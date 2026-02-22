@@ -82,6 +82,7 @@ export function calculateWERMetric(reference: string, hypothesis: string): Metri
     percentage,
     rating: getRatingForErrorRate(wer),
     description: 'Word Error Rate - lower is better',
+    tooltip: 'Word-level difference between transcripts. Lower is better.\nLevenshtein distance on words ÷ reference word count',
   };
 }
 
@@ -101,5 +102,6 @@ export function calculateCERMetric(reference: string, hypothesis: string): Metri
     percentage,
     rating: getRatingForErrorRate(cer),
     description: 'Character Error Rate - lower is better',
+    tooltip: 'Character-level difference between transcripts. Lower is better.\nLevenshtein distance on characters ÷ reference character count',
   };
 }

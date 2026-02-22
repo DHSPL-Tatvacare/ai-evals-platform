@@ -124,6 +124,7 @@ export default function RunDetail() {
   const summaryErrors = (run?.summary?.errors as number) ?? 0;
   const summaryCompleted = (run?.summary?.completed as number) ?? 0;
   const summaryTotal = (run?.summary?.total_threads as number) ?? 0;
+  const summarySkipped = (run?.summary?.skipped_previously_processed as number) ?? 0;
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!runId || !run) return;
@@ -483,6 +484,15 @@ export default function RunDetail() {
               metricKey="total_threads"
               value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length}
             />
+
+            {/* Skipped previously processed threads */}
+            {summarySkipped > 0 && (
+              <StatPill
+                label="Skipped"
+                value={summarySkipped}
+                color="var(--text-muted)"
+              />
+            )}
 
             {/* Dynamic evaluator pills — only show evaluators with an average/percentage metric */}
             {(run.evaluator_descriptors ?? [])

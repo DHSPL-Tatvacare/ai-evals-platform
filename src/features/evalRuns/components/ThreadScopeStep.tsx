@@ -13,6 +13,8 @@ interface ThreadScopeStepProps {
   onScopeChange: (scope: ThreadScope) => void;
   onSampleSizeChange: (size: number) => void;
   onSelectedThreadsChange: (ids: string[]) => void;
+  skipPreviouslyProcessed: boolean;
+  onSkipPreviouslyProcessedChange: (checked: boolean) => void;
 }
 
 const SCOPE_OPTIONS: { value: ThreadScope; label: string; description: string }[] = [
@@ -29,6 +31,8 @@ export function ThreadScopeStep({
   onScopeChange,
   onSampleSizeChange,
   onSelectedThreadsChange,
+  skipPreviouslyProcessed,
+  onSkipPreviouslyProcessedChange,
 }: ThreadScopeStepProps) {
   const [threadSearch, setThreadSearch] = useState('');
 
@@ -177,6 +181,27 @@ export function ThreadScopeStep({
           </div>
         </div>
       )}
+
+      {/* Skip previously processed */}
+      <div className="border-t border-[var(--border-subtle)] pt-3 mt-1">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={skipPreviouslyProcessed}
+            onChange={(e) => onSkipPreviouslyProcessedChange(e.target.checked)}
+            className="mt-0.5 accent-[var(--interactive-primary)]"
+          />
+          <div>
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">
+              Skip previously processed conversations
+            </span>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Thread IDs already evaluated in any past Kaira batch run will be excluded.
+              {scope === 'sample' && ' Sampling will draw from the remaining unprocessed threads.'}
+            </p>
+          </div>
+        </label>
+      </div>
     </div>
   );
 }

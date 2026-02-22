@@ -8,7 +8,6 @@ export {
 export {
   type MetricRating,
   type MetricResult,
-  type ListingMetrics,
   getRating,
   getRatingForErrorRate,
   getRatingColors,
@@ -21,4 +20,4 @@ export {
   calculateCERMetric,
 } from './wordErrorRate';
 
-export { computeAllMetrics } from './computeMetrics';
+export { computeUploadFlowMetrics, computeApiFlowMetrics } from './computeMetrics';

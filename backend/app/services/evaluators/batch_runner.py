@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Callable
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.database import async_session
 from app.models.eval_run import EvalRun, ThreadEvaluation as DBThreadEval, ApiLog
@@ -125,6 +125,7 @@ async def run_batch_evaluation(
     parallel_threads: bool = False,
     thread_workers: int = 1,
     thinking: str = "low",
+    skip_previously_processed: bool = False,
 ) -> dict:
     """Run batch evaluation on threads from a data file."""
     start_time = time.monotonic()
@@ -186,14 +187,39 @@ async def run_batch_evaluation(
     loader = DataLoader(csv_content=csv_content, csv_path=Path(data_path) if data_path else None)
 
     # Resolve thread IDs
+    skipped_previously_processed_count = 0
     if thread_ids:
-        ids_to_evaluate = thread_ids
+        candidate_ids = thread_ids
     elif sample_size:
-        import random
-        all_ids = loader.get_all_thread_ids()
-        ids_to_evaluate = random.sample(all_ids, min(sample_size, len(all_ids)))
+        candidate_ids = loader.get_all_thread_ids()
     else:
-        ids_to_evaluate = loader.get_all_thread_ids()
+        candidate_ids = loader.get_all_thread_ids()
+
+    # Skip previously processed thread IDs (Kaira-only)
+    if skip_previously_processed and app_id == "kaira-bot" and candidate_ids:
+        async with async_session() as db:
+            result = await db.execute(
+                select(DBThreadEval.thread_id).distinct()
+                .join(EvalRun, DBThreadEval.run_id == EvalRun.id)
+                .where(
+                    EvalRun.app_id == "kaira-bot",
+                    DBThreadEval.thread_id.in_(candidate_ids),
+                )
+            )
+            already_processed = set(result.scalars().all())
+        candidate_ids = [tid for tid in candidate_ids if tid not in already_processed]
+        skipped_previously_processed_count = len(already_processed)
+        logger.info(
+            "Skip previously processed: %d already evaluated, %d remaining",
+            skipped_previously_processed_count, len(candidate_ids),
+        )
+
+    # Apply sampling after skip-filtering so sample draws from unseen pool
+    if sample_size and not thread_ids:
+        import random
+        ids_to_evaluate = random.sample(candidate_ids, min(sample_size, len(candidate_ids)))
+    else:
+        ids_to_evaluate = candidate_ids
 
     total = len(ids_to_evaluate)
 
@@ -216,6 +242,8 @@ async def run_batch_evaluation(
                     "evaluate_efficiency": evaluate_efficiency,
                     "custom_evaluator_ids": [str(eid) for eid in (custom_evaluator_ids or [])],
                     "thinking": thinking,
+                    "skip_previously_processed": skip_previously_processed,
+                    "skipped_previously_processed_count": skipped_previously_processed_count,
                 },
             )
         )
@@ -555,6 +583,8 @@ async def run_batch_evaluation(
             "correctness_verdicts": results_summary["correctness_verdicts"],
             "efficiency_verdicts": results_summary["efficiency_verdicts"],
         }
+        if skipped_previously_processed_count > 0:
+            summary["skipped_previously_processed"] = skipped_previously_processed_count
         if results_summary.get("custom_evaluations"):
             summary["custom_evaluations"] = results_summary["custom_evaluations"]
 

@@ -13,13 +13,8 @@ export interface MetricResult {
   percentage: number; // 0-100 for progress bar
   rating: MetricRating;
   description?: string;
-}
-
-export interface ListingMetrics {
-  match: MetricResult;
-  wer: MetricResult;
-  cer: MetricResult;
-  computedAt: Date;
+  /** Static definition + formula shown in info tooltip */
+  tooltip?: string;
 }
 
 /**

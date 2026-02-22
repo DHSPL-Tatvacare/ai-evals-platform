@@ -294,6 +294,7 @@ async def handle_evaluate_batch(job_id, params: dict) -> dict:
         parallel_threads=params.get("parallel_threads", False),
         thread_workers=params.get("thread_workers", 1),
         thinking=params.get("thinking", "low"),
+        skip_previously_processed=params.get("skip_previously_processed", False),
     )
     return result
 

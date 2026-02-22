@@ -944,6 +944,26 @@ def _build_summary(flow: FlowConfig, evaluation: dict) -> dict | None:
             matches = sum(1 for fc in field_critiques if fc.get("match", False))
             summary["overall_accuracy"] = matches / total
             summary["total_items"] = total
+
+            # Extraction Recall: how many items did the API capture?
+            api_extracted = sum(
+                1 for fc in field_critiques
+                if str(fc.get("apiValue", "(not found)")) != "(not found)"
+            )
+            summary["extraction_recall"] = api_extracted / total if total > 0 else 0
+            summary["api_extracted_count"] = api_extracted
+
+            # Extraction Precision: of what the API extracted, how many were correct?
+            api_correct = sum(
+                1 for fc in field_critiques
+                if str(fc.get("apiValue", "(not found)")) != "(not found)"
+                and fc.get("match", False)
+            )
+            summary["extraction_precision"] = (
+                api_correct / api_extracted if api_extracted > 0 else 0
+            )
+            summary["api_correct_count"] = api_correct
+
             severity_dist = _count_severity(field_critiques, key="severity")
             summary["severity_distribution"] = severity_dist
             summary["critical_errors"] = severity_dist.get("CRITICAL", 0)

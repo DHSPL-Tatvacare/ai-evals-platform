@@ -1,36 +1,40 @@
 import { useMemo } from 'react';
-import { computeAllMetrics, type ListingMetrics } from '../metrics';
-import type { Listing, AIEvaluation } from '@/types';
+import { computeUploadFlowMetrics, computeApiFlowMetrics, type MetricResult } from '../metrics';
+import type { Listing, AIEvaluation, TranscriptData } from '@/types';
 
 /**
  * Hook to compute metrics for a listing.
- * Accepts the AIEvaluation separately (fetched from eval_runs API).
- * Returns null if AI evaluation hasn't been run yet.
+ * Returns a flat MetricResult[] suitable for MetricsBar, or null if
+ * evaluation hasn't been run / hasn't completed yet.
+ *
+ * Upload flow → [Match, WER, CER]
+ * API flow    → [Field Accuracy, Recall, Precision, WER, CER]
  */
 export function useListingMetrics(
   listing: Listing | null,
   aiEval?: AIEvaluation | null,
-): ListingMetrics | null {
+): MetricResult[] | null {
   return useMemo(() => {
-    // Need listing with original transcript and AI-generated transcript from eval
-    if (!listing?.transcript || !aiEval?.judgeOutput) {
-      return null;
+    if (!aiEval || aiEval.status !== 'completed' || !aiEval.judgeOutput) return null;
+
+    if (aiEval.flowType === 'api') {
+      const apiTranscript = listing?.apiResponse?.input || '';
+      const judgeTranscript = aiEval.judgeOutput.transcript || '';
+      const fieldCritiques = aiEval.critique?.fieldCritiques ?? [];
+
+      if (!apiTranscript && !judgeTranscript) return null;
+
+      return computeApiFlowMetrics(apiTranscript, judgeTranscript, fieldCritiques);
     }
 
-    // Only compute if AI eval completed successfully
-    if (aiEval.status !== 'completed') {
-      return null;
-    }
+    // Upload flow: segment-based transcripts
+    if (!listing?.transcript) return null;
 
-    // Construct TranscriptData-compatible shape from judgeOutput
     const judgeTranscriptData = {
       fullTranscript: aiEval.judgeOutput.transcript,
       segments: aiEval.judgeOutput.segments ?? [],
-    } as unknown as import('@/types').TranscriptData;
+    } as unknown as TranscriptData;
 
-    return computeAllMetrics(
-      listing.transcript,
-      judgeTranscriptData
-    );
-  }, [listing?.transcript, aiEval]);
+    return computeUploadFlowMetrics(listing.transcript, judgeTranscriptData);
+  }, [listing?.transcript, listing?.apiResponse, aiEval]);
 }
