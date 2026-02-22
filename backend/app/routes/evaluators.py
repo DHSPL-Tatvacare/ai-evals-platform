@@ -1,14 +1,34 @@
 """Evaluators API routes."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.evaluator import Evaluator
+from app.models.listing import Listing
 from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorSetGlobal, EvaluatorResponse
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
+    """Recursively extract dot-notation paths from a dict."""
+    paths: list[str] = []
+
+    def _walk(obj: dict | list | str | int | float | bool | None, path: str, depth: int) -> None:
+        if depth > max_depth or not isinstance(obj, dict):
+            return
+        for k, v in obj.items():
+            full = f"{path}.{k}" if path else k
+            paths.append(full)
+            _walk(v, full, depth + 1)
+
+    _walk(data, prefix, 0)
+    return paths
 
 
 @router.get("", response_model=list[EvaluatorResponse])
@@ -43,6 +63,65 @@ async def list_registry(
     )
     result = await db.execute(query)
     return result.scalars().all()
+
+
+
+# ── Variable Registry Endpoints ──────────────────────────────────────
+# These MUST be before /{evaluator_id} routes — otherwise FastAPI
+# treats "variables" / "validate-prompt" as a UUID path parameter.
+
+
+@router.get("/variables")
+async def list_variables(
+    app_id: str = Query(..., alias="appId"),
+    source_type: str | None = Query(None, alias="sourceType"),
+):
+    """List available template variables for custom evaluator prompts."""
+    from app.services.evaluators.variable_registry import get_registry
+    variables = get_registry().get_for_app(app_id, source_type)
+    return [
+        {
+            "key": v.key,
+            "displayName": v.display_name,
+            "description": v.description,
+            "category": v.category,
+            "valueType": v.value_type,
+            "requiresAudio": v.requires_audio,
+            "requiresEvalOutput": v.requires_eval_output,
+            "sourceTypes": v.source_types,
+            "example": v.example,
+        }
+        for v in variables
+    ]
+
+
+@router.post("/validate-prompt")
+async def validate_prompt(
+    app_id: str = Query(..., alias="appId"),
+    source_type: str | None = Query(None, alias="sourceType"),
+    body: dict = Body(...),
+):
+    """Validate template variables in a prompt against the registry."""
+    prompt = body.get("prompt", "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="'prompt' field is required")
+    from app.services.evaluators.variable_registry import get_registry
+    return get_registry().validate_prompt(prompt, app_id, source_type)
+
+
+@router.get("/variables/api-paths")
+async def list_api_paths(
+    listing_id: str = Query(..., alias="listingId"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract available {{rx.*}} variable paths from a listing's API response."""
+    listing = await db.get(Listing, listing_id)
+    if not listing or not listing.api_response:
+        return []
+    return _extract_paths(listing.api_response, prefix="rx")
+
+
+# ── Evaluator CRUD ───────────────────────────────────────────────────
 
 
 @router.get("/{evaluator_id}", response_model=EvaluatorResponse)

@@ -1,6 +1,7 @@
-export type EvaluatorFieldType = 'number' | 'text' | 'boolean' | 'array';
+export type EvaluatorFieldType = 'number' | 'text' | 'boolean' | 'array' | 'enum';
 export type EvaluatorDisplayMode = 'header' | 'card' | 'hidden';
 export type ArrayItemType = 'string' | 'number' | 'boolean' | 'object';
+export type FieldRole = 'metric' | 'reasoning' | 'detail';
 
 export interface EvaluatorThresholds {
   green: number;  // Value >= green is good (green)
@@ -27,6 +28,8 @@ export interface EvaluatorOutputField {
   isMainMetric?: boolean;         // Only one field can be main metric (shown in header)
   thresholds?: EvaluatorThresholds; // RYG thresholds (only for number type)
   arrayItemSchema?: ArrayItemSchema; // Only for type === 'array'
+  enumValues?: string[];            // Allowed values (only for type === 'enum')
+  role?: FieldRole;                 // Semantic role: metric, reasoning, or detail
 }
 
 export interface EvaluatorDefinition {
@@ -48,4 +51,25 @@ export interface EvaluatorDefinition {
 export interface EvaluatorContext {
   appId: string;
   entityId?: string;      // listing.id for voice-rx, undefined for kaira-bot
+}
+
+/** Variable metadata returned by GET /api/evaluators/variables */
+export interface VariableInfo {
+  key: string;
+  displayName: string;
+  description: string;
+  category: string;
+  valueType: string;
+  requiresAudio: boolean;
+  requiresEvalOutput: boolean;
+  sourceTypes: string[] | null;
+  example: string;
+}
+
+/** Prompt validation result returned by POST /api/evaluators/validate-prompt */
+export interface PromptValidation {
+  valid_variables: string[];
+  unknown_variables: string[];
+  requires_audio: boolean;
+  requires_eval_output: boolean;
 }

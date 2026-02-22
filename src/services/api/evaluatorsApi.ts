@@ -4,7 +4,7 @@
  * Backend returns camelCase via Pydantic alias_generator.
  * Query params remain snake_case (FastAPI query params).
  */
-import type { EvaluatorDefinition } from '@/types';
+import type { EvaluatorDefinition, VariableInfo, PromptValidation } from '@/types';
 import { apiRequest } from './client';
 
 /** Shape returned by backend (camelCase, dates as strings) */
@@ -119,5 +119,27 @@ export const evaluatorsRepository = {
     await apiRequest(`/api/evaluators/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  /** Fetch available template variables for an app (backend variable registry). */
+  async getVariables(appId: string, sourceType?: string): Promise<VariableInfo[]> {
+    const params = new URLSearchParams({ appId });
+    if (sourceType) params.set('sourceType', sourceType);
+    return apiRequest<VariableInfo[]>(`/api/evaluators/variables?${params}`);
+  },
+
+  /** Validate a prompt's template variables against the backend registry. */
+  async validatePrompt(prompt: string, appId: string, sourceType?: string): Promise<PromptValidation> {
+    const params = new URLSearchParams({ appId });
+    if (sourceType) params.set('sourceType', sourceType);
+    return apiRequest<PromptValidation>(`/api/evaluators/validate-prompt?${params}`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+  },
+
+  /** Extract available API response variable paths for a listing. */
+  async getApiPaths(listingId: string): Promise<string[]> {
+    return apiRequest<string[]>(`/api/evaluators/variables/api-paths?listingId=${listingId}`);
   },
 };

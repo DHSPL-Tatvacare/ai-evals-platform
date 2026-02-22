@@ -61,7 +61,7 @@ Batch evaluation of Kaira Bot conversations with built-in and custom evaluators:
 
 ### Backend Services
 - **Job Worker** — Polls a `jobs` table for queued work, dispatches to typed runners, tracks progress, and recovers from crashes.
-- **Evaluator Runners** — `voice_rx_runner`, `batch_runner`, `adversarial_runner`, `custom_evaluator_runner`, `voice_rx_batch_custom_runner`.
+- **Evaluator Runners** — `voice_rx_runner`, `batch_runner`, `adversarial_runner`, `custom_evaluator_runner` (includes batch custom), `runner_utils` (shared utilities).
 - **LLM Base** — Provider abstraction with retry, timeout tiers (60s-240s), and token counting.
 - **Seed Defaults** — Auto-creates default prompts, schemas, and evaluators on startup.
 

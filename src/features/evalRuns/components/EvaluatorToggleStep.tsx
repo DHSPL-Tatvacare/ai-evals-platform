@@ -17,6 +17,8 @@ interface EvaluatorToggleStepProps {
   onIntentPromptChange: (prompt: string) => void;
   customEvaluatorIds?: string[];
   onCustomEvaluatorIdsChange?: (ids: string[]) => void;
+  customOnly?: boolean;
+  onCustomOnlyChange?: (value: boolean) => void;
 }
 
 const EVALUATOR_INFO: { key: keyof EvaluatorToggles; label: string; description: string }[] = [
@@ -32,6 +34,8 @@ export function EvaluatorToggleStep({
   onIntentPromptChange,
   customEvaluatorIds = [],
   onCustomEvaluatorIdsChange,
+  customOnly = false,
+  onCustomOnlyChange,
 }: EvaluatorToggleStepProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showCustomPicker, setShowCustomPicker] = useState(false);
@@ -39,8 +43,9 @@ export function EvaluatorToggleStep({
   const activeCount = Object.values(evaluators).filter(Boolean).length;
 
   const handleToggle = (key: keyof EvaluatorToggles) => {
+    if (customOnly) return; // Built-in toggles are locked in custom-only mode
     const newValue = !evaluators[key];
-    // Prevent turning off the last active evaluator
+    // Prevent turning off the last active evaluator (unless in custom-only mode)
     if (!newValue && activeCount <= 1) return;
     onEvaluatorsChange({ ...evaluators, [key]: newValue });
   };
@@ -52,23 +57,26 @@ export function EvaluatorToggleStep({
           Evaluators
         </label>
         <p className="text-[11px] text-[var(--text-muted)] mb-3">
-          Select which evaluations to run on each thread. At least one must be enabled.
+          Select which evaluations to run on each thread.{!customOnly && ' At least one must be enabled.'}
         </p>
 
         <div className="space-y-2">
           {EVALUATOR_INFO.map((info) => {
-            const isActive = evaluators[info.key];
-            const isLastActive = isActive && activeCount <= 1;
+            const isActive = !customOnly && evaluators[info.key];
+            const isLastActive = !customOnly && isActive && activeCount <= 1;
+            const isLocked = customOnly;
 
             return (
               <label
                 key={info.key}
                 className={cn(
                   'flex items-center justify-between px-3 py-3 rounded-[6px] border transition-colors',
-                  isActive
-                    ? 'border-[var(--interactive-primary)] bg-[var(--color-brand-accent)]/5'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-primary)]',
-                  isLastActive && 'cursor-not-allowed'
+                  isLocked
+                    ? 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] opacity-50'
+                    : isActive
+                      ? 'border-[var(--interactive-primary)] bg-[var(--color-brand-accent)]/5'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-primary)]',
+                  (isLastActive || isLocked) && 'cursor-not-allowed'
                 )}
               >
                 <div className="flex-1 min-w-0 mr-3">
@@ -92,12 +100,13 @@ export function EvaluatorToggleStep({
                   role="switch"
                   aria-checked={isActive}
                   onClick={() => handleToggle(info.key)}
-                  disabled={isLastActive}
+                  disabled={isLastActive || isLocked}
                   className={cn(
                     'relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]',
                     isActive ? 'bg-[var(--interactive-primary)]' : 'bg-[var(--border-default)]',
-                    isLastActive && 'opacity-50 cursor-not-allowed'
+                    isLastActive && 'opacity-50 cursor-not-allowed',
+                    isLocked && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   <span
@@ -147,6 +156,24 @@ export function EvaluatorToggleStep({
             selectedIds={customEvaluatorIds}
             onSelectionChange={onCustomEvaluatorIdsChange}
           />
+
+          {/* Custom Only Toggle — only visible when custom evaluators are selected */}
+          {onCustomOnlyChange && customEvaluatorIds.length > 0 && (
+            <label className="flex items-center gap-2 mt-2 px-3 py-2.5 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={customOnly}
+                onChange={(e) => onCustomOnlyChange(e.target.checked)}
+                className="rounded border-[var(--border-default)] text-[var(--interactive-primary)] focus:ring-[var(--color-brand-accent)]"
+              />
+              <div>
+                <span className="text-[13px] font-medium text-[var(--text-primary)]">Custom Evaluators Only</span>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                  Skip intent, correctness, and efficiency evaluators. Run only the selected custom evaluators.
+                </p>
+              </div>
+            </label>
+          )}
         </div>
       )}
 

@@ -103,6 +103,9 @@ function FieldValue({ field, value, compact }: { field: OutputFieldDef; value: u
       return <span className="text-sm text-[var(--text-primary)] break-words">{str}</span>;
     }
 
+    case 'enum':
+      return <VerdictBadge verdict={String(value)} />;
+
     case 'array':
       if (compact) return <span className="text-sm text-[var(--text-muted)]">[{Array.isArray(value) ? value.length : 0} items]</span>;
       return (

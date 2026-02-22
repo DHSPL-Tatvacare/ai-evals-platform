@@ -2,7 +2,11 @@
 
 Creates eval_runs rows (eval_type='custom') as the single source of truth.
 Called by the job worker when processing 'evaluate-custom' jobs.
+
+Also contains run_custom_eval_batch() for the 'evaluate-custom-batch' job type
+(merged from voice_rx_batch_custom_runner.py).
 """
+import asyncio
 import json
 import logging
 import time
@@ -10,15 +14,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.database import async_session
 from app.models.listing import Listing
 from app.models.chat import ChatSession, ChatMessage
 from app.models.evaluator import Evaluator
 from app.models.file_record import FileRecord
-from app.models.job import Job
-from app.models.eval_run import EvalRun, ApiLog
 from app.services.file_storage import file_storage
 from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
@@ -26,81 +28,71 @@ from app.services.evaluators.llm_base import (
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
-from app.services.job_worker import is_job_cancelled, JobCancelledError, safe_error_message
+from app.services.evaluators.runner_utils import (
+    save_api_log, create_eval_run, finalize_eval_run, find_primary_field,
+)
+from app.services.job_worker import (
+    is_job_cancelled, JobCancelledError, safe_error_message, update_job_progress,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def _save_api_log(log_entry: dict):
-    """Persist an LLM API log entry to PostgreSQL."""
-    run_id = log_entry.get("run_id")
-    # Convert string run_id to UUID if needed
-    if run_id and isinstance(run_id, str):
-        try:
-            run_id = uuid.UUID(run_id)
-        except ValueError:
-            run_id = None
-
-    async with async_session() as db:
-        db.add(ApiLog(
-            run_id=run_id,
-            thread_id=log_entry.get("thread_id"),
-            provider=log_entry.get("provider", "unknown"),
-            model=log_entry.get("model", "unknown"),
-            method=log_entry.get("method", "unknown"),
-            prompt=log_entry.get("prompt", ""),
-            system_prompt=log_entry.get("system_prompt"),
-            response=log_entry.get("response"),
-            error=log_entry.get("error"),
-            duration_ms=log_entry.get("duration_ms"),
-            tokens_in=log_entry.get("tokens_in"),
-            tokens_out=log_entry.get("tokens_out"),
-        ))
-        await db.commit()
+# ── Score Extraction ─────────────────────────────────────────────────
 
 
 def _extract_scores(output: dict, output_schema: list[dict]) -> Optional[dict]:
-    """Extract scores from evaluator output for summary persistence."""
+    """Extract scores from evaluator output for summary persistence.
+
+    Strategy:
+      1. Find primary metric via find_primary_field (isMainMetric > first number > first text).
+      2. Find reasoning field: explicit role='reasoning' first, then substring heuristic.
+      3. max_score from thresholds only — no arbitrary defaults.
+    """
     if not output:
         return None
 
-    main_field = next((f for f in output_schema if f.get("isMainMetric")), None)
+    main_field = find_primary_field(output_schema)
+
+    # ── Reasoning field: explicit role, then heuristic ────────────
+    _REASONING_KEYWORDS = ("reason", "explanation", "comment", "justification", "notes")
+    reasoning_field = next((f for f in output_schema if f.get("role") == "reasoning"), None)
+    if not reasoning_field:
+        for f in output_schema:
+            if any(kw in f["key"].lower() for kw in _REASONING_KEYWORDS):
+                reasoning_field = f
+                break
+    reasoning = str(output.get(reasoning_field["key"], "")) if reasoning_field else None
 
     if not main_field:
         return {
             "overall_score": None,
             "max_score": None,
             "breakdown": output,
-            "reasoning": None,
+            "reasoning": reasoning,
             "metadata": None,
         }
 
     overall_score = output.get(main_field["key"])
 
-    breakdown = {}
-    for field in output_schema:
-        if field.get("displayMode") != "hidden" and field["key"] in output:
-            breakdown[field["key"]] = output[field["key"]]
+    # ── Breakdown: all visible fields ─────────────────────────────
+    breakdown = {
+        f["key"]: output[f["key"]]
+        for f in output_schema
+        if f.get("displayMode") != "hidden" and f["key"] in output
+    }
 
-    reasoning = None
-    for field in output_schema:
-        key_lower = field["key"].lower()
-        if "reason" in key_lower or "explanation" in key_lower or "comment" in key_lower:
-            reasoning = str(output.get(field["key"], ""))
-            break
-
+    # ── max_score: derive from thresholds only ────────────────────
     max_score = None
     if main_field.get("type") == "number":
         thresholds = main_field.get("thresholds")
         if thresholds:
             max_score = thresholds.get("green")
-        else:
-            max_score = 100
 
     return {
         "overall_score": overall_score if overall_score is not None else None,
         "max_score": max_score,
-        "breakdown": breakdown if breakdown else None,
+        "breakdown": breakdown or None,
         "reasoning": reasoning,
         "metadata": {
             "main_metric_key": main_field["key"],
@@ -108,6 +100,9 @@ def _extract_scores(output: dict, output_schema: list[dict]) -> Optional[dict]:
             "thresholds": main_field.get("thresholds"),
         },
     }
+
+
+# ── Single Custom Evaluator ─────────────────────────────────────────
 
 
 async def run_custom_evaluator(job_id, params: dict) -> dict:
@@ -130,35 +125,22 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
 
     # Create eval_run record immediately so it's visible in UI
     eval_run_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
 
-    async with async_session() as db:
-        db.add(EvalRun(
-            id=eval_run_id,
-            app_id=app_id,
-            eval_type="custom",
-            listing_id=uuid.UUID(listing_id) if listing_id and not is_session_flow else None,
-            session_id=uuid.UUID(session_id) if session_id and is_session_flow else None,
-            evaluator_id=uuid.UUID(str(evaluator_id)),
-            job_id=job_id,
-            status="running",
-            started_at=now,
-        ))
-        await db.commit()
+    await create_eval_run(
+        id=eval_run_id,
+        app_id=app_id,
+        eval_type="custom",
+        job_id=job_id,
+        listing_id=uuid.UUID(listing_id) if listing_id and not is_session_flow else None,
+        session_id=uuid.UUID(session_id) if session_id and is_session_flow else None,
+        evaluator_id=uuid.UUID(str(evaluator_id)),
+    )
 
-    # Update job progress
-    async with async_session() as db:
-        await db.execute(
-            update(Job).where(Job.id == job_id).values(
-                progress={
-                    "current": 0, "total": 2,
-                    "message": "Loading evaluator...",
-                    "evaluator_id": str(evaluator_id),
-                    "run_id": str(eval_run_id),
-                }
-            )
-        )
-        await db.commit()
+    # Update job progress with run_id for frontend tracking
+    await update_job_progress(
+        job_id, 0, 2, "Loading evaluator...",
+        evaluator_id=str(evaluator_id), run_id=str(eval_run_id),
+    )
 
     # ── Load evaluator + entity ──────────────────────────────────
     listing = None
@@ -216,6 +198,12 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     resolved = resolve_prompt(evaluator.prompt, resolve_ctx)
     prompt_text = resolved["prompt"]
 
+    # Non-blocking validation: log unknown variables for observability
+    from app.services.evaluators.variable_registry import get_registry
+    validation = get_registry().validate_prompt(evaluator.prompt, app_id)
+    if validation["unknown_variables"]:
+        logger.warning("Unknown variables in evaluator %s: %s", evaluator.name, validation["unknown_variables"])
+
     has_audio = "{{audio}}" in evaluator.prompt and audio_bytes is not None
     prompt_text = prompt_text.replace("{{audio}}", "[Audio file attached]")
 
@@ -234,7 +222,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
         temperature=0.2,
         service_account_path=db_settings.get("service_account_path", ""),
     )
-    llm: BaseLLMProvider = LoggingLLMWrapper(inner, log_callback=_save_api_log)
+    llm: BaseLLMProvider = LoggingLLMWrapper(inner, log_callback=save_api_log)
     if params.get("timeouts"):
         llm.set_timeouts(params["timeouts"])
     llm.set_context(str(eval_run_id))
@@ -251,7 +239,9 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     }
 
     # Update eval_run with config and LLM info
+    from sqlalchemy import update
     async with async_session() as db:
+        from app.models.eval_run import EvalRun
         await db.execute(
             update(EvalRun).where(EvalRun.id == eval_run_id).values(
                 config=config_snapshot,
@@ -269,18 +259,10 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
             raise JobCancelledError("Job was cancelled by user")
 
         # Update progress
-        async with async_session() as db:
-            await db.execute(
-                update(Job).where(Job.id == job_id).values(
-                    progress={
-                        "current": 1, "total": 2,
-                        "message": "Running evaluator...",
-                        "evaluator_id": str(evaluator_id),
-                        "run_id": str(eval_run_id),
-                    }
-                )
-            )
-            await db.commit()
+        await update_job_progress(
+            job_id, 1, 2, "Running evaluator...",
+            evaluator_id=str(evaluator_id), run_id=str(eval_run_id),
+        )
 
         # ── Call LLM ─────────────────────────────────────────────
         if has_audio and audio_bytes:
@@ -302,57 +284,39 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
             raise JobCancelledError("Job was cancelled by user")
 
         # ── Build completed result ──────────────────────────────
-        completed_at = datetime.now(timezone.utc)
         duration_ms = (time.monotonic() - start_time) * 1000
         scores = _extract_scores(output or {}, evaluator.output_schema)
 
-        result_data = {
-            "output": output,
-            "rawRequest": prompt_text,
-            "rawResponse": response_text,
-        }
-
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == eval_run_id).values(
-                    status="completed",
-                    completed_at=completed_at,
-                    duration_ms=duration_ms,
-                    result=result_data,
-                    summary=scores,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="completed",
+            duration_ms=duration_ms,
+            result={
+                "output": output,
+                "rawRequest": prompt_text,
+                "rawResponse": response_text,
+            },
+            summary=scores,
+        )
 
     except JobCancelledError:
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == eval_run_id).values(
-                    status="cancelled",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=(time.monotonic() - start_time) * 1000,
-                    error_message="Cancelled",
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="cancelled",
+            duration_ms=(time.monotonic() - start_time) * 1000,
+            error_message="Cancelled",
+        )
         logger.info("Custom evaluator %s cancelled for %s", evaluator_id, entity_ref)
 
     except Exception as e:
         error_msg = safe_error_message(e)
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(
-                    EvalRun.id == eval_run_id,
-                    EvalRun.status != "cancelled",
-                ).values(
-                    status="failed",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=(time.monotonic() - start_time) * 1000,
-                    error_message=error_msg,
-                    result={"rawRequest": prompt_text} if prompt_text else None,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="failed",
+            duration_ms=(time.monotonic() - start_time) * 1000,
+            error_message=error_msg,
+            result={"rawRequest": prompt_text} if prompt_text else None,
+        )
         logger.error("Custom evaluator %s failed for %s: %s", evaluator_id, entity_ref, error_msg)
         raise
 
@@ -368,3 +332,111 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     else:
         result["listing_id"] = str(listing_id)
     return result
+
+
+# ── Batch Custom Evaluator ───────────────────────────────────────────
+# Merged from voice_rx_batch_custom_runner.py
+
+
+async def run_custom_eval_batch(job_id, params: dict) -> dict:
+    """Run multiple custom evaluators on a single listing/session.
+
+    Params:
+        evaluator_ids: list[str]  - UUIDs of evaluators to run
+        listing_id: str           - UUID of listing (voice-rx)
+        session_id: str           - UUID of session (kaira-bot) — optional
+        app_id: str               - "voice-rx" or "kaira-bot"
+        parallel: bool            - Run evaluators in parallel (default: True)
+        timeouts: dict            - LLM timeout config
+    """
+    evaluator_ids = params["evaluator_ids"]
+    listing_id = params.get("listing_id")
+    session_id = params.get("session_id")
+    app_id = params.get("app_id", "voice-rx")
+    parallel = params.get("parallel", True)
+
+    # Validate evaluators exist
+    async with async_session() as db:
+        valid_ids = []
+        for eid in evaluator_ids:
+            ev = await db.get(Evaluator, eid)
+            if ev:
+                valid_ids.append(eid)
+            else:
+                logger.warning("Evaluator %s not found, skipping", eid)
+
+        if not valid_ids:
+            raise ValueError("No valid evaluators found")
+
+    total = len(valid_ids)
+    completed = 0
+    errors = 0
+    eval_run_ids: list[str] = []
+    first_run_id_written = False
+
+    await update_job_progress(job_id, 0, total, f"Starting {total} evaluators...")
+
+    async def _run_one(eid: str, index: int) -> dict:
+        """Run one evaluator, creating its own EvalRun via run_custom_evaluator."""
+        nonlocal completed, errors, first_run_id_written
+
+        if await is_job_cancelled(job_id):
+            raise JobCancelledError("Batch cancelled")
+
+        sub_params = {
+            "evaluator_id": eid,
+            "app_id": app_id,
+            "timeouts": params.get("timeouts"),
+        }
+        if listing_id:
+            sub_params["listing_id"] = listing_id
+        if session_id:
+            sub_params["session_id"] = session_id
+
+        try:
+            result = await run_custom_evaluator(job_id=job_id, params=sub_params)
+            run_id = result.get("eval_run_id")
+            if run_id:
+                eval_run_ids.append(run_id)
+
+            # Write first completed run_id to job progress so frontend can redirect
+            if run_id and not first_run_id_written:
+                first_run_id_written = True
+                await update_job_progress(
+                    job_id, completed + 1, total,
+                    f"Completed {completed + 1}/{total}...",
+                    run_id=run_id,
+                )
+
+            completed += 1
+            return result
+        except Exception as e:
+            errors += 1
+            logger.error("Batch custom eval %s failed: %s", eid, e)
+            return {"evaluator_id": eid, "status": "failed", "error": safe_error_message(e)}
+
+    try:
+        if parallel:
+            tasks = [_run_one(eid, i) for i, eid in enumerate(valid_ids)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, r in enumerate(results):
+                if isinstance(r, Exception):
+                    errors += 1
+                    logger.error("Batch custom eval %s raised: %s", valid_ids[i], r)
+        else:
+            for i, eid in enumerate(valid_ids):
+                await update_job_progress(job_id, i, total, f"Running evaluator {i + 1}/{total}...")
+                await _run_one(eid, i)
+
+        await update_job_progress(job_id, total, total, f"Completed: {completed} success, {errors} failed")
+
+    except JobCancelledError:
+        logger.info("Batch custom eval cancelled at %d/%d", completed, total)
+        raise
+
+    return {
+        "total": total,
+        "completed": completed,
+        "errors": errors,
+        "eval_run_ids": eval_run_ids,
+    }

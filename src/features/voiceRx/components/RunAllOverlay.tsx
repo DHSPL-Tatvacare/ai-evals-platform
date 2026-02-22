@@ -1,20 +1,19 @@
 import { useState, useMemo } from 'react';
 import { Search, X } from 'lucide-react';
 import { useEvaluatorsStore } from '@/stores';
-import { jobsApi } from '@/services/api/jobsApi';
-import { notificationService } from '@/services/notifications';
+import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 
 interface RunAllOverlayProps {
   listingId: string;
+  sessionId?: string;
   appId: string;
   open: boolean;
   onClose: () => void;
 }
 
-export function RunAllOverlay({ listingId, appId, open, onClose }: RunAllOverlayProps) {
+export function RunAllOverlay({ listingId, sessionId, appId, open, onClose }: RunAllOverlayProps) {
   const evaluators = useEvaluatorsStore((s) => s.evaluators);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(evaluators.map(e => e.id)));
-  const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
 
   // Sync selection when overlay opens with new evaluator list
@@ -33,25 +32,26 @@ export function RunAllOverlay({ listingId, appId, open, onClose }: RunAllOverlay
     );
   }, [evaluators, search]);
 
+  const { submit, isSubmitting } = useSubmitAndRedirect({
+    appId,
+    label: `Custom batch (${selected.size} evaluators)`,
+    successMessage: `Running ${selected.size} evaluator${selected.size !== 1 ? 's' : ''}...`,
+    fallbackRoute: `/apps/${appId}/runs`,
+    onClose,
+  });
+
   async function handleSubmit() {
     if (selected.size === 0) return;
-    setSubmitting(true);
-
-    try {
-      await jobsApi.submit('evaluate-custom-batch', {
-        evaluator_ids: Array.from(selected),
-        listing_id: listingId,
-        app_id: appId,
-        parallel: true,
-      });
-
-      notificationService.success(`Running ${selected.size} evaluator${selected.size !== 1 ? 's' : ''}...`);
-      onClose();
-    } catch (e) {
-      notificationService.error(`Failed to start evaluators: ${(e as Error).message}`);
-    } finally {
-      setSubmitting(false);
+    const params: Record<string, unknown> = {
+      evaluator_ids: Array.from(selected),
+      listing_id: listingId,
+      app_id: appId,
+      parallel: true,
+    };
+    if (sessionId) {
+      params.session_id = sessionId;
     }
+    await submit('evaluate-custom-batch', params);
   }
 
   function toggleEvaluator(id: string) {
@@ -159,10 +159,10 @@ export function RunAllOverlay({ listingId, appId, open, onClose }: RunAllOverlay
             </button>
             <button
               onClick={handleSubmit}
-              disabled={selected.size === 0 || submitting}
+              disabled={selected.size === 0 || isSubmitting}
               className="px-3 py-1.5 text-sm font-medium text-white bg-[var(--color-brand-accent)] rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {submitting ? 'Starting...' : `Run ${selected.size} Evaluator${selected.size !== 1 ? 's' : ''}`}
+              {isSubmitting ? 'Starting...' : `Run ${selected.size} Evaluator${selected.size !== 1 ? 's' : ''}`}
             </button>
           </div>
         </div>

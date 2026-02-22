@@ -54,6 +54,9 @@ def _generate_field_schema(field: dict) -> dict:
         return {**base, "type": "string"}
     elif field_type == "boolean":
         return {**base, "type": "boolean"}
+    elif field_type == "enum":
+        allowed = field.get("enumValues", [])
+        return {**base, "type": "string", "enum": allowed} if allowed else {**base, "type": "string"}
     elif field_type == "array":
         return {
             **base,

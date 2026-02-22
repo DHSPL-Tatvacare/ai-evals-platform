@@ -69,6 +69,7 @@ function deriveRunType(command: string): RunType {
 function deriveCustomRunType(evalType: string): RunType {
   if (evalType === 'batch_thread' || evalType === 'batch_adversarial') return 'batch';
   if (evalType === 'custom') return 'custom';
+  if (evalType === 'full_evaluation') return 'evaluation';
   return 'thread';
 }
 
@@ -354,8 +355,8 @@ export default function RunList() {
               key={f.key}
               onClick={() => setTypeFilter(f.key)}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${typeFilter === f.key
-                  ? 'bg-[var(--surface-info)] text-[var(--color-info)] border border-[var(--border-info)]'
-                  : 'bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'
+                ? 'bg-[var(--surface-info)] text-[var(--color-info)] border border-[var(--border-info)]'
+                : 'bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'
                 }`}
             >
               {f.dotColor && (
@@ -377,8 +378,8 @@ export default function RunList() {
               key={f.key}
               onClick={() => setStatusFilter(f.key)}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${statusFilter === f.key
-                  ? 'bg-[var(--surface-info)] text-[var(--color-info)] border border-[var(--border-info)]'
-                  : 'bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'
+                ? 'bg-[var(--surface-info)] text-[var(--color-info)] border border-[var(--border-info)]'
+                : 'bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'
                 }`}
             >
               {f.dotColor && (
@@ -432,8 +433,8 @@ export default function RunList() {
               key={i}
               onClick={() => setPage(i)}
               className={`min-w-[28px] h-7 px-1.5 text-xs font-medium rounded transition-colors ${page === i
-                  ? 'bg-[var(--interactive-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                ? 'bg-[var(--interactive-primary)] text-white'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                 }`}
             >
               {i + 1}

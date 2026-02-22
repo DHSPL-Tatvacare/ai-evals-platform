@@ -8,12 +8,13 @@
 export interface OutputFieldDef {
   key: string;
   label?: string;
-  type: 'number' | 'text' | 'boolean' | 'array';
+  type: 'number' | 'text' | 'boolean' | 'array' | 'enum';
   description?: string;
   isMainMetric?: boolean;
   thresholds?: { green: number; yellow?: number; red?: number };
   displayMode?: 'badge' | 'bar' | 'hidden';
   enumValues?: string[];
+  role?: 'metric' | 'reasoning' | 'detail';
 }
 
 /** Describes how to render an evaluator's results in the UI. */

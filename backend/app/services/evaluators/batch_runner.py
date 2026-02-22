@@ -1,7 +1,22 @@
-"""Batch evaluation runner — orchestrates evaluations and persists results.
+"""Batch evaluation runner — orchestrates standard evaluations and persists results.
 
 Creates eval_runs rows (eval_type='batch_thread') with UUID PK.
 Called by the job worker when processing 'evaluate-batch' jobs.
+
+Standard pipeline contract:
+  - Prompts: intent/correctness/efficiency prompts are hardcoded in their respective
+    evaluator modules (intent_evaluator.py, correctness_evaluator.py, efficiency_evaluator.py).
+  - Schemas: JSON response schemas are hardcoded in each evaluator module.
+  - Server-side logic: thread data loading (data_loader), per-thread evaluation with
+    skipping/sampling, progress tracking, parallel execution (parallel_engine),
+    and summary aggregation with pass-rate and per-evaluator breakdowns.
+  - Custom evaluators: appended via custom_evaluator_ids; custom prompts/schemas are
+    user-defined and stored in the evaluator registry (DB). Uses prompt_resolver for
+    variable injection and schema_generator for dynamic JSON schema.
+  - Guarantees: creates eval_run record before starting any work (always visible in UI),
+    finalises with status/summary even on failure, supports job cancellation.
+  - custom_only mode: when True, force-disables intent/correctness/efficiency and runs
+    only the selected custom evaluators.
 """
 import asyncio
 import hashlib
@@ -14,7 +29,7 @@ from typing import Optional, Callable
 from sqlalchemy import select, update
 
 from app.database import async_session
-from app.models.eval_run import EvalRun, ThreadEvaluation as DBThreadEval, ApiLog
+from app.models.eval_run import EvalRun, ThreadEvaluation as DBThreadEval
 from app.models.evaluator import Evaluator
 from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
@@ -28,65 +43,19 @@ from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
 from app.services.evaluators.parallel_engine import run_parallel
-from app.services.job_worker import JobCancelledError, safe_error_message
+from app.services.evaluators.runner_utils import (
+    save_api_log, create_eval_run, finalize_eval_run, find_primary_field,
+)
+from app.services.job_worker import (
+    JobCancelledError, safe_error_message, update_job_progress,
+)
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable  # async (job_id, current, total, message) -> None
 
 
-def _detect_primary_field(output_schema: list[dict]) -> dict | None:
-    """Find the primary field for summary aggregation.
 
-    Priority: isMainMetric=true > first number field > first text field > first field.
-    """
-    if not output_schema:
-        return None
-
-    # 1. Explicit main metric
-    for f in output_schema:
-        if f.get("isMainMetric"):
-            return {"key": f["key"], "type": f.get("type", "text"), "thresholds": f.get("thresholds")}
-
-    # 2. First number field (likely a score)
-    for f in output_schema:
-        if f.get("type") == "number":
-            return {"key": f["key"], "type": "number", "thresholds": f.get("thresholds")}
-
-    # 3. First text field (likely a verdict)
-    for f in output_schema:
-        if f.get("type") == "text":
-            return {"key": f["key"], "type": "text"}
-
-    # 4. First field regardless
-    return {"key": output_schema[0]["key"], "type": output_schema[0].get("type", "text")}
-
-
-async def _save_api_log(log_entry: dict):
-    """Persist an LLM API log entry to PostgreSQL."""
-    run_id = log_entry.get("run_id")
-    if run_id and isinstance(run_id, str):
-        try:
-            run_id = uuid.UUID(run_id)
-        except ValueError:
-            run_id = None
-
-    async with async_session() as db:
-        db.add(ApiLog(
-            run_id=run_id,
-            thread_id=log_entry.get("thread_id"),
-            provider=log_entry.get("provider", "unknown"),
-            model=log_entry.get("model", "unknown"),
-            method=log_entry.get("method", "unknown"),
-            prompt=log_entry.get("prompt", ""),
-            system_prompt=log_entry.get("system_prompt"),
-            response=log_entry.get("response"),
-            error=log_entry.get("error"),
-            duration_ms=log_entry.get("duration_ms"),
-            tokens_in=log_entry.get("tokens_in"),
-            tokens_out=log_entry.get("tokens_out"),
-        ))
-        await db.commit()
 
 
 def _file_hash(path: str) -> str:
@@ -126,48 +95,47 @@ async def run_batch_evaluation(
     thread_workers: int = 1,
     thinking: str = "low",
     skip_previously_processed: bool = False,
+    custom_only: bool = False,
 ) -> dict:
     """Run batch evaluation on threads from a data file."""
     start_time = time.monotonic()
     run_id = uuid.uuid4()
 
+    # When custom_only is set, force-disable all built-in evaluators
+    if custom_only:
+        evaluate_intent = False
+        evaluate_correctness = False
+        evaluate_efficiency = False
+
     # Create eval run record FIRST so failures are always visible in the UI
     data_hash = _file_hash(data_path) if data_path else ""
-    async with async_session() as db:
-        db.add(EvalRun(
-            id=run_id,
-            app_id=app_id,
-            eval_type="batch_thread",
-            job_id=job_id,
-            status="running",
-            started_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-            llm_provider=llm_provider or "gemini",
-            llm_model=llm_model or "",
-            batch_metadata={
-                "name": name,
-                "description": description,
-                "data_path": data_path or "(uploaded)",
-                "data_file_hash": data_hash,
-                "total_items": 0,
-                "command": "evaluate-batch",
-                "eval_temperature": temperature,
-                "evaluate_intent": evaluate_intent,
-                "evaluate_correctness": evaluate_correctness,
-                "evaluate_efficiency": evaluate_efficiency,
-                "custom_evaluator_ids": [str(eid) for eid in (custom_evaluator_ids or [])],
-            },
-        ))
-        await db.commit()
+    await create_eval_run(
+        id=run_id,
+        app_id=app_id,
+        eval_type="batch_thread",
+        job_id=job_id,
+        llm_provider=llm_provider or "gemini",
+        llm_model=llm_model or "",
+        batch_metadata={
+            "name": name,
+            "description": description,
+            "data_path": data_path or "(uploaded)",
+            "data_file_hash": data_hash,
+            "total_items": 0,
+            "command": "evaluate-batch",
+            "eval_temperature": temperature,
+            "evaluate_intent": evaluate_intent,
+            "evaluate_correctness": evaluate_correctness,
+            "evaluate_efficiency": evaluate_efficiency,
+            "custom_evaluator_ids": [str(eid) for eid in (custom_evaluator_ids or [])],
+            "custom_only": custom_only,
+        },
+    )
 
     # Write run_id to job progress so frontend can redirect early
-    from app.models.job import Job
-    async with async_session() as db:
-        await db.execute(
-            update(Job).where(Job.id == job_id).values(
-                progress={"current": 0, "total": 0, "message": "Initializing...", "run_id": str(run_id)}
-            )
-        )
-        await db.commit()
+    await update_job_progress(
+        job_id, 0, 0, "Initializing...", run_id=str(run_id),
+    )
 
     # Resolve API key from settings if not provided
     auth_method = "api_key"  # default when caller provides api_key directly
@@ -244,6 +212,7 @@ async def run_batch_evaluation(
                     "thinking": thinking,
                     "skip_previously_processed": skip_previously_processed,
                     "skipped_previously_processed_count": skipped_previously_processed_count,
+                    "custom_only": custom_only,
                 },
             )
         )
@@ -255,7 +224,7 @@ async def run_batch_evaluation(
         model_name=llm_model or "", temperature=temperature,
         service_account_path=service_account_path,
     )
-    llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=_save_api_log)
+    llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=save_api_log)
     if timeouts:
         llm.set_timeouts(timeouts)
     llm.set_context(str(run_id))
@@ -281,7 +250,7 @@ async def run_batch_evaluation(
     # Build metadata for custom evaluators (primary field detection for summary aggregation)
     custom_eval_meta = {}
     for cev in custom_evaluators:
-        pf = _detect_primary_field(cev.output_schema)
+        pf = find_primary_field(cev.output_schema)
         custom_eval_meta[str(cev.id)] = {
             "name": cev.name,
             "output_schema": cev.output_schema,
@@ -588,11 +557,12 @@ async def run_batch_evaluation(
         if results_summary.get("custom_evaluations"):
             summary["custom_evaluations"] = results_summary["custom_evaluations"]
 
+        from datetime import datetime, timezone
         async with async_session() as db:
             await db.execute(
                 update(EvalRun).where(EvalRun.id == run_id).values(
                     status=final_status,
-                    completed_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
                     duration_ms=round(duration * 1000, 2),
                     summary=summary,
                     error_message=error_message,
@@ -615,36 +585,26 @@ async def run_batch_evaluation(
                 processed = result.scalar() or 0
         except Exception:
             pass  # best-effort count
+        from datetime import datetime, timezone
         summary = {
             "total_threads": total,
             "processed": processed,
             "cancelled": True,
         }
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == run_id).values(
-                    status="cancelled",
-                    completed_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                    duration_ms=round(duration * 1000, 2),
-                    summary=summary,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            run_id,
+            status="cancelled",
+            duration_ms=round(duration * 1000, 2),
+            summary=summary,
+        )
         logger.info(f"Batch run {run_id} cancelled after {processed}/{total} threads processed")
         return {"run_id": str(run_id), "cancelled": True, **summary}
 
     except Exception as e:
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(
-                    EvalRun.id == run_id,
-                    EvalRun.status != "cancelled",
-                ).values(
-                    status="failed",
-                    error_message=safe_error_message(e),
-                    completed_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                    duration_ms=round((time.monotonic() - start_time) * 1000, 2),
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            run_id,
+            status="failed",
+            duration_ms=round((time.monotonic() - start_time) * 1000, 2),
+            error_message=safe_error_message(e),
+        )
         raise

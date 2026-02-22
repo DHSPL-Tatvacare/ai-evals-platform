@@ -38,7 +38,7 @@ All evaluations run as background jobs via `job_worker.py` (polls `jobs` table e
 - `evaluate-batch` → `batch_runner` — Intent/correctness/efficiency evaluators on CSV thread data.
 - `evaluate-adversarial` → `adversarial_runner` — Stress-tests live Kaira API.
 - `evaluate-custom` → `custom_evaluator_runner` — Single custom evaluator on a listing/session.
-- `evaluate-custom-batch` → `voice_rx_batch_custom_runner` — N custom evaluators on one listing.
+- `evaluate-custom-batch` → `custom_evaluator_runner.run_custom_eval_batch` — N custom evaluators on one listing.
 
 **Unified data model**: `EvalRun` is the single source of truth for all eval results (`eval_type`: custom, full_evaluation, batch_thread, batch_adversarial). Linked to `Job` for async progress, `ApiLog` for LLM call auditing.
 

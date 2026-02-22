@@ -4,9 +4,45 @@
  */
 
 import type { Listing, AIEvaluation, TranscriptData, TemplateVariableStatus, ResolvedPrompt, EvaluationPrerequisites } from '@/types';
-import { extractVariables, isKnownVariable } from './variableRegistry';
 import { detectTranscriptScript } from '@/utils/scriptDetector';
-import { getNestedValue } from './apiVariableExtractor';
+
+// ── Inlined utilities (previously in variableRegistry.ts / apiVariableExtractor.ts) ──
+
+/** Extract all {{variable}} placeholders from a prompt string. */
+function extractVariables(prompt: string): string[] {
+  if (!prompt) return [];
+  const matches = prompt.match(/\{\{[^}]+\}\}/g) || [];
+  return [...new Set(matches)];
+}
+
+/** Set of all known template variable keys (authoritative list lives on the backend
+ *  variable registry; this is a client-side subset used only for resolve-time checks). */
+const KNOWN_VARIABLE_KEYS = new Set([
+  '{{chat_transcript}}',
+  '{{audio}}',
+  '{{transcript}}',
+  '{{llm_transcript}}',
+  '{{script_preference}}',
+  '{{language_hint}}',
+  '{{preserve_code_switching}}',
+  '{{original_script}}',
+  '{{segment_count}}',
+  '{{speaker_list}}',
+  '{{time_windows}}',
+  '{{structured_output}}',
+  '{{api_input}}',
+  '{{api_rx}}',
+  '{{llm_structured}}',
+]);
+
+function isKnownVariable(key: string): boolean {
+  return KNOWN_VARIABLE_KEYS.has(key);
+}
+
+/** Traverse a nested object using dot-notation path. */
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce((acc: any, part) => acc?.[part], obj);
+}
 
 /**
  * Context for resolving variables
@@ -307,14 +343,14 @@ export function resolveAllVariables(
 export function getAvailableDataKeys(context: VariableContext): Set<string> {
   const available = new Set<string>();
   const sourceType = context.listing.sourceType || 'upload';
-  
+
   if (context.audioBlob) {
     available.add('{{audio}}');
   }
-  
+
   if (context.listing.transcript) {
     available.add('{{transcript}}');
-    
+
     // Only add segment-based variables for upload flow
     if (sourceType === 'upload') {
       available.add('{{original_script}}');
@@ -323,7 +359,7 @@ export function getAvailableDataKeys(context: VariableContext): Set<string> {
       available.add('{{time_windows}}');
     }
   }
-  
+
   if (context.aiEval?.judgeOutput) {
     available.add('{{llm_transcript}}');
   }
@@ -331,15 +367,15 @@ export function getAvailableDataKeys(context: VariableContext): Set<string> {
   // API flow: add API-related variables
   if (sourceType === 'api' && context.listing.apiResponse) {
     const apiResponseObj = context.listing.apiResponse as unknown as Record<string, unknown>;
-    
+
     // {{structured_output}} needs apiResponse.rx specifically
     if (apiResponseObj.rx) {
       available.add('{{structured_output}}');
     }
-    
+
     // {{api_rx}} is the full response
     available.add('{{api_rx}}');
-    
+
     if (apiResponseObj.input) {
       available.add('{{api_input}}');
     }
@@ -354,7 +390,7 @@ export function getAvailableDataKeys(context: VariableContext): Set<string> {
   available.add('{{script_preference}}');
   available.add('{{language_hint}}');
   available.add('{{preserve_code_switching}}');
-  
+
   return available;
 }
 
@@ -369,16 +405,16 @@ export function resolvePrompt(
   const variables = extractVariables(prompt);
   const resolvedVariables = new Map<string, string | Blob>();
   const unresolvedVariables: string[] = [];
-  
+
   let resolvedPrompt = prompt;
 
   // First, resolve known registry variables
   for (const varKey of variables) {
     const status = resolveVariable(varKey, context);
-    
+
     if (status.available && status.value !== undefined) {
       resolvedVariables.set(varKey, status.value);
-      
+
       // Only substitute text variables in the prompt string
       if (typeof status.value === 'string') {
         resolvedPrompt = resolvedPrompt.replace(varKey, status.value);
@@ -393,14 +429,14 @@ export function resolvePrompt(
   if (context.listing.sourceType === 'api' && context.listing.apiResponse) {
     const apiVarRegex = /\{\{([a-zA-Z0-9_.]+)\}\}/g;
     const matches = Array.from(resolvedPrompt.matchAll(apiVarRegex));
-    
+
     for (const match of matches) {
       const fullVar = match[0]; // e.g., {{rx.vitals.temperature}} or {{input}} or {{rx}}
       const path = match[1];    // e.g., rx.vitals.temperature or input or rx
-      
+
       // Skip if already handled by registry
       if (isKnownVariable(fullVar)) continue;
-      
+
       try {
         const value = getNestedValue(context.listing.apiResponse as unknown as Record<string, unknown>, path);
         if (value !== undefined) {

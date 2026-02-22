@@ -122,18 +122,19 @@ async def process_job(job_id, job_type: str, params: dict) -> dict:
     return await handler(job_id, params)
 
 
-async def update_job_progress(job_id, current: int, total: int, message: str = ""):
+async def update_job_progress(job_id, current: int, total: int, message: str = "", **extra):
     """Update job progress (called from within handlers).
 
-    Preserves run_id from existing progress so the frontend can always
-    find the associated eval_run for redirect.
+    Extra kwargs (run_id, listing_id, evaluator_id, etc.) are merged into
+    the progress dict.  Preserves run_id from existing progress unless
+    explicitly overridden.
     """
     async with async_session() as db:
         job = await db.get(Job, job_id)
         if job:
-            new_progress = {"current": current, "total": total, "message": message}
-            # Preserve run_id if it was set previously
-            if isinstance(job.progress, dict) and "run_id" in job.progress:
+            new_progress = {"current": current, "total": total, "message": message, **extra}
+            # Preserve run_id if it was set previously and not overridden
+            if "run_id" not in extra and isinstance(job.progress, dict) and "run_id" in job.progress:
                 new_progress["run_id"] = job.progress["run_id"]
             job.progress = new_progress
             await db.commit()
@@ -295,6 +296,7 @@ async def handle_evaluate_batch(job_id, params: dict) -> dict:
         thread_workers=params.get("thread_workers", 1),
         thinking=params.get("thinking", "low"),
         skip_previously_processed=params.get("skip_previously_processed", False),
+        custom_only=params.get("custom_only", False),
     )
     return result
 
@@ -347,5 +349,5 @@ async def handle_evaluate_custom(job_id, params: dict) -> dict:
 @register_job_handler("evaluate-custom-batch")
 async def handle_evaluate_custom_batch(job_id, params: dict) -> dict:
     """Run multiple custom evaluators on a single entity."""
-    from app.services.evaluators.voice_rx_batch_custom_runner import run_voice_rx_batch_custom
-    return await run_voice_rx_batch_custom(job_id=job_id, params=params)
+    from app.services.evaluators.custom_evaluator_runner import run_custom_eval_batch
+    return await run_custom_eval_batch(job_id=job_id, params=params)

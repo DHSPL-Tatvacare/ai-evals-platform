@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Plus, Trash2, Sparkles, Settings, ListPlus } from 'lucide-react';
+import { X, Plus, Trash2, Sparkles, Settings, ListPlus, AlertTriangle } from 'lucide-react';
 import { Input, Button, VariablePickerPopover, EmptyState } from '@/components/ui';
 import { ModelSelector } from '@/features/settings/components/ModelSelector';
 import { ArrayItemConfigModal } from './ArrayItemConfigModal';
+import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useLLMSettingsStore } from '@/stores';
 import { cn } from '@/utils';
-import type { Listing, EvaluatorDefinition, EvaluatorOutputField, EvaluatorFieldType, ArrayItemSchema, EvaluatorContext } from '@/types';
+import type { Listing, EvaluatorDefinition, EvaluatorOutputField, EvaluatorFieldType, ArrayItemSchema, EvaluatorContext, FieldRole, PromptValidation } from '@/types';
 
 interface CreateEvaluatorOverlayProps {
   isOpen: boolean;
@@ -33,6 +34,8 @@ export function CreateEvaluatorOverlay({
     fieldIndex: null,
   });
   const [isVisible, setIsVisible] = useState(false);
+  const [validationResult, setValidationResult] = useState<PromptValidation | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
 
   const apiKey = useLLMSettingsStore((state) => state.apiKey);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -59,7 +62,7 @@ export function CreateEvaluatorOverlay({
       };
     }
   }, [isOpen, onClose]);
-  
+
   // Reset form when modal opens or editEvaluator changes
   useEffect(() => {
     if (isOpen) {
@@ -69,27 +72,27 @@ export function CreateEvaluatorOverlay({
       setOutputFields(editEvaluator?.outputSchema || []);
     }
   }, [isOpen, editEvaluator]);
-  
+
   const handleInsertVariable = (variable: string) => {
     const textarea = textareaRef.current;
     if (!textarea) {
       setPrompt(prev => `${prev}${variable}`);
       return;
     }
-    
+
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const text = textarea.value;
     const newText = text.substring(0, start) + variable + text.substring(end);
     setPrompt(newText);
-    
+
     setTimeout(() => {
       textarea.focus();
       const newCursorPos = start + variable.length;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
     }, 0);
   };
-  
+
   const addField = () => {
     const newField: EvaluatorOutputField = {
       key: '',
@@ -100,39 +103,54 @@ export function CreateEvaluatorOverlay({
     };
     setOutputFields([...outputFields, newField]);
   };
-  
+
   const updateField = (index: number, updates: Partial<EvaluatorOutputField>) => {
     const newFields = [...outputFields];
     newFields[index] = { ...newFields[index], ...updates };
-    
+
     // Ensure only one main metric
     if (updates.displayMode === 'header' && updates.isMainMetric) {
       newFields.forEach((f, i) => {
         if (i !== index) f.isMainMetric = false;
       });
     }
-    
+
     setOutputFields(newFields);
   };
-  
+
   const removeField = (index: number) => {
     setOutputFields(outputFields.filter((_, i) => i !== index));
   };
-  
+
   const openArrayConfig = (fieldIndex: number) => {
     setArrayConfigModal({ isOpen: true, fieldIndex });
   };
-  
+
   const handleArrayConfigSave = (schema: ArrayItemSchema) => {
     if (arrayConfigModal.fieldIndex !== null) {
       updateField(arrayConfigModal.fieldIndex, { arrayItemSchema: schema });
     }
   };
-  
+
   const effectiveAppId = listing?.appId || context?.appId || 'voice-rx';
   const effectiveEntityId = listing?.id || context?.entityId;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Non-blocking validation: warn about unknown variables but still allow save
+    setIsValidating(true);
+    try {
+      const result = await evaluatorsRepository.validatePrompt(
+        prompt,
+        effectiveAppId,
+        listing?.sourceType,
+      );
+      setValidationResult(result);
+    } catch {
+      // Validation failure is non-blocking — proceed with save
+    } finally {
+      setIsValidating(false);
+    }
+
     const evaluator: EvaluatorDefinition = {
       id: editEvaluator?.id || '',
       name,
@@ -150,12 +168,12 @@ export function CreateEvaluatorOverlay({
     onSave(evaluator);
     onClose();
   };
-  
+
   const isValid = name.trim() && prompt.trim() && outputFields.length > 0;
   const charCount = prompt.length;
 
   if (!isOpen) return null;
-  
+
   return (
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
@@ -213,7 +231,7 @@ export function CreateEvaluatorOverlay({
               />
             </div>
           </div>
-          
+
           <div className="py-4 space-y-6">
             {/* Prompt Canvas */}
             <div>
@@ -225,7 +243,7 @@ export function CreateEvaluatorOverlay({
                   <span>{charCount} characters</span>
                 </div>
               </div>
-              
+
               <textarea
                 ref={textareaRef}
                 value={prompt}
@@ -239,7 +257,7 @@ export function CreateEvaluatorOverlay({
                   "placeholder:text-[var(--text-muted)]"
                 )}
               />
-              
+
               {/* Action Buttons */}
               <div className="flex gap-2 mt-2">
                 <VariablePickerPopover
@@ -248,15 +266,33 @@ export function CreateEvaluatorOverlay({
                   onInsert={handleInsertVariable}
                 />
               </div>
-              
+
               <p className="text-xs text-[var(--text-muted)] mt-2">
                 {effectiveAppId === 'kaira-bot'
                   ? <>Use <code className="px-1 py-0.5 bg-[var(--bg-secondary)] rounded font-mono text-[10px]">{'{{chat_transcript}}'}</code> to reference the chat conversation.</>
                   : <>Use variables like <code className="px-1 py-0.5 bg-[var(--bg-secondary)] rounded font-mono text-[10px]">{'{{transcript}}'}</code> to reference data from your listing.</>
                 }
               </p>
+
+              {/* Prompt validation warning */}
+              {validationResult && validationResult.unknown_variables.length > 0 && (
+                <div className="flex items-start gap-2 mt-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-300">
+                    <strong>Unknown variables:</strong>{' '}
+                    {validationResult.unknown_variables.map((v) => (
+                      <code key={v} className="px-1 py-0.5 bg-amber-500/15 rounded font-mono text-[10px] mr-1">
+                        {`{{${v}}}`}
+                      </code>
+                    ))}
+                    <span className="text-[var(--text-muted)] block mt-1">
+                      These variables are not recognized. The evaluator will still be saved.
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
-            
+
             {/* Output Schema */}
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -271,7 +307,7 @@ export function CreateEvaluatorOverlay({
                   Add Field
                 </Button>
               </div>
-              
+
               {outputFields.length === 0 ? (
                 <EmptyState
                   icon={ListPlus}
@@ -304,7 +340,7 @@ export function CreateEvaluatorOverlay({
                             className="h-8 text-xs"
                           />
                         </div>
-                        
+
                         {/* Type */}
                         <div className="col-span-2">
                           <label className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wide mb-1 block">
@@ -312,7 +348,15 @@ export function CreateEvaluatorOverlay({
                           </label>
                           <select
                             value={field.type}
-                            onChange={(e) => updateField(index, { type: e.target.value as EvaluatorFieldType })}
+                            onChange={(e) => {
+                              const newType = e.target.value as EvaluatorFieldType;
+                              const updates: Partial<EvaluatorOutputField> = { type: newType };
+                              // Clear type-specific fields when switching types
+                              if (newType !== 'enum') updates.enumValues = undefined;
+                              if (newType !== 'array') updates.arrayItemSchema = undefined;
+                              if (newType !== 'number') updates.thresholds = undefined;
+                              updateField(index, updates);
+                            }}
                             className={cn(
                               "h-8 w-full text-xs border rounded px-2",
                               "bg-[var(--bg-surface)] text-[var(--text-primary)]",
@@ -323,11 +367,12 @@ export function CreateEvaluatorOverlay({
                             <option value="text">Text</option>
                             <option value="boolean">Boolean</option>
                             <option value="array">Array</option>
+                            <option value="enum">Enum</option>
                           </select>
                         </div>
-                        
+
                         {/* Description */}
-                        <div className="col-span-5">
+                        <div className="col-span-4">
                           <label className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wide mb-1 block">
                             Description
                           </label>
@@ -338,7 +383,28 @@ export function CreateEvaluatorOverlay({
                             className="h-8 text-xs"
                           />
                         </div>
-                        
+
+                        {/* Role */}
+                        <div className="col-span-1">
+                          <label className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wide mb-1 block">
+                            Role
+                          </label>
+                          <select
+                            value={field.role || ''}
+                            onChange={(e) => updateField(index, { role: (e.target.value || undefined) as FieldRole | undefined })}
+                            className={cn(
+                              "h-8 w-full text-xs border rounded px-1",
+                              "bg-[var(--bg-surface)] text-[var(--text-primary)]",
+                              "border-[var(--border-default)]"
+                            )}
+                          >
+                            <option value="">—</option>
+                            <option value="metric">Metric</option>
+                            <option value="reasoning">Reasoning</option>
+                            <option value="detail">Detail</option>
+                          </select>
+                        </div>
+
                         {/* Display Mode */}
                         <div className="col-span-2 flex items-end gap-1">
                           <div className="flex-1">
@@ -400,7 +466,7 @@ export function CreateEvaluatorOverlay({
                           </Button>
                         </div>
                       </div>
-                      
+
                       {/* RYG Thresholds for Number type */}
                       {field.type === 'number' && (
                         <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
@@ -420,12 +486,12 @@ export function CreateEvaluatorOverlay({
                               <Input
                                 type="number"
                                 value={field.thresholds?.green ?? ''}
-                                onChange={(e) => updateField(index, { 
-                                  thresholds: { 
+                                onChange={(e) => updateField(index, {
+                                  thresholds: {
                                     ...field.thresholds,
                                     green: parseFloat(e.target.value) || 0,
                                     yellow: field.thresholds?.yellow ?? 0
-                                  } 
+                                  }
                                 })}
                                 placeholder="80"
                                 className="h-7 text-xs"
@@ -438,11 +504,11 @@ export function CreateEvaluatorOverlay({
                               <Input
                                 type="number"
                                 value={field.thresholds?.yellow ?? ''}
-                                onChange={(e) => updateField(index, { 
-                                  thresholds: { 
+                                onChange={(e) => updateField(index, {
+                                  thresholds: {
                                     green: field.thresholds?.green ?? 0,
                                     yellow: parseFloat(e.target.value) || 0
-                                  } 
+                                  }
                                 })}
                                 placeholder="50"
                                 className="h-7 text-xs"
@@ -451,7 +517,7 @@ export function CreateEvaluatorOverlay({
                           </div>
                         </div>
                       )}
-                      
+
                       {/* Array Configuration */}
                       {field.type === 'array' && (
                         <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
@@ -462,7 +528,7 @@ export function CreateEvaluatorOverlay({
                               </label>
                               {field.arrayItemSchema ? (
                                 <p className="text-xs text-[var(--text-primary)]">
-                                  {field.arrayItemSchema.itemType === 'object' 
+                                  {field.arrayItemSchema.itemType === 'object'
                                     ? `Object (${field.arrayItemSchema.properties?.length || 0} properties)`
                                     : field.arrayItemSchema.itemType.charAt(0).toUpperCase() + field.arrayItemSchema.itemType.slice(1)
                                   }
@@ -485,7 +551,37 @@ export function CreateEvaluatorOverlay({
                           </div>
                         </div>
                       )}
-                      
+
+                      {/* Enum Values Configuration */}
+                      {field.type === 'enum' && (
+                        <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                          <label className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wide mb-1 block">
+                            Allowed Values (comma separated)
+                          </label>
+                          <Input
+                            value={(field.enumValues || []).join(', ')}
+                            onChange={(e) => {
+                              const values = e.target.value
+                                .split(',')
+                                .map(v => v.trim())
+                                .filter(Boolean);
+                              updateField(index, { enumValues: values });
+                            }}
+                            placeholder="e.g. none, low, medium, high, critical"
+                            className="h-8 text-xs font-mono"
+                          />
+                          {(field.enumValues?.length ?? 0) > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {field.enumValues!.map(v => (
+                                <span key={v} className="px-1.5 py-px text-[10px] rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] font-medium">
+                                  {v}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {field.isMainMetric && (
                         <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
                           <p className="text-[10px] text-[var(--color-brand-accent)] font-medium">
@@ -497,26 +593,26 @@ export function CreateEvaluatorOverlay({
                   ))}
                 </div>
               )}
-              
+
               <p className="text-xs text-[var(--text-muted)] mt-2">
                 <strong>Display modes:</strong> H=Header (main metric), C=Card body, X=Hidden
               </p>
             </div>
           </div>
         </div>
-        
+
         {/* Footer */}
         <div className="shrink-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-[var(--border-subtle)]">
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!isValid}>
+          <Button onClick={handleSave} disabled={!isValid || isValidating}>
             <Sparkles className="h-4 w-4 mr-1.5" />
             {editEvaluator ? 'Update' : 'Save'} Evaluator
           </Button>
         </div>
       </div>
-      
+
       {/* Array Configuration Modal */}
       {arrayConfigModal.fieldIndex !== null && (
         <ArrayItemConfigModal

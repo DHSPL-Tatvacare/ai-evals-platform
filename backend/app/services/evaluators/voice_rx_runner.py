@@ -22,8 +22,7 @@ from app.models.listing import Listing
 from app.models.file_record import FileRecord
 from app.models.prompt import Prompt
 from app.models.schema import Schema
-from app.models.job import Job
-from app.models.eval_run import EvalRun, ApiLog
+from app.models.eval_run import EvalRun
 from app.services.file_storage import file_storage
 from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
@@ -50,12 +49,18 @@ from app.services.evaluators.comparison_builder import (
     build_deep_comparison,
     format_comparison_for_prompt,
 )
-from app.services.job_worker import is_job_cancelled, JobCancelledError, safe_error_message
+from app.services.evaluators.runner_utils import (
+    save_api_log, create_eval_run, finalize_eval_run,
+)
+from app.services.job_worker import (
+    is_job_cancelled, JobCancelledError, safe_error_message, update_job_progress,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ── DB helpers for loading default prompts/schemas ────────────────────
+
 
 async def _load_default_prompt(app_id: str, prompt_type: str, source_type: str) -> str:
     """Load the default prompt text from the DB for a given app/type/source."""
@@ -126,51 +131,6 @@ def _validate_pipeline_inputs(flow, listing, params: dict) -> list[str]:
     return errors
 
 
-async def _save_api_log(log_entry: dict):
-    """Persist an LLM API log entry to PostgreSQL."""
-    run_id = log_entry.get("run_id")
-    if run_id and isinstance(run_id, str):
-        try:
-            run_id = uuid.UUID(run_id)
-        except ValueError:
-            run_id = None
-
-    async with async_session() as db:
-        db.add(ApiLog(
-            run_id=run_id,
-            thread_id=log_entry.get("thread_id"),
-            provider=log_entry.get("provider", "unknown"),
-            model=log_entry.get("model", "unknown"),
-            method=log_entry.get("method", "unknown"),
-            prompt=log_entry.get("prompt", ""),
-            system_prompt=log_entry.get("system_prompt"),
-            response=log_entry.get("response"),
-            error=log_entry.get("error"),
-            duration_ms=log_entry.get("duration_ms"),
-            tokens_in=log_entry.get("tokens_in"),
-            tokens_out=log_entry.get("tokens_out"),
-        ))
-        await db.commit()
-
-
-async def _update_progress(job_id, current: int, total: int, message: str, listing_id: str = "", run_id: str = ""):
-    """Update job progress with listing_id and run_id for frontend tracking."""
-    progress = {
-        "current": current,
-        "total": total,
-        "message": message,
-    }
-    if listing_id:
-        progress["listing_id"] = listing_id
-    if run_id:
-        progress["run_id"] = run_id
-    async with async_session() as db:
-        await db.execute(
-            update(Job).where(Job.id == job_id).values(progress=progress)
-        )
-        await db.commit()
-
-
 async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
     """Run voice-rx FlowConfig-driven evaluation pipeline.
 
@@ -196,21 +156,19 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
     # Create eval_run record immediately
     eval_run_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
 
-    async with async_session() as db:
-        db.add(EvalRun(
-            id=eval_run_id,
-            app_id=app_id,
-            eval_type="full_evaluation",
-            listing_id=uuid.UUID(listing_id) if isinstance(listing_id, str) else listing_id,
-            job_id=job_id,
-            status="running",
-            started_at=now,
-        ))
-        await db.commit()
+    await create_eval_run(
+        id=eval_run_id,
+        app_id=app_id,
+        eval_type="full_evaluation",
+        job_id=job_id,
+        listing_id=uuid.UUID(listing_id) if isinstance(listing_id, str) else listing_id,
+    )
 
-    await _update_progress(job_id, 0, 3, "Initializing...", listing_id, str(eval_run_id))
+    await update_job_progress(
+        job_id, 0, 3, "Initializing...",
+        listing_id=listing_id, run_id=str(eval_run_id),
+    )
 
     # ── Load listing ─────────────────────────────────────────────
     async with async_session() as db:
@@ -248,7 +206,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
             model_name=model, temperature=0.3,
             service_account_path=service_account_path,
         )
-        llm = LoggingLLMWrapper(inner, log_callback=_save_api_log)
+        llm = LoggingLLMWrapper(inner, log_callback=save_api_log)
         if params.get("timeouts"):
             llm.set_timeouts(params["timeouts"])
         llm.set_context(str(eval_run_id))
@@ -317,7 +275,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
     # Build the evaluation result (camelCase keys for frontend compat)
     evaluation = {
         "id": str(eval_run_id),
-        "createdAt": now.isoformat(),
+        "createdAt": datetime.now(timezone.utc).isoformat(),
         "model": selected_model,
         "models": {"transcription": selected_model, "evaluation": selected_model},
         "status": "processing",
@@ -336,10 +294,10 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
         # ── STEP 1: Transcription ───────────────────────────────
         current_step += 1
-        await _update_progress(
+        await update_job_progress(
             job_id, current_step, total_steps,
             "Transcribing audio..." if flow.requires_segments else "Judge is transcribing audio...",
-            listing_id, str(eval_run_id),
+            listing_id=listing_id, run_id=str(eval_run_id),
         )
         await check_cancel()
 
@@ -380,9 +338,10 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
         # ── STEP 2: Normalization (optional) ────────────────────
         if flow.normalize_original:
             current_step += 1
-            await _update_progress(
+            await update_job_progress(
                 job_id, current_step, total_steps,
-                "Normalizing transcript...", listing_id, str(eval_run_id),
+                "Normalizing transcript...",
+                listing_id=listing_id, run_id=str(eval_run_id),
             )
             await check_cancel()
 
@@ -413,10 +372,10 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
         # ── STEP 3: Critique ───────────────────────────────────
         current_step += 1
-        await _update_progress(
+        await update_job_progress(
             job_id, current_step, total_steps,
             "Generating critique..." if flow.requires_segments else "Comparing outputs...",
-            listing_id, str(eval_run_id),
+            listing_id=listing_id, run_id=str(eval_run_id),
         )
         await check_cancel()
 
@@ -471,16 +430,12 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
     except JobCancelledError:
         evaluation["status"] = "cancelled"
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == eval_run_id).values(
-                    status="cancelled",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=(time.monotonic() - start_time) * 1000,
-                    result=evaluation,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="cancelled",
+            duration_ms=(time.monotonic() - start_time) * 1000,
+            result=evaluation,
+        )
         logger.info("Voice-RX evaluation for %s cancelled", listing_id)
         return {"listing_id": listing_id, "eval_run_id": str(eval_run_id), "status": "cancelled"}
 
@@ -514,20 +469,13 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
         error_msg = safe_error_message(e)
         evaluation["status"] = "failed"
         evaluation["error"] = error_msg
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(
-                    EvalRun.id == eval_run_id,
-                    EvalRun.status != "cancelled",
-                ).values(
-                    status="failed",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=(time.monotonic() - start_time) * 1000,
-                    error_message=error_msg,
-                    result=evaluation,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="failed",
+            duration_ms=(time.monotonic() - start_time) * 1000,
+            error_message=error_msg,
+            result=evaluation,
+        )
         raise
 
 

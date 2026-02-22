@@ -2,6 +2,20 @@
 
 Creates eval_runs rows (eval_type='batch_adversarial') with UUID PK.
 Called by the job worker when processing 'evaluate-adversarial' jobs.
+
+Standard pipeline contract:
+  - Test case generation: LLM generates adversarial test cases based on categories
+    and rules from AdversarialConfig (DB-backed, snapshotted per run).
+  - Conversation: each test case runs a multi-turn live conversation against the
+    Kaira API via KairaClient, with configurable turn delays and timeouts.
+  - Evaluation: each transcript is evaluated by the AdversarialEvaluator using
+    hardcoded evaluation prompts. Verdicts are persisted per-case in the
+    adversarial_evaluations table.
+  - Server-side logic: verdict/category aggregation, goal-achieved counting,
+    error boundary per test case, parallel execution via run_parallel().
+  - Guarantees: creates eval_run record before starting, snapshots adversarial config
+    in batch_metadata for auditability, finalises with summary even on failure,
+    supports job cancellation, cleans up KairaClient session.
 """
 import logging
 import time
@@ -9,11 +23,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Callable
 
-from sqlalchemy import update
 
 from app.database import async_session
-from app.models.eval_run import EvalRun, AdversarialEvaluation as DBAdversarialEval, ApiLog
-from app.models.job import Job
+from app.models.eval_run import AdversarialEvaluation as DBAdversarialEval
 from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
 )
@@ -24,39 +36,19 @@ from app.services.evaluators.adversarial_config import (
 from app.services.evaluators.kaira_client import KairaClient
 from app.services.evaluators.models import RunMetadata, serialize
 from app.services.evaluators.parallel_engine import run_parallel
-from app.services.job_worker import JobCancelledError, safe_error_message
+from app.services.evaluators.runner_utils import (
+    save_api_log, create_eval_run, finalize_eval_run,
+)
+from app.services.job_worker import (
+    JobCancelledError, safe_error_message, update_job_progress,
+)
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable  # async (job_id, current, total, message) -> None
 
 
-async def _save_api_log(log_entry: dict):
-    """Persist an LLM API log entry to PostgreSQL."""
-    run_id = log_entry.get("run_id")
-    if run_id and isinstance(run_id, str):
-        try:
-            run_id = uuid.UUID(run_id)
-        except ValueError:
-            run_id = None
 
-    async with async_session() as db:
-        db.add(ApiLog(
-            run_id=run_id,
-            thread_id=log_entry.get("thread_id"),
-            test_case_label=log_entry.get("test_case_label"),
-            provider=log_entry.get("provider", "unknown"),
-            model=log_entry.get("model", "unknown"),
-            method=log_entry.get("method", "unknown"),
-            prompt=log_entry.get("prompt", ""),
-            system_prompt=log_entry.get("system_prompt"),
-            response=log_entry.get("response"),
-            error=log_entry.get("error"),
-            duration_ms=log_entry.get("duration_ms"),
-            tokens_in=log_entry.get("tokens_in"),
-            tokens_out=log_entry.get("tokens_out"),
-        ))
-        await db.commit()
 
 
 async def run_adversarial_evaluation(
@@ -105,40 +97,29 @@ async def run_adversarial_evaluation(
     }
 
     # Create eval run record FIRST so failures are always visible in the UI
-    async with async_session() as db:
-        db.add(EvalRun(
-            id=run_id,
-            app_id="kaira-bot",
-            eval_type="batch_adversarial",
-            job_id=job_id,
-            status="running",
-            started_at=datetime.now(timezone.utc),
-            llm_provider=llm_provider or "gemini",
-            llm_model=llm_model or "",
-            batch_metadata={
-                "name": name,
-                "description": description,
-                "command": "adversarial",
-                "eval_temperature": temperature,
-                "total_items": test_count,
-                "thinking": thinking,
-                "adversarial_config": config_snapshot,
-                "extra_instructions": extra_instructions,
-            },
-        ))
-        await db.commit()
+    await create_eval_run(
+        id=run_id,
+        app_id="kaira-bot",
+        eval_type="batch_adversarial",
+        job_id=job_id,
+        llm_provider=llm_provider or "gemini",
+        llm_model=llm_model or "",
+        batch_metadata={
+            "name": name,
+            "description": description,
+            "command": "adversarial",
+            "eval_temperature": temperature,
+            "total_items": test_count,
+            "thinking": thinking,
+            "adversarial_config": config_snapshot,
+            "extra_instructions": extra_instructions,
+        },
+    )
 
     # Write run_id to job progress so frontend can redirect early
-    async with async_session() as db:
-        await db.execute(
-            update(Job).where(Job.id == job_id).values(
-                progress={
-                    "current": 0, "total": test_count,
-                    "message": "Initializing...", "run_id": str(run_id),
-                }
-            )
-        )
-        await db.commit()
+    await update_job_progress(
+        job_id, 0, test_count, "Initializing...", run_id=str(run_id),
+    )
 
     # Resolve API key from settings if not provided
     sa_path = ""
@@ -160,12 +141,14 @@ async def run_adversarial_evaluation(
         model_name=llm_model or "", temperature=temperature,
         service_account_path=sa_path,
     )
-    llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=_save_api_log)
+    llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=save_api_log)
     if timeouts:
         llm.set_timeouts(timeouts)
     llm.set_context(str(run_id))
 
     # Update run with resolved model name and auth method
+    from sqlalchemy import update
+    from app.models.eval_run import EvalRun
     async with async_session() as db:
         await db.execute(
             update(EvalRun).where(EvalRun.id == run_id).values(
@@ -179,22 +162,15 @@ async def run_adversarial_evaluation(
     evaluator = AdversarialEvaluator(llm, config=config)
     client = KairaClient(
         auth_token=kaira_auth_token, base_url=kaira_api_url,
-        log_callback=_save_api_log, run_id=str(run_id),
+        log_callback=save_api_log, run_id=str(run_id),
         timeout=kaira_timeout,
     )
     await client.open()
 
     async def report_progress(current: int, total: int, message: str):
-        async with async_session() as db:
-            await db.execute(
-                update(Job).where(Job.id == job_id).values(
-                    progress={
-                        "current": current, "total": total,
-                        "message": message, "run_id": str(run_id),
-                    }
-                )
-            )
-            await db.commit()
+        await update_job_progress(
+            job_id, current, total, message, run_id=str(run_id),
+        )
 
     # Determine effective concurrency
     effective_concurrency = case_workers if parallel_cases else 1
@@ -340,49 +316,34 @@ async def run_adversarial_evaluation(
         else:
             final_status = "completed"
 
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == run_id).values(
-                    status=final_status,
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=round(duration * 1000, 2),
-                    summary=summary,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            run_id,
+            status=final_status,
+            duration_ms=round(duration * 1000, 2),
+            summary=summary,
+        )
 
         return {"run_id": str(run_id), "duration_seconds": round(duration, 2), **summary}
 
     except JobCancelledError:
         duration = time.monotonic() - start_time
         summary = {"cancelled": True}
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == run_id).values(
-                    status="cancelled",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=round(duration * 1000, 2),
-                    summary=summary,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            run_id,
+            status="cancelled",
+            duration_ms=round(duration * 1000, 2),
+            summary=summary,
+        )
         logger.info(f"Adversarial run {run_id} cancelled")
         return {"run_id": str(run_id), "cancelled": True}
 
     except Exception as e:
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(
-                    EvalRun.id == run_id,
-                    EvalRun.status != "cancelled",
-                ).values(
-                    status="failed",
-                    error_message=safe_error_message(e),
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=round((time.monotonic() - start_time) * 1000, 2),
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            run_id,
+            status="failed",
+            duration_ms=round((time.monotonic() - start_time) * 1000, 2),
+            error_message=safe_error_message(e),
+        )
         raise
 
     finally:
