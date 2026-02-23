@@ -49,3 +49,12 @@ service-account*.json
 /docs/*
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
+
+# Allow guide app source/config
+!/docs/guide/
+!/docs/guide/**
+
+# Re-ignore generated artifacts inside guide
+/docs/guide/node_modules/
+/docs/guide/dist/
+/docs/guide/.DS_Store
