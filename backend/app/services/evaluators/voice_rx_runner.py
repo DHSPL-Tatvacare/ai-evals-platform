@@ -31,6 +31,7 @@ from app.services.evaluators.response_parser import (
     parse_transcript_response,
     parse_critique_response,
     parse_api_critique_response,
+    _safe_parse_json,
 )
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.flow_config import FlowConfig
@@ -531,7 +532,10 @@ async def _run_transcription(
         }
     else:
         # API flow: response must have {input, rx} matching real API shape
-        parsed = json.loads(response_text) if isinstance(response_text, str) else response_text
+        if isinstance(response_text, str):
+            parsed, _repaired = _safe_parse_json(response_text)
+        else:
+            parsed = response_text
 
         judge_transcript = parsed.get("input", "")
         judge_rx = parsed.get("rx")

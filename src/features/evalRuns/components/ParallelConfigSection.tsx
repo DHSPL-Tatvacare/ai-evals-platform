@@ -60,7 +60,7 @@ export function ParallelConfigSection({
             <input
               type="range"
               min={2}
-              max={10}
+              max={20}
               value={workers}
               onChange={(e) => onWorkersChange(Number(e.target.value))}
               className="flex-1 h-1.5 accent-[var(--interactive-primary)]"
