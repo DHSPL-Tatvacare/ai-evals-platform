@@ -6,8 +6,8 @@ import {
   EvalDashboard,
   EvalRunList,
   EvalRunDetail,
-  EvalThreadDetail,
-  EvalAdversarialDetail,
+  EvalThreadDetailV2,
+  EvalAdversarialDetailV2,
   EvalLogs,
 } from '@/features/evalRuns';
 import { HomePage } from './pages/HomePage';
@@ -48,8 +48,8 @@ export function Router() {
           <Route path={routes.kaira.dashboard} element={<EvalDashboard />} />
           <Route path={routes.kaira.runs} element={<EvalRunList />} />
           <Route path="/kaira/runs/:runId" element={<EvalRunDetail />} />
-          <Route path="/kaira/runs/:runId/adversarial/:evalId" element={<EvalAdversarialDetail />} />
-          <Route path="/kaira/threads/:threadId" element={<EvalThreadDetail />} />
+          <Route path="/kaira/runs/:runId/adversarial/:evalId" element={<EvalAdversarialDetailV2 />} />
+          <Route path="/kaira/threads/:threadId" element={<EvalThreadDetailV2 />} />
           <Route path={routes.kaira.logs} element={<EvalLogs />} />
 
           <Route path="*" element={<NotFoundPage />} />

@@ -1,16 +1,11 @@
 import { useState, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { AlertTriangle, ClipboardList, CheckCircle2, XCircle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";
 import { EmptyState } from "@/components/ui";
-import type { ThreadEvalRow, EvaluatorDescriptor, CustomEvaluationResult } from "@/types";
+import type { ThreadEvalRow, EvaluatorDescriptor } from "@/types";
 import VerdictBadge from "./VerdictBadge";
-import { OutputFieldRenderer } from "./OutputFieldRenderer";
-import { CompactTranscript } from "./TranscriptViewer";
-import RuleComplianceGrid from "./RuleComplianceGrid";
-import { pct, normalizeLabel, unwrapSerializedDates } from "@/utils/evalFormatters";
-import { getVerdictColor } from "@/utils/evalColors";
-import { STATUS_COLORS } from "@/utils/statusColors";
-import EvalSection, { EvalCard, EvalCardHeader, EvalCardBody } from "./EvalSection";
+import { pct, normalizeLabel } from "@/utils/evalFormatters";
+import { routes } from "@/config/routes";
 
 interface Props {
   evaluations: ThreadEvalRow[];
@@ -18,6 +13,7 @@ interface Props {
 }
 
 type SortDir = "asc" | "desc";
+const PAGE_SIZE = 25;
 
 const CORRECTNESS_RANK: Record<string, number> = {
   "PASS": 0, "NOT APPLICABLE": 1, "SOFT FAIL": 2, "HARD FAIL": 3, "CRITICAL": 4,
@@ -30,7 +26,7 @@ const EFFICIENCY_RANK: Record<string, number> = {
 const DEFAULT_DESCRIPTORS: EvaluatorDescriptor[] = [
   {
     id: 'intent',
-    name: 'Intent Acc',
+    name: 'Judge Intent Acc',
     type: 'built-in',
     primaryField: { key: 'intent_accuracy', format: 'percentage' },
   },
@@ -53,7 +49,6 @@ function getRank(value: string | null, ranks: Record<string, number>): number {
   return ranks[normalizeLabel(value)] ?? 5;
 }
 
-/** Inline badge for meta-states (Failed / Skipped). Not a verdict — intentionally not VerdictBadge. */
 function StatusBadge({ status }: { status: "failed" | "skipped" }) {
   const isFailed = status === "failed";
   return (
@@ -69,22 +64,6 @@ function StatusBadge({ status }: { status: "failed" | "skipped" }) {
   );
 }
 
-/** Inline section shown in expanded detail when an evaluator failed. */
-function EvalFailedSection({ label, errorMsg }: { label: string; errorMsg: string }) {
-  return (
-    <div
-      className="flex items-start gap-2 px-3 py-2 rounded-md border text-sm bg-[var(--surface-error)] border-[var(--border-error)]"
-    >
-      <AlertTriangle className="h-4 w-4 text-[var(--color-error)] shrink-0 mt-0.5" />
-      <div>
-        <span className="font-semibold text-[var(--text-primary)]">{label}:</span>{" "}
-        <span className="text-[var(--text-secondary)]">{errorMsg}</span>
-      </div>
-    </div>
-  );
-}
-
-/** Get cell value and state for a given evaluator descriptor. */
 function getCellValue(
   evaluation: ThreadEvalRow,
   desc: EvaluatorDescriptor,
@@ -106,7 +85,6 @@ function getCellValue(
     }
   }
 
-  // Custom evaluator — read from result.custom_evaluations
   const customEvals = (result?.custom_evaluations ?? {}) as Record<string, {
     status: string;
     output?: Record<string, unknown>;
@@ -125,7 +103,6 @@ function getCellValue(
   return { value: null, state: 'ok' };
 }
 
-/** Render a cell value based on its evaluator descriptor's format. */
 function CellRenderer({ desc, value }: { desc: EvaluatorDescriptor; value: unknown }) {
   if (value == null) return <span className="text-[var(--text-muted)]">{"\u2014"}</span>;
 
@@ -135,7 +112,7 @@ function CellRenderer({ desc, value }: { desc: EvaluatorDescriptor; value: unkno
       return <span className="text-sm font-medium">{pct(num)}</span>;
     }
     case 'verdict':
-      return <VerdictBadge verdict={String(value)} category={desc.type === 'built-in' ? desc.id as any : 'correctness'} />;
+      return <VerdictBadge verdict={String(value)} category={desc.type === 'built-in' ? desc.id as 'correctness' | 'efficiency' | 'intent' : 'correctness'} />;
     case 'number': {
       const num = Number(value);
       const display = num <= 1 ? `${(num * 100).toFixed(0)}%` : String(num);
@@ -150,11 +127,39 @@ function CellRenderer({ desc, value }: { desc: EvaluatorDescriptor; value: unkno
   }
 }
 
+function getMsgCount(te: ThreadEvalRow): number {
+  const r = te.result as unknown as Record<string, unknown> | undefined;
+  const thread = r?.thread as { message_count?: number; messages?: unknown[] } | undefined;
+  return thread?.message_count ?? (thread?.messages as unknown[])?.length ?? 0;
+}
+
+function SortHeader({ label, k, sortKey, sortDir, onToggle }: {
+  label: string;
+  k: string;
+  sortKey: string;
+  sortDir: SortDir;
+  onToggle: (key: string) => void;
+}) {
+  const active = sortKey === k;
+  return (
+    <th
+      onClick={() => onToggle(k)}
+      className={`text-left px-2.5 py-2 text-xs uppercase tracking-wider cursor-pointer select-none whitespace-nowrap border-b-2 border-[var(--border-subtle)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1 ${
+        active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+      }`}
+    >
+      {label}
+      {active && <span className="ml-1 text-[0.6rem]">{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>}
+    </th>
+  );
+}
+
 export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) {
   const descriptors = evaluatorDescriptors ?? DEFAULT_DESCRIPTORS;
+  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<string>("thread_id");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [page, setPage] = useState(0);
 
   const sorted = useMemo(() => {
     const arr = [...evaluations];
@@ -163,6 +168,8 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
 
       if (sortKey === "thread_id") {
         cmp = a.thread_id.localeCompare(b.thread_id);
+      } else if (sortKey === "message_count") {
+        cmp = getMsgCount(a) - getMsgCount(b);
       } else if (sortKey === "success_status") {
         cmp = a.success_status - b.success_status;
       } else if (sortKey === "intent_accuracy") {
@@ -175,13 +182,14 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
         const evalId = sortKey.slice(7);
         const getCustomVal = (te: ThreadEvalRow) => {
           const result = te.result as unknown as Record<string, unknown> | undefined;
-          const customEvals = (result?.custom_evaluations ?? {}) as Record<string, any>;
+          const customEvals = (result?.custom_evaluations ?? {}) as Record<string, Record<string, unknown>>;
           const ce = customEvals[evalId];
           if (!ce || ce.status !== 'completed' || !ce.output) return '';
           const desc = descriptors.find(d => d.id === evalId);
           const primaryKey = desc?.primaryField?.key;
           if (primaryKey) {
-            const val = ce.output[primaryKey];
+            const output = ce.output as Record<string, unknown>;
+            const val = output[primaryKey];
             if (typeof val === 'number') return val;
             if (typeof val === 'string') return val;
             if (typeof val === 'boolean') return val ? 1 : 0;
@@ -202,7 +210,12 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
     return arr;
   }, [evaluations, sortKey, sortDir, descriptors]);
 
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const safePage = totalPages > 0 ? Math.min(page, totalPages - 1) : 0;
+  const paged = sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
   function toggleSort(key: string) {
+    setPage(0);
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -211,57 +224,71 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
     }
   }
 
-  function SortHeader({ label, k }: { label: string; k: string }) {
-    const active = sortKey === k;
-    return (
-      <th
-        onClick={() => toggleSort(k)}
-        className={`text-left px-2.5 py-2 text-xs uppercase tracking-wider cursor-pointer select-none whitespace-nowrap border-b-2 border-[var(--border-subtle)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1 ${
-          active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-        }`}
-      >
-        {label}
-        {active && <span className="ml-1 text-[0.6rem]">{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>}
-      </th>
-    );
-  }
-
-  // Total column count: Thread ID + Msgs + dynamic evaluators + Completed
   const totalCols = 2 + descriptors.length + 1;
 
   return (
     <div>
       <div className="overflow-x-auto rounded-md border border-[var(--border-subtle)]">
         <table className="w-full border-collapse bg-[var(--bg-primary)]">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-[var(--bg-primary)]">
             <tr>
-              <SortHeader label="Thread ID" k="thread_id" />
-              <SortHeader label="Msgs" k="thread_id" />
+              <SortHeader label="Thread ID" k="thread_id" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+              <SortHeader label="Msgs" k="message_count" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               {descriptors.map(desc => (
                 <SortHeader
                   key={desc.id}
                   label={desc.name}
                   k={desc.type === 'built-in' ? (desc.primaryField?.key ?? desc.id) : `custom_${desc.id}`}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onToggle={toggleSort}
                 />
               ))}
-              <SortHeader label="Completed" k="success_status" />
+              <SortHeader label="Completed" k="success_status" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
             </tr>
           </thead>
           <tbody>
-            {sorted.map((e) => {
-              const isExpanded = expandedId === e.id;
-              return (
-                <ExpandableRow
-                  key={e.id}
-                  evaluation={e}
-                  isExpanded={isExpanded}
-                  onToggle={() => setExpandedId(isExpanded ? null : e.id)}
-                  descriptors={descriptors}
-                  totalCols={totalCols}
-                  evaluatorDescriptors={evaluatorDescriptors}
-                />
-              );
-            })}
+            {paged.map((e) => (
+              <tr
+                key={e.id}
+                onClick={() => navigate(routes.kaira.threadDetail(e.thread_id))}
+                className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+              >
+                <td className="px-2.5 py-2 text-sm font-mono text-[var(--text-primary)]">
+                  <Link
+                    to={routes.kaira.threadDetail(e.thread_id)}
+                    className="text-[var(--text-brand)] hover:underline"
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
+                    {e.thread_id}
+                  </Link>
+                </td>
+                <td className="px-2.5 py-2 text-sm text-right text-[var(--text-secondary)]">
+                  {getMsgCount(e)}
+                </td>
+                {descriptors.map(desc => {
+                  const { value, state } = getCellValue(e, desc);
+                  return (
+                    <td key={desc.id} className="px-2.5 py-2">
+                      {state === 'failed' ? (
+                        <StatusBadge status="failed" />
+                      ) : state === 'skipped' ? (
+                        <StatusBadge status="skipped" />
+                      ) : (
+                        <CellRenderer desc={desc} value={value} />
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="px-2.5 py-2 text-center text-sm">
+                  {e.success_status ? (
+                    <span className="text-[var(--color-success)]">{"\u2713"}</span>
+                  ) : (
+                    <span className="text-[var(--color-error)]">{"\u2717"}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={totalCols} className="p-3">
@@ -277,294 +304,42 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-[var(--text-muted)] mt-1.5">
-        {sorted.length} of {evaluations.length} evaluations
-      </p>
-    </div>
-  );
-}
 
-function ExpandableRow({
-  evaluation: e,
-  isExpanded,
-  onToggle,
-  descriptors,
-  totalCols,
-  evaluatorDescriptors,
-}: {
-  evaluation: ThreadEvalRow;
-  isExpanded: boolean;
-  onToggle: () => void;
-  descriptors: EvaluatorDescriptor[];
-  totalCols: number;
-  evaluatorDescriptors?: EvaluatorDescriptor[];
-}) {
-  const result = useMemo(() => unwrapSerializedDates(e.result), [e.result]);
-  const messages = result?.thread?.messages ?? [];
-  const msgCount = result?.thread?.message_count ?? messages.length;
-
-  return (
-    <>
-      <tr
-        onClick={onToggle}
-        className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
-      >
-        <td className="px-2.5 py-2 text-sm font-mono text-[var(--text-primary)]">
-          <Link
-            to={`/kaira/threads/${e.thread_id}`}
-            className="text-[var(--text-brand)] hover:underline"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            {e.thread_id}
-          </Link>
-        </td>
-        <td className="px-2.5 py-2 text-sm text-right text-[var(--text-secondary)]">
-          {msgCount}
-        </td>
-        {descriptors.map(desc => {
-          const { value, state } = getCellValue(e, desc);
-          return (
-            <td key={desc.id} className="px-2.5 py-2">
-              {state === 'failed' ? (
-                <StatusBadge status="failed" />
-              ) : state === 'skipped' ? (
-                <StatusBadge status="skipped" />
-              ) : (
-                <CellRenderer desc={desc} value={value} />
-              )}
-            </td>
-          );
-        })}
-        <td className="px-2.5 py-2 text-center text-sm">
-          {e.success_status ? (
-            <span className="text-[var(--color-success)]">{"\u2713"}</span>
-          ) : (
-            <span className="text-[var(--color-error)]">{"\u2717"}</span>
-          )}
-        </td>
-      </tr>
-      {isExpanded && (
-        <tr className="bg-[var(--bg-secondary)]">
-          <td colSpan={totalCols} className="p-0">
-            <ExpandedContent evaluation={e} evaluatorDescriptors={evaluatorDescriptors} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function ExpandedContent({ evaluation: e, evaluatorDescriptors }: { evaluation: ThreadEvalRow; evaluatorDescriptors?: EvaluatorDescriptor[] }) {
-  const result = useMemo(() => unwrapSerializedDates(e.result), [e.result]);
-  const messages = result?.thread?.messages ?? [];
-
-  const errorMsg = result?.error;
-  const hasFailed = result?.failed_evaluators;
-
-  return (
-    <div className="px-4 py-3 space-y-3">
-      {/* Generic error banner — only for old data or outer-except errors (no structured failed_evaluators) */}
-      {errorMsg && !hasFailed && (
-        <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-[var(--surface-error)] border border-[var(--border-error)] text-sm">
-          <AlertTriangle className="h-4 w-4 text-[var(--color-error)] shrink-0 mt-0.5" />
-          <span className="text-[var(--text-primary)]">
-            <strong>Evaluation failed:</strong> {errorMsg}
-          </span>
-        </div>
-      )}
-
-      {messages.length > 0 && <CompactTranscript messages={messages} />}
-
-      {/* --- Efficiency --- */}
-      {result?.failed_evaluators?.efficiency ? (
-        <EvalFailedSection label="Efficiency" errorMsg={result.failed_evaluators.efficiency} />
-      ) : result?.efficiency_evaluation?.reasoning ? (
-        <details className="group">
-          <summary className="text-sm font-semibold text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1 rounded">
-            Efficiency: <VerdictBadge verdict={result.efficiency_evaluation.verdict} category="efficiency" size="sm" />
-            {result.efficiency_evaluation.task_completed ? " (completed)" : " (incomplete)"}
-          </summary>
-          <div className="mt-1.5 pl-0.5">
-            <div
-              className="text-sm text-[var(--text-secondary)] p-2.5 bg-[var(--bg-secondary)] rounded border-l-3 border-[var(--border-subtle)]"
-              style={{ borderLeftWidth: 3 }}
+      <div className="flex items-center justify-between mt-1.5">
+        <p className="text-xs text-[var(--text-muted)]">
+          Showing {sorted.length === 0 ? 0 : safePage * PAGE_SIZE + 1}-{Math.min((safePage + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="p-1 rounded text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
-              {result.efficiency_evaluation.reasoning}
-              {result.efficiency_evaluation.friction_turns?.length > 0 && (
-                <div className="mt-2">
-                  <strong className="text-xs">Friction turns:</strong>
-                  <ul className="list-disc ml-4 mt-0.5">
-                    {result.efficiency_evaluation.friction_turns.map((ft, i) => (
-                      <li key={i} className="text-sm">
-                        Turn {ft.turn ?? "?"} [{ft.cause ?? "?"}]: {ft.description}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-            {result.efficiency_evaluation.rule_compliance?.length > 0 && (
-              <div className="mt-2">
-                <RuleComplianceGrid rules={result.efficiency_evaluation.rule_compliance} />
-              </div>
-            )}
-          </div>
-        </details>
-      ) : null}
-
-      {/* --- Correctness --- */}
-      {result?.failed_evaluators?.correctness ? (
-        <EvalFailedSection label="Correctness" errorMsg={result.failed_evaluators.correctness} />
-      ) : result?.correctness_evaluations?.length > 0 ? (() => {
-        const applicable = result.correctness_evaluations.filter(
-          (c) => normalizeLabel(c.verdict) !== "NOT APPLICABLE",
-        );
-        if (applicable.length === 0) return null;
-        return (
-          <details className="group">
-            <summary className="text-sm font-semibold text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1 rounded">
-              Correctness Evaluations ({applicable.length})
-            </summary>
-            <div className="mt-1.5 space-y-1.5">
-              {applicable.map((ce, i) => (
-                <div
-                  key={i}
-                  className="text-sm p-2 bg-[var(--bg-secondary)] rounded"
-                  style={{
-                    borderLeft: `3px solid ${getVerdictColor(ce.verdict)}`,
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    {ce.has_image_context && (
-                      <span className="inline-block px-1.5 py-px rounded text-xs font-semibold bg-[var(--color-accent-purple)] text-white">
-                        IMG
-                      </span>
-                    )}
-                    <span className="font-semibold text-[var(--text-primary)]">
-                      {ce.message?.query_text ?? ""}
-                    </span>
-                  </div>
-                  <VerdictBadge verdict={ce.verdict} category="correctness" />
-                  {ce.reasoning && (
-                    <p className="text-[var(--text-secondary)] mt-1">{ce.reasoning}</p>
-                  )}
-                  {ce.rule_compliance?.length > 0 && (
-                    <div className="mt-1.5">
-                      <RuleComplianceGrid rules={ce.rule_compliance} />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
-        );
-      })() : null}
-
-      {/* --- Intent --- */}
-      {result?.failed_evaluators?.intent ? (
-        <EvalFailedSection label="Intent" errorMsg={result.failed_evaluators.intent} />
-      ) : result?.intent_evaluations?.length > 0 ? (
-        <details className="group">
-          <summary className="text-sm font-semibold text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1 rounded">
-            Intent Evaluations ({result.intent_evaluations.length})
-          </summary>
-          <div className="mt-1.5 space-y-1">
-            {result.intent_evaluations.map((ie, i) => (
-              <div
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
                 key={i}
-                className="text-sm p-2 bg-[var(--bg-secondary)] rounded"
-                style={{
-                  borderLeft: `3px solid ${ie.is_correct_intent ? STATUS_COLORS.pass : STATUS_COLORS.hardFail}`,
-                }}
+                onClick={() => setPage(i)}
+                className={`min-w-[28px] h-7 px-1.5 text-xs font-medium rounded transition-colors ${safePage === i
+                  ? 'bg-[var(--interactive-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                }`}
               >
-                <div className="font-semibold text-[var(--text-primary)] mb-0.5">
-                  {ie.message?.query_text ?? ""}
-                </div>
-                <span className="text-xs">
-                  Expected: <strong>{ie.predicted_intent ? ie.message?.intent_detected : "\u2014"}</strong>
-                  {" | "}Predicted: <strong>{ie.predicted_intent ?? "\u2014"}</strong>
-                  {" | "}
-                  {ie.is_correct_intent ? (
-                    <span className="text-[var(--color-success)]">{"\u2713"} Correct</span>
-                  ) : (
-                    <span className="text-[var(--color-error)]">{"\u2717"} Incorrect</span>
-                  )}
-                </span>
-                {ie.reasoning && (
-                  <p className="text-[var(--text-secondary)] mt-0.5">{ie.reasoning}</p>
-                )}
-              </div>
+                {i + 1}
+              </button>
             ))}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage === totalPages - 1}
+              className="p-1 rounded text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
-        </details>
-      ) : null}
-
-      {/* --- Custom Evaluators --- */}
-      {result?.custom_evaluations && Object.keys(result.custom_evaluations).length > 0 && (
-        <CustomEvaluationsBlock evaluations={result.custom_evaluations} evaluatorDescriptors={evaluatorDescriptors} />
-      )}
+        )}
+      </div>
     </div>
-  );
-}
-
-function CustomEvaluationsBlock({
-  evaluations,
-  evaluatorDescriptors,
-}: {
-  evaluations: Record<string, CustomEvaluationResult>;
-  evaluatorDescriptors?: EvaluatorDescriptor[];
-}) {
-  const entries = Object.values(evaluations);
-  const completed = entries.filter(e => e.status === "completed");
-  const failed = entries.filter(e => e.status === "failed");
-
-  return (
-    <EvalSection
-      title="Custom Evaluators"
-      subtitle={`${entries.length} evaluator${entries.length !== 1 ? "s" : ""}${failed.length > 0 ? ` (${failed.length} failed)` : ""}`}
-    >
-      {completed.map((ce) => {
-        const desc = evaluatorDescriptors?.find(d => d.id === ce.evaluator_id);
-        return (
-          <EvalCard key={ce.evaluator_id} accentColor={STATUS_COLORS.pass}>
-            <EvalCardHeader>
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success)] shrink-0" />
-              <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                {ce.evaluator_name}
-              </span>
-            </EvalCardHeader>
-            {ce.output && desc?.outputSchema && desc.outputSchema.length > 0 ? (
-              <OutputFieldRenderer
-                schema={desc.outputSchema}
-                output={ce.output}
-                mode="inline"
-              />
-            ) : ce.output ? (
-              <div className="space-y-1.5">
-                {Object.entries(ce.output).map(([key, value]) => (
-                  <div key={key} className="flex items-start gap-2 text-sm">
-                    <span className="text-[var(--text-muted)] shrink-0 font-medium">{key}:</span>
-                    <span className="text-[var(--text-primary)] break-words">
-                      {typeof value === "object" ? JSON.stringify(value, null, 2) : String(value ?? "\u2014")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </EvalCard>
-        );
-      })}
-      {failed.map((ce) => (
-        <EvalCard key={ce.evaluator_id} accentColor={STATUS_COLORS.hardFail}>
-          <EvalCardHeader>
-            <XCircle className="h-3.5 w-3.5 text-[var(--color-error)] shrink-0" />
-            <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-              {ce.evaluator_name}
-            </span>
-          </EvalCardHeader>
-          {ce.error && <EvalCardBody>{ce.error}</EvalCardBody>}
-        </EvalCard>
-      ))}
-    </EvalSection>
   );
 }

@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { usePoll } from "@/hooks";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Loader2, CheckCircle2, XCircle, Clock, Search, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText, Trash2 } from "lucide-react";
 import { EmptyState, ConfirmDialog } from "@/components/ui";
-import type { Run, ThreadEvalRow, AdversarialEvalRow, CustomEvaluationResult } from "@/types";
+import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
 import {
   fetchRun,
   fetchRunThreads,
@@ -20,21 +20,15 @@ import {
   MetricInfo,
   EvalTable,
   DistributionBar,
-  RuleComplianceGrid,
-  EvalSection,
-  EvalCard,
-  EvalCardHeader,
-  EvalCardBody,
-  OutputFieldRenderer,
   RunProgressBar,
 } from "../components";
+import AdversarialTable from "../components/AdversarialTable";
 import { useElapsedTime } from "../hooks";
-import { ChatViewer } from "../components/TranscriptViewer";
-import { CORRECTNESS_ORDER, EFFICIENCY_ORDER, CATEGORY_COLORS } from "@/utils/evalColors";
-import { getVerdictColor, getLabelDefinition } from "@/config/labelDefinitions";
+import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from "@/utils/evalColors";
+import { getLabelDefinition } from "@/config/labelDefinitions";
 import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
-import { formatTimestamp, formatDuration, humanize, pct, normalizeLabel, unwrapSerializedDates } from "@/utils/evalFormatters";
+import { formatTimestamp, formatDuration, pct, normalizeLabel } from "@/utils/evalFormatters";
 
 function SuccessBanner({ durationSeconds }: { durationSeconds: number }) {
   return (
@@ -104,7 +98,6 @@ export default function RunDetail() {
   const [run, setRun] = useState<Run | null>(null);
   const [threadEvals, setThreadEvals] = useState<ThreadEvalRow[]>([]);
   const [adversarialEvals, setAdversarialEvals] = useState<AdversarialEvalRow[]>([]);
-  const [view, setView] = useState<"table" | "detail">("table");
   const [search, setSearch] = useState("");
   const [verdictFilter, setVerdictFilter] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -112,7 +105,6 @@ export default function RunDetail() {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  // Live progress polling state
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -133,8 +125,8 @@ export default function RunDetail() {
     try {
       await deleteRun(runId);
       navigate(routes.kaira.runs, { replace: true });
-    } catch (e: any) {
-      notificationService.error(e.message, "Delete failed");
+    } catch (e: unknown) {
+      notificationService.error(e instanceof Error ? e.message : 'Unknown error', "Delete failed");
       setDeleting(false);
     }
   }, [runId, run, navigate]);
@@ -144,18 +136,15 @@ export default function RunDetail() {
     setCancelling(true);
     try {
       await jobsApi.cancel(activeJob.id);
-      // Optimistically update job state so the polling loop picks up "cancelled"
       setActiveJob((prev) => prev ? { ...prev, status: 'cancelled' } : prev);
-      // Update run status locally in case EvalRun hasn't been updated by backend yet
-      setRun((prev) => prev ? { ...prev, status: 'CANCELLED' as any } : prev);
-    } catch (e: any) {
-      notificationService.error(e.message, "Cancel failed");
+      setRun((prev) => prev ? { ...prev, status: 'CANCELLED' as Run['status'] } : prev);
+    } catch (e: unknown) {
+      notificationService.error(e instanceof Error ? e.message : 'Unknown error', "Cancel failed");
     } finally {
       setCancelling(false);
     }
   }, [activeJob]);
 
-  // Initial data load
   useEffect(() => {
     if (!runId) return;
     let cancelled = false;
@@ -182,7 +171,6 @@ export default function RunDetail() {
     return () => { cancelled = true; };
   }, [runId]);
 
-  // Untrack this job from the global watcher on mount to prevent duplicate toasts
   useEffect(() => {
     if (!runId) return;
     const { activeJobs, untrackJob } = useJobTrackerStore.getState();
@@ -190,7 +178,6 @@ export default function RunDetail() {
     if (match) untrackJob(match.jobId);
   }, [runId]);
 
-  // Poll job progress when run is active
   const runJobId = run?.job_id ?? null;
   const runStatus = run?.status ?? null;
   usePoll({
@@ -202,7 +189,6 @@ export default function RunDetail() {
 
       const currentProgress = job.progress?.current ?? -1;
 
-      // Only fetch eval results when progress has actually advanced
       if (currentProgress !== lastProgressRef.current) {
         lastProgressRef.current = currentProgress;
         try {
@@ -218,10 +204,8 @@ export default function RunDetail() {
       }
 
       if (["completed", "failed", "cancelled"].includes(job.status)) {
-        // Final fetch for run metadata (status, summary, etc.)
         try {
           const r = await fetchRun(runId);
-          // Reconcile: if job is terminal but run is still "running", override
           if (r.status.toLowerCase() === "running") {
             r.status = job.status === "cancelled" ? "CANCELLED" : "FAILED";
             if (!r.error_message) {
@@ -239,10 +223,10 @@ export default function RunDetail() {
           setTimeout(() => setShowSuccessBanner(false), 8000);
         }
         lastProgressRef.current = -1;
-        return false; // stop polling
+        return false;
       }
 
-      return true; // keep polling
+      return true;
     },
     enabled: !!runStatus && isActiveStatus(runStatus) && !!runJobId,
   });
@@ -253,14 +237,14 @@ export default function RunDetail() {
       if (te.worst_correctness) set.add(normalizeLabel(te.worst_correctness));
       if (te.efficiency_verdict) set.add(normalizeLabel(te.efficiency_verdict));
 
-      // Add custom evaluator verdicts
       const result = te.result as unknown as Record<string, unknown> | undefined;
-      const customEvals = (result?.custom_evaluations ?? {}) as Record<string, any>;
+      const customEvals = (result?.custom_evaluations ?? {}) as Record<string, Record<string, unknown>>;
       for (const [ceId, ce] of Object.entries(customEvals)) {
         if (ce.status !== 'completed' || !ce.output) continue;
         const desc = run?.evaluator_descriptors?.find(d => d.id === ceId);
         if (desc?.primaryField?.format === 'verdict') {
-          const val = ce.output[desc.primaryField.key];
+          const output = ce.output as Record<string, unknown>;
+          const val = output[desc.primaryField.key];
           if (typeof val === 'string') set.add(normalizeLabel(val));
         }
       }
@@ -284,15 +268,15 @@ export default function RunDetail() {
           .filter(Boolean)
           .some((v) => verdictFilter.has(normalizeLabel(v!)));
 
-        // Check custom evaluator verdicts
         let customMatch = false;
         const result = te.result as unknown as Record<string, unknown> | undefined;
-        const customEvals = (result?.custom_evaluations ?? {}) as Record<string, any>;
+        const customEvals = (result?.custom_evaluations ?? {}) as Record<string, Record<string, unknown>>;
         for (const [ceId, ce] of Object.entries(customEvals)) {
           if (ce.status !== 'completed' || !ce.output) continue;
           const desc = run?.evaluator_descriptors?.find(d => d.id === ceId);
           if (desc?.primaryField?.format === 'verdict') {
-            const val = ce.output[desc.primaryField.key];
+            const output = ce.output as Record<string, unknown>;
+            const val = output[desc.primaryField.key];
             if (typeof val === 'string' && verdictFilter.has(normalizeLabel(val))) {
               customMatch = true;
               break;
@@ -325,10 +309,7 @@ export default function RunDetail() {
         <p className="text-sm text-[var(--text-secondary)]">
           This evaluation run may have been deleted or doesn't exist.
         </p>
-        <Link
-          to={routes.kaira.runs}
-          className="text-sm font-medium text-[var(--text-brand)] hover:underline"
-        >
+        <Link to={routes.kaira.runs} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
           Back to runs
         </Link>
       </div>
@@ -341,10 +322,7 @@ export default function RunDetail() {
         <AlertTriangle className="h-10 w-10 text-[var(--color-error)]" />
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Failed to load run</h2>
         <p className="text-sm text-[var(--color-error)]">{error}</p>
-        <Link
-          to={routes.kaira.runs}
-          className="text-sm font-medium text-[var(--text-brand)] hover:underline"
-        >
+        <Link to={routes.kaira.runs} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
           Back to runs
         </Link>
       </div>
@@ -369,13 +347,11 @@ export default function RunDetail() {
   }
 
   const adversarialDist: Record<string, number> = {};
-  const categoryDist: Record<string, number> = {};
   for (const ae of adversarialEvals) {
     if (ae.verdict != null) {
       const n = normalizeLabel(ae.verdict);
       adversarialDist[n] = (adversarialDist[n] ?? 0) + 1;
     }
-    categoryDist[ae.category] = (categoryDist[ae.category] ?? 0) + 1;
   }
 
   function toggleVerdictFilter(v: string) {
@@ -388,338 +364,230 @@ export default function RunDetail() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-        <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)]">Runs</Link>
-        <span>/</span>
-        <span className="font-mono text-[var(--text-secondary)]">{run.run_id.slice(0, 12)}</span>
-      </div>
+    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+      {/* ── Sticky header ─────────────────────────────────── */}
+      <div className="shrink-0 space-y-2 pb-2">
+        <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+          <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>
+          <span>/</span>
+          <span className="font-mono text-[var(--text-primary)] font-medium">{run.run_id.slice(0, 12)}</span>
+        </nav>
 
-      {/* Live progress bar for running/queued jobs */}
-      {isRunActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
+        {isRunActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
 
-      {/* Success/failure/cancelled/partial banners */}
-      {showSuccessBanner && <SuccessBanner durationSeconds={run.duration_seconds} />}
-      {run.status.toLowerCase() === "failed" && run.error_message && !isRunActive && (
-        <FailureBanner message={run.error_message} />
-      )}
-      {run.status.toLowerCase() === "cancelled" && (
-        <CancelledBanner durationSeconds={run.duration_seconds} />
-      )}
-      {summaryErrors > 0 && summaryCompleted > 0 && !isRunActive && (
-        <ErrorWarningBanner errors={summaryErrors} total={summaryTotal} completed={summaryCompleted} />
-      )}
+        {showSuccessBanner && <SuccessBanner durationSeconds={run.duration_seconds} />}
+        {run.status.toLowerCase() === "failed" && run.error_message && !isRunActive && (
+          <FailureBanner message={run.error_message} />
+        )}
+        {run.status.toLowerCase() === "cancelled" && (
+          <CancelledBanner durationSeconds={run.duration_seconds} />
+        )}
+        {summaryErrors > 0 && summaryCompleted > 0 && !isRunActive && (
+          <ErrorWarningBanner errors={summaryErrors} total={summaryTotal} completed={summaryCompleted} />
+        )}
 
-      <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">
-            {run.name || run.command}
-          </h1>
-          <VerdictBadge verdict={run.status} category="status" />
-          {run.description && (
-            <span className="text-xs text-[var(--text-secondary)] truncate hidden sm:inline">{run.description}</span>
-          )}
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            <Link
-              to={`${routes.kaira.logs}?run_id=${run.run_id}`}
-              className="px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              Logs
-            </Link>
-            {isRunActive && activeJob && (
-              <button
-                onClick={handleCancel}
-                disabled={cancelling}
-                className="px-2 py-0.5 text-xs font-medium text-[var(--color-warning)] bg-[var(--surface-warning)] border border-[var(--border-warning)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">
+              {run.name || run.command}
+            </h1>
+            <VerdictBadge verdict={run.status} category="status" />
+            {run.description && (
+              <span className="text-xs text-[var(--text-secondary)] truncate hidden sm:inline">{run.description}</span>
+            )}
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              <Link
+                to={`${routes.kaira.logs}?run_id=${run.run_id}`}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
               >
-                {cancelling ? "Cancelling…" : "Cancel"}
+                <FileText className="h-3 w-3" />
+                Logs
+              </Link>
+              {isRunActive && activeJob && (
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--color-warning)] bg-[var(--surface-warning)] border border-[var(--border-warning)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                >
+                  <Ban className="h-3 w-3" />
+                  {cancelling ? "Cancelling\u2026" : "Cancel"}
+                </button>
+              )}
+              <button
+                onClick={() => setConfirmDelete(true)}
+                disabled={deleting || isRunActive}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--color-error)] bg-[var(--surface-error)] border border-[var(--border-error)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                title={isRunActive ? "Cannot delete a running evaluation. Cancel it first." : undefined}
+              >
+                <Trash2 className="h-3 w-3" />
+                {deleting ? "Deleting\u2026" : "Delete"}
               </button>
-            )}
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={deleting || isRunActive}
-              className="px-2 py-0.5 text-xs font-medium text-[var(--color-error)] bg-[var(--surface-error)] border border-[var(--border-error)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-              title={isRunActive ? "Cannot delete a running evaluation. Cancel it first." : undefined}
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </button>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">
-          <span className="font-mono">{run.run_id.slice(0, 12)}</span>
-          <span className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {formatTimestamp(run.timestamp)}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {isRunActive ? elapsed || "—" : formatDuration(run.duration_seconds)}
-          </span>
-          <span className="flex items-center gap-1">
-            <Cpu className="h-3 w-3" />
-            {run.llm_provider}/{run.llm_model}
-          </span>
-          <span className="flex items-center gap-1">
-            <Thermometer className="h-3 w-3" />
-            {run.eval_temperature}
-          </span>
-          {run.data_path && (
-            <span className="flex items-center gap-1 truncate max-w-48">
-              <FileText className="h-3 w-3 shrink-0" />
-              {run.data_path}
+          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">
+            <span className="font-mono">{run.run_id.slice(0, 12)}</span>
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatTimestamp(run.timestamp)}
             </span>
-          )}
-          {run.error_message && (
-            <span className="text-[var(--color-error)]">{run.error_message}</span>
-          )}
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {isRunActive ? elapsed || "\u2014" : formatDuration(run.duration_seconds)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Cpu className="h-3 w-3" />
+              {run.llm_provider}/{run.llm_model}
+            </span>
+            <span className="flex items-center gap-1">
+              <Thermometer className="h-3 w-3" />
+              {run.eval_temperature}
+            </span>
+            {run.data_path && (
+              <span className="flex items-center gap-1 truncate max-w-48">
+                <FileText className="h-3 w-3 shrink-0" />
+                {run.data_path}
+              </span>
+            )}
+            {run.error_message && (
+              <span className="text-[var(--color-error)]">{run.error_message}</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {threadEvals.length > 0 && (
-        <>
-          <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage').length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
-            {/* Fixed: Threads pill */}
-            <StatPill
-              label="Threads"
-              metricKey="total_threads"
-              value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length}
-            />
-
-            {/* Skipped previously processed threads */}
-            {summarySkipped > 0 && (
-              <StatPill
-                label="Skipped"
-                value={summarySkipped}
-                color="var(--text-muted)"
-              />
-            )}
-
-            {/* Dynamic evaluator pills — only show evaluators with an average/percentage metric */}
-            {(run.evaluator_descriptors ?? [])
-              .filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage')
-              .slice(0, 2)
-              .map(d => (
-                <StatPill
-                  key={d.id}
-                  label={d.name}
-                  metricKey={d.id}
-                  value={d.aggregation?.average != null
-                    ? pct(d.aggregation.average)
-                    : pct(
-                      threadEvals.reduce((s, e) => s + (e.intent_accuracy ?? 0), 0) /
-                      threadEvals.length,
-                    )
-                  }
-                />
-              ))}
-
-            {/* Fallback when no descriptors: show legacy Avg Intent Acc and Completion Rate */}
-            {!(run.evaluator_descriptors?.length) && (
-              <>
-                <StatPill
-                  label="Avg Intent Acc"
-                  metricKey="avg_intent_acc"
-                  value={pct(
-                    threadEvals.reduce((s, e) => s + (e.intent_accuracy ?? 0), 0) /
-                    threadEvals.length,
-                  )}
-                />
-                <StatPill
-                  label="Completion Rate"
-                  metricKey="completion_rate"
-                  value={pct(
-                    threadEvals.filter((e) => e.success_status).length / threadEvals.length,
-                  )}
-                />
-              </>
-            )}
-
-            {/* Completion/Errors pill (always last) */}
-            {summaryErrors > 0 ? (
-              <StatPill
-                label="Errors"
-                value={`${summaryErrors} / ${summaryTotal}`}
-                color="var(--color-error)"
-              />
-            ) : (
-              <StatPill
-                label="Completed"
-                metricKey="completed"
-                value={`${threadEvals.filter((e) => e.success_status).length} / ${threadEvals.length}`}
-              />
-            )}
-          </div>
-
-          <div className="flex gap-4 flex-wrap">
-            {/* Dynamic distribution bars from evaluator descriptors */}
-            {run.evaluator_descriptors
-              ? run.evaluator_descriptors
-                .filter(d => d.primaryField?.format === 'verdict' && d.aggregation?.distribution &&
-                  Object.keys(d.aggregation.distribution).length > 0)
+      {/* ── Scrollable body ───────────────────────────────── */}
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-1">
+        {threadEvals.length > 0 && (
+          <>
+            <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage').length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
+              <StatPill label="Threads" metricKey="total_threads" value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length} />
+              {summarySkipped > 0 && <StatPill label="Skipped" value={summarySkipped} color="var(--text-muted)" />}
+              {(run.evaluator_descriptors ?? [])
+                .filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage')
+                .slice(0, 2)
                 .map(d => (
-                  <div key={d.id} className="flex-1 min-w-[260px]">
-                    <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-                      {d.name}
-                    </h3>
-                    <DistributionBar
-                      distribution={d.aggregation!.distribution!}
-                      order={d.primaryField!.verdictOrder}
-                    />
-                  </div>
-                ))
-              : (
-                <>
-                  {/* Fallback: hardcoded correctness/efficiency distributions */}
-                  {Object.keys(correctnessDist).length > 0 && (
-                    <div className="flex-1 min-w-[260px]">
-                      <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-                        Correctness
-                      </h3>
-                      <DistributionBar distribution={correctnessDist} order={CORRECTNESS_ORDER} />
-                    </div>
-                  )}
-                  {Object.keys(efficiencyDist).length > 0 && (
-                    <div className="flex-1 min-w-[260px]">
-                      <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-                        Efficiency
-                      </h3>
-                      <DistributionBar distribution={efficiencyDist} order={EFFICIENCY_ORDER} />
-                    </div>
-                  )}
-                </>
-              )
-            }
-          </div>
-
-          {customEvalSummary.length > 0 && (
-            <div>
-              <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-                Custom Evaluators
-              </h3>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
-                {customEvalSummary.map(({ id, name, completed, errors, distribution, average }) => (
-                  <div
-                    key={id}
-                    className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2"
-                    style={{ borderLeftWidth: 3, borderLeftColor: errors > 0 ? STATUS_COLORS.hardFail : STATUS_COLORS.pass }}
-                  >
-                    <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{name}</p>
-                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      {completed} completed{errors > 0 ? `, ${errors} failed` : ""}
-                    </p>
-                    {average != null && (
-                      <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">
-                        Avg: {average <= 1 ? `${(average * 100).toFixed(0)}%` : average.toFixed(1)}
-                      </p>
-                    )}
-                    {distribution && Object.keys(distribution).length > 0 && (
-                      <div className="mt-1.5">
-                        <DistributionBar distribution={distribution} />
-                      </div>
-                    )}
-                  </div>
+                  <StatPill
+                    key={d.id}
+                    label={d.name}
+                    metricKey={d.id}
+                    value={d.aggregation?.average != null
+                      ? pct(d.aggregation.average)
+                      : pct(threadEvals.reduce((s, e) => s + (e.intent_accuracy ?? 0), 0) / threadEvals.length)}
+                  />
                 ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search thread ID, verdict..."
-              className="px-2.5 py-1.5 text-sm border border-[var(--border-default)] rounded-md w-60 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/30 focus:border-[var(--border-focus)]"
-            />
-            <div className="flex">
-              <button
-                onClick={() => setView("table")}
-                className={`px-3 py-1.5 text-sm border border-[var(--border-subtle)] rounded-l-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${view === "table"
-                  ? "bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]"
-                  : "bg-[var(--bg-primary)] text-[var(--text-secondary)]"
-                  }`}
-              >
-                Table
-              </button>
-              <button
-                onClick={() => setView("detail")}
-                className={`px-3 py-1.5 text-sm border border-[var(--border-subtle)] border-l-0 rounded-r-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${view === "detail"
-                  ? "bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]"
-                  : "bg-[var(--bg-primary)] text-[var(--text-secondary)]"
-                  }`}
-              >
-                Detail
-              </button>
-            </div>
-            <div className="flex gap-1 flex-wrap">
-              {allVerdicts.map((v) => {
-                const def = getLabelDefinition(v, "correctness");
-                return (
-                  <button
-                    key={v}
-                    onClick={() => toggleVerdictFilter(v)}
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${verdictFilter.has(v)
-                      ? "bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]"
-                      : "bg-[var(--bg-primary)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
-                      }`}
-                  >
-                    {def.displayName}
-                  </button>
-                );
-              })}
-            </div>
-            <span className="text-xs text-[var(--text-muted)] ml-auto">
-              {filteredThreads.length}{filteredThreads.length !== threadEvals.length ? ` of ${threadEvals.length}` : ""} threads
-            </span>
-          </div>
-
-          {view === "table" && <EvalTable evaluations={filteredThreads} evaluatorDescriptors={run.evaluator_descriptors} />}
-
-          {view === "detail" && (
-            <div className="flex flex-col gap-3">
-              {filteredThreads.map((te) => (
-                <ThreadDetailCard key={te.id} evaluation={te} evaluatorDescriptors={run.evaluator_descriptors} />
-              ))}
-              {filteredThreads.length === 0 && (
-                <EmptyState
-                  icon={Search}
-                  title="No threads match filters"
-                  description="Try adjusting your search or verdict filters."
-                  compact
-                />
+              {!(run.evaluator_descriptors?.length) && (
+                <>
+                  <StatPill label="Avg Judge Intent Acc" metricKey="avg_intent_acc" value={pct(threadEvals.reduce((s, e) => s + (e.intent_accuracy ?? 0), 0) / threadEvals.length)} />
+                  <StatPill label="Completion Rate" metricKey="completion_rate" value={pct(threadEvals.filter((e) => e.success_status).length / threadEvals.length)} />
+                </>
+              )}
+              {summaryErrors > 0 ? (
+                <StatPill label="Errors" value={`${summaryErrors} / ${summaryTotal}`} color="var(--color-error)" />
+              ) : (
+                <StatPill label="Completed" metricKey="completed" value={`${threadEvals.filter((e) => e.success_status).length} / ${threadEvals.length}`} />
               )}
             </div>
-          )}
-        </>
-      )}
 
-      {adversarialEvals.length > 0 && <AdversarialSection
-        evals={adversarialEvals}
-        adversarialDist={adversarialDist}
-        categoryDist={categoryDist}
-        runId={run.run_id}
-        isRunActive={isRunActive}
-      />}
+            <div className="flex gap-4 flex-wrap">
+              {run.evaluator_descriptors
+                ? run.evaluator_descriptors
+                  .filter(d => d.primaryField?.format === 'verdict' && d.aggregation?.distribution && Object.keys(d.aggregation.distribution).length > 0)
+                  .map(d => (
+                    <div key={d.id} className="flex-1 min-w-[260px]">
+                      <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">{d.name}</h3>
+                      <DistributionBar distribution={d.aggregation!.distribution!} order={d.primaryField!.verdictOrder} />
+                    </div>
+                  ))
+                : (
+                  <>
+                    {Object.keys(correctnessDist).length > 0 && (
+                      <div className="flex-1 min-w-[260px]">
+                        <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Correctness</h3>
+                        <DistributionBar distribution={correctnessDist} order={CORRECTNESS_ORDER} />
+                      </div>
+                    )}
+                    {Object.keys(efficiencyDist).length > 0 && (
+                      <div className="flex-1 min-w-[260px]">
+                        <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Efficiency</h3>
+                        <DistributionBar distribution={efficiencyDist} order={EFFICIENCY_ORDER} />
+                      </div>
+                    )}
+                  </>
+                )}
+            </div>
 
-      {threadEvals.length === 0 && adversarialEvals.length === 0 && (
-        isRunActive ? (
-          <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
-            <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
-            <p className="text-sm font-semibold text-[var(--text-primary)]">
-              Evaluations are being processed...
-            </p>
-            <p className="text-sm text-[var(--text-secondary)]">
-              Results will appear here as threads are evaluated.
-            </p>
-          </div>
-        ) : (
-          <EmptyState
-            icon={ClipboardList}
-            title="No evaluations found"
-            description="This run has no evaluation results yet."
-          />
-        )
-      )}
+            {customEvalSummary.length > 0 && (
+              <div>
+                <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Custom Evaluators</h3>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+                  {customEvalSummary.map(({ id, name, completed, errors, distribution, average }) => (
+                    <div
+                      key={id}
+                      className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2"
+                      style={{ borderLeftWidth: 3, borderLeftColor: errors > 0 ? STATUS_COLORS.hardFail : STATUS_COLORS.pass }}
+                    >
+                      <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{name}</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">{completed} completed{errors > 0 ? `, ${errors} failed` : ""}</p>
+                      {average != null && (
+                        <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">Avg: {average <= 1 ? `${(average * 100).toFixed(0)}%` : average.toFixed(1)}</p>
+                      )}
+                      {distribution && Object.keys(distribution).length > 0 && (
+                        <div className="mt-1.5"><DistributionBar distribution={distribution} /></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search thread ID, verdict..."
+                className="px-2.5 py-1.5 text-sm border border-[var(--border-default)] rounded-md w-60 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/30 focus:border-[var(--border-focus)]"
+              />
+              <div className="flex gap-1 flex-wrap">
+                {allVerdicts.map((v) => {
+                  const def = getLabelDefinition(v, "correctness");
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => toggleVerdictFilter(v)}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${verdictFilter.has(v)
+                        ? "bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]"
+                        : "bg-[var(--bg-primary)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
+                      }`}
+                    >
+                      {def.displayName}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-xs text-[var(--text-muted)] ml-auto">
+                {filteredThreads.length}{filteredThreads.length !== threadEvals.length ? ` of ${threadEvals.length}` : ""} threads
+              </span>
+            </div>
+
+            <EvalTable evaluations={filteredThreads} evaluatorDescriptors={run.evaluator_descriptors} />
+          </>
+        )}
+
+        {adversarialEvals.length > 0 && <AdversarialSection evals={adversarialEvals} adversarialDist={adversarialDist} runId={run.run_id} isRunActive={isRunActive} />}
+
+        {threadEvals.length === 0 && adversarialEvals.length === 0 && (
+          isRunActive ? (
+            <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
+              <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Evaluations are being processed...</p>
+              <p className="text-sm text-[var(--text-secondary)]">Results will appear here as threads are evaluated.</p>
+            </div>
+          ) : (
+            <EmptyState icon={ClipboardList} title="No evaluations found" description="This run has no evaluation results yet." />
+          )
+        )}
+      </div>
 
       {run && (
         <ConfirmDialog
@@ -737,16 +605,9 @@ export default function RunDetail() {
   );
 }
 
-function AdversarialSection({
-  evals,
-  adversarialDist,
-  categoryDist,
-  runId,
-  isRunActive,
-}: {
+function AdversarialSection({ evals, adversarialDist, runId, isRunActive }: {
   evals: AdversarialEvalRow[];
   adversarialDist: Record<string, number>;
-  categoryDist: Record<string, number>;
   runId: string;
   isRunActive: boolean;
 }) {
@@ -756,106 +617,26 @@ function AdversarialSection({
 
   return (
     <>
-      {failedCount > 0 && !isRunActive && (
-        <AdversarialErrorBanner errors={failedCount} total={evals.length} />
-      )}
+      {failedCount > 0 && !isRunActive && <AdversarialErrorBanner errors={failedCount} total={evals.length} />}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatPill label="Tests" metricKey="total_tests" value={evals.length} />
-        <StatPill
-          label="Pass Rate"
-          metricKey="pass_rate"
-          value={successfulCount > 0 ? pct(
-            successfulEvals.filter((e) => normalizeLabel(e.verdict!) === "PASS").length /
-            successfulCount,
-          ) : "N/A"}
-        />
-        <StatPill
-          label="Goal Achievement"
-          metricKey="goal_achievement"
-          value={successfulCount > 0 ? pct(
-            successfulEvals.filter((e) => e.goal_achieved).length /
-            successfulCount,
-          ) : "N/A"}
-        />
+        <StatPill label="Pass Rate" metricKey="pass_rate" value={successfulCount > 0 ? pct(successfulEvals.filter((e) => normalizeLabel(e.verdict!) === "PASS").length / successfulCount) : "N/A"} />
+        <StatPill label="Goal Achievement" metricKey="goal_achievement" value={successfulCount > 0 ? pct(successfulEvals.filter((e) => e.goal_achieved).length / successfulCount) : "N/A"} />
         {failedCount > 0 ? (
-          <StatPill
-            label="Errors"
-            value={`${failedCount} / ${evals.length}`}
-            color="var(--color-error)"
-          />
+          <StatPill label="Errors" value={`${failedCount} / ${evals.length}`} color="var(--color-error)" />
         ) : (
-          <StatPill
-            label="Avg Turns"
-            metricKey="avg_turns"
-            value={(
-              evals.reduce((s, e) => s + e.total_turns, 0) /
-              evals.length
-            ).toFixed(1)}
-          />
+          <StatPill label="Avg Turns" metricKey="avg_turns" value={(evals.reduce((s, e) => s + e.total_turns, 0) / evals.length).toFixed(1)} />
         )}
       </div>
 
       {Object.keys(adversarialDist).length > 0 && (
         <div>
-          <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-            Verdicts
-          </h3>
+          <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Verdicts</h3>
           <DistributionBar distribution={adversarialDist} />
         </div>
       )}
 
-      {Object.keys(categoryDist).length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2">
-          {Object.entries(categoryDist).map(([cat, count]) => (
-            <div
-              key={cat}
-              className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-2.5 py-2"
-              style={{ borderLeftWidth: 3, borderLeftColor: CATEGORY_COLORS[cat] ?? STATUS_COLORS.default }}
-            >
-              <p className="text-sm font-semibold text-[var(--text-primary)]">{humanize(cat)}</p>
-              <p className="text-xs text-[var(--text-muted)] mt-0.5">{count} tests</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="space-y-1.5">
-        {evals.map((ae) => (
-          <Link
-            key={ae.id}
-            to={routes.kaira.adversarialDetail(runId, String(ae.id))}
-            className="flex items-center justify-between gap-3 bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2 hover:border-[var(--border-focus)] transition-colors"
-            style={{
-              borderLeftWidth: 3,
-              borderLeftColor: ae.verdict == null
-                ? STATUS_COLORS.failed
-                : (CATEGORY_COLORS[ae.category] ?? STATUS_COLORS.default),
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-[var(--text-primary)]">
-                {humanize(ae.category)}
-              </span>
-              <VerdictBadge verdict={ae.difficulty} category="difficulty" />
-            </div>
-            <div className="flex items-center gap-2">
-              {ae.verdict != null ? (
-                <>
-                  <span className="text-xs text-[var(--text-muted)]">{ae.total_turns} turns</span>
-                  <VerdictBadge verdict={ae.verdict} category="adversarial" />
-                </>
-              ) : (
-                <span
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-white"
-                  style={{ backgroundColor: 'var(--color-error)' }}
-                >
-                  Failed
-                </span>
-              )}
-            </div>
-          </Link>
-        ))}
-      </div>
+      <AdversarialTable evaluations={evals} runId={runId} />
     </>
   );
 }
@@ -867,277 +648,9 @@ function StatPill({ label, value, metricKey, color }: { label: string; value: st
         <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">{label}</p>
         {metricKey && <MetricInfo metricKey={metricKey} />}
       </div>
-      <p
-        className={`text-lg font-bold mt-0.5 leading-tight${color ? "" : " text-[var(--text-primary)]"}`}
-        style={color ? { color } : undefined}
-      >
+      <p className={`text-lg font-bold mt-0.5 leading-tight${color ? "" : " text-[var(--text-primary)]"}`} style={color ? { color } : undefined}>
         {value}
       </p>
     </div>
-  );
-}
-
-function ThreadDetailCard({ evaluation: te, evaluatorDescriptors }: { evaluation: ThreadEvalRow; evaluatorDescriptors?: import('@/types').EvaluatorDescriptor[] }) {
-  const result = useMemo(() => unwrapSerializedDates(te.result), [te.result]);
-  const messages = result?.thread?.messages ?? [];
-  const worstVerdict = te.worst_correctness ?? "NOT APPLICABLE";
-
-  return (
-    <div
-      className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md overflow-hidden"
-      style={{ borderLeftWidth: 4, borderLeftColor: getVerdictColor(worstVerdict) }}
-    >
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-subtle)] flex-wrap gap-2">
-        <Link
-          to={routes.kaira.threadDetail(te.thread_id)}
-          className="font-mono text-[0.82rem] font-semibold text-[var(--text-brand)] hover:underline"
-        >
-          {te.thread_id}
-        </Link>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-[var(--text-secondary)]">
-            <strong className="text-[var(--text-primary)]">{result?.thread?.message_count ?? messages.length}</strong> msgs
-          </span>
-          <span className="text-sm text-[var(--text-secondary)]">
-            Intent: <strong className="text-[var(--text-primary)]">{te.intent_accuracy != null ? pct(te.intent_accuracy) : "\u2014"}</strong>
-          </span>
-          {te.worst_correctness && <VerdictBadge verdict={te.worst_correctness} category="correctness" />}
-          {te.efficiency_verdict && <VerdictBadge verdict={te.efficiency_verdict} category="efficiency" />}
-          <span className="text-sm">
-            {te.success_status ? (
-              <span className="text-[var(--color-success)]">{"\u2713"} Completed</span>
-            ) : (
-              <span className="text-[var(--color-error)]">{"\u2717"} Incomplete</span>
-            )}
-          </span>
-        </div>
-      </div>
-
-      <div className="px-4 py-3 space-y-3">
-        {result?.error && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-[var(--surface-error)] border border-[var(--border-error)] text-sm">
-            <AlertTriangle className="h-4 w-4 text-[var(--color-error)] shrink-0 mt-0.5" />
-            <span className="text-[var(--text-primary)]">
-              <strong>Evaluation failed:</strong> {result.error || "Unknown error (timeout or internal failure)"}
-            </span>
-          </div>
-        )}
-
-        {messages.length > 0 && <ChatViewer messages={messages} />}
-
-        {result?.efficiency_evaluation && (
-          <EfficiencyBlock ee={result.efficiency_evaluation} />
-        )}
-
-        {result?.correctness_evaluations?.length > 0 && (
-          <CorrectnessBlock evaluations={result.correctness_evaluations} />
-        )}
-
-        {result?.intent_evaluations?.length > 0 && (
-          <IntentBlock evaluations={result.intent_evaluations} />
-        )}
-
-        {result?.custom_evaluations && Object.keys(result.custom_evaluations).length > 0 && (
-          <CustomEvaluationsBlock evaluations={result.custom_evaluations} evaluatorDescriptors={evaluatorDescriptors} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function FrictionTurnRow({ turn }: { turn: any }) {
-  const isBot = (turn.cause ?? "").toLowerCase() === "bot";
-  return (
-    <div
-      className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-sm border ${isBot
-        ? "bg-[var(--surface-warning)] border-[var(--border-warning)]"
-        : "bg-[var(--bg-secondary)] border-[var(--border-subtle)]"
-        }`}
-    >
-      <span
-        className={`shrink-0 mt-0.5 px-1.5 py-px rounded text-[0.6rem] font-bold uppercase ${isBot ? "bg-[var(--color-warning)] text-white" : "bg-[var(--text-muted)] text-white"
-          }`}
-      >
-        {turn.cause ?? "?"}
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className={`font-semibold ${isBot ? "text-[var(--color-warning)]" : "text-[var(--text-primary)]"}`}>
-          Turn {turn.turn ?? "?"}
-        </span>
-        {turn.description && (
-          <p className={`mt-0.5 ${isBot ? "text-[var(--color-warning)]" : "text-[var(--text-secondary)]"}`} style={{ opacity: 0.8 }}>
-            {turn.description}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function EfficiencyBlock({ ee }: { ee: any }) {
-  return (
-    <EvalSection
-      title="Efficiency"
-      verdict={ee.verdict}
-      verdictCategory="efficiency"
-      subtitle={ee.task_completed ? undefined : "Task not completed"}
-    >
-      {ee.reasoning && (
-        <EvalCard accentColor={getVerdictColor(ee.verdict)}>
-          <EvalCardBody>{ee.reasoning}</EvalCardBody>
-        </EvalCard>
-      )}
-      {ee.friction_turns?.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
-            Friction Turns
-          </p>
-          {ee.friction_turns.map((ft: any, i: number) => (
-            <FrictionTurnRow key={i} turn={ft} />
-          ))}
-        </div>
-      )}
-      {ee.abandonment_reason && (
-        <EvalCard accentColor={STATUS_COLORS.hardFail}>
-          <EvalCardHeader>
-            <span className="text-xs uppercase tracking-wider text-[var(--color-error)] font-semibold">
-              Abandonment Reason
-            </span>
-          </EvalCardHeader>
-          <EvalCardBody>{ee.abandonment_reason}</EvalCardBody>
-        </EvalCard>
-      )}
-      {ee.rule_compliance?.length > 0 && (
-        <RuleComplianceGrid rules={ee.rule_compliance} />
-      )}
-    </EvalSection>
-  );
-}
-
-function CorrectnessBlock({ evaluations }: { evaluations: any[] }) {
-  const applicable = evaluations.filter(
-    (c) => normalizeLabel(c.verdict) !== "NOT APPLICABLE",
-  );
-  if (applicable.length === 0) return null;
-
-  return (
-    <EvalSection
-      title="Correctness"
-      subtitle={`${applicable.length} evaluation${applicable.length !== 1 ? "s" : ""}`}
-    >
-      {applicable.map((ce, i) => (
-        <EvalCard key={i} accentColor={getVerdictColor(ce.verdict)}>
-          <EvalCardHeader>
-            <VerdictBadge verdict={ce.verdict} category="correctness" />
-            {ce.has_image_context && (
-              <span className="inline-block px-1.5 py-px rounded text-xs font-semibold bg-[var(--color-accent-purple)] text-white">
-                IMG
-              </span>
-            )}
-            <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-              {ce.message?.query_text ?? ""}
-            </span>
-          </EvalCardHeader>
-          {ce.reasoning && <EvalCardBody>{ce.reasoning}</EvalCardBody>}
-          {ce.rule_compliance?.length > 0 && (
-            <RuleComplianceGrid rules={ce.rule_compliance} />
-          )}
-        </EvalCard>
-      ))}
-    </EvalSection>
-  );
-}
-
-function IntentBlock({ evaluations }: { evaluations: any[] }) {
-  return (
-    <EvalSection
-      title="Intent Classification"
-      subtitle={`${evaluations.length} evaluation${evaluations.length !== 1 ? "s" : ""}`}
-    >
-      {evaluations.map((ie, i) => (
-        <EvalCard
-          key={i}
-          accentColor={ie.is_correct_intent ? STATUS_COLORS.pass : STATUS_COLORS.hardFail}
-        >
-          <EvalCardHeader>
-            <span
-              className={`shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[0.6rem] font-bold text-white ${ie.is_correct_intent ? "bg-[var(--color-success)]" : "bg-[var(--color-error)]"
-                }`}
-            >
-              {ie.is_correct_intent ? "\u2713" : "\u2717"}
-            </span>
-            <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-              {ie.message?.query_text ?? ""}
-            </span>
-          </EvalCardHeader>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-[var(--text-secondary)]">
-              Expected: <strong className="text-[var(--text-primary)]">{ie.message?.intent_detected ?? "\u2014"}</strong>
-            </span>
-            <span className="text-[var(--text-muted)]">|</span>
-            <span className="text-[var(--text-secondary)]">
-              Predicted: <strong className="text-[var(--text-primary)]">{ie.predicted_intent ?? "\u2014"}</strong>
-            </span>
-          </div>
-          {ie.reasoning && <EvalCardBody>{ie.reasoning}</EvalCardBody>}
-        </EvalCard>
-      ))}
-    </EvalSection>
-  );
-}
-
-function CustomEvaluationsBlock({ evaluations, evaluatorDescriptors }: { evaluations: Record<string, CustomEvaluationResult>; evaluatorDescriptors?: import('@/types').EvaluatorDescriptor[] }) {
-  const entries = Object.values(evaluations);
-  const completed = entries.filter(e => e.status === "completed");
-  const failed = entries.filter(e => e.status === "failed");
-
-  return (
-    <EvalSection
-      title="Custom Evaluators"
-      subtitle={`${entries.length} evaluator${entries.length !== 1 ? "s" : ""}${failed.length > 0 ? ` (${failed.length} failed)` : ""}`}
-    >
-      {completed.map((ce) => {
-        const desc = evaluatorDescriptors?.find(d => d.id === ce.evaluator_id);
-        return (
-          <EvalCard key={ce.evaluator_id} accentColor={STATUS_COLORS.pass}>
-            <EvalCardHeader>
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success)] shrink-0" />
-              <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                {ce.evaluator_name}
-              </span>
-            </EvalCardHeader>
-            {ce.output && desc?.outputSchema && desc.outputSchema.length > 0 ? (
-              <OutputFieldRenderer
-                schema={desc.outputSchema}
-                output={ce.output}
-                mode="inline"
-              />
-            ) : ce.output ? (
-              <div className="space-y-1.5">
-                {Object.entries(ce.output).map(([key, value]) => (
-                  <div key={key} className="flex items-start gap-2 text-sm">
-                    <span className="text-[var(--text-muted)] shrink-0 font-medium">{key}:</span>
-                    <span className="text-[var(--text-primary)] break-words">
-                      {typeof value === "object" ? JSON.stringify(value, null, 2) : String(value ?? "\u2014")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </EvalCard>
-        );
-      })}
-      {failed.map((ce) => (
-        <EvalCard key={ce.evaluator_id} accentColor={STATUS_COLORS.hardFail}>
-          <EvalCardHeader>
-            <XCircle className="h-3.5 w-3.5 text-[var(--color-error)] shrink-0" />
-            <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-              {ce.evaluator_name}
-            </span>
-          </EvalCardHeader>
-          {ce.error && <EvalCardBody>{ce.error}</EvalCardBody>}
-        </EvalCard>
-      ))}
-    </EvalSection>
   );
 }

@@ -4,9 +4,10 @@ import { Printer, Download, ChevronDown } from 'lucide-react';
 interface ExportButtonProps {
   pageTitle: string;
   contentRef: RefObject<HTMLDivElement | null>;
+  compact?: boolean;
 }
 
-export default function ExportButton({ pageTitle, contentRef }: ExportButtonProps) {
+export default function ExportButton({ pageTitle, contentRef, compact }: ExportButtonProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -69,7 +70,7 @@ export default function ExportButton({ pageTitle, contentRef }: ExportButtonProp
     <div ref={dropdownRef} className="export-btn relative inline-block">
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+        className={`flex items-center gap-1.5 ${compact ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'} rounded-lg font-medium cursor-pointer transition-colors`}
         style={{
           background: 'var(--bg-secondary)',
           color: 'var(--text-secondary)',

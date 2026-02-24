@@ -444,7 +444,7 @@ export const ADVERSARIAL_CATEGORIES: Record<string, LabelDefinition> = {
 export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
   intent_accuracy: {
     key: "intent_accuracy",
-    displayName: "Intent Accuracy",
+    displayName: "Judge Intent Accuracy",
     description: "Percentage of messages with correct intent classification",
     tooltip:
       "Measures how accurately the bot identifies user intent (meal logging vs. questions). Higher is better. Target: >95%.",
@@ -484,7 +484,7 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
   },
   avg_intent_acc: {
     key: "avg_intent_acc",
-    displayName: "Avg Intent Accuracy",
+    displayName: "Avg Judge Intent Accuracy",
     description: "Average intent classification accuracy across threads",
     tooltip:
       "Average percentage of correct intent predictions across all evaluated threads. Higher is better. Target: >95%.",

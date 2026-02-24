@@ -95,7 +95,7 @@ export default function Dashboard() {
         <StatCard label="Adversarial Tests" metricKey="adversarial_tests" value={stats.total_adversarial_tests} />
         {stats.avg_intent_accuracy != null && (
           <StatCard
-            label="Avg Intent Accuracy"
+            label="Avg Judge Intent Acc"
             metricKey="avg_intent_acc"
             value={`${(stats.avg_intent_accuracy * 100).toFixed(1)}%`}
           />
@@ -134,7 +134,7 @@ export default function Dashboard() {
         {Object.keys(stats.intent_distribution).length > 0 && (
           <div className="flex-1 min-w-[260px]">
             <h2 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">
-              Intent Classification
+              Judge Intent Classification
             </h2>
             <DistributionBar
               distribution={stats.intent_distribution}

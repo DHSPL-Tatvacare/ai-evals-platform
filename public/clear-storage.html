@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clear Storage - AI Evals Platform</title>
+  <title>Data Management - AI Evals Platform</title>
   <link rel="icon" type="image/jpeg" href="/favicon.jpeg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +15,7 @@
       --color-brand-primary: #7030A0;
       --color-brand-primary-hover: #5C2680;
       --color-brand-accent: #C3C2F0;
-      
+
       /* Colors - Neutral */
       --color-neutral-0: #FFFFFF;
       --color-neutral-50: #FBFAFF;
@@ -28,7 +28,7 @@
       --color-neutral-700: #363642;
       --color-neutral-800: #252530;
       --color-neutral-900: #1A1A24;
-      
+
       /* Semantic */
       --bg-primary: var(--color-neutral-0);
       --bg-secondary: var(--color-neutral-50);
@@ -39,7 +39,7 @@
       --text-brand: var(--color-brand-primary);
       --border-default: var(--color-neutral-300);
       --border-subtle: var(--color-neutral-200);
-      
+
       /* Semantic Colors */
       --color-success: #10B981;
       --color-success-light: #D1FAE5;
@@ -49,7 +49,7 @@
       --color-warning-light: #FEF3C7;
       --color-info: #6366F1;
       --color-info-light: #E0E7FF;
-      
+
       /* Typography */
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -57,17 +57,17 @@
       --text-sm: 13px;
       --text-base: 14px;
       --text-lg: 16px;
-      
+
       /* Spacing & Radius */
       --radius-sm: 4px;
       --radius-default: 6px;
       --radius-lg: 8px;
-      
+
       /* Shadows */
       --shadow-default: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
       --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.03);
     }
-    
+
     [data-theme="dark"] {
       --bg-primary: var(--color-neutral-900);
       --bg-secondary: var(--color-neutral-800);
@@ -84,10 +84,8 @@
       --color-info-light: rgba(99, 102, 241, 0.2);
     }
 
-    * {
-      box-sizing: border-box;
-    }
-    
+    * { box-sizing: border-box; }
+
     body {
       font-family: var(--font-sans);
       font-size: var(--text-base);
@@ -99,19 +97,16 @@
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
     }
-    
-    .container {
-      max-width: 720px;
-      margin: 0 auto;
-    }
-    
+
+    .container { max-width: 720px; margin: 0 auto; }
+
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 24px;
     }
-    
+
     .header h1 {
       font-size: 20px;
       font-weight: 600;
@@ -121,8 +116,10 @@
       align-items: center;
       gap: 10px;
     }
-    
-    .theme-toggle {
+
+    .header-actions { display: flex; gap: 8px; }
+
+    .theme-toggle, .refresh-btn {
       background: var(--bg-tertiary);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-default);
@@ -132,12 +129,12 @@
       color: var(--text-secondary);
       transition: all 0.15s ease;
     }
-    
-    .theme-toggle:hover {
+
+    .theme-toggle:hover, .refresh-btn:hover {
       background: var(--border-subtle);
       color: var(--text-primary);
     }
-    
+
     .card {
       background: var(--bg-primary);
       border: 1px solid var(--border-subtle);
@@ -146,7 +143,7 @@
       margin-bottom: 16px;
       box-shadow: var(--shadow-default);
     }
-    
+
     .card-header {
       display: flex;
       align-items: center;
@@ -155,7 +152,7 @@
       padding-bottom: 16px;
       border-bottom: 1px solid var(--border-subtle);
     }
-    
+
     .card-header .icon {
       width: 40px;
       height: 40px;
@@ -165,70 +162,38 @@
       justify-content: center;
       font-size: 20px;
       background: var(--bg-tertiary);
+      flex-shrink: 0;
     }
-    
-    .card-header .title {
-      flex: 1;
-    }
-    
+
+    .card-header .title { flex: 1; }
+
     .card-header h2 {
       font-size: var(--text-lg);
       font-weight: 600;
       color: var(--text-primary);
       margin: 0 0 2px 0;
     }
-    
+
     .card-header p {
       font-size: var(--text-sm);
       color: var(--text-muted);
       margin: 0;
     }
-    
+
     .alert {
       padding: 12px 16px;
       border-radius: var(--radius-default);
       font-size: var(--text-sm);
       margin-bottom: 16px;
     }
-    
-    .alert-warning {
-      background: var(--color-warning-light);
-      border: 1px solid var(--color-warning);
-      color: var(--text-primary);
-    }
-    
-    .alert-info {
-      background: var(--color-info-light);
-      border: 1px solid var(--color-info);
-      color: var(--text-primary);
-    }
-    
-    .alert-error {
-      background: var(--color-error-light);
-      border: 1px solid var(--color-error);
-      color: var(--text-primary);
-    }
-    
-    .alert strong {
-      font-weight: 600;
-    }
-    
-    .alert ul {
-      margin: 8px 0 0 0;
-      padding-left: 20px;
-    }
-    
-    .alert li {
-      margin: 4px 0;
-    }
-    
-    .data-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    
+
+    .alert-warning { background: var(--color-warning-light); border: 1px solid var(--color-warning); color: var(--text-primary); }
+    .alert-info { background: var(--color-info-light); border: 1px solid var(--color-info); color: var(--text-primary); }
+    .alert-error { background: var(--color-error-light); border: 1px solid var(--color-error); color: var(--text-primary); }
+    .alert strong { font-weight: 600; }
+
+    .data-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
     .data-item {
       display: flex;
       align-items: center;
@@ -238,16 +203,11 @@
       border-radius: var(--radius-default);
       font-size: var(--text-sm);
     }
-    
-    .data-item .label {
-      color: var(--text-secondary);
-    }
-    
-    .data-item .value {
-      font-family: var(--font-mono);
-      color: var(--text-primary);
-    }
-    
+
+    .data-item .label { color: var(--text-secondary); }
+    .data-item .value { font-family: var(--font-mono); color: var(--text-primary); }
+    .data-item .sub { padding-left: 16px; opacity: 0.8; }
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -261,46 +221,16 @@
       border: none;
       transition: all 0.15s ease;
     }
-    
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    
-    .btn-danger {
-      background: var(--color-error);
-      color: white;
-    }
-    
-    .btn-danger:hover:not(:disabled) {
-      background: #DC2626;
-    }
-    
-    .btn-success {
-      background: var(--color-success);
-      color: white;
-    }
-    
-    .btn-success:hover:not(:disabled) {
-      background: #059669;
-    }
-    
-    .btn-secondary {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      border: 1px solid var(--border-default);
-    }
-    
-    .btn-secondary:hover:not(:disabled) {
-      background: var(--border-subtle);
-    }
-    
-    .btn-group {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-danger { background: var(--color-error); color: white; }
+    .btn-danger:hover:not(:disabled) { background: #DC2626; }
+    .btn-success { background: var(--color-success); color: white; }
+    .btn-success:hover:not(:disabled) { background: #059669; }
+    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-default); }
+    .btn-secondary:hover:not(:disabled) { background: var(--border-subtle); }
+    .btn-group { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
     .output {
       margin-top: 16px;
       padding: 16px;
@@ -314,15 +244,12 @@
       display: none;
       color: var(--text-secondary);
     }
-    
-    .output.show {
-      display: block;
-    }
-    
+
+    .output.show { display: block; }
     .output .success { color: var(--color-success); }
     .output .error { color: var(--color-error); }
     .output .info { color: var(--color-info); }
-    
+
     .badge {
       display: inline-flex;
       align-items: center;
@@ -330,18 +257,13 @@
       border-radius: var(--radius-sm);
       font-size: var(--text-xs);
       font-weight: 500;
+      flex-shrink: 0;
     }
-    
-    .badge-success {
-      background: var(--color-success-light);
-      color: var(--color-success);
-    }
-    
-    .badge-warning {
-      background: var(--color-warning-light);
-      color: var(--color-warning);
-    }
-    
+
+    .badge-success { background: var(--color-success-light); color: var(--color-success); }
+    .badge-warning { background: var(--color-warning-light); color: var(--color-warning); }
+    .badge-error { background: var(--color-error-light); color: var(--color-error); }
+
     .back-link {
       display: inline-flex;
       align-items: center;
@@ -352,298 +274,697 @@
       font-weight: 500;
       margin-bottom: 16px;
     }
-    
-    .back-link:hover {
-      text-decoration: underline;
+
+    .back-link:hover { text-decoration: underline; }
+
+    .checkbox-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: var(--text-sm);
+      cursor: pointer;
     }
-    
-    .divider {
-      height: 1px;
-      background: var(--border-subtle);
-      margin: 20px 0;
+
+    .checkbox-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--color-brand-primary);
+      cursor: pointer;
     }
+
+    .checkbox-item .cb-label { color: var(--text-primary); font-weight: 500; }
+    .checkbox-item .cb-desc { color: var(--text-muted); font-size: var(--text-xs); }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-default);
+      font-size: var(--text-sm);
+      margin-bottom: 16px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .api-error {
+      padding: 12px 16px;
+      background: var(--color-error-light);
+      border: 1px solid var(--color-error);
+      border-radius: var(--radius-default);
+      font-size: var(--text-sm);
+      color: var(--text-primary);
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .api-error.show { display: block; }
+
+    /* Confirm Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.15s ease, visibility 0.15s ease;
+    }
+
+    .modal-overlay.show {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md), 0 20px 40px rgba(0, 0, 0, 0.15);
+      padding: 24px;
+      max-width: 440px;
+      width: calc(100% - 48px);
+      transform: scale(0.95) translateY(8px);
+      transition: transform 0.15s ease;
+    }
+
+    .modal-overlay.show .modal {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-default);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      background: var(--color-error-light);
+      margin-bottom: 16px;
+    }
+
+    .modal h3 {
+      font-size: var(--text-lg);
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 0 0 8px 0;
+    }
+
+    .modal p {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      margin: 0 0 8px 0;
+      line-height: 1.6;
+    }
+
+    .modal .detail-list {
+      font-size: var(--text-xs);
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      margin: 12px 0 20px 0;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .modal-actions .btn { min-width: 90px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <a href="/" class="back-link">← Back to Application</a>
-    
+    <a href="/" class="back-link">&larr; Back to Application</a>
+
     <div class="header">
-      <h1>🗑️ Storage Management</h1>
-      <button class="theme-toggle" onclick="toggleTheme()">🌙 Dark Mode</button>
+      <h1>&#128451; Data Management</h1>
+      <div class="header-actions">
+        <button class="refresh-btn" onclick="refreshStats()" title="Refresh stats">&#8635; Refresh</button>
+        <button class="theme-toggle" onclick="toggleTheme()">&#127769; Dark Mode</button>
+      </div>
     </div>
 
-    <!-- Global Clear Card -->
+    <div id="apiError" class="api-error"></div>
+
+    <!-- Global Stats Card -->
     <div class="card">
       <div class="card-header">
-        <div class="icon">🌐</div>
+        <div class="icon">&#128202;</div>
         <div class="title">
-          <h2>Clear All Storage</h2>
-          <p>Remove all data across all applications</p>
+          <h2>Database Statistics</h2>
+          <p>Live record counts from PostgreSQL</p>
         </div>
-        <span class="badge badge-warning">Destructive</span>
+        <span id="statsStatus" class="badge badge-success">Live</span>
       </div>
-      
+
+      <div id="globalStats" class="data-list">
+        <div class="data-item">
+          <span class="label">Loading...</span>
+          <span class="value">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clear All Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="icon">&#128163;</div>
+        <div class="title">
+          <h2>Clear All Data</h2>
+          <p>Remove all user data across all applications</p>
+        </div>
+        <span class="badge badge-error">Destructive</span>
+      </div>
+
       <div class="alert alert-error">
-        <strong>⚠️ Warning:</strong> This will permanently delete ALL data including:
-        <ul>
-          <li>All app data (listings, files, chats, sessions)</li>
-          <li>All evaluations, transcripts, and schemas</li>
-          <li>All settings and preferences (including API keys)</li>
-          <li>Service worker caches</li>
-        </ul>
+        <strong>&#9888;&#65039; Warning:</strong> This will permanently delete ALL data including
+        evaluation results, data sources, chat sessions, configuration, jobs, and history.
+        Seed data (default prompts, schemas, evaluators) is preserved unless toggled on.
       </div>
-      
-      <div id="globalStats" class="data-list"></div>
-      
+
+      <div class="toggle-row">
+        <input type="checkbox" id="globalSeedToggle">
+        <label for="globalSeedToggle" style="cursor:pointer;">
+          <span style="font-weight:500;">Include seed data</span>
+          <span style="color:var(--text-muted); font-size:var(--text-xs); margin-left:6px;">
+            (default prompts, schemas, evaluators &mdash; regenerate on restart)
+          </span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <input type="checkbox" id="globalBrowserToggle" checked>
+        <label for="globalBrowserToggle" style="cursor:pointer;">
+          <span style="font-weight:500;">Clear browser storage</span>
+          <span style="color:var(--text-muted); font-size:var(--text-xs); margin-left:6px;">
+            (localStorage, sessionStorage, caches, service workers)
+          </span>
+        </label>
+      </div>
+
       <div class="btn-group">
-        <button class="btn btn-danger" onclick="clearAllStorage()">
-          🗑️ Clear All Storage
+        <button id="clearAllBtn" class="btn btn-danger" onclick="clearAll()">
+          &#128465; Clear All Data
         </button>
       </div>
-      
+
       <div id="globalOutput" class="output"></div>
     </div>
 
-    <!-- App-Specific Cards (dynamically generated) -->
+    <!-- App-Specific Cards -->
     <div id="appCards"></div>
-    
+
     <!-- Reload Card -->
     <div id="reloadCard" class="card" style="display: none;">
       <div class="card-header">
-        <div class="icon">✅</div>
+        <div class="icon">&#9989;</div>
         <div class="title">
-          <h2>Storage Cleared</h2>
+          <h2>Data Cleared</h2>
           <p>Click below to restart the application with fresh data</p>
         </div>
         <span class="badge badge-success">Complete</span>
       </div>
-      
-      <button class="btn btn-success" onclick="reloadApp()">
-        🔄 Reload Application
+
+      <button class="btn btn-success" onclick="window.location.href='/'">
+        &#128260; Reload Application
       </button>
+    </div>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="confirmModal" class="modal-overlay" onclick="if(event.target===this)dismissModal()">
+    <div class="modal">
+      <div class="modal-icon">&#9888;&#65039;</div>
+      <h3 id="modalTitle">Confirm Action</h3>
+      <p id="modalMessage"></p>
+      <div id="modalDetail" class="detail-list" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="dismissModal()">Cancel</button>
+        <button id="modalConfirmBtn" class="btn btn-danger" onclick="confirmModal()">Delete</button>
+      </div>
     </div>
   </div>
 
   <script>
     // =========================================================================
-    // App Registry - Matches current project structure
+    // Confirm Modal
+    // =========================================================================
+    let _modalResolve = null;
+
+    function showConfirmModal({ title, message, detail, confirmLabel }) {
+      document.getElementById('modalTitle').textContent = title || 'Confirm Action';
+      document.getElementById('modalMessage').textContent = message || 'Are you sure?';
+      const detailEl = document.getElementById('modalDetail');
+      if (detail) {
+        detailEl.textContent = detail;
+        detailEl.style.display = 'block';
+      } else {
+        detailEl.style.display = 'none';
+      }
+      document.getElementById('modalConfirmBtn').textContent = confirmLabel || 'Delete';
+      document.getElementById('confirmModal').classList.add('show');
+      return new Promise((resolve) => { _modalResolve = resolve; });
+    }
+
+    function confirmModal() {
+      document.getElementById('confirmModal').classList.remove('show');
+      if (_modalResolve) { _modalResolve(true); _modalResolve = null; }
+    }
+
+    function dismissModal() {
+      document.getElementById('confirmModal').classList.remove('show');
+      if (_modalResolve) { _modalResolve(false); _modalResolve = null; }
+    }
+
+    // =========================================================================
+    // App Registry
     // =========================================================================
     const APP_REGISTRY = {
       'voice-rx': {
         id: 'voice-rx',
         name: 'Voice Rx',
-        icon: '🎙️',
+        icon: '&#127908;',
         description: 'Audio file evaluation tool',
-        dataTypes: [
-          'Listings & audio files (listings, files tables)',
-          'Evaluations & transcripts',
-          'Custom schemas & prompts (entities table)',
-          'Evaluator definitions (entities table)',
-          'Run history (history table)'
+        targets: [
+          { key: 'eval_runs', label: 'Evaluation Results', desc: 'eval_runs + thread_evaluations, adversarial_evaluations, api_logs (cascade)' },
+          { key: 'listings', label: 'Data Sources (Listings)', desc: 'listings + associated files' },
+          { key: 'config', label: 'Configuration', desc: 'prompts, schemas, evaluators, settings, tags', multi: ['prompts', 'schemas', 'evaluators', 'settings', 'tags'] },
+          { key: 'ops', label: 'Jobs & History', desc: 'Background jobs and audit history', multi: ['jobs', 'history'] },
         ]
       },
       'kaira-bot': {
         id: 'kaira-bot',
         name: 'Kaira Bot',
-        icon: '🤖',
+        icon: '&#129302;',
         description: 'Health chat bot assistant',
-        dataTypes: [
-          'Chat sessions (entities table)',
-          'Chat messages & history (entities table)',
-          'User preferences'
+        targets: [
+          { key: 'eval_runs', label: 'Evaluation Results', desc: 'eval_runs + thread_evaluations, adversarial_evaluations, api_logs (cascade)' },
+          { key: 'chat_sessions', label: 'Chat Sessions', desc: 'chat_sessions + chat_messages (cascade)' },
+          { key: 'config', label: 'Configuration', desc: 'prompts, schemas, evaluators, settings, tags', multi: ['prompts', 'schemas', 'evaluators', 'settings', 'tags'] },
+          { key: 'ops', label: 'Jobs & History', desc: 'Background jobs and audit history', multi: ['jobs', 'history'] },
         ]
       }
     };
-    
-    const DB_NAME = 'ai-evals-platform';
-    
-    // Current database schema (v2)
-    const DB_TABLES = ['listings', 'files', 'entities', 'history'];
-    const ENTITY_TYPES = ['setting', 'prompt', 'schema', 'chatSession', 'chatMessage', 'evaluator', 'tagRegistry'];
-    
+
+    const API_BASE = '/api/admin';
+    let currentStats = null;
+
     // =========================================================================
     // Theme Management
     // =========================================================================
     function toggleTheme() {
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       document.documentElement.setAttribute('data-theme', isDark ? '' : 'dark');
-      document.querySelector('.theme-toggle').textContent = isDark ? '🌙 Dark Mode' : '☀️ Light Mode';
+      document.querySelector('.theme-toggle').innerHTML = isDark ? '&#127769; Dark Mode' : '&#9728;&#65039; Light Mode';
       localStorage.setItem('theme', isDark ? 'light' : 'dark');
     }
-    
+
     function initTheme() {
       const savedTheme = localStorage.getItem('theme');
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const theme = savedTheme || (prefersDark ? 'dark' : 'light');
-      
       if (theme === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
-        document.querySelector('.theme-toggle').textContent = '☀️ Light Mode';
+        document.querySelector('.theme-toggle').innerHTML = '&#9728;&#65039; Light Mode';
       }
     }
-    
+
     // =========================================================================
-    // Stats & Initialization
+    // API Helpers
     // =========================================================================
-    async function getStorageStats() {
-      const stats = {
-        databases: [],
-        localStorage: { count: 0, size: 0 },
-        caches: 0,
-        storageEstimate: { used: 0, quota: 0 }
-      };
-      
-      // IndexedDB databases
-      if (indexedDB.databases) {
-        stats.databases = await indexedDB.databases();
-      }
-      
-      // localStorage
-      stats.localStorage.count = localStorage.length;
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        stats.localStorage.size += (localStorage.getItem(key) || '').length;
-      }
-      
-      // Caches
-      if ('caches' in window) {
-        const cacheNames = await caches.keys();
-        stats.caches = cacheNames.length;
-      }
-      
-      // Storage estimate
-      if ('storage' in navigator && 'estimate' in navigator.storage) {
-        const estimate = await navigator.storage.estimate();
-        stats.storageEstimate = {
-          used: estimate.usage || 0,
-          quota: estimate.quota || 0
-        };
-      }
-      
-      return stats;
+    function showApiError(msg) {
+      const el = document.getElementById('apiError');
+      el.textContent = msg;
+      el.classList.add('show');
     }
-    
-    function formatBytes(bytes) {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+
+    function hideApiError() {
+      document.getElementById('apiError').classList.remove('show');
     }
-    
-    async function renderGlobalStats() {
-      const stats = await getStorageStats();
-      const container = document.getElementById('globalStats');
-      
-      container.innerHTML = `
+
+    async function apiGet(path) {
+      const res = await fetch(`${API_BASE}${path}`);
+      if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+      return res.json();
+    }
+
+    async function apiPost(path, body) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+      return res.json();
+    }
+
+    // =========================================================================
+    // Stats
+    // =========================================================================
+    function formatCount(n) {
+      if (n === undefined || n === null) return '—';
+      return n.toLocaleString();
+    }
+
+    function statRow(label, value, sub) {
+      return `
         <div class="data-item">
-          <span class="label">IndexedDB Databases</span>
-          <span class="value">${stats.databases.length}</span>
-        </div>
-        <div class="data-item">
-          <span class="label">LocalStorage Items</span>
-          <span class="value">${stats.localStorage.count} (${formatBytes(stats.localStorage.size * 2)})</span>
-        </div>
-        <div class="data-item">
-          <span class="label">Service Worker Caches</span>
-          <span class="value">${stats.caches}</span>
-        </div>
-        <div class="data-item">
-          <span class="label">Total Storage Used</span>
-          <span class="value">${formatBytes(stats.storageEstimate.used)} / ${formatBytes(stats.storageEstimate.quota)}</span>
+          <span class="label${sub ? ' sub' : ''}">${sub ? '↳ ' : ''}${label}</span>
+          <span class="value">${value}</span>
         </div>
       `;
     }
-    
-    async function getAppTableCounts(appId) {
-      const app = APP_REGISTRY[appId];
-      if (!app) return {};
-      
-      const counts = {};
-      
+
+    async function loadGlobalStats() {
+      const container = document.getElementById('globalStats');
+      const badge = document.getElementById('statsStatus');
+
       try {
-        const request = indexedDB.open(DB_NAME);
-        
-        await new Promise((resolve, reject) => {
-          request.onerror = () => reject(request.error);
-          request.onsuccess = async () => {
-            const db = request.result;
-            
-            try {
-              // Count listings for this app
-              if (db.objectStoreNames.contains('listings')) {
-                const tx1 = db.transaction('listings', 'readonly');
-                const listingsStore = tx1.objectStore('listings');
-                const listingsIndex = listingsStore.index('appId');
-                counts['listings'] = await new Promise((res) => {
-                  const countRequest = listingsIndex.count(appId);
-                  countRequest.onsuccess = () => res(countRequest.result);
-                  countRequest.onerror = () => res(0);
-                });
-              }
-              
-              // Count entities for this app
-              if (db.objectStoreNames.contains('entities')) {
-                const tx2 = db.transaction('entities', 'readonly');
-                const entitiesStore = tx2.objectStore('entities');
-                const allEntities = await new Promise((res) => {
-                  const getRequest = entitiesStore.getAll();
-                  getRequest.onsuccess = () => res(getRequest.result);
-                  getRequest.onerror = () => res([]);
-                });
-                
-                // Filter by appId (prompts, schemas, evaluators, etc.)
-                const appEntities = allEntities.filter(e => e.appId === appId);
-                counts['entities'] = appEntities.length;
-                
-                // Break down by entity type
-                const byType = {};
-                appEntities.forEach(e => {
-                  byType[e.type] = (byType[e.type] || 0) + 1;
-                });
-                counts['entities_by_type'] = byType;
-                
-                // For kaira-bot, count chat sessions and messages
-                if (appId === 'kaira-bot') {
-                  const chatSessions = allEntities.filter(e => e.type === 'chatSession' && e.appId === appId);
-                  const chatMessages = allEntities.filter(e => e.type === 'chatMessage');
-                  counts['chat_sessions'] = chatSessions.length;
-                  counts['chat_messages'] = chatMessages.length;
-                }
-              }
-              
-              // Count history for this app
-              if (db.objectStoreNames.contains('history')) {
-                const tx3 = db.transaction('history', 'readonly');
-                const historyStore = tx3.objectStore('history');
-                const allHistory = await new Promise((res) => {
-                  const getRequest = historyStore.getAll();
-                  getRequest.onsuccess = () => res(getRequest.result);
-                  getRequest.onerror = () => res([]);
-                });
-                counts['history'] = allHistory.filter(h => h.app_id === appId).length;
-              }
-            } catch (e) {
-              console.warn('Error counting tables:', e);
-            }
-            
-            db.close();
-            resolve();
-          };
-        });
+        const data = await apiGet('/stats');
+        currentStats = data.tables;
+        hideApiError();
+        badge.textContent = 'Live';
+        badge.className = 'badge badge-success';
+
+        const t = data.tables;
+        let html = '';
+
+        // Core data tables
+        html += statRow('Listings', formatCount(t.listings?.total));
+        if (t.listings?.byApp) {
+          for (const [app, count] of Object.entries(t.listings.byApp)) {
+            html += statRow(app, formatCount(count), true);
+          }
+        }
+
+        html += statRow('Eval Runs', formatCount(t.eval_runs?.total));
+        if (t.eval_runs?.byApp) {
+          for (const [app, count] of Object.entries(t.eval_runs.byApp)) {
+            html += statRow(app, formatCount(count), true);
+          }
+        }
+
+        html += statRow('Thread Evaluations', formatCount(t.thread_evaluations?.total));
+        html += statRow('Adversarial Evaluations', formatCount(t.adversarial_evaluations?.total));
+        html += statRow('API Logs', formatCount(t.api_logs?.total));
+
+        html += statRow('Chat Sessions', formatCount(t.chat_sessions?.total));
+        html += statRow('Chat Messages', formatCount(t.chat_messages?.total));
+
+        // Seeded tables
+        const ps = t.prompts || {};
+        html += statRow('Prompts', `${formatCount(ps.total)} (${ps.seed || 0} seed, ${ps.user || 0} user)`);
+        const sc = t.schemas || {};
+        html += statRow('Schemas', `${formatCount(sc.total)} (${sc.seed || 0} seed, ${sc.user || 0} user)`);
+        const ev = t.evaluators || {};
+        html += statRow('Evaluators', `${formatCount(ev.total)} (${ev.seed || 0} seed, ${ev.user || 0} user)`);
+
+        // Other tables
+        html += statRow('Files', formatCount(t.files?.total));
+        html += statRow('Jobs', formatCount(t.jobs?.total));
+        html += statRow('Settings', formatCount(t.settings?.total));
+        html += statRow('Tags', formatCount(t.tags?.total));
+        html += statRow('History', formatCount(t.history?.total));
+
+        container.innerHTML = html;
       } catch (e) {
-        console.warn('Could not get table counts:', e);
+        badge.textContent = 'Error';
+        badge.className = 'badge badge-error';
+        container.innerHTML = statRow('Error loading stats', e.message);
+        showApiError('Could not connect to backend API. Is the server running? (' + e.message + ')');
       }
-      
-      return counts;
     }
-    
+
+    async function loadAppStats(appId) {
+      const container = document.getElementById(`stats-${appId}`);
+      try {
+        const data = await apiGet(`/stats?app_id=${appId}`);
+        const t = data.tables;
+        let html = '';
+
+        html += statRow('Eval Runs', formatCount(t.eval_runs?.total));
+        html += statRow('Thread Evaluations', formatCount(t.thread_evaluations?.total));
+        html += statRow('Adversarial Evaluations', formatCount(t.adversarial_evaluations?.total));
+        html += statRow('API Logs', formatCount(t.api_logs?.total));
+
+        if (appId === 'voice-rx') {
+          html += statRow('Listings', formatCount(t.listings?.total));
+        }
+        if (appId === 'kaira-bot') {
+          html += statRow('Chat Sessions', formatCount(t.chat_sessions?.total));
+          html += statRow('Chat Messages', formatCount(t.chat_messages?.total));
+        }
+
+        const ps = t.prompts || {};
+        html += statRow('Prompts', `${formatCount(ps.total)} (${ps.seed || 0} seed, ${ps.user || 0} user)`);
+        const sc = t.schemas || {};
+        html += statRow('Schemas', `${formatCount(sc.total)} (${sc.seed || 0} seed, ${sc.user || 0} user)`);
+        const ev = t.evaluators || {};
+        html += statRow('Evaluators', `${formatCount(ev.total)} (${ev.seed || 0} seed, ${ev.user || 0} user)`);
+
+        html += statRow('Tags', formatCount(t.tags?.total));
+        html += statRow('History', formatCount(t.history?.total));
+
+        container.innerHTML = html || statRow('No data', '—');
+      } catch (e) {
+        container.innerHTML = statRow('Error', e.message);
+      }
+    }
+
+    async function refreshStats() {
+      await loadGlobalStats();
+      for (const appId of Object.keys(APP_REGISTRY)) {
+        await loadAppStats(appId);
+      }
+    }
+
+    // =========================================================================
+    // Log helper
+    // =========================================================================
+    function log(outputId, message, type) {
+      const output = document.getElementById(outputId);
+      output.classList.add('show');
+      const span = document.createElement('span');
+      if (type) span.className = type;
+      span.textContent = message + '\n';
+      output.appendChild(span);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    // =========================================================================
+    // Clear Browser Storage
+    // =========================================================================
+    async function clearBrowserStorage(outputId) {
+      log(outputId, '\nClearing browser storage...', 'info');
+
+      // localStorage
+      const lsCount = localStorage.length;
+      const savedTheme = localStorage.getItem('theme');
+      localStorage.clear();
+      if (savedTheme) localStorage.setItem('theme', savedTheme);
+      log(outputId, `  Cleared ${lsCount} localStorage items (theme preserved)`, 'success');
+
+      // sessionStorage
+      const ssCount = sessionStorage.length;
+      sessionStorage.clear();
+      log(outputId, `  Cleared ${ssCount} sessionStorage items`, 'success');
+
+      // Caches
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        for (const name of cacheNames) await caches.delete(name);
+        log(outputId, `  Cleared ${cacheNames.length} cache(s)`, 'success');
+      }
+
+      // Service workers
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) await reg.unregister();
+        log(outputId, `  Unregistered ${regs.length} service worker(s)`, 'success');
+      }
+
+      // Legacy IndexedDB (if any remain from migration)
+      if (indexedDB.databases) {
+        try {
+          const dbs = await indexedDB.databases();
+          for (const db of dbs) {
+            if (db.name) indexedDB.deleteDatabase(db.name);
+          }
+          if (dbs.length) log(outputId, `  Deleted ${dbs.length} IndexedDB database(s)`, 'success');
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    // =========================================================================
+    // Clear All
+    // =========================================================================
+    async function clearAll() {
+      const confirmed = await showConfirmModal({
+        title: 'Clear All Data',
+        message: 'This will permanently delete ALL data across all applications. This action cannot be undone.',
+        confirmLabel: 'Clear All Data',
+      });
+      if (!confirmed) return;
+
+      const outputId = 'globalOutput';
+      const output = document.getElementById(outputId);
+      const btn = document.getElementById('clearAllBtn');
+      output.innerHTML = '';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Clearing...';
+
+      const includeSeed = document.getElementById('globalSeedToggle').checked;
+      const clearBrowser = document.getElementById('globalBrowserToggle').checked;
+
+      try {
+        log(outputId, 'Starting full data cleanup...', 'info');
+
+        // Call backend erase API with empty targets = erase all
+        log(outputId, '\nErasing database records...');
+        const result = await apiPost('/erase', {
+          appId: null,
+          targets: [],
+          includeSeedData: includeSeed,
+        });
+
+        const d = result.deleted;
+        for (const [table, count] of Object.entries(d)) {
+          log(outputId, `  ${table}: ${count} deleted`, count > 0 ? 'success' : '');
+        }
+
+        // Clear browser storage
+        if (clearBrowser) {
+          await clearBrowserStorage(outputId);
+        }
+
+        log(outputId, '\n' + '='.repeat(50));
+        log(outputId, 'ALL DATA CLEARED!', 'success');
+        if (includeSeed) {
+          log(outputId, 'Seed data was included. Restart backend to regenerate defaults.', 'info');
+        }
+        log(outputId, '='.repeat(50));
+
+        document.getElementById('reloadCard').style.display = 'block';
+        await refreshStats();
+      } catch (e) {
+        log(outputId, `\nError: ${e.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '&#128465; Clear All Data';
+      }
+    }
+
+    // =========================================================================
+    // Per-App Clear
+    // =========================================================================
+    async function clearAppData(appId) {
+      const app = APP_REGISTRY[appId];
+      if (!app) return;
+
+      // Collect selected targets
+      const selectedTargets = [];
+      for (const target of app.targets) {
+        const cb = document.getElementById(`cb-${appId}-${target.key}`);
+        if (cb && cb.checked) {
+          if (target.multi) {
+            selectedTargets.push(...target.multi);
+          } else {
+            selectedTargets.push(target.key);
+          }
+        }
+      }
+
+      if (selectedTargets.length === 0) {
+        alert('Please select at least one data type to clear.');
+        return;
+      }
+
+      const includeSeed = document.getElementById(`seed-${appId}`)?.checked || false;
+
+      const confirmed = await showConfirmModal({
+        title: `Clear ${app.name} Data`,
+        message: `This will permanently delete the selected data for ${app.name}. This action cannot be undone.`,
+        detail: selectedTargets.join(', '),
+        confirmLabel: `Clear ${app.name} Data`,
+      });
+      if (!confirmed) return;
+
+      const outputId = `output-${appId}`;
+      const output = document.getElementById(outputId);
+      const btn = document.getElementById(`btn-${appId}`);
+      output.innerHTML = '';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Clearing...';
+
+      try {
+        log(outputId, `Clearing ${app.name} data...`, 'info');
+        log(outputId, `Targets: ${selectedTargets.join(', ')}`);
+
+        const result = await apiPost('/erase', {
+          appId: appId,
+          targets: selectedTargets,
+          includeSeedData: includeSeed,
+        });
+
+        const d = result.deleted;
+        for (const [table, count] of Object.entries(d)) {
+          log(outputId, `  ${table}: ${count} deleted`, count > 0 ? 'success' : '');
+        }
+
+        log(outputId, `\n${app.name} data cleared!`, 'success');
+
+        await loadAppStats(appId);
+        await loadGlobalStats();
+      } catch (e) {
+        log(outputId, `\nError: ${e.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `&#128465; Clear Selected ${app.name} Data`;
+      }
+    }
+
+    // =========================================================================
+    // Render App Cards
+    // =========================================================================
     function renderAppCards() {
       const container = document.getElementById('appCards');
       container.innerHTML = '';
-      
+
       for (const [appId, app] of Object.entries(APP_REGISTRY)) {
+        const checkboxes = app.targets.map(t => `
+          <label class="checkbox-item">
+            <input type="checkbox" id="cb-${appId}-${t.key}" checked>
+            <div>
+              <div class="cb-label">${t.label}</div>
+              <div class="cb-desc">${t.desc}</div>
+            </div>
+          </label>
+        `).join('');
+
         const card = document.createElement('div');
         card.className = 'card';
         card.id = `card-${appId}`;
@@ -654,418 +975,50 @@
               <h2>${app.name}</h2>
               <p>${app.description}</p>
             </div>
+            <span class="badge badge-warning">Per-App</span>
           </div>
-          
-          <div class="alert alert-info">
-            <strong>ℹ️ This will clear:</strong>
-            <ul>
-              ${app.dataTypes.map(dt => `<li>${dt}</li>`).join('')}
-            </ul>
+
+          <div class="checkbox-group">
+            ${checkboxes}
           </div>
-          
+
+          <div class="toggle-row">
+            <input type="checkbox" id="seed-${appId}">
+            <label for="seed-${appId}" style="cursor:pointer;">
+              <span style="font-weight:500;">Include seed data</span>
+              <span style="color:var(--text-muted); font-size:var(--text-xs); margin-left:6px;">
+                (regenerates on restart)
+              </span>
+            </label>
+          </div>
+
           <div id="stats-${appId}" class="data-list">
             <div class="data-item">
               <span class="label">Loading...</span>
               <span class="value">—</span>
             </div>
           </div>
-          
+
           <div class="btn-group">
-            <button class="btn btn-secondary" onclick="clearAppStorage('${appId}')">
-              🗑️ Clear ${app.name} Data
+            <button id="btn-${appId}" class="btn btn-secondary" onclick="clearAppData('${appId}')">
+              &#128465; Clear Selected ${app.name} Data
             </button>
           </div>
-          
+
           <div id="output-${appId}" class="output"></div>
         `;
         container.appendChild(card);
-        
-        // Load stats async
+
         loadAppStats(appId);
       }
     }
-    
-    async function loadAppStats(appId) {
-      const app = APP_REGISTRY[appId];
-      const container = document.getElementById(`stats-${appId}`);
-      const counts = await getAppTableCounts(appId);
-      
-      let html = '';
-      
-      // Listings
-      if (counts['listings'] !== undefined) {
-        html += `
-          <div class="data-item">
-            <span class="label">Listings</span>
-            <span class="value">${counts['listings']} records</span>
-          </div>
-        `;
-      }
-      
-      // Entities breakdown
-      if (counts['entities'] !== undefined) {
-        html += `
-          <div class="data-item">
-            <span class="label">Entities (prompts, schemas, etc.)</span>
-            <span class="value">${counts['entities']} records</span>
-          </div>
-        `;
-        
-        if (counts['entities_by_type']) {
-          const types = counts['entities_by_type'];
-          Object.keys(types).forEach(type => {
-            html += `
-              <div class="data-item" style="padding-left: 24px; opacity: 0.8;">
-                <span class="label">↳ ${type}</span>
-                <span class="value">${types[type]}</span>
-              </div>
-            `;
-          });
-        }
-      }
-      
-      // Chat-specific counts for kaira-bot
-      if (appId === 'kaira-bot') {
-        if (counts['chat_sessions'] !== undefined) {
-          html += `
-            <div class="data-item">
-              <span class="label">Chat Sessions</span>
-              <span class="value">${counts['chat_sessions']} sessions</span>
-            </div>
-          `;
-        }
-        if (counts['chat_messages'] !== undefined) {
-          html += `
-            <div class="data-item">
-              <span class="label">Chat Messages</span>
-              <span class="value">${counts['chat_messages']} messages</span>
-            </div>
-          `;
-        }
-      }
-      
-      // History
-      if (counts['history'] !== undefined) {
-        html += `
-          <div class="data-item">
-            <span class="label">Evaluator History</span>
-            <span class="value">${counts['history']} runs</span>
-          </div>
-        `;
-      }
-      
-      container.innerHTML = html || '<div class="data-item"><span class="label">No data</span><span class="value">—</span></div>';
-    }
-    
-    // =========================================================================
-    // Clear Storage Functions
-    // =========================================================================
-    function log(outputId, message, type = '') {
-      const output = document.getElementById(outputId);
-      output.classList.add('show');
-      const span = document.createElement('span');
-      span.className = type;
-      span.textContent = message + '\n';
-      output.appendChild(span);
-      output.scrollTop = output.scrollHeight;
-    }
-    
-    async function clearAllStorage() {
-      const outputId = 'globalOutput';
-      const output = document.getElementById(outputId);
-      output.innerHTML = '';
-      
-      log(outputId, '🚀 Starting COMPLETE storage cleanup...', 'info');
-      
-      try {
-        // 1. Clear IndexedDB databases
-        log(outputId, '\n📦 Step 1: Clearing IndexedDB databases...');
-        
-        // Helper to delete with timeout
-        const deleteDbWithTimeout = (dbName, timeoutMs = 2000) => {
-          return new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-              log(outputId, `   ⚠ Timeout deleting: ${dbName} (blocked by another tab?)`, 'error');
-              resolve();
-            }, timeoutMs);
-            
-            try {
-              const deleteRequest = indexedDB.deleteDatabase(dbName);
-              deleteRequest.onsuccess = () => {
-                clearTimeout(timeout);
-                log(outputId, `   ✓ Deleted: ${dbName}`, 'success');
-                resolve();
-              };
-              deleteRequest.onerror = (e) => {
-                clearTimeout(timeout);
-                log(outputId, `   ✗ Error deleting: ${dbName} - ${e.target?.error?.message || 'unknown'}`, 'error');
-                resolve();
-              };
-              deleteRequest.onblocked = () => {
-                clearTimeout(timeout);
-                log(outputId, `   ⚠ BLOCKED: ${dbName} - CLOSE ALL OTHER TABS WITH THIS APP!`, 'error');
-                resolve();
-              };
-            } catch (e) {
-              clearTimeout(timeout);
-              log(outputId, `   ✗ Exception: ${e.message}`, 'error');
-              resolve();
-            }
-          });
-        };
-        
-        if (indexedDB.databases) {
-          try {
-            const dbs = await Promise.race([
-              indexedDB.databases(),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
-            ]);
-            log(outputId, `   Found ${dbs.length} database(s): ${dbs.map(d => d.name).join(', ') || '(none)'}`);
-            
-            for (const dbInfo of dbs) {
-              if (dbInfo.name) {
-                await deleteDbWithTimeout(dbInfo.name);
-              }
-            }
-          } catch (e) {
-            log(outputId, `   ⚠ Could not list databases: ${e.message}`, 'error');
-          }
-        }
-        
-        // Always try to delete known database names
-        log(outputId, '   Deleting known database: ai-evals-platform');
-        await deleteDbWithTimeout('ai-evals-platform');
-        
-        // 2. Clear ALL localStorage
-        log(outputId, '\n🔑 Step 2: Clearing ALL localStorage...');
-        const localStorageKeys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          localStorageKeys.push(localStorage.key(i));
-        }
-        log(outputId, `   Found ${localStorageKeys.length} key(s): ${localStorageKeys.join(', ') || '(none)'}`);
-        localStorage.clear();
-        log(outputId, '   ✓ localStorage cleared completely', 'success');
-        
-        // 3. Clear sessionStorage
-        log(outputId, '\n📝 Step 3: Clearing sessionStorage...');
-        const sessionStorageCount = sessionStorage.length;
-        sessionStorage.clear();
-        log(outputId, `   ✓ Cleared ${sessionStorageCount} item(s)`, 'success');
-        
-        // 4. Clear service worker caches
-        log(outputId, '\n🔄 Step 4: Clearing service worker caches...');
-        if ('caches' in window) {
-          const cacheNames = await caches.keys();
-          log(outputId, `   Found ${cacheNames.length} cache(s)`);
-          for (const cacheName of cacheNames) {
-            await caches.delete(cacheName);
-            log(outputId, `   ✓ Deleted: ${cacheName}`, 'success');
-          }
-          if (cacheNames.length === 0) {
-            log(outputId, '   (no caches to clear)');
-          }
-        } else {
-          log(outputId, '   No cache API available');
-        }
-        
-        // 5. Unregister service workers
-        log(outputId, '\n🛠️ Step 5: Unregistering service workers...');
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          log(outputId, `   Found ${registrations.length} service worker(s)`);
-          for (const registration of registrations) {
-            await registration.unregister();
-            log(outputId, `   ✓ Unregistered service worker`, 'success');
-          }
-          if (registrations.length === 0) {
-            log(outputId, '   (no service workers to unregister)');
-          }
-        } else {
-          log(outputId, '   No service worker API available');
-        }
-        
-        log(outputId, '\n' + '='.repeat(50));
-        log(outputId, '✅ STORAGE CLEANUP COMPLETE!', 'success');
-        log(outputId, '='.repeat(50));
-        log(outputId, '\n⚠️ If you saw any "BLOCKED" messages above:');
-        log(outputId, '   1. Close ALL other browser tabs with localhost:5173');
-        log(outputId, '   2. Run this cleanup again');
-        log(outputId, '\nClick "Reload Application" to start fresh.');
-        
-        // Show reload card
-        document.getElementById('reloadCard').style.display = 'block';
-        
-        // Refresh stats
-        await renderGlobalStats();
-        
-      } catch (error) {
-        log(outputId, `\n❌ Error: ${error.message}`, 'error');
-        console.error('Clear storage error:', error);
-      }
-    }
-    
-    async function clearAppStorage(appId) {
-      const app = APP_REGISTRY[appId];
-      if (!app) return;
-      
-      const outputId = `output-${appId}`;
-      const output = document.getElementById(outputId);
-      output.innerHTML = '';
-      
-      log(outputId, `🚀 Clearing ${app.name} data...`, 'info');
-      
-      try {
-        const request = indexedDB.open(DB_NAME);
-        
-        await new Promise((resolve, reject) => {
-          request.onerror = () => reject(request.error);
-          request.onsuccess = async () => {
-            const db = request.result;
-            let totalDeleted = 0;
-            
-            // Clear listings for this app
-            if (db.objectStoreNames.contains('listings')) {
-              try {
-                const tx = db.transaction('listings', 'readwrite');
-                const store = tx.objectStore('listings');
-                const index = store.index('appId');
-                const range = IDBKeyRange.only(appId);
-                let deleted = 0;
-                
-                await new Promise((res) => {
-                  const cursorRequest = index.openCursor(range);
-                  cursorRequest.onsuccess = (e) => {
-                    const cursor = e.target.result;
-                    if (cursor) {
-                      cursor.delete();
-                      deleted++;
-                      cursor.continue();
-                    } else {
-                      res();
-                    }
-                  };
-                  cursorRequest.onerror = () => res();
-                });
-                
-                log(outputId, `   ✓ Cleared ${deleted} listings`, 'success');
-                totalDeleted += deleted;
-              } catch (e) {
-                log(outputId, `   ⚠ Could not clear listings: ${e.message}`, 'error');
-              }
-            }
-            
-            // Clear entities for this app
-            if (db.objectStoreNames.contains('entities')) {
-              try {
-                const tx = db.transaction('entities', 'readwrite');
-                const store = tx.objectStore('entities');
-                let deleted = 0;
-                
-                // Get all entities and filter by appId
-                const allEntities = await new Promise((res) => {
-                  const getRequest = store.getAll();
-                  getRequest.onsuccess = () => res(getRequest.result);
-                  getRequest.onerror = () => res([]);
-                });
-                
-                // Delete entities matching this appId
-                for (const entity of allEntities) {
-                  if (entity.appId === appId) {
-                    await new Promise((res) => {
-                      const deleteRequest = store.delete(entity.id);
-                      deleteRequest.onsuccess = () => { deleted++; res(); };
-                      deleteRequest.onerror = () => res();
-                    });
-                  }
-                }
-                
-                log(outputId, `   ✓ Cleared ${deleted} entities (prompts, schemas, evaluators, etc.)`, 'success');
-                totalDeleted += deleted;
-              } catch (e) {
-                log(outputId, `   ⚠ Could not clear entities: ${e.message}`, 'error');
-              }
-            }
-            
-            // Clear history for this app
-            if (db.objectStoreNames.contains('history')) {
-              try {
-                const tx = db.transaction('history', 'readwrite');
-                const store = tx.objectStore('history');
-                let deleted = 0;
-                
-                const allHistory = await new Promise((res) => {
-                  const getRequest = store.getAll();
-                  getRequest.onsuccess = () => res(getRequest.result);
-                  getRequest.onerror = () => res([]);
-                });
-                
-                for (const entry of allHistory) {
-                  if (entry.app_id === appId) {
-                    await new Promise((res) => {
-                      const deleteRequest = store.delete(entry.id);
-                      deleteRequest.onsuccess = () => { deleted++; res(); };
-                      deleteRequest.onerror = () => res();
-                    });
-                  }
-                }
-                
-                log(outputId, `   ✓ Cleared ${deleted} history entries`, 'success');
-                totalDeleted += deleted;
-              } catch (e) {
-                log(outputId, `   ⚠ Could not clear history: ${e.message}`, 'error');
-              }
-            }
-            
-            db.close();
-            resolve();
-          };
-        });
-        
-        // Clear localStorage settings (but preserve API key)
-        const settingsKey = `${appId}-settings`;
-        const settingsRaw = localStorage.getItem(settingsKey);
-        let apiKey = null;
-        
-        if (settingsRaw) {
-          try {
-            const settings = JSON.parse(settingsRaw);
-            apiKey = settings?.state?.llm?.apiKey;
-          } catch (e) {}
-        }
-        
-        localStorage.removeItem(settingsKey);
-        
-        if (apiKey) {
-          localStorage.setItem(settingsKey, JSON.stringify({
-            state: { llm: { apiKey } },
-            version: 0
-          }));
-          log(outputId, `   ✓ Settings cleared (API key preserved)`);
-        } else {
-          log(outputId, `   ✓ Settings cleared`);
-        }
-        
-        log(outputId, `\n✅ ${app.name} data cleared! (${totalDeleted} total records)`, 'success');
-        
-        // Refresh stats
-        await loadAppStats(appId);
-        await renderGlobalStats();
-        
-      } catch (error) {
-        log(outputId, `\n❌ Error: ${error.message}`, 'error');
-      }
-    }
-    
-    function reloadApp() {
-      window.location.href = '/';
-    }
-    
+
     // =========================================================================
     // Initialize
     // =========================================================================
     document.addEventListener('DOMContentLoaded', () => {
       initTheme();
-      renderGlobalStats();
+      loadGlobalStats();
       renderAppCards();
     });
   </script>
