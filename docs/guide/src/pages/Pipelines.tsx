@@ -1,13 +1,18 @@
-import { useState } from 'react';
-import { MermaidDiagram, FilterPills, CodeBlock, ExportButton, InfoBox } from '@/components';
-import { usePageExport } from '@/hooks/usePageExport';
+import { useState } from "react";
+import {
+  MermaidDiagram,
+  FilterPills,
+  CodeBlock,
+  PageHeader,
+} from "@/components";
+import { usePageExport } from "@/hooks/usePageExport";
 
 const pipelineOptions = [
-  { id: 'frontend', label: 'Frontend LLM Pipeline' },
-  { id: 'backend', label: 'Backend Job Pipeline' },
-  { id: 'voicerx', label: 'Voice RX Two-Call' },
-  { id: 'batch', label: 'Batch Pipeline' },
-  { id: 'adversarial', label: 'Adversarial Pipeline' },
+  { id: "frontend", label: "Frontend LLM Pipeline" },
+  { id: "backend", label: "Backend Job Pipeline" },
+  { id: "voicerx", label: "Voice RX Two-Call" },
+  { id: "batch", label: "Batch Pipeline" },
+  { id: "adversarial", label: "Adversarial Pipeline" },
 ];
 
 const frontendDiagram = `flowchart LR
@@ -130,59 +135,75 @@ interface PipelineView {
   title: string;
   subtitle: string;
   diagram: string;
-  code?: { code: string; language: 'typescript' | 'python' };
+  code?: { code: string; language: "typescript" | "python" };
 }
 
 const pipelines: Record<string, PipelineView> = {
   frontend: {
-    title: 'Frontend LLM Pipeline',
-    subtitle: 'Used for real-time AI features in the browser. 4-stage pipeline in LLMInvocationPipeline.ts.',
+    title: "Frontend LLM Pipeline",
+    subtitle:
+      "Used for real-time AI features in the browser. 4-stage pipeline in LLMInvocationPipeline.ts.",
     diagram: frontendDiagram,
-    code: { code: frontendCode, language: 'typescript' },
+    code: { code: frontendCode, language: "typescript" },
   },
   backend: {
-    title: 'Backend Job Pipeline',
-    subtitle: 'Background job processing via worker_loop() in job_worker.py.',
+    title: "Backend Job Pipeline",
+    subtitle: "Background job processing via worker_loop() in job_worker.py.",
     diagram: backendDiagram,
-    code: { code: backendCode, language: 'python' },
+    code: { code: backendCode, language: "python" },
   },
   voicerx: {
-    title: 'Voice RX Two-Call Pipeline (Detailed)',
-    subtitle: '',
+    title: "Voice RX Two-Call Pipeline (Detailed)",
+    subtitle: "",
     diagram: voicerxDiagram,
   },
   batch: {
-    title: 'Batch Evaluation Pipeline',
-    subtitle: '',
+    title: "Batch Evaluation Pipeline",
+    subtitle: "",
     diagram: batchDiagram,
   },
   adversarial: {
-    title: 'Adversarial Testing Pipeline',
-    subtitle: '',
+    title: "Adversarial Testing Pipeline",
+    subtitle: "",
     diagram: adversarialDiagram,
   },
 };
 
 export default function Pipelines() {
-  const [active, setActive] = useState('frontend');
+  const [active, setActive] = useState("frontend");
   const { contentRef } = usePageExport();
   const current = pipelines[active];
 
   return (
-    <div ref={contentRef} className="page-content animate-fade-in-up" data-title="Pipelines">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Execution Pipelines</h2>
-        <ExportButton pageTitle="Pipelines" contentRef={contentRef} />
-      </div>
-      <InfoBox className="mb-4">
-        How evaluation jobs flow from user click to saved results. Select a pipeline below to explore its architecture and code.
-      </InfoBox>
+    <div
+      ref={contentRef}
+      className="page-content animate-fade-in-up"
+      data-title="Pipelines"
+    >
+      <PageHeader
+        title="Execution Pipelines"
+        subtitle="Trace how each run moves from request submission to persisted evaluation results."
+        pageTitle="Pipelines"
+        contentRef={contentRef}
+      />
 
-      <FilterPills options={pipelineOptions} active={active} onChange={setActive} />
+      <FilterPills
+        options={pipelineOptions}
+        active={active}
+        onChange={setActive}
+        className="mb-3"
+      />
 
-      <h3 className="text-xl font-bold mt-6 mb-2" style={{ color: 'var(--text)' }}>{current.title}</h3>
+      <h3
+        className="text-xl font-bold mt-4 mb-2"
+        style={{ color: "var(--text)" }}
+      >
+        {current.title}
+      </h3>
       {current.subtitle && (
-        <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>{current.subtitle}</p>
+        <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
+          {current.subtitle}
+        </p>
       )}
 
       <MermaidDiagram chart={current.diagram} />

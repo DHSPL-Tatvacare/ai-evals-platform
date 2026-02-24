@@ -169,7 +169,8 @@ export function computeHumanAdjustedUploadMetrics(
   const cer = calculateCERMetric(originalText, adjustedText);
   const match = calculateMatchMetric(wer);
 
-  return [match, wer, cer];
+  // Stamp source so UI can show human-adjusted indicator
+  return [match, wer, cer].map(m => ({ ...m, source: 'human' as const }));
 }
 
 /**
@@ -252,5 +253,8 @@ export function computeHumanAdjustedApiMetrics(
     tooltip: 'Human-adjusted precision.\nAccepted + corrected extractions count as correct.',
   };
 
-  return [fieldAccuracy, extractionRecall, extractionPrecision, wer, cer];
+  // Stamp source so UI can show human-adjusted indicator
+  return [fieldAccuracy, extractionRecall, extractionPrecision, wer, cer].map(
+    m => ({ ...m, source: 'human' as const }),
+  );
 }

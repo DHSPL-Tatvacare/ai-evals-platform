@@ -1,14 +1,13 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Tabs, Button } from '@/components/ui';
-import { RefreshCw, Loader2, ExternalLink, Send, Undo2 } from 'lucide-react';
+import { RefreshCw, Loader2, ExternalLink } from 'lucide-react';
 import { routes } from '@/config/routes';
 import { AIEvalRequest } from './AIEvalRequest';
 import { AIEvalStatus } from './AIEvalStatus';
 import { HumanReviewStatus } from './HumanReviewStatus';
 import { SegmentComparisonTable } from './SegmentComparisonTable';
 import { ApiEvalsView } from './ApiEvalsView';
-import { MetricsBar } from './MetricsBar';
 import { EvaluationOverlay } from './EvaluationOverlay';
 import { useAIEvaluation, type EvaluationConfig } from '../hooks/useAIEvaluation';
 import { useHumanReview } from '../hooks/useHumanReview';
@@ -16,7 +15,7 @@ import { useListingMetrics } from '../hooks/useListingMetrics';
 import { filesRepository } from '@/services/storage';
 import { fetchLatestRun } from '@/services/api/evalRunsApi';
 import { useTaskQueueStore, useJobTrackerStore } from '@/stores';
-import type { Listing, AIEvaluation, TranscriptData, OverallVerdict } from '@/types';
+import type { Listing, AIEvaluation, TranscriptData } from '@/types';
 
 interface EvalsViewProps {
   listing: Listing;
@@ -29,21 +28,11 @@ interface EvalsViewProps {
   onAiEvalChange?: (aiEval: AIEvaluation | null) => void;
   /** Eval run row ID (needed for human review linking) */
   aiEvalRunId?: string | null;
+  /** Callback to notify parent when human review is saved/updated */
+  onHumanReviewChange?: (review: import('@/types').HumanReview) => void;
 }
 
-const VERDICT_LABEL: Record<OverallVerdict, string> = {
-  accepted: 'Accepted',
-  rejected: 'Rejected',
-  accepted_with_corrections: 'Accepted with Corrections',
-};
-
-const VERDICT_COLORS: Record<OverallVerdict, string> = {
-  accepted: 'text-[var(--color-success)]',
-  rejected: 'text-[var(--color-error)]',
-  accepted_with_corrections: 'text-[var(--color-warning)]',
-};
-
-export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: externalAiEval, onAiEvalChange, aiEvalRunId: externalRunId }: EvalsViewProps) {
+export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: externalAiEval, onAiEvalChange, aiEvalRunId: externalRunId, onHumanReviewChange }: EvalsViewProps) {
   const { evaluate, cancel } = useAIEvaluation();
   const { tasks } = useTaskQueueStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -57,9 +46,6 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
 
   // Detect flow type from aiEval or listing
   const flowType = aiEval?.flowType ?? (listing.sourceType === 'api' ? 'api' : 'upload');
-
-  // Metrics source toggle state
-  const [metricsSource, setMetricsSource] = useState<'ai' | 'human'>('ai');
 
   // Total items for review (segments or fields)
   const totalItems = useMemo(() => {
@@ -91,8 +77,14 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
     totalItems,
   });
 
-  // Metrics computation (supports AI and human-adjusted)
-  const metrics = useListingMetrics(listing, aiEval, humanReview, metricsSource);
+  // Compute human-adjusted metrics from LIVE working state (not saved review).
+  // This ensures submit payload contains metrics reflecting current edits.
+  const workingReviewState = useMemo(() => ({
+    segmentReviews,
+    fieldReviews,
+  }), [segmentReviews, fieldReviews]);
+
+  const humanAdjustedMetrics = useListingMetrics(listing, aiEval, humanReview, 'human', workingReviewState);
 
   // Fetch latest full evaluation from eval_runs API (only if not provided externally)
   useEffect(() => {
@@ -173,13 +165,21 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
   const handleSubmit = useCallback(async () => {
     // Build adjusted metrics from current review state
     const adjustedMetrics: Record<string, number> = {};
-    if (metrics) {
-      for (const m of metrics) {
+    if (humanAdjustedMetrics) {
+      for (const m of humanAdjustedMetrics) {
         adjustedMetrics[m.id] = m.value;
       }
     }
-    await submit('', adjustedMetrics);
-  }, [submit, metrics]);
+    const savedReview = await submit('', adjustedMetrics);
+    if (savedReview) {
+      // Propagate to parent so header metrics refresh immediately
+      onHumanReviewChange?.(savedReview);
+      // Backend marks listing as completed; reflect in UI
+      if (listing.status !== 'completed') {
+        onUpdate({ ...listing, status: 'completed' });
+      }
+    }
+  }, [submit, humanAdjustedMetrics, listing, onUpdate, onHumanReviewChange]);
 
   const hasAIEval = !!aiEval;
   const hasComparison = hasAIEval && aiEval?.status === 'completed' && (
@@ -277,27 +277,22 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
     </div>
   );
 
-  // --- Human Review tab content ---
+  // --- Human Evaluation tab content ---
   const humanReviewContent = (
     <div className="flex flex-col h-full min-h-0 gap-4">
-      {/* Status strip */}
+      {/* Unified action bar: progress + verdict + discard/submit */}
       <HumanReviewStatus
         humanReview={humanReview}
         isDirty={isDirty}
+        isSubmitting={isSubmitting}
         reviewedCount={reviewedCount}
         totalItems={totalItems}
         overallVerdict={overallVerdict}
+        onSubmit={handleSubmit}
+        onDiscard={discard}
       />
 
-      {/* Metrics with toggle */}
-      <MetricsBar
-        metrics={metrics}
-        hasHumanReview={!!humanReview}
-        metricsSource={metricsSource}
-        onMetricsSourceChange={setMetricsSource}
-      />
-
-      {/* Same comparison table, review mode on */}
+      {/* Comparison table in review mode */}
       {hasComparison && (
         flowType === 'api' ? (
           <ApiEvalsView
@@ -339,62 +334,6 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
           </p>
         </div>
       )}
-
-      {/* Submit footer */}
-      {hasComparison && (
-        <div className="sticky bottom-0 flex items-center gap-4 px-4 py-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-default)] shadow-sm">
-          {/* Progress */}
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] text-[var(--text-muted)]">
-              {reviewedCount}/{totalItems} reviewed
-            </span>
-            <div className="w-24 h-1.5 rounded-full bg-[var(--bg-tertiary)]">
-              <div
-                className="h-full rounded-full bg-[var(--color-brand-primary)] transition-all"
-                style={{ width: `${totalItems > 0 ? (reviewedCount / totalItems) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Verdict badge */}
-          {overallVerdict && (
-            <span className={`text-[12px] font-medium ${VERDICT_COLORS[overallVerdict]}`}>
-              {VERDICT_LABEL[overallVerdict]}
-            </span>
-          )}
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Discard button */}
-          {isDirty && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={discard}
-              className="h-8 gap-1.5"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-              Discard
-            </Button>
-          )}
-
-          {/* Submit button */}
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={isSubmitting || (!isDirty && !!humanReview)}
-            className="h-8 gap-1.5"
-          >
-            {isSubmitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Send className="h-3.5 w-3.5" />
-            )}
-            {humanReview ? 'Update Review' : 'Submit Review'}
-          </Button>
-        </div>
-      )}
     </div>
   );
 
@@ -412,7 +351,7 @@ export function EvalsView({ listing, onUpdate, hideRerunButton = false, aiEval: 
     },
     {
       id: 'human-eval',
-      label: 'Human Review',
+      label: 'Human Evaluation',
       content: humanReviewContent,
     },
   ];

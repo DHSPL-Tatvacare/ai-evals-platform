@@ -1,5 +1,6 @@
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Bot, UserCheck } from 'lucide-react';
 import { MetricCard } from './MetricCard';
+import { Tooltip } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { MetricResult } from '../metrics';
 
@@ -32,47 +33,16 @@ export function MetricsBar({
     );
   }
 
-  return (
-    <div className="mt-3 flex flex-col gap-2">
-      {/* Source toggle — only when human review exists */}
-      {hasHumanReview && onMetricsSourceChange && (
-        <div className="flex items-center">
-          <div className="inline-flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
-            <button
-              type="button"
-              onClick={() => onMetricsSourceChange('ai')}
-              className={cn(
-                'px-3 py-1 text-[12px] font-medium rounded-md transition-all',
-                metricsSource === 'ai'
-                  ? 'bg-[var(--bg-brand)] text-[var(--text-on-brand)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-              )}
-            >
-              AI Computed
-            </button>
-            <button
-              type="button"
-              onClick={() => onMetricsSourceChange('human')}
-              className={cn(
-                'px-3 py-1 text-[12px] font-medium rounded-md transition-all',
-                metricsSource === 'human'
-                  ? 'bg-[var(--bg-brand)] text-[var(--text-on-brand)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-              )}
-            >
-              Human Reviewed
-            </button>
-          </div>
-        </div>
-      )}
+  const showToggle = hasHumanReview && !!onMetricsSourceChange;
 
-      {/* Metrics grid */}
-      <div className="flex items-center gap-3">
+  return (
+    <div className="mt-3 flex items-center gap-3">
+      {/* Metrics grid — flex-1 so toggle stays anchored right */}
+      <div className="flex-1 min-w-0">
         <div
           className="grid gap-2"
           style={{
             gridTemplateColumns: `repeat(${metrics.length}, minmax(0, 1fr))`,
-            minWidth: `${metrics.length * 120}px`,
           }}
         >
           {metrics.map(metric => (
@@ -80,6 +50,58 @@ export function MetricsBar({
           ))}
         </div>
       </div>
+
+      {/* Compact icon toggle — only when human review exists */}
+      {showToggle && (
+        <MetricsSourceToggle
+          metricsSource={metricsSource}
+          onMetricsSourceChange={onMetricsSourceChange}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Compact icon-based toggle for switching between AI and Human metrics */
+function MetricsSourceToggle({
+  metricsSource,
+  onMetricsSourceChange,
+}: {
+  metricsSource: 'ai' | 'human';
+  onMetricsSourceChange: (source: 'ai' | 'human') => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] shrink-0">
+      <Tooltip content="AI-computed metrics" position="bottom">
+        <button
+          type="button"
+          onClick={() => onMetricsSourceChange('ai')}
+          className={cn(
+            'p-1.5 rounded-md transition-all',
+            metricsSource === 'ai'
+              ? 'bg-[var(--bg-brand)] text-[var(--text-on-brand)] shadow-sm'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+          )}
+          aria-label="Show AI-computed metrics"
+        >
+          <Bot className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
+      <Tooltip content="Human-reviewed metrics" position="bottom">
+        <button
+          type="button"
+          onClick={() => onMetricsSourceChange('human')}
+          className={cn(
+            'p-1.5 rounded-md transition-all',
+            metricsSource === 'human'
+              ? 'bg-[var(--bg-brand)] text-[var(--text-on-brand)] shadow-sm'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+          )}
+          aria-label="Show human-reviewed metrics"
+        >
+          <UserCheck className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
     </div>
   );
 }

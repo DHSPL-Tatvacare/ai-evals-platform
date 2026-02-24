@@ -6,6 +6,7 @@ Runs as an asyncio task within the FastAPI process.
 For production scale: extract to a separate worker process or use Celery.
 For current scale (company-internal): this is sufficient.
 """
+
 import asyncio
 import logging
 import time
@@ -47,9 +48,13 @@ async def recover_stale_jobs(stale_minutes: int = 15):
         stale_jobs = result.scalars().all()
         for job in stale_jobs:
             job.status = "failed"
-            job.error_message = f"Recovered on startup: job was running for >{stale_minutes} minutes"
+            job.error_message = (
+                f"Recovered on startup: job was running for >{stale_minutes} minutes"
+            )
             job.completed_at = datetime.now(timezone.utc)
-            logger.warning(f"Recovered stale job {job.id} (started at {job.started_at})")
+            logger.warning(
+                f"Recovered stale job {job.id} (started at {job.started_at})"
+            )
         if stale_jobs:
             await db.commit()
             logger.info(f"Recovered {len(stale_jobs)} stale job(s)")
@@ -68,7 +73,9 @@ async def recover_stale_eval_runs():
     """
     async with async_session() as db:
         result = await db.execute(
-            select(EvalRun).join(Job, EvalRun.job_id == Job.id).where(
+            select(EvalRun)
+            .join(Job, EvalRun.job_id == Job.id)
+            .where(
                 EvalRun.status == "running",
                 Job.status.in_(["completed", "failed", "cancelled"]),
             )
@@ -79,7 +86,9 @@ async def recover_stale_eval_runs():
             run.status = "cancelled" if job.status == "cancelled" else "failed"
             run.error_message = f"Recovered on startup: job was {job.status}"
             run.completed_at = datetime.now(timezone.utc)
-            logger.warning(f"Recovered stale eval_run {run.id} (job {run.job_id} was {job.status})")
+            logger.warning(
+                f"Recovered stale eval_run {run.id} (job {run.job_id} was {job.status})"
+            )
         if stale_runs:
             await db.commit()
             logger.info(f"Recovered {len(stale_runs)} stale eval_run(s)")
@@ -87,6 +96,7 @@ async def recover_stale_eval_runs():
 
 class JobCancelledError(Exception):
     """Raised when a job detects it has been cancelled (cooperative cancellation)."""
+
     pass
 
 
@@ -108,9 +118,11 @@ JOB_HANDLERS = {}
 
 def register_job_handler(job_type: str):
     """Decorator to register a job handler function."""
+
     def decorator(func):
         JOB_HANDLERS[job_type] = func
         return func
+
     return decorator
 
 
@@ -122,7 +134,9 @@ async def process_job(job_id, job_type: str, params: dict) -> dict:
     return await handler(job_id, params)
 
 
-async def update_job_progress(job_id, current: int, total: int, message: str = "", **extra):
+async def update_job_progress(
+    job_id, current: int, total: int, message: str = "", **extra
+):
     """Update job progress (called from within handlers).
 
     Extra kwargs (run_id, listing_id, evaluator_id, etc.) are merged into
@@ -132,9 +146,18 @@ async def update_job_progress(job_id, current: int, total: int, message: str = "
     async with async_session() as db:
         job = await db.get(Job, job_id)
         if job:
-            new_progress = {"current": current, "total": total, "message": message, **extra}
+            new_progress = {
+                "current": current,
+                "total": total,
+                "message": message,
+                **extra,
+            }
             # Preserve run_id if it was set previously and not overridden
-            if "run_id" not in extra and isinstance(job.progress, dict) and "run_id" in job.progress:
+            if (
+                "run_id" not in extra
+                and isinstance(job.progress, dict)
+                and "run_id" in job.progress
+            ):
                 new_progress["run_id"] = job.progress["run_id"]
             job.progress = new_progress
             await db.commit()
@@ -209,19 +232,30 @@ async def worker_loop():
                     await db.commit()
 
                     try:
-                        result_data = await process_job(job.id, job.job_type, job.params)
+                        result_data = await process_job(
+                            job.id, job.job_type, job.params
+                        )
 
                         # Re-check: if job was cancelled during execution, don't overwrite
                         await db.refresh(job)
                         if job.status == "cancelled":
-                            logger.info(f"Job {job.id} was cancelled during execution, skipping completed update")
+                            logger.info(
+                                f"Job {job.id} was cancelled during execution, skipping completed update"
+                            )
                         else:
                             job.status = "completed"
                             job.result = result_data or {}
                             job.completed_at = datetime.now(timezone.utc)
                             # Preserve run_id so frontend can still redirect
-                            done_progress = {"current": 1, "total": 1, "message": "Done"}
-                            if isinstance(job.progress, dict) and "run_id" in job.progress:
+                            done_progress = {
+                                "current": 1,
+                                "total": 1,
+                                "message": "Done",
+                            }
+                            if (
+                                isinstance(job.progress, dict)
+                                and "run_id" in job.progress
+                            ):
                                 done_progress["run_id"] = job.progress["run_id"]
                             job.progress = done_progress
                             await db.commit()
@@ -242,11 +276,26 @@ async def worker_loop():
                                     if j and j.status not in ("completed", "cancelled"):
                                         j.status = "failed"
                                         # Format step-specific error for PipelineStepError
-                                        if hasattr(e, 'step') and hasattr(e, 'message'):
-                                            j.error_message = f"[{e.step}] {e.message}"[:2000]
+                                        if hasattr(e, "step") and hasattr(e, "message"):
+                                            error_message = f"[{e.step}] {e.message}"[
+                                                :2000
+                                            ]
                                         else:
-                                            j.error_message = safe_error_message(e)[:2000]
+                                            error_message = safe_error_message(e)[:2000]
+                                        j.error_message = error_message
                                         j.completed_at = datetime.now(timezone.utc)
+                                        await db2.execute(
+                                            update(EvalRun)
+                                            .where(
+                                                EvalRun.job_id == job.id,
+                                                EvalRun.status == "running",
+                                            )
+                                            .values(
+                                                status="failed",
+                                                error_message=error_message,
+                                                completed_at=j.completed_at,
+                                            )
+                                        )
                                         await db2.commit()
                                 break
                             except Exception as db_err:
@@ -265,6 +314,7 @@ async def worker_loop():
 
 
 # ── Job Handlers ─────────────────────────────────────────────────
+
 
 @register_job_handler("evaluate-batch")
 async def handle_evaluate_batch(job_id, params: dict) -> dict:
@@ -336,6 +386,7 @@ async def handle_evaluate_adversarial(job_id, params: dict) -> dict:
 async def handle_evaluate_voice_rx(job_id, params: dict) -> dict:
     """Run voice-rx two-call evaluation (transcription + critique)."""
     from app.services.evaluators.voice_rx_runner import run_voice_rx_evaluation
+
     return await run_voice_rx_evaluation(job_id=job_id, params=params)
 
 
@@ -343,6 +394,7 @@ async def handle_evaluate_voice_rx(job_id, params: dict) -> dict:
 async def handle_evaluate_custom(job_id, params: dict) -> dict:
     """Run a custom evaluator on a voice-rx listing."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_evaluator
+
     return await run_custom_evaluator(job_id=job_id, params=params)
 
 
@@ -350,4 +402,5 @@ async def handle_evaluate_custom(job_id, params: dict) -> dict:
 async def handle_evaluate_custom_batch(job_id, params: dict) -> dict:
     """Run multiple custom evaluators on a single entity."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_eval_batch
+
     return await run_custom_eval_batch(job_id=job_id, params=params)

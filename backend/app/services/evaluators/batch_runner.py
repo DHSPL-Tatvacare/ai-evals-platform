@@ -18,11 +18,12 @@ Standard pipeline contract:
   - custom_only mode: when True, force-disables intent/correctness/efficiency and runs
     only the selected custom evaluators.
 """
+
 import asyncio
 import hashlib
 import logging
-import time
 import random
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,9 @@ from app.database import async_session
 from app.models.eval_run import EvalRun, ThreadEvaluation as DBThreadEval
 from app.models.evaluator import Evaluator
 from app.services.evaluators.llm_base import (
-    BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
+    BaseLLMProvider,
+    LoggingLLMWrapper,
+    create_llm_provider,
 )
 from app.services.evaluators.data_loader import DataLoader
 from app.services.evaluators.intent_evaluator import IntentEvaluator
@@ -46,18 +49,20 @@ from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
 from app.services.evaluators.parallel_engine import run_parallel
 from app.services.evaluators.runner_utils import (
-    save_api_log, create_eval_run, finalize_eval_run, find_primary_field,
+    save_api_log,
+    create_eval_run,
+    finalize_eval_run,
+    find_primary_field,
 )
 from app.services.job_worker import (
-    JobCancelledError, safe_error_message, update_job_progress,
+    JobCancelledError,
+    safe_error_message,
+    update_job_progress,
 )
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable  # async (job_id, current, total, message) -> None
-
-
-
 
 
 def _file_hash(path: str) -> str:
@@ -136,13 +141,18 @@ async def run_batch_evaluation(
 
     # Write run_id to job progress so frontend can redirect early
     await update_job_progress(
-        job_id, 0, 0, "Initializing...", run_id=str(run_id),
+        job_id,
+        0,
+        0,
+        "Initializing...",
+        run_id=str(run_id),
     )
 
     # Resolve API key from settings if not provided
     auth_method = "api_key"  # default when caller provides api_key directly
     if not api_key:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
+
         db_settings = await get_llm_settings_from_db(auth_intent="managed_job")
         api_key = db_settings["api_key"]
         auth_method = db_settings.get("auth_method", "api_key")
@@ -154,7 +164,9 @@ async def run_batch_evaluation(
             llm_model = db_settings["selected_model"]
 
     # Load data
-    loader = DataLoader(csv_content=csv_content, csv_path=Path(data_path) if data_path else None)
+    loader = DataLoader(
+        csv_content=csv_content, csv_path=Path(data_path) if data_path else None
+    )
 
     # Resolve thread IDs
     skipped_previously_processed_count = 0
@@ -169,7 +181,8 @@ async def run_batch_evaluation(
     if skip_previously_processed and app_id == "kaira-bot" and candidate_ids:
         async with async_session() as db:
             result = await db.execute(
-                select(DBThreadEval.thread_id).distinct()
+                select(DBThreadEval.thread_id)
+                .distinct()
                 .join(EvalRun, DBThreadEval.run_id == EvalRun.id)
                 .where(
                     EvalRun.app_id == "kaira-bot",
@@ -181,12 +194,15 @@ async def run_batch_evaluation(
         skipped_previously_processed_count = len(already_processed)
         logger.info(
             "Skip previously processed: %d already evaluated, %d remaining",
-            skipped_previously_processed_count, len(candidate_ids),
+            skipped_previously_processed_count,
+            len(candidate_ids),
         )
 
     # Apply sampling after skip-filtering so sample draws from unseen pool
     if sample_size and not thread_ids:
-        ids_to_evaluate = random.sample(candidate_ids, min(sample_size, len(candidate_ids)))
+        ids_to_evaluate = random.sample(
+            candidate_ids, min(sample_size, len(candidate_ids))
+        )
     else:
         ids_to_evaluate = candidate_ids
 
@@ -195,8 +211,11 @@ async def run_batch_evaluation(
     # Update run with resolved details
     async with async_session() as db:
         await db.execute(
-            update(EvalRun).where(EvalRun.id == run_id).values(
-                llm_provider=llm_provider, llm_model=llm_model or "",
+            update(EvalRun)
+            .where(EvalRun.id == run_id)
+            .values(
+                llm_provider=llm_provider,
+                llm_model=llm_model or "",
                 batch_metadata={
                     "name": name,
                     "description": description,
@@ -209,7 +228,9 @@ async def run_batch_evaluation(
                     "evaluate_intent": evaluate_intent,
                     "evaluate_correctness": evaluate_correctness,
                     "evaluate_efficiency": evaluate_efficiency,
-                    "custom_evaluator_ids": [str(eid) for eid in (custom_evaluator_ids or [])],
+                    "custom_evaluator_ids": [
+                        str(eid) for eid in (custom_evaluator_ids or [])
+                    ],
                     "thinking": thinking,
                     "skip_previously_processed": skip_previously_processed,
                     "skipped_previously_processed_count": skipped_previously_processed_count,
@@ -221,8 +242,10 @@ async def run_batch_evaluation(
 
     # Create LLM provider with logging wrapper
     inner_llm = create_llm_provider(
-        provider=llm_provider, api_key=api_key,
-        model_name=llm_model or "", temperature=temperature,
+        provider=llm_provider,
+        api_key=api_key,
+        model_name=llm_model or "",
+        temperature=temperature,
         service_account_path=service_account_path,
     )
     llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=save_api_log)
@@ -232,11 +255,13 @@ async def run_batch_evaluation(
 
     # Track which evaluators are disabled so UI can show "Skipped"
     skipped_evaluators = [
-        name for name, enabled in [
+        name
+        for name, enabled in [
             ("intent", evaluate_intent),
             ("correctness", evaluate_correctness),
             ("efficiency", evaluate_efficiency),
-        ] if not enabled
+        ]
+        if not enabled
     ]
 
     # Load custom evaluators if specified
@@ -264,6 +289,7 @@ async def run_batch_evaluation(
     run_custom_in_parallel = parallel_threads
 
     try:
+
         async def _evaluate_one_thread(_index: int, thread_id: str) -> dict:
             """Evaluate a single thread — called by run_parallel().
 
@@ -271,14 +297,24 @@ async def run_batch_evaluation(
             shared state. DB records are saved within the worker.
             """
             # Each worker gets its own LLM wrapper for thread_id isolation
-            worker_llm = llm.clone_for_thread(thread_id) if effective_concurrency > 1 else llm
+            worker_llm = (
+                llm.clone_for_thread(thread_id) if effective_concurrency > 1 else llm
+            )
             if effective_concurrency == 1:
                 worker_llm.set_thread_id(thread_id)
 
             # Create per-worker evaluator instances that use the worker's LLM
-            w_intent_eval = IntentEvaluator(worker_llm, system_prompt=intent_system_prompt) if evaluate_intent else None
-            w_correctness_eval = CorrectnessEvaluator(worker_llm) if evaluate_correctness else None
-            w_efficiency_eval = EfficiencyEvaluator(worker_llm) if evaluate_efficiency else None
+            w_intent_eval = (
+                IntentEvaluator(worker_llm, system_prompt=intent_system_prompt)
+                if evaluate_intent
+                else None
+            )
+            w_correctness_eval = (
+                CorrectnessEvaluator(worker_llm) if evaluate_correctness else None
+            )
+            w_efficiency_eval = (
+                EfficiencyEvaluator(worker_llm) if evaluate_efficiency else None
+            )
 
             try:
                 thread = loader.get_thread(thread_id)
@@ -296,7 +332,9 @@ async def run_batch_evaluation(
 
                 if w_intent_eval:
                     try:
-                        intent_results = await w_intent_eval.evaluate_thread(thread.messages, thinking=thinking)
+                        intent_results = await w_intent_eval.evaluate_thread(
+                            thread.messages, thinking=thinking
+                        )
                     except Exception as ie_err:
                         msg = safe_error_message(ie_err)
                         eval_errors.append(f"Intent: {msg}")
@@ -305,21 +343,29 @@ async def run_batch_evaluation(
 
                 if w_correctness_eval:
                     try:
-                        correctness_results = await w_correctness_eval.evaluate_thread(thread, thinking=thinking)
+                        correctness_results = await w_correctness_eval.evaluate_thread(
+                            thread, thinking=thinking
+                        )
                     except Exception as ce_err:
                         msg = safe_error_message(ce_err)
                         eval_errors.append(f"Correctness: {msg}")
                         failed_evaluators["correctness"] = msg
-                        logger.error("Correctness eval failed for %s: %s", thread_id, msg)
+                        logger.error(
+                            "Correctness eval failed for %s: %s", thread_id, msg
+                        )
 
                 if w_efficiency_eval:
                     try:
-                        efficiency_result = await w_efficiency_eval.evaluate_thread(thread, thinking=thinking)
+                        efficiency_result = await w_efficiency_eval.evaluate_thread(
+                            thread, thinking=thinking
+                        )
                     except Exception as ee_err:
                         msg = safe_error_message(ee_err)
                         eval_errors.append(f"Efficiency: {msg}")
                         failed_evaluators["efficiency"] = msg
-                        logger.error("Efficiency eval failed for %s: %s", thread_id, msg)
+                        logger.error(
+                            "Efficiency eval failed for %s: %s", thread_id, msg
+                        )
 
                 # Run custom evaluators on this thread
                 custom_stats = {}
@@ -327,7 +373,9 @@ async def run_batch_evaluation(
                     interleaved = []
                     for m in thread.messages:
                         interleaved.append({"role": "user", "content": m.query_text})
-                        interleaved.append({"role": "assistant", "content": m.final_response_message})
+                        interleaved.append(
+                            {"role": "assistant", "content": m.final_response_message}
+                        )
 
                     async def _run_one_custom(cev):
                         cev_id = str(cev.id)
@@ -341,20 +389,33 @@ async def run_batch_evaluation(
                                 json_schema=json_schema,
                                 thinking=thinking,
                             )
-                            return cev_id, {
-                                "evaluator_id": cev_id,
-                                "evaluator_name": cev.name,
-                                "status": "completed",
-                                "output": output,
-                            }, None
+                            return (
+                                cev_id,
+                                {
+                                    "evaluator_id": cev_id,
+                                    "evaluator_name": cev.name,
+                                    "status": "completed",
+                                    "output": output,
+                                },
+                                None,
+                            )
                         except Exception as ce_err:
-                            logger.error("Custom evaluator %s failed for thread %s: %s", cev.id, thread_id, ce_err)
-                            return cev_id, {
-                                "evaluator_id": cev_id,
-                                "evaluator_name": cev.name,
-                                "status": "failed",
-                                "error": safe_error_message(ce_err),
-                            }, ce_err
+                            logger.error(
+                                "Custom evaluator %s failed for thread %s: %s",
+                                cev.id,
+                                thread_id,
+                                ce_err,
+                            )
+                            return (
+                                cev_id,
+                                {
+                                    "evaluator_id": cev_id,
+                                    "evaluator_name": cev.name,
+                                    "status": "failed",
+                                    "error": safe_error_message(ce_err),
+                                },
+                                ce_err,
+                            )
 
                     if run_custom_in_parallel:
                         results_list = await asyncio.gather(
@@ -370,11 +431,15 @@ async def run_batch_evaluation(
                         custom_results[cev_id] = result_dict
                         stat = {"status": result_dict["status"]}
                         if result_dict["status"] == "completed":
-                            pf_meta = custom_eval_meta.get(cev_id, {}).get("primary_field")
+                            pf_meta = custom_eval_meta.get(cev_id, {}).get(
+                                "primary_field"
+                            )
                             if pf_meta and result_dict.get("output"):
                                 pf_val = result_dict["output"].get(pf_meta["key"])
                                 if pf_val is not None:
-                                    if pf_meta["type"] == "number" and isinstance(pf_val, (int, float)):
+                                    if pf_meta["type"] == "number" and isinstance(
+                                        pf_val, (int, float)
+                                    ):
                                         stat["primary_value"] = pf_val
                                         stat["primary_type"] = "number"
                                     elif isinstance(pf_val, str):
@@ -389,7 +454,13 @@ async def run_batch_evaluation(
                     intent_accuracy = correct / len(intent_results)
 
                 worst_correctness = "NOT APPLICABLE"
-                severity = ["NOT APPLICABLE", "PASS", "SOFT FAIL", "HARD FAIL", "CRITICAL"]
+                severity = [
+                    "NOT APPLICABLE",
+                    "PASS",
+                    "SOFT FAIL",
+                    "HARD FAIL",
+                    "CRITICAL",
+                ]
                 for ce in correctness_results:
                     if severity.index(ce.verdict) > severity.index(worst_correctness):
                         worst_correctness = ce.verdict
@@ -401,27 +472,38 @@ async def run_batch_evaluation(
                 result_data = {
                     "thread": serialize(thread),
                     "intent_evaluations": [serialize(ie) for ie in intent_results],
-                    "correctness_evaluations": [serialize(ce) for ce in correctness_results],
-                    "efficiency_evaluation": serialize(efficiency_result) if efficiency_result else None,
+                    "correctness_evaluations": [
+                        serialize(ce) for ce in correctness_results
+                    ],
+                    "efficiency_evaluation": serialize(efficiency_result)
+                    if efficiency_result
+                    else None,
                     "success_status": is_success,
                     "custom_evaluations": custom_results if custom_results else None,
-                    "failed_evaluators": failed_evaluators if failed_evaluators else None,
-                    "skipped_evaluators": skipped_evaluators if skipped_evaluators else None,
+                    "failed_evaluators": failed_evaluators
+                    if failed_evaluators
+                    else None,
+                    "skipped_evaluators": skipped_evaluators
+                    if skipped_evaluators
+                    else None,
                 }
                 if eval_errors:
                     result_data["error"] = "; ".join(eval_errors)
 
                 # --- Save to DB (always, with full partial results) ---
                 async with async_session() as db:
-                    db.add(DBThreadEval(
-                        run_id=run_id, thread_id=thread_id,
-                        data_file_hash=data_hash,
-                        intent_accuracy=intent_accuracy,
-                        worst_correctness=worst_correctness,
-                        efficiency_verdict=eff_verdict,
-                        success_status=is_success,
-                        result=result_data,
-                    ))
+                    db.add(
+                        DBThreadEval(
+                            run_id=run_id,
+                            thread_id=thread_id,
+                            data_file_hash=data_hash,
+                            intent_accuracy=intent_accuracy,
+                            worst_correctness=worst_correctness,
+                            efficiency_verdict=eff_verdict,
+                            success_status=is_success,
+                            result=result_data,
+                        )
+                    )
                     await db.commit()
 
                 return {
@@ -438,18 +520,23 @@ async def run_batch_evaluation(
 
                 try:
                     async with async_session() as db:
-                        db.add(DBThreadEval(
-                            run_id=run_id, thread_id=thread_id,
-                            data_file_hash=data_hash,
-                            intent_accuracy=0.0,
-                            worst_correctness="NOT APPLICABLE",
-                            efficiency_verdict="N/A",
-                            success_status=False,
-                            result={"error": error_msg},
-                        ))
+                        db.add(
+                            DBThreadEval(
+                                run_id=run_id,
+                                thread_id=thread_id,
+                                data_file_hash=data_hash,
+                                intent_accuracy=0.0,
+                                worst_correctness="NOT APPLICABLE",
+                                efficiency_verdict="N/A",
+                                success_status=False,
+                                result={"error": error_msg},
+                            )
+                        )
                         await db.commit()
                 except Exception as save_err:
-                    logger.warning(f"Failed to save error record for thread {thread_id}: {save_err}")
+                    logger.warning(
+                        f"Failed to save error record for thread {thread_id}: {save_err}"
+                    )
 
                 return {"is_error": True}
 
@@ -471,7 +558,8 @@ async def run_batch_evaluation(
 
         # Aggregate results from worker return values
         results_summary = {
-            "completed": 0, "errors": 0,
+            "completed": 0,
+            "errors": 0,
             "intent_accuracy_sum": 0.0,
             "correctness_verdicts": {},
             "efficiency_verdicts": {},
@@ -499,11 +587,13 @@ async def run_batch_evaluation(
                 results_summary["completed"] += 1
                 results_summary["intent_accuracy_sum"] += r.get("intent_accuracy", 0.0)
                 wc = r.get("worst_correctness", "NOT APPLICABLE")
-                results_summary["correctness_verdicts"][wc] = \
+                results_summary["correctness_verdicts"][wc] = (
                     results_summary["correctness_verdicts"].get(wc, 0) + 1
+                )
                 ev = r.get("efficiency_verdict", "N/A")
-                results_summary["efficiency_verdicts"][ev] = \
+                results_summary["efficiency_verdicts"][ev] = (
                     results_summary["efficiency_verdicts"].get(ev, 0) + 1
+                )
             # Aggregate custom eval stats (present on both success and partial-error results)
             for cev_id, stat in r.get("custom_stats", {}).items():
                 entry = results_summary["custom_evaluations"].get(cev_id)
@@ -526,8 +616,9 @@ async def run_batch_evaluation(
         duration = time.monotonic() - start_time
         completed = results_summary["completed"]
         errors = results_summary["errors"]
-        avg_intent = (results_summary["intent_accuracy_sum"] / completed
-                      if completed > 0 else 0.0)
+        avg_intent = (
+            results_summary["intent_accuracy_sum"] / completed if completed > 0 else 0.0
+        )
 
         if completed == 0 and errors > 0:
             final_status = "failed"
@@ -540,7 +631,9 @@ async def run_batch_evaluation(
             error_message = None
 
         # Compute averages for custom evaluators and clean up internal lists
-        for cev_id, cev_summary in results_summary.get("custom_evaluations", {}).items():
+        for cev_id, cev_summary in results_summary.get(
+            "custom_evaluations", {}
+        ).items():
             values = cev_summary.pop("values", [])
             if values:
                 cev_summary["average"] = sum(values) / len(values)
@@ -560,7 +653,9 @@ async def run_batch_evaluation(
 
         async with async_session() as db:
             await db.execute(
-                update(EvalRun).where(EvalRun.id == run_id).values(
+                update(EvalRun)
+                .where(EvalRun.id == run_id)
+                .values(
                     status=final_status,
                     completed_at=datetime.now(timezone.utc),
                     duration_ms=round(duration * 1000, 2),
@@ -570,7 +665,11 @@ async def run_batch_evaluation(
             )
             await db.commit()
 
-        return {"run_id": str(run_id), "duration_seconds": round(duration, 2), **summary}
+        return {
+            "run_id": str(run_id),
+            "duration_seconds": round(duration, 2),
+            **summary,
+        }
 
     except JobCancelledError:
         duration = time.monotonic() - start_time
@@ -579,7 +678,9 @@ async def run_batch_evaluation(
         try:
             async with async_session() as db:
                 result = await db.execute(
-                    select(func.count()).select_from(DBThreadEval).where(DBThreadEval.run_id == run_id)
+                    select(func.count())
+                    .select_from(DBThreadEval)
+                    .where(DBThreadEval.run_id == run_id)
                 )
                 processed = result.scalar() or 0
         except Exception:
@@ -595,7 +696,9 @@ async def run_batch_evaluation(
             duration_ms=round(duration * 1000, 2),
             summary=summary,
         )
-        logger.info(f"Batch run {run_id} cancelled after {processed}/{total} threads processed")
+        logger.info(
+            f"Batch run {run_id} cancelled after {processed}/{total} threads processed"
+        )
         return {"run_id": str(run_id), "cancelled": True, **summary}
 
     except Exception as e:

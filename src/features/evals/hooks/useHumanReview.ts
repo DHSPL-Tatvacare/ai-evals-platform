@@ -42,8 +42,8 @@ interface UseHumanReviewReturn {
   overallVerdict: OverallVerdict | null;
   /** Reviewed count */
   reviewedCount: number;
-  /** Submit to backend */
-  submit: (notes?: string, adjustedMetrics?: Record<string, number>) => Promise<void>;
+  /** Submit to backend — returns saved HumanReview on success, null on failure */
+  submit: (notes?: string, adjustedMetrics?: Record<string, number>) => Promise<HumanReview | null>;
   /** Discard local changes, revert to saved */
   discard: () => void;
 }
@@ -188,8 +188,8 @@ export function useHumanReview({
   }, [flowType, segmentReviews, fieldReviews]);
 
   // --- Submit ---
-  const submit = useCallback(async (notes?: string, adjustedMetrics?: Record<string, number>) => {
-    if (!aiEvalRunId) return;
+  const submit = useCallback(async (notes?: string, adjustedMetrics?: Record<string, number>): Promise<HumanReview | null> => {
+    if (!aiEvalRunId) return null;
 
     setIsSubmitting(true);
     try {
@@ -248,12 +248,14 @@ export function useHumanReview({
         savedSegmentRef.current = new Map(segmentReviews);
       }
 
-      notificationService.success('Human review saved');
+      notificationService.success('Human review saved — metrics recomputed');
+      return saved;
     } catch (err) {
       notificationService.error(
         err instanceof Error ? err.message : 'Failed to save human review',
         'Save Error',
       );
+      return null;
     } finally {
       setIsSubmitting(false);
     }

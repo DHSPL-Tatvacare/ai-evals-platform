@@ -1,6 +1,12 @@
-import { Mic, MessageSquare, Shield } from 'lucide-react';
-import { Card, MermaidDiagram, Badge, ExportButton } from '@/components';
-import { usePageExport } from '@/hooks/usePageExport';
+import {
+  ArrowRight,
+  Database,
+  Monitor,
+  Server,
+  type LucideIcon,
+} from "lucide-react";
+import { Card, MermaidDiagram, Badge, PageHeader } from "@/components";
+import { usePageExport } from "@/hooks/usePageExport";
 
 const archDiagram = `graph TB
     Browser["Browser (React + Vite)"] -->|"/api/*"| Vite["Vite Dev Proxy :5173"]
@@ -25,73 +31,154 @@ const archDiagram = `graph TB
 
 const workspaces = [
   {
-    icon: Mic,
-    iconBg: '#dbeafe',
-    iconColor: '#2563eb',
-    title: 'Voice RX',
-    description: 'Evaluate medical voice transcription quality. Upload audio + transcripts, run AI-judged transcription and per-segment critique using a two-call LLM pipeline.',
+    iconSrc: "/voice-rx-icon.jpeg",
+    iconAlt: "Voice RX icon",
+    title: "Voice RX",
+    description:
+      "Evaluate medical voice transcription quality. Upload audio + transcripts, run AI-judged transcription and per-segment critique using a two-call LLM pipeline.",
     badges: [
-      { color: 'blue' as const, label: 'Transcription' },
-      { color: 'purple' as const, label: 'Evaluation' },
+      { color: "blue" as const, label: "Transcription" },
+      { color: "purple" as const, label: "Evaluation" },
     ],
   },
   {
-    icon: MessageSquare,
-    iconBg: '#d1fae5',
-    iconColor: '#059669',
-    title: 'Kaira Bot',
-    description: 'Test the Kaira health assistant chatbot. Run live chat sessions via SSE streaming, then evaluate conversations using custom evaluators with structured output schemas.',
+    iconSrc: "/kaira-icon.svg",
+    iconAlt: "Kaira Bot icon",
+    title: "Kaira Bot",
+    description:
+      "Test the Kaira health assistant chatbot. Run live chat sessions via SSE streaming, then evaluate conversations using custom evaluators with structured output schemas.",
     badges: [
-      { color: 'green' as const, label: 'Chat' },
-      { color: 'purple' as const, label: 'Evaluation' },
+      { color: "green" as const, label: "Chat" },
+      { color: "purple" as const, label: "Evaluation" },
     ],
   },
   {
-    icon: Shield,
-    iconBg: '#ede9fe',
-    iconColor: '#7c3aed',
-    title: 'Kaira Evals',
-    description: 'Batch and adversarial testing at scale. Upload CSV chat threads for batch evaluation, or run automated adversarial stress tests against the live Kaira API.',
+    iconSrc: "/kaira-icon.svg",
+    iconAlt: "Kaira Evals icon",
+    title: "Kaira Evals",
+    description:
+      "Batch and adversarial testing at scale. Upload CSV chat threads for batch evaluation, or run automated adversarial stress tests against the live Kaira API.",
     badges: [
-      { color: 'amber' as const, label: 'Batch' },
-      { color: 'purple' as const, label: 'Adversarial' },
+      { color: "amber" as const, label: "Batch" },
+      { color: "purple" as const, label: "Adversarial" },
     ],
   },
 ];
 
 const techStack = [
-  { title: 'Frontend', items: ['React 19', 'Vite', 'TypeScript', 'Zustand', 'Tailwind CSS v4'] },
-  { title: 'Backend', items: ['FastAPI', 'async SQLAlchemy', 'asyncpg', 'Python'] },
-  { title: 'Database', items: ['PostgreSQL 16', 'JSONB columns', 'Docker Compose'] },
+  {
+    title: "Frontend",
+    icon: Monitor,
+    items: ["React 19", "Vite", "TypeScript", "Zustand", "Tailwind CSS v4"],
+  },
+  {
+    title: "Backend",
+    icon: Server,
+    items: ["FastAPI", "async SQLAlchemy", "asyncpg", "Python"],
+  },
+  {
+    title: "Database",
+    icon: Database,
+    items: ["PostgreSQL 16", "JSONB columns", "Docker Compose"],
+  },
 ];
+
+interface TechStackSection {
+  title: string;
+  icon: LucideIcon;
+  items: string[];
+}
+
+interface TechStackCardProps {
+  stack: TechStackSection;
+}
+
+function TechStackCard({ stack }: TechStackCardProps) {
+  const Icon = stack.icon;
+
+  return (
+    <Card className="h-full">
+      <div className="flex h-full flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg"
+            style={{
+              background: "var(--bg-secondary)",
+              color: "var(--accent-text)",
+            }}
+          >
+            <Icon size={16} />
+          </span>
+          <h3
+            className="text-[1.0625rem] font-bold tracking-tight"
+            style={{ color: "var(--text)" }}
+          >
+            {stack.title}
+          </h3>
+        </div>
+        <ul
+          className="list-disc list-inside text-sm"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {stack.items.map((item) => (
+            <li key={item} className="py-0.5">
+              {item}
+            </li>
+          ))}
+        </ul>
+        <a
+          href="#sbom"
+          className="mt-auto inline-flex items-center gap-1.5 pt-2 text-xs font-semibold"
+          style={{ color: "var(--accent-text)" }}
+        >
+          View related inventory in SBOM
+          <ArrowRight size={14} />
+        </a>
+      </div>
+    </Card>
+  );
+}
 
 export default function Overview() {
   const { contentRef } = usePageExport();
 
   return (
-    <div ref={contentRef} className="page-content animate-fade-in-up" data-title="Overview">
-      <div className="flex items-center justify-between mb-6">
-        <div />
-        <ExportButton pageTitle="Overview" contentRef={contentRef} />
-      </div>
+    <div
+      ref={contentRef}
+      className="page-content animate-fade-in-up"
+      data-title="Overview"
+    >
+      <PageHeader pageTitle="Overview" contentRef={contentRef} />
 
       {/* Hero */}
       <div
-        className="rounded-2xl text-center py-8 px-6 mb-8 relative overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa)', color: '#ffffff' }}
+        className="relative mb-6 overflow-hidden rounded-2xl px-6 py-6 text-center"
+        style={{
+          background: "linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa)",
+          color: "#ffffff",
+        }}
       >
         <div
           className="absolute -top-1/2 -left-1/2 w-[150%] h-[150%] pointer-events-none"
-          style={{ background: 'radial-gradient(circle at 30% 40%, rgba(255,255,255,0.05) 0%, transparent 60%)' }}
+          style={{
+            background:
+              "radial-gradient(circle at 30% 40%, rgba(255,255,255,0.05) 0%, transparent 60%)",
+          }}
         />
-        <h1 className="text-2xl font-extrabold tracking-tight mb-2 relative">AI Evals Platform</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight mb-2 relative">
+          AI Evals Platform
+        </h1>
         <p className="text-sm opacity-90 max-w-[480px] mx-auto relative">
-          An interactive guide to understanding how the platform evaluates AI systems across Voice RX, Kaira Bot, and Kaira Evals workspaces.
+          An interactive guide to understanding how the platform evaluates AI
+          systems across Voice RX, Kaira Bot, and Kaira Evals workspaces.
         </p>
       </div>
 
       {/* Three Workspaces */}
-      <h2 className="text-2xl font-bold mt-2 mb-5 flex items-center gap-2" style={{ color: 'var(--text)' }}>
+      <h2
+        className="text-2xl font-bold mt-2 mb-5 flex items-center gap-2"
+        style={{ color: "var(--text)" }}
+      >
         Three Workspaces
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -99,20 +186,36 @@ export default function Overview() {
           <Card key={ws.title}>
             <div className="flex flex-col gap-3">
               <div
-                className="w-12 h-12 rounded-full inline-flex items-center justify-center mb-1"
-                style={{ background: ws.iconBg }}
+                className="w-12 h-12 rounded-xl inline-flex items-center justify-center mb-1"
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                }}
               >
-                <ws.icon size={28} color={ws.iconColor} />
+                <img
+                  src={ws.iconSrc}
+                  alt={ws.iconAlt}
+                  className="w-8 h-8 object-contain"
+                  loading="lazy"
+                />
               </div>
-              <h3 className="text-[1.0625rem] font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+              <h3
+                className="text-[1.0625rem] font-bold tracking-tight"
+                style={{ color: "var(--text)" }}
+              >
                 {ws.title}
               </h3>
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: "var(--text-secondary)" }}
+              >
                 {ws.description}
               </p>
               <div className="flex flex-wrap gap-2 mt-1">
                 {ws.badges.map((b) => (
-                  <Badge key={b.label} color={b.color}>{b.label}</Badge>
+                  <Badge key={b.label} color={b.color}>
+                    {b.label}
+                  </Badge>
                 ))}
               </div>
             </div>
@@ -121,28 +224,34 @@ export default function Overview() {
       </div>
 
       {/* Technology Stack */}
-      <h2 className="text-2xl font-bold mb-5 flex items-center gap-2" style={{ color: 'var(--text)' }}>
+      <h2
+        className="text-2xl font-bold mb-5 flex items-center gap-2"
+        style={{ color: "var(--text)" }}
+      >
         Technology Stack
       </h2>
+      <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
+        Need exact package versions and transitive dependencies?{" "}
+        <a
+          href="#sbom"
+          className="font-semibold"
+          style={{ color: "var(--accent-text)" }}
+        >
+          Jump to SBOM
+        </a>
+        .
+      </p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         {techStack.map((stack) => (
-          <Card key={stack.title}>
-            <div className="flex flex-col gap-3">
-              <h3 className="text-[1.0625rem] font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-                {stack.title}
-              </h3>
-              <ul className="list-disc list-inside text-sm" style={{ color: 'var(--text-secondary)' }}>
-                {stack.items.map((item) => (
-                  <li key={item} className="py-0.5">{item}</li>
-                ))}
-              </ul>
-            </div>
-          </Card>
+          <TechStackCard key={stack.title} stack={stack} />
         ))}
       </div>
 
       {/* Architecture Overview */}
-      <h2 className="text-2xl font-bold mb-5 flex items-center gap-2" style={{ color: 'var(--text)' }}>
+      <h2
+        className="text-2xl font-bold mb-5 flex items-center gap-2"
+        style={{ color: "var(--text)" }}
+      >
         Architecture Overview
       </h2>
       <MermaidDiagram chart={archDiagram} />

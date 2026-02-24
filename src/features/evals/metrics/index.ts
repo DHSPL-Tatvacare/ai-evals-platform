@@ -8,6 +8,7 @@ export {
 export {
   type MetricRating,
   type MetricResult,
+  type MetricSource,
   getRating,
   getRatingForErrorRate,
   getRatingColors,

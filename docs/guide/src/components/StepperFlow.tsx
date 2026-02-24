@@ -9,22 +9,28 @@ interface StepperFlowProps {
 
 export default function StepperFlow({ steps }: StepperFlowProps) {
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-0 my-6">
+    <div className="my-4 flex flex-col items-start gap-0 sm:flex-row sm:items-center">
       {steps.map((step, i) => (
         <div key={i} className="flex items-center gap-0">
-          <div className="flex flex-col items-center sm:items-start gap-2 min-w-[140px]">
+          <div className="flex min-w-[132px] flex-col items-center gap-2 sm:items-start">
             <div className="flex items-center gap-3">
               <div
-                className="flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0"
-                style={{ background: 'var(--accent)', color: '#ffffff' }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                style={{ background: "var(--accent)", color: "#ffffff" }}
               >
                 {i + 1}
               </div>
               <div>
-                <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                <div
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--text)" }}
+                >
                   {step.title}
                 </div>
-                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <div
+                  className="text-xs"
+                  style={{ color: "var(--text-secondary)" }}
+                >
                   {step.description}
                 </div>
               </div>
@@ -33,13 +39,13 @@ export default function StepperFlow({ steps }: StepperFlowProps) {
           {i < steps.length - 1 && (
             <div
               className="hidden sm:block w-8 h-px mx-2 shrink-0"
-              style={{ background: 'var(--border)' }}
+              style={{ background: "var(--border)" }}
             />
           )}
           {i < steps.length - 1 && (
             <div
               className="sm:hidden w-px h-6 ml-4"
-              style={{ background: 'var(--border)' }}
+              style={{ background: "var(--border)" }}
             />
           )}
         </div>

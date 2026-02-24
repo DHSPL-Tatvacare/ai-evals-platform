@@ -1,4 +1,4 @@
-import { Info } from 'lucide-react';
+import { Info, UserCheck } from 'lucide-react';
 import { Tooltip } from '@/components/ui';
 import { cn } from '@/utils';
 import { getRatingColors, type MetricResult } from '../metrics';
@@ -32,8 +32,21 @@ function InfoIcon({ metric }: { metric: MetricResult }) {
   );
 }
 
+/** Small indicator shown when metric was recomputed with human review */
+function HumanSourceIcon() {
+  return (
+    <Tooltip
+      content="Recomputed with human review adjustments"
+      position="bottom"
+    >
+      <UserCheck className="h-3 w-3 text-[var(--color-brand-primary)] cursor-help shrink-0" />
+    </Tooltip>
+  );
+}
+
 export function MetricCard({ metric, compact = false }: MetricCardProps) {
   const colors = getRatingColors(metric.rating);
+  const isHumanSource = metric.source === 'human';
 
   if (compact) {
     return (
@@ -42,6 +55,7 @@ export function MetricCard({ metric, compact = false }: MetricCardProps) {
           <span className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
             {metric.label}
             <InfoIcon metric={metric} />
+            {isHumanSource && <HumanSourceIcon />}
           </span>
           <span className={cn('text-[13px] font-semibold', colors.text)}>
             {metric.displayValue}
@@ -63,6 +77,7 @@ export function MetricCard({ metric, compact = false }: MetricCardProps) {
         <span className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
           {metric.label}
           <InfoIcon metric={metric} />
+          {isHumanSource && <HumanSourceIcon />}
         </span>
         <span className={cn('text-[15px] font-bold', colors.text)}>
           {metric.displayValue}

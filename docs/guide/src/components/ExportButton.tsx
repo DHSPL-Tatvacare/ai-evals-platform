@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, type RefObject } from 'react';
-import { Printer, Download, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect, type RefObject } from "react";
+import { Printer, Download, ChevronDown } from "lucide-react";
 
 interface ExportButtonProps {
   pageTitle: string;
@@ -7,25 +7,32 @@ interface ExportButtonProps {
   compact?: boolean;
 }
 
-export default function ExportButton({ pageTitle, contentRef, compact }: ExportButtonProps) {
+export default function ExportButton({
+  pageTitle,
+  contentRef,
+  compact = false,
+}: ExportButtonProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const handlePrint = () => {
     setOpen(false);
     document.title = `${pageTitle} — AI Evals Platform Guide`;
     window.print();
-    document.title = 'AI Evals Platform — Interactive Guide';
+    document.title = "AI Evals Platform — Interactive Guide";
   };
 
   const handleDownloadHtml = () => {
@@ -37,12 +44,12 @@ export default function ExportButton({ pageTitle, contentRef, compact }: ExportB
         try {
           return Array.from(sheet.cssRules)
             .map((rule) => rule.cssText)
-            .join('\n');
+            .join("\n");
         } catch {
-          return '';
+          return "";
         }
       })
-      .join('\n');
+      .join("\n");
 
     const html = `<!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -57,11 +64,11 @@ export default function ExportButton({ pageTitle, contentRef, compact }: ExportB
 </body>
 </html>`;
 
-    const blob = new Blob([html], { type: 'text/html' });
+    const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `${pageTitle.replace(/\s+/g, '-').toLowerCase()}.html`;
+    a.download = `${pageTitle.replace(/\s+/g, "-").toLowerCase()}.html`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -70,32 +77,44 @@ export default function ExportButton({ pageTitle, contentRef, compact }: ExportB
     <div ref={dropdownRef} className="export-btn relative inline-block">
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className={`flex items-center gap-1.5 ${compact ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'} rounded-lg font-medium cursor-pointer transition-colors`}
+        className={`flex items-center rounded-lg font-medium cursor-pointer transition-colors ${
+          compact ? "h-9 gap-1 px-2.5 text-xs" : "gap-1.5 px-3 py-2 text-sm"
+        }`}
         style={{
-          background: 'var(--bg-secondary)',
-          color: 'var(--text-secondary)',
-          border: '1px solid var(--border)',
+          background: "var(--bg-secondary)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border)",
         }}
+        aria-label="Export options"
       >
         <Printer size={16} />
-        Export
+        {!compact && "Export"}
         <ChevronDown size={14} />
       </button>
       {open && (
         <div
           className="absolute right-0 top-full mt-1 rounded-lg py-1 z-10 min-w-[160px]"
           style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-lg)',
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            boxShadow: "var(--shadow-lg)",
           }}
         >
           <button
             onClick={handlePrint}
             className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left cursor-pointer transition-colors"
-            style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontFamily: 'inherit' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text)",
+              fontFamily: "inherit",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--surface-hover)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
           >
             <Printer size={14} />
             Print PDF
@@ -103,9 +122,18 @@ export default function ExportButton({ pageTitle, contentRef, compact }: ExportB
           <button
             onClick={handleDownloadHtml}
             className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left cursor-pointer transition-colors"
-            style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontFamily: 'inherit' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text)",
+              fontFamily: "inherit",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--surface-hover)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
           >
             <Download size={14} />
             Download HTML

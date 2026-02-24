@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType } from "react";
 
 export interface NavItem {
   id: string;
@@ -7,15 +7,15 @@ export interface NavItem {
 }
 
 export const navigation: NavItem[] = [
-  { id: 'overview', label: 'Overview', icon: 'Layout' },
-  { id: 'workflows', label: 'Workflows', icon: 'GitBranch' },
-  { id: 'api-auth', label: 'API & Auth', icon: 'Key' },
-  { id: 'prompts-schemas', label: 'Prompts & Schemas', icon: 'FileText' },
-  { id: 'pipelines', label: 'Pipelines', icon: 'Workflow' },
-  { id: 'brain-map', label: 'Brain Map', icon: 'Brain' },
-  { id: 'db-api-ref', label: 'DB & API Ref', icon: 'Database' },
-  { id: 'sbom', label: 'SBOM', icon: 'Package' },
-  { id: 'api-explorer', label: 'API Explorer', icon: 'Terminal' },
+  { id: "overview", label: "Overview", icon: "Layout" },
+  { id: "workflows", label: "Workflows", icon: "GitBranch" },
+  { id: "api-auth", label: "API & Auth", icon: "Key" },
+  { id: "prompts-schemas", label: "Prompts & Schemas", icon: "FileText" },
+  { id: "pipelines", label: "Pipelines", icon: "Workflow" },
+  { id: "brain-map", label: "Code Map", icon: "Code2" },
+  { id: "db-api-ref", label: "DB & API Ref", icon: "Database" },
+  { id: "api-explorer", label: "API Explorer", icon: "Terminal" },
+  { id: "sbom", label: "SBOM", icon: "Package" },
 ];
 
 export interface PageDef {

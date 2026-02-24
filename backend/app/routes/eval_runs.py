@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
+from app.models.listing import Listing
 from app.models.job import Job
 from app.schemas.base import CamelModel
 from app.schemas.eval_run import HumanReviewUpsert
@@ -343,6 +344,11 @@ async def upsert_human_review(
             completed_at=now,
         )
         db.add(human_run)
+
+    # 6. Mark the parent listing as completed
+    listing = await db.get(Listing, ai_run.listing_id)
+    if listing and listing.status != "completed":
+        listing.status = "completed"
 
     await db.commit()
     await db.refresh(human_run)

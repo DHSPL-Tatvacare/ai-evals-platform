@@ -4,6 +4,8 @@
 
 export type MetricRating = 'excellent' | 'good' | 'fair' | 'poor';
 
+export type MetricSource = 'ai' | 'human';
+
 export interface MetricResult {
   id: string;
   label: string;
@@ -15,6 +17,8 @@ export interface MetricResult {
   description?: string;
   /** Static definition + formula shown in info tooltip */
   tooltip?: string;
+  /** Origin of this metric value — drives UI indicators */
+  source?: MetricSource;
 }
 
 /**
