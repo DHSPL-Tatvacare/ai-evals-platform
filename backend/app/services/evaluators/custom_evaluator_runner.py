@@ -306,6 +306,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
             error_message="Cancelled",
         )
         logger.info("Custom evaluator %s cancelled for %s", evaluator_id, entity_ref)
+        raise
 
     except Exception as e:
         error_msg = safe_error_message(e)
@@ -409,6 +410,8 @@ async def run_custom_eval_batch(job_id, params: dict) -> dict:
 
             completed += 1
             return result
+        except JobCancelledError:
+            raise
         except Exception as e:
             errors += 1
             logger.error("Batch custom eval %s failed: %s", eid, e)
@@ -416,12 +419,15 @@ async def run_custom_eval_batch(job_id, params: dict) -> dict:
 
     try:
         if parallel:
-            tasks = [_run_one(eid, i) for i, eid in enumerate(valid_ids)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for i, r in enumerate(results):
-                if isinstance(r, Exception):
-                    errors += 1
-                    logger.error("Batch custom eval %s raised: %s", valid_ids[i], r)
+            tasks = [asyncio.create_task(_run_one(eid, i)) for i, eid in enumerate(valid_ids)]
+            try:
+                await asyncio.gather(*tasks)
+            except JobCancelledError:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
         else:
             for i, eid in enumerate(valid_ids):
                 await update_job_progress(job_id, i, total, f"Running evaluator {i + 1}/{total}...")

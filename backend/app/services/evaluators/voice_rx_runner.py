@@ -451,20 +451,13 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
                 if k not in evaluation:
                     evaluation[k] = v
 
-        async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(
-                    EvalRun.id == eval_run_id,
-                    EvalRun.status != "cancelled",
-                ).values(
-                    status="failed",
-                    completed_at=datetime.now(timezone.utc),
-                    duration_ms=(time.monotonic() - start_time) * 1000,
-                    error_message=f"[{e.step}] {e.message}",
-                    result=evaluation,
-                )
-            )
-            await db.commit()
+        await finalize_eval_run(
+            eval_run_id,
+            status="failed",
+            duration_ms=(time.monotonic() - start_time) * 1000,
+            error_message=f"[{e.step}] {e.message}",
+            result=evaluation,
+        )
         raise
 
     except Exception as e:
