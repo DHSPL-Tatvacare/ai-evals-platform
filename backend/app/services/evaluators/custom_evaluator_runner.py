@@ -120,6 +120,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     listing_id = params.get("listing_id")
     session_id = params.get("session_id")
     app_id = params.get("app_id", "voice-rx")
+    thinking = params.get("thinking", "low")
     is_session_flow = session_id is not None
 
     entity_ref = session_id if is_session_flow else listing_id
@@ -237,6 +238,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
         "provider": db_settings["provider"],
         "evaluator_name": evaluator.name,
         "auth_method": db_settings["auth_method"],
+        "thinking": thinking,
     }
 
     # Update eval_run with config and LLM info
@@ -270,12 +272,14 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
                 audio_bytes=audio_bytes,
                 mime_type=mime_type,
                 json_schema=json_schema,
+                thinking=thinking,
             )
             output, _was_repaired = _safe_parse_json(response_text)
         else:
             output = await llm.generate_json(
                 prompt=prompt_text,
                 json_schema=json_schema,
+                thinking=thinking,
             )
             response_text = json.dumps(output, ensure_ascii=False)
 
@@ -386,6 +390,7 @@ async def run_custom_eval_batch(job_id, params: dict) -> dict:
         sub_params = {
             "evaluator_id": eid,
             "app_id": app_id,
+            "thinking": params.get("thinking", "low"),
             "timeouts": params.get("timeouts"),
         }
         if listing_id:
