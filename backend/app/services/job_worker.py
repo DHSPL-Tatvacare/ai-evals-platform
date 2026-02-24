@@ -145,22 +145,29 @@ async def update_job_progress(
     """
     async with async_session() as db:
         job = await db.get(Job, job_id)
-        if job:
-            new_progress = {
-                "current": current,
-                "total": total,
-                "message": message,
-                **extra,
-            }
-            # Preserve run_id if it was set previously and not overridden
-            if (
-                "run_id" not in extra
-                and isinstance(job.progress, dict)
-                and "run_id" in job.progress
-            ):
-                new_progress["run_id"] = job.progress["run_id"]
-            job.progress = new_progress
-            await db.commit()
+        if not job:
+            return
+
+        new_progress = {
+            "current": current,
+            "total": total,
+            "message": message,
+            **extra,
+        }
+
+        # Preserve run_id from previous progress (first-class metadata).
+        # run_id is semantically a relationship (eval_run → job) stored in
+        # the progress dict; it must survive overwrites from step updates.
+        existing_run_id = (
+            job.progress.get("run_id")
+            if isinstance(job.progress, dict)
+            else None
+        )
+        if existing_run_id and "run_id" not in extra:
+            new_progress["run_id"] = existing_run_id
+
+        job.progress = new_progress
+        await db.commit()
 
 
 def mark_job_cancelled(job_id) -> None:
@@ -247,16 +254,18 @@ async def worker_loop():
                             job.result = result_data or {}
                             job.completed_at = datetime.now(timezone.utc)
                             # Preserve run_id so frontend can still redirect
-                            done_progress = {
+                            existing_run_id = (
+                                job.progress.get("run_id")
+                                if isinstance(job.progress, dict)
+                                else None
+                            )
+                            done_progress: dict = {
                                 "current": 1,
                                 "total": 1,
                                 "message": "Done",
                             }
-                            if (
-                                isinstance(job.progress, dict)
-                                and "run_id" in job.progress
-                            ):
-                                done_progress["run_id"] = job.progress["run_id"]
+                            if existing_run_id:
+                                done_progress["run_id"] = existing_run_id
                             job.progress = done_progress
                             await db.commit()
                             logger.info(f"Job {job.id} completed")

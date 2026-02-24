@@ -484,12 +484,16 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
                 if k not in evaluation:
                     evaluation[k] = v
 
+        # Generate partial summary so list views show what was computed
+        partial_summary = _build_summary(flow, evaluation)
+
         await finalize_eval_run(
             eval_run_id,
             status="failed",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message=f"[{e.step}] {e.message}",
             result=evaluation,
+            summary=partial_summary,
         )
         raise
 
@@ -497,12 +501,17 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
         error_msg = safe_error_message(e)
         evaluation["status"] = "failed"
         evaluation["error"] = error_msg
+
+        # Generate partial summary so list views show what was computed
+        partial_summary = _build_summary(flow, evaluation)
+
         await finalize_eval_run(
             eval_run_id,
             status="failed",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message=error_msg,
             result=evaluation,
+            summary=partial_summary,
         )
         raise
 
@@ -540,11 +549,21 @@ async def _run_transcription(
     if not schema:
         raise ValueError(f"No transcription schema configured for {flow.flow_type} flow.")
 
-    # Inject script constraint into schema field descriptions when a concrete
-    # target script is set (not "auto").  Mirrors what build_normalization_schema
-    # does for the normalization step.
+    # ── Script enforcement (single resolution, three injection levels) ──
+    # Script constraints are enforced at three levels for maximum compliance:
+    #   1. Schema field descriptions — forces structured output script
+    #   2. System prompt — establishes baseline expectation
+    #   3. Hard directive prepended to prompt — most effective for compliance
+    #
+    # resolve_prompt() above may also resolve {{script_instruction}} in the
+    # prompt template, but the directive (level 3) is the authoritative
+    # constraint for the standard voice-rx pipeline. {{script_instruction}}
+    # is kept functional for custom evaluator prompts that use it directly.
     output_script = prerequisites.get("outputScript", "")
-    script_display = resolve_script_name(output_script)
+    script_display = resolve_script_name(output_script) if output_script != "auto" else ""
+    language = prerequisites.get("language", "Not specified")
+
+    # Level 1: Schema field descriptions
     if script_display:
         schema = copy.deepcopy(schema)
         props = schema.get("properties", {})
@@ -560,15 +579,10 @@ async def _run_transcription(
             if input_prop:
                 input_prop["description"] = f"Full transcribed text — MUST be in {script_display} script"
 
-    # Build system prompt for script/language anchoring
-    output_script = prerequisites.get("outputScript", "")
-    script_display = resolve_script_name(output_script) if output_script != "auto" else ""
-    language = prerequisites.get("language", "Not specified")
+    # Level 2: System prompt
     transcription_sys = build_transcription_system_prompt(script_display, language)
 
-    # Prepend hard script directive at the TOP of the prompt so the model sees
-    # it immediately — burying it deep in the prompt lets the model commit to
-    # the audio's native script before encountering the constraint.
+    # Level 3: Hard directive at TOP of prompt (authoritative script constraint)
     if script_display:
         script_directive = (
             f">>> MANDATORY OUTPUT SCRIPT: {script_display} <<<\n"
@@ -961,12 +975,32 @@ async def _run_critique(
 
 
 def _build_summary(flow: FlowConfig, evaluation: dict) -> dict | None:
-    """Build a consistent summary regardless of flow type."""
-    if evaluation.get("status") != "completed":
+    """Build a consistent summary regardless of flow type.
+
+    Returns partial summaries for incomplete evaluations so list views
+    can show what was computed before failure.
+    """
+    status = evaluation.get("status", "unknown")
+    critique = evaluation.get("critique", {})
+    summary: dict = {"flow_type": flow.flow_type}
+
+    # Determine completeness level
+    has_transcription = bool(evaluation.get("judgeOutput"))
+    has_critique = bool(critique)
+
+    if status == "completed" and has_critique:
+        summary["completeness"] = "full"
+    elif has_critique:
+        summary["completeness"] = "partial_with_critique"
+    elif has_transcription:
+        summary["completeness"] = "partial_transcription_only"
+    else:
+        # Nothing useful to summarize (failed before transcription produced output)
         return None
 
-    critique = evaluation.get("critique", {})
-    summary = {"flow_type": flow.flow_type}
+    if status != "completed":
+        summary["status"] = status
+        summary["failed_step"] = evaluation.get("failedStep")
 
     if flow.requires_segments:
         # Upload: use server-computed statistics (never trust LLM counts)

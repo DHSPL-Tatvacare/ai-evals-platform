@@ -185,7 +185,10 @@ def _resolve_single(
         return prerequisites.get("sourceScript", prerequisites.get("source_script", "auto"))
 
     if key == "script_instruction":
-        # Direct, unambiguous instruction block — no conditional branches for the model
+        # Direct, unambiguous instruction block — no conditional branches for the model.
+        # Note: For voice-rx standard transcription, the runner prepends a hard
+        # directive that takes precedence over this resolved value.
+        # This variable still resolves for use in custom evaluator prompts.
         output_script = prerequisites.get("outputScript")
         if not output_script:
             output_script = prerequisites.get("targetScript", prerequisites.get("target_script", "roman"))
