@@ -38,6 +38,8 @@ from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.flow_config import FlowConfig
 from app.services.evaluators.evaluation_constants import (
     resolve_script_name,
+    build_transcription_system_prompt,
+    CRITIQUE_SYSTEM_PROMPT,
     NORMALIZATION_PROMPT,
     NORMALIZATION_PROMPT_PLAIN,
     build_normalization_schema,
@@ -242,11 +244,20 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
     total_steps = flow.total_steps
 
+    # Build system prompts for observability snapshot
+    _script_display = resolve_script_name(output_script) if output_script != "auto" else ""
+    _language = prerequisites.get("language", "Not specified")
+    transcription_sys_prompt = build_transcription_system_prompt(_script_display, _language)
+
     # Store config snapshot
     config_snapshot = {
         "prompts": {
             "transcription": transcription_prompt,
             "evaluation": "[hardcoded standard pipeline]",
+        },
+        "system_prompts": {
+            "transcription": transcription_sys_prompt,
+            "critique": CRITIQUE_SYSTEM_PROMPT,
         },
         "schemas": {
             "transcription": transcription_schema,
@@ -411,8 +422,13 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
         duration_ms = (time.monotonic() - start_time) * 1000
 
         async with async_session() as db:
-            await db.execute(
-                update(EvalRun).where(EvalRun.id == eval_run_id).values(
+            result = await db.execute(
+                update(EvalRun)
+                .where(
+                    EvalRun.id == eval_run_id,
+                    EvalRun.status != "cancelled",  # Don't overwrite cancel
+                )
+                .values(
                     status="completed",
                     completed_at=completed_at,
                     duration_ms=duration_ms,
@@ -421,6 +437,11 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
                 )
             )
             await db.commit()
+            if result.rowcount == 0:
+                logger.info(
+                    "Eval run %s was cancelled before completion write — skipping",
+                    eval_run_id,
+                )
 
         duration = time.monotonic() - start_time
         return {
@@ -527,11 +548,30 @@ async def _run_transcription(
             if input_prop:
                 input_prop["description"] = f"Full transcribed text — MUST be in {script_display} script"
 
+    # Build system prompt for script/language anchoring
+    output_script = prerequisites.get("outputScript", "")
+    script_display = resolve_script_name(output_script) if output_script != "auto" else ""
+    language = prerequisites.get("language", "Not specified")
+    transcription_sys = build_transcription_system_prompt(script_display, language)
+
+    # Prepend hard script directive at the TOP of the prompt so the model sees
+    # it immediately — burying it deep in the prompt lets the model commit to
+    # the audio's native script before encountering the constraint.
+    if script_display:
+        script_directive = (
+            f">>> MANDATORY OUTPUT SCRIPT: {script_display} <<<\n"
+            f"ALL text you produce MUST be in {script_display} script. "
+            "Do NOT use Devanagari, Arabic, or any other script. "
+            "This applies to every field in your output.\n\n"
+        )
+        final_prompt = script_directive + final_prompt
+
     response_text = await llm.generate_with_audio(
         prompt=final_prompt,
         audio_bytes=audio_bytes,
         mime_type=mime_type,
         json_schema=schema,
+        system_prompt=transcription_sys,
         thinking=thinking,
     )
 
@@ -775,6 +815,7 @@ async def _run_critique(
         # Call generate_json — NO AUDIO
         critique_text = await llm.generate_json(
             prompt=prompt,
+            system_prompt=CRITIQUE_SYSTEM_PROMPT,
             json_schema=UPLOAD_EVALUATION_SCHEMA,
             thinking=thinking,
         )
@@ -787,6 +828,17 @@ async def _run_critique(
                 critique_text, original_segments, judge_segments, llm.model_name,
                 total_segments=total_segments,
             )
+
+        # Validate required critique fields
+        segments_val = parsed_critique.get("segments")
+        if not isinstance(segments_val, list):
+            raise PipelineStepError(
+                step="critique",
+                message="LLM critique response missing 'segments' array",
+                partial_result=dict(evaluation),
+            )
+        if not parsed_critique.get("overallAssessment"):
+            logger.warning("Critique response missing overallAssessment — using empty string")
 
         # Build critique segments with back-fill
         critique_segments = []
@@ -857,12 +909,22 @@ async def _run_critique(
 
         raw_critique = await llm.generate_json(
             prompt=prompt,
+            system_prompt=CRITIQUE_SYSTEM_PROMPT,
             json_schema=API_EVALUATION_SCHEMA,
             thinking=thinking,
         )
 
         if isinstance(raw_critique, str):
             raw_critique = parse_api_critique_response(raw_critique, llm.model_name)
+
+        # Validate required API critique fields
+        structured = raw_critique.get("structuredComparison")
+        if not structured or not isinstance(structured, dict):
+            raise PipelineStepError(
+                step="critique",
+                message="LLM critique response missing 'structuredComparison' object",
+                partial_result=dict(evaluation),
+            )
 
         raw_critique["generatedAt"] = datetime.now(timezone.utc).isoformat()
         raw_critique["model"] = llm.model_name

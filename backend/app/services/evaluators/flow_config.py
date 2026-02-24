@@ -17,7 +17,6 @@ class FlowConfig:
     flow_type: FlowType
 
     # ── Step enablement ──
-    skip_transcription: bool = False
     normalize_original: bool = False
 
     # ── Flow-derived properties ──
@@ -44,12 +43,9 @@ class FlowConfig:
     @property
     def total_steps(self) -> int:
         """Number of pipeline steps for progress tracking."""
-        steps = 0
-        if not self.skip_transcription:
-            steps += 1
+        steps = 2  # transcription + critique (always)
         if self.normalize_original:
             steps += 1
-        steps += 1  # critique always runs
         return steps
 
     @classmethod
@@ -58,6 +54,5 @@ class FlowConfig:
         flow_type: FlowType = "api" if source_type == "api" else "upload"
         return cls(
             flow_type=flow_type,
-            skip_transcription=params.get("skip_transcription", False),
             normalize_original=params.get("normalize_original", False),
         )
