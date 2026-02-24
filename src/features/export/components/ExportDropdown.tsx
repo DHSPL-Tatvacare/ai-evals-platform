@@ -1,28 +1,25 @@
 import { useState, useMemo } from 'react';
-import { Download, FileJson, FileText, FileType } from 'lucide-react';
+import { Download, FileText, FileType } from 'lucide-react';
 import { SplitButton } from '@/components/ui';
-import { exporterRegistry, downloadBlob, type Exporter } from '@/services/export';
-import type { Listing, AIEvaluation, HumanReview } from '@/types';
+import { exporterRegistry, downloadBlob, type Exporter, type EvalExportPayload } from '@/services/export';
 
 interface ExportDropdownProps {
-  listing: Listing;
+  /** Async function that resolves all eval data into the universal payload */
+  getPayload: () => Promise<EvalExportPayload>;
+  /** Title used for the downloaded filename */
+  filenameBase: string;
   className?: string;
   size?: 'sm' | 'md';
   disabled?: boolean;
-  aiEval?: AIEvaluation | null;
-  humanReview?: HumanReview | null;
 }
 
-export function ExportDropdown({ listing, className, size = 'md', disabled = false, aiEval, humanReview }: ExportDropdownProps) {
+export function ExportDropdown({ getPayload, filenameBase, className, size = 'md', disabled = false }: ExportDropdownProps) {
   const [isExporting, setIsExporting] = useState<string | null>(null);
-  
+
   const exporters = useMemo(() => exporterRegistry.getAll(), []);
 
   const getIconForExporter = (exporter: Exporter) => {
     switch (exporter.id) {
-      case 'json':
-      case 'corrections-json':
-        return <FileJson className="h-4 w-4" />;
       case 'csv':
         return <FileText className="h-4 w-4" />;
       case 'pdf':
@@ -34,18 +31,14 @@ export function ExportDropdown({ listing, className, size = 'md', disabled = fal
 
   const handleExport = async (exporter: Exporter) => {
     setIsExporting(exporter.id);
-    
+
     try {
-      const blob = await exporter.export({
-        listing,
-        exportedAt: new Date(),
-        aiEval,
-        humanReview,
-      });
-      
-      const safeTitle = listing.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const payload = await getPayload();
+      const blob = await exporter.export(payload);
+
+      const safeTitle = filenameBase.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const filename = `${safeTitle}_${exporter.id}.${exporter.extension}`;
-      
+
       downloadBlob(blob, filename);
     } catch (error) {
       console.error('Export failed:', error);
@@ -54,7 +47,6 @@ export function ExportDropdown({ listing, className, size = 'md', disabled = fal
     }
   };
 
-  // Use the first exporter as the primary action
   const primaryExporter = exporters[0];
   const dropdownExporters = exporters.slice(1);
 

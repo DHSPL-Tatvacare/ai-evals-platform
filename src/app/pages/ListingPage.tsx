@@ -358,8 +358,7 @@ export function ListingPage() {
             </h1>
             <ListingActionMenu
               listing={listing}
-              aiEval={aiEval}
-              humanReview={humanReview}
+              appId={appId}
               onFetchFromApi={handleFetchFromApi}
               onRefetchFromApi={() => setShowRefetchConfirm(true)}
               onAddTranscript={handleAddTranscript}
@@ -369,6 +368,7 @@ export function ListingPage() {
               isAnyOperationInProgress={isAnyOperationInProgress}
               isEvaluating={isEvaluating}
               canEvaluate={canEvaluate}
+              hasExistingEval={!!aiEval}
             />
           </div>
           <MetricsBar

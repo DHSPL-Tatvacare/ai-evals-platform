@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { CustomEvaluationResult, EvaluatorDescriptor } from '@/types/evalRuns';
-import { OutputFieldRenderer } from '../OutputFieldRenderer';
+import { FieldValue } from '../OutputFieldRenderer';
 import { cn } from '@/utils';
 import { humanize } from '@/utils/evalFormatters';
 
@@ -64,29 +64,58 @@ export default function CustomEvalsTab({ customEvaluations, evaluatorDescriptors
 
         if (!ce.output) return null;
 
+        const schema = descriptor?.outputSchema?.filter(f => f.displayMode !== 'hidden');
+        const hasDescriptions = schema?.some(f => f.description);
+
         return (
           <div key={key} className="space-y-2">
             <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
               {ce.evaluator_name}
             </h3>
 
-            {descriptor?.outputSchema?.length ? (
-              <OutputFieldRenderer schema={descriptor.outputSchema} output={ce.output} mode="card" />
-            ) : (
-              // Fallback: key-value rendering
-              <div className="space-y-1.5">
-                {Object.entries(ce.output).map(([k, v]) => (
-                  <div key={k} className="flex items-start gap-2 text-sm">
-                    <span className="text-[var(--text-muted)] shrink-0 font-medium min-w-[100px]">
-                      {humanize(k)}:
-                    </span>
-                    <span className="text-[var(--text-primary)] break-words">
-                      {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v ?? '\u2014')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border-subtle)]">
+                    <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Metric</th>
+                    <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-20">Value</th>
+                    {hasDescriptions && (
+                      <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Description</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {schema?.length ? (
+                    schema.map(f => (
+                      <tr key={f.key} className="border-b border-[var(--border-subtle)]">
+                        <td className="py-1.5 px-2 font-medium text-[var(--text-primary)]">
+                          {f.label || humanize(f.key)}
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <FieldValue field={f} value={ce.output![f.key]} />
+                        </td>
+                        {hasDescriptions && (
+                          <td className="py-1.5 px-2 text-xs text-[var(--text-muted)]">
+                            {f.description || ''}
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  ) : (
+                    Object.entries(ce.output).map(([k, v]) => (
+                      <tr key={k} className="border-b border-[var(--border-subtle)]">
+                        <td className="py-1.5 px-2 font-medium text-[var(--text-primary)]">
+                          {humanize(k)}
+                        </td>
+                        <td className="py-1.5 px-2 text-[var(--text-secondary)] break-words">
+                          {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v ?? '\u2014')}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       })}

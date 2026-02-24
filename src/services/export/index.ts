@@ -1,12 +1,12 @@
-export type { Exporter, ExportData } from './types';
+export type { Exporter, EvalExportPayload, EvalExportEntry, ExportSource, ExportField, ExportHumanReview } from './types';
 export { exporterRegistry } from './exporterRegistry';
-export { jsonExporter, csvExporter, pdfExporter } from './exporters';
+export { csvExporter, pdfExporter } from './exporters';
+export { resolveVoiceRxExport } from './resolvers';
 
 // Initialize exporters on import
 import { exporterRegistry } from './exporterRegistry';
-import { jsonExporter, csvExporter, pdfExporter } from './exporters';
+import { csvExporter, pdfExporter } from './exporters';
 
-exporterRegistry.register(jsonExporter);
 exporterRegistry.register(csvExporter);
 exporterRegistry.register(pdfExporter);
 

@@ -28,7 +28,7 @@ import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from "@/utils/evalColors";
 import { getLabelDefinition } from "@/config/labelDefinitions";
 import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
-import { formatTimestamp, formatDuration, pct, normalizeLabel } from "@/utils/evalFormatters";
+import { formatTimestamp, formatDuration, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
 
 function SuccessBanner({ durationSeconds }: { durationSeconds: number }) {
   return (
@@ -459,11 +459,11 @@ export default function RunDetail() {
       <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-1">
         {threadEvals.length > 0 && (
           <>
-            <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage').length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
+            <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage')).length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
               <StatPill label="Threads" metricKey="total_threads" value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length} />
               {summarySkipped > 0 && <StatPill label="Skipped" value={summarySkipped} color="var(--text-muted)" />}
               {(run.evaluator_descriptors ?? [])
-                .filter(d => d.aggregation?.average != null || d.primaryField?.format === 'percentage')
+                .filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage'))
                 .slice(0, 2)
                 .map(d => (
                   <StatPill
@@ -471,7 +471,7 @@ export default function RunDetail() {
                     label={d.name}
                     metricKey={d.id}
                     value={d.aggregation?.average != null
-                      ? pct(d.aggregation.average)
+                      ? formatMetric(d.aggregation.average, d.primaryField?.format)
                       : pct(threadEvals.reduce((s, e) => s + (e.intent_accuracy ?? 0), 0) / threadEvals.length)}
                   />
                 ))}
@@ -491,7 +491,7 @@ export default function RunDetail() {
             <div className="flex gap-4 flex-wrap">
               {run.evaluator_descriptors
                 ? run.evaluator_descriptors
-                  .filter(d => d.primaryField?.format === 'verdict' && d.aggregation?.distribution && Object.keys(d.aggregation.distribution).length > 0)
+                  .filter(d => d.type === 'built-in' && d.primaryField?.format === 'verdict' && d.aggregation?.distribution && Object.keys(d.aggregation.distribution).length > 0)
                   .map(d => (
                     <div key={d.id} className="flex-1 min-w-[260px]">
                       <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">{d.name}</h3>
@@ -529,7 +529,7 @@ export default function RunDetail() {
                       <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{name}</p>
                       <p className="text-xs text-[var(--text-muted)] mt-0.5">{completed} completed{errors > 0 ? `, ${errors} failed` : ""}</p>
                       {average != null && (
-                        <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">Avg: {average <= 1 ? `${(average * 100).toFixed(0)}%` : average.toFixed(1)}</p>
+                        <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">Avg: {formatMetric(average, run.evaluator_descriptors?.find(d => d.id === id)?.primaryField?.format)}</p>
                       )}
                       {distribution && Object.keys(distribution).length > 0 && (
                         <div className="mt-1.5"><DistributionBar distribution={distribution} /></div>

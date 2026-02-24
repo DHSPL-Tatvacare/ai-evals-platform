@@ -28,6 +28,20 @@ export function pct(value: number, decimals = 1): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
 
+/**
+ * Format an aggregated metric value using the evaluator's primaryField format.
+ * - 'percentage': value is 0-1 fraction → "85.0%"
+ * - 'number' / any other explicit format → raw number
+ * - undefined (no descriptor): heuristic — 0-1 treated as percentage, else raw
+ */
+export function formatMetric(value: number, format?: string): string {
+  if (format === 'percentage') return pct(value);
+  if (format) return value % 1 === 0 ? String(value) : value.toFixed(1);
+  // No format — heuristic fallback
+  if (value >= 0 && value <= 1) return pct(value);
+  return value % 1 === 0 ? String(value) : value.toFixed(1);
+}
+
 /** Format ISO timestamp to local date+time string */
 export function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {

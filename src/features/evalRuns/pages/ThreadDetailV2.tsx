@@ -232,70 +232,81 @@ export default function ThreadDetailV2() {
   // - Body: flex-1 min-h-0, fills remaining space
   return (
     <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
-      {/* Header — single row: breadcrumb + nav left, metrics right */}
-      <div className="shrink-0 pb-3 flex items-center justify-between gap-4 flex-wrap">
-        <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-          <Link to="/kaira/runs" className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>
-          {current && (
-            <>
-              <span>/</span>
-              <Link
-                to={routes.kaira.runDetail(current.run_id)}
-                className="hover:text-[var(--text-brand)] transition-colors font-mono"
-              >
-                {current.run_id.slice(0, 12)}
-              </Link>
-            </>
-          )}
-          <span>/</span>
-          <span className="font-mono text-[var(--text-primary)] font-medium">{threadId}</span>
-          {history.length > 1 && (
-            <select
-              value={selected}
-              onChange={(e) => setSelected(Number(e.target.value))}
-              className="ml-1 px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]"
-            >
-              {history.map((h, i) => (
-                <option key={h.id ?? i} value={i}>
-                  {formatTimestamp(h.created_at)}
-                  {h.worst_correctness ? ` \u2022 ${h.worst_correctness}` : ''}
-                  {h.efficiency_verdict ? ` \u2022 ${h.efficiency_verdict}` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-          {history.length === 1 && current && (
-            <span className="ml-1">{formatTimestamp(current.created_at)}</span>
-          )}
+      {/* Header — two rows: breadcrumb + controls, then centered metric bar */}
+      <div className="shrink-0 pb-3 space-y-2">
+        {/* Row 1: breadcrumb left, controls right */}
+        <div className="flex items-center justify-between gap-4">
+          <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] min-w-0">
+            <Link to="/kaira/runs" className="hover:text-[var(--text-brand)] transition-colors shrink-0">Runs</Link>
+            {current && (
+              <>
+                <span>/</span>
+                <Link
+                  to={routes.kaira.runDetail(current.run_id)}
+                  className="hover:text-[var(--text-brand)] transition-colors font-mono shrink-0"
+                >
+                  {current.run_id.slice(0, 12)}
+                </Link>
+              </>
+            )}
+            <span>/</span>
+            <span className="font-mono text-[var(--text-primary)] font-medium truncate">{threadId}</span>
+            {history.length === 1 && current && (
+              <span className="ml-1 shrink-0">{formatTimestamp(current.created_at)}</span>
+            )}
+          </nav>
 
-          {/* Prev / Next thread navigation */}
-          {siblingThreadIds.length > 1 && (
-            <span className="inline-flex items-center gap-0.5 ml-2 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)]">
-              <button
-                disabled={!prevThreadId}
-                onClick={() => prevThreadId && goToThread(prevThreadId)}
-                className="p-1 disabled:opacity-30 hover:bg-[var(--surface-hover)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
-                title={prevThreadId ? `Previous thread (Alt+\u2190)` : 'No previous thread'}
+          {/* Controls: run selector + thread nav */}
+          <div className="flex items-center gap-2 shrink-0">
+            {history.length > 1 && (
+              <select
+                value={selected}
+                onChange={(e) => setSelected(Number(e.target.value))}
+                className="text-xs px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]"
               >
-                <ChevronLeft size={14} />
-              </button>
-              <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)]">
-                {siblingIndex + 1}/{siblingThreadIds.length}
+                {history.map((h, i) => (
+                  <option key={h.id ?? i} value={i}>
+                    {formatTimestamp(h.created_at)}
+                    {h.worst_correctness ? ` \u2022 ${h.worst_correctness}` : ''}
+                    {h.efficiency_verdict ? ` \u2022 ${h.efficiency_verdict}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {siblingThreadIds.length > 1 && (
+              <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)]">
+                <button
+                  disabled={!prevThreadId}
+                  onClick={() => prevThreadId && goToThread(prevThreadId)}
+                  className="p-1 disabled:opacity-30 hover:bg-[var(--surface-hover)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
+                  title={prevThreadId ? `Previous thread (Alt+\u2190)` : 'No previous thread'}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)]">
+                  {siblingIndex + 1}/{siblingThreadIds.length}
+                </span>
+                <button
+                  disabled={!nextThreadId}
+                  onClick={() => nextThreadId && goToThread(nextThreadId)}
+                  className="p-1 disabled:opacity-30 hover:bg-[var(--surface-hover)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
+                  title={nextThreadId ? `Next thread (Alt+\u2192)` : 'No next thread'}
+                >
+                  <ChevronRight size={14} />
+                </button>
               </span>
-              <button
-                disabled={!nextThreadId}
-                onClick={() => nextThreadId && goToThread(nextThreadId)}
-                className="p-1 disabled:opacity-30 hover:bg-[var(--surface-hover)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
-                title={nextThreadId ? `Next thread (Alt+\u2192)` : 'No next thread'}
-              >
-                <ChevronRight size={14} />
-              </button>
-            </span>
-          )}
-        </nav>
+            )}
+          </div>
+        </div>
 
+        {/* Row 2: metric bar — centered, horizontally scrollable on overflow */}
         {current && result && (
-          <SummaryBar evalRow={current} result={result} evaluatorDescriptors={evaluatorDescriptors} />
+          <div className="overflow-x-auto scrollbar-thin">
+            <div className="w-fit mx-auto">
+              <SummaryBar evalRow={current} result={result} evaluatorDescriptors={evaluatorDescriptors} />
+            </div>
+          </div>
         )}
       </div>
 

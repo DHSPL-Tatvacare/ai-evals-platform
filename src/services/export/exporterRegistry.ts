@@ -1,4 +1,4 @@
-import type { Exporter, ExportData } from './types';
+import type { Exporter, EvalExportPayload } from './types';
 
 const exporters = new Map<string, Exporter>();
 
@@ -19,7 +19,7 @@ export const exporterRegistry = {
     return Array.from(exporters.values());
   },
 
-  async export(exporterId: string, data: ExportData): Promise<Blob> {
+  async export(exporterId: string, data: EvalExportPayload): Promise<Blob> {
     const exporter = exporters.get(exporterId);
     if (!exporter) {
       throw new Error(`Exporter "${exporterId}" not found`);

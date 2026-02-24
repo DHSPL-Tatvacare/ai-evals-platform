@@ -98,7 +98,7 @@ export default function SummaryBar({ evalRow, result, evaluatorDescriptors }: Pr
 
   return (
     <div
-      className="inline-flex flex-wrap items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm"
+      className="inline-flex items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm"
     >
       {metrics.map((m, i) => (
         <div

@@ -64,7 +64,7 @@ export function OutputFieldRenderer({ schema, output, mode, fieldKey }: OutputFi
   );
 }
 
-function FieldValue({ field, value, compact }: { field: OutputFieldDef; value: unknown; compact?: boolean }) {
+export function FieldValue({ field, value, compact }: { field: OutputFieldDef; value: unknown; compact?: boolean }) {
   if (value == null) return <span className="text-[var(--text-muted)]">&mdash;</span>;
 
   switch (field.type) {

@@ -3,12 +3,12 @@
  * Consolidates data-source, export, and eval-variant actions
  * into a single MoreHorizontal dropdown so metrics stay prominent.
  */
-import { useState, useRef, useEffect, useMemo, type ReactNode } from 'react';
-import { MoreHorizontal, RefreshCw, Cloud, FileText, Download, FileJson, FileType, Play, Clock } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { MoreHorizontal, RefreshCw, Cloud, FileText, Download, FileType, Play, Clock } from 'lucide-react';
 import { Tooltip } from '@/components/ui';
-import { exporterRegistry, downloadBlob, type Exporter } from '@/services/export';
+import { exporterRegistry, downloadBlob, resolveVoiceRxExport, type Exporter } from '@/services/export';
 import { cn } from '@/utils';
-import type { Listing, AIEvaluation, HumanReview } from '@/types';
+import type { Listing } from '@/types';
 
 interface ActionItem {
   id: string;
@@ -23,8 +23,7 @@ interface ActionItem {
 
 interface ListingActionMenuProps {
   listing: Listing;
-  aiEval: AIEvaluation | null;
-  humanReview: HumanReview | null;
+  appId: string;
   /** Data-source actions */
   onFetchFromApi: () => void;
   onRefetchFromApi: () => void;
@@ -37,12 +36,12 @@ interface ListingActionMenuProps {
   isAnyOperationInProgress: boolean;
   isEvaluating: boolean;
   canEvaluate: boolean;
+  hasExistingEval: boolean;
 }
 
 export function ListingActionMenu({
   listing,
-  aiEval,
-  humanReview,
+  appId,
   onFetchFromApi,
   onRefetchFromApi,
   onAddTranscript,
@@ -52,13 +51,12 @@ export function ListingActionMenu({
   isAnyOperationInProgress,
   isEvaluating,
   canEvaluate,
+  hasExistingEval,
 }: ListingActionMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const hasExistingEval = !!aiEval;
   const hasApiResponse = !!listing.apiResponse;
   const hasTranscript = !!listing.transcript;
 
@@ -89,9 +87,6 @@ export function ListingActionMenu({
 
   const getExportIcon = (exporter: Exporter) => {
     switch (exporter.id) {
-      case 'json':
-      case 'corrections-json':
-        return <FileJson className="h-3.5 w-3.5" />;
       case 'csv':
         return <FileText className="h-3.5 w-3.5" />;
       case 'pdf':
@@ -101,16 +96,12 @@ export function ListingActionMenu({
     }
   };
 
-  const handleExport = async (exporter: Exporter) => {
+  const handleExport = useCallback(async (exporter: Exporter) => {
     setIsOpen(false);
     setIsExporting(exporter.id);
     try {
-      const blob = await exporter.export({
-        listing,
-        exportedAt: new Date(),
-        aiEval,
-        humanReview,
-      });
+      const payload = await resolveVoiceRxExport(appId, listing);
+      const blob = await exporter.export(payload);
       const safeTitle = listing.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       downloadBlob(blob, `${safeTitle}_${exporter.id}.${exporter.extension}`);
     } catch (error) {
@@ -118,7 +109,7 @@ export function ListingActionMenu({
     } finally {
       setIsExporting(null);
     }
-  };
+  }, [appId, listing]);
 
   // --- Build context-aware action list ---
   const actions: ActionItem[] = [];
@@ -199,7 +190,6 @@ export function ListingActionMenu({
       <div ref={menuRef} className="relative">
         <Tooltip content="More actions" position="bottom">
           <button
-            ref={buttonRef}
             type="button"
             onClick={() => setIsOpen(prev => !prev)}
             className={cn(
