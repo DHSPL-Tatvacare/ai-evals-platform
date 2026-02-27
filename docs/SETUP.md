@@ -37,6 +37,12 @@ OPENAI_API_KEY=<your-openai-key>
 DEFAULT_LLM_PROVIDER=gemini
 ```
 
+Optional (needed for Vertex AI service account auth - used by Voice Rx evaluation jobs):
+
+```env
+GEMINI_SERVICE_ACCOUNT_PATH=service-account.json
+```
+
 Optional (needed for adversarial runs against live Kaira API):
 
 ```env

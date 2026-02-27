@@ -17,8 +17,10 @@ Prefer existing abstractions and local patterns over new architecture.
 - DB: PostgreSQL 16, JSON/JSONB-heavy schema.
 - App IDs in active use: `voice-rx`, `kaira-bot`.
 - `kaira-evals` appId has been removed from frontend app settings state.
-- API routers registered in `backend/app/main.py`: 14 routers.
+- API routers registered in `backend/app/main.py`: 15 routers (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin).
 - ORM tables: 15 total (`eval_runs`, `jobs`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat_sessions`, `chat_messages`, `history`, `settings`, `tags`, `thread_evaluations`, `adversarial_evaluations`, `api_logs`).
+- Zustand stores: 13 (appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore).
+- LLM providers: Gemini (dual auth: service account for backend jobs, API key for frontend-triggered tasks) and OpenAI.
 
 ## Build, lint, run, and test commands
 
@@ -165,9 +167,11 @@ Minimum acceptance criteria for UI changes:
 
 ## External agent-rule files
 
-- Copilot rules exist at `.github/copilot-instructions.md`.
+- Agent guidance: `AGENTS.md`.
+- Copilot rules: `.github/copilot-instructions.md`.
 - Cursor rules not found (`.cursorrules` and `.cursor/rules/` absent at time of writing).
-- If Copilot instructions conflict with live code (for example older IndexedDB notes), follow current codebase and this file.
+- Architecture education: `docs/PROJECT 101.md`.
+- If Copilot instructions conflict with live code, follow current codebase and this file.
 
 ## Fixed integration constant
 

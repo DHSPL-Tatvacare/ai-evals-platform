@@ -1,905 +1,417 @@
-# AI Evals Platform - Architecture Education Plan
+# AI Evals Platform - Project 101
 
-**Goal:** Teach the fundamental separation of concerns in this React/TypeScript codebase through the **Prompt/Schema Management** use case - showing how folders work together from UI click to API persistence.
-
----
-
-## 📚 Learning Path
-
-This document explains the codebase architecture by following a real user flow:
-**"User creates a new evaluation prompt and uses it to evaluate audio"**
-
-### Workplan
-
-- [x] Analyze codebase structure
-- [ ] Explain folder responsibilities (types, constants, services, stores, hooks, components, features)
-- [ ] Trace prompt creation flow through all layers
-- [ ] Trace prompt usage in evaluation flow
-- [ ] Provide quick reference cheat sheet
+A guided walkthrough of how this codebase works, aimed at new developers and coding agents. Follows a real user flow to explain how all the layers connect.
 
 ---
 
-## 🏗️ Architecture Overview: The Folder Hierarchy
+## Architecture Overview
 
-Think of this app as **layers of responsibility**:
+This is a full-stack application with a clear separation between frontend and backend:
 
 ```
-┌─────────────────────────────────────────────┐
-│  UI Layer (features/, components/)         │  ← User sees & clicks
-├─────────────────────────────────────────────┤
-│  State Layer (stores/)                      │  ← React state management
-├─────────────────────────────────────────────┤
-│  Business Logic (services/)                 │  ← Core algorithms
-├─────────────────────────────────────────────┤
-│  Data Layer (services/api/)                  │  ← HTTP API calls → PostgreSQL
-└─────────────────────────────────────────────┘
-
-Supporting cast:
-- types/      → TypeScript definitions (the contract)
-- constants/  → Hardcoded values (single source of truth)
-- hooks/      → Reusable React logic (glue between UI & stores)
-- utils/      → Pure functions (no side effects)
+Browser (React)                     Server (FastAPI)                  Database
+┌───────────────────┐   HTTP/JSON   ┌──────────────────────┐         ┌──────────┐
+│  UI Components    │──────────────>│  API Routers (15)    │────────>│          │
+│  Zustand Stores   │<──────────────│  Services/Evaluators │<────────│ Postgres │
+│  API Client Layer │               │  Job Worker          │         │  (JSONB) │
+└───────────────────┘               │  LLM Providers       │         └──────────┘
+     :5173                          └──────────────────────┘
+                                         :8721
 ```
+
+**Key principle:** The frontend never calls LLM APIs directly. All evaluation logic, LLM calls, and data persistence run through the FastAPI backend. The frontend is a thin client that manages UI state and makes API calls.
 
 ---
 
-## 📁 Folder Responsibilities Explained
+## The Two Workspaces
 
-### 1. **`types/`** - The Contract Language
+The platform has two active app IDs, each with their own evaluation workflows:
 
-**Purpose:** Define the "shape" of data that flows through the app.
+### Voice Rx (`voice-rx`)
+Medical transcription evaluation. Users upload audio files and reference transcripts, then run a two-call evaluation pipeline:
+1. **Transcription call** - LLM listens to audio and generates a transcript
+2. **Critique call** - LLM compares the generated transcript against the reference (text-only, no audio)
 
-**Rule:** If data crosses a boundary (component → service, store → component, etc.), it must have a type.
-
-**Example - Prompt Definition:**
-```typescript
-// src/types/prompt.types.ts
-export interface PromptDefinition {
-  id: string;
-  name: string;                    // "Evaluation Prompt v3"
-  version: number;                 // Auto-increment per type
-  createdAt: Date;
-  updatedAt: Date;
-  promptType: 'transcription' | 'evaluation' | 'extraction';
-  prompt: string;                  // The actual prompt text
-  description?: string;
-  isDefault?: boolean;
-}
-```
-
-**Why this matters:**
-- TypeScript prevents bugs: Can't pass a `SchemaDefinition` where `PromptDefinition` is expected
-- Self-documenting: New developers see what fields exist without digging
-- Intellisense: Your editor autocompletes properties
-
-**Re-export pattern:**
-```typescript
-// src/types/index.ts
-export * from './prompt.types';
-export * from './schema.types';
-// ... other types
-```
-Allows: `import { PromptDefinition, SchemaDefinition } from '@/types';`
+### Kaira Bot (`kaira-bot`)
+Conversational AI evaluation. Users chat with a bot, then run evaluators against the conversation data. Supports:
+- Single custom evaluator runs
+- Batch thread evaluations (from CSV)
+- Adversarial testing (automated red-teaming)
 
 ---
 
-### 2. **`constants/`** - Single Source of Truth
+## Frontend Layer (`src/`)
 
-**Purpose:** Hardcoded values that never change at runtime. Prevents magic strings/numbers.
+### Folder Responsibilities
 
-**What lives here:**
-- Default prompts/schemas (seeded on first run)
-- LLM model configurations
-- Regex patterns
-- UI labels/messages
+```
+src/
+├── components/ui/       <- Generic UI primitives (Button, Modal, Card, Badge)
+├── config/              <- Route constants, app configuration
+├── constants/           <- Hardcoded values, default configs
+├── features/            <- Domain-specific modules (see below)
+├── hooks/               <- Reusable React logic
+├── services/
+│   ├── api/             <- HTTP client + per-resource API modules
+│   ├── storage/         <- Barrel re-export from api/ (backward compat)
+│   ├── notifications/   <- Toast messages
+│   └── logger/          <- Structured diagnostic logging
+├── stores/              <- Zustand state management (13 stores)
+├── styles/              <- Tailwind v4 globals + CSS variables
+├── types/               <- TypeScript interfaces and type definitions
+└── utils/               <- Pure helper functions (cn, date parsing, etc.)
+```
 
-**Example:**
+### Feature Modules (`src/features/`)
+
+Each feature is a self-contained domain module with its own components, hooks, and utils:
+
+| Feature | Purpose |
+|---------|---------|
+| `voiceRx` | Dashboard, run list, run detail, settings for voice-rx evaluations |
+| `evalRuns` | Shared evaluation dashboard, run list, run detail (used by kaira-bot) |
+| `kaira` | Chat interface, message tagging, trace analysis, action buttons |
+| `kairaBotSettings` | Kaira-specific settings and tag management |
+| `settings` | Shared settings infrastructure (LLM provider config, prompt/schema editors) |
+| `upload` | File upload with drag-and-drop, CSV preview, validation |
+| `transcript` | Transcript viewer with segment-level display and audio alignment |
+| `structured-outputs` | JSON viewer, schema validator, structured output display |
+| `evals` | Metric displays, comparison cards, evaluation statistics |
+| `export` | PDF/CSV/JSON export with format selectors |
+| `listings` | Listing cards, list views, detail views |
+| `common` | Shared feature components (35+ UI primitives) |
+
+### Zustand Stores (`src/stores/`)
+
+Stores are in-memory caches of server data plus ephemeral UI state. They follow a consistent pattern:
+
 ```typescript
-// src/constants/prompts.ts
-export const DEFAULT_EVALUATION_PROMPT: Omit<PromptDefinition, 'id' | 'createdAt' | 'updatedAt'> = {
-  name: 'Default Evaluation v1',
-  version: 1,
-  promptType: 'evaluation',
-  prompt: `You are an expert medical transcription evaluator...
-  
-Compare the AI transcript against the ground truth:
-{{transcript}} vs {{llm_transcript}}
-
-Output structured JSON per segment.`,
-  isDefault: true,
-};
-```
-
-**Why not hardcode in components?**
-```typescript
-// ❌ BAD: Scattered across files
-<Button>Evaluation Prompt v3</Button>
-const label = "Evaluation Prompt v3";
-
-// ✅ GOOD: One place to change
-import { PROMPT_TYPE_LABELS } from '@/constants';
-<Button>{PROMPT_TYPE_LABELS.evaluation}</Button>
-```
-
----
-
-### 3. **`services/`** - The Business Logic Brain
-
-**Purpose:** Pure business logic. No React, no JSX. Testable in isolation.
-
-**Key principle:** Services don't know about React. They operate on raw data.
-
-**Structure:**
-```
-services/
-├── api/              ← HTTP client layer (fetch → FastAPI → PostgreSQL)
-├── storage/          ← Barrel re-export from api/ (backward compat)
-├── llm/              ← LLM provider abstraction (Gemini, OpenAI, etc.)
-├── templates/        ← Prompt variable resolution ({{audio}}, {{transcript}})
-├── evaluation/       ← Two-call evaluation orchestration
-├── notifications/    ← Toast messages
-├── logger/           ← Structured logging
-└── errors/           ← Error normalization
-```
-
-**Example - API Client:**
-```typescript
-// src/services/api/promptsApi.ts
-export const promptsRepository = {
-  async save(appId: AppId, prompt: PromptDefinition): Promise<PromptDefinition> {
-    return apiClient.post('/api/prompts', { ...prompt, app_id: appId });
-  },
-
-  async getAll(appId: AppId, promptType?: PromptType): Promise<PromptDefinition[]> {
-    const params = new URLSearchParams({ app_id: appId });
-    if (promptType) params.set('prompt_type', promptType);
-    return apiClient.get(`/api/prompts?${params}`);
-  },
-};
-```
-
-**Why this pattern?**
-- **Testable:** No React dependencies, just `promptsRepository.save(...)`
-- **Reusable:** Called from components, hooks, or other services
-- **Single Responsibility:** Only knows about HTTP API calls
-
-**Template Service (Variable Resolution):**
-```typescript
-// src/services/templates/variableResolver.ts
-
-// Registry defines what variables exist
-export const TEMPLATE_VARIABLES = {
-  '{{audio}}': {
-    type: 'file',
-    availableIn: ['transcription', 'evaluation'],
-    required: true,
-  },
-  '{{transcript}}': {
-    type: 'text',
-    availableIn: ['evaluation'],
-  },
-  // ... more variables
-};
-
-// Resolver replaces variables with actual data
-export function resolvePrompt(
-  promptText: string, 
-  context: { listing: Listing, audioBlob?: Blob }
-): ResolvedPrompt {
-  let resolved = promptText;
-  
-  // Replace {{transcript}} with actual transcript text
-  if (context.listing.transcript) {
-    resolved = resolved.replace(
-      '{{transcript}}', 
-      formatTranscript(context.listing.transcript)
-    );
-  }
-  
-  // {{audio}} is special - passed separately to LLM API
-  const audioBlob = context.audioBlob;
-  
-  return { text: resolved, media: { audio: audioBlob } };
-}
-```
-
-**LLM Service (Provider Pattern):**
-```typescript
-// src/services/llm/providers/GeminiProvider.ts
-export class GeminiProvider implements ILLMProvider {
-  async generateContent(
-    prompt: string, 
-    options?: LLMGenerateOptions
-  ): Promise<LLMResponse> {
-    const model = this.genai.getGenerativeModel({
-      model: options?.model || 'gemini-2.0-flash',
-      generationConfig: {
-        responseMimeType: options?.schema ? 'application/json' : 'text/plain',
-        responseSchema: options?.schema,
-      },
-    });
-    
-    const result = await model.generateContent(prompt);
-    return { text: result.response.text() };
-  }
-}
-
-// src/services/llm/providerRegistry.ts
-const providers: Record<string, ILLMProvider> = {
-  gemini: new GeminiProvider(apiKey),
-  // openai: new OpenAIProvider(apiKey),  ← Future providers
-};
-```
-
----
-
-### 4. **`stores/`** - State Management (Zustand)
-
-**Purpose:** Global React state. Think of it as an "in-memory database" that React components can subscribe to.
-
-**Why Zustand?** Simpler than Redux, better performance than Context API.
-
-**Pattern:**
-```typescript
-// src/stores/promptsStore.ts
-import { create } from 'zustand';
-
-interface PromptsState {
-  prompts: Record<AppId, PromptDefinition[]>;  // Cache
-  isLoading: boolean;
-  
-  // Actions
-  loadPrompts: (appId: AppId) => Promise<void>;
-  savePrompt: (appId: AppId, prompt: PromptDefinition) => Promise<void>;
-  deletePrompt: (appId: AppId, id: string) => Promise<void>;
-}
-
+// Pattern: Store calls API repository, caches result, React re-renders
 export const usePromptsStore = create<PromptsState>((set, get) => ({
   prompts: { 'voice-rx': [], 'kaira-bot': [] },
-  isLoading: false,
-  
+
   loadPrompts: async (appId) => {
-    set({ isLoading: true });
-    const prompts = await promptsRepository.getAll(appId);
+    const prompts = await promptsApi.getAll(appId);
     set((state) => ({
       prompts: { ...state.prompts, [appId]: prompts },
-      isLoading: false,
-    }));
-  },
-  
-  savePrompt: async (appId, prompt) => {
-    const saved = await promptsRepository.save(appId, prompt);
-    set((state) => ({
-      prompts: {
-        ...state.prompts,
-        [appId]: [...state.prompts[appId], saved],
-      },
     }));
   },
 }));
 ```
 
-**Store Types:**
-- **`promptsStore`** / **`schemasStore`**: Cache prompt/schema definitions
-- **`listingsStore`**: Cache evaluation records (audio metadata, results)
-- **`settingsStore`**: Persisted user preferences (API keys, selected models)
-- **`uiStore`**: Ephemeral UI state (sidebar open/closed, selected items)
-- **`appStore`**: Current app context ('voice-rx' | 'kaira-bot')
-- **`taskQueueStore`**: Background task tracking (progress bars)
+**13 stores:** `appStore`, `appSettingsStore`, `llmSettingsStore`, `globalSettingsStore`, `listingsStore`, `schemasStore`, `promptsStore`, `evaluatorsStore`, `chatStore`, `uiStore`, `miniPlayerStore`, `taskQueueStore`, `jobTrackerStore`.
 
-**Critical Anti-Pattern:**
+**Critical pattern:** Always select slices in components, never the full store:
 ```typescript
-// ❌ INFINITE LOOP: Re-renders on ANY store change
-function MyComponent() {
-  const store = usePromptsStore();  
-  return <div>{store.prompts.length}</div>;
-}
+// Good - re-renders only when prompts change
+const prompts = usePromptsStore((s) => s.prompts['voice-rx']);
 
-// ✅ CORRECT: Only re-renders when prompts change
-function MyComponent() {
-  const prompts = usePromptsStore((state) => state.prompts['voice-rx']);
-  return <div>{prompts.length}</div>;
-}
+// Bad - re-renders on ANY store change
+const store = usePromptsStore();
+```
 
-// ✅ CORRECT: One-off read in callback (doesn't subscribe)
-function MyComponent() {
-  const handleClick = () => {
-    const prompts = usePromptsStore.getState().prompts['voice-rx'];
-    console.log(prompts);
-  };
-  return <button onClick={handleClick}>Log Prompts</button>;
-}
+### API Client Layer (`src/services/api/`)
+
+All HTTP communication goes through a shared client with typed repository wrappers:
+
+| Module | Purpose |
+|--------|---------|
+| `client.ts` | Shared HTTP client (`apiRequest`, `apiUpload`, `apiDownload`) |
+| `listingsApi.ts` | Listing CRUD |
+| `filesApi.ts` | File upload/download |
+| `promptsApi.ts` | Versioned prompts |
+| `schemasApi.ts` | Versioned schemas |
+| `evaluatorsApi.ts` | Custom evaluator definitions |
+| `evalRunsApi.ts` | Evaluation run results |
+| `chatApi.ts` | Chat sessions and messages |
+| `jobsApi.ts` | Job status polling |
+| `jobPolling.ts` | `submitAndPollJob()` - async job lifecycle abstraction |
+| `settingsApi.ts` | Settings persistence |
+| `tagsApi.ts` | Tag management |
+| `adversarialConfigApi.ts` | Adversarial test configuration |
+| `historyApi.ts` | Activity history |
+
+### Frontend Routes (`src/config/routes.ts`)
+
+**Voice Rx:**
+- `/upload` - Upload audio/transcript files
+- `/listing/:id` - Individual listing detail
+- `/dashboard` - Evaluation dashboard with metrics
+- `/runs` - Run list with filtering
+- `/runs/:runId` - Individual run detail
+- `/logs` - API call logs
+- `/settings` - Voice Rx settings (prompts, schemas, LLM config)
+
+**Kaira Bot:**
+- `/kaira/chat` - Chat interface
+- `/kaira/dashboard` - Evaluation dashboard
+- `/kaira/runs` - Run list
+- `/kaira/runs/:runId` - Run detail
+- `/kaira/runs/:runId/adversarial/:evalId` - Adversarial case detail
+- `/kaira/threads/:threadId` - Thread detail
+- `/kaira/logs` - API call logs
+- `/kaira/settings` - Kaira settings
+- `/kaira/settings/tags` - Tag management
+
+---
+
+## Backend Layer (`backend/`)
+
+### Structure
+
+```
+backend/
+├── app/
+│   ├── main.py              <- FastAPI app, router registration, lifespan
+│   ├── database.py          <- Async SQLAlchemy engine + session factory
+│   ├── models/              <- 15 ORM models (SQLAlchemy 2 Mapped[] style)
+│   ├── schemas/             <- Pydantic request/response schemas (CamelModel)
+│   ├── routes/              <- 15 API routers
+│   └── services/
+│       ├── evaluators/      <- LLM providers, evaluation runners
+│       ├── job_worker.py    <- Background job dispatch + handler registry
+│       ├── seed_defaults.py <- Startup seeding (prompts, schemas, evaluators)
+│       └── evaluation_constants.py <- System prompts, normalization templates
+├── requirements.txt
+└── Dockerfile
+```
+
+### Database Models (15 tables)
+
+```
+Listing ──────────┐
+                  ├──> EvalRun ──┬──> ThreadEvaluation
+ChatSession ──────┘     │        ├──> AdversarialEvaluation
+    │                   │        └──> ApiLog
+    └──> ChatMessage    │
+                        └──> Job
+                        └──> Evaluator (nullable FK)
+
+Standalone:
+  Prompt, Schema, FileRecord, History, Setting, Tag
+```
+
+**Core entity: `EvalRun`** - Unified record for all evaluation outcomes. The `eval_type` field determines the polymorphic shape:
+- `full_evaluation` - Voice Rx two-call pipeline result
+- `custom` - Single custom evaluator output
+- `human` - Manual review/annotation
+- `batch_thread` - Kaira batch thread evaluation
+- `batch_adversarial` - Kaira adversarial test result
+
+### API Routers (15)
+
+| Router | Prefix | Purpose |
+|--------|--------|---------|
+| `listings` | `/api/listings` | Evaluation source data (audio, transcripts) |
+| `files` | `/api/files` | File upload/download/metadata |
+| `prompts` | `/api/prompts` | Versioned LLM prompts (per-app, per-type) |
+| `schemas` | `/api/schemas` | JSON schemas for structured output |
+| `evaluators` | `/api/evaluators` | Custom evaluator definitions |
+| `chat` | `/api/chat` | Chat sessions and messages (Kaira) |
+| `history` | `/api/history` | Activity history tracking |
+| `settings` | `/api/settings` | Global and per-app settings |
+| `tags` | `/api/tags` | Message classification tags |
+| `jobs` | `/api/jobs` | Background job queue and polling |
+| `eval_runs` | `/api/eval-runs` | Evaluation results (all types) |
+| `threads` | `/api/threads` | Thread-level evaluation aggregation |
+| `llm` | `/api/llm` | LLM provider config and testing |
+| `adversarial_config` | `/api/adversarial` | Adversarial test case management |
+| `admin` | `/api/admin` | Administrative operations |
+
+### Job Worker (`backend/app/services/job_worker.py`)
+
+Long-running evaluations execute as background jobs. The worker uses a handler registry pattern:
+
+```python
+@register_job_handler("evaluate-voice-rx")
+async def handle_voice_rx(job, session):
+    # Transcription call -> Critique call -> Save results
+    ...
+```
+
+**5 registered handlers:**
+1. `evaluate-voice-rx` - Voice Rx two-call pipeline
+2. `evaluate-batch` - Batch thread evaluation from CSV
+3. `evaluate-adversarial` - Adversarial test execution
+4. `evaluate-custom` - Single custom evaluator
+5. `evaluate-custom-batch` - Batch custom evaluator
+
+**Safety features:**
+- Cooperative cancellation via `is_job_cancelled()` checks
+- Progress tracking via `update_job_progress()`
+- Stale job recovery on startup (jobs stuck >15 minutes)
+- Orphaned eval_run reconciliation
+
+### LLM Providers (`backend/app/services/evaluators/llm_base.py`)
+
+All LLM calls go through a provider abstraction. Never call SDKs directly from runners.
+
+**Gemini (primary):**
+- Service account auth (Vertex AI) for backend jobs - reliable for long tasks
+- API key auth (Developer API) for frontend-triggered settings generation
+- Model family detection: 2.0, 2.5, 3.0, 3.1
+- Thinking config: `thinking_budget` (int) for 2.5, `thinking_level` (enum) for 3+
+- Vertex AI uses `Part.from_bytes()` for media (no file upload API)
+
+**OpenAI (secondary):**
+- API key auth
+- Async wrapper via `asyncio.to_thread()`
+
+**Timeout tiers:**
+| Tier | Timeout | Use case |
+|------|---------|----------|
+| `text_only` | 60s | Text-only generation |
+| `with_schema` | 90s | Structured JSON output |
+| `with_audio` | 180s | Audio transcription |
+| `with_audio_and_schema` | 240s | Audio + structured output |
+
+### Evaluation Runners
+
+| Runner | File | Purpose |
+|--------|------|---------|
+| Voice Rx Runner | `voice_rx_runner.py` | Two-call transcription + critique pipeline |
+| Custom Runner | `custom_evaluator_runner.py` | Execute user-defined evaluator prompt + schema |
+| Batch Runner | `batch_runner.py` | CSV-based batch processing for threads and adversarial |
+| Intent Evaluator | `intent_evaluator.py` | Intent classification |
+| Correctness Evaluator | `correctness_evaluator.py` | Correctness assessment |
+| Efficiency Evaluator | `efficiency_evaluator.py` | Efficiency/workflow evaluation |
+| Adversarial Evaluator | `adversarial_evaluator.py` | Adversarial test case execution |
+
+### Seed Defaults (`backend/app/services/seed_defaults.py`)
+
+On startup, the backend seeds default prompts, schemas, and evaluators for both apps:
+
+**Voice Rx seeds:** 5 prompts (transcription/evaluation/extraction for upload and API flows), 3 schemas (transcription segments, evaluation critique, API format), 3 evaluators (Intent, Correctness, Efficiency)
+
+**Kaira Bot seeds:** 2 prompts (system prompt, conversation starter), 1 schema (chat format), 3 evaluators (Intent, Correctness, Efficiency)
+
+---
+
+## Data Flow: End-to-End Example
+
+### Use Case: Voice Rx Full Evaluation
+
+**User uploads an audio file and runs a full evaluation.**
+
+```
+1. UPLOAD
+   Browser                      Backend
+   FileDropZone component       POST /api/files (multipart upload)
+       │                            │
+       └─> filesApi.upload()        └─> FileRecord saved to DB
+                                        file written to uploads/
+
+2. CREATE LISTING
+   ListingCard component        POST /api/listings
+       │                            │
+       └─> listingsApi.create()     └─> Listing row with file references
+
+3. RUN EVALUATION
+   RunAllOverlay component      POST /api/jobs
+       │                            │
+       └─> submitAndPollJob()       └─> Job row created (status: queued)
+           │                            │
+           │  polls GET /api/jobs/:id   │  job_worker picks up job
+           │  every few seconds         │
+           │                            ├─> Call 1: Transcription
+           │                            │   GeminiProvider.generate() with audio
+           │                            │   System prompt: multilingual, script-aware
+           │                            │
+           │                            ├─> Call 2: Critique (text-only)
+           │                            │   GeminiProvider.generate_json()
+           │                            │   Compares AI transcript vs reference
+           │                            │
+           │                            ├─> EvalRun saved (eval_type: full_evaluation)
+           │                            ├─> ApiLog entries saved (both LLM calls)
+           │                            └─> Job status: completed
+           │
+           └─> navigates to /runs/:runId
+
+4. VIEW RESULTS
+   VoiceRxRunDetail page        GET /api/eval-runs/:id
+       │                            │
+       └─> evalRunsApi.getById()    └─> Returns EvalRun with result JSON
+                                        segment-level findings, aggregate stats
+```
+
+### Use Case: Kaira Batch Thread Evaluation
+
+```
+1. User uploads thread CSV data via upload interface
+2. Frontend calls submitAndPollJob("evaluate-batch", { csv data })
+3. Backend job_worker dispatches to batch_runner
+4. batch_runner iterates rows, runs evaluators per thread
+5. Per-thread results saved as ThreadEvaluation rows
+6. Aggregate EvalRun record saved with summary stats
+7. Frontend polls completion, navigates to run detail
 ```
 
 ---
 
-### 5. **`hooks/`** - Reusable React Logic
+## Key Conventions
 
-**Purpose:** Extract repetitive React logic into reusable functions. "Smart glue" between UI and stores/services.
+### API Contract: snake_case <-> camelCase
 
-**Rule:** Hook name starts with `use`. Can use other hooks inside.
+Python code uses `snake_case` internally. API JSON uses `camelCase`. The translation is automatic via Pydantic's `CamelModel`:
 
-**Example:**
-```typescript
-// src/hooks/useCurrentAppData.ts
-export function useCurrentPrompts(): PromptDefinition[] {
-  const appId = useAppStore((state) => state.currentApp);
-  const prompts = usePromptsStore((state) => state.prompts[appId] || []);
-  return prompts;
-}
-
-export function useCurrentPromptsActions() {
-  const appId = useAppStore((state) => state.currentApp);
-  const loadPrompts = usePromptsStore((state) => state.loadPrompts);
-  const savePrompt = usePromptsStore((state) => state.savePrompt);
-  
-  return {
-    loadPrompts: () => loadPrompts(appId),
-    savePrompt: (prompt: PromptDefinition) => savePrompt(appId, prompt),
-  };
-}
+```python
+# Backend model (snake_case)
+class EvalRunResponse(CamelORMModel):
+    eval_type: str        # -> "evalType" in JSON
+    created_at: datetime  # -> "createdAt" in JSON
 ```
 
-**Usage in component:**
-```typescript
-function PromptsTab() {
-  const prompts = useCurrentPrompts();  // ← Auto-scoped to current app
-  const { loadPrompts, savePrompt } = useCurrentPromptsActions();
-  
-  useEffect(() => {
-    loadPrompts();  // ← No need to pass appId
-  }, []);
-  
-  return <div>{prompts.length} prompts loaded</div>;
-}
+### Versioned Resources
+
+Prompts and schemas are versioned per (app_id, type). The backend auto-increments version numbers:
+
+```
+prompt: app_id="voice-rx", prompt_type="transcription", version=1
+prompt: app_id="voice-rx", prompt_type="transcription", version=2  <- newer
 ```
 
-**Common Hooks:**
-- **`useCurrentAppData`**: Get data scoped to active app (voice-rx vs kaira-bot)
-- **`useDebounce`**: Delay expensive operations (search, auto-save)
-- **`useErrorHandler`**: Centralized error handling
-- **`useKeyboardShortcuts`**: Global keyboard shortcuts (Ctrl+S to save)
-- **`useUnsavedChanges`**: Warn before navigating away from unsaved form
+### Settings Scope
 
----
+Settings can be global or per-app. Global scope uses empty string `''` as app_id (not `null`):
 
-### 6. **`components/`** - Reusable UI Building Blocks
-
-**Purpose:** Generic UI components with no business logic. Pure presentation.
-
-**Structure:**
 ```
-components/
-├── ui/                ← Base components (Button, Input, Modal)
-├── layout/            ← App shell (Sidebar, Header)
-└── feedback/          ← Loading spinners, error states
-```
-
-**Principle:** Components are dumb. They receive props, render JSX, emit events.
-
-**Example:**
-```typescript
-// src/components/ui/Button.tsx
-interface ButtonProps {
-  children: React.ReactNode;
-  onClick?: () => void;
-  variant?: 'primary' | 'secondary' | 'danger';
-  disabled?: boolean;
-}
-
-export function Button({ children, onClick, variant = 'primary', disabled }: ButtonProps) {
-  return (
-    <button
-      className={cn(
-        'px-4 py-2 rounded',
-        variant === 'primary' && 'bg-blue-500 text-white',
-        variant === 'danger' && 'bg-red-500 text-white',
-        disabled && 'opacity-50 cursor-not-allowed'
-      )}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {children}
-    </button>
-  );
-}
-```
-
-**No Business Logic:**
-```typescript
-// ❌ BAD: Button knows about stores
-export function SaveButton() {
-  const save = usePromptsStore((state) => state.savePrompt);
-  return <button onClick={save}>Save</button>;
-}
-
-// ✅ GOOD: Button receives callback as prop
-export function Button({ onClick }) {
-  return <button onClick={onClick}>Save</button>;
-}
+setting: app_id="",          key="defaultProvider"    <- global
+setting: app_id="voice-rx",  key="language"           <- per-app
 ```
 
 ---
 
-### 7. **`features/`** - Domain-Specific Modules
+## Mental Models
 
-**Purpose:** Self-contained feature implementations. Each feature has its own UI, logic, and hooks.
+### 1. Frontend is a Thin Client
+All business logic lives in the backend. The frontend manages UI state, makes API calls, and renders results. It never calls LLM APIs directly.
 
-**Structure:**
-```
-features/
-├── settings/
-│   ├── components/      ← PromptsTab, SchemasTab, PromptCreateOverlay
-│   ├── hooks/           ← Feature-specific hooks (if needed)
-│   └── index.ts         ← Public API
-├── evals/
-│   ├── components/      ← EvaluationOverlay, MetricsDisplay
-│   ├── hooks/           ← useAIEvaluation, useHumanEvaluation
-│   └── metrics/         ← Accuracy calculations
-└── upload/
-    ├── components/      ← AudioUploader, ValidationMessages
-    ├── hooks/           ← useFileValidation
-    └── utils/           ← Audio file processing
-```
+### 2. EvalRun is the Central Entity
+Every evaluation outcome - whether from Voice Rx, custom evaluators, batch threads, or adversarial tests - is an `EvalRun` record. The `eval_type` field determines the shape and meaning of the `result` JSON.
 
-**Feature vs Component:**
-- **Feature** = Business domain (Evaluation, Settings, Upload)
-- **Component** = UI element (Button, Modal, Input)
+### 3. Jobs are the Execution Model
+Any operation that takes more than a few seconds runs as a background job. The pattern is always: create job -> poll status -> get result. Use `submitAndPollJob()`, not custom polling loops.
 
-**Example - Settings Feature:**
-```typescript
-// src/features/settings/components/PromptsTab.tsx
-export function PromptsTab() {
-  const prompts = useCurrentPrompts();
-  const { savePrompt } = useCurrentPromptsActions();
-  const [showModal, setShowModal] = useState(false);
-  
-  const handleCreate = async (text: string) => {
-    await savePrompt({ promptType: 'evaluation', prompt: text });
-    setShowModal(false);
-  };
-  
-  return (
-    <Card>
-      <Button onClick={() => setShowModal(true)}>Create Prompt</Button>
-      {prompts.map(p => <PromptCard key={p.id} prompt={p} />)}
-      
-      <PromptCreateOverlay 
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        onSave={handleCreate}
-      />
-    </Card>
-  );
-}
-```
+### 4. Stores are Caches, Not Sources of Truth
+Zustand stores cache data fetched from the API. On page load, stores call their `load*()` methods to fetch fresh data. The PostgreSQL database is the single source of truth.
+
+### 5. Provider Abstraction Protects Runners
+Evaluation runners never call Gemini/OpenAI SDKs directly. They go through `llm_base.py` providers, which handle auth, retries, timeouts, and token tracking uniformly.
 
 ---
 
-## 🔄 Real-World Flow: Creating & Using a Prompt
+## Quick Reference
 
-### **Use Case:** User creates evaluation prompt → uses it to evaluate audio
-
----
-
-### **Part 1: Creating a Prompt**
-
-**User Action:** Clicks "Create Prompt" button in Settings → Prompts tab
-
-#### Step-by-Step Trace:
-
-```typescript
-// 1️⃣ UI Layer: User clicks button
-// src/features/settings/components/PromptsTab.tsx
-export function PromptsTab() {
-  const [showModal, setShowModal] = useState(false);
-  
-  return (
-    <Button onClick={() => setShowModal(true)}>
-      Create Prompt
-    </Button>
-    
-    <PromptCreateOverlay 
-      isOpen={showModal}
-      promptType="evaluation"
-      onClose={() => setShowModal(false)}
-    />
-  );
-}
-```
-
-```typescript
-// 2️⃣ Modal Opens: User types prompt text
-// src/features/settings/components/PromptCreateOverlay.tsx
-export function PromptCreateOverlay({ isOpen, promptType, onClose }) {
-  const { savePrompt } = useCurrentPromptsActions();  // ← Hook from hooks/
-  const [promptText, setPromptText] = useState('');
-  
-  const handleSave = async () => {
-    await savePrompt({
-      promptType,
-      prompt: promptText,
-      description: 'My custom prompt',
-    });
-    onClose();
-  };
-  
-  return (
-    <Modal isOpen={isOpen}>
-      <textarea 
-        value={promptText} 
-        onChange={(e) => setPromptText(e.target.value)} 
-      />
-      <Button onClick={handleSave}>Save</Button>
-    </Modal>
-  );
-}
-```
-
-```typescript
-// 3️⃣ Hook Layer: Wraps store actions with current app context
-// src/hooks/useCurrentAppData.ts
-export function useCurrentPromptsActions() {
-  const appId = useAppStore((state) => state.currentApp);  // 'voice-rx' or 'kaira-bot'
-  const savePromptAction = usePromptsStore((state) => state.savePrompt);
-  
-  return {
-    savePrompt: (prompt: Partial<PromptDefinition>) => 
-      savePromptAction(appId, prompt),
-  };
-}
-```
-
-```typescript
-// 4️⃣ Store Layer: Orchestrates save + updates cache
-// src/stores/promptsStore.ts
-export const usePromptsStore = create<PromptsState>((set, get) => ({
-  prompts: { 'voice-rx': [], 'kaira-bot': [] },
-  
-  savePrompt: async (appId, prompt) => {
-    // Call repository to persist
-    const saved = await promptsRepository.save(appId, prompt);
-    
-    // Update in-memory cache
-    set((state) => ({
-      prompts: {
-        ...state.prompts,
-        [appId]: [...state.prompts[appId], saved],
-      },
-    }));
-    
-    return saved;
-  },
-}));
-```
-
-```typescript
-// 5️⃣ API Layer: HTTP call to backend
-// src/services/api/promptsApi.ts
-export const promptsRepository = {
-  async save(appId: AppId, prompt: Partial<PromptDefinition>): Promise<PromptDefinition> {
-    // Backend handles version auto-increment and persistence
-    return apiClient.post('/api/prompts', {
-      app_id: appId,
-      prompt_type: prompt.promptType,
-      name: prompt.name,
-      prompt: prompt.prompt,
-      description: prompt.description,
-    });
-  },
-};
-```
-
-**Result:** Prompt is now:
-1. Persisted in PostgreSQL `prompts` table via FastAPI backend
-2. Cached in `promptsStore` state
-3. Visible in PromptsTab UI (React re-renders automatically)
-
----
-
-### **Part 2: Using the Prompt in Evaluation**
-
-**User Action:** Selects prompt in EvaluationOverlay → clicks "Evaluate"
-
-#### Step-by-Step Trace:
-
-```typescript
-// 1️⃣ UI Layer: User selects prompt from dropdown
-// src/features/evals/components/EvaluationOverlay.tsx
-export function EvaluationOverlay({ listing }) {
-  const prompts = useCurrentPrompts();
-  const [selectedPromptId, setSelectedPromptId] = useState('');
-  const { evaluate } = useAIEvaluation();  // ← Hook from features/evals/hooks
-  
-  const handleEvaluate = async () => {
-    const prompt = prompts.find(p => p.id === selectedPromptId);
-    
-    await evaluate(listing, {
-      prompts: {
-        transcription: '...',
-        evaluation: prompt!.prompt,  // ← User's custom prompt
-      },
-    });
-  };
-  
-  return (
-    <Modal>
-      <select onChange={(e) => setSelectedPromptId(e.target.value)}>
-        {prompts.map(p => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
-      </select>
-      <Button onClick={handleEvaluate}>Evaluate</Button>
-    </Modal>
-  );
-}
-```
-
-```typescript
-// 2️⃣ Hook Layer: Orchestrates two-call evaluation flow
-// src/features/evals/hooks/useAIEvaluation.ts
-export function useAIEvaluation() {
-  const evaluate = async (listing: Listing, config: EvaluationConfig) => {
-    // Load audio file from storage
-    const audioBlob = await filesRepository.getAudioBlob(listing.id);
-    
-    // Resolve template variables in prompt
-    const resolved = resolvePrompt(config.prompts.evaluation, {
-      listing,
-      audioBlob,
-    });
-    
-    // CALL 1: Transcription (if not skipped)
-    const transcriptResult = await evaluationService.transcribe(
-      audioBlob,
-      config.prompts.transcription
-    );
-    
-    // CALL 2: Critique (uses Call 1 result)
-    const evaluationResult = await evaluationService.critique(
-      audioBlob,
-      resolved.text,  // ← User's prompt with variables resolved
-      transcriptResult
-    );
-    
-    // Save results to database
-    const aiEval: AIEvaluation = {
-      id: generateId(),
-      listingId: listing.id,
-      result: evaluationResult,
-      createdAt: new Date(),
-    };
-    
-    await listingsRepository.updateAIEvaluation(listing.id, aiEval);
-    
-    return aiEval;
-  };
-  
-  return { evaluate };
-}
-```
-
-```typescript
-// 3️⃣ Service Layer: Template variable resolution
-// src/services/templates/variableResolver.ts
-export function resolvePrompt(
-  promptText: string, 
-  context: { listing: Listing, audioBlob: Blob }
-): ResolvedPrompt {
-  let resolved = promptText;
-  
-  // Replace {{transcript}} with actual transcript
-  if (promptText.includes('{{transcript}}') && context.listing.transcript) {
-    const formatted = context.listing.transcript.segments
-      .map(seg => `[${seg.speaker}]: ${seg.text}`)
-      .join('\n');
-    resolved = resolved.replace('{{transcript}}', formatted);
-  }
-  
-  // Replace {{llm_transcript}} (from Call 1)
-  if (promptText.includes('{{llm_transcript}}') && context.listing.aiEvaluation) {
-    const llmTranscript = context.listing.aiEvaluation.llmTranscript;
-    resolved = resolved.replace('{{llm_transcript}}', llmTranscript);
-  }
-  
-  // {{audio}} is passed separately (not text-replaced)
-  return { 
-    text: resolved, 
-    media: { audio: context.audioBlob } 
-  };
-}
-```
-
-```typescript
-// 4️⃣ Service Layer: LLM invocation
-// src/services/llm/EvaluationService.ts
-export class EvaluationService {
-  async critique(
-    audioBlob: Blob,
-    prompt: string,
-    transcriptResult: TranscriptData
-  ): Promise<EvaluationResult> {
-    const provider = createProvider('gemini', apiKey);
-    
-    // Call LLM with audio + prompt
-    const response = await provider.generateContentWithAudio(
-      prompt,
-      audioBlob,
-      'audio/webm',
-      {
-        model: 'gemini-2.0-flash',
-        schema: evaluationSchema,  // Force structured JSON output
-      }
-    );
-    
-    // Parse structured response
-    const result = JSON.parse(response.text);
-    return result;
-  }
-}
-```
-
-**Result:**
-1. Prompt text has variables replaced with actual data
-2. LLM receives resolved prompt + audio file
-3. Evaluation results saved to database
-4. UI shows results in TranscriptView
-
----
-
-## 🗂️ Data Flow Diagram
-
-```
-User Action (UI)
-    ↓
-Component (features/)
-    ↓
-Hook (hooks/) ← Wraps store actions with app context
-    ↓
-Store (stores/) ← In-memory cache + orchestration
-    ↓
-API Client (services/api/) ← HTTP fetch calls
-    ↓
-FastAPI Backend → PostgreSQL ← Persistence
-```
-
-**Read Flow (Prompt Selector Dropdown):**
-```
-PromptsTab component
-    ↓
-useCurrentPrompts() hook  ← Auto-filters by current app
-    ↓
-usePromptsStore((state) => state.prompts[appId])
-    ↓
-Returns cached array (React re-renders on changes)
-```
-
-**Write Flow (Save Prompt):**
-```
-PromptCreateOverlay component
-    ↓
-useCurrentPromptsActions().savePrompt()
-    ↓
-usePromptsStore.getState().savePrompt(appId, prompt)
-    ↓
-promptsRepository.save(appId, prompt)
-    ↓
-apiClient.post('/api/prompts', data)
-    ↓
-FastAPI → PostgreSQL INSERT
-```
-
----
-
-## 🧠 Mental Models to Internalize
-
-### Model 1: Layers Talk Down, Events Bubble Up
-
-```
-UI Layer          → Emits events (onClick, onSave)
-                  ← Receives data via props
-
-State Layer       → Calls services
-                  ← Returns data synchronously
-
-Service Layer     → Pure functions
-                  ← Never calls React hooks
-
-Data Layer        → Raw database operations
-```
-
-### Model 2: Types are the Contract
-
-```typescript
-// Service promises to return this shape
-function getPrompt(id: string): Promise<PromptDefinition>
-
-// Component promises to accept this shape
-function PromptCard({ prompt }: { prompt: PromptDefinition })
-
-// TypeScript enforces the contract at compile time
-```
-
-### Model 3: Stores are Caches, Not Databases
-
-```typescript
-// ❌ Wrong mental model: "Store is the source of truth"
-const prompts = usePromptsStore(state => state.prompts);
-// What if user refreshes page? Data is lost!
-
-// ✅ Correct: "Store is a cache of API data"
-useEffect(() => {
-  loadPrompts();  // Fetch from API on mount
-}, []);
-```
-
-### Model 4: Features Own Their Domain
-
-```
-features/settings/    ← Owns prompt/schema management UI
-features/evals/       ← Owns evaluation orchestration
-features/upload/      ← Owns audio file validation
-
-They share services/ and stores/ but don't import from each other.
-```
-
----
-
-## 📝 Quick Reference Cheat Sheet
-
-| Need to...                        | Use...                          | Example                                      |
-|-----------------------------------|---------------------------------|----------------------------------------------|
-| Define data shape                 | `types/`                        | `PromptDefinition` interface                 |
-| Store hardcoded values            | `constants/`                    | `DEFAULT_EVALUATION_PROMPT`                  |
-| Call backend API                  | `services/api/`                 | `promptsRepository.save()`                   |
-| Call LLM API                      | `services/llm/`                 | `provider.generateContent()`                 |
-| Resolve template variables        | `services/templates/`           | `resolvePrompt(promptText, context)`         |
-| Manage React state globally       | `stores/`                       | `usePromptsStore()`                          |
-| Extract reusable React logic      | `hooks/`                        | `useCurrentPrompts()`                        |
-| Create generic UI component       | `components/ui/`                | `<Button>`, `<Modal>`                        |
-| Implement feature-specific UI     | `features/<feature>/components` | `PromptCreateOverlay`                        |
-| Implement feature-specific logic  | `features/<feature>/hooks`      | `useAIEvaluation()`                          |
-
----
-
-## 💡 Key Takeaways
-
-1. **Separation of Concerns:**
-   - Types define contracts
-   - Constants avoid magic values
-   - Services contain logic
-   - Stores manage state
-   - Hooks connect React to state
-   - Components render UI
-   - Features bundle domain logic
-
-2. **Data Flow is Unidirectional:**
-   - UI → Hook → Store → Service → Database
-   - Database → Service → Store → Hook → UI (re-render)
-
-3. **Never Mix Layers:**
-   - Services don't import React
-   - Components don't call repositories directly
-   - Stores don't render JSX
-
-4. **Use Existing Patterns:**
-   - New prompt type? Add to `PromptDefinition['promptType']` union
-   - New LLM provider? Implement `ILLMProvider` interface
-   - New feature? Create `features/<name>/` folder
-
-5. **Template Variables Bridge Prompts and Data:**
-   - User writes: `{{transcript}}` in prompt
-   - Resolver replaces with actual transcript text
-   - LLM receives final resolved prompt
-
----
-
-## 🎯 Next Steps
-
-After understanding this:
-1. Try tracing another flow (Schema creation, Chat with Kaira Bot)
-2. Add a new template variable (`{{word_count}}`)
-3. Create a new prompt type (`'summarization'`)
-4. Implement a new LLM provider (OpenAI)
-
-The patterns stay the same - just apply them to new domains!
+| Need to... | Use... |
+|------------|--------|
+| Make an API call | `apiRequest`/`apiUpload` from `src/services/api/client.ts` |
+| Access resource data | Repository wrappers in `src/services/api/*.ts` |
+| Run a background evaluation | `submitAndPollJob()` from `src/services/api/jobPolling.ts` |
+| Read/write global state | Zustand stores in `src/stores/` (select slices) |
+| Navigate between pages | Route constants from `src/config/routes.ts` |
+| Show user feedback | `notificationService.success/error/info/warning` |
+| Log diagnostics | `logger`/`evaluationLogger` (not `console.log`) |
+| Merge CSS classes | `cn()` from `src/utils/cn.ts` |
+| Define data shapes | Interfaces in `src/types/` |
+| Add a new evaluation type | Add handler in `job_worker.py`, runner in `evaluators/`, frontend polling |
+| Add a new API resource | Model + schema + route + frontend API module + store |

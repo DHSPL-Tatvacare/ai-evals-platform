@@ -26,8 +26,10 @@ Default to existing abstractions and local patterns; avoid unnecessary architect
 - Frontend stack: React 19, TypeScript strict, Vite 7, Tailwind v4, Zustand.
 - Backend stack: FastAPI, async SQLAlchemy 2, asyncpg, Python 3.12.
 - Database: PostgreSQL 16 with JSON/JSONB-heavy schema.
-- API surface: 14 routers in `backend/app/main.py`.
+- API surface: 15 routers in `backend/app/main.py` (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin).
 - ORM surface: 15 tables from `backend/app/models/__init__.py`.
+- Zustand stores: 13 (appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore).
+- LLM providers: Gemini (service account + API key) and OpenAI, via `backend/app/services/evaluators/llm_base.py`.
 - Job worker entrypoint: `backend/app/services/job_worker.py`.
 - Registered job types: `evaluate-voice-rx`, `evaluate-batch`, `evaluate-adversarial`, `evaluate-custom`, `evaluate-custom-batch`.
 

@@ -57,11 +57,12 @@ Based on the guide workflow (`docs/guide/index.html`):
 
 ## 🏗️ Architecture (At a Glance)
 
-- Frontend: React 19 + TypeScript strict + Vite 7 + Tailwind v4 + Zustand.
-- Backend: FastAPI + async SQLAlchemy + asyncpg + Python 3.12.
+- Frontend: React 19 + TypeScript strict + Vite 7 + Tailwind v4 + Zustand (13 stores).
+- Backend: FastAPI + async SQLAlchemy 2 + asyncpg + Python 3.12.
 - Database: PostgreSQL 16 with JSON/JSONB-heavy schema.
-- Job execution: background worker dispatching to evaluator runners.
-- API surface: 14 routers in `backend/app/main.py`.
+- LLM providers: Gemini (service account + API key) and OpenAI, via unified provider abstraction.
+- Job execution: background worker with 5 registered handlers, cooperative cancellation, and crash recovery.
+- API surface: 15 routers in `backend/app/main.py` (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin).
 - ORM surface: 15 tables including `eval_runs`, `jobs`, `thread_evaluations`, `adversarial_evaluations`, and `api_logs`.
 
 ## 🚀 Baseline Setup (Local)
@@ -79,14 +80,16 @@ Open:
 - Frontend: http://localhost:5173
 - Backend health: http://localhost:8721/api/health
 
-For full setup details (including Azure), see `docs/SETUP.md`.
+For full setup details (including Azure deployment), see `docs/SETUP.md`.
 
 ## 📚 Developer References
 
+- Architecture education: `docs/PROJECT 101.md`
 - Agent rules: `AGENTS.md`
 - Claude guidance: `CLAUDE.md`
 - Copilot guidance: `.github/copilot-instructions.md`
 - Interactive architecture/workflow guide: `docs/guide/index.html`
+- Setup (local + Azure): `docs/SETUP.md`
 
 ## License
 
