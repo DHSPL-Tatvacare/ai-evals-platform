@@ -9,6 +9,7 @@ import SegmentedBar from './shared/SegmentedBar';
 import type { BarSegment } from './shared/SegmentedBar';
 import { VERDICT_COLORS, METRIC_HEX, DIFFICULTY_COLORS, verdictLabel } from './shared/colors';
 import { useResolvedColor } from '@/hooks/useResolvedColor';
+import { VERDICT_DISTRIBUTIONS_INFO } from './sectionInfo';
 
 interface Props {
   distributions: VerdictDistributionsType;
@@ -83,6 +84,7 @@ export default function VerdictDistributions({ distributions, isAdversarial, adv
           ? 'How test cases were classified by adversarial verdict'
           : 'How threads were classified across correctness, efficiency, and intent accuracy'
         }
+        infoTooltip={<VERDICT_DISTRIBUTIONS_INFO isAdversarial={isAdversarial} />}
       />
 
       {/* Adversarial-only: show adversarial verdict bar prominently + category/difficulty */}

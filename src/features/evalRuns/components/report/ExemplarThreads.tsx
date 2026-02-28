@@ -1,17 +1,20 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import type { Exemplars, ExemplarThread, NarrativeOutput, ExemplarAnalysis } from '@/types/reports';
 import { cn } from '@/utils/cn';
+import { routes } from '@/config/routes';
 import SectionHeader from './shared/SectionHeader';
 import { VerdictBadge } from '../../components';
+import { EXEMPLAR_INFO } from './sectionInfo';
 
 interface Props {
   exemplars: Exemplars;
   narrative: NarrativeOutput | null;
   isAdversarial?: boolean;
+  runId?: string;
 }
 
-export default function ExemplarThreads({ exemplars, narrative, isAdversarial }: Props) {
+export default function ExemplarThreads({ exemplars, narrative, isAdversarial, runId }: Props) {
   const analysisMap = new Map<string, ExemplarAnalysis>();
   if (narrative?.exemplarAnalysis) {
     for (const ea of narrative.exemplarAnalysis) {
@@ -27,6 +30,7 @@ export default function ExemplarThreads({ exemplars, narrative, isAdversarial }:
           ? 'Representative best and worst adversarial test cases with AI analysis'
           : 'Representative best and worst threads with AI analysis'
         }
+        infoTooltip={<EXEMPLAR_INFO isAdversarial={isAdversarial} />}
       />
 
       {exemplars.best.length > 0 && (
@@ -40,6 +44,7 @@ export default function ExemplarThreads({ exemplars, narrative, isAdversarial }:
                 type="good"
                 analysis={analysisMap.get(thread.threadId)}
                 isAdversarial={isAdversarial}
+                runId={runId}
               />
             ))}
           </div>
@@ -57,6 +62,7 @@ export default function ExemplarThreads({ exemplars, narrative, isAdversarial }:
                 type="bad"
                 analysis={analysisMap.get(thread.threadId)}
                 isAdversarial={isAdversarial}
+                runId={runId}
               />
             ))}
           </div>
@@ -68,11 +74,12 @@ export default function ExemplarThreads({ exemplars, narrative, isAdversarial }:
 
 // ── Thread diagnostic card ─────────────────────────────────────
 
-function ThreadCard({ thread, type, analysis, isAdversarial }: {
+function ThreadCard({ thread, type, analysis, isAdversarial, runId }: {
   thread: ExemplarThread;
   type: 'good' | 'bad';
   analysis?: ExemplarAnalysis;
   isAdversarial?: boolean;
+  runId?: string;
 }) {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const isGood = type === 'good';
@@ -106,6 +113,18 @@ function ThreadCard({ thread, type, analysis, isAdversarial }: {
         <span className="text-xs font-mono text-[var(--text-muted)]">
           {thread.threadId.slice(0, 12)}
         </span>
+        {runId && (
+          <a
+            href={routes.kaira.threadDetail(thread.threadId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--text-muted)] hover:text-[var(--text-brand)] transition-colors print:hidden"
+            title="Open thread in new tab"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
         <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
           {/* Adversarial badges */}
           {isAdversarialExemplar && thread.category && (

@@ -593,11 +593,11 @@ export default function ReportTab({ runId }: Props) {
                   <ExecutiveSummary healthScore={report.healthScore} narrative={report.narrative} isAdversarial={isAdversarial} />
                   <VerdictDistributions distributions={report.distributions} isAdversarial={isAdversarial} adversarialBreakdown={report.adversarial} />
                   <RuleComplianceTable ruleCompliance={report.ruleCompliance} />
-                  {!isAdversarial && <FrictionAnalysis friction={report.friction} />}
+                  {!isAdversarial && <FrictionAnalysis friction={report.friction} runId={runId} />}
                   {(isAdversarial || report.adversarial) && report.adversarial && (
                     <AdversarialBreakdown adversarial={report.adversarial} />
                   )}
-                  <ExemplarThreads exemplars={report.exemplars} narrative={report.narrative} isAdversarial={isAdversarial} />
+                  <ExemplarThreads exemplars={report.exemplars} narrative={report.narrative} isAdversarial={isAdversarial} runId={runId} />
                   <PromptGapAnalysis narrative={report.narrative} />
                   <Recommendations narrative={report.narrative} />
                   </div>

@@ -1,11 +1,15 @@
+import { ExternalLink } from 'lucide-react';
 import type { FrictionAnalysis as FrictionAnalysisType } from '@/types/reports';
+import { routes } from '@/config/routes';
 import SectionHeader from './shared/SectionHeader';
 import SegmentedBar from './shared/SegmentedBar';
 import type { BarSegment } from './shared/SegmentedBar';
 import { VERDICT_COLORS, RECOVERY_COLORS, verdictLabel } from './shared/colors';
+import { FRICTION_INFO } from './sectionInfo';
 
 interface Props {
   friction: FrictionAnalysisType;
+  runId?: string;
 }
 
 const CAUSE_COLORS: Record<string, string> = {
@@ -15,7 +19,7 @@ const CAUSE_COLORS: Record<string, string> = {
 
 const VERDICT_TURNS_ORDER = ['EFFICIENT', 'ACCEPTABLE', 'FRICTION', 'BROKEN'];
 
-export default function FrictionAnalysis({ friction }: Props) {
+export default function FrictionAnalysis({ friction, runId }: Props) {
   const botCaused = friction.byCause['bot'] ?? 0;
   const userCaused = friction.byCause['user'] ?? 0;
   const notNeededCount = friction.recoveryQuality['NOT NEEDED'] ?? friction.recoveryQuality['NOT_NEEDED'] ?? 0;
@@ -49,6 +53,7 @@ export default function FrictionAnalysis({ friction }: Props) {
       <SectionHeader
         title="Friction & Efficiency Analysis"
         description="Conversation friction points, causes, and recovery quality"
+        infoTooltip={<FRICTION_INFO />}
       />
 
       {/* Centered highlight stat box */}
@@ -146,9 +151,29 @@ export default function FrictionAnalysis({ friction }: Props) {
                     <td className="px-2 py-2 font-medium text-[var(--text-primary)]">{pattern.description}</td>
                     <td className="px-2 py-2 text-right font-semibold text-[var(--text-primary)]">{pattern.count}</td>
                     <td className="px-2 py-2">
-                      <span className="font-mono text-xs text-[var(--text-muted)]">
-                        {pattern.exampleThreadIds.slice(0, 3).join(', ')}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {pattern.exampleThreadIds.slice(0, 3).map((tid, j) => (
+                          <span key={tid} className="inline-flex items-center gap-1">
+                            <span className="font-mono text-xs text-[var(--text-muted)]">
+                              {tid.slice(0, 12)}
+                            </span>
+                            {runId && (
+                              <a
+                                href={routes.kaira.threadDetail(tid)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[var(--text-muted)] hover:text-[var(--text-brand)] transition-colors print:hidden"
+                                title="Open thread in new tab"
+                              >
+                                <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            )}
+                            {j < Math.min(pattern.exampleThreadIds.length, 3) - 1 && (
+                              <span className="text-[var(--text-muted)]">,</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                   </tr>
                 ))}

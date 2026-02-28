@@ -6,6 +6,7 @@ import {
   PRIORITY_DOT_COLORS,
   parseImpactSegments,
 } from './shared/colors';
+import { RECOMMENDATIONS_INFO } from './sectionInfo';
 
 interface Props {
   narrative: NarrativeOutput | null;
@@ -19,6 +20,7 @@ export default function Recommendations({ narrative }: Props) {
       <SectionHeader
         title="Recommendations"
         description="AI-generated improvement actions prioritized by impact"
+        infoTooltip={<RECOMMENDATIONS_INFO />}
       />
 
       {recommendations.length > 0 ? (

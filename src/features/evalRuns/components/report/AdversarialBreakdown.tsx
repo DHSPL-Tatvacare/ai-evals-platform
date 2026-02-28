@@ -1,6 +1,7 @@
 import type { AdversarialBreakdown as AdversarialBreakdownType } from '@/types/reports';
 import SectionHeader from './shared/SectionHeader';
 import { DIFFICULTY_COLORS, METRIC_HEX } from './shared/colors';
+import { ADVERSARIAL_INFO } from './sectionInfo';
 
 interface Props {
   adversarial: AdversarialBreakdownType;
@@ -20,6 +21,7 @@ export default function AdversarialBreakdown({ adversarial }: Props) {
       <SectionHeader
         title="Adversarial Testing Results"
         description="How the bot handled adversarial test scenarios by category and difficulty"
+        infoTooltip={<ADVERSARIAL_INFO />}
       />
 
       {sortedCategories.length > 0 && (

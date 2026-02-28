@@ -5,6 +5,7 @@ import { cn } from '@/utils/cn';
 import SectionHeader from './shared/SectionHeader';
 import SegmentedBar from './shared/SegmentedBar';
 import { GAP_TYPE_COLORS, GAP_TYPE_DOT_COLORS, verdictLabel } from './shared/colors';
+import { PROMPT_GAP_INFO } from './sectionInfo';
 
 interface Props {
   narrative: NarrativeOutput | null;
@@ -38,6 +39,7 @@ export default function PromptGapAnalysis({ narrative }: Props) {
         <SectionHeader
           title="Prompt Gap Analysis"
           description="Where production prompts may be missing or conflicting with evaluation rules"
+          infoTooltip={<PROMPT_GAP_INFO />}
         />
         <p className="text-sm text-[var(--text-muted)] italic">
           AI analysis not available for prompt gaps.
@@ -65,6 +67,7 @@ export default function PromptGapAnalysis({ narrative }: Props) {
       <SectionHeader
         title="Prompt Gap Analysis"
         description="Where production prompts may be missing or conflicting with evaluation rules"
+        infoTooltip={<PROMPT_GAP_INFO />}
       />
 
       {/* Gap type summary bar */}

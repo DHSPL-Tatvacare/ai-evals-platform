@@ -3,6 +3,7 @@ import { cn } from '@/utils/cn';
 import SectionHeader from './shared/SectionHeader';
 import SegmentedBar from './shared/SegmentedBar';
 import { SEVERITY_COLORS, METRIC_COLOR } from './shared/colors';
+import { RULE_COMPLIANCE_INFO } from './sectionInfo';
 
 interface Props {
   ruleCompliance: RuleComplianceMatrix;
@@ -17,6 +18,7 @@ export default function RuleComplianceTable({ ruleCompliance }: Props) {
         <SectionHeader
           title="Rule Compliance Analysis"
           description="Pass/fail rates for each evaluation rule, sorted by compliance"
+          infoTooltip={<RULE_COMPLIANCE_INFO />}
         />
         <p className="text-sm text-[var(--text-muted)] italic">No rule compliance data available.</p>
       </section>
@@ -39,6 +41,7 @@ export default function RuleComplianceTable({ ruleCompliance }: Props) {
       <SectionHeader
         title="Rule Compliance Analysis"
         description="Pass/fail rates for each evaluation rule, sorted by compliance"
+        infoTooltip={<RULE_COMPLIANCE_INFO />}
       />
 
       {/* Summary compliance bar */}

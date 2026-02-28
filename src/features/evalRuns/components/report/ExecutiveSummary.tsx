@@ -1,6 +1,7 @@
 import type { HealthScore, NarrativeOutput } from '@/types/reports';
 import SectionHeader from './shared/SectionHeader';
 import { METRIC_COLOR, PRIORITY_DOT_COLORS, rankToPriority } from './shared/colors';
+import { EXECUTIVE_SUMMARY_INFO } from './sectionInfo';
 
 interface Props {
   healthScore: HealthScore;
@@ -30,6 +31,7 @@ export default function ExecutiveSummary({ healthScore, narrative, isAdversarial
       <SectionHeader
         title="Executive Summary"
         description="Health metrics and AI-generated assessment of this evaluation run"
+        infoTooltip={<EXECUTIVE_SUMMARY_INFO isAdversarial={isAdversarial} />}
       />
 
       {/* Compact stat row */}
