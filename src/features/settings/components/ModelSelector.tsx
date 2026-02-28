@@ -110,7 +110,7 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
           <img
             src={providerIcons[provider]}
             alt="Provider"
-            className="h-4 w-4"
+            className={cn('h-4 w-4', provider === 'openai' && 'provider-icon-openai')}
           />
           {!apiKey && !isServiceAccount ? (
             <span className="text-[var(--text-muted)]">Enter API key first</span>
@@ -181,7 +181,7 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
                   <img
                     src={providerIcons[detectProvider(model.name)]}
                     alt="Provider"
-                    className="h-4 w-4 mt-0.5 shrink-0"
+                    className={cn('h-4 w-4 mt-0.5 shrink-0', detectProvider(model.name) === 'openai' && 'provider-icon-openai')}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

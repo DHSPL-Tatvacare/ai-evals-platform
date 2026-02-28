@@ -45,13 +45,15 @@ export function ModelBadge({
   const primaryName = displayName || modelName;
   const secondaryName = displayName && displayName !== modelName ? modelName : null;
 
+  const iconCls = detectedProvider === 'openai' ? 'provider-icon-openai' : undefined;
+
   if (variant === 'inline') {
     return (
       <span className={cn('inline-flex items-center gap-1.5', className)}>
-        <img 
-          src={iconSrc} 
-          alt={providerLabel} 
-          className="h-3 w-3 shrink-0" 
+        <img
+          src={iconSrc}
+          alt={providerLabel}
+          className={cn('h-3 w-3 shrink-0', iconCls)}
         />
         <span className="text-[11px] text-[var(--text-muted)]">
           {modelName}
@@ -64,10 +66,10 @@ export function ModelBadge({
     return (
       <span className={cn('inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]', className)}>
         {showPoweredBy && <span>powered by</span>}
-        <img 
-          src={iconSrc} 
-          alt={providerLabel} 
-          className="h-3 w-3 shrink-0" 
+        <img
+          src={iconSrc}
+          alt={providerLabel}
+          className={cn('h-3 w-3 shrink-0', iconCls)}
         />
         <span>{modelName}</span>
       </span>
@@ -83,10 +85,10 @@ export function ModelBadge({
         className
       )}
     >
-      <img 
-        src={iconSrc} 
-        alt={providerLabel} 
-        className="h-4 w-4 shrink-0" 
+      <img
+        src={iconSrc}
+        alt={providerLabel}
+        className={cn('h-4 w-4 shrink-0', iconCls)}
       />
       <div className="flex-1 min-w-0">
         <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">

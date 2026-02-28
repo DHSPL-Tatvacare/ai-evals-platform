@@ -15,3 +15,4 @@ export * from './api.types';
 export * from './evaluator.types';
 export * from './history.types';
 export * from './evalRuns';
+export * from './reports';

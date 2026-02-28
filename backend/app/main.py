@@ -23,6 +23,13 @@ async def lifespan(app: FastAPI):
             """)
         )
 
+        # Add report_cache column to eval_runs table if missing
+        await conn.execute(
+            text("""
+                ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS report_cache JSON
+            """)
+        )
+
     # Seed default prompts, schemas, and evaluators
     from app.services.seed_defaults import seed_all_defaults
     from app.database import async_session
@@ -89,6 +96,7 @@ from app.routes.eval_runs import router as eval_runs_router, threads_router
 from app.routes.llm import router as llm_router
 from app.routes.adversarial_config import router as adversarial_config_router
 from app.routes.admin import router as admin_router
+from app.routes.reports import router as reports_router
 app.include_router(listings_router)
 app.include_router(files_router)
 app.include_router(prompts_router)
@@ -104,3 +112,4 @@ app.include_router(threads_router)
 app.include_router(llm_router)
 app.include_router(adversarial_config_router)
 app.include_router(admin_router)
+app.include_router(reports_router)

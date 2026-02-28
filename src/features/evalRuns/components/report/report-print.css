@@ -1,0 +1,159 @@
+/* ── Print-to-PDF stylesheet ──────────────────────────────────
+   Enables browser-native PDF export via window.print().
+   All rules scoped under @media print — zero impact on screen.
+   ─────────────────────────────────────────────────────────── */
+
+@media print {
+  /* ── Force exact color reproduction ── */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm 14mm;
+  }
+
+  /* ── Hide app shell ── */
+  aside {
+    display: none !important;
+  }
+
+  main {
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+    min-height: unset !important;
+  }
+
+  /* Reset the flex h-screen layout wrapper */
+  .flex.h-screen {
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* ── RunDetail overrides ── */
+  .run-detail-container {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .run-detail-tabs {
+    display: none !important;
+  }
+
+  .run-detail-header {
+    display: none !important;
+  }
+
+  /* ── Report layout ── */
+  .report-container {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide action buttons (Export PDF, Refresh) */
+  .report-actions {
+    display: none !important;
+  }
+
+  /* Hide report's own Summary/Detailed tab bar */
+  .report-tabs > div:first-child {
+    display: none !important;
+  }
+
+  /* Show ALL tab panes (Tabs uses `hidden` on inactive) */
+  .report-tabs .hidden {
+    display: block !important;
+  }
+
+  /* ── Print-only elements ── */
+  .print-only {
+    display: block !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* ── Print cover page ── */
+  .print-cover {
+    display: block !important;
+    page-break-after: always;
+  }
+
+  /* ── Section page breaks ── */
+  .report-section {
+    page-break-inside: avoid;
+    margin-bottom: 4mm;
+  }
+
+  .report-section-break {
+    page-break-before: always;
+  }
+
+  /* ── Expandable content: force open in print ── */
+  .exemplar-transcript {
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .prompt-gap-detail {
+    display: table-row !important;
+  }
+
+  /* ── Tables ── */
+  table {
+    page-break-inside: avoid;
+  }
+
+  /* ── Overflow resets ── */
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-hidden {
+    overflow: visible !important;
+  }
+
+  [class*='h-screen'],
+  [class*='h-\\[calc'] {
+    height: auto !important;
+  }
+
+  /* ── Scrollable body reset ── */
+  .run-detail-body {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: unset !important;
+  }
+
+  /* ── Refresh overlay: hide in print ── */
+  .report-refresh-overlay {
+    display: none !important;
+  }
+
+  /* ── Print section divider ── */
+  .print-section-divider {
+    display: block !important;
+    border-top: 1px solid #e2e8f0;
+    margin: 6mm 0;
+    page-break-before: always;
+  }
+
+  /* ── Print footer ── */
+  .print-footer {
+    display: block !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 8px;
+    color: #9ca3af;
+    padding: 4mm 0;
+  }
+}

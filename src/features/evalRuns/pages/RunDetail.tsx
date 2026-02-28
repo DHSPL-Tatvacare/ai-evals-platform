@@ -23,6 +23,7 @@ import {
   RunProgressBar,
 } from "../components";
 import AdversarialTable from "../components/AdversarialTable";
+import { ReportTab } from "../components/report";
 import { useElapsedTime } from "../hooks";
 import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from "@/utils/evalColors";
 import { getLabelDefinition } from "@/config/labelDefinitions";
@@ -104,6 +105,7 @@ export default function RunDetail() {
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [activeTab, setActiveTab] = useState<'results' | 'report'>('results');
 
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
@@ -364,9 +366,9 @@ export default function RunDetail() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+    <div className="run-detail-container flex flex-col h-[calc(100vh-var(--header-height,48px))]">
       {/* ── Sticky header ─────────────────────────────────── */}
-      <div className="shrink-0 space-y-2 pb-2">
+      <div className="run-detail-header shrink-0 space-y-2 pb-2">
         <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
           <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>
           <span>/</span>
@@ -455,9 +457,31 @@ export default function RunDetail() {
         </div>
       </div>
 
+      {/* ── Tab bar (only when report tab is available) ──── */}
+      {run && !isRunActive && ['completed', 'completed_with_errors'].includes(run.status.toLowerCase()) && (
+        <div className="run-detail-tabs shrink-0 flex gap-0 border-b border-[var(--border-subtle)]">
+          <button
+            onClick={() => setActiveTab('results')}
+            className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'results' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          >
+            Results
+          </button>
+          <button
+            onClick={() => setActiveTab('report')}
+            className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'report' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          >
+            Report
+          </button>
+        </div>
+      )}
+
       {/* ── Scrollable body ───────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-1">
-        {threadEvals.length > 0 && (
+      <div className="run-detail-body flex-1 min-h-0 overflow-y-auto space-y-4 pt-4">
+        {activeTab === 'report' && run && (
+          <ReportTab runId={run.run_id} />
+        )}
+
+        {activeTab === 'results' && threadEvals.length > 0 && (
           <>
             <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage')).length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
               <StatPill label="Threads" metricKey="total_threads" value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length} />
@@ -499,7 +523,18 @@ export default function RunDetail() {
                 const incompleteCount = threadEvals.filter((e) => normalizeLabel(e.efficiency_verdict ?? '') === 'INCOMPLETE').length;
                 const evaluable = threadEvals.length - incompleteCount;
                 const completedCount = threadEvals.filter((e) => e.success_status).length;
-                return <StatPill label="Completed" metricKey="completed" value={`${completedCount} / ${evaluable}`} />;
+                return (
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
+                    <div className="flex items-center gap-1">
+                      <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">Completed</p>
+                      <MetricInfo metricKey="completed" />
+                    </div>
+                    <p className="text-lg font-bold mt-0.5 leading-tight text-[var(--text-primary)]">{completedCount} / {evaluable}</p>
+                    {incompleteCount > 0 && (
+                      <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{incompleteCount} thread{incompleteCount > 1 ? 's' : ''} excluded (incomplete)</p>
+                    )}
+                  </div>
+                );
               })()}
             </div>
 
@@ -589,9 +624,9 @@ export default function RunDetail() {
           </>
         )}
 
-        {adversarialEvals.length > 0 && <AdversarialSection evals={adversarialEvals} adversarialDist={adversarialDist} runId={run.run_id} isRunActive={isRunActive} />}
+        {activeTab === 'results' && adversarialEvals.length > 0 && <AdversarialSection evals={adversarialEvals} adversarialDist={adversarialDist} runId={run.run_id} isRunActive={isRunActive} />}
 
-        {threadEvals.length === 0 && adversarialEvals.length === 0 && (
+        {activeTab === 'results' && threadEvals.length === 0 && adversarialEvals.length === 0 && (
           isRunActive ? (
             <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
               <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
