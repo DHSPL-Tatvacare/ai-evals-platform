@@ -11,12 +11,18 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import load_only
+
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
+from app.models.evaluator import Evaluator
 from app.services.evaluators.llm_base import create_llm_provider, LoggingLLMWrapper
 from app.services.evaluators.runner_utils import save_api_log
 from app.services.evaluators.settings_helper import get_llm_settings_from_db, _detect_service_account_path
 
 from .aggregator import AdversarialAggregator, ReportAggregator
+from .custom_evaluations.aggregator import CustomEvaluationsAggregator
+from .custom_evaluations.narrator import CustomEvalNarrator
+from .custom_evaluations.schemas import CustomEvaluationsReport
 from .health_score import compute_adversarial_health_score, compute_health_score
 from .narrator import ReportNarrator
 from .prompts.production_prompts import get_production_prompts
@@ -87,11 +93,22 @@ class ReportService:
             )
             agg = ReportAggregator(threads, adversarial, summary)
 
+        # Custom evaluations (isolated module — standard runs only)
+        custom_eval_report: CustomEvaluationsReport | None = None
+        custom_scores: dict[str, float] | None = None
+        custom_eval_agg: CustomEvaluationsAggregator | None = None
+        if not is_adversarial:
+            evaluator_schemas = await self._load_evaluator_schemas(summary)
+            if evaluator_schemas:
+                custom_eval_agg = CustomEvaluationsAggregator(threads, evaluator_schemas)
+                custom_eval_report = custom_eval_agg.aggregate()
+                custom_scores = custom_eval_agg.compute_custom_scores_for_exemplars()
+
         # Aggregate — same interface for both aggregator types
         distributions = agg.compute_distributions()
         rule_compliance = agg.compute_rule_compliance()
         friction = agg.compute_friction_analysis()
-        exemplars = agg.select_exemplars(k=5)
+        exemplars = agg.select_exemplars(k=5, custom_scores=custom_scores)
         adversarial_breakdown = agg.compute_adversarial_breakdown()
 
         # Metadata
@@ -125,6 +142,17 @@ class ReportService:
         if narrative:
             self._reconcile_exemplar_ids(narrative, exemplars)
 
+        # Custom eval narrative (separate LLM call — non-blocking)
+        if custom_eval_report and custom_eval_agg:
+            custom_eval_report = await self._generate_custom_eval_narrative(
+                run=run,
+                report=custom_eval_report,
+                aggregator=custom_eval_agg,
+                metadata=metadata,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+            )
+
         # Attach narrative model to metadata
         metadata.narrative_model = narrative_model
 
@@ -138,6 +166,7 @@ class ReportService:
             exemplars=exemplars,
             production_prompts=production_prompts,
             narrative=narrative,
+            custom_evaluations_report=custom_eval_report,
         )
 
         # Cache for future requests
@@ -339,3 +368,127 @@ class ReportService:
             duration_ms=run.duration_ms,
             data_path=batch_meta.get("data_path"),
         )
+
+    # --- Custom evaluations helpers ---
+
+    async def _load_evaluator_schemas(
+        self, summary: dict,
+    ) -> dict[str, dict]:
+        """Load evaluator schemas for custom evaluations in this run.
+
+        Returns {eval_id: {"name", "output_schema", "prompt"}} or empty dict.
+        """
+        custom_evals = summary.get("custom_evaluations", {})
+        if not custom_evals:
+            return {}
+
+        eval_ids = list(custom_evals.keys())
+
+        # Bulk-load evaluators from DB
+        from uuid import UUID as PyUUID
+        try:
+            uuids = [PyUUID(eid) for eid in eval_ids]
+        except (ValueError, AttributeError):
+            return {}
+
+        result = await self.db.execute(
+            select(Evaluator)
+            .where(Evaluator.id.in_(uuids))
+            .options(load_only(
+                Evaluator.id, Evaluator.name,
+                Evaluator.output_schema, Evaluator.prompt,
+            ))
+        )
+        db_evaluators = {str(e.id): e for e in result.scalars().all()}
+
+        schemas: dict[str, dict] = {}
+        for eval_id in eval_ids:
+            if eval_id in db_evaluators:
+                e = db_evaluators[eval_id]
+                schemas[eval_id] = {
+                    "name": e.name,
+                    "output_schema": e.output_schema or [],
+                    "prompt": e.prompt or "",
+                }
+            else:
+                # Evaluator deleted — fall back to summary data
+                cev_data = custom_evals.get(eval_id, {})
+                if isinstance(cev_data, dict):
+                    schemas[eval_id] = {
+                        "name": cev_data.get("name", eval_id),
+                        "output_schema": cev_data.get("output_schema", []),
+                        "prompt": "",
+                    }
+
+        return schemas
+
+    async def _generate_custom_eval_narrative(
+        self,
+        run: EvalRun,
+        report: CustomEvaluationsReport,
+        aggregator: CustomEvaluationsAggregator,
+        metadata: ReportMetadata,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> CustomEvaluationsReport:
+        """Generate AI narrative for custom eval report. Returns report with narrative attached."""
+        try:
+            # Resolve LLM settings (same logic as main narrative)
+            try:
+                settings = await get_llm_settings_from_db(
+                    app_id=run.app_id,
+                    auth_intent="managed_job",
+                )
+            except RuntimeError:
+                sa_path = _detect_service_account_path()
+                if not sa_path and not llm_provider:
+                    return report
+                settings = {
+                    "provider": llm_provider or "gemini",
+                    "selected_model": llm_model or "",
+                    "api_key": "",
+                    "service_account_path": sa_path,
+                }
+
+            effective_provider = llm_provider or settings["provider"]
+            effective_model = llm_model or settings["selected_model"]
+
+            if not effective_model:
+                return report
+
+            provider = create_llm_provider(
+                provider=effective_provider,
+                api_key=settings["api_key"],
+                model_name=effective_model,
+                service_account_path=settings["service_account_path"],
+            )
+
+            llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
+            llm.set_context(run_id=str(run.id), thread_id="custom_eval_narrative")
+
+            # Collect text/array samples for narrative context
+            text_samples: dict[str, dict[str, list[str]]] = {}
+            for section in report.evaluator_sections:
+                text_fields = [
+                    f.key for f in section.fields
+                    if f.field_type in ("text", "array")
+                ]
+                if text_fields:
+                    text_samples[section.evaluator_id] = aggregator.collect_text_samples(
+                        section.evaluator_id, text_fields, k=10,
+                    )
+
+            narrator = CustomEvalNarrator(llm)
+            narrative = await narrator.generate(
+                report=report,
+                text_samples=text_samples,
+                metadata=metadata.model_dump(),
+            )
+
+            if narrative:
+                report.narrative = narrative
+
+        except Exception as e:
+            logger.warning("Custom eval narrative generation skipped: %s", e)
+
+        return report

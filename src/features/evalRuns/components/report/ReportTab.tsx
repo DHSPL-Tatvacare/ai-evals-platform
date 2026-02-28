@@ -18,6 +18,7 @@ import ExemplarThreads from './ExemplarThreads';
 import PromptGapAnalysis from './PromptGapAnalysis';
 import Recommendations, { RecommendationsTable } from './Recommendations';
 import SectionRail from './SectionRail';
+import { CustomEvalTab, CustomSummaryCard } from './customEval';
 import { METRIC_COLOR, PRIORITY_DOT_COLORS, rankToPriority } from './shared/colors';
 import './report-print.css';
 
@@ -34,6 +35,7 @@ export default function ReportTab({ runId }: Props) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRefreshSelector, setShowRefreshSelector] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
   const refreshPopoverRef = useRef<HTMLDivElement>(null);
 
   // Close popover on outside click
@@ -490,9 +492,11 @@ export default function ReportTab({ runId }: Props) {
           </div>
         )}
 
-        {/* Two-tab layout */}
+        {/* Tab layout */}
         {!refreshing && <Tabs
           className="report-tabs"
+          defaultTab={activeTab}
+          onChange={setActiveTab}
           tabs={[
             {
               id: 'summary',
@@ -573,6 +577,14 @@ export default function ReportTab({ runId }: Props) {
                     </div>
                   )}
 
+                  {/* Custom Evaluations summary preview */}
+                  {report.customEvaluationsReport && (
+                    <CustomSummaryCard
+                      report={report.customEvaluationsReport}
+                      onNavigate={() => setActiveTab('custom')}
+                    />
+                  )}
+
                   {/* Top 3 Recommendations */}
                   {narrative?.recommendations && narrative.recommendations.length > 0 && (
                     <div>
@@ -604,8 +616,12 @@ export default function ReportTab({ runId }: Props) {
                 </div>
               ),
             },
+            ...(report.customEvaluationsReport ? [{
+              id: 'custom',
+              label: 'Custom Evaluations',
+              content: <CustomEvalTab report={report.customEvaluationsReport} />,
+            }] : []),
           ]}
-          defaultTab="summary"
         />}
       </div>
 

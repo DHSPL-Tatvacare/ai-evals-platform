@@ -7,6 +7,7 @@ Fields are raw numeric values; frontend handles display formatting.
 from __future__ import annotations
 
 from app.schemas.base import CamelModel
+from app.services.reports.custom_evaluations.schemas import CustomEvaluationsReport
 
 
 # --- Health Score ---
@@ -36,19 +37,12 @@ class IntentHistogram(CamelModel):
     counts: list[int]
 
 
-class CustomEvalSummary(CamelModel):
-    name: str
-    type: str
-    average: float | None = None
-    distribution: dict[str, int] | None = None
-
-
 class VerdictDistributions(CamelModel):
     correctness: dict[str, int]
     efficiency: dict[str, int]
     adversarial: dict[str, int] | None = None
     intent_histogram: IntentHistogram
-    custom_evaluations: dict[str, CustomEvalSummary]
+    custom_evaluations: dict = {}  # deprecated — kept for cache compat
 
 
 # --- Rule Compliance ---
@@ -226,3 +220,4 @@ class ReportPayload(CamelModel):
     exemplars: Exemplars
     production_prompts: ProductionPrompts
     narrative: NarrativeOutput | None = None
+    custom_evaluations_report: CustomEvaluationsReport | None = None

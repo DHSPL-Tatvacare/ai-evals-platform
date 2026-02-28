@@ -27,19 +27,12 @@ export interface IntentHistogram {
   counts: number[];
 }
 
-export interface CustomEvalSummary {
-  name: string;
-  type: 'numeric' | 'text';
-  average: number | null;
-  distribution: Record<string, number> | null;
-}
-
 export interface VerdictDistributions {
   correctness: Record<string, number>;
   efficiency: Record<string, number>;
   adversarial: Record<string, number> | null;
   intentHistogram: IntentHistogram;
-  customEvaluations: Record<string, CustomEvalSummary>;
+  customEvaluations?: Record<string, unknown>; // deprecated — kept for cache compat
 }
 
 // --- Rule Compliance ---
@@ -189,6 +182,61 @@ export interface NarrativeOutput {
   recommendations: Recommendation[];
 }
 
+// --- Custom Evaluations Report ---
+
+export interface ThresholdPassRates {
+  greenPct: number;
+  yellowPct: number;
+  redPct: number;
+  greenThreshold: number;
+  yellowThreshold: number | null;
+}
+
+export interface FieldAggregation {
+  key: string;
+  fieldType: 'number' | 'boolean' | 'enum' | 'text' | 'array';
+  displayMode: 'header' | 'card';
+  label: string;
+  sampleCount: number;
+  // Number fields
+  average: number | null;
+  thresholdPassRates: ThresholdPassRates | null;
+  // Boolean fields
+  passRate: number | null;
+  trueCount: number | null;
+  falseCount: number | null;
+  // Enum fields
+  distribution: Record<string, number> | null;
+}
+
+export interface EvaluatorSection {
+  evaluatorId: string;
+  evaluatorName: string;
+  totalThreads: number;
+  completed: number;
+  errors: number;
+  errorRate: number;
+  primaryField: FieldAggregation | null;
+  fields: FieldAggregation[];
+}
+
+export interface CustomEvalNarrativeFinding {
+  finding: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  affectedCount: number;
+}
+
+export interface CustomEvalNarrative {
+  overallAssessment: string;
+  keyFindings: CustomEvalNarrativeFinding[];
+  notablePatterns: string[];
+}
+
+export interface CustomEvaluationsReport {
+  evaluatorSections: EvaluatorSection[];
+  narrative: CustomEvalNarrative | null;
+}
+
 // --- Top-level payload ---
 
 export interface ReportMetadata {
@@ -217,4 +265,5 @@ export interface ReportPayload {
   exemplars: Exemplars;
   productionPrompts: ProductionPrompts;
   narrative: NarrativeOutput | null;
+  customEvaluationsReport: CustomEvaluationsReport | null;
 }

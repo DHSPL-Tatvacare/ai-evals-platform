@@ -16,7 +16,6 @@ from .schemas import (
     AdversarialCategoryResult,
     AdversarialDifficultyResult,
     CoFailure,
-    CustomEvalSummary,
     Exemplars,
     ExemplarThread,
     FrictionAnalysis,
@@ -91,7 +90,7 @@ class ReportAggregator:
             efficiency=efficiency,
             adversarial=self._adversarial_verdict_dist(),
             intent_histogram=self._build_intent_histogram(),
-            custom_evaluations=self._build_custom_eval_summaries(),
+            custom_evaluations={},
         )
 
     def _build_intent_histogram(self) -> IntentHistogram:
@@ -104,19 +103,6 @@ class ReportAggregator:
             idx = min(int(pct // 20), 4)  # clamp 100% to last bucket
             counts[idx] += 1
         return IntentHistogram(buckets=buckets, counts=counts)
-
-    def _build_custom_eval_summaries(self) -> dict[str, CustomEvalSummary]:
-        result: dict[str, CustomEvalSummary] = {}
-        for cev_id, cev_data in self.summary.get("custom_evaluations", {}).items():
-            if not isinstance(cev_data, dict):
-                continue
-            result[cev_id] = CustomEvalSummary(
-                name=cev_data.get("name", cev_id),
-                type="numeric" if cev_data.get("average") is not None else "text",
-                average=cev_data.get("average"),
-                distribution=cev_data.get("distribution"),
-            )
-        return result
 
     def _adversarial_verdict_dist(self) -> dict[str, int] | None:
         if not self.adversarial:
@@ -290,9 +276,13 @@ class ReportAggregator:
     # Exemplar Selection
     # ------------------------------------------------------------------
 
-    def select_exemplars(self, k: int = 5) -> Exemplars:
+    def select_exemplars(
+        self,
+        k: int = 5,
+        custom_scores: dict[str, float] | None = None,
+    ) -> Exemplars:
         scored = [
-            (self._compute_composite_score(t), t)
+            (self._compute_composite_score(t, custom_scores), t)
             for t in self.threads
         ]
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -304,11 +294,23 @@ class ReportAggregator:
         return Exemplars(best=best, worst=worst)
 
     @staticmethod
-    def _compute_composite_score(thread: ThreadEvaluation) -> float:
+    def _compute_composite_score(
+        thread: ThreadEvaluation,
+        custom_scores: dict[str, float] | None = None,
+    ) -> float:
         intent = thread.intent_accuracy if thread.intent_accuracy is not None else 0.5
         correctness = CORRECTNESS_ORDINAL.get(thread.worst_correctness or "", 0.5)
         efficiency = EFFICIENCY_ORDINAL.get(thread.efficiency_verdict or "", 0.5)
         task = 1.0 if thread.success_status else 0.0
+
+        # When custom eval scores are available, allocate 20% to custom dimension
+        if custom_scores and thread.thread_id in custom_scores:
+            custom = custom_scores[thread.thread_id]
+            return (
+                (intent * 0.20) + (correctness * 0.20)
+                + (efficiency * 0.20) + (task * 0.20) + (custom * 0.20)
+            )
+
         return (intent * 0.25) + (correctness * 0.25) + (efficiency * 0.25) + (task * 0.25)
 
     def _build_exemplar(self, score: float, thread: ThreadEvaluation) -> ExemplarThread:
@@ -554,7 +556,11 @@ class AdversarialAggregator:
     # Exemplar Selection
     # ------------------------------------------------------------------
 
-    def select_exemplars(self, k: int = 5) -> Exemplars:
+    def select_exemplars(
+        self,
+        k: int = 5,
+        custom_scores: dict[str, float] | None = None,
+    ) -> Exemplars:
         scored = [
             (self._compute_adversarial_score(ae), ae)
             for ae in self.adversarial
