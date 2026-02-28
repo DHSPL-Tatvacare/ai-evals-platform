@@ -8,12 +8,13 @@ Phase 3: AI narrative generation via LLM.
 import logging
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import load_only
 
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
+from app.models.evaluation_analytics import EvaluationAnalytics
 from app.models.evaluator import Evaluator
 from app.services.evaluators.llm_base import create_llm_provider, LoggingLLMWrapper
 from app.services.evaluators.runner_utils import save_api_log
@@ -67,11 +68,13 @@ class ReportService:
         run = await self._load_run(run_id)
 
         # Return cached report if available
-        if not force_refresh and run.report_cache:
-            try:
-                return ReportPayload.model_validate(run.report_cache)
-            except Exception:
-                logger.warning("Report cache corrupted for run %s, regenerating", run_id)
+        if not force_refresh:
+            cached = await self._load_cache(run_id, run.app_id)
+            if cached:
+                try:
+                    return ReportPayload.model_validate(cached)
+                except Exception:
+                    logger.warning("Report cache corrupted for run %s, regenerating", run_id)
 
         threads = await self._load_threads(run_id)
         adversarial = await self._load_adversarial(run_id)
@@ -170,7 +173,7 @@ class ReportService:
         )
 
         # Cache for future requests
-        await self._save_cache(run_id, payload)
+        await self._save_cache(run_id, run.app_id, payload)
 
         return payload
 
@@ -219,11 +222,17 @@ class ReportService:
                 logger.warning("Narrative generation skipped: no model specified")
                 return None, None
 
+            factory_kwargs = {}
+            if effective_provider == "azure_openai":
+                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
+                factory_kwargs["api_version"] = settings.get("api_version", "")
+
             provider = create_llm_provider(
                 provider=effective_provider,
                 api_key=settings["api_key"],
                 model_name=effective_model,
-                service_account_path=settings["service_account_path"],
+                service_account_path=settings.get("service_account_path", ""),
+                **factory_kwargs,
             )
 
             # Wrap with logging for API log visibility
@@ -295,15 +304,54 @@ class ReportService:
 
     # --- Cache persistence ---
 
-    async def _save_cache(self, run_id: str, payload: ReportPayload) -> None:
-        """Persist report payload to eval_run.report_cache."""
+    async def _load_cache(self, run_id: str, app_id: str) -> dict | None:
+        """Load cached report from evaluation_analytics table."""
         try:
-            stmt = (
-                update(EvalRun)
-                .where(EvalRun.id == UUID(run_id))
-                .values(report_cache=payload.model_dump())
+            result = await self.db.execute(
+                select(EvaluationAnalytics.analytics_data)
+                .where(
+                    EvaluationAnalytics.scope == "single_run",
+                    EvaluationAnalytics.run_id == UUID(run_id),
+                    EvaluationAnalytics.app_id == app_id,
+                )
             )
-            await self.db.execute(stmt)
+            row = result.scalar_one_or_none()
+            return row if row else None
+        except Exception as e:
+            logger.warning("Failed to load cache for run %s: %s", run_id, e)
+            return None
+
+    async def _save_cache(self, run_id: str, app_id: str, payload: ReportPayload) -> None:
+        """Persist report payload to evaluation_analytics table."""
+        try:
+            from datetime import datetime, timezone
+            data = payload.model_dump()
+            now = datetime.now(timezone.utc)
+
+            # Check for existing row
+            result = await self.db.execute(
+                select(EvaluationAnalytics)
+                .where(
+                    EvaluationAnalytics.scope == "single_run",
+                    EvaluationAnalytics.run_id == UUID(run_id),
+                    EvaluationAnalytics.app_id == app_id,
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.analytics_data = data
+                existing.computed_at = now
+            else:
+                row = EvaluationAnalytics(
+                    app_id=app_id,
+                    scope="single_run",
+                    run_id=UUID(run_id),
+                    analytics_data=data,
+                    computed_at=now,
+                )
+                self.db.add(row)
+
             await self.db.commit()
         except Exception as e:
             logger.warning("Failed to cache report for run %s: %s", run_id, e)
@@ -456,11 +504,17 @@ class ReportService:
             if not effective_model:
                 return report
 
+            factory_kwargs = {}
+            if effective_provider == "azure_openai":
+                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
+                factory_kwargs["api_version"] = settings.get("api_version", "")
+
             provider = create_llm_provider(
                 provider=effective_provider,
                 api_key=settings["api_key"],
                 model_name=effective_model,
-                service_account_path=settings["service_account_path"],
+                service_account_path=settings.get("service_account_path", ""),
+                **factory_kwargs,
             )
 
             llm = LoggingLLMWrapper(provider, log_callback=save_api_log)

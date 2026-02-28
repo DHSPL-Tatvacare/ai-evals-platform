@@ -1,5 +1,6 @@
 import { apiRequest, apiDownload } from './client';
 import type { ReportPayload } from '@/types/reports';
+import type { CrossRunAnalyticsResponse, CrossRunAISummary, CrossRunAISummaryRequest } from '@/types/crossRunAnalytics';
 
 export const reportsApi = {
   /**
@@ -22,4 +23,26 @@ export const reportsApi = {
   /** Export report as PDF via server-side headless browser rendering. */
   exportPdf: (runId: string): Promise<Blob> =>
     apiDownload(`/api/reports/${runId}/export-pdf`),
+
+  /** Fetch cached cross-run analytics for an app. */
+  fetchCrossRunAnalytics: (appId: string): Promise<CrossRunAnalyticsResponse> => {
+    const params = new URLSearchParams({ app_id: appId });
+    return apiRequest<CrossRunAnalyticsResponse>(`/api/reports/cross-run-analytics?${params}`);
+  },
+
+  /** Recompute cross-run analytics from single_run caches and persist. */
+  refreshCrossRunAnalytics: (appId: string, limit?: number): Promise<CrossRunAnalyticsResponse> => {
+    const params = new URLSearchParams({ app_id: appId });
+    if (limit) params.set('limit', String(limit));
+    return apiRequest<CrossRunAnalyticsResponse>(`/api/reports/cross-run-analytics/refresh?${params}`, {
+      method: 'POST',
+    });
+  },
+
+  /** Generate AI summary of cross-run analytics. */
+  generateCrossRunSummary: (payload: CrossRunAISummaryRequest): Promise<CrossRunAISummary> =>
+    apiRequest<CrossRunAISummary>('/api/reports/cross-run-ai-summary', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };

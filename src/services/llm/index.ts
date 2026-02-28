@@ -1,7 +1,16 @@
 export { GeminiProvider } from './GeminiProvider';
 export { llmProviderRegistry } from './providerRegistry';
 export { withRetry, createRetryableError } from './retryPolicy';
-export { discoverGeminiModels, discoverOpenAIModels, discoverModelsViaBackend, clearModelCache, type GeminiModel } from './modelDiscovery';
+export {
+  discoverModels,
+  discoverGeminiModels,
+  discoverOpenAIModels,
+  discoverAnthropicModels,
+  discoverModelsViaBackend,
+  clearModelCache,
+  type DiscoveredModel,
+  type GeminiModel,
+} from './modelDiscovery';
 
 // LLM Pipeline exports
 export {

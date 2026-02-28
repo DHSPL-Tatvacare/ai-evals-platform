@@ -30,14 +30,17 @@ async def submit_job(
 @router.get("", response_model=list[JobResponse])
 async def list_jobs(
     status: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """List jobs, optionally filtered by status."""
+    """List jobs, optionally filtered by status and/or job_type."""
     query = select(Job).order_by(desc(Job.created_at)).limit(limit).offset(offset)
     if status:
         query = query.where(Job.status == status)
+    if job_type:
+        query = query.where(Job.job_type == job_type)
     result = await db.execute(query)
     return result.scalars().all()
 

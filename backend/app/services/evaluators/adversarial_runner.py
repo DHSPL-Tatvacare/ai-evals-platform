@@ -74,6 +74,8 @@ async def run_adversarial_evaluation(
     selected_categories: Optional[list] = None,
     extra_instructions: Optional[str] = None,
     kaira_timeout: float = 120,
+    azure_endpoint: str = "",
+    api_version: str = "",
 ) -> dict:
     """Run adversarial stress test against live Kaira API."""
     start_time = time.monotonic()
@@ -124,6 +126,7 @@ async def run_adversarial_evaluation(
 
     # Resolve API key from settings if not provided
     sa_path = ""
+    db_settings = None
     auth_method = "api_key"  # default when caller provides api_key directly
     if not api_key:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
@@ -137,10 +140,15 @@ async def run_adversarial_evaluation(
             llm_model = db_settings["selected_model"]
 
     # Create LLM provider with logging wrapper
+    # Pick up Azure kwargs from DB settings when applicable
+    if not azure_endpoint and llm_provider == "azure_openai":
+        azure_endpoint = db_settings.get("azure_endpoint", "") if db_settings else ""
+        api_version = db_settings.get("api_version", "") if db_settings else ""
     inner_llm = create_llm_provider(
         provider=llm_provider, api_key=api_key,
         model_name=llm_model or "", temperature=temperature,
         service_account_path=sa_path,
+        azure_endpoint=azure_endpoint, api_version=api_version,
     )
     llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=save_api_log)
     if timeouts:

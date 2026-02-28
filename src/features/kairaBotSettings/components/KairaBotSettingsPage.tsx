@@ -48,7 +48,12 @@ export function KairaBotSettingsPage() {
   const llmProvider = useLLMSettingsStore((s) => s.provider);
   const llmGeminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
   const llmOpenaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
-  const globalSettings = useGlobalSettingsStore();
+  const llmAzureOpenaiApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
+  const llmAzureOpenaiEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
+  const llmAzureOpenaiApiVersion = useLLMSettingsStore((s) => s.azureOpenaiApiVersion);
+  const llmAnthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
+  const theme = useGlobalSettingsStore((s) => s.theme);
+  const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const { settings: kairaBotSettings, updateSettings: updateKairaBotSettings } = useKairaBotSettings();
 
   // Load credentials from backend on mount
@@ -78,20 +83,24 @@ export function KairaBotSettingsPage() {
     buildStoreValues: () => {
       const { kairaApiUrl, kairaAuthToken, kairaChatUserId, ...kairaBotPrefs } = kairaBotSettings;
       return {
-        theme: globalSettings.theme,
+        theme,
         apiKey: llmApiKey,
         provider: llmProvider,
         geminiApiKey: llmGeminiApiKey,
         openaiApiKey: llmOpenaiApiKey,
+        azureOpenaiApiKey: llmAzureOpenaiApiKey,
+        azureOpenaiEndpoint: llmAzureOpenaiEndpoint,
+        azureOpenaiApiVersion: llmAzureOpenaiApiVersion,
+        anthropicApiKey: llmAnthropicApiKey,
         selectedModel: llmSelectedModel,
-        timeouts: { ...globalSettings.timeouts } as LLMTimeoutSettings,
+        timeouts: { ...timeouts } as LLMTimeoutSettings,
         kairaBot: kairaBotPrefs as KairaBotFormValues['kairaBot'],
         kairaApiUrl,
         kairaAuthToken,
         kairaChatUserId,
       };
     },
-    deps: [globalSettings.theme, llmApiKey, llmSelectedModel, llmProvider, llmGeminiApiKey, llmOpenaiApiKey, globalSettings.timeouts, kairaBotSettings],
+    deps: [theme, llmApiKey, llmSelectedModel, llmProvider, llmGeminiApiKey, llmOpenaiApiKey, llmAzureOpenaiApiKey, llmAzureOpenaiEndpoint, llmAzureOpenaiApiVersion, llmAnthropicApiKey, timeouts, kairaBotSettings],
     onSaveApp,
   });
 
@@ -115,6 +124,10 @@ export function KairaBotSettingsPage() {
               provider={formValues.provider}
               geminiApiKey={formValues.geminiApiKey}
               openaiApiKey={formValues.openaiApiKey}
+              azureOpenaiApiKey={(formValues.azureOpenaiApiKey as string) || ''}
+              azureOpenaiEndpoint={(formValues.azureOpenaiEndpoint as string) || ''}
+              azureOpenaiApiVersion={(formValues.azureOpenaiApiVersion as string) || '2025-03-01-preview'}
+              anthropicApiKey={(formValues.anthropicApiKey as string) || ''}
               selectedModel={formValues.selectedModel}
               onChange={handleChange}
             />

@@ -23,10 +23,10 @@ async def lifespan(app: FastAPI):
             """)
         )
 
-        # Add report_cache column to eval_runs table if missing
+        # Drop legacy report_cache column (now in evaluation_analytics table)
         await conn.execute(
             text("""
-                ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS report_cache JSON
+                ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache
             """)
         )
 

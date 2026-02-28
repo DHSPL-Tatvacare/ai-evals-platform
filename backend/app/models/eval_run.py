@@ -60,9 +60,6 @@ class EvalRun(Base, UserMixin):
     # Batch-specific metadata (data_path, data_file_hash, thread count, flags, name, description)
     batch_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # Cached report payload (avoids repeated LLM narrative calls)
-    report_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
     # Standard
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -64,9 +64,13 @@ async def get_llm_settings_from_db(
     value = setting.value
     provider = value.get("provider", "gemini")
 
-    # New format: per-provider API keys (geminiApiKey, openaiApiKey)
+    # New format: per-provider API keys (geminiApiKey, openaiApiKey, azureOpenaiApiKey, anthropicApiKey)
     if "geminiApiKey" in value or "openaiApiKey" in value:
-        if provider == "openai":
+        if provider == "azure_openai":
+            api_key = value.get("azureOpenaiApiKey", "")
+        elif provider == "anthropic":
+            api_key = value.get("anthropicApiKey", "")
+        elif provider == "openai":
             api_key = value.get("openaiApiKey", "")
         else:
             api_key = value.get("geminiApiKey") or value.get("apiKey", "")
@@ -120,10 +124,17 @@ async def get_llm_settings_from_db(
 
     logger.info("Auth resolved: intent=%s method=%s provider=%s", auth_intent, auth_method, provider)
 
-    return {
+    result = {
         "api_key": api_key,
         "provider": provider,
         "selected_model": selected_model,
         "auth_method": auth_method,
         "service_account_path": service_account_path,
     }
+
+    # Azure OpenAI: include endpoint and api_version
+    if provider == "azure_openai":
+        result["azure_endpoint"] = value.get("azureOpenaiEndpoint", "")
+        result["api_version"] = value.get("azureOpenaiApiVersion", "2025-03-01-preview")
+
+    return result

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { ExternalLink, Key, Server, Brain } from 'lucide-react';
-import { useLLMSettingsStore, hasLLMCredentials } from '@/stores';
+import { useLLMSettingsStore, hasLLMCredentials, LLM_PROVIDERS } from '@/stores';
 import { ModelSelector } from '@/features/settings/components/ModelSelector';
 import { Alert } from '@/components/ui';
 import { cn } from '@/utils';
@@ -48,7 +48,7 @@ export function LLMConfigStep({ config, onChange, onModelsLoading }: LLMConfigSt
       <div className="space-y-4">
         <Alert variant="warning" title="No credentials configured">
           <p>
-            You need to configure your {provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in Settings
+            You need to configure your {LLM_PROVIDERS.find((p) => p.value === provider)?.label ?? 'LLM'} API key in Settings
             or set up a service account on the server before running evaluations.
           </p>
           <a
@@ -70,7 +70,7 @@ export function LLMConfigStep({ config, onChange, onModelsLoading }: LLMConfigSt
           Provider
         </label>
         <div className="flex items-center gap-2 px-3 py-2 rounded-[6px] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[14px] text-[var(--text-primary)]">
-          {provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}
+          {LLM_PROVIDERS.find((p) => p.value === provider)?.label ?? provider}
         </div>
         <p className="mt-1 text-[11px] text-[var(--text-muted)]">
           Provider is configured in global settings.

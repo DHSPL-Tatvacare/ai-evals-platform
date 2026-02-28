@@ -169,6 +169,20 @@
   --border-warning: #fde68a;
   --border-info: #c7d2fe;
 
+  /* Heatmap cell scale (red → amber → green with legible text) */
+  --heatmap-critical-bg: #fef2f2;
+  --heatmap-critical-text: #991b1b;
+  --heatmap-low-bg: #fff7ed;
+  --heatmap-low-text: #9a3412;
+  --heatmap-mid-bg: #fffbeb;
+  --heatmap-mid-text: #92400e;
+  --heatmap-good-bg: #ecfdf5;
+  --heatmap-good-text: #065f46;
+  --heatmap-great-bg: #d1fae5;
+  --heatmap-great-text: #064e3b;
+  --heatmap-null-bg: var(--bg-tertiary);
+  --heatmap-null-text: var(--text-muted);
+
   /* Interactive ghost states */
   --interactive-ghost: transparent;
   --interactive-ghost-hover: var(--bg-tertiary);
@@ -259,6 +273,20 @@
   --border-error: rgba(239, 68, 68, 0.3);
   --border-warning: rgba(245, 158, 11, 0.3);
   --border-info: rgba(99, 102, 241, 0.3);
+
+  /* Heatmap cell scale — dark mode (muted backgrounds, light text) */
+  --heatmap-critical-bg: rgba(239, 68, 68, 0.2);
+  --heatmap-critical-text: #fca5a5;
+  --heatmap-low-bg: rgba(249, 115, 22, 0.2);
+  --heatmap-low-text: #fdba74;
+  --heatmap-mid-bg: rgba(245, 158, 11, 0.2);
+  --heatmap-mid-text: #fcd34d;
+  --heatmap-good-bg: rgba(16, 185, 129, 0.15);
+  --heatmap-good-text: #6ee7b7;
+  --heatmap-great-bg: rgba(16, 185, 129, 0.25);
+  --heatmap-great-text: #a7f3d0;
+  --heatmap-null-bg: var(--bg-tertiary);
+  --heatmap-null-text: var(--text-muted);
 
   --bg-code: var(--color-neutral-800);
   --bg-code-block: var(--color-neutral-800);
@@ -359,5 +387,5 @@ html[data-theme-transitioning] * {
   30% { opacity: 1; transform: translateY(-4px); }
 }
 
-/* Dark mode fix for OpenAI SVG icons rendered as <img> (uses currentColor) */
-[data-theme="dark"] .provider-icon-openai { filter: invert(1); }
+/* Dark mode fix for provider SVG icons rendered as <img> that use fill="currentColor" */
+[data-theme="dark"] .provider-icon-invert { filter: invert(1); }

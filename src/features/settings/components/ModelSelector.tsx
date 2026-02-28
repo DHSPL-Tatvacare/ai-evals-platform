@@ -1,10 +1,21 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Search, Loader2, AlertCircle, ChevronDown, Check } from 'lucide-react';
-import { discoverGeminiModels, discoverOpenAIModels, discoverModelsViaBackend, type GeminiModel } from '@/services/llm';
+import { discoverModels, clearModelCache, type DiscoveredModel } from '@/services/llm';
 import { detectProvider, providerIcons } from '@/components/ui/ModelBadge/providers';
 import { useLLMSettingsStore } from '@/stores';
 import { cn } from '@/utils';
 import type { LLMProvider } from '@/types';
+
+/** Minimum API key length before attempting model discovery (avoids partial-key errors). */
+const MIN_KEY_LENGTH: Record<LLMProvider, number> = {
+  gemini: 10,
+  openai: 10,
+  azure_openai: 10,
+  anthropic: 10,
+};
+
+/** Debounce delay (ms) — only fire discovery after user stops typing. */
+const DEBOUNCE_MS = 800;
 
 interface ModelSelectorProps {
   apiKey: string;
@@ -17,21 +28,32 @@ interface ModelSelectorProps {
   onLoadingChange?: (loading: boolean) => void;
   /** Direction for dropdown to open. Default 'down'. Use 'up' when near bottom of viewport. */
   dropdownDirection?: 'up' | 'down';
+  /** Azure endpoint — passed through to backend for Azure discovery */
+  azureEndpoint?: string;
+  /** Azure API version — passed through to backend for Azure discovery */
+  azureApiVersion?: string;
 }
 
-export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gemini', mode = 'auto', onLoadingChange, dropdownDirection = 'down' }: ModelSelectorProps) {
-  const [models, setModels] = useState<GeminiModel[]>([]);
+export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gemini', mode = 'auto', onLoadingChange, dropdownDirection = 'down', azureEndpoint, azureApiVersion }: ModelSelectorProps) {
+  const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const saConfigured = useLLMSettingsStore((s) => s._serviceAccountConfigured);
   const isServiceAccount = mode === 'api-key-only' ? false : (provider === 'gemini' && saConfigured);
 
-  const loadModels = useCallback(async () => {
-    if (!isServiceAccount && !apiKey) {
+  // Azure loads models without a key; all others need a key (unless SA)
+  const needsApiKey = provider !== 'azure_openai' && !isServiceAccount;
+
+  const doLoadModels = useCallback(async (key: string) => {
+    if (needsApiKey && !key) {
       setModels([]);
+      return;
+    }
+    if (needsApiKey && key.length < (MIN_KEY_LENGTH[provider] ?? 10)) {
       return;
     }
 
@@ -39,14 +61,14 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
     setError(null);
 
     try {
-      let discovered: GeminiModel[];
-      if (isServiceAccount) {
-        discovered = await discoverModelsViaBackend('gemini');
-      } else if (provider === 'openai') {
-        discovered = await discoverOpenAIModels(apiKey);
-      } else {
-        discovered = await discoverGeminiModels(apiKey);
+      clearModelCache();
+      const credentials: { apiKey?: string; endpoint?: string; apiVersion?: string } = {};
+      if (key) credentials.apiKey = key;
+      if (provider === 'azure_openai') {
+        credentials.endpoint = azureEndpoint;
+        credentials.apiVersion = azureApiVersion;
       }
+      const discovered = await discoverModels(provider, credentials);
       setModels(discovered);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load models');
@@ -54,11 +76,26 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
     } finally {
       setIsLoading(false);
     }
-  }, [apiKey, provider, isServiceAccount]);
+  }, [provider, needsApiKey, azureEndpoint, azureApiVersion]);
 
+  // Debounce model discovery when apiKey changes (user typing)
   useEffect(() => {
-    loadModels();
-  }, [loadModels]);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      doLoadModels(apiKey);
+    }, DEBOUNCE_MS);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [apiKey, doLoadModels]);
+
+  // Immediately re-discover when provider changes (no debounce needed)
+  const prevProviderRef = useRef(provider);
+  useEffect(() => {
+    if (prevProviderRef.current !== provider) {
+      prevProviderRef.current = provider;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      doLoadModels(apiKey);
+    }
+  }, [provider, apiKey, doLoadModels]);
 
   useEffect(() => {
     onLoadingChange?.(isLoading);
@@ -79,7 +116,7 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
     [models, selectedModel]
   );
 
-  const handleSelect = (model: GeminiModel) => {
+  const handleSelect = (model: DiscoveredModel) => {
     onChange(model.name);
     setIsOpen(false);
     setSearchQuery('');
@@ -98,7 +135,7 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        disabled={isLoading || (!apiKey && !isServiceAccount)}
+        disabled={isLoading || (needsApiKey && !apiKey)}
         className={cn(
           'w-full flex items-center justify-between rounded-[6px] border px-3 py-2 text-left text-[14px]',
           'bg-[var(--input-bg)] border-[var(--border-default)]',
@@ -110,9 +147,9 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
           <img
             src={providerIcons[provider]}
             alt="Provider"
-            className={cn('h-4 w-4', provider === 'openai' && 'provider-icon-openai')}
+            className={cn('h-4 w-4', provider !== 'gemini' && 'provider-icon-invert')}
           />
-          {!apiKey && !isServiceAccount ? (
+          {needsApiKey && !apiKey ? (
             <span className="text-[var(--text-muted)]">Enter API key first</span>
           ) : isLoading ? (
             <span className="text-[var(--text-muted)]">Loading models...</span>
@@ -181,7 +218,7 @@ export function ModelSelector({ apiKey, selectedModel, onChange, provider = 'gem
                   <img
                     src={providerIcons[detectProvider(model.name)]}
                     alt="Provider"
-                    className={cn('h-4 w-4 mt-0.5 shrink-0', detectProvider(model.name) === 'openai' && 'provider-icon-openai')}
+                    className={cn('h-4 w-4 mt-0.5 shrink-0', detectProvider(model.name) !== 'gemini' && 'provider-icon-invert')}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

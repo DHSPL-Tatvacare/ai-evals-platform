@@ -204,11 +204,16 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
     selected_model = params.get("model") or db_settings["selected_model"]
 
     # ── Create LLM providers ────────────────────────────────────
+    vr_azure_endpoint = db_settings.get("azure_endpoint", "")
+    vr_api_version = db_settings.get("api_version", "")
+
     def _create_llm(model: str) -> BaseLLMProvider:
         inner = create_llm_provider(
             provider=provider, api_key=api_key,
             model_name=model, temperature=0.3,
             service_account_path=service_account_path,
+            azure_endpoint=vr_azure_endpoint,
+            api_version=vr_api_version,
         )
         llm = LoggingLLMWrapper(inner, log_callback=save_api_log)
         if params.get("timeouts"):

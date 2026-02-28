@@ -17,6 +17,8 @@ type PromptType = 'transcription' | 'evaluation' | 'extraction';
 const PROVIDER_DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: '',
   openai: '',
+  azure_openai: '',
+  anthropic: '',
 };
 
 const defaultLLMSettings: LLMSettings = {
@@ -24,6 +26,10 @@ const defaultLLMSettings: LLMSettings = {
   apiKey: '',
   geminiApiKey: '',
   openaiApiKey: '',
+  azureOpenaiApiKey: '',
+  azureOpenaiEndpoint: '',
+  azureOpenaiApiVersion: '2025-03-01-preview',
+  anthropicApiKey: '',
   selectedModel: DEFAULT_MODEL,
   activeSchemaIds: {
     transcription: null,
@@ -72,8 +78,21 @@ interface LLMSettingsState extends LLMSettings {
  * Usage in components: `useLLMSettingsStore(hasLLMCredentials)`
  * Usage in callbacks:  `hasLLMCredentials(useLLMSettingsStore.getState())`
  */
-export const hasLLMCredentials = (state: Pick<LLMSettingsState, 'apiKey' | 'provider' | '_serviceAccountConfigured'>): boolean =>
-  Boolean(state.apiKey) || (state.provider === 'gemini' && state._serviceAccountConfigured);
+export const hasLLMCredentials = (state: Pick<LLMSettingsState, 'apiKey' | 'provider' | '_serviceAccountConfigured' | 'azureOpenaiEndpoint'>): boolean => {
+  if (state.provider === 'gemini' && state._serviceAccountConfigured) return true;
+  if (!state.apiKey) return false;
+  // Azure OpenAI requires both API key AND endpoint
+  if (state.provider === 'azure_openai') return Boolean(state.azureOpenaiEndpoint);
+  return true;
+};
+
+/** All provider options — shared across ProviderConfigCard, ReportTab, etc. */
+export const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'azure_openai', label: 'Azure OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+];
 
 export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
   ...defaultLLMSettings,
@@ -97,7 +116,14 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
         const provider = data.provider || 'gemini';
         const geminiApiKey = data.geminiApiKey || '';
         const openaiApiKey = data.openaiApiKey || '';
-        const apiKey = provider === 'openai' ? openaiApiKey : geminiApiKey;
+        const azureOpenaiApiKey = data.azureOpenaiApiKey || '';
+        const azureOpenaiEndpoint = data.azureOpenaiEndpoint || '';
+        const azureOpenaiApiVersion = data.azureOpenaiApiVersion || '2025-03-01-preview';
+        const anthropicApiKey = data.anthropicApiKey || '';
+        const apiKey = provider === 'azure_openai' ? azureOpenaiApiKey
+          : provider === 'anthropic' ? anthropicApiKey
+          : provider === 'openai' ? openaiApiKey
+          : geminiApiKey;
 
         // Auto-compute geminiAuthMethod from SA detection
         const geminiAuthMethod: GeminiAuthMethod = saConfigured ? 'service_account' : 'api_key';
@@ -108,6 +134,10 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
           provider,
           geminiApiKey,
           openaiApiKey,
+          azureOpenaiApiKey,
+          azureOpenaiEndpoint,
+          azureOpenaiApiVersion,
+          anthropicApiKey,
           apiKey,
           activeSchemaIds: {
             ...defaultLLMSettings.activeSchemaIds,
@@ -147,6 +177,10 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
       apiKey: state.apiKey,
       geminiApiKey: state.geminiApiKey,
       openaiApiKey: state.openaiApiKey,
+      azureOpenaiApiKey: state.azureOpenaiApiKey,
+      azureOpenaiEndpoint: state.azureOpenaiEndpoint,
+      azureOpenaiApiVersion: state.azureOpenaiApiVersion,
+      anthropicApiKey: state.anthropicApiKey,
       selectedModel: state.selectedModel,
       activeSchemaIds: state.activeSchemaIds,
       activePromptIds: state.activePromptIds,
@@ -176,7 +210,10 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
   setProvider: (provider) => {
     const state = get();
     const defaultModel = PROVIDER_DEFAULT_MODELS[provider];
-    const apiKey = provider === 'openai' ? state.openaiApiKey : state.geminiApiKey;
+    const apiKey = provider === 'azure_openai' ? state.azureOpenaiApiKey
+      : provider === 'anthropic' ? state.anthropicApiKey
+      : provider === 'openai' ? state.openaiApiKey
+      : state.geminiApiKey;
     set({ provider, selectedModel: defaultModel, apiKey });
   },
 
@@ -184,8 +221,12 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
     const updates: Partial<LLMSettingsState> = {};
     if (provider === 'gemini') {
       updates.geminiApiKey = key;
-    } else {
+    } else if (provider === 'openai') {
       updates.openaiApiKey = key;
+    } else if (provider === 'azure_openai') {
+      updates.azureOpenaiApiKey = key;
+    } else if (provider === 'anthropic') {
+      updates.anthropicApiKey = key;
     }
     // If this is the active provider, also update apiKey
     if (get().provider === provider) {

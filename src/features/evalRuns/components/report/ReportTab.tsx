@@ -3,11 +3,14 @@ import { Loader2, RefreshCw, Download, FileBarChart, Sparkles, X } from 'lucide-
 import type { ReportPayload } from '@/types/reports';
 import type { LLMProvider } from '@/types';
 import { reportsApi } from '@/services/api/reportsApi';
+import { jobsApi } from '@/services/api/jobsApi';
+import { pollJobUntilComplete } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { EmptyState, Button, Tabs } from '@/components/ui';
 import { ModelSelector } from '@/features/settings/components/ModelSelector';
 import { useLLMSettingsStore, hasLLMCredentials } from '@/stores';
 import { providerIcons } from '@/components/ui/ModelBadge/providers';
+import { LLM_PROVIDERS } from '@/stores';
 import { cn } from '@/utils';
 import ExecutiveSummary from './ExecutiveSummary';
 import VerdictDistributions from './VerdictDistributions';
@@ -34,9 +37,11 @@ export default function ReportTab({ runId }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progressMsg, setProgressMsg] = useState('');
   const [showRefreshSelector, setShowRefreshSelector] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
   const refreshPopoverRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Close popover on outside click
   useEffect(() => {
@@ -56,52 +61,110 @@ export default function ReportTab({ runId }: Props) {
   const credentialsReady = useLLMSettingsStore(hasLLMCredentials);
   const apiKey = useLLMSettingsStore((s) => s.apiKey);
 
-  // On mount: pre-fill model selector + check for cached report
+  // ── Poll a job until done, then load the cached report ──
+  const pollAndLoad = useCallback(async (jobId: string, isRefresh: boolean) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const finalJob = await pollJobUntilComplete(jobId, {
+        pollIntervalMs: 5000,
+        signal: controller.signal,
+        onProgress: (p) => setProgressMsg(p.message || ''),
+      });
+      if (finalJob.status === 'completed') {
+        const data = await reportsApi.fetchReport(runId, { cacheOnly: true });
+        setReport(data);
+        setStatus('ready');
+        if (isRefresh) notificationService.success('Report regenerated');
+      } else if (finalJob.status === 'failed') {
+        const msg = finalJob.errorMessage || 'Report generation failed';
+        setError(msg);
+        if (!isRefresh) setStatus('error');
+        else notificationService.error(msg);
+      }
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      const msg = e instanceof Error ? e.message : 'Report generation failed';
+      setError(msg);
+      if (!isRefresh) setStatus('error');
+      else notificationService.error(msg);
+    } finally {
+      setRefreshing(false);
+      setProgressMsg('');
+    }
+  }, [runId]);
+
+  // ── On mount: check running jobs first (survives refresh), then cache, then idle ──
   useEffect(() => {
     const s = useLLMSettingsStore.getState();
     setReportProvider(s.provider);
     setReportModel(s.selectedModel);
 
     let cancelled = false;
-    reportsApi.fetchReport(runId, { cacheOnly: true }).then((data) => {
-      if (!cancelled) {
-        setReport(data);
-        setStatus('ready');
-      }
-    }).catch(() => {
-      if (!cancelled) setStatus('idle');
-    });
-    return () => { cancelled = true; };
-  }, [runId]);
 
-  const fetchReport = useCallback(async (refresh = false) => {
-    // First load vs refresh: different UI treatment
-    if (report && refresh) {
+    (async () => {
+      // 1. Check for an in-progress generate-report job for this run FIRST.
+      //    This ensures a page refresh during generation resumes polling
+      //    instead of showing a stale cached report.
+      try {
+        const jobs = await jobsApi.list({ jobType: 'generate-report' });
+        const active = jobs.find(
+          (j) => ['queued', 'running'].includes(j.status) &&
+                 (j.params as Record<string, unknown>)?.run_id === runId,
+        );
+        if (active && !cancelled) {
+          setStatus('generating');
+          pollAndLoad(active.id, false);
+          return;
+        }
+      } catch { /* ignore */ }
+
+      if (cancelled) return;
+
+      // 2. No active job — check for cached report
+      try {
+        const data = await reportsApi.fetchReport(runId, { cacheOnly: true });
+        if (!cancelled) { setReport(data); setStatus('ready'); }
+        return;
+      } catch { /* no cache */ }
+
+      if (!cancelled) setStatus('idle');
+    })();
+
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+    };
+  }, [runId, pollAndLoad]);
+
+  // ── Submit a generate-report job ──
+  const generateReport = useCallback(async (refresh = false) => {
+    if (refresh && report) {
       setRefreshing(true);
     } else {
       setStatus('generating');
     }
     setError(null);
+    setProgressMsg('Submitting report job…');
 
     try {
-      const data = await reportsApi.fetchReport(runId, {
-        refresh: refresh || undefined,
+      const job = await jobsApi.submit('generate-report', {
+        run_id: runId,
+        refresh,
         provider: reportProvider,
         model: reportModel || undefined,
       });
-      setReport(data);
-      setStatus('ready');
-      if (refresh) notificationService.success('Report regenerated');
+      await pollAndLoad(job.id, refresh);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate report';
+      const msg = e instanceof Error ? e.message : 'Failed to submit report job';
       setError(msg);
-      // Only go to error state if we have nothing to show
       if (!report) setStatus('error');
       else notificationService.error(msg);
-    } finally {
       setRefreshing(false);
     }
-  }, [runId, report, reportProvider, reportModel]);
+  }, [runId, report, reportProvider, reportModel, pollAndLoad]);
 
   const handleExportPdf = useCallback(async () => {
     if (exporting) return;
@@ -130,7 +193,7 @@ export default function ReportTab({ runId }: Props) {
       <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
       <p className="text-sm font-semibold text-[var(--text-primary)]">{label}</p>
       <p className="text-sm text-[var(--text-secondary)]">
-        Aggregating evaluation data and generating AI narrative. This typically takes 10–30 seconds.
+        {progressMsg || 'Aggregating evaluation data and generating AI narrative. This typically takes 10\u201330 seconds.'}
       </p>
     </div>
   );
@@ -169,25 +232,11 @@ export default function ReportTab({ runId }: Props) {
               </div>
 
               {/* Provider toggle */}
-              <div className="flex gap-1 p-0.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
-                {(['gemini', 'openai'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      setReportProvider(p);
-                      setReportModel('');
-                    }}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-colors ${
-                      reportProvider === p
-                        ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                    }`}
-                  >
-                    <img src={providerIcons[p]} alt={p} className={cn('h-3.5 w-3.5', p === 'openai' && 'provider-icon-openai')} />
-                    {p === 'gemini' ? 'Gemini' : 'OpenAI'}
-                  </button>
-                ))}
-              </div>
+              <ProviderToggle
+                providers={LLM_PROVIDERS}
+                value={reportProvider}
+                onChange={(v) => { setReportProvider(v); setReportModel(''); }}
+              />
 
               {/* Model dropdown */}
               <ModelSelector
@@ -204,7 +253,7 @@ export default function ReportTab({ runId }: Props) {
               variant="primary"
               size="lg"
               icon={FileBarChart}
-              onClick={() => fetchReport()}
+              onClick={() => generateReport()}
               disabled={!credentialsReady || !reportModel}
               className="w-full"
             >
@@ -242,7 +291,7 @@ export default function ReportTab({ runId }: Props) {
             description={error ?? 'Something went wrong. Try again.'}
             action={{
               label: 'Retry',
-              onClick: () => fetchReport(),
+              onClick: () => generateReport(),
             }}
           />
         </div>
@@ -438,25 +487,11 @@ export default function ReportTab({ runId }: Props) {
                   </div>
 
                   {/* Provider toggle */}
-                  <div className="flex gap-1 p-0.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
-                    {(['gemini', 'openai'] as const).map((p) => (
-                      <button
-                        key={p}
-                        onClick={() => {
-                          setReportProvider(p);
-                          setReportModel('');
-                        }}
-                        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-colors ${
-                          reportProvider === p
-                            ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                        }`}
-                      >
-                        <img src={providerIcons[p]} alt={p} className={cn('h-3.5 w-3.5', p === 'openai' && 'provider-icon-openai')} />
-                        {p === 'gemini' ? 'Gemini' : 'OpenAI'}
-                      </button>
-                    ))}
-                  </div>
+                  <ProviderToggle
+                    providers={LLM_PROVIDERS}
+                    value={reportProvider}
+                    onChange={(v) => { setReportProvider(v); setReportModel(''); }}
+                  />
 
                   {/* Model dropdown */}
                   <ModelSelector
@@ -471,7 +506,7 @@ export default function ReportTab({ runId }: Props) {
                   <button
                     onClick={() => {
                       setShowRefreshSelector(false);
-                      fetchReport(true);
+                      generateReport(true);
                     }}
                     disabled={!credentialsReady || !reportModel}
                     className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-[var(--interactive-primary)] rounded-md hover:opacity-90 transition-colors disabled:opacity-50"
@@ -629,6 +664,48 @@ export default function ReportTab({ runId }: Props) {
       <div className="print-footer print-only hidden">
         CONFIDENTIAL &mdash; AI Evals Platform &middot; Tatvacare
       </div>
+    </div>
+  );
+}
+
+/* ── Provider toggle: icons-only when >2 providers, icon+label when ≤2 ── */
+function ProviderToggle({
+  providers,
+  value,
+  onChange,
+}: {
+  providers: { value: LLMProvider; label: string }[];
+  value: LLMProvider;
+  onChange: (v: LLMProvider) => void;
+}) {
+  const iconOnly = providers.length > 2;
+
+  return (
+    <div className="flex gap-1 p-0.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
+      {providers.map((p) => {
+        const isActive = value === p.value;
+        return (
+          <button
+            key={p.value}
+            onClick={() => onChange(p.value)}
+            title={p.label}
+            className={cn(
+              'flex items-center justify-center gap-1.5 rounded-md text-xs font-medium transition-colors',
+              iconOnly ? 'flex-1 py-1.5 px-2' : 'py-1.5 px-3',
+              isActive
+                ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+            )}
+          >
+            <img
+              src={providerIcons[p.value]}
+              alt={p.label}
+              className={cn('h-4 w-4', p.value !== 'gemini' && 'provider-icon-invert')}
+            />
+            {!iconOnly && <span>{p.label}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

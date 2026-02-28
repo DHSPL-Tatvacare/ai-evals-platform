@@ -45,7 +45,7 @@ export function ModelBadge({
   const primaryName = displayName || modelName;
   const secondaryName = displayName && displayName !== modelName ? modelName : null;
 
-  const iconCls = detectedProvider === 'openai' ? 'provider-icon-openai' : undefined;
+  const iconCls = detectedProvider !== 'gemini' ? 'provider-icon-invert' : undefined;
 
   if (variant === 'inline') {
     return (

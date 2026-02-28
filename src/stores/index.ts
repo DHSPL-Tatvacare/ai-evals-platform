@@ -1,4 +1,4 @@
-export { useLLMSettingsStore, hasLLMCredentials } from './llmSettingsStore';
+export { useLLMSettingsStore, hasLLMCredentials, LLM_PROVIDERS } from './llmSettingsStore';
 export { useUIStore } from './uiStore';
 export { useListingsStore } from './listingsStore';
 export { useTaskQueueStore } from './taskQueueStore';
@@ -18,3 +18,4 @@ export { useChatStore } from './chatStore';
 export { useEvaluatorsStore } from './evaluatorsStore';
 export { useMiniPlayerStore } from './miniPlayerStore';
 export { useJobTrackerStore, type TrackedJob } from './jobTrackerStore';
+export { useCrossRunStore } from './crossRunStore';

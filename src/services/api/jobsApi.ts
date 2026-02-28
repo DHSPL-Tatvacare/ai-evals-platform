@@ -26,9 +26,12 @@ export const jobsApi = {
     });
   },
 
-  async list(status?: string): Promise<Job[]> {
-    const query = status ? `?status=${status}` : '';
-    return apiRequest<Job[]>(`/api/jobs${query}`);
+  async list(opts?: { status?: string; jobType?: string }): Promise<Job[]> {
+    const params = new URLSearchParams();
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.jobType) params.set('job_type', opts.jobType);
+    const qs = params.toString();
+    return apiRequest<Job[]>(`/api/jobs${qs ? `?${qs}` : ''}`);
   },
 
   async get(jobId: string): Promise<Job> {

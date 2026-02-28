@@ -75,7 +75,7 @@ export function KairaSidebarContent({ searchPlaceholder }: KairaSidebarContentPr
         />
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-4">
+      <nav className="flex-1 flex flex-col overflow-y-auto px-2 pb-4">
         <ChatSessionList
           sessions={filteredSessions}
           currentSessionId={currentSession?.id ?? null}

@@ -1,5 +1,5 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type LLMProvider = 'gemini' | 'openai';
+export type LLMProvider = 'gemini' | 'openai' | 'azure_openai' | 'anthropic';
 export type GeminiAuthMethod = 'api_key' | 'service_account';
 export type SettingCategory = 'appearance' | 'llm' | 'storage' | 'advanced' | 'prompts' | 'ai' | 'chat' | 'timeouts' | 'api';
 export type SettingType = 'text' | 'password' | 'select' | 'toggle' | 'number' | 'textarea' | 'file';
@@ -59,6 +59,10 @@ export interface LLMSettings {
   /** Per-provider API keys */
   geminiApiKey: string;
   openaiApiKey: string;
+  azureOpenaiApiKey: string;
+  azureOpenaiEndpoint: string;
+  azureOpenaiApiVersion: string;
+  anthropicApiKey: string;
   selectedModel: string;
   activeSchemaIds: {
     transcription: string | null;

@@ -76,11 +76,12 @@ class BaseLLMProvider(ABC):
             return self._timeouts.get("with_schema", DEFAULT_TIMEOUTS["with_schema"])
         return self._timeouts.get("text_only", DEFAULT_TIMEOUTS["text_only"])
 
-    async def _with_retry(self, sync_fn, *args, max_retries: int = 3):
-        """Wrap a sync LLM call with exponential backoff for transient errors.
+    async def _with_retry(self, sync_fn, *args, max_retries: int = 1):
+        """Safety-net retry for transient errors not handled by SDK-level retries.
 
-        Replaces bare asyncio.to_thread — the returned coroutine should still be
-        wrapped with asyncio.wait_for so the overall timeout applies across all retries.
+        SDKs (google-genai, openai) now handle HTTP 429/5xx retries internally.
+        This wrapper catches only residual connection/timeout errors with a single
+        retry.  Still wrapped with asyncio.wait_for for overall deadline.
         """
         for attempt in range(max_retries + 1):
             try:
@@ -133,13 +134,17 @@ class GeminiProvider(BaseLLMProvider):
         super().__init__(api_key or "", model_name, temperature)
 
         from google import genai
-        try:
-            from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
-            self.RETRYABLE_EXCEPTIONS = (
-                ResourceExhausted, ServiceUnavailable, ConnectionError, TimeoutError,
-            )
-        except ImportError:
-            pass  # Fall back to base class defaults
+        from google.genai import types as genai_types
+
+        # Configure SDK-level retry with exponential backoff for 429/5xx errors.
+        # Default retryable status codes: 408, 429, 500, 502, 503, 504.
+        retry_opts = genai_types.HttpRetryOptions(
+            attempts=5,
+            initial_delay=1.0,
+            max_delay=60.0,
+            exp_base=2.0,
+        )
+        http_opts = genai_types.HttpOptions(retry_options=retry_opts)
 
         if service_account_path:
             from pathlib import Path
@@ -155,12 +160,13 @@ class GeminiProvider(BaseLLMProvider):
                 )
                 self.client = genai.Client(
                     vertexai=True, project=project_id, credentials=credentials,
+                    http_options=http_opts,
                 )
                 self.auth_method = "service_account"
             else:
                 raise FileNotFoundError(f"Service account file not found: {sa_path}")
         elif api_key:
-            self.client = genai.Client(api_key=api_key)
+            self.client = genai.Client(api_key=api_key, http_options=http_opts)
             self.auth_method = "api_key"
         else:
             raise ValueError("Either api_key or service_account_path must be provided")
@@ -418,14 +424,7 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(self, api_key: str, model_name: str = "", temperature: float = 1.0):
         super().__init__(api_key, model_name, temperature)
         from openai import OpenAI
-        self.client = OpenAI(api_key=api_key)
-        try:
-            from openai import RateLimitError, APIConnectionError
-            self.RETRYABLE_EXCEPTIONS = (
-                RateLimitError, APIConnectionError, ConnectionError, TimeoutError,
-            )
-        except ImportError:
-            pass  # Fall back to base class defaults
+        self.client = OpenAI(api_key=api_key, max_retries=4)
 
     @staticmethod
     def _extract_tokens(response):
@@ -560,6 +559,110 @@ class OpenAIProvider(BaseLLMProvider):
             return text
         except asyncio.TimeoutError:
             raise LLMTimeoutError(f"LLM generate_with_audio call timed out after {timeout}s")
+
+
+class AzureOpenAIProvider(OpenAIProvider):
+    """Azure OpenAI — inherits all sync/async methods from OpenAIProvider.
+
+    Only ``__init__`` differs: uses ``AzureOpenAI`` client which routes
+    requests to an Azure-hosted deployment instead of the OpenAI API.
+    """
+
+    def __init__(
+        self, api_key: str, model_name: str = "", temperature: float = 1.0,
+        azure_endpoint: str = "", api_version: str = "2025-03-01-preview",
+    ):
+        # Skip OpenAIProvider.__init__ — we need a different client class.
+        BaseLLMProvider.__init__(self, api_key, model_name, temperature)
+        from openai import AzureOpenAI
+        self.client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=azure_endpoint,
+            max_retries=4,
+        )
+
+
+class AnthropicProvider(BaseLLMProvider):
+    """Async Anthropic/Claude provider."""
+
+    def __init__(self, api_key: str, model_name: str = "", temperature: float = 1.0):
+        super().__init__(api_key, model_name, temperature)
+        from anthropic import Anthropic
+        self.client = Anthropic(api_key=api_key, max_retries=4)
+
+    @staticmethod
+    def _extract_tokens(response):
+        """Extract token counts from Anthropic response. Returns (in, out) tuple."""
+        tokens_in = tokens_out = None
+        if hasattr(response, "usage") and response.usage:
+            tokens_in = getattr(response.usage, "input_tokens", None)
+            tokens_out = getattr(response.usage, "output_tokens", None)
+        return tokens_in, tokens_out
+
+    def _sync_generate(self, prompt, system_prompt):
+        kwargs = {
+            "model": self.model_name,
+            "max_tokens": 8192,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        response = self.client.messages.create(**kwargs)
+        tokens_in, tokens_out = self._extract_tokens(response)
+        text = response.content[0].text if response.content else ""
+        return text, tokens_in, tokens_out
+
+    def _sync_generate_json(self, prompt, system_prompt, json_schema):
+        json_instruction = "Respond with valid JSON only. No markdown fences, no extra text."
+        if json_schema:
+            json_instruction += f"\n\nJSON Schema:\n{json.dumps(json_schema, indent=2)}"
+        full_system = f"{system_prompt}\n\n{json_instruction}" if system_prompt else json_instruction
+
+        kwargs = {
+            "model": self.model_name,
+            "max_tokens": 8192,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature,
+            "system": full_system,
+        }
+        response = self.client.messages.create(**kwargs)
+        tokens_in, tokens_out = self._extract_tokens(response)
+        content = response.content[0].text if response.content else "{}"
+        try:
+            return json.loads(content), tokens_in, tokens_out
+        except json.JSONDecodeError:
+            text = content.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip()), tokens_in, tokens_out
+
+    async def generate(self, prompt, system_prompt=None, response_format=None, **kwargs):
+        timeout = self._get_timeout()
+        try:
+            text, self._last_tokens_in, self._last_tokens_out = await asyncio.wait_for(
+                self._with_retry(self._sync_generate, prompt, system_prompt),
+                timeout=timeout,
+            )
+            return text
+        except asyncio.TimeoutError:
+            raise LLMTimeoutError(f"LLM generate call timed out after {timeout}s")
+
+    async def generate_json(self, prompt, system_prompt=None, json_schema=None, **kwargs):
+        timeout = self._get_timeout(has_schema=bool(json_schema))
+        try:
+            data, self._last_tokens_in, self._last_tokens_out = await asyncio.wait_for(
+                self._with_retry(self._sync_generate_json, prompt, system_prompt, json_schema),
+                timeout=timeout,
+            )
+            return data
+        except asyncio.TimeoutError:
+            raise LLMTimeoutError(f"LLM generate_json call timed out after {timeout}s")
+
+    # generate_with_audio: inherits NotImplementedError from base class
 
 
 class LoggingLLMWrapper(BaseLLMProvider):
@@ -707,19 +810,30 @@ class LoggingLLMWrapper(BaseLLMProvider):
 def create_llm_provider(
     provider: str, api_key: str = "", model_name: str = "",
     temperature: float = 0.1, service_account_path: str = "",
+    **kwargs,
 ) -> BaseLLMProvider:
     """Factory — dumb constructor, no auth policy. Use settings_helper for credential resolution."""
     if not model_name:
         raise ValueError("No model selected. Go to Settings and select a model.")
     if provider == "gemini":
-        kwargs = {"model_name": model_name, "temperature": temperature}
+        gkw = {"model_name": model_name, "temperature": temperature}
         if api_key:
-            kwargs["api_key"] = api_key
+            gkw["api_key"] = api_key
         elif service_account_path:
-            kwargs["service_account_path"] = service_account_path
-        return GeminiProvider(**kwargs)
+            gkw["service_account_path"] = service_account_path
+        return GeminiProvider(**gkw)
     elif provider == "openai":
         return OpenAIProvider(
+            api_key=api_key, model_name=model_name, temperature=temperature,
+        )
+    elif provider == "azure_openai":
+        return AzureOpenAIProvider(
+            api_key=api_key, model_name=model_name, temperature=temperature,
+            azure_endpoint=kwargs.get("azure_endpoint", ""),
+            api_version=kwargs.get("api_version", "2025-03-01-preview"),
+        )
+    elif provider == "anthropic":
+        return AnthropicProvider(
             api_key=api_key, model_name=model_name, temperature=temperature,
         )
     else:

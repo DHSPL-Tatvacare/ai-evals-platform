@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePoll } from "@/hooks";
 import { useLocation } from "react-router-dom";
-import { FileSpreadsheet, ShieldAlert, FlaskConical, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { FlaskConical, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Run, EvalRun } from "@/types";
 import { fetchRuns, deleteRun, fetchEvalRuns, deleteEvalRun } from "@/services/api/evalRunsApi";
 import { notificationService } from "@/services/notifications";
-import { RunCard, RunRowCard, NewBatchEvalOverlay, NewAdversarialOverlay } from "../components";
-import { SplitButton, EmptyState, ConfirmDialog } from "@/components/ui";
+import { RunCard, RunRowCard } from "../components";
+import { EmptyState, ConfirmDialog } from "@/components/ui";
 import { TAG_ACCENT_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
 import { routes } from "@/config/routes";
@@ -114,8 +114,6 @@ export default function RunList() {
   const [customRuns, setCustomRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showBatchWizard, setShowBatchWizard] = useState(false);
-  const [showAdversarialWizard, setShowAdversarialWizard] = useState(false);
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<RunType | 'all'>('all');
@@ -310,28 +308,6 @@ export default function RunList() {
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-base font-bold text-[var(--text-primary)]">All Runs</h1>
-          <div className="flex items-center gap-2">
-            <SplitButton
-              primaryLabel="Batch Evaluation"
-              primaryIcon={<FileSpreadsheet className="h-4 w-4" />}
-              primaryAction={() => setShowBatchWizard(true)}
-              size="sm"
-              dropdownItems={[
-                {
-                  label: 'Batch Evaluation',
-                  icon: <FileSpreadsheet className="h-4 w-4" />,
-                  description: 'Evaluate conversation threads from CSV data',
-                  action: () => setShowBatchWizard(true),
-                },
-                {
-                  label: 'Adversarial Stress Test',
-                  icon: <ShieldAlert className="h-4 w-4" />,
-                  description: 'Run adversarial inputs against live Kaira API',
-                  action: () => setShowAdversarialWizard(true),
-                },
-              ]}
-            />
-          </div>
         </div>
 
         {/* Search + Filter bar */}
@@ -452,9 +428,6 @@ export default function RunList() {
           </button>
         </div>
       )}
-
-      {showBatchWizard && <NewBatchEvalOverlay onClose={() => setShowBatchWizard(false)} />}
-      {showAdversarialWizard && <NewAdversarialOverlay onClose={() => setShowAdversarialWizard(false)} />}
 
       <ConfirmDialog
         isOpen={!!deleteTarget}

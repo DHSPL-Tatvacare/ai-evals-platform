@@ -576,6 +576,39 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
       "Count of threads where the conversation goal was achieved (e.g., meal logged, query answered).",
     unit: "threads",
   },
+  // ─── Cross-Run Analytics ───
+  cross_runs_analyzed: {
+    key: "cross_runs_analyzed",
+    displayName: "Runs Analyzed",
+    description: "Number of runs included in cross-run analysis",
+    tooltip:
+      "Only runs with generated reports are included. Runs without reports are excluded from analysis. The subtitle shows coverage (e.g., '8 of 12 runs have reports').",
+    unit: "runs",
+  },
+  cross_thread_evaluations: {
+    key: "cross_thread_evaluations",
+    displayName: "Thread Evaluations",
+    description: "Total threads evaluated across all analyzed runs",
+    tooltip:
+      "Sum of all conversation threads evaluated across every run included in the analysis. Gives a sense of overall evaluation volume.",
+    unit: "threads",
+  },
+  cross_avg_health_score: {
+    key: "cross_avg_health_score",
+    displayName: "Avg Health Score",
+    description: "Average health score across all analyzed runs",
+    tooltip:
+      "Mean of the health score (0–100) from each run's report. Combines intent accuracy, correctness, efficiency, and task completion. The letter grade corresponds to the average score.",
+    unit: "%",
+  },
+  cross_adversarial_pass_rate: {
+    key: "cross_adversarial_pass_rate",
+    displayName: "Adversarial Pass Rate",
+    description: "Overall pass rate across all adversarial tests",
+    tooltip:
+      "Percentage of adversarial stress tests that passed across all adversarial runs. Computed from total passed / total tests. Shows '—' when no adversarial runs exist.",
+    unit: "%",
+  },
 };
 
 // ─── HELPER FUNCTIONS ─────────────────────────────────────────────────

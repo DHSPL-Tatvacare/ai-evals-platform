@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLLMSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { useToast } from '@/hooks';
-import type { ThemeMode, LLMTimeoutSettings } from '@/types';
+import type { ThemeMode, LLMTimeoutSettings, LLMProvider } from '@/types';
 
 /** Base form values shared across all settings pages. */
 export interface BaseFormValues {
@@ -35,8 +35,9 @@ export function useSettingsForm<T extends BaseFormValues>({
   const setProviderApiKey = useLLMSettingsStore((s) => s.setProviderApiKey);
   const saveLLMSettings = useLLMSettingsStore((s) => s.save);
 
-  // Global settings actions
-  const globalSettings = useGlobalSettingsStore();
+  // Global settings actions (slice selectors — avoid full-store subscription)
+  const setTheme = useGlobalSettingsStore((s) => s.setTheme);
+  const setGlobalTimeouts = useGlobalSettingsStore((s) => s.setTimeouts);
 
   const userHasEdited = useRef(false);
 
@@ -46,11 +47,15 @@ export function useSettingsForm<T extends BaseFormValues>({
   const [formValues, setFormValues] = useState<T>(storeValues);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Dirty detection via JSON comparison
-  const isDirty = useMemo(
-    () => JSON.stringify(formValues) !== JSON.stringify(storeValues),
-    [formValues, storeValues],
-  );
+  // Dirty detection via JSON comparison.
+  // Exclude `provider` (tab navigation, not a real edit) and `apiKey` (derived from
+  // per-provider keys) so that merely switching the provider tab doesn't trigger dirty.
+  const isDirty = useMemo(() => {
+    const omit = new Set(['provider', 'apiKey']);
+    const strip = (obj: Record<string, unknown>) =>
+      JSON.stringify(Object.fromEntries(Object.entries(obj).filter(([k]) => !omit.has(k))));
+    return strip(formValues as Record<string, unknown>) !== strip(storeValues as Record<string, unknown>);
+  }, [formValues, storeValues]);
 
   // Sync form from store when values change externally and user hasn't edited
   useEffect(() => {
@@ -58,6 +63,15 @@ export function useSettingsForm<T extends BaseFormValues>({
       setFormValues(storeValues);
     }
   }, [storeValues]);
+
+  // Auto-reset edit flag when user reverts all manual changes.
+  // This unblocks store→form syncing (e.g. credential loads that finish
+  // after the user briefly touched a field and then undid the change).
+  useEffect(() => {
+    if (!isDirty) {
+      userHasEdited.current = false;
+    }
+  }, [isDirty]);
 
   // Warn on page unload with unsaved changes
   useEffect(() => {
@@ -92,7 +106,7 @@ export function useSettingsForm<T extends BaseFormValues>({
     try {
       // Theme — localStorage only
       if (formValues.theme !== storeValues.theme) {
-        globalSettings.setTheme(formValues.theme);
+        setTheme(formValues.theme);
       }
       // LLM provider, API keys, model — backend-persisted
       let llmDirty = false;
@@ -100,7 +114,7 @@ export function useSettingsForm<T extends BaseFormValues>({
       const sv = storeValues as Record<string, unknown>;
 
       if (fv.provider !== sv.provider) {
-        setProvider(fv.provider as 'gemini' | 'openai');
+        setProvider(fv.provider as LLMProvider);
         llmDirty = true;
       }
       if (fv.geminiApiKey !== sv.geminiApiKey) {
@@ -109,6 +123,22 @@ export function useSettingsForm<T extends BaseFormValues>({
       }
       if (fv.openaiApiKey !== sv.openaiApiKey) {
         setProviderApiKey('openai', fv.openaiApiKey as string);
+        llmDirty = true;
+      }
+      if (fv.azureOpenaiApiKey !== sv.azureOpenaiApiKey) {
+        setProviderApiKey('azure_openai', fv.azureOpenaiApiKey as string);
+        llmDirty = true;
+      }
+      if (fv.anthropicApiKey !== sv.anthropicApiKey) {
+        setProviderApiKey('anthropic', fv.anthropicApiKey as string);
+        llmDirty = true;
+      }
+      // Azure-specific fields — update store directly, persisted via saveLLMSettings
+      if (fv.azureOpenaiEndpoint !== sv.azureOpenaiEndpoint || fv.azureOpenaiApiVersion !== sv.azureOpenaiApiVersion) {
+        useLLMSettingsStore.getState().updateLLMSettings({
+          azureOpenaiEndpoint: (fv.azureOpenaiEndpoint as string) || '',
+          azureOpenaiApiVersion: (fv.azureOpenaiApiVersion as string) || '2025-03-01-preview',
+        });
         llmDirty = true;
       }
       if (formValues.apiKey !== storeValues.apiKey) {
@@ -124,7 +154,7 @@ export function useSettingsForm<T extends BaseFormValues>({
       }
       // Timeouts — localStorage only
       if (JSON.stringify(formValues.timeouts) !== JSON.stringify(storeValues.timeouts)) {
-        globalSettings.setTimeouts(formValues.timeouts);
+        setGlobalTimeouts(formValues.timeouts);
       }
       // App-specific save
       await onSaveApp(formValues, storeValues);
@@ -136,7 +166,7 @@ export function useSettingsForm<T extends BaseFormValues>({
     } finally {
       setIsSaving(false);
     }
-  }, [formValues, storeValues, globalSettings, setApiKey, setSelectedModel, setProvider, setProviderApiKey, saveLLMSettings, onSaveApp, toast]);
+  }, [formValues, storeValues, setTheme, setGlobalTimeouts, setApiKey, setSelectedModel, setProvider, setProviderApiKey, saveLLMSettings, onSaveApp, toast]);
 
   // Discard changes
   const handleDiscard = useCallback(() => {

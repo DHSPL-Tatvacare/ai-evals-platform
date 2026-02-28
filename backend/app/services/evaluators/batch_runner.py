@@ -104,6 +104,8 @@ async def run_batch_evaluation(
     skip_previously_processed: bool = False,
     custom_only: bool = False,
     truncate_responses: bool = False,
+    azure_endpoint: str = "",
+    api_version: str = "",
 ) -> dict:
     """Run batch evaluation on threads from a data file."""
     start_time = time.monotonic()
@@ -250,6 +252,8 @@ async def run_batch_evaluation(
         model_name=llm_model or "",
         temperature=temperature,
         service_account_path=service_account_path,
+        azure_endpoint=azure_endpoint,
+        api_version=api_version,
     )
     llm: BaseLLMProvider = LoggingLLMWrapper(inner_llm, log_callback=save_api_log)
     if timeouts:
@@ -571,6 +575,7 @@ async def run_batch_evaluation(
             job_id=job_id,
             progress_callback=_progress_bridge,
             progress_message=_progress_message,
+            inter_item_delay=1.5,
         )
 
         # Aggregate results from worker return values (F3: skip None metrics)

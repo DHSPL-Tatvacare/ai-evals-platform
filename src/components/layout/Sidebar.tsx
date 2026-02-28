@@ -8,9 +8,12 @@ import {
   ListChecks,
   ScrollText,
   BookOpen,
+  MessageSquare,
+  FileSpreadsheet,
+  ShieldAlert,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui";
+import { Button, Popover, PopoverTrigger, PopoverContent } from "@/components/ui";
 import {
   useUIStore,
   useAppStore,
@@ -48,6 +51,9 @@ export function Sidebar({ onNewEval }: SidebarProps) {
     location.pathname === routes.voiceRx.settings ||
     location.pathname === routes.kaira.settings;
   const guideUrl = import.meta.env.VITE_GUIDE_URL || "http://localhost:5174";
+
+  // Modal management (for batch/adversarial wizards)
+  const openModal = useUIStore((s) => s.openModal);
 
   // Check if this is Kaira Bot app
   const isKairaBot = appId === "kaira-bot";
@@ -105,15 +111,37 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           </button>
         </div>
         <div className="flex-1 flex flex-col items-center py-3 gap-2">
-          <Button
-            size="sm"
-            onClick={handleNewClick}
-            disabled={isNewButtonDisabled}
-            className="h-9 w-9 p-0"
-            title={isKairaBot ? "New chat" : "New evaluation"}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          {isKairaBot ? (
+            <Popover>
+              <PopoverTrigger>
+                <Button
+                  size="sm"
+                  disabled={isNewButtonDisabled}
+                  className="h-9 w-9 p-0"
+                  title="New"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent side="right" align="start" className="w-[220px] p-1">
+                <KairaNewMenu
+                  onNewChat={handleNewClick}
+                  onBatchEval={() => openModal('batchEval')}
+                  onAdversarialTest={() => openModal('adversarialTest')}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleNewClick}
+              disabled={isNewButtonDisabled}
+              className="h-9 w-9 p-0"
+              title="New evaluation"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          )}
 
           <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
           {isKairaBot ? (
@@ -186,15 +214,37 @@ export function Sidebar({ onNewEval }: SidebarProps) {
       <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)] px-4">
         <AppSwitcher />
         <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            onClick={handleNewClick}
-            disabled={isNewButtonDisabled}
-            isLoading={isCreatingSession}
-          >
-            <Plus className="h-4 w-4" />
-            New
-          </Button>
+          {isKairaBot ? (
+            <Popover>
+              <PopoverTrigger>
+                <Button
+                  size="sm"
+                  disabled={isNewButtonDisabled}
+                  isLoading={isCreatingSession}
+                >
+                  <Plus className="h-4 w-4" />
+                  New
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="end" className="w-[260px] p-1">
+                <KairaNewMenu
+                  onNewChat={handleNewClick}
+                  onBatchEval={() => openModal('batchEval')}
+                  onAdversarialTest={() => openModal('adversarialTest')}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleNewClick}
+              disabled={isNewButtonDisabled}
+              isLoading={isCreatingSession}
+            >
+              <Plus className="h-4 w-4" />
+              New
+            </Button>
+          )}
           <button
             onClick={toggleSidebar}
             className="ml-1 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
@@ -241,6 +291,55 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         </a>
       </div>
     </aside>
+  );
+}
+
+function KairaNewMenu({
+  onNewChat,
+  onBatchEval,
+  onAdversarialTest,
+}: {
+  onNewChat: () => void;
+  onBatchEval: () => void;
+  onAdversarialTest: () => void;
+}) {
+  const items = [
+    {
+      icon: MessageSquare,
+      label: 'New Chat',
+      description: 'Start a new Kaira conversation',
+      action: onNewChat,
+    },
+    {
+      icon: FileSpreadsheet,
+      label: 'Batch Evaluation',
+      description: 'Evaluate threads from CSV data',
+      action: onBatchEval,
+    },
+    {
+      icon: ShieldAlert,
+      label: 'Adversarial Test',
+      description: 'Run adversarial inputs against Kaira',
+      action: onAdversarialTest,
+    },
+  ];
+
+  return (
+    <div className="py-1">
+      {items.map((item) => (
+        <button
+          key={item.label}
+          onClick={item.action}
+          className="w-full flex items-start gap-3 px-3 py-2 text-left rounded-md hover:bg-[var(--interactive-secondary)] transition-colors"
+        >
+          <item.icon className="h-4 w-4 mt-0.5 text-[var(--text-secondary)] shrink-0" />
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-[var(--text-primary)]">{item.label}</div>
+            <div className="text-[11px] text-[var(--text-muted)] leading-tight">{item.description}</div>
+          </div>
+        </button>
+      ))}
+    </div>
   );
 }
 

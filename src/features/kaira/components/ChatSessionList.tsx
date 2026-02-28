@@ -168,7 +168,7 @@ export function ChatSessionList({
 
   if (sessions.length === 0) {
     return (
-      <div className="px-2">
+      <div className="flex-1 flex items-center justify-center px-2">
         <EmptyState
           icon={MessageSquare}
           title="No chats yet"

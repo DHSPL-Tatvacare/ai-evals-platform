@@ -11,10 +11,12 @@ from app.models.setting import Setting
 from app.models.tag import Tag
 from app.models.job import Job
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
+from app.models.evaluation_analytics import EvaluationAnalytics
 
 __all__ = [
     "Base",
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
     "ChatSession", "ChatMessage", "History", "Setting", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
+    "EvaluationAnalytics",
 ]

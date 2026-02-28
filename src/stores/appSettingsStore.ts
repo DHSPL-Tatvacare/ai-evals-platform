@@ -141,27 +141,31 @@ export const useAppSettingsStore = create<AppSettingsState>()(
           const data = await settingsRepository.get(appId, 'api-credentials') as Record<string, string> | undefined;
           if (!data) return;
 
+          // Only call set() when values actually differ — avoids creating
+          // new object references that trigger downstream re-renders/recomputation.
+          const current = get().settings;
+
           if (appId === 'voice-rx') {
+            const cur = current['voice-rx'];
+            const newUrl = data.voiceRxApiUrl ?? cur.voiceRxApiUrl;
+            const newKey = data.voiceRxApiKey ?? cur.voiceRxApiKey;
+            if (newUrl === cur.voiceRxApiUrl && newKey === cur.voiceRxApiKey) return;
             set((state) => ({
               settings: {
                 ...state.settings,
-                'voice-rx': {
-                  ...state.settings['voice-rx'],
-                  ...(data.voiceRxApiUrl !== undefined && { voiceRxApiUrl: data.voiceRxApiUrl }),
-                  ...(data.voiceRxApiKey !== undefined && { voiceRxApiKey: data.voiceRxApiKey }),
-                },
+                'voice-rx': { ...state.settings['voice-rx'], voiceRxApiUrl: newUrl, voiceRxApiKey: newKey },
               },
             }));
           } else if (appId === 'kaira-bot') {
+            const cur = current['kaira-bot'];
+            const newUrl = data.kairaApiUrl ?? cur.kairaApiUrl;
+            const newToken = data.kairaAuthToken ?? cur.kairaAuthToken;
+            const newUserId = data.kairaChatUserId ?? cur.kairaChatUserId;
+            if (newUrl === cur.kairaApiUrl && newToken === cur.kairaAuthToken && newUserId === cur.kairaChatUserId) return;
             set((state) => ({
               settings: {
                 ...state.settings,
-                'kaira-bot': {
-                  ...state.settings['kaira-bot'],
-                  ...(data.kairaApiUrl !== undefined && { kairaApiUrl: data.kairaApiUrl }),
-                  ...(data.kairaAuthToken !== undefined && { kairaAuthToken: data.kairaAuthToken }),
-                  ...(data.kairaChatUserId !== undefined && { kairaChatUserId: data.kairaChatUserId }),
-                },
+                'kaira-bot': { ...state.settings['kaira-bot'], kairaApiUrl: newUrl, kairaAuthToken: newToken, kairaChatUserId: newUserId },
               },
             }));
           }

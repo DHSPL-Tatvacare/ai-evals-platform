@@ -18,12 +18,12 @@ Prefer existing abstractions and local patterns over new architecture.
 - App IDs in active use: `voice-rx`, `kaira-bot`.
 - `kaira-evals` appId has been removed from frontend app settings state.
 - API routers registered in `backend/app/main.py`: 16 routers (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports).
-- ORM tables: 15 total (`eval_runs`, `jobs`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat_sessions`, `chat_messages`, `history`, `settings`, `tags`, `thread_evaluations`, `adversarial_evaluations`, `api_logs`).
-- Zustand stores: 13 (appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore).
+- ORM tables: 16 total (`eval_runs`, `jobs`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat_sessions`, `chat_messages`, `history`, `settings`, `tags`, `thread_evaluations`, `adversarial_evaluations`, `api_logs`, `evaluation_analytics`).
+- Zustand stores: 14 (appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore).
 - LLM providers: Gemini (dual auth: service account for backend jobs, API key for frontend-triggered tasks) and OpenAI.
-- Report system: `backend/app/services/reports/` (aggregation, AI narrative, health score, caching in `EvalRun.report_cache`).
+- Report system: `backend/app/services/reports/` (aggregation, AI narrative, health score). Caching via `evaluation_analytics` table (scope: `single_run` per run, `cross_run` per app).
 - Report frontend: `src/features/evalRuns/components/report/` (on-screen) + `src/features/evalRuns/export/` (PDF via jsPDF).
-- Report API: `GET /api/reports/{run_id}?refresh=true` — cached `ReportPayload`, `?refresh=true` forces regen.
+- Report API: `GET /api/reports/{run_id}?refresh=true` — cached `ReportPayload`, `?refresh=true` forces regen. Cross-run: `GET /api/reports/cross-run-analytics`, `POST /api/reports/cross-run-analytics/refresh`.
 
 ## Build, lint, run, and test commands
 

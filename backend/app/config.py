@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = ""
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2025-03-01-preview"
+    AZURE_OPENAI_MODEL: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = ""
     DEFAULT_LLM_PROVIDER: str = "gemini"
     EVAL_TEMPERATURE: float = 0.1
 

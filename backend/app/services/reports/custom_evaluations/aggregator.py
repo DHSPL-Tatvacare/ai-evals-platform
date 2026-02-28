@@ -75,7 +75,7 @@ class CustomEvaluationsAggregator:
                     continue
 
                 completed += 1
-                output = eval_data if isinstance(eval_data, dict) else {}
+                output = eval_data.get("output", {}) if isinstance(eval_data, dict) else {}
 
                 for f in visible_fields:
                     key = f["key"]
@@ -148,7 +148,8 @@ class CustomEvaluationsAggregator:
                 if not isinstance(eval_data, dict) or eval_data.get("error"):
                     continue
 
-                val = eval_data.get(primary_key)
+                output = eval_data.get("output", {})
+                val = output.get(primary_key)
                 if val is None:
                     continue
 
@@ -190,9 +191,10 @@ class CustomEvaluationsAggregator:
             if not isinstance(eval_data, dict) or eval_data.get("error"):
                 continue
 
+            output = eval_data.get("output", {})
             found_any = False
             for key in field_keys:
-                val = eval_data.get(key)
+                val = output.get(key)
                 if val is None:
                     continue
                 found_any = True

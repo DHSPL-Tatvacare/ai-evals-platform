@@ -220,12 +220,17 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     db_settings = await get_llm_settings_from_db(app_id=None, key="llm-settings", auth_intent="managed_job")
 
     model = evaluator.model_id or db_settings["selected_model"]
+    factory_kwargs = {}
+    if db_settings["provider"] == "azure_openai":
+        factory_kwargs["azure_endpoint"] = db_settings.get("azure_endpoint", "")
+        factory_kwargs["api_version"] = db_settings.get("api_version", "")
     inner = create_llm_provider(
         provider=db_settings["provider"],
         api_key=db_settings["api_key"],
         model_name=model,
         temperature=0.2,
         service_account_path=db_settings.get("service_account_path", ""),
+        **factory_kwargs,
     )
     llm: BaseLLMProvider = LoggingLLMWrapper(inner, log_callback=save_api_log)
     if params.get("timeouts"):

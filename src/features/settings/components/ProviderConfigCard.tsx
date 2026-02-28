@@ -1,25 +1,33 @@
-import { Key, Server, Info } from 'lucide-react';
-import { providerIcons, providerLabels } from '@/components/ui/ModelBadge/providers';
+import { Key, Server, Info, Globe } from 'lucide-react';
+import { providerIcons } from '@/components/ui/ModelBadge/providers';
 import { ModelSelector } from './ModelSelector';
 import { cn } from '@/utils';
-import { useLLMSettingsStore } from '@/stores';
+import { useLLMSettingsStore, LLM_PROVIDERS } from '@/stores';
 import type { LLMProvider } from '@/types';
 
 /** Provider option config — data-driven, not hardcoded inline */
-const PROVIDERS: { value: LLMProvider; icon: string; label: string; hasServiceAccount: boolean }[] = [
-  { value: 'gemini', icon: providerIcons.gemini, label: providerLabels.gemini, hasServiceAccount: true },
-  { value: 'openai', icon: providerIcons.openai, label: providerLabels.openai, hasServiceAccount: false },
-];
+const PROVIDERS: { value: LLMProvider; icon: string; label: string; hasServiceAccount: boolean }[] =
+  LLM_PROVIDERS.map((p: { value: LLMProvider; label: string }) => ({
+    ...p,
+    icon: providerIcons[p.value],
+    hasServiceAccount: p.value === 'gemini',
+  }));
 
 const API_KEY_META: Record<LLMProvider, { placeholder: string; hint: string }> = {
   gemini: { placeholder: 'AI...', hint: 'Get your key from aistudio.google.com' },
   openai: { placeholder: 'sk-...', hint: 'Get your key from platform.openai.com' },
+  azure_openai: { placeholder: 'Key...', hint: 'Get your key from Azure Portal' },
+  anthropic: { placeholder: 'sk-ant-...', hint: 'Get your key from console.anthropic.com' },
 };
 
 interface ProviderConfigCardProps {
   provider: LLMProvider;
   geminiApiKey: string;
   openaiApiKey: string;
+  azureOpenaiApiKey: string;
+  azureOpenaiEndpoint: string;
+  azureOpenaiApiVersion: string;
+  anthropicApiKey: string;
   selectedModel: string;
   onChange: (key: string, value: unknown) => void;
 }
@@ -58,16 +66,28 @@ export function ProviderConfigCard({
   provider,
   geminiApiKey,
   openaiApiKey,
+  azureOpenaiApiKey,
+  azureOpenaiEndpoint,
+  azureOpenaiApiVersion,
+  anthropicApiKey,
   selectedModel,
   onChange,
 }: ProviderConfigCardProps) {
   const activeProvider = PROVIDERS.find((p) => p.value === provider)!;
-  const activeApiKey = provider === 'openai' ? openaiApiKey : geminiApiKey;
+  const activeApiKey = provider === 'azure_openai' ? azureOpenaiApiKey
+    : provider === 'anthropic' ? anthropicApiKey
+    : provider === 'openai' ? openaiApiKey
+    : geminiApiKey;
   const apiKeyMeta = API_KEY_META[provider];
 
   const handleApiKeyChange = (value: string) => {
-    const key = provider === 'openai' ? 'openaiApiKey' : 'geminiApiKey';
-    onChange(key, value);
+    const keyMap: Record<LLMProvider, string> = {
+      gemini: 'geminiApiKey',
+      openai: 'openaiApiKey',
+      azure_openai: 'azureOpenaiApiKey',
+      anthropic: 'anthropicApiKey',
+    };
+    onChange(keyMap[provider], value);
     onChange('apiKey', value);
   };
 
@@ -78,22 +98,22 @@ export function ProviderConfigCard({
         <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-2">
           Provider
         </label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex gap-2">
           {PROVIDERS.map((p) => (
             <button
               key={p.value}
               type="button"
               onClick={() => onChange('provider', p.value)}
               className={cn(
-                'flex items-center gap-3 rounded-[var(--radius-default)] border px-4 py-3 text-left transition-all',
+                'flex-1 flex items-center justify-center gap-2 rounded-[var(--radius-default)] border px-3 py-2.5 transition-all',
                 provider === p.value
                   ? 'border-[var(--border-brand)] bg-[var(--color-brand-accent)]/8 shadow-sm'
                   : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] hover:border-[var(--border-default)] hover:bg-[var(--bg-secondary)]'
               )}
             >
-              <img src={p.icon} alt={p.label} className="h-5 w-5 shrink-0" />
+              <img src={p.icon} alt={p.label} className={cn('h-4 w-4 shrink-0', p.value !== 'gemini' && 'provider-icon-invert')} />
               <span className={cn(
-                'text-[13px] font-medium',
+                'text-[12px] font-medium',
                 provider === p.value ? 'text-[var(--text-brand)]' : 'text-[var(--text-primary)]'
               )}>
                 {p.label}
@@ -126,6 +146,50 @@ export function ProviderConfigCard({
         </p>
       </div>
 
+      {/* Azure-specific fields */}
+      {provider === 'azure_openai' && (
+        <div className="space-y-4">
+          <div>
+            <label className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
+              <Globe className="h-3.5 w-3.5" />
+              Endpoint
+            </label>
+            <input
+              type="text"
+              value={azureOpenaiEndpoint}
+              onChange={(e) => onChange('azureOpenaiEndpoint', e.target.value)}
+              placeholder="https://your-resource.openai.azure.com"
+              className={cn(
+                'w-full px-3 py-2 rounded-[var(--radius-default)] border border-[var(--border-default)]',
+                'bg-[var(--input-bg)] text-[var(--text-primary)] text-[13px]',
+                'placeholder:text-[var(--text-muted)]',
+                'focus:outline-none focus:ring-2 focus:ring-[var(--border-brand)]/30 focus:border-[var(--border-focus)]',
+              )}
+            />
+            <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+              Your Azure OpenAI resource endpoint URL.
+            </p>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
+              API Version
+            </label>
+            <input
+              type="text"
+              value={azureOpenaiApiVersion}
+              onChange={(e) => onChange('azureOpenaiApiVersion', e.target.value)}
+              placeholder="2025-03-01-preview"
+              className={cn(
+                'w-full px-3 py-2 rounded-[var(--radius-default)] border border-[var(--border-default)]',
+                'bg-[var(--input-bg)] text-[var(--text-primary)] text-[13px]',
+                'placeholder:text-[var(--text-muted)]',
+                'focus:outline-none focus:ring-2 focus:ring-[var(--border-brand)]/30 focus:border-[var(--border-focus)]',
+              )}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Service Account status — Gemini only */}
       {activeProvider.hasServiceAccount && (
         <ServiceAccountStatus />
@@ -137,6 +201,8 @@ export function ProviderConfigCard({
         selectedModel={selectedModel}
         onChange={(model) => onChange('selectedModel', model)}
         provider={provider}
+        azureEndpoint={azureOpenaiEndpoint}
+        azureApiVersion={azureOpenaiApiVersion}
       />
     </div>
   );
