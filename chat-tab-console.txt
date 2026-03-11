@@ -1,0 +1,55 @@
+Total messages: 53 (Errors: 0, Warnings: 0)
+
+[DEBUG] [vite] connecting... @ http://localhost:5173/@vite/client:732
+[DEBUG] [vite] connected. @ http://localhost:5173/@vite/client:826
+[INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=07b0a15b:20102
+[LOG] [Router] Current path: /kaira/chat @ http://localhost:5173/src/app/Router.tsx?t=1773249431186:22
+[LOG] [Router] Current path: /kaira/chat @ http://localhost:5173/src/app/Router.tsx?t=1773249431186:22
+[LOG] [useKairaChat] Effect triggered - appId: voice-rx @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [PromptsStore] Loading prompts for voice-rx type: undefined @ http://localhost:5173/src/stores/promptsStore.ts:10
+[LOG] [PromptsStore] Loading prompts for kaira-bot type: undefined @ http://localhost:5173/src/stores/promptsStore.ts:10
+[LOG] [useKairaChat] Effect triggered - appId: voice-rx @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [PromptsStore] Loading prompts for voice-rx type: undefined @ http://localhost:5173/src/stores/promptsStore.ts:10
+[LOG] [PromptsStore] Loading prompts for kaira-bot type: undefined @ http://localhost:5173/src/stores/promptsStore.ts:10
+[LOG] [useKairaChat] Effect triggered - appId: kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [useKairaChat] Calling loadSessions for kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:31
+[LOG] [chatStore] loadSessions called for appId: kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:28
+[LOG] [chatStore] Setting isLoading: true @ http://localhost:5173/src/stores/chatStore.ts:34
+[LOG] [chatStore] Fetching sessions from repository... @ http://localhost:5173/src/stores/chatStore.ts:36
+[LOG] [useKairaChat] Effect triggered - appId: kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [useKairaChat] Calling loadSessions for kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:31
+[LOG] [chatStore] loadSessions called for appId: kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:28
+[LOG] [chatStore] Setting isLoading: true @ http://localhost:5173/src/stores/chatStore.ts:34
+[LOG] [chatStore] Fetching sessions from repository... @ http://localhost:5173/src/stores/chatStore.ts:36
+[LOG] [useKairaChat] Effect triggered - appId: kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [useKairaChat] Calling loadSessions for kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:31
+[LOG] [chatStore] loadSessions called for appId: kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:28
+[LOG] [chatStore] Setting isLoading: true @ http://localhost:5173/src/stores/chatStore.ts:34
+[LOG] [chatStore] Fetching sessions from repository... @ http://localhost:5173/src/stores/chatStore.ts:36
+[LOG] [PromptsStore] Loaded 0 prompts: [] @ http://localhost:5173/src/stores/promptsStore.ts:14
+[LOG] [PromptsStore] Loaded 5 prompts: [Object, Object, Object, Object, Object] @ http://localhost:5173/src/stores/promptsStore.ts:14
+[LOG] [chatStore] Fetched sessions: 2 sessions @ http://localhost:5173/src/stores/chatStore.ts:38
+[LOG] [chatStore] loadSessions completed successfully @ http://localhost:5173/src/stores/chatStore.ts:50
+[LOG] [PromptsStore] Loaded 0 prompts: [] @ http://localhost:5173/src/stores/promptsStore.ts:14
+[LOG] [PromptsStore] Loaded 5 prompts: [Object, Object, Object, Object, Object] @ http://localhost:5173/src/stores/promptsStore.ts:14
+[LOG] [chatStore] Fetched sessions: 2 sessions @ http://localhost:5173/src/stores/chatStore.ts:38
+[LOG] [chatStore] loadSessions completed successfully @ http://localhost:5173/src/stores/chatStore.ts:50
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100
+[LOG] [useKairaChat] Effect triggered - appId: kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [useKairaChat] Calling loadSessions for kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:31
+[LOG] [chatStore] loadSessions called for appId: kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:28
+[LOG] [chatStore] Sessions already loaded for kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:30
+[LOG] [ChatView] Auto-create check: {userId: true, isSessionsLoaded: true, sessionsLength: 2, currentSession: true, isCreatingSession: false} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:62
+[LOG] [useKairaChat] Effect triggered - appId: kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:29
+[LOG] [useKairaChat] Calling loadSessions for kaira-bot @ http://localhost:5173/src/hooks/useKairaChat.ts:31
+[LOG] [chatStore] loadSessions called for appId: kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:28
+[LOG] [chatStore] Sessions already loaded for kaira-bot @ http://localhost:5173/src/stores/chatStore.ts:30
+[LOG] [ChatView] Auto-create check: {userId: true, isSessionsLoaded: true, sessionsLength: 2, currentSession: true, isCreatingSession: false} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:62
+[LOG] [chatStore] Fetched sessions: 2 sessions @ http://localhost:5173/src/stores/chatStore.ts:38
+[LOG] [chatStore] loadSessions completed successfully @ http://localhost:5173/src/stores/chatStore.ts:50
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100
+[LOG] [ChatView] Auto-create check: {userId: true, isSessionsLoaded: true, sessionsLength: 2, currentSession: true, isCreatingSession: false} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:62
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100
+[LOG] [ChatView] Render state: {userId: c22a5505-f514-11f0-9722-000d3a3e18d5, isSessionsLoaded: true, isLoading: false, sessionsCount: 2, currentSession: 736ceda6-82ad-4de9-8f49-702f76e67ad2} @ http://localhost:5173/src/features/kaira/components/ChatView.tsx:100

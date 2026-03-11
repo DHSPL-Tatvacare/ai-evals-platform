@@ -3,15 +3,15 @@
  * Main orchestrator for the Kaira chat interface
  */
 
-import React, { useCallback, useEffect } from 'react';
-import { MessageSquare } from 'lucide-react';
-import { Spinner, Alert, EmptyState, DebugFab } from '@/components/ui';
-import { useKairaChat } from '@/hooks';
-import { useKairaBotSettings } from '@/stores';
-import { ChatMessageList } from './ChatMessageList';
-import { ChatInput } from './ChatInput';
-import { SuggestedPrompts } from './SuggestedPrompts';
-import { UserIdInput } from './UserIdInput';
+import React, { useCallback, useEffect } from "react";
+import { MessageSquare } from "lucide-react";
+import { Spinner, Alert, EmptyState, DebugFab } from "@/components/ui";
+import { useKairaChat } from "@/hooks";
+import { useKairaBotSettings } from "@/stores";
+import { ChatMessageList } from "./ChatMessageList";
+import { ChatInput } from "./ChatInput";
+import { SuggestedPrompts } from "./SuggestedPrompts";
+import { UserIdInput } from "./UserIdInput";
 
 interface ChatViewProps {
   /** Optional session ID - if provided, loads and displays this specific session */
@@ -23,7 +23,8 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
     sessions,
     currentSession,
     messages,
-    isLoading,
+    isLoadingSessions,
+    isLoadingMessages,
     isStreaming,
     isCreatingSession,
     isSending,
@@ -44,9 +45,12 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
   const userId = settings.kairaChatUserId;
 
   // Handle user ID submission
-  const handleUserIdSubmit = useCallback(async (newUserId: string) => {
-    await updateSettings({ kairaChatUserId: newUserId });
-  }, [updateSettings]);
+  const handleUserIdSubmit = useCallback(
+    async (newUserId: string) => {
+      await updateSettings({ kairaChatUserId: newUserId });
+    },
+    [updateSettings],
+  );
 
   // Handle creating a new chat session
   const handleNewChat = useCallback(async () => {
@@ -57,26 +61,35 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
       await selectSession(session.id);
     } catch (err) {
       // Session creation failed (likely concurrent creation guard)
-      console.warn('Session creation skipped:', err);
+      console.warn("Session creation skipped:", err);
     }
   }, [userId, isCreatingSession, isStreaming, createSession, selectSession]);
 
   // Handle sending a message (using streaming)
-  const handleSendMessage = useCallback(async (content: string) => {
-    await sendMessageStreaming(content);
-  }, [sendMessageStreaming]);
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      await sendMessageStreaming(content);
+    },
+    [sendMessageStreaming],
+  );
 
   // Handle action chip clicks - send the full chip label as a message
   // Must include emoji prefix (e.g. "✅ Yes, log this meal") — the server
   // uses it to distinguish confirmation actions from regular text queries
-  const handleChipClick = useCallback(async (_chipId: string, chipLabel: string) => {
-    await sendMessageStreaming(chipLabel);
-  }, [sendMessageStreaming]);
+  const handleChipClick = useCallback(
+    async (_chipId: string, chipLabel: string) => {
+      await sendMessageStreaming(chipLabel);
+    },
+    [sendMessageStreaming],
+  );
 
   // Handle suggested prompt selection
-  const handleSuggestedPrompt = useCallback(async (prompt: string) => {
-    await sendMessageStreaming(prompt);
-  }, [sendMessageStreaming]);
+  const handleSuggestedPrompt = useCallback(
+    async (prompt: string) => {
+      await sendMessageStreaming(prompt);
+    },
+    [sendMessageStreaming],
+  );
 
   // Auto-create session on first load if user has userId but no sessions
   // Use ref to track if we've already triggered auto-create to prevent race conditions
@@ -98,7 +111,7 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
       !isCreatingSession &&
       !hasAutoCreatedRef.current;
 
-    console.log('[ChatView] Auto-create check:', {
+    console.log("[ChatView] Auto-create check:", {
       userId: !!userId,
       isSessionsLoaded,
       sessionsLength: sessions.length,
@@ -109,19 +122,27 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
     });
 
     if (shouldAutoCreate) {
-      console.log('[ChatView] Auto-creating session for userId:', userId);
+      console.log("[ChatView] Auto-creating session for userId:", userId);
       hasAutoCreatedRef.current = true;
       // Inline the createSession call to avoid stale closure issues
-      createSession(userId).then(session => {
-        console.log('[ChatView] Auto-created session:', session.id);
-        selectSession(session.id);
-      }).catch(err => {
-        // Session creation failed (likely concurrent creation guard)
-        console.warn('[ChatView] Auto-create session skipped:', err);
-      });
+      createSession(userId)
+        .then((session) => {
+          console.log("[ChatView] Auto-created session:", session.id);
+          selectSession(session.id);
+        })
+        .catch((err) => {
+          // Session creation failed (likely concurrent creation guard)
+          console.warn("[ChatView] Auto-create session skipped:", err);
+        });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- createSession and selectSession are stable store actions
-  }, [userId, isSessionsLoaded, sessions.length, currentSession, isCreatingSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- createSession and selectSession are stable store actions
+  }, [
+    userId,
+    isSessionsLoaded,
+    sessions.length,
+    currentSession,
+    isCreatingSession,
+  ]);
 
   // When sessionId prop is provided, select that specific session
   useEffect(() => {
@@ -131,31 +152,40 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
   }, [sessionId, isSessionsLoaded, selectSession]);
 
   // Auto-select first session if none selected (only when no sessionId prop)
-  useEffect(() => {
-    if (!sessionId && userId && isSessionsLoaded && sessions.length > 0 && !currentSession && !isLoading) {
-      selectSession(sessions[0].id);
-    }
-  }, [sessionId, userId, isSessionsLoaded, sessions, currentSession, isLoading, selectSession]);
+  // REMOVED: now handled atomically inside loadSessions (step 2)
 
   // If no user ID is set, show the user ID input
   if (!userId) {
-    console.log('[ChatView] No userId, showing input');
+    console.log("[ChatView] No userId, showing input");
     return <UserIdInput onSubmit={handleUserIdSubmit} />;
   }
 
-  console.log('[ChatView] Render state:', {
+  console.log("[ChatView] Render state:", {
     userId,
     isSessionsLoaded,
-    isLoading,
+    isLoadingSessions,
+    isLoadingMessages,
     sessionsCount: sessions.length,
     currentSession: currentSession?.id,
     messagesCount: messages.length,
     isCreatingSession,
   });
 
-  // Show loading state while sessions are loading initially
-  if (!isSessionsLoaded || (isLoading && messages.length === 0 && !currentSession)) {
-    console.log('[ChatView] Showing loading spinner - isSessionsLoaded:', isSessionsLoaded, 'isLoading:', isLoading);
+  // Show loading state while sessions are loading initially (defense-in-depth --
+  // KairaBotTabView's isReady gate should prevent reaching here in a loading state)
+  if (
+    !isSessionsLoaded ||
+    isLoadingSessions ||
+    (isLoadingMessages && messages.length === 0)
+  ) {
+    console.log(
+      "[ChatView] Showing loading spinner - isSessionsLoaded:",
+      isSessionsLoaded,
+      "isLoadingSessions:",
+      isLoadingSessions,
+      "isLoadingMessages:",
+      isLoadingMessages,
+    );
     return (
       <div className="flex h-full items-center justify-center">
         <Spinner size="lg" />
@@ -165,7 +195,7 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
 
   // No current session - show empty state with new chat button
   if (!currentSession) {
-    console.log('[ChatView] No current session, showing empty state');
+    console.log("[ChatView] No current session, showing empty state");
     return (
       <div className="flex h-full items-center justify-center p-8">
         <EmptyState
@@ -174,7 +204,7 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
           description="Select a chat from the sidebar or start a new one"
           className="w-full max-w-md"
           action={{
-            label: 'New Chat',
+            label: "New Chat",
             onClick: handleNewChat,
             isLoading: isCreatingSession,
           }}
@@ -221,35 +251,65 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
           className="absolute -top-12 right-3"
           sections={[
             {
-              title: 'Session',
+              title: "Session",
               items: [
-                { label: 'Local ID', value: currentSession?.id },
-                { label: 'Thread ID', value: currentSession?.threadId },
-                { label: 'Server Session', value: currentSession?.serverSessionId },
-                { label: 'User ID', value: currentSession?.userId },
-                { label: 'Status', value: currentSession?.status, copyable: false },
+                { label: "Local ID", value: currentSession?.id },
+                { label: "Thread ID", value: currentSession?.threadId },
+                {
+                  label: "Server Session",
+                  value: currentSession?.serverSessionId,
+                },
+                { label: "User ID", value: currentSession?.userId },
+                {
+                  label: "Status",
+                  value: currentSession?.status,
+                  copyable: false,
+                },
               ],
             },
-            ...((() => {
-              const lastMsg = messages.filter(m => m.role === 'assistant' && m.status === 'complete').pop();
+            ...(() => {
+              const lastMsg = messages
+                .filter(
+                  (m) => m.role === "assistant" && m.status === "complete",
+                )
+                .pop();
               const meta = lastMsg?.metadata;
               if (!meta) return [];
-              return [{
-                title: 'Last Response',
-                items: [
-                  { label: 'Response ID', value: meta.responseId },
-                  { label: 'Processing Time', value: meta.processingTime ? `${meta.processingTime.toFixed(2)}s` : undefined, copyable: false },
-                  { label: 'Multi-Intent', value: meta.isMultiIntent !== undefined ? String(meta.isMultiIntent) : undefined, copyable: false },
-                  { label: 'Agents', value: meta.intents?.map(i => i.agent).join(', '), copyable: false },
-                ],
-              }];
-            })()),
+              return [
+                {
+                  title: "Last Response",
+                  items: [
+                    { label: "Response ID", value: meta.responseId },
+                    {
+                      label: "Processing Time",
+                      value: meta.processingTime
+                        ? `${meta.processingTime.toFixed(2)}s`
+                        : undefined,
+                      copyable: false,
+                    },
+                    {
+                      label: "Multi-Intent",
+                      value:
+                        meta.isMultiIntent !== undefined
+                          ? String(meta.isMultiIntent)
+                          : undefined,
+                      copyable: false,
+                    },
+                    {
+                      label: "Agents",
+                      value: meta.intents?.map((i) => i.agent).join(", "),
+                      copyable: false,
+                    },
+                  ],
+                },
+              ];
+            })(),
           ]}
         />
         <ChatInput
           onSend={handleSendMessage}
           onCancel={cancelStream}
-          disabled={isLoading || isSending}
+          disabled={isLoadingSessions || isLoadingMessages || isSending}
           isStreaming={isStreaming}
           placeholder="Ask Kaira anything about health..."
         />

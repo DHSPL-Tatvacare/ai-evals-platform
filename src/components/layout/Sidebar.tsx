@@ -13,7 +13,12 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Button, Popover, PopoverTrigger, PopoverContent } from "@/components/ui";
+import {
+  Button,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui";
 import {
   useUIStore,
   useAppStore,
@@ -75,10 +80,8 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         // Create new Kaira chat session
         const session = await createSession(appId, kairaChatUserId);
         selectSession(appId, session.id);
-        // Navigate to Kaira chat page
-        if (location.pathname !== routes.kaira.chat) {
-          navigate(routes.kaira.chat);
-        }
+        // Navigate to the new session URL
+        navigate(routes.kaira.chatSession(session.id));
       } catch (err) {
         // Session creation failed (likely concurrent creation guard)
         console.warn("Session creation skipped:", err);
@@ -95,7 +98,6 @@ export function Sidebar({ onNewEval }: SidebarProps) {
     appId,
     createSession,
     selectSession,
-    location.pathname,
     navigate,
     onNewEval,
   ]);
@@ -126,11 +128,15 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                   <Plus className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent side="right" align="start" className="w-[220px] p-1">
+              <PopoverContent
+                side="right"
+                align="start"
+                className="w-[220px] p-1"
+              >
                 <KairaNewMenu
                   onNewChat={handleNewClick}
-                  onBatchEval={() => openModal('batchEval')}
-                  onAdversarialTest={() => openModal('adversarialTest')}
+                  onBatchEval={() => openModal("batchEval")}
+                  onAdversarialTest={() => openModal("adversarialTest")}
                   onClose={() => setNewMenuOpen(false)}
                 />
               </PopoverContent>
@@ -230,11 +236,15 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                   New
                 </Button>
               </PopoverTrigger>
-              <PopoverContent side="bottom" align="end" className="w-[260px] p-1">
+              <PopoverContent
+                side="bottom"
+                align="end"
+                className="w-[260px] p-1"
+              >
                 <KairaNewMenu
                   onNewChat={handleNewClick}
-                  onBatchEval={() => openModal('batchEval')}
-                  onAdversarialTest={() => openModal('adversarialTest')}
+                  onBatchEval={() => openModal("batchEval")}
+                  onAdversarialTest={() => openModal("adversarialTest")}
                   onClose={() => setNewMenuOpen(false)}
                 />
               </PopoverContent>
@@ -313,20 +323,20 @@ function KairaNewMenu({
   const items = [
     {
       icon: MessageSquare,
-      label: 'New Chat',
-      description: 'Start a new Kaira conversation',
+      label: "New Chat",
+      description: "Start a new Kaira conversation",
       action: onNewChat,
     },
     {
       icon: FileSpreadsheet,
-      label: 'Batch Evaluation',
-      description: 'Evaluate threads from CSV data',
+      label: "Batch Evaluation",
+      description: "Evaluate threads from CSV data",
       action: onBatchEval,
     },
     {
       icon: ShieldAlert,
-      label: 'Adversarial Test',
-      description: 'Run adversarial inputs against Kaira',
+      label: "Adversarial Test",
+      description: "Run adversarial inputs against Kaira",
       action: onAdversarialTest,
     },
   ];
@@ -336,13 +346,20 @@ function KairaNewMenu({
       {items.map((item) => (
         <button
           key={item.label}
-          onClick={() => { onClose(); item.action(); }}
+          onClick={() => {
+            onClose();
+            item.action();
+          }}
           className="w-full flex items-start gap-3 px-3 py-2 text-left rounded-md hover:bg-[var(--interactive-secondary)] transition-colors"
         >
           <item.icon className="h-4 w-4 mt-0.5 text-[var(--text-secondary)] shrink-0" />
           <div className="min-w-0">
-            <div className="text-[13px] font-medium text-[var(--text-primary)]">{item.label}</div>
-            <div className="text-[11px] text-[var(--text-muted)] leading-tight">{item.description}</div>
+            <div className="text-[13px] font-medium text-[var(--text-primary)]">
+              {item.label}
+            </div>
+            <div className="text-[11px] text-[var(--text-muted)] leading-tight">
+              {item.description}
+            </div>
           </div>
         </button>
       ))}

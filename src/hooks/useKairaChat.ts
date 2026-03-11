@@ -3,19 +3,21 @@
  * Context-aware hook for Kaira chat functionality
  */
 
-import { useEffect, useCallback } from 'react';
-import { useChatStore } from '@/stores/chatStore';
-import { useCurrentAppId } from './useCurrentAppData';
-import type { KairaChatSession, KairaChatMessage } from '@/types';
+import { useEffect, useCallback } from "react";
+import { useChatStore } from "@/stores/chatStore";
+import { useCurrentAppId } from "./useCurrentAppData";
+import { useAppSettingsStore } from "@/stores/appSettingsStore";
+import type { KairaChatSession, KairaChatMessage } from "@/types";
 
 export interface UseKairaChatReturn {
   // Data
   sessions: KairaChatSession[];
   currentSession: KairaChatSession | null;
   messages: KairaChatMessage[];
-  
+
   // UI State
-  isLoading: boolean;
+  isLoadingSessions: boolean;
+  isLoadingMessages: boolean;
   isStreaming: boolean;
   isCreatingSession: boolean;
   isSending: boolean;
@@ -23,7 +25,7 @@ export interface UseKairaChatReturn {
   isSessionsLoaded: boolean;
   streamingContent: string;
   error: string | null;
-  
+
   // Actions
   loadSessions: () => Promise<void>;
   selectSession: (sessionId: string | null) => Promise<void>;
@@ -34,12 +36,22 @@ export interface UseKairaChatReturn {
   cancelStream: () => void;
   clearError: () => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
-  updateMessageMetadata: (messageId: string, metadata: Partial<KairaChatMessage['metadata']>) => Promise<void>;
+  updateMessageMetadata: (
+    messageId: string,
+    metadata: Partial<KairaChatMessage["metadata"]>,
+  ) => Promise<void>;
 }
 
-export function useKairaChat(): UseKairaChatReturn {
+export function useKairaChat(opts?: {
+  chatIdHint?: string;
+}): UseKairaChatReturn {
   const appId = useCurrentAppId();
-  
+
+  // Read userId from settings so we can pass it to loadSessions for auto-select
+  const userId = useAppSettingsStore(
+    (s) => s.settings["kaira-bot"].kairaChatUserId,
+  );
+
   const {
     currentSessionId,
     sessions,
@@ -47,7 +59,8 @@ export function useKairaChat(): UseKairaChatReturn {
     isStreaming,
     streamingContent,
     error,
-    isLoading,
+    isLoadingSessions,
+    isLoadingMessages,
     isCreatingSession,
     isSending,
     isDeleting,
@@ -64,21 +77,24 @@ export function useKairaChat(): UseKairaChatReturn {
     updateMessageMetadata: storeUpdateMessageMetadata,
   } = useChatStore();
 
-  // Auto-load sessions on mount
+  // Auto-load sessions on mount, passing userId so loadSessions can auto-select inline
   useEffect(() => {
-    console.log('[useKairaChat] Effect triggered - appId:', appId);
-    if (appId === 'kaira-bot') {
-      console.log('[useKairaChat] Calling loadSessions for kaira-bot');
-      storeLoadSessions(appId);
+    console.log("[useKairaChat] Effect triggered - appId:", appId);
+    if (appId === "kaira-bot") {
+      console.log("[useKairaChat] Calling loadSessions for kaira-bot");
+      storeLoadSessions(appId, {
+        userId: userId || undefined,
+        chatIdHint: opts?.chatIdHint,
+      });
     }
-  }, [appId, storeLoadSessions]);
+  }, [appId, userId, opts?.chatIdHint, storeLoadSessions]);
 
   // Get current app's sessions
   const appSessions = sessions[appId] ?? [];
-  
+
   // Find current session
-  const currentSession = currentSessionId 
-    ? appSessions.find(s => s.id === currentSessionId) ?? null 
+  const currentSession = currentSessionId
+    ? (appSessions.find((s) => s.id === currentSessionId) ?? null)
     : null;
 
   // Wrap actions to inject appId
@@ -86,39 +102,61 @@ export function useKairaChat(): UseKairaChatReturn {
     return storeLoadSessions(appId);
   }, [appId, storeLoadSessions]);
 
-  const selectSession = useCallback((sessionId: string | null) => {
-    return storeSelectSession(appId, sessionId);
-  }, [appId, storeSelectSession]);
+  const selectSession = useCallback(
+    (sessionId: string | null) => {
+      return storeSelectSession(appId, sessionId);
+    },
+    [appId, storeSelectSession],
+  );
 
-  const createSession = useCallback((userId: string) => {
-    return storeCreateSession(appId, userId);
-  }, [appId, storeCreateSession]);
+  const createSession = useCallback(
+    (userId: string) => {
+      return storeCreateSession(appId, userId);
+    },
+    [appId, storeCreateSession],
+  );
 
-  const deleteSession = useCallback((sessionId: string) => {
-    return storeDeleteSession(appId, sessionId);
-  }, [appId, storeDeleteSession]);
+  const deleteSession = useCallback(
+    (sessionId: string) => {
+      return storeDeleteSession(appId, sessionId);
+    },
+    [appId, storeDeleteSession],
+  );
 
-  const sendMessage = useCallback((content: string) => {
-    return storeSendMessage(appId, content);
-  }, [appId, storeSendMessage]);
+  const sendMessage = useCallback(
+    (content: string) => {
+      return storeSendMessage(appId, content);
+    },
+    [appId, storeSendMessage],
+  );
 
-  const sendMessageStreaming = useCallback((content: string) => {
-    return storeSendMessageStreaming(appId, content);
-  }, [appId, storeSendMessageStreaming]);
+  const sendMessageStreaming = useCallback(
+    (content: string) => {
+      return storeSendMessageStreaming(appId, content);
+    },
+    [appId, storeSendMessageStreaming],
+  );
 
-  const updateSessionTitle = useCallback((sessionId: string, title: string) => {
-    return storeUpdateSessionTitle(appId, sessionId, title);
-  }, [appId, storeUpdateSessionTitle]);
+  const updateSessionTitle = useCallback(
+    (sessionId: string, title: string) => {
+      return storeUpdateSessionTitle(appId, sessionId, title);
+    },
+    [appId, storeUpdateSessionTitle],
+  );
 
-  const updateMessageMetadata = useCallback((messageId: string, metadata: Partial<KairaChatMessage['metadata']>) => {
-    return storeUpdateMessageMetadata(messageId, metadata);
-  }, [storeUpdateMessageMetadata]);
+  const updateMessageMetadata = useCallback(
+    (messageId: string, metadata: Partial<KairaChatMessage["metadata"]>) => {
+      return storeUpdateMessageMetadata(messageId, metadata);
+    },
+    [storeUpdateMessageMetadata],
+  );
 
   return {
     sessions: appSessions,
     currentSession,
     messages,
-    isLoading,
+    isLoadingSessions,
+    isLoadingMessages,
     isStreaming,
     isCreatingSession,
     isSending,

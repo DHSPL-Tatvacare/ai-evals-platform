@@ -1,27 +1,62 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Search, X, PlayCircle } from 'lucide-react';
-import { Button } from '@/components/ui';
-import { useEvaluatorsStore } from '@/stores';
-import { cn } from '@/utils';
+import { useState, useMemo, useEffect } from "react";
+import { Search, X, PlayCircle } from "lucide-react";
+import { Button, LLMConfigSection } from "@/components/ui";
+import {
+  useEvaluatorsStore,
+  LLM_PROVIDERS,
+  useLLMSettingsStore,
+  hasProviderCredentials,
+} from "@/stores";
+import { cn } from "@/utils";
+import type { LLMProvider } from "@/types";
+
+export interface RunAllSelection {
+  evaluatorIds: string[];
+  provider: LLMProvider;
+  model: string;
+}
 
 interface RunAllOverlayProps {
   open: boolean;
   onClose: () => void;
-  onRun: (evaluatorIds: string[]) => void;
+  onRun: (selection: RunAllSelection) => void;
 }
 
 export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
   const evaluators = useEvaluatorsStore((s) => s.evaluators);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(evaluators.map(e => e.id)));
-  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(evaluators.map((e) => e.id)),
+  );
+  const [search, setSearch] = useState("");
   const [isVisible, setIsVisible] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(
+    LLM_PROVIDERS[0].value,
+  );
+  const [selectedModel, setSelectedModel] = useState("");
+
+  // Credential gating
+  const geminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
+  const openaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
+  const azureOpenaiApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
+  const azureOpenaiEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
+  const anthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
+  const saConfigured = useLLMSettingsStore((s) => s._serviceAccountConfigured);
+  const storeSlice = {
+    geminiApiKey,
+    openaiApiKey,
+    azureOpenaiApiKey,
+    azureOpenaiEndpoint,
+    anthropicApiKey,
+    _serviceAccountConfigured: saConfigured,
+  };
+  const credentialsReady = hasProviderCredentials(selectedProvider, storeSlice);
 
   // Sync selection when overlay opens with new evaluator list
-  const evaluatorIds = evaluators.map(e => e.id).join(',');
+  const evaluatorIds = evaluators.map((e) => e.id).join(",");
   const [lastIds, setLastIds] = useState(evaluatorIds);
   if (evaluatorIds !== lastIds) {
     setLastIds(evaluatorIds);
-    setSelected(new Set(evaluators.map(e => e.id)));
+    setSelected(new Set(evaluators.map((e) => e.id)));
   }
 
   // Slide-in animation
@@ -36,13 +71,13 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
   useEffect(() => {
     if (open) {
       function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === 'Escape') onClose();
+        if (e.key === "Escape") onClose();
       }
-      document.addEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'hidden';
+      document.addEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "hidden";
       return () => {
-        document.removeEventListener('keydown', handleKeyDown);
-        document.body.style.overflow = 'unset';
+        document.removeEventListener("keydown", handleKeyDown);
+        document.body.style.overflow = "unset";
       };
     }
   }, [open, onClose]);
@@ -50,19 +85,24 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
   const filteredEvaluators = useMemo(() => {
     if (!search) return evaluators;
     const q = search.toLowerCase();
-    return evaluators.filter(e =>
-      e.name.toLowerCase().includes(q) || e.prompt.toLowerCase().includes(q)
+    return evaluators.filter(
+      (e) =>
+        e.name.toLowerCase().includes(q) || e.prompt.toLowerCase().includes(q),
     );
   }, [evaluators, search]);
 
   function handleSubmit() {
-    if (selected.size === 0) return;
-    onRun(Array.from(selected));
+    if (selected.size === 0 || !selectedModel) return;
+    onRun({
+      evaluatorIds: Array.from(selected),
+      provider: selectedProvider,
+      model: selectedModel,
+    });
     onClose();
   }
 
   function toggleEvaluator(id: string) {
-    setSelected(prev => {
+    setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -71,7 +111,7 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
   }
 
   function selectAll() {
-    setSelected(new Set(evaluators.map(e => e.id)));
+    setSelected(new Set(evaluators.map((e) => e.id)));
   }
 
   function selectNone() {
@@ -85,8 +125,8 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
       {/* Backdrop */}
       <div
         className={cn(
-          'absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300',
-          isVisible ? 'opacity-100' : 'opacity-0'
+          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
+          isVisible ? "opacity-100" : "opacity-0",
         )}
         onClick={onClose}
       />
@@ -94,18 +134,21 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
       {/* Slide-in panel */}
       <div
         className={cn(
-          'ml-auto relative z-10 h-full w-[var(--overlay-width-sm)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden',
-          'flex flex-col',
-          'transform transition-transform duration-300 ease-out',
-          isVisible ? 'translate-x-0' : 'translate-x-full'
+          "ml-auto relative z-10 h-full w-[var(--overlay-width-sm)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
+          "flex flex-col",
+          "transform transition-transform duration-300 ease-out",
+          isVisible ? "translate-x-0" : "translate-x-full",
         )}
       >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Run All Evaluators</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              Run Evaluators
+            </h2>
             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              Select evaluators to run on this listing. They will execute in parallel.
+              Select evaluators to run on this listing. They will execute in
+              parallel.
             </p>
           </div>
           <button
@@ -116,6 +159,25 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
           </button>
         </div>
 
+        {/* LLM config */}
+        <div className="shrink-0 px-6 py-4 border-b border-[var(--border-subtle)]">
+          <LLMConfigSection
+            provider={selectedProvider}
+            onProviderChange={(p) => {
+              setSelectedProvider(p);
+              setSelectedModel("");
+            }}
+            model={selectedModel}
+            onModelChange={setSelectedModel}
+          />
+          {selectedModel && !credentialsReady && (
+            <p className="mt-2 text-xs text-[var(--color-warning)]">
+              No credentials configured for this provider. Set up an API key in
+              Settings.
+            </p>
+          )}
+        </div>
+
         {/* Search + select all/none */}
         <div className="shrink-0 px-6 py-3 border-b border-[var(--border-subtle)] flex items-center gap-2">
           <div className="relative flex-1">
@@ -124,29 +186,43 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
               type="text"
               placeholder="Search evaluators..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-2 py-1.5 text-sm bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-[6px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--border-focus)]"
             />
           </div>
-          <button onClick={selectAll} className="text-xs text-[var(--text-brand)] hover:underline shrink-0">All</button>
-          <button onClick={selectNone} className="text-xs text-[var(--text-muted)] hover:underline shrink-0">None</button>
+          <button
+            onClick={selectAll}
+            className="text-xs text-[var(--text-brand)] hover:underline shrink-0"
+          >
+            All
+          </button>
+          <button
+            onClick={selectNone}
+            className="text-xs text-[var(--text-muted)] hover:underline shrink-0"
+          >
+            None
+          </button>
         </div>
 
         {/* Evaluator list */}
         <div className="flex-1 overflow-y-auto px-6 py-3 space-y-2">
           {evaluators.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)] text-center py-4">No evaluators configured for this listing.</p>
+            <p className="text-sm text-[var(--text-muted)] text-center py-4">
+              No evaluators configured for this listing.
+            </p>
           ) : filteredEvaluators.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)] text-center py-4">No evaluators match your search.</p>
+            <p className="text-sm text-[var(--text-muted)] text-center py-4">
+              No evaluators match your search.
+            </p>
           ) : (
-            filteredEvaluators.map(ev => (
+            filteredEvaluators.map((ev) => (
               <label
                 key={ev.id}
                 className={cn(
-                  'flex items-start gap-2.5 p-3 rounded-lg cursor-pointer transition-colors',
+                  "flex items-start gap-2.5 p-3 rounded-lg cursor-pointer transition-colors",
                   selected.has(ev.id)
-                    ? 'bg-[var(--surface-info)] border border-[var(--border-info)]'
-                    : 'bg-[var(--bg-secondary)] border border-transparent hover:border-[var(--border-subtle)]'
+                    ? "bg-[var(--surface-info)] border border-[var(--border-info)]"
+                    : "bg-[var(--bg-secondary)] border border-transparent hover:border-[var(--border-subtle)]",
                 )}
               >
                 <input
@@ -156,15 +232,19 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
                   className="mt-0.5 rounded accent-[var(--interactive-primary)]"
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--text-primary)]">{ev.name}</p>
+                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                    {ev.name}
+                  </p>
                   <p className="text-xs text-[var(--text-muted)] truncate mt-0.5">
-                    {ev.prompt.slice(0, 100)}{ev.prompt.length > 100 ? '...' : ''}
+                    {ev.prompt.slice(0, 100)}
+                    {ev.prompt.length > 100 ? "..." : ""}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
-                      {ev.outputSchema?.length ?? 0} field{(ev.outputSchema?.length ?? 0) !== 1 ? 's' : ''}
+                      {ev.outputSchema?.length ?? 0} field
+                      {(ev.outputSchema?.length ?? 0) !== 1 ? "s" : ""}
                     </span>
-                    {ev.outputSchema?.slice(0, 3).map(f => (
+                    {ev.outputSchema?.slice(0, 3).map((f) => (
                       <span
                         key={f.key}
                         className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)]"
@@ -186,17 +266,21 @@ export function RunAllOverlay({ open, onClose, onRun }: RunAllOverlayProps) {
 
         {/* Footer */}
         <div className="shrink-0 px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
-          <span className="text-xs text-[var(--text-muted)]">{selected.size} of {evaluators.length} selected</span>
+          <span className="text-xs text-[var(--text-muted)]">
+            {selected.size} of {evaluators.length} selected
+          </span>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose}>
               Cancel
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={selected.size === 0}
+              disabled={
+                selected.size === 0 || !selectedModel || !credentialsReady
+              }
               icon={PlayCircle}
             >
-              Run {selected.size} Evaluator{selected.size !== 1 ? 's' : ''}
+              Run {selected.size} Evaluator{selected.size !== 1 ? "s" : ""}
             </Button>
           </div>
         </div>

@@ -3,38 +3,48 @@
  * Zustand store for managing Kaira chat state
  */
 
-import { create } from 'zustand';
-import type { AppId, KairaChatSession, KairaChatMessage } from '@/types';
-import { chatSessionsRepository, chatMessagesRepository } from '@/services/storage';
-import { kairaChatService } from '@/services/kaira';
+import { create } from "zustand";
+import type { AppId, KairaChatSession, KairaChatMessage } from "@/types";
+import {
+  chatSessionsRepository,
+  chatMessagesRepository,
+} from "@/services/storage";
+import { kairaChatService } from "@/services/kaira";
 import {
   buildStreamRequest,
   processChunk,
   applySessionUpdate,
-} from '@/services/kaira/kairaSessionProtocol';
-import type { KairaSessionState, SessionUpdate } from '@/services/kaira/kairaSessionProtocol';
+} from "@/services/kaira/kairaSessionProtocol";
+import type {
+  KairaSessionState,
+  SessionUpdate,
+} from "@/services/kaira/kairaSessionProtocol";
 
 interface ChatStoreState {
   // Current session
   currentSessionId: string | null;
   sessions: Record<AppId, KairaChatSession[]>;
   messages: KairaChatMessage[];
-  
+
   // UI state
   isStreaming: boolean;
   streamingContent: string;
   error: string | null;
-  isLoading: boolean;
+  isLoadingSessions: boolean;
+  isLoadingMessages: boolean;
   isCreatingSession: boolean;
   isSending: boolean;
   isDeleting: boolean;
   isSessionsLoaded: Record<AppId, boolean>;
-  
+
   // Abort controller for canceling streams
   abortController: AbortController | null;
-  
+
   // Actions
-  loadSessions: (appId: AppId) => Promise<void>;
+  loadSessions: (
+    appId: AppId,
+    opts?: { userId?: string; chatIdHint?: string },
+  ) => Promise<void>;
   selectSession: (appId: AppId, sessionId: string | null) => Promise<void>;
   createSession: (appId: AppId, userId: string) => Promise<KairaChatSession>;
   deleteSession: (appId: AppId, sessionId: string) => Promise<void>;
@@ -42,49 +52,69 @@ interface ChatStoreState {
   sendMessageStreaming: (appId: AppId, content: string) => Promise<void>;
   cancelStream: () => void;
   clearError: () => void;
-  updateSessionTitle: (appId: AppId, sessionId: string, title: string) => Promise<void>;
-  updateMessageMetadata: (messageId: string, metadata: Partial<KairaChatMessage['metadata']>) => Promise<void>;
+  updateSessionTitle: (
+    appId: AppId,
+    sessionId: string,
+    title: string,
+  ) => Promise<void>;
+  updateMessageMetadata: (
+    messageId: string,
+    metadata: Partial<KairaChatMessage["metadata"]>,
+  ) => Promise<void>;
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
   currentSessionId: null,
   sessions: {
-    'voice-rx': [],
-    'kaira-bot': [],
+    "voice-rx": [],
+    "kaira-bot": [],
   },
   messages: [],
   isStreaming: false,
-  streamingContent: '',
+  streamingContent: "",
   error: null,
-  isLoading: false,
+  isLoadingSessions: false,
+  isLoadingMessages: false,
   isCreatingSession: false,
   isSending: false,
   isDeleting: false,
   isSessionsLoaded: {
-    'voice-rx': false,
-    'kaira-bot': false,
+    "voice-rx": false,
+    "kaira-bot": false,
   },
   abortController: null,
 
-  loadSessions: async (appId: AppId) => {
-    console.log('[chatStore] loadSessions called for appId:', appId);
-    
+  loadSessions: async (
+    appId: AppId,
+    opts?: { userId?: string; chatIdHint?: string },
+  ) => {
+    console.log("[chatStore] loadSessions called for appId:", appId);
+
     // Skip if already loaded
     if (get().isSessionsLoaded[appId]) {
-      console.log('[chatStore] Sessions already loaded for', appId);
+      console.log("[chatStore] Sessions already loaded for", appId);
       return;
     }
-    
+
+    // Pre-fetch app-level evaluators in parallel (fire-and-forget).
+    // Mirrors Voice Rx pattern so evaluator data is ready before the
+    // user clicks the Evaluators tab, eliminating the flash on first click.
+    if (appId === "kaira-bot") {
+      import("@/stores/evaluatorsStore").then(({ useEvaluatorsStore }) => {
+        useEvaluatorsStore.getState().loadAppEvaluators(appId);
+      });
+    }
+
     try {
-      console.log('[chatStore] Setting isLoading: true');
-      set({ isLoading: true, error: null });
-      
-      console.log('[chatStore] Fetching sessions from repository...');
-      
+      console.log("[chatStore] Setting isLoadingSessions: true");
+      set({ isLoadingSessions: true, error: null });
+
+      console.log("[chatStore] Fetching sessions from repository...");
+
       const sessions = await chatSessionsRepository.getAll(appId);
-      
-      console.log('[chatStore] Fetched sessions:', sessions.length, 'sessions');
-      
+
+      console.log("[chatStore] Fetched sessions:", sessions.length, "sessions");
+
       set((state) => ({
         sessions: {
           ...state.sessions,
@@ -94,14 +124,38 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           ...state.isSessionsLoaded,
           [appId]: true,
         },
-        isLoading: false,
       }));
-      console.log('[chatStore] loadSessions completed successfully');
+
+      // Auto-select first session inline -- no intermediate render exposed to React
+      const updatedState = get();
+      if (
+        opts?.userId &&
+        updatedState.sessions[appId].length > 0 &&
+        !updatedState.currentSessionId
+      ) {
+        // Prefer chatIdHint (from URL) if it matches an existing session; fall back to first session
+        const targetSessionId = opts?.chatIdHint
+          ? (updatedState.sessions[appId].find((s) => s.id === opts.chatIdHint)
+              ?.id ?? updatedState.sessions[appId][0].id)
+          : updatedState.sessions[appId][0].id;
+        set({ currentSessionId: targetSessionId, isLoadingMessages: true });
+        try {
+          const messages =
+            await chatMessagesRepository.getBySession(targetSessionId);
+          set({ messages, isLoadingMessages: false });
+        } catch {
+          set({ messages: [], isLoadingMessages: false });
+        }
+      }
+
+      // Mark sessions loading complete only after everything (incl. auto-select) is settled
+      set({ isLoadingSessions: false });
+      console.log("[chatStore] loadSessions completed successfully");
     } catch (err) {
-      console.error('[chatStore] Failed to load chat sessions:', err);
-      set((state) => ({ 
-        error: 'Failed to load chat sessions', 
-        isLoading: false,
+      console.error("[chatStore] Failed to load chat sessions:", err);
+      set((state) => ({
+        error: "Failed to load chat sessions",
+        isLoadingSessions: false,
         isSessionsLoaded: {
           ...state.isSessionsLoaded,
           [appId]: true,
@@ -117,48 +171,60 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
 
     // Clear messages immediately to prevent cross-session contamination
-    set({ currentSessionId: sessionId, messages: [], isLoading: true, error: null });
+    set({
+      currentSessionId: sessionId,
+      messages: [],
+      isLoadingMessages: true,
+      error: null,
+    });
 
     try {
       const messages = await chatMessagesRepository.getBySession(sessionId);
-      set({ 
+      set({
         messages,
-        isLoading: false,
+        isLoadingMessages: false,
       });
     } catch (err) {
-      console.error('Failed to load session messages:', err);
-      set({ 
+      console.error("Failed to load session messages:", err);
+      set({
         currentSessionId: null,
         messages: [],
-        error: 'Failed to load messages', 
-        isLoading: false 
+        error: "Failed to load messages",
+        isLoadingMessages: false,
       });
     }
   },
 
   createSession: async (appId: AppId, userId: string) => {
-    console.log('[chatStore] createSession called - appId:', appId, 'userId:', userId);
-    
+    console.log(
+      "[chatStore] createSession called - appId:",
+      appId,
+      "userId:",
+      userId,
+    );
+
     // Guard against concurrent session creation - check current state, not closure
     const state = get();
     if (state.isCreatingSession) {
-      console.log('[chatStore] Session creation already in progress, skipping');
-      throw new Error('Session creation already in progress');
+      console.log("[chatStore] Session creation already in progress, skipping");
+      throw new Error("Session creation already in progress");
     }
-    
-    console.log('[chatStore] Setting isCreatingSession: true');
+
+    console.log("[chatStore] Setting isCreatingSession: true");
     set({ isCreatingSession: true, error: null });
-    
+
     try {
       // Don't generate threadId - server will provide it on first message
-      console.log('[chatStore] Creating session in repository (no threadId yet)...');
+      console.log(
+        "[chatStore] Creating session in repository (no threadId yet)...",
+      );
       const session = await chatSessionsRepository.create(appId, {
         userId,
-        title: 'New Chat',
-        status: 'active',
+        title: "New Chat",
+        status: "active",
         isFirstMessage: true,
       });
-      console.log('[chatStore] Session created with id:', session.id);
+      console.log("[chatStore] Session created with id:", session.id);
 
       set((state) => ({
         sessions: {
@@ -170,13 +236,13 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         isCreatingSession: false,
       }));
 
-      console.log('[chatStore] createSession completed successfully');
+      console.log("[chatStore] createSession completed successfully");
       return session;
     } catch (err) {
-      console.error('[chatStore] Failed to create session:', err);
-      set({ 
+      console.error("[chatStore] Failed to create session:", err);
+      set({
         isCreatingSession: false,
-        error: err instanceof Error ? err.message : 'Failed to create session',
+        error: err instanceof Error ? err.message : "Failed to create session",
       });
       throw err;
     }
@@ -186,24 +252,26 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     // Guard against concurrent deletion
     const state = get();
     if (state.isDeleting) {
-      throw new Error('Delete already in progress');
+      throw new Error("Delete already in progress");
     }
-    
+
     set({ isDeleting: true, error: null });
-    
+
     try {
       // DB operation first - only update state on success
       await chatSessionsRepository.delete(appId, sessionId);
-      
+
       set((state) => {
         const newSessions = {
           ...state.sessions,
-          [appId]: (state.sessions[appId] || []).filter(s => s.id !== sessionId),
+          [appId]: (state.sessions[appId] || []).filter(
+            (s) => s.id !== sessionId,
+          ),
         };
-        
+
         // If we deleted the current session, clear it
         const shouldClearCurrent = state.currentSessionId === sessionId;
-        
+
         return {
           sessions: newSessions,
           currentSessionId: shouldClearCurrent ? null : state.currentSessionId,
@@ -212,10 +280,10 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         };
       });
     } catch (err) {
-      console.error('Failed to delete session:', err);
-      set({ 
+      console.error("Failed to delete session:", err);
+      set({
         isDeleting: false,
-        error: err instanceof Error ? err.message : 'Failed to delete session',
+        error: err instanceof Error ? err.message : "Failed to delete session",
       });
       throw err;
     }
@@ -225,20 +293,20 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     // Guard against concurrent sends - check current state
     const state = get();
     if (state.isSending || state.isStreaming) {
-      console.warn('Message send already in progress');
-      return;
-    }
-    
-    const { currentSessionId, sessions } = state;
-    
-    if (!currentSessionId) {
-      set({ error: 'No session selected' });
+      console.warn("Message send already in progress");
       return;
     }
 
-    const session = sessions[appId]?.find(s => s.id === currentSessionId);
+    const { currentSessionId, sessions } = state;
+
+    if (!currentSessionId) {
+      set({ error: "No session selected" });
+      return;
+    }
+
+    const session = sessions[appId]?.find((s) => s.id === currentSessionId);
     if (!session) {
-      set({ error: 'Session not found' });
+      set({ error: "Session not found" });
       return;
     }
 
@@ -248,19 +316,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       // Create user message
       const userMessage = await chatMessagesRepository.create({
         sessionId: currentSessionId,
-        role: 'user',
+        role: "user",
         content,
         createdAt: new Date(),
-        status: 'complete',
+        status: "complete",
       });
 
       // Create pending assistant message
       const assistantMessage = await chatMessagesRepository.create({
         sessionId: currentSessionId,
-        role: 'assistant',
-        content: '',
+        role: "assistant",
+        content: "",
         createdAt: new Date(),
-        status: 'pending',
+        status: "pending",
       });
 
       set((state) => ({
@@ -276,20 +344,20 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const apiRequest = {
         query: content,
         userId: session.userId,
-        ...(!isFirstMessage && { 
+        ...(!isFirstMessage && {
           threadId: session.threadId,
           sessionId: session.serverSessionId,
         }),
         context: { additionalProp1: {} },
         endSession: isFirstMessage,
       };
-      
+
       const response = await kairaChatService.sendMessage(apiRequest);
 
       // Update assistant message with response
       await chatMessagesRepository.update(assistantMessage.id, {
         content: response.message,
-        status: 'complete',
+        status: "complete",
         metadata: {
           intents: response.detected_intents,
           agentResponses: response.agent_responses,
@@ -300,7 +368,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
             user_id: apiRequest.userId,
             ...(apiRequest.threadId && { thread_id: apiRequest.threadId }),
             ...(apiRequest.sessionId && { session_id: apiRequest.sessionId }),
-            ...(apiRequest.endSession !== undefined && { end_session: apiRequest.endSession }),
+            ...(apiRequest.endSession !== undefined && {
+              end_session: apiRequest.endSession,
+            }),
           },
           apiResponse: response,
         },
@@ -313,46 +383,53 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           threadId: response.thread_id,
           isFirstMessage: false,
         });
-        
+
         // Update local state with both IDs
         set((state) => ({
           sessions: {
             ...state.sessions,
-            [appId]: state.sessions[appId]?.map(s => 
-              s.id === currentSessionId ? { 
-                ...s, 
-                serverSessionId: response.session_id,
-                threadId: response.thread_id,
-                isFirstMessage: false 
-              } : s
-            ) || [],
+            [appId]:
+              state.sessions[appId]?.map((s) =>
+                s.id === currentSessionId
+                  ? {
+                      ...s,
+                      serverSessionId: response.session_id,
+                      threadId: response.thread_id,
+                      isFirstMessage: false,
+                    }
+                  : s,
+              ) || [],
           },
         }));
       }
 
       // Update title if it's still "New Chat"
-      if (session.title === 'New Chat') {
-        const newTitle = content.slice(0, 50) + (content.length > 50 ? '...' : '');
-        await chatSessionsRepository.update(appId, currentSessionId, { title: newTitle });
-        
+      if (session.title === "New Chat") {
+        const newTitle =
+          content.slice(0, 50) + (content.length > 50 ? "..." : "");
+        await chatSessionsRepository.update(appId, currentSessionId, {
+          title: newTitle,
+        });
+
         set((state) => ({
           sessions: {
             ...state.sessions,
-            [appId]: state.sessions[appId]?.map(s => 
-              s.id === currentSessionId ? { ...s, title: newTitle } : s
-            ) || [],
+            [appId]:
+              state.sessions[appId]?.map((s) =>
+                s.id === currentSessionId ? { ...s, title: newTitle } : s,
+              ) || [],
           },
         }));
       }
 
       // Update messages in state
       set((state) => ({
-        messages: state.messages.map(m => 
-          m.id === assistantMessage.id 
-            ? { 
-                ...m, 
-                content: response.message, 
-                status: 'complete' as const,
+        messages: state.messages.map((m) =>
+          m.id === assistantMessage.id
+            ? {
+                ...m,
+                content: response.message,
+                status: "complete" as const,
                 metadata: {
                   intents: response.detected_intents,
                   agentResponses: response.agent_responses,
@@ -361,32 +438,38 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
                   apiRequest: {
                     query: apiRequest.query,
                     user_id: apiRequest.userId,
-                    ...(apiRequest.threadId && { thread_id: apiRequest.threadId }),
-                    ...(apiRequest.sessionId && { session_id: apiRequest.sessionId }),
-                    ...(apiRequest.endSession !== undefined && { end_session: apiRequest.endSession }),
+                    ...(apiRequest.threadId && {
+                      thread_id: apiRequest.threadId,
+                    }),
+                    ...(apiRequest.sessionId && {
+                      session_id: apiRequest.sessionId,
+                    }),
+                    ...(apiRequest.endSession !== undefined && {
+                      end_session: apiRequest.endSession,
+                    }),
                   },
                   apiResponse: response,
                 },
-              } 
-            : m
+              }
+            : m,
         ),
         isSending: false,
       }));
-
     } catch (err) {
-      console.error('Failed to send message:', err);
-      
+      console.error("Failed to send message:", err);
+
       set((state) => ({
-        messages: state.messages.map(m => 
-          m.status === 'pending'
-            ? { 
-                ...m, 
-                status: 'error' as const, 
-                errorMessage: err instanceof Error ? err.message : 'Failed to get response',
-              } 
-            : m
+        messages: state.messages.map((m) =>
+          m.status === "pending"
+            ? {
+                ...m,
+                status: "error" as const,
+                errorMessage:
+                  err instanceof Error ? err.message : "Failed to get response",
+              }
+            : m,
         ),
-        error: err instanceof Error ? err.message : 'Failed to send message',
+        error: err instanceof Error ? err.message : "Failed to send message",
         isSending: false,
       }));
     }
@@ -396,20 +479,20 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     // Guard against concurrent sends - check current state
     const state = get();
     if (state.isSending || state.isStreaming) {
-      console.warn('Message send already in progress');
-      return;
-    }
-    
-    const { currentSessionId, sessions } = state;
-    
-    if (!currentSessionId) {
-      set({ error: 'No session selected' });
+      console.warn("Message send already in progress");
       return;
     }
 
-    const session = sessions[appId]?.find(s => s.id === currentSessionId);
+    const { currentSessionId, sessions } = state;
+
+    if (!currentSessionId) {
+      set({ error: "No session selected" });
+      return;
+    }
+
+    const session = sessions[appId]?.find((s) => s.id === currentSessionId);
     if (!session) {
-      set({ error: 'Session not found' });
+      set({ error: "Session not found" });
       return;
     }
 
@@ -419,32 +502,32 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     // Create user message
     const userMessage = await chatMessagesRepository.create({
       sessionId: currentSessionId,
-      role: 'user',
+      role: "user",
       content,
       createdAt: new Date(),
-      status: 'complete',
+      status: "complete",
     });
 
     // Create streaming assistant message
     const assistantMessage = await chatMessagesRepository.create({
       sessionId: currentSessionId,
-      role: 'assistant',
-      content: '',
+      role: "assistant",
+      content: "",
       createdAt: new Date(),
-      status: 'streaming',
+      status: "streaming",
     });
 
     set((state) => ({
       messages: [...state.messages, userMessage, assistantMessage],
       isStreaming: true,
-      streamingContent: '',
+      streamingContent: "",
       error: null,
       abortController,
     }));
 
     try {
-      let fullContent = '';
-      const metadata: KairaChatMessage['metadata'] = {};
+      let fullContent = "";
+      const metadata: KairaChatMessage["metadata"] = {};
       const streamStartTime = Date.now();
 
       // Initialize session state from persisted session
@@ -466,8 +549,10 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const persistSessionUpdate = async (update: SessionUpdate) => {
         const dbPatch: Partial<KairaChatSession> = {};
         if (update.threadId !== undefined) dbPatch.threadId = update.threadId;
-        if (update.sessionId !== undefined) dbPatch.serverSessionId = update.sessionId;
-        if (update.responseId !== undefined) dbPatch.lastResponseId = update.responseId;
+        if (update.sessionId !== undefined)
+          dbPatch.serverSessionId = update.sessionId;
+        if (update.responseId !== undefined)
+          dbPatch.lastResponseId = update.responseId;
         if (update.markFirstMessageDone) dbPatch.isFirstMessage = false;
 
         if (Object.keys(dbPatch).length === 0) return;
@@ -476,20 +561,24 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         set((state) => ({
           sessions: {
             ...state.sessions,
-            [appId]: state.sessions[appId]?.map(s =>
-              s.id === currentSessionId ? { ...s, ...dbPatch } : s
-            ) || [],
+            [appId]:
+              state.sessions[appId]?.map((s) =>
+                s.id === currentSessionId ? { ...s, ...dbPatch } : s,
+              ) || [],
           },
         }));
       };
 
       for await (const chunk of kairaChatService.streamMessage(
         apiRequest,
-        abortController.signal
+        abortController.signal,
       )) {
-        console.log('[ChatStore] Received chunk:', chunk.type, chunk);
+        console.log("[ChatStore] Received chunk:", chunk.type, chunk);
 
-        const { sessionUpdate, content: chunkContent } = processChunk(chunk, sessionState);
+        const { sessionUpdate, content: chunkContent } = processChunk(
+          chunk,
+          sessionState,
+        );
 
         // Apply session update (immutable state + persist)
         if (sessionUpdate) {
@@ -514,14 +603,14 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           set({ streamingContent: fullContent });
         }
         if (chunkContent.logMessage) {
-          console.log('[ChatStore]', chunkContent.logMessage);
+          console.log("[ChatStore]", chunkContent.logMessage);
         }
         if (chunkContent.error) {
           throw new Error(chunkContent.error);
         }
       }
 
-      console.log('[ChatStore] Stream complete. Final content:', fullContent);
+      console.log("[ChatStore] Stream complete. Final content:", fullContent);
       // Calculate processing time
       metadata.processingTime = (Date.now() - streamStartTime) / 1000;
 
@@ -535,68 +624,80 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         is_multi_intent: metadata.isMultiIntent || false,
         processing_time: metadata.processingTime,
         user_id: session.userId,
-        thread_id: sessionState.threadId || session.threadId || '',
-        session_id: sessionState.sessionId || session.serverSessionId || '',
+        thread_id: sessionState.threadId || session.threadId || "",
+        session_id: sessionState.sessionId || session.serverSessionId || "",
       };
 
       // Update assistant message with final content
-      console.log('[ChatStore] Updating assistant message with content:', fullContent.substring(0, 50));
+      console.log(
+        "[ChatStore] Updating assistant message with content:",
+        fullContent.substring(0, 50),
+      );
       await chatMessagesRepository.update(assistantMessage.id, {
         content: fullContent,
-        status: 'complete',
+        status: "complete",
         metadata,
       });
-      console.log('[ChatStore] Assistant message updated successfully');
+      console.log("[ChatStore] Assistant message updated successfully");
 
       // Update title if it's still "New Chat"
-      if (session.title === 'New Chat') {
-        const newTitle = content.slice(0, 50) + (content.length > 50 ? '...' : '');
-        await chatSessionsRepository.update(appId, currentSessionId, { title: newTitle });
-        
+      if (session.title === "New Chat") {
+        const newTitle =
+          content.slice(0, 50) + (content.length > 50 ? "..." : "");
+        await chatSessionsRepository.update(appId, currentSessionId, {
+          title: newTitle,
+        });
+
         set((state) => ({
           sessions: {
             ...state.sessions,
-            [appId]: state.sessions[appId]?.map(s => 
-              s.id === currentSessionId ? { ...s, title: newTitle } : s
-            ) || [],
+            [appId]:
+              state.sessions[appId]?.map((s) =>
+                s.id === currentSessionId ? { ...s, title: newTitle } : s,
+              ) || [],
           },
         }));
       }
 
       set((state) => ({
-        messages: state.messages.map(m => 
-          m.id === assistantMessage.id 
-            ? { ...m, content: fullContent, status: 'complete' as const, metadata } 
-            : m
+        messages: state.messages.map((m) =>
+          m.id === assistantMessage.id
+            ? {
+                ...m,
+                content: fullContent,
+                status: "complete" as const,
+                metadata,
+              }
+            : m,
         ),
         isStreaming: false,
-        streamingContent: '',
+        streamingContent: "",
         abortController: null,
       }));
-      
-      console.log('[ChatStore] State updated with final message');
 
+      console.log("[ChatStore] State updated with final message");
     } catch (err) {
-      console.error('Streaming error:', err);
-      
+      console.error("Streaming error:", err);
+
       await chatMessagesRepository.update(assistantMessage.id, {
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Streaming failed',
+        status: "error",
+        errorMessage: err instanceof Error ? err.message : "Streaming failed",
       });
 
       set((state) => ({
-        messages: state.messages.map(m => 
-          m.id === assistantMessage.id 
-            ? { 
-                ...m, 
-                status: 'error' as const, 
-                errorMessage: err instanceof Error ? err.message : 'Streaming failed',
-              } 
-            : m
+        messages: state.messages.map((m) =>
+          m.id === assistantMessage.id
+            ? {
+                ...m,
+                status: "error" as const,
+                errorMessage:
+                  err instanceof Error ? err.message : "Streaming failed",
+              }
+            : m,
         ),
         isStreaming: false,
-        streamingContent: '',
-        error: err instanceof Error ? err.message : 'Streaming failed',
+        streamingContent: "",
+        error: err instanceof Error ? err.message : "Streaming failed",
         abortController: null,
       }));
     }
@@ -606,9 +707,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     const { abortController } = get();
     if (abortController) {
       abortController.abort();
-      set({ 
-        isStreaming: false, 
-        streamingContent: '',
+      set({
+        isStreaming: false,
+        streamingContent: "",
         abortController: null,
       });
     }
@@ -618,22 +719,30 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     set({ error: null });
   },
 
-  updateSessionTitle: async (appId: AppId, sessionId: string, title: string) => {
+  updateSessionTitle: async (
+    appId: AppId,
+    sessionId: string,
+    title: string,
+  ) => {
     await chatSessionsRepository.update(appId, sessionId, { title });
-    
+
     set((state) => ({
       sessions: {
         ...state.sessions,
-        [appId]: state.sessions[appId]?.map(s => 
-          s.id === sessionId ? { ...s, title } : s
-        ) || [],
+        [appId]:
+          state.sessions[appId]?.map((s) =>
+            s.id === sessionId ? { ...s, title } : s,
+          ) || [],
       },
     }));
   },
 
-  updateMessageMetadata: async (messageId: string, metadataUpdates: Partial<KairaChatMessage['metadata']>) => {
+  updateMessageMetadata: async (
+    messageId: string,
+    metadataUpdates: Partial<KairaChatMessage["metadata"]>,
+  ) => {
     // Find the message to get current metadata
-    const currentMessage = get().messages.find(m => m.id === messageId);
+    const currentMessage = get().messages.find((m) => m.id === messageId);
     if (!currentMessage) {
       throw new Error(`Message ${messageId} not found`);
     }
@@ -650,10 +759,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
 
     // Update in store
     set((state) => ({
-      messages: state.messages.map(m =>
-        m.id === messageId
-          ? { ...m, metadata: updatedMetadata }
-          : m
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, metadata: updatedMetadata } : m,
       ),
     }));
   },
