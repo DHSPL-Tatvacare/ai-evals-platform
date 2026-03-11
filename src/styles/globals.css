@@ -169,6 +169,20 @@
   --border-warning: #fde68a;
   --border-info: #c7d2fe;
 
+  /* Priority levels (P0 critical / P1 high / P2 medium) */
+  --priority-p0-accent: #ef4444;
+  --priority-p0-text: #991b1b;
+  --priority-p0-bg: #fef2f2;
+  --priority-p0-border: #fecaca;
+  --priority-p1-accent: #f59e0b;
+  --priority-p1-text: #92400e;
+  --priority-p1-bg: #fffbeb;
+  --priority-p1-border: #fde68a;
+  --priority-p2-accent: #3b82f6;
+  --priority-p2-text: #1e40af;
+  --priority-p2-bg: #eff6ff;
+  --priority-p2-border: #bfdbfe;
+
   /* Heatmap cell scale (red → amber → green with legible text) */
   --heatmap-critical-bg: #fef2f2;
   --heatmap-critical-text: #991b1b;
@@ -273,6 +287,20 @@
   --border-error: rgba(239, 68, 68, 0.3);
   --border-warning: rgba(245, 158, 11, 0.3);
   --border-info: rgba(99, 102, 241, 0.3);
+
+  /* Priority levels — dark mode */
+  --priority-p0-accent: #ef4444;
+  --priority-p0-text: #fca5a5;
+  --priority-p0-bg: rgba(239, 68, 68, 0.1);
+  --priority-p0-border: rgba(239, 68, 68, 0.3);
+  --priority-p1-accent: #f59e0b;
+  --priority-p1-text: #fcd34d;
+  --priority-p1-bg: rgba(245, 158, 11, 0.1);
+  --priority-p1-border: rgba(245, 158, 11, 0.3);
+  --priority-p2-accent: #3b82f6;
+  --priority-p2-text: #93c5fd;
+  --priority-p2-bg: rgba(59, 130, 246, 0.1);
+  --priority-p2-border: rgba(59, 130, 246, 0.3);
 
   /* Heatmap cell scale — dark mode (muted backgrounds, light text) */
   --heatmap-critical-bg: rgba(239, 68, 68, 0.2);

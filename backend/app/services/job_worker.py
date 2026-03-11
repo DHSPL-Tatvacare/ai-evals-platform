@@ -164,9 +164,7 @@ async def update_job_progress(
         # run_id is semantically a relationship (eval_run → job) stored in
         # the progress dict; it must survive overwrites from step updates.
         existing_run_id = (
-            job.progress.get("run_id")
-            if isinstance(job.progress, dict)
-            else None
+            job.progress.get("run_id") if isinstance(job.progress, dict) else None
         )
         if existing_run_id and "run_id" not in extra:
             new_progress["run_id"] = existing_run_id
@@ -272,9 +270,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                             j.status = "failed"
                             # Format step-specific error for PipelineStepError
                             if hasattr(e, "step") and hasattr(e, "message"):
-                                error_message = f"[{e.step}] {e.message}"[
-                                    :2000
-                                ]
+                                error_message = f"[{e.step}] {e.message}"[:2000]
                             else:
                                 error_message = safe_error_message(e)[:2000]
                             j.error_message = error_message
@@ -490,11 +486,15 @@ async def handle_generate_report(job_id, params: dict) -> dict:
 
     start = _time.monotonic()
 
-    await update_job_progress(job_id, 0, 2, "Aggregating evaluation data…", run_id=run_id)
+    await update_job_progress(
+        job_id, 0, 2, "Aggregating evaluation data…", run_id=run_id
+    )
 
     async with _async_session() as db:
         service = ReportService(db)
-        await update_job_progress(job_id, 1, 2, "Generating AI narrative…", run_id=run_id)
+        await update_job_progress(
+            job_id, 1, 2, "Generating AI narrative…", run_id=run_id
+        )
         payload = await service.generate(
             run_id,
             force_refresh=params.get("refresh", False),
@@ -538,7 +538,9 @@ async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
     # Resolve LLM credentials — use provider from job params so the correct
     # provider-specific API key is resolved from the DB settings.
     job_provider = params.get("provider") or None
-    db_settings = await get_llm_settings_from_db(provider_override=job_provider)
+    db_settings = await get_llm_settings_from_db(
+        provider_override=job_provider, auth_intent="managed_job"
+    )
     provider_name = job_provider or db_settings.get("provider", "gemini")
     model_name = params.get("model") or db_settings.get("selected_model", "")
     api_key = db_settings.get("api_key", "")
@@ -573,16 +575,20 @@ async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
             )
         )
         existing = result.scalar_one_or_none()
-        summary_data = summary.model_dump() if hasattr(summary, "model_dump") else summary
+        summary_data = (
+            summary.model_dump() if hasattr(summary, "model_dump") else summary
+        )
         if existing:
             existing.analytics_data = summary_data
             existing.computed_at = _dt.now(_tz.utc)
         else:
-            db.add(EvaluationAnalytics(
-                app_id=app_id,
-                scope="cross_run_summary",
-                analytics_data=summary_data,
-            ))
+            db.add(
+                EvaluationAnalytics(
+                    app_id=app_id,
+                    scope="cross_run_summary",
+                    analytics_data=summary_data,
+                )
+            )
         await db.commit()
 
     duration = round(_time.monotonic() - start, 2)

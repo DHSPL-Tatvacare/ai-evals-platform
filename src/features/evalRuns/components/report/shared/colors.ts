@@ -58,9 +58,9 @@ export const GAP_TYPE_DOT_COLORS: Record<string, string> = {
 };
 
 export const PRIORITY_STYLES: Record<string, { bg: string; border: string; text: string; label: string }> = {
-  P0: { bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800', text: 'text-red-800 dark:text-red-300', label: 'P0 \u00b7 CRITICAL' },
-  P1: { bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', text: 'text-amber-800 dark:text-amber-300', label: 'P1 \u00b7 HIGH' },
-  P2: { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800', text: 'text-blue-800 dark:text-blue-300', label: 'P2 \u00b7 MEDIUM' },
+  P0: { bg: 'bg-[var(--priority-p0-bg)]', border: 'border-[var(--priority-p0-border)]', text: 'text-[var(--priority-p0-text)]', label: 'P0 \u00b7 CRITICAL' },
+  P1: { bg: 'bg-[var(--priority-p1-bg)]', border: 'border-[var(--priority-p1-border)]', text: 'text-[var(--priority-p1-text)]', label: 'P1 \u00b7 HIGH' },
+  P2: { bg: 'bg-[var(--priority-p2-bg)]', border: 'border-[var(--priority-p2-border)]', text: 'text-[var(--priority-p2-text)]', label: 'P2 \u00b7 MEDIUM' },
 };
 
 export const RECOVERY_COLORS: Record<string, string> = {
@@ -77,11 +77,11 @@ export const DIFFICULTY_COLORS: Record<string, string> = {
   HARD: '#EF4444',
 };
 
-/** Priority → dot color for table rows. */
+/** Priority → accent color for dot indicators and accent strips. */
 export const PRIORITY_DOT_COLORS: Record<string, string> = {
-  P0: '#ef4444',
-  P1: '#f59e0b',
-  P2: '#3b82f6',
+  P0: 'var(--priority-p0-accent)',
+  P1: 'var(--priority-p1-accent)',
+  P2: 'var(--priority-p2-accent)',
 };
 
 /** Map issue rank (1-based) to priority key. */

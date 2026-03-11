@@ -1,15 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Sparkles, MessageSquare, Clock } from 'lucide-react';
+import { Loader2, Sparkles, MessageSquare, Clock } from 'lucide-react';
 import type {
   IssuesAndRecommendations,
-  AggregatedIssue,
   AggregatedRecommendation,
   CrossRunStats,
   CrossRunAISummary,
   HealthTrendPoint,
 } from '@/types/crossRunAnalytics';
 import type { LLMProvider } from '@/types';
-import { cn } from '@/utils';
 import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
 import { poll } from '@/services/api/jobPolling';
@@ -17,12 +15,9 @@ import { notificationService } from '@/services/notifications';
 import { hasProviderCredentials, useLLMSettingsStore, LLM_PROVIDERS } from '@/stores';
 import SectionHeader from '../report/shared/SectionHeader';
 import CalloutBox from '../report/shared/CalloutBox';
-import {
-  PRIORITY_STYLES,
-  PRIORITY_DOT_COLORS,
-  rankToPriority,
-  parseImpactSegments,
-} from '../report/shared/colors';
+import { rankToPriority, parseImpactSegments } from '../report/shared/colors';
+import InsightPanel from './InsightPanel';
+import type { InsightPanelItem } from './InsightPanel';
 
 interface Props {
   data: IssuesAndRecommendations;
@@ -189,25 +184,46 @@ export default function IssuesTab({ data, stats, healthTrend }: Props) {
       {data.issues.length > 0 && (
         <div>
           <SectionHeader title="Recurring Issues" description="Issues grouped by area across multiple runs." />
-          <IssuesTable issues={data.issues} />
+          <div className="space-y-2">
+            {data.issues.map((issue) => (
+              <InsightPanel
+                key={issue.area}
+                area={issue.area}
+                priority={rankToPriority(issue.worstRank)}
+                runCount={issue.runCount}
+                items={issue.descriptions.map((d) => ({ text: d }))}
+                stats={[{ label: 'affected', value: String(issue.totalAffected) }]}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Recurring Recommendations — grouped by priority */}
+      {/* Recurring Recommendations */}
       {data.recommendations.length > 0 && (
         <div>
           <SectionHeader title="Recurring Recommendations" description="Recommendations grouped by area, sorted by priority." />
-          <div className="space-y-6">
-            {(['P0', 'P1', 'P2'] as const).map((priority) => {
-              const group = data.recommendations.filter((r) => r.highestPriority === priority);
-              if (group.length === 0) return null;
+          <div className="space-y-2">
+            {sortByPriority(data.recommendations).map((rec) => {
+              const panelItems = buildRecItems(rec);
+              const allSegments = rec.estimatedImpacts.flatMap(parseImpactSegments);
+              const totalFixes = allSegments
+                .filter((s) => s.arrow === '↓')
+                .reduce((sum, s) => sum + (parseInt(s.count, 10) || 0), 0);
+
               return (
-                <div key={priority}>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                    {PRIORITY_STYLES[priority].label}
-                  </h4>
-                  <RecommendationsTable items={group} />
-                </div>
+                <InsightPanel
+                  key={rec.area}
+                  area={rec.area}
+                  priority={rec.highestPriority}
+                  runCount={rec.runCount}
+                  items={panelItems}
+                  stats={[
+                    { label: rec.actions.length === 1 ? 'action' : 'actions', value: String(rec.actions.length) },
+                    { label: 'fixes', value: `\u2193${totalFixes}`, success: true },
+                  ]}
+                  footerImpacts={panelItems.length > 3 ? allSegments : undefined}
+                />
               );
             })}
           </div>
@@ -217,247 +233,28 @@ export default function IssuesTab({ data, stats, healthTrend }: Props) {
   );
 }
 
-// ── Issues Table ──
+// ── Helpers ──
 
-function IssuesTable({ issues }: { issues: AggregatedIssue[] }) {
-  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
+const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
 
-  const toggle = (area: string) => {
-    setExpandedAreas((prev) => {
-      const next = new Set(prev);
-      if (next.has(area)) next.delete(area);
-      else next.add(area);
-      return next;
-    });
-  };
-
-  return (
-    <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b-2 border-[var(--border-subtle)]">
-            <th style={{ width: 12 }} className="px-2 py-1.5" />
-            <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Area</th>
-            <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Top Description</th>
-            <th className="text-right px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider whitespace-nowrap">Runs</th>
-            <th className="text-right px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider whitespace-nowrap">Threads Affected</th>
-          </tr>
-        </thead>
-        <tbody>
-          {issues.map((issue, i) => {
-            const priority = rankToPriority(issue.worstRank);
-            const dotColor = PRIORITY_DOT_COLORS[priority] || '#6b7280';
-            const hasMore = issue.descriptions.length > 1;
-            const expanded = expandedAreas.has(issue.area);
-
-            return (
-              <IssueTableRows
-                key={issue.area}
-                issue={issue}
-                dotColor={dotColor}
-                hasMore={hasMore}
-                expanded={expanded}
-                onToggle={() => toggle(issue.area)}
-                rowIndex={i}
-              />
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+function sortByPriority(recs: AggregatedRecommendation[]): AggregatedRecommendation[] {
+  return [...recs].sort(
+    (a, b) => (PRIORITY_ORDER[a.highestPriority] ?? 9) - (PRIORITY_ORDER[b.highestPriority] ?? 9),
   );
 }
 
-function IssueTableRows({
-  issue,
-  dotColor,
-  hasMore,
-  expanded,
-  onToggle,
-  rowIndex,
-}: {
-  issue: AggregatedIssue;
-  dotColor: string;
-  hasMore: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  rowIndex: number;
-}) {
-  const stripeBg = rowIndex % 2 === 0 ? 'bg-[var(--bg-primary)]' : 'bg-[var(--bg-secondary)]';
-
-  return (
-    <>
-      <tr className={cn(stripeBg, hasMore && 'cursor-pointer')} onClick={hasMore ? onToggle : undefined}>
-        <td className="px-2 py-2 align-top">
-          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
-        </td>
-        <td className="px-2 py-2 align-top font-semibold text-[var(--text-primary)] whitespace-nowrap">
-          <div className="flex items-center gap-1">
-            {hasMore && (
-              expanded
-                ? <ChevronDown className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
-                : <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
-            )}
-            {issue.area}
-          </div>
-        </td>
-        <td className="px-2 py-2 align-top text-[var(--text-secondary)]">{issue.descriptions[0]}</td>
-        <td className="px-2 py-2 align-top text-right text-[var(--text-muted)] whitespace-nowrap">{issue.runCount}</td>
-        <td className="px-2 py-2 align-top text-right text-[var(--text-muted)] whitespace-nowrap">{issue.totalAffected}</td>
-      </tr>
-      {expanded && issue.descriptions.slice(1).map((desc, j) => (
-        <tr key={`${issue.area}-${j}`} className={stripeBg}>
-          <td className="px-2 py-1" />
-          <td className="px-2 py-1" />
-          <td className="px-2 py-1 text-xs text-[var(--text-muted)]">{desc}</td>
-          <td className="px-2 py-1" />
-          <td className="px-2 py-1" />
-        </tr>
-      ))}
-    </>
-  );
-}
-
-// ── Recommendations Table ──
-
-function RecommendationsTable({ items }: { items: AggregatedRecommendation[] }) {
-  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
-
-  const toggle = (area: string) => {
-    setExpandedAreas((prev) => {
-      const next = new Set(prev);
-      if (next.has(area)) next.delete(area);
-      else next.add(area);
-      return next;
-    });
-  };
-
-  return (
-    <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b-2 border-[var(--border-subtle)]">
-            <th style={{ width: 12 }} className="px-2 py-1.5" />
-            <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Action</th>
-            <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider whitespace-nowrap">Area</th>
-            <th className="text-right px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider whitespace-nowrap">Runs</th>
-            <th className="text-right px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider whitespace-nowrap">Projected Impact</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((rec, i) => {
-            const dotColor = PRIORITY_DOT_COLORS[rec.highestPriority] ?? '#6b7280';
-            const hasMore = rec.actions.length > 1 || rec.estimatedImpacts.length > 1;
-            const expanded = expandedAreas.has(rec.area);
-
-            return (
-              <RecommendationTableRows
-                key={rec.area}
-                rec={rec}
-                dotColor={dotColor}
-                hasMore={hasMore}
-                expanded={expanded}
-                onToggle={() => toggle(rec.area)}
-                rowIndex={i}
-              />
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function RecommendationTableRows({
-  rec,
-  dotColor,
-  hasMore,
-  expanded,
-  onToggle,
-  rowIndex,
-}: {
-  rec: AggregatedRecommendation;
-  dotColor: string;
-  hasMore: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  rowIndex: number;
-}) {
-  const stripeBg = rowIndex % 2 === 0 ? 'bg-[var(--bg-primary)]' : 'bg-[var(--bg-secondary)]';
-  const firstImpact = rec.estimatedImpacts[0];
-  const firstSegments = firstImpact ? parseImpactSegments(firstImpact) : [];
-
-  return (
-    <>
-      <tr className={cn(stripeBg, hasMore && 'cursor-pointer')} onClick={hasMore ? onToggle : undefined}>
-        <td className="px-2 py-2.5 align-top">
-          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
-        </td>
-        <td className="px-2 py-2.5 align-top font-medium text-[var(--text-primary)]">
-          <div className="flex items-center gap-1">
-            {hasMore && (
-              expanded
-                ? <ChevronDown className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
-                : <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
-            )}
-            {rec.actions[0]}
-          </div>
-        </td>
-        <td className="px-2 py-2.5 align-top text-[var(--text-muted)] whitespace-nowrap">{rec.area}</td>
-        <td className="px-2 py-2.5 align-top text-right text-[var(--text-muted)] whitespace-nowrap">{rec.runCount}</td>
-        <td className="px-2 py-2.5 align-top text-right text-xs">
-          <ImpactCell segments={firstSegments} />
-        </td>
-      </tr>
-      {expanded && rec.actions.slice(1).map((action, j) => {
-        const impact = rec.estimatedImpacts[j + 1];
-        const segments = impact ? parseImpactSegments(impact) : [];
-        return (
-          <tr key={`${rec.area}-a-${j}`} className={stripeBg}>
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1 text-xs text-[var(--text-secondary)]">{action}</td>
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1 text-right text-xs">
-              <ImpactCell segments={segments} />
-            </td>
-          </tr>
-        );
-      })}
-      {/* Show remaining impacts that don't pair with an action */}
-      {expanded && rec.estimatedImpacts.slice(rec.actions.length).map((impact, j) => {
-        const segments = parseImpactSegments(impact);
-        return (
-          <tr key={`${rec.area}-i-${j}`} className={stripeBg}>
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1" />
-            <td className="px-2 py-1 text-right text-xs">
-              <ImpactCell segments={segments} />
-            </td>
-          </tr>
-        );
-      })}
-    </>
-  );
-}
-
-function ImpactCell({ segments }: { segments: ReturnType<typeof parseImpactSegments> }) {
-  if (segments.length === 0) return <span className="text-[var(--text-muted)]">&mdash;</span>;
-
-  return (
-    <div className="space-y-1">
-      {segments.map((seg, j) => (
-        <div key={j} className="text-[var(--color-success)]">
-          {seg.arrow && <span>{seg.arrow}{seg.count} </span>}
-          <code className="text-[11px] bg-[var(--surface-success)] px-1 py-px rounded text-[var(--color-success)]">
-            {seg.label}
-          </code>
-        </div>
-      ))}
-    </div>
-  );
+function buildRecItems(rec: AggregatedRecommendation): InsightPanelItem[] {
+  const items: InsightPanelItem[] = rec.actions.map((action, i) => ({
+    text: action,
+    impacts: rec.estimatedImpacts[i] ? parseImpactSegments(rec.estimatedImpacts[i]) : undefined,
+  }));
+  // Append orphan impacts (more impacts than actions) to last item
+  if (rec.estimatedImpacts.length > rec.actions.length && items.length > 0) {
+    const orphans = rec.estimatedImpacts.slice(rec.actions.length).flatMap(parseImpactSegments);
+    const last = items[items.length - 1];
+    last.impacts = [...(last.impacts ?? []), ...orphans];
+  }
+  return items;
 }
 
 // ── AI Summary Card ──
@@ -480,22 +277,22 @@ function AISummaryCard({ summary }: { summary: CrossRunAISummary }) {
             <p className="text-xs leading-relaxed">{summary.trendAnalysis}</p>
           </div>
 
-          {summary.criticalPatterns.length > 0 && (
+          {(summary.criticalPatterns ?? []).length > 0 && (
             <div className="border-t border-[var(--border-subtle)] pt-2">
               <h4 className="text-xs font-bold text-[var(--text-primary)] mb-1">Critical Patterns</h4>
               <ul className="list-disc list-inside space-y-0.5">
-                {summary.criticalPatterns.map((p, i) => (
+                {(summary.criticalPatterns ?? []).map((p, i) => (
                   <li key={i} className="text-xs">{p}</li>
                 ))}
               </ul>
             </div>
           )}
 
-          {summary.strategicRecommendations.length > 0 && (
+          {(summary.strategicRecommendations ?? []).length > 0 && (
             <div className="border-t border-[var(--border-subtle)] pt-2">
               <h4 className="text-xs font-bold text-[var(--text-primary)] mb-1">Strategic Recommendations</h4>
               <ol className="list-decimal list-inside space-y-0.5">
-                {summary.strategicRecommendations.map((r, i) => (
+                {(summary.strategicRecommendations ?? []).map((r, i) => (
                   <li key={i} className="text-xs">{r}</li>
                 ))}
               </ol>
