@@ -23,6 +23,7 @@ CORRECT BOT BEHAVIORS (do NOT count as friction):
 - Asking what food the user wants to log when only quantity or time was given
 - Treating a composite dish (e.g. "porridge with almonds and honey") as a single item
 - Asking for confirmation before logging
+- Responding that no food was detected in a non-food image and prompting the user to try again with a food photo
 
 BOT ERRORS (count as friction, cause = "bot"):
 - Re-asking for time or quantity that the user already provided
@@ -31,6 +32,14 @@ BOT ERRORS (count as friction, cause = "bot"):
 - Splitting a composite dish into separate line items
 - Showing incorrect calorie values or extracting the wrong food
 - Ignoring a user correction or repeating the same mistake after correction
+
+IMAGE TURNS
+
+When a turn is tagged [image attached], the user submitted a photo of their food instead of describing it in text. This changes the attribution rules:
+- Vague user text on an image turn (e.g. "log this", "add this") is NOT the user failing to provide required information — the image itself carries the food description. Do not treat image-driven brevity as a user shortcoming.
+- If the bot asks a clarifying question on the turn immediately following an image turn (e.g. "Is this the right quantity?"), attribute that extra turn cause "user" — the ambiguity originated with the image content, not a bot error.
+- Only assign cause "bot" for an image-bearing turn if the bot demonstrably misread or ignored the image in a way that is evident from the conversation text alone (e.g. logged a completely wrong meal category despite an explicit user correction, or asked for information the image clearly provided).
+- When all extra turns in a thread are attributable to image-based interactions and the task completed correctly, prefer ACCEPTABLE over FRICTION for the overall verdict.
 
 EVALUATION TASKS
 
@@ -92,7 +101,7 @@ EFFICIENCY_JSON_SCHEMA = {
                     "cause": {
                         "type": "string",
                         "enum": ["user", "bot"],
-                        "description": "Who caused this extra turn. 'user' if the user failed to provide required info. 'bot' if the bot made an error that necessitated the extra turn.",
+                        "description": "Who caused this extra turn. 'user' if the user failed to provide required info. 'bot' if the bot made an error that necessitated the extra turn. When the turn is tagged [image attached], default to 'user' unless there is explicit evidence of bot error visible in the conversation text.",
                     },
                     "description": {
                         "type": "string",
@@ -237,6 +246,37 @@ class EfficiencyEvaluator:
         for ft in friction_turns:
             if "cause" in ft:
                 ft["cause"] = ft["cause"].upper().replace("_", " ")
+
+        # Safety net: reclassify bot-caused friction on image-bearing turns → user.
+        # Image ambiguity originates with the user's choice to send a photo; the bot
+        # cannot be blamed for vagueness that exists only because the image is absent
+        # from the judge's context.
+        image_turn_numbers = {
+            i + 1
+            for i, m in enumerate(thread.messages)
+            if m.has_image
+        }
+        if image_turn_numbers:
+            for ft in friction_turns:
+                if ft.get("cause") == "BOT" and ft.get("turn") in image_turn_numbers:
+                    ft["cause"] = "USER"
+                    ft["description"] = (
+                        f"[Image-based turn — friction reclassified from bot] "
+                        f"{ft.get('description', '')}"
+                    )
+
+        # If the reclassification eliminated all bot-caused friction and the task
+        # completed, upgrade FRICTION → ACCEPTABLE (mirrors correctness HARD_FAIL → PASS).
+        if (
+            verdict == "FRICTION"
+            and raw.get("task_completed", False)
+            and not any(ft.get("cause") == "BOT" for ft in friction_turns)
+        ):
+            verdict = "ACCEPTABLE"
+            raw["reasoning"] = (
+                f"[Image-based thread — bot-attributed friction reclassified to user after image context review] "
+                f"{raw.get('reasoning', '')}"
+            )
 
         return EfficiencyEvaluation(
             thread=thread, verdict=verdict,

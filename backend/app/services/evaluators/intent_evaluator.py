@@ -209,8 +209,18 @@ class IntentEvaluator:
             history_context = "Conversation History:\n"
             for i, msg in enumerate(conversation_history[-3:], 1):
                 bot_resp = msg.final_response_message[:100] + "..." if truncate_responses and len(msg.final_response_message) > 100 else msg.final_response_message
-                history_context += f"Turn {i}: User: {msg.query_text}\n"
+                img_tag = " [IMAGE ATTACHED]" if msg.has_image else ""
+                history_context += f"Turn {i}: User: {msg.query_text}{img_tag}\n"
                 history_context += f"        Bot: {bot_resp}\n\n"
+
+        current_img_tag = " [IMAGE ATTACHED]" if message.has_image else ""
+        image_note = ""
+        if message.has_image:
+            image_note = (
+                "\nNOTE: This query is tagged [IMAGE ATTACHED] — the user submitted a photo. "
+                "If the text is vague (e.g. 'log this', 'add this'), classify based on the "
+                "user's apparent intent given that they submitted an image, per the system prompt.\n"
+            )
 
         # Build enum constraint instructions for the prompt
         intent_constraint = ""
@@ -226,8 +236,8 @@ class IntentEvaluator:
             )
 
         eval_prompt = f"""{history_context}
-User Query: "{message.query_text}"
-
+User Query: "{message.query_text}{current_img_tag}"
+{image_note}
 Classify this query according to the system prompt. Return a JSON response with your
 independent classification — do NOT guess or assume what the production system chose.{intent_constraint}"""
 

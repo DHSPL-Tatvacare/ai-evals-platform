@@ -142,10 +142,31 @@ class CorrectnessEvaluator:
 
         has_image_context = message.has_image
         if not has_image_context and conversation_history:
-            for m in conversation_history[-2:]:
+            for m in conversation_history[-4:]:
                 if m.has_image:
                     has_image_context = True
                     break
+
+        # Build thread-scoped image awareness from the full history, not just the
+        # sliding window. As threads grow, early image turns scroll out of the
+        # history_block the judge sees — the sticky note keeps the judge informed
+        # regardless of where the window sits.
+        image_turn_numbers = [
+            i + 1
+            for i, m in enumerate(conversation_history or [])
+            if m.has_image
+        ]
+        if image_turn_numbers:
+            has_image_context = True
+            turns_str = ", ".join(str(t) for t in image_turn_numbers)
+            thread_image_note = (
+                f"\n**THREAD NOTE:** The user shared image(s) at turn(s) {turns_str} in this "
+                "conversation. Even if those turns are not visible in the history window above, "
+                "apply image-based adjudication rules if this evaluation is related to an "
+                "image-bearing turn.\n"
+            )
+        else:
+            thread_image_note = ""
 
         history_block = ""
         if conversation_history:
@@ -167,6 +188,7 @@ class CorrectnessEvaluator:
 
         eval_prompt = (
             f"### Conversation history (for context)\n{history_block}\n"
+            f"{thread_image_note}"
             f"### Current turn\n**User input:** {message.query_text}{img_tag}\n\n"
             f"**Bot response:**\n{message.final_response_message}\n\n"
             f"{image_note}{rules_block}\n"
