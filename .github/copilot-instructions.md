@@ -1,176 +1,112 @@
 # AI Evals Platform - Copilot Instructions
 
-Operational guide for coding agents working in this repository.
-Prefer existing abstractions and local patterns over new architecture.
+Operational guide for coding agents working in this repository. Prefer existing abstractions and patterns.
 
-## Rule precedence
+## Rule Precedence
 
-1. Direct user instruction.
-2. `AGENTS.md`.
-3. This file.
-4. Existing code patterns in touched files.
+1. Direct user instruction
+2. `AGENTS.md`
+3. This file
+4. Existing code patterns in touched files
 
-## Current project state
+## Architecture Mental Models
 
-- Frontend: React 19, TypeScript strict, Vite 7, Tailwind v4, Zustand.
-- Backend: FastAPI, async SQLAlchemy 2, asyncpg, Python 3.12.
-- DB: PostgreSQL 16, JSON/JSONB-heavy schema.
-- App IDs in active use: `voice-rx`, `kaira-bot`.
-- `kaira-evals` appId has been removed from frontend app settings state.
-- API routers registered in `backend/app/main.py`: 15 routers (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin).
-- ORM tables: 15 total (`eval_runs`, `jobs`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat_sessions`, `chat_messages`, `history`, `settings`, `tags`, `thread_evaluations`, `adversarial_evaluations`, `api_logs`).
-- Zustand stores: 13 (appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore).
-- LLM providers: Gemini (service account + API key) and OpenAI.
+1. Frontend is a thin client. All business logic, LLM calls, and persistence run on the backend. Frontend manages UI state and makes API calls.
+2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`.
+3. Jobs are the execution model. Operations longer than a few seconds run as background jobs: create → poll → get result. Never write custom polling loops in components.
+4. Stores are caches. Zustand stores cache server data. PostgreSQL is the source of truth. On page load, stores call their `load*()` methods.
+5. The provider abstraction protects runners. Runners never call Gemini/OpenAI/Anthropic SDKs directly. They go through `llm_base.py`, which handles auth, retries, timeouts, and logging.
 
-## Build, lint, run, and test commands
+## Abstractions to Reuse — Never Bypass
 
-### Full stack (recommended for integration work)
+- LLM calls → `backend/app/services/evaluators/llm_base.py` providers only. No direct SDK calls from runners.
+- Async evaluations → `submitAndPollJob()` from `src/services/api/jobPolling.ts`. No component-level polling loops.
+- HTTP → `apiRequest` / `apiUpload` / `apiDownload` from `src/services/api/client.ts`. No raw `fetch` in components.
+- Resource data → repository wrappers in `src/services/api/*.ts` and `src/services/storage/`.
+- Navigation → route constants from `src/config/routes.ts`. No hardcoded route strings.
+- User feedback → `notificationService.success/error/info/warning`. No `alert()`.
+- Diagnostics → `logger` / `evaluationLogger`. No `console.log` in production paths.
+- CSS merging → `cn()` from `src/utils/cn.ts`.
+- UI primitives → `src/components/ui/` before creating new variants.
 
-- `docker compose up --build` - start Postgres + backend + frontend.
-- `docker compose down` - stop services.
-- `docker compose down -v` - stop and wipe DB volume.
-- `docker compose logs -f backend` - tail backend logs.
+## Current Registry
 
-### Frontend only
+- Routers (16): listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
+- ORM tables (16): eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
+- Zustand stores (14): appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
+- LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
+- Job handlers (7): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, generate-report, generate-cross-run-report
+- Active app IDs: `voice-rx`, `kaira-bot`
 
-- `npm run dev` - Vite dev server on `:5173`.
-- `npm run build` - production build (`tsc -b && vite build`).
-- `npm run lint` - ESLint across repo.
-- `npx tsc -b` - typecheck only.
-- Targeted lint: `npm run lint -- src/path/to/file.tsx` or `npx eslint src/path/to/file.tsx`.
+## Invariants — Do Not Break
 
-### Backend only (local Python)
+- EvalRun `eval_type` polymorphism must be preserved. FK/cascade chain `listings`/`chat_sessions` → `eval_runs` → `thread_evaluations`/`adversarial_evaluations`/`api_logs` must remain intact.
+- Voice Rx two-call order is fixed: transcription first (with audio), critique second (text-only `generate_json`). Never send audio on the critique call. Compute statistics server-side from records, not LLM self-reports.
+- Job safety: `is_job_cancelled()` checks must exist in all long-running flows. `recover_stale_jobs()` and `recover_stale_eval_runs()` startup paths must remain functional.
+- LLM settings are global. Stored at `app_id=""`. Never pass an app_id to LLM settings lookup.
+- Gemini on Vertex AI: use `Part.from_bytes()` for media — `client.files.upload()` is not available on Vertex. To disable thinking, omit `thinking_config` entirely. Thinking params differ by model family: 2.5 uses `thinking_budget` (int), 3+ uses `thinking_level` (enum). Do not mix them.
+- Do not reintroduce `kaira-evals` as an appId in any frontend store or settings.
+- Do not create additional agent rule files in subdirectories. `AGENTS.md` is the source of truth.
 
-- `pyenv activate venv-python-ai-evals-arize`.
-- `pip install -r backend/requirements.txt` (inside that venv only).
-- `PYTHONPATH=backend python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8721`.
+## Coding Rules — Frontend
 
-### Test status and single-test guidance
+- TypeScript strict. Avoid `any`; if unavoidable, localize it.
+- Single quotes, semicolons. Match local file style.
+- `@/` alias for internal imports. `import type` for type-only imports. External packages before `@/`.
+- Named exports for new feature files. Keep existing default exports.
+- Zustand in components: select slices — `useStore((s) => s.value)`. Never destructure the full store object.
+- Zustand in async callbacks: `useStore.getState()`.
+- Explicit interfaces/types for all API payloads and store state.
+- Date parsing: explicit `parseDates` at API boundaries, not inline.
 
-- Current state: no committed automated test framework (no pytest/vitest/playwright test config in repo).
-- For UI validation, use manual flows plus Playwright MCP checks (see UI section below).
-- If introducing tests, use single-test commands:
-  - Backend pytest single test: `python -m pytest backend/tests/test_file.py::test_name -q`.
-  - Vitest single test: `npx vitest run src/path/file.test.ts -t "test name"`.
-  - Playwright single spec: `npx playwright test tests/path.spec.ts -g "scenario"`.
+## Coding Rules — Backend
 
-## Frontend coding conventions
+- Python internals: snake_case. API JSON: camelCase via `CamelModel`/`CamelORMModel`.
+- Schema naming: `XxxCreate`, `XxxUpdate`, `XxxResponse`.
+- Routes: async sessions via `Depends(get_db)` and SQLAlchemy `select()`.
+- Client errors: `HTTPException` with stable `detail` strings.
+- Model changes: update model + schema + `seed_defaults.py` + affected routes together.
+- Local Python: `pyenv activate venv-python-ai-evals-arize`. No global installs.
 
-### Imports and modules
+## Anti-Overengineering
 
-- Use `@/` alias for internal imports (`@` maps to `src`).
-- Prefer `import type` for type-only imports.
-- Keep import groups ordered: external packages, then internal `@/`.
-- Reuse barrels where available (`src/services/api/index.ts`, `src/stores/index.ts`, feature `index.ts`).
+- Fix callers passing wrong scope. Do not add fallback chains to lookup functions.
+- Do not add new schema fields + frontend sync for UI polish issues when the root bug can be fixed directly.
+- Do not add error-surfacing infrastructure when the fix eliminates the error.
+- Do not create helpers or abstractions for one-off operations.
+- Do not design for hypothetical future requirements. Three similar lines is better than a premature abstraction.
 
-### Formatting and TypeScript
+## Common Pitfalls
 
-- Strict TypeScript is enforced (`tsconfig.app.json`); do not bypass with `any` unless unavoidable.
-- Match local file style; dominant style is single quotes + semicolons.
-- Use explicit interfaces/types for API payloads and store state.
-- Keep date parsing explicit at API edges (see `parseDates` patterns in repositories).
+- Most backend list/get endpoints require `app_id` as a query param. Do not omit it.
+- `settings` API: global scope is `app_id=""`, not `null`.
+- `listing` source_type rules: do not mix upload and API-flow data.
+- Model changes: update model + schema + seed + routes together, or the DB and API go out of sync.
+- Kaira/MyTatva default user ID: `c22a5505-f514-11f0-9722-000d3a3e18d5`.
 
-### React and state
+## Build, Run, Lint
 
-- Function components and hooks.
-- Prefer named exports for new feature code; keep existing default exports where already established.
-- Zustand in components: always select slices (`useStore((s) => s.value)`), never full store object.
-- One-off reads in async logic/callbacks: `useStore.getState()`.
+```bash
+# Full stack
+docker compose up --build
+docker compose down          # stop, keep DB data
+docker compose down -v       # stop, wipe DB volume
+docker compose logs -f backend
 
-### API and service boundaries
+# Frontend
+npm run dev                  # :5173
+npm run build
+npm run lint
+npx tsc -b                   # typecheck only
 
-- Use `apiRequest`/`apiUpload`/`apiDownload` from `src/services/api/client.ts`.
-- Use repository wrappers from `src/services/api/` or `src/services/storage/`; avoid ad-hoc `fetch` in components.
-- Use route constants from `src/config/routes.ts` instead of hardcoded route strings.
+# Backend (local, without Docker)
+pyenv activate venv-python-ai-evals-arize
+PYTHONPATH=backend python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8721
+```
 
-### Error handling and notifications
+## References
 
-- Normalize errors with `err instanceof Error ? err.message : 'fallback'`.
-- User-facing failures should go through `notificationService.error(...)`.
-- Use `notificationService.success/info/warning` for user feedback.
-- Use `logger`/`evaluationLogger` for diagnostic logging, not random `console.log` in production paths.
-
-### UI styling
-
-- Use Tailwind v4 + design tokens from `src/styles/globals.css`.
-- Prefer CSS variables (`var(--text-primary)`, `var(--bg-secondary)`, etc.) over hardcoded values.
-- Use `cn()` (`src/utils/cn.ts`) for class merging.
-- Reuse shared primitives in `src/components/ui/` before creating new variants.
-
-## Backend coding conventions
-
-### API and schema contracts
-
-- Keep Python internals in snake_case; API JSON is camelCase via `CamelModel`/`CamelORMModel`.
-- Request/response schema naming: `XxxCreate`, `XxxUpdate`, `XxxResponse`.
-- Routes use async sessions via `Depends(get_db)` and SQLAlchemy `select()`.
-- Raise `HTTPException` for client errors with stable `detail` messages.
-
-### Data model paradigm (domain model)
-
-- `EvalRun` is the unified record for all evaluation outcomes.
-- Keep `eval_type` polymorphism intact (`custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`).
-- Keep FK + cascade behavior intact (`listings/chat_sessions -> eval_runs -> thread/adversarial/api_logs`).
-- Prompts and schemas are versioned and app-scoped; keep versioning semantics when writing new rows.
-
-### Job worker and evaluators
-
-- `job_worker.py` is the dispatch entrypoint for background execution.
-- Registered job types: `evaluate-voice-rx`, `evaluate-batch`, `evaluate-adversarial`, `evaluate-custom`, `evaluate-custom-batch`.
-- Preserve cooperative cancellation (`is_job_cancelled()` checks) and progress updates (`update_job_progress`).
-- Keep crash recovery paths (`recover_stale_jobs`, `recover_stale_eval_runs`) working.
-
-### LLM abstractions
-
-- Always use provider factory/wrapper in `backend/app/services/evaluators/llm_base.py`.
-- Do not call OpenAI/Gemini SDKs directly from runners.
-- Respect timeout tiers and retry behavior already implemented in base providers.
-
-### Voice Rx critical invariants
-
-- Preserve two-call flow: transcription first, critique second.
-- Critique step is text-only (`generate_json`), not audio.
-- Evaluation prompt/schema for standard Voice Rx flow are server-controlled in runner constants.
-- Compute summary/statistics server-side from known data, not LLM-reported counts.
-
-## Respect abstractions (example)
-
-- Good: use `submitAndPollJob(...)` from `src/services/api/jobPolling.ts` for async job lifecycle.
-- Avoid: custom polling loops in components that repeatedly call `jobsApi.get(...)` and duplicate abort/retry logic.
-
-## UI fixes and Playwright validation
-
-When changing UI behavior, validate both correctness and regressions:
-
-1. Run `npm run lint` (or targeted lint) and `npx tsc -b`.
-2. Run app (`docker compose up --build` or frontend dev + backend).
-3. Validate desktop and mobile widths for touched views.
-4. Use Playwright MCP to exercise the changed flow and check console/network errors.
-
-Minimum acceptance criteria for UI changes:
-
-- Changed workflow succeeds end-to-end.
-- No uncaught runtime error in browser console during flow.
-- No severe layout break on mobile and desktop.
-- Toast/error messages remain actionable.
-
-## Common pitfalls
-
-- Do not reintroduce `kaira-evals` as an appId in frontend stores/settings.
-- Many backend list/get endpoints require `app_id` query param; do not omit it.
-- `settings` API treats global scope as empty string app_id (`''`), not `null`.
-- Keep listing `source_type` rules intact (no upload/API data mixing).
-- Do not bypass repository/service layers for quick direct DB/API access.
-- If adding DB tables or changing model shape, update models, schemas, startup seeding, and affected routes together.
-- For local Python scripts/tools, always use `pyenv activate venv-python-ai-evals-arize`; avoid global installs.
-- Use Docker when you need faithful integration behavior across frontend/backend/DB.
-
-## External rule files
-
-- Agent guidance: `AGENTS.md` and `CLAUDE.md`.
-- Architecture education: `docs/PROJECT 101.md`.
-- Cursor rules not found (`.cursorrules` and `.cursor/rules/` absent at time of writing).
-
-## Fixed integration constant
-
-- MyTatva default user id for Kaira flows: `c22a5505-f514-11f0-9722-000d3a3e18d5`.
+- Product overview, architecture, data flows: `docs/PROJECT 101.md`
+- Full setup (local + Azure): `docs/SETUP.md`
+- Agent guide (primary): `AGENTS.md`
+- Claude guide: `CLAUDE.md`

@@ -1,98 +1,38 @@
 # AI Evals Platform
 
-AI Evals Platform is a full-stack evaluation system for AI outputs used in real workflows.
-It supports two active workspaces: `voice-rx` and `kaira-bot`.
+Full-stack evaluation system for AI outputs in production clinical and conversational workflows. Gives QA teams a structured, reproducible way to measure, compare, and audit AI model performance with a versioned prompt/schema system, background job pipeline, and unified result store.
 
-## 🎯 Product Philosophy
+Two active workspaces: Voice Rx (medical transcription evaluation) and Kaira Bot (conversational AI evaluation).
 
-- Evidence over intuition: every evaluation should be reproducible and auditable.
-- Structured by default: prompts + schemas + versioning are first-class.
-- Async by design: long-running runs execute as jobs with progress and cancellation.
-- Human-usable outcomes: results should support QA decisions, not just model diagnostics.
+## Tech Stack
 
-## 🧩 What This Product Covers
+- Frontend: React 19, TypeScript (strict), Vite 7, Tailwind v4, Zustand (14 stores)
+- Backend: FastAPI, async SQLAlchemy 2, asyncpg, Python 3.12
+- Database: PostgreSQL 16 with JSONB
+- LLM Providers: Gemini (Vertex AI + API key), OpenAI, Azure OpenAI, Anthropic
+- Execution: Background job worker — 7 registered handlers, cooperative cancellation, crash recovery
+- Deployment: Docker Compose (local), Azure Container Apps + Static Web Apps (production)
 
-### Voice Rx (`voice-rx`)
-
-- Evaluates medical audio/transcript quality with a two-call pipeline:
-  - Call 1: transcription
-  - Call 2: critique against reference transcript
-- Supports upload and API-fed assets, multilingual handling, and schema-constrained output.
-
-### Kaira Bot (`kaira-bot`)
-
-- Supports live chat QA and evaluator runs on conversation data.
-- Includes single custom evaluator runs, batch thread evaluations, and adversarial testing.
-
-## 🔄 Universal 4-Step Evaluation Pattern
-
-Based on the guide workflow (`docs/guide/index.html`):
-
-1. **Bring Assets** - upload audio/transcripts/CSV, or connect an API source.
-2. **Review Setup** - configure prompts, schemas, model/provider settings.
-3. **Run Evaluators** - execute standalone custom evaluators.
-4. **Run Full Evals** - launch complete, multi-step evaluation pipelines.
-
-## 🧪 AI Evaluation Flows Available
-
-1. **Voice Rx Full Evaluation** (`evaluate-voice-rx`)
-   - Upload or import listing assets.
-   - Run transcription + critique as one background job.
-   - Review segment-level findings and aggregate stats.
-
-2. **Custom Evaluator Run** (`evaluate-custom`)
-   - Create/select evaluator with prompt + schema.
-   - Run against a listing or chat session.
-   - Store output in `eval_runs` with structured fields.
-
-3. **Batch Thread Evaluation** (`evaluate-batch`)
-   - Upload thread CSV data.
-   - Run built-in and custom evaluators across rows.
-   - Get run-level summaries and per-thread records.
-
-4. **Adversarial Evaluation** (`evaluate-adversarial`)
-   - Configure target Kaira API + test parameters.
-   - Generate adversarial cases, simulate conversations, score safety/compliance.
-   - Persist case-level outcomes for replay and trend tracking.
-
-## 🏗️ Architecture (At a Glance)
-
-- Frontend: React 19 + TypeScript strict + Vite 7 + Tailwind v4 + Zustand (13 stores).
-- Backend: FastAPI + async SQLAlchemy 2 + asyncpg + Python 3.12.
-- Database: PostgreSQL 16 with JSON/JSONB-heavy schema.
-- LLM providers: Gemini (service account + API key) and OpenAI, via unified provider abstraction.
-- Job execution: background worker with 5 registered handlers, cooperative cancellation, and crash recovery.
-- API surface: 15 routers in `backend/app/main.py` (listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin).
-- ORM surface: 15 tables including `eval_runs`, `jobs`, `thread_evaluations`, `adversarial_evaluations`, and `api_logs`.
-
-## 🚀 Baseline Setup (Local)
+## Quick Start (Local)
 
 ```bash
 cp .env.backend.example .env.backend
-# Add at least one API key: GEMINI_API_KEY or OPENAI_API_KEY
-
+# Edit .env.backend — add at least GEMINI_API_KEY or OPENAI_API_KEY
 touch service-account.json
 docker compose up --build
 ```
 
-Open:
-
 - Frontend: http://localhost:5173
 - Backend health: http://localhost:8721/api/health
 
-For full setup details (including Azure deployment), see `docs/SETUP.md`.
+## Documentation
 
-## 📚 Developer References
-
-- Architecture education: `docs/PROJECT 101.md`
-- Agent rules: `AGENTS.md`
-- Claude guidance: `CLAUDE.md`
-- Copilot guidance: `.github/copilot-instructions.md`
-- Interactive architecture/workflow guide: `docs/guide/index.html`
-- Setup (local + Azure): `docs/SETUP.md`
+- Product overview, architecture, data flows: `docs/PROJECT 101.md`
+- Full setup guide (local + Azure): `docs/SETUP.md`
+- Agent coding guide: `AGENTS.md`
+- Claude coding guide: `CLAUDE.md`
+- Interactive architecture guide: `docs/guide/index.html` (run with `npm run dev:guide`)
 
 ## License
 
-Proprietary - All rights reserved.
-
-Built by TatvaCare.
+Proprietary. All rights reserved. Built by TatvaCare.

@@ -28,22 +28,53 @@ cd ai-evals-platform
 cp .env.backend.example .env.backend
 ```
 
-Update `.env.backend` with at least one provider key:
+Update `.env.backend` with at least one LLM provider key and set `DEFAULT_LLM_PROVIDER` to match.
+
+**Required — at least one of:**
 
 ```env
 GEMINI_API_KEY=<your-gemini-key>
-# or
 OPENAI_API_KEY=<your-openai-key>
-DEFAULT_LLM_PROVIDER=gemini
+AZURE_OPENAI_API_KEY=<key>
+ANTHROPIC_API_KEY=<key>
+
+DEFAULT_LLM_PROVIDER=gemini    # gemini | openai | azure_openai | anthropic
 ```
 
-Optional (needed for Vertex AI service account auth - used by Voice Rx evaluation jobs):
+**Optional — Gemini Vertex AI (service account auth for backend evaluation jobs):**
 
 ```env
+GEMINI_AUTH_METHOD=service_account   # default: api_key
 GEMINI_SERVICE_ACCOUNT_PATH=service-account.json
 ```
 
-Optional (needed for adversarial runs against live Kaira API):
+Without a service account, Gemini uses API key auth for all calls including backend jobs.
+
+**Optional — Azure OpenAI:**
+
+```env
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2025-03-01-preview
+AZURE_OPENAI_MODEL=<your-deployment-name>
+```
+
+**Optional — model overrides (leave blank to use platform defaults):**
+
+```env
+GEMINI_MODEL=
+OPENAI_MODEL=
+ANTHROPIC_MODEL=
+```
+
+**Optional — adversarial test timing:**
+
+```env
+ADVERSARIAL_MAX_TURNS=10
+ADVERSARIAL_TURN_DELAY=1.5
+ADVERSARIAL_CASE_DELAY=3.0
+```
+
+**Optional — adversarial runs against live Kaira API:**
 
 ```env
 KAIRA_API_URL=<kaira-api-url>
