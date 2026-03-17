@@ -35,6 +35,7 @@ interface MiniPlayerActions {
   setPlaybackState: (partial: Partial<Pick<MiniPlayerState, 'isPlaying' | 'isReady' | 'currentTime' | 'duration' | 'playbackRate'>>) => void;
   closeIfAppChanged: (newAppId: AppId) => void;
   consumeTransfer: () => { currentTime: number; playbackRate: number } | null;
+  reset: () => void;
 }
 
 const initialState: MiniPlayerState = {
@@ -99,4 +100,6 @@ export const useMiniPlayerStore = create<MiniPlayerState & MiniPlayerActions>()(
     }
     return pendingTransfer;
   },
+
+  reset: () => set(initialState),
 }));

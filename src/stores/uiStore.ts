@@ -23,6 +23,7 @@ interface UIState {
   modalData: Record<string, unknown>;
   openModal: (id: string, data?: Record<string, unknown>) => void;
   closeModal: () => void;
+  reset: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -55,6 +56,14 @@ export const useUIStore = create<UIState>()(
       modalData: {},
       openModal: (id, data = {}) => set({ activeModal: id, modalData: data }),
       closeModal: () => set({ activeModal: null, modalData: {} }),
+
+      reset: () => set({
+        globalLoading: false,
+        loadingMessage: undefined,
+        notifications: [],
+        activeModal: null,
+        modalData: {},
+      }),
     }),
     {
       name: 'voice-rx-ui',

@@ -15,6 +15,7 @@ interface TaskQueueState {
   getTasksByListing: (listingId: string) => LLMTask[];
   getActiveTask: () => LLMTask | undefined;
   clearCompletedTasks: () => void;
+  reset: () => void;
 }
 
 export const useTaskQueueStore = create<TaskQueueState>()(
@@ -97,6 +98,8 @@ export const useTaskQueueStore = create<TaskQueueState>()(
           ),
         }));
       },
+
+      reset: () => set({ tasks: [] }),
     }),
     {
       name: 'voice-rx-task-queue',

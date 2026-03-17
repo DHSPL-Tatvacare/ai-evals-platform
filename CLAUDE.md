@@ -32,9 +32,9 @@ At session start, read `~/.claude` project memory for context from prior convers
 
 ## Current Registry
 
-- Routers (16): listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
-- ORM tables (16): eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
-- Zustand stores (14): appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
+- Routers (17): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
+- ORM tables (19): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
+- Zustand stores (15): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
 - LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
 - Job handlers (7): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, generate-report, generate-cross-run-report
 - Active app IDs: `voice-rx`, `kaira-bot`
@@ -44,7 +44,11 @@ At session start, read `~/.claude` project memory for context from prior convers
 - EvalRun `eval_type` polymorphism must be preserved. FK/cascade chain `listings`/`chat_sessions` → `eval_runs` → `thread_evaluations`/`adversarial_evaluations`/`api_logs` must remain intact.
 - Voice Rx two-call order is fixed: transcription first (with audio), critique second (text-only `generate_json`). Never send audio on the critique call. Compute statistics server-side from records, not LLM self-reports.
 - Job safety: `is_job_cancelled()` checks must exist in all long-running flows. `recover_stale_jobs()` and `recover_stale_eval_runs()` startup paths must remain functional.
-- LLM settings are global. Stored at `app_id=""`. Never pass an app_id to LLM settings lookup.
+- Every data row belongs to a tenant. Every query filters by `tenant_id` from `AuthContext`.
+- `SYSTEM_TENANT_ID` and `SYSTEM_USER_ID` are well-known UUIDs for seed data. System prompts/schemas/evaluators are read-only to all tenants.
+- `UserMixin` is replaced by `TenantUserMixin`. Both `tenant_id` and `user_id` are required FK references — no defaults.
+- LLM settings are per-user-per-tenant, stored at `(tenant_id, user_id, app_id="")`.
+- Auth routes (`/api/auth/*`) are the only public routes. All others require Bearer token.
 - Gemini on Vertex AI: use `Part.from_bytes()` for media — `client.files.upload()` is not available on Vertex. To disable thinking, omit `thinking_config` entirely — `thinking_budget=0` is rejected. Thinking params differ by model family: 2.5 uses `thinking_budget` (int), 3+ uses `thinking_level` (enum). Do not mix them.
 - Do not reintroduce `kaira-evals` as an appId in any frontend store or settings.
 - Do not create subdirectory agent rule files (`agents/`, `.cursor/`, etc.). This file is the source of truth for Claude. Creating duplicate rule files in subdirectories is redundant and causes drift.
@@ -65,6 +69,10 @@ At session start, read `~/.claude` project memory for context from prior convers
 - Python internals: snake_case. API JSON: camelCase via `CamelModel`/`CamelORMModel`.
 - Schema naming: `XxxCreate`, `XxxUpdate`, `XxxResponse`.
 - Routes: async sessions via `Depends(get_db)` and SQLAlchemy `select()`.
+- Auth context: `auth: AuthContext = Depends(get_auth_context)` on every route.
+- Never use `db.get(Model, id)` for user data — always `select().where()` with tenant/user filters.
+- Job params: `tenant_id` and `user_id` are injected by the job submission route. Runners read from params.
+- System data: Query with `tenant_id == SYSTEM_TENANT_ID`, not `is_default == True and user_id == "default"`.
 - Client errors: `HTTPException` with stable `detail` strings.
 - Model changes: update model + schema + `seed_defaults.py` + affected routes together.
 - Local Python: `pyenv activate venv-python-ai-evals-arize`. No global installs.
@@ -80,10 +88,9 @@ At session start, read `~/.claude` project memory for context from prior convers
 ## Common Pitfalls
 
 - Most backend list/get endpoints require `app_id` as a query param. Do not omit it.
-- `settings` API: global scope is `app_id=""`, not `null`.
+- `settings` API: LLM settings scope is `(tenant_id, user_id, app_id="")`. Always pass tenant/user from auth context.
 - `listing` source_type rules: do not mix upload and API-flow data.
 - Model changes: update model + schema + seed + routes together, or the DB and API go out of sync.
-- Kaira/MyTatva default user ID: `c22a5505-f514-11f0-9722-000d3a3e18d5`.
 
 ## Build, Run, Lint
 

@@ -11,6 +11,10 @@ import { useAppSettingsStore } from '@/stores/appSettingsStore';
 import { useAppStore } from '@/stores/appStore';
 import { useJobTrackerStore } from '@/stores/jobTrackerStore';
 import { useCrossRunStore } from '@/stores/crossRunStore';
+import { useGlobalSettingsStore } from '@/stores/globalSettingsStore';
+import { useTaskQueueStore } from '@/stores/taskQueueStore';
+import { useUIStore } from '@/stores/uiStore';
+import { useMiniPlayerStore } from '@/stores/miniPlayerStore';
 
 interface AuthStore {
   user: User | null;
@@ -56,6 +60,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     useAppStore.getState().reset();
     useJobTrackerStore.getState().reset();
     useCrossRunStore.getState().reset();
+    useGlobalSettingsStore.getState().reset();
+    useTaskQueueStore.getState().reset();
+    useUIStore.getState().reset();
+    useMiniPlayerStore.getState().reset();
 
     set({ accessToken: null, user: null, isAuthenticated: false, isLoading: false });
   },

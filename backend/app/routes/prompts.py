@@ -148,10 +148,3 @@ async def delete_prompt(
     return {"deleted": True, "id": prompt_id}
 
 
-@router.post("/ensure-defaults")
-async def ensure_default_prompts(
-    app_id: str = Query(...),
-    _auth: AuthContext = Depends(get_auth_context),
-):
-    """No-op — system seeds happen at startup."""
-    return {"message": "Default prompts ensured", "app_id": app_id}

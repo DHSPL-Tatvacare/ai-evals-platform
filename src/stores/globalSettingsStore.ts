@@ -35,6 +35,9 @@ interface GlobalSettingsState extends GlobalSettings {
 
   // Bulk update
   updateSettings: (updates: Partial<GlobalSettings>) => void;
+
+  // Reset (used on logout)
+  reset: () => void;
 }
 
 const defaultGlobalSettings: GlobalSettings & { _version: number } = {
@@ -67,6 +70,8 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>()(
             ...updates.timeouts,
           },
         })),
+
+      reset: () => set({ ...defaultGlobalSettings }),
     }),
     {
       name: 'global-settings',

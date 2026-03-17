@@ -96,13 +96,6 @@ export const schemasRepository = {
     });
   },
 
-  async ensureDefaults(appId: AppId): Promise<void> {
-    await apiRequest('/api/schemas/ensure-defaults', {
-      method: 'POST',
-      body: JSON.stringify({ appId: appId }),
-    });
-  },
-
   async syncFromListing(listingId: string): Promise<{ synced: boolean; field_count: number }> {
     return apiRequest('/api/schemas/sync-from-listing', {
       method: 'POST',

@@ -93,10 +93,4 @@ export const promptsRepository = {
     });
   },
 
-  async ensureDefaults(appId: AppId): Promise<void> {
-    await apiRequest('/api/prompts/ensure-defaults', {
-      method: 'POST',
-      body: JSON.stringify({ appId: appId }),
-    });
-  },
 };

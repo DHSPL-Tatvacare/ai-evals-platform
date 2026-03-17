@@ -153,13 +153,6 @@ async def delete_schema(
     return {"deleted": True, "id": schema_id}
 
 
-@router.post("/ensure-defaults")
-async def ensure_default_schemas(
-    app_id: str = Query(...),
-    _auth: AuthContext = Depends(get_auth_context),
-):
-    """No-op — system seeds happen at startup."""
-    return {"message": "Default schemas ensured", "app_id": app_id}
 
 
 # ── Schema sync from listing ────────────────────────────────────
