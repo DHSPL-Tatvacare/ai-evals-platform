@@ -1,11 +1,11 @@
 """Setting model - user/app configuration."""
-from sqlalchemy import String, JSON, UniqueConstraint, DateTime, func
+from sqlalchemy import String, JSON, Index, UniqueConstraint, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from app.models.base import Base, UserMixin
+from app.models.base import Base, TenantUserMixin
 
 
-class Setting(Base, UserMixin):
+class Setting(Base, TenantUserMixin):
     __tablename__ = "settings"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -17,5 +17,7 @@ class Setting(Base, UserMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("app_id", "key", "user_id", name="uq_setting"),
+        UniqueConstraint("tenant_id", "app_id", "key", "user_id", name="uq_setting"),
+        Index("idx_settings_tenant", "tenant_id"),
+        Index("idx_settings_tenant_user", "tenant_id", "user_id"),
     )

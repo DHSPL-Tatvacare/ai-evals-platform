@@ -3,10 +3,10 @@ import uuid
 from sqlalchemy import String, Float, BigInteger, JSON, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, UserMixin
+from app.models.base import Base, TenantUserMixin
 
 
-class History(Base, UserMixin):
+class History(Base, TenantUserMixin):
     __tablename__ = "history"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -29,4 +29,6 @@ class History(Base, UserMixin):
         Index("idx_history_source", "source_type", "source_id", "timestamp"),
         Index("idx_history_app_source", "app_id", "source_type", "timestamp"),
         Index("idx_history_entity_source", "entity_id", "source_type", "source_id", "timestamp"),
+        Index("idx_history_tenant", "tenant_id"),
+        Index("idx_history_tenant_user", "tenant_id", "user_id"),
     )

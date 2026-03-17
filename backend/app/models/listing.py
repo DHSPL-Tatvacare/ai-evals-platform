@@ -3,10 +3,10 @@ import uuid
 from sqlalchemy import String, JSON, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.models.base import Base, TimestampMixin, UserMixin
+from app.models.base import Base, TimestampMixin, TenantUserMixin
 
 
-class Listing(Base, TimestampMixin, UserMixin):
+class Listing(Base, TimestampMixin, TenantUserMixin):
     __tablename__ = "listings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -30,4 +30,7 @@ class Listing(Base, TimestampMixin, UserMixin):
 
     __table_args__ = (
         Index("idx_listings_updated_at", "updated_at", postgresql_using="btree"),
+        Index("idx_listings_tenant", "tenant_id"),
+        Index("idx_listings_tenant_user", "tenant_id", "user_id"),
+        Index("idx_listings_tenant_app", "tenant_id", "app_id"),
     )

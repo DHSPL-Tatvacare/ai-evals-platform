@@ -8,10 +8,10 @@ from datetime import datetime
 from sqlalchemy import String, Text, Integer, Float, Boolean, JSON, ForeignKey, DateTime, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.models.base import Base, UserMixin
+from app.models.base import Base, TenantUserMixin
 
 
-class EvalRun(Base, UserMixin):
+class EvalRun(Base, TenantUserMixin):
     __tablename__ = "eval_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -83,6 +83,9 @@ class EvalRun(Base, UserMixin):
         Index("idx_eval_runs_session", "session_id", "created_at"),
         Index("idx_eval_runs_app_type", "app_id", "eval_type", "created_at"),
         Index("idx_eval_runs_evaluator", "evaluator_id"),
+        Index("idx_eval_runs_tenant", "tenant_id"),
+        Index("idx_eval_runs_tenant_app", "tenant_id", "app_id", "created_at"),
+        Index("idx_eval_runs_tenant_user", "tenant_id", "user_id", "created_at"),
     )
 
 

@@ -1,18 +1,43 @@
 """FastAPI application entry point."""
 import asyncio
+import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import delete, text
 
 from app.config import settings
-from app.database import engine, get_db
+from app.database import engine, get_db, async_session
 from app.models import Base
+from app.models.user import RefreshToken
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_startup_config() -> None:
+    """Fail fast if critical config is missing."""
+    if not settings.JWT_SECRET:
+        raise RuntimeError("JWT_SECRET environment variable is required. Set it in .env.backend.")
+
+
+async def _cleanup_expired_refresh_tokens() -> None:
+    """Delete expired refresh tokens. Called from recovery loop."""
+    async with async_session() as db:
+        result = await db.execute(
+            delete(RefreshToken).where(RefreshToken.expires_at < datetime.now(timezone.utc))
+        )
+        if result.rowcount:
+            await db.commit()
+            logger.info("Cleaned up %d expired refresh tokens", result.rowcount)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create tables on startup, start background worker."""
+    _validate_startup_config()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -30,11 +55,14 @@ async def lifespan(app: FastAPI):
             """)
         )
 
-    # Seed default prompts, schemas, and evaluators
-    from app.services.seed_defaults import seed_all_defaults
-    from app.database import async_session
+    # Seed system tenant/user + default prompts/schemas, then bootstrap admin
+    from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
     async with async_session() as session:
         await seed_all_defaults(session)
+    await seed_bootstrap_admin()
+
+    # Clean up any expired refresh tokens from previous run
+    await _cleanup_expired_refresh_tokens()
 
     # Recover any jobs stuck in "running" from a previous crash,
     # then reconcile any eval_runs orphaned by the same crash
@@ -99,6 +127,8 @@ from app.routes.llm import router as llm_router
 from app.routes.adversarial_config import router as adversarial_config_router
 from app.routes.admin import router as admin_router
 from app.routes.reports import router as reports_router
+from app.routes.auth import router as auth_router
+app.include_router(auth_router)
 app.include_router(listings_router)
 app.include_router(files_router)
 app.include_router(prompts_router)

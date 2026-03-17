@@ -1,13 +1,13 @@
 """Chat models - sessions and messages."""
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, Boolean, JSON, ForeignKey, DateTime, func
+from sqlalchemy import String, Text, Boolean, JSON, ForeignKey, DateTime, Index, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.models.base import Base, TimestampMixin, UserMixin
+from app.models.base import Base, TimestampMixin, TenantUserMixin
 
 
-class ChatSession(Base, TimestampMixin, UserMixin):
+class ChatSession(Base, TimestampMixin, TenantUserMixin):
     __tablename__ = "chat_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -30,8 +30,14 @@ class ChatSession(Base, TimestampMixin, UserMixin):
         cascade="all, delete-orphan", passive_deletes=True,
     )
 
+    __table_args__ = (
+        Index("idx_chat_sessions_tenant", "tenant_id"),
+        Index("idx_chat_sessions_tenant_user", "tenant_id", "user_id"),
+        Index("idx_chat_sessions_tenant_app", "tenant_id", "app_id"),
+    )
 
-class ChatMessage(Base, UserMixin):
+
+class ChatMessage(Base, TenantUserMixin):
     __tablename__ = "chat_messages"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -48,3 +54,8 @@ class ChatMessage(Base, UserMixin):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_chat_messages_tenant", "tenant_id"),
+        Index("idx_chat_messages_tenant_user", "tenant_id", "user_id"),
+    )

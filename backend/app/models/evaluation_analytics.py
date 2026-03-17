@@ -11,6 +11,9 @@ class EvaluationAnalytics(Base, TimestampMixin):
     __tablename__ = "evaluation_analytics"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     app_id: Mapped[str] = mapped_column(String(50), nullable=False)
     scope: Mapped[str] = mapped_column(String(20), nullable=False)  # 'single_run' | 'cross_run'
     run_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -25,12 +28,13 @@ class EvaluationAnalytics(Base, TimestampMixin):
     eval_run = relationship("EvalRun")
 
     __table_args__ = (
-        UniqueConstraint("app_id", "scope", "run_id", name="uq_analytics_app_scope_run"),
+        UniqueConstraint("tenant_id", "app_id", "scope", "run_id", name="uq_analytics_app_scope_run"),
         Index(
             "uq_analytics_cross_run_per_app",
-            "app_id",
+            "tenant_id", "app_id",
             unique=True,
             postgresql_where=text("scope = 'cross_run'"),
         ),
         Index("idx_analytics_app_scope", "app_id", "scope"),
+        Index("idx_analytics_tenant_app", "tenant_id", "app_id"),
     )

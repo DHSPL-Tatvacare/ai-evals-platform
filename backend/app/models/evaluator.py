@@ -1,12 +1,12 @@
 """Evaluator model - custom evaluator definitions."""
 import uuid
-from sqlalchemy import String, Text, Boolean, JSON, ForeignKey
+from sqlalchemy import String, Text, Boolean, JSON, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, TimestampMixin, UserMixin
+from app.models.base import Base, TimestampMixin, TenantUserMixin
 
 
-class Evaluator(Base, TimestampMixin, UserMixin):
+class Evaluator(Base, TimestampMixin, TenantUserMixin):
     __tablename__ = "evaluators"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -22,4 +22,10 @@ class Evaluator(Base, TimestampMixin, UserMixin):
     show_in_header: Mapped[bool] = mapped_column(Boolean, default=False)
     forked_from: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluators.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        Index("idx_evaluators_tenant", "tenant_id"),
+        Index("idx_evaluators_tenant_user", "tenant_id", "user_id"),
+        Index("idx_evaluators_tenant_app", "tenant_id", "app_id"),
     )

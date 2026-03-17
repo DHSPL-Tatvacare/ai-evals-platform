@@ -1,6 +1,8 @@
 """SQLAlchemy declarative base and shared mixins."""
+import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, func
+from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -19,6 +21,11 @@ class TimestampMixin:
     )
 
 
-class UserMixin:
-    """Adds user_id column for future auth. Default 'default' until auth is added."""
-    user_id: Mapped[str] = mapped_column(String(100), default="default")
+class TenantUserMixin:
+    """Adds tenant_id and user_id columns. Both are required FK references."""
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )

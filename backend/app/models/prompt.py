@@ -1,10 +1,10 @@
 """Prompt model - versioned LLM prompt templates."""
-from sqlalchemy import String, Text, Integer, Boolean, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Boolean, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, TimestampMixin, UserMixin
+from app.models.base import Base, TimestampMixin, TenantUserMixin
 
 
-class Prompt(Base, TimestampMixin, UserMixin):
+class Prompt(Base, TimestampMixin, TenantUserMixin):
     __tablename__ = "prompts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -18,5 +18,8 @@ class Prompt(Base, TimestampMixin, UserMixin):
     source_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("app_id", "prompt_type", "version", "user_id", name="uq_prompt_version"),
+        UniqueConstraint("tenant_id", "app_id", "prompt_type", "version", "user_id", name="uq_prompt_version"),
+        Index("idx_prompts_tenant", "tenant_id"),
+        Index("idx_prompts_tenant_user", "tenant_id", "user_id"),
+        Index("idx_prompts_tenant_app", "tenant_id", "app_id"),
     )

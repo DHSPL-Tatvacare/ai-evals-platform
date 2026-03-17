@@ -1,11 +1,11 @@
 """Tag model - tag registry for autocomplete."""
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, UniqueConstraint, func
+from sqlalchemy import String, Integer, DateTime, Index, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, UserMixin
+from app.models.base import Base, TenantUserMixin
 
 
-class Tag(Base, UserMixin):
+class Tag(Base, TenantUserMixin):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -17,5 +17,8 @@ class Tag(Base, UserMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("app_id", "name", "user_id", name="uq_tag"),
+        UniqueConstraint("tenant_id", "app_id", "name", "user_id", name="uq_tag"),
+        Index("idx_tags_tenant", "tenant_id"),
+        Index("idx_tags_tenant_user", "tenant_id", "user_id"),
+        Index("idx_tags_tenant_app", "tenant_id", "app_id"),
     )

@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     KAIRA_AUTH_TOKEN: str = ""
     KAIRA_TEST_USER_ID: str = ""
 
+    # Auth / JWT
+    JWT_SECRET: str = ""  # Required — validated on startup
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Bootstrap admin (used only when no users exist in DB)
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
+    ADMIN_TENANT_NAME: str = ""
+
     # Adversarial test settings
     ADVERSARIAL_MAX_TURNS: int = 10
     ADVERSARIAL_TURN_DELAY: float = 1.5

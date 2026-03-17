@@ -1,10 +1,10 @@
 """Schema model - versioned JSON schemas for structured LLM output."""
-from sqlalchemy import String, Text, Integer, Boolean, JSON, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Boolean, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, TimestampMixin, UserMixin
+from app.models.base import Base, TimestampMixin, TenantUserMixin
 
 
-class Schema(Base, TimestampMixin, UserMixin):
+class Schema(Base, TimestampMixin, TenantUserMixin):
     __tablename__ = "schemas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -18,5 +18,8 @@ class Schema(Base, TimestampMixin, UserMixin):
     source_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 'upload' | 'api'
 
     __table_args__ = (
-        UniqueConstraint("app_id", "prompt_type", "version", "user_id", name="uq_schema_version"),
+        UniqueConstraint("tenant_id", "app_id", "prompt_type", "version", "user_id", name="uq_schema_version"),
+        Index("idx_schemas_tenant", "tenant_id"),
+        Index("idx_schemas_tenant_user", "tenant_id", "user_id"),
+        Index("idx_schemas_tenant_app", "tenant_id", "app_id"),
     )

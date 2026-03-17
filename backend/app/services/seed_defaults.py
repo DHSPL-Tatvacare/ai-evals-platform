@@ -4,14 +4,28 @@ Idempotent: checks for existing defaults before inserting.
 """
 import json
 import logging
+import re
+import unicodedata
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
+from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from app.database import async_session as get_async_session
+from app.models.tenant import Tenant
+from app.models.user import User, UserRole
 from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
 
 logger = logging.getLogger(__name__)
+
+
+def _slugify(text: str) -> str:
+    """Convert text to a URL-safe slug."""
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^\w\s-]", "", text.lower())
+    return re.sub(r"[-\s]+", "-", text).strip("-")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VOICE-RX PROMPTS (5 rows)
@@ -1562,11 +1576,42 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 # SEED FUNCTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
+    """Ensure system tenant and system user exist. Required before seeding any data."""
+    # System tenant
+    existing_tenant = await session.get(Tenant, SYSTEM_TENANT_ID)
+    if not existing_tenant:
+        session.add(Tenant(
+            id=SYSTEM_TENANT_ID, name="System", slug="system", is_active=True,
+        ))
+        logger.info("Created system tenant (id=%s)", SYSTEM_TENANT_ID)
+
+    # System user (placeholder password hash — this user cannot log in)
+    existing_user = await session.get(User, SYSTEM_USER_ID)
+    if not existing_user:
+        session.add(User(
+            id=SYSTEM_USER_ID,
+            tenant_id=SYSTEM_TENANT_ID,
+            email="system@internal",
+            password_hash="!nologin",
+            display_name="System",
+            role=UserRole.OWNER,
+            is_active=False,
+        ))
+        logger.info("Created system user (id=%s)", SYSTEM_USER_ID)
+
+    await session.flush()
+
+
 async def _seed_prompts(session: AsyncSession) -> None:
     """Seed default prompts for voice-rx — insert if missing, update text if changed."""
     # Fetch all existing default prompts
     existing_result = await session.execute(
-        select(Prompt).where(Prompt.app_id == "voice-rx", Prompt.is_default == True)
+        select(Prompt).where(
+            Prompt.app_id == "voice-rx",
+            Prompt.is_default == True,
+            Prompt.tenant_id == SYSTEM_TENANT_ID,
+        )
     )
     existing_prompts = {p.name: p for p in existing_result.scalars().all()}
 
@@ -1595,7 +1640,11 @@ async def _seed_prompts(session: AsyncSession) -> None:
     # Query max existing version per prompt_type to avoid UniqueConstraint collision
     rows = await session.execute(
         select(Prompt.prompt_type, func.max(Prompt.version))
-        .where(Prompt.app_id == "voice-rx", Prompt.user_id == "default")
+        .where(
+            Prompt.app_id == "voice-rx",
+            Prompt.tenant_id == SYSTEM_TENANT_ID,
+            Prompt.user_id == SYSTEM_USER_ID,
+        )
         .group_by(Prompt.prompt_type)
     )
     max_versions: dict[str, int] = {row[0]: row[1] for row in rows}
@@ -1609,7 +1658,12 @@ async def _seed_prompts(session: AsyncSession) -> None:
             next_version[pt] = max_versions.get(pt, 0) + 1
         else:
             next_version[pt] += 1
-        row_data = {**p, "version": next_version[pt]}
+        row_data = {
+            **p,
+            "version": next_version[pt],
+            "tenant_id": SYSTEM_TENANT_ID,
+            "user_id": SYSTEM_USER_ID,
+        }
         session.add(Prompt(**row_data))
     await session.flush()
     logger.info("Seeded %d new default prompts for voice-rx", len(missing))
@@ -1617,9 +1671,12 @@ async def _seed_prompts(session: AsyncSession) -> None:
 
 async def _seed_schemas(session: AsyncSession) -> None:
     """Seed default schemas for voice-rx — insert missing, update existing schema_data and source_type."""
-    # Fetch all existing voice-rx schemas
+    # Fetch all existing voice-rx schemas owned by system tenant
     existing_result = await session.execute(
-        select(Schema).where(Schema.app_id == "voice-rx")
+        select(Schema).where(
+            Schema.app_id == "voice-rx",
+            Schema.tenant_id == SYSTEM_TENANT_ID,
+        )
     )
     existing_schemas = {s.name: s for s in existing_result.scalars().all()}
 
@@ -1645,7 +1702,11 @@ async def _seed_schemas(session: AsyncSession) -> None:
     # Query max existing version per prompt_type to avoid UniqueConstraint collision
     rows = await session.execute(
         select(Schema.prompt_type, func.max(Schema.version))
-        .where(Schema.app_id == "voice-rx", Schema.user_id == "default")
+        .where(
+            Schema.app_id == "voice-rx",
+            Schema.tenant_id == SYSTEM_TENANT_ID,
+            Schema.user_id == SYSTEM_USER_ID,
+        )
         .group_by(Schema.prompt_type)
     )
     max_versions: dict[str, int] = {row[0]: row[1] for row in rows}
@@ -1658,7 +1719,12 @@ async def _seed_schemas(session: AsyncSession) -> None:
             next_version[pt] = max_versions.get(pt, 0) + 1
         else:
             next_version[pt] += 1
-        row_data = {**s, "version": next_version[pt]}
+        row_data = {
+            **s,
+            "version": next_version[pt],
+            "tenant_id": SYSTEM_TENANT_ID,
+            "user_id": SYSTEM_USER_ID,
+        }
         session.add(Schema(**row_data))
     await session.flush()
     logger.info("Seeded %d new schemas for voice-rx", len(missing))
@@ -1671,6 +1737,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             Evaluator.app_id == "kaira-bot",
             Evaluator.is_global == True,
             Evaluator.listing_id == None,
+            Evaluator.tenant_id == SYSTEM_TENANT_ID,
         )
     )
     existing = {e.name: e for e in result.scalars().all()}
@@ -1690,21 +1757,74 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         new_names = set(e["name"] for e in KAIRA_BOT_EVALUATORS) - set(existing.keys())
         for e_data in KAIRA_BOT_EVALUATORS:
             if e_data["name"] in new_names:
-                session.add(Evaluator(**e_data))
+                session.add(Evaluator(**{
+                    **e_data,
+                    "tenant_id": SYSTEM_TENANT_ID,
+                    "user_id": SYSTEM_USER_ID,
+                }))
         if new_names:
             await session.flush()
             logger.info("Seeded %d new kaira-bot evaluators", len(new_names))
         return
 
     for e in KAIRA_BOT_EVALUATORS:
-        session.add(Evaluator(**e))
+        session.add(Evaluator(**{
+            **e,
+            "tenant_id": SYSTEM_TENANT_ID,
+            "user_id": SYSTEM_USER_ID,
+        }))
     await session.flush()
     logger.info("Seeded %d global evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
+
+
+async def seed_bootstrap_admin() -> None:
+    """Create the first tenant + admin user if no users exist (beyond system user).
+
+    Uses ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_TENANT_NAME from env vars.
+    Called once on startup, after system tenant/user are seeded.
+    """
+    from app.auth.utils import hash_password
+
+    async with get_async_session() as db:
+        # Count non-system users
+        user_count = await db.scalar(
+            select(func.count(User.id)).where(User.id != SYSTEM_USER_ID)
+        )
+        if user_count and user_count > 0:
+            return  # Already bootstrapped
+
+        email = settings.ADMIN_EMAIL
+        password = settings.ADMIN_PASSWORD
+        tenant_name = settings.ADMIN_TENANT_NAME
+
+        if not all([email, password, tenant_name]):
+            logger.warning(
+                "No ADMIN_EMAIL/ADMIN_PASSWORD/ADMIN_TENANT_NAME set. Skipping bootstrap admin."
+            )
+            return
+
+        # Create admin tenant
+        tenant = Tenant(name=tenant_name, slug=_slugify(tenant_name))
+        db.add(tenant)
+        await db.flush()  # Get tenant.id
+
+        # Create admin user
+        db.add(User(
+            tenant_id=tenant.id,
+            email=email,
+            password_hash=hash_password(password),
+            display_name="Admin",
+            role=UserRole.OWNER,
+        ))
+
+        await db.commit()
+        logger.info("Bootstrapped tenant '%s' with admin user '%s'", tenant_name, email)
 
 
 async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
     logger.info("Checking seed defaults...")
+    await _seed_system_tenant_and_user(session)
     await _seed_prompts(session)
     await _seed_schemas(session)
     # kaira-bot evaluators are NOT auto-seeded; they use the on-demand
