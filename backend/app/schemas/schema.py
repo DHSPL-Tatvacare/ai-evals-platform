@@ -34,4 +34,5 @@ class SchemaResponse(CamelORMModel):
     source_type: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str

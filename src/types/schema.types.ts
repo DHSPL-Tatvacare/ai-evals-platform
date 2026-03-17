@@ -1,5 +1,7 @@
 export interface SchemaDefinition {
   id: string;
+  userId?: string;
+  tenantId?: string;
   name: string;                    // Auto-generated: "Evaluation Schema v3"
   version: number;                 // Auto-increment per promptType
   createdAt: Date;

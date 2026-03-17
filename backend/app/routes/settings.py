@@ -4,9 +4,10 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.setting import Setting
-from app.schemas.setting import SettingCreate, SettingUpdate, SettingResponse
+from app.schemas.setting import SettingCreate, SettingResponse
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -15,14 +16,17 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 async def list_settings(
     app_id: str = Query(None),
     key: str = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List settings, optionally filtered by app_id and/or key."""
-    query = select(Setting)
-
+    """List settings for the current user, optionally filtered by app_id and/or key."""
     # Always filter by app_id — coerce None to empty string (global)
     resolved_app_id = app_id if app_id is not None else ""
-    query = query.where(Setting.app_id == resolved_app_id)
+    query = select(Setting).where(
+        Setting.tenant_id == auth.tenant_id,
+        Setting.user_id == auth.user_id,
+        Setting.app_id == resolved_app_id,
+    )
     if key:
         query = query.where(Setting.key == key)
 
@@ -33,11 +37,16 @@ async def list_settings(
 @router.get("/{setting_id}", response_model=SettingResponse)
 async def get_setting(
     setting_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single setting by ID."""
     result = await db.execute(
-        select(Setting).where(Setting.id == setting_id)
+        select(Setting).where(
+            Setting.id == setting_id,
+            Setting.tenant_id == auth.tenant_id,
+            Setting.user_id == auth.user_id,
+        )
     )
     setting = result.scalar_one_or_none()
     if not setting:
@@ -48,9 +57,10 @@ async def get_setting(
 @router.put("", response_model=SettingResponse)
 async def upsert_setting(
     body: SettingCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upsert a setting (insert or update if exists)."""
+    """Upsert a setting (insert or update if exists). Per-user scoped."""
     # Coerce None to empty string — NULL breaks the unique constraint
     app_id = body.app_id or ""
 
@@ -58,7 +68,8 @@ async def upsert_setting(
         app_id=app_id,
         key=body.key,
         value=body.value,
-        user_id="default"
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
     ).on_conflict_do_update(
         constraint="uq_setting",
         set_={"value": body.value, "updated_at": func.now()}
@@ -74,14 +85,19 @@ async def upsert_setting(
 async def delete_setting_by_key(
     key: str = Query(...),
     app_id: str = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a setting by key + app_id."""
+    """Delete a setting by key + app_id for the current user."""
     resolved_app_id = app_id if app_id is not None else ""
     result = await db.execute(
         select(Setting)
-        .where(Setting.key == key)
-        .where(Setting.app_id == resolved_app_id)
+        .where(
+            Setting.key == key,
+            Setting.app_id == resolved_app_id,
+            Setting.tenant_id == auth.tenant_id,
+            Setting.user_id == auth.user_id,
+        )
     )
     setting = result.scalar_one_or_none()
     if not setting:
@@ -95,10 +111,17 @@ async def delete_setting_by_key(
 @router.delete("/{setting_id}")
 async def delete_setting(
     setting_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by ID."""
-    result = await db.execute(select(Setting).where(Setting.id == setting_id))
+    result = await db.execute(
+        select(Setting).where(
+            Setting.id == setting_id,
+            Setting.tenant_id == auth.tenant_id,
+            Setting.user_id == auth.user_id,
+        )
+    )
     setting = result.scalar_one_or_none()
     if not setting:
         raise HTTPException(status_code=404, detail="Setting not found")

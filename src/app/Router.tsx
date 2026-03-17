@@ -18,7 +18,8 @@ import {
   EvalAdversarialDetailV2,
   EvalLogs,
 } from "@/features/evalRuns";
-import { LoginPage, AuthGuard } from "@/features/auth";
+import { LoginPage, AuthGuard, AdminGuard } from "@/features/auth";
+import { AdminUsersPage } from "@/features/admin";
 import { HomePage } from "./pages/HomePage";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -88,6 +89,16 @@ export function Router() {
             element={<EvalThreadDetailV2 />}
           />
           <Route path={routes.kaira.logs} element={<EvalLogs />} />
+
+          {/* Admin routes */}
+          <Route
+            path={routes.adminUsers}
+            element={
+              <AdminGuard>
+                <AdminUsersPage />
+              </AdminGuard>
+            }
+          />
 
           <Route path="*" element={<NotFoundPage />} />
         </Route>

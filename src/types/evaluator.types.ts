@@ -34,6 +34,8 @@ export interface EvaluatorOutputField {
 
 export interface EvaluatorDefinition {
   id: string;                     // UUID
+  userId?: string;
+  tenantId?: string;
   name: string;                   // User-defined name
   prompt: string;                 // Prompt template with variables
   modelId: string;                // LLM model to use

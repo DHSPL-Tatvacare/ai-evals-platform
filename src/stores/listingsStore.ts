@@ -21,6 +21,8 @@ interface ListingsState {
   
   // Getters
   getListingsForApp: (appId: AppId) => Listing[];
+
+  reset: () => void;
 }
 
 export const useListingsStore = create<ListingsState>((set, get) => ({
@@ -68,4 +70,11 @@ export const useListingsStore = create<ListingsState>((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   
   getListingsForApp: (appId) => get().listings[appId] || [],
+
+  reset: () => set({
+    listings: { 'voice-rx': [], 'kaira-bot': [] },
+    selectedId: null,
+    searchQuery: '',
+    isLoading: true,
+  }),
 }));

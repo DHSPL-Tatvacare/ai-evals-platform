@@ -10,6 +10,8 @@ import { apiRequest } from './client';
 /** Shape returned by backend (camelCase, dates as strings) */
 interface ApiEvaluator {
   id: string;
+  userId?: string;
+  tenantId?: string;
   appId: string;
   listingId: string | null;
   name: string;
@@ -26,6 +28,8 @@ interface ApiEvaluator {
 function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
   return {
     id: e.id,
+    userId: e.userId,
+    tenantId: e.tenantId,
     appId: e.appId,
     listingId: e.listingId ?? undefined,
     name: e.name,

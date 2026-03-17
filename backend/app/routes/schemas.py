@@ -4,9 +4,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, or_
+from sqlalchemy import select, func, desc, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
+from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.listing import Listing
 from app.models.schema import Schema
@@ -22,10 +24,17 @@ async def list_schemas(
     app_id: str = Query(...),
     prompt_type: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all schemas for an app, optionally filtered by prompt_type and source_type."""
-    query = select(Schema).where(Schema.app_id == app_id)
+    """List user's schemas + system defaults for an app."""
+    query = select(Schema).where(
+        or_(
+            and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
+            Schema.tenant_id == SYSTEM_TENANT_ID,
+        ),
+        Schema.app_id == app_id,
+    )
     if prompt_type:
         query = query.where(Schema.prompt_type == prompt_type)
     if source_type:
@@ -41,11 +50,18 @@ async def list_schemas(
 @router.get("/{schema_id}", response_model=SchemaResponse)
 async def get_schema(
     schema_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single schema by ID."""
+    """Get a single schema by ID (own or system)."""
     result = await db.execute(
-        select(Schema).where(Schema.id == schema_id)
+        select(Schema).where(
+            Schema.id == schema_id,
+            or_(
+                and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
+                Schema.tenant_id == SYSTEM_TENANT_ID,
+            ),
+        )
     )
     schema = result.scalar_one_or_none()
     if not schema:
@@ -56,16 +72,27 @@ async def get_schema(
 @router.post("", response_model=SchemaResponse, status_code=201)
 async def create_schema(
     body: SchemaCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new schema with auto-incremented version."""
     result = await db.execute(
         select(func.max(Schema.version))
-        .where(Schema.app_id == body.app_id, Schema.prompt_type == body.prompt_type)
+        .where(
+            Schema.tenant_id == auth.tenant_id,
+            Schema.user_id == auth.user_id,
+            Schema.app_id == body.app_id,
+            Schema.prompt_type == body.prompt_type,
+        )
     )
     max_version = result.scalar() or 0
 
-    schema = Schema(**body.model_dump(), version=max_version + 1)
+    schema = Schema(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        version=max_version + 1,
+    )
     db.add(schema)
     await db.commit()
     await db.refresh(schema)
@@ -76,10 +103,17 @@ async def create_schema(
 async def update_schema(
     schema_id: int,
     body: SchemaUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a schema. Only provided fields are updated."""
-    result = await db.execute(select(Schema).where(Schema.id == schema_id))
+    """Update a schema. Cannot edit system schemas."""
+    result = await db.execute(
+        select(Schema).where(
+            Schema.id == schema_id,
+            Schema.tenant_id == auth.tenant_id,
+            Schema.user_id == auth.user_id,
+        )
+    )
     schema = result.scalar_one_or_none()
     if not schema:
         raise HTTPException(status_code=404, detail="Schema not found")
@@ -96,10 +130,17 @@ async def update_schema(
 @router.delete("/{schema_id}")
 async def delete_schema(
     schema_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a schema. Cannot delete default schemas."""
-    result = await db.execute(select(Schema).where(Schema.id == schema_id))
+    """Delete a schema. Cannot delete system schemas."""
+    result = await db.execute(
+        select(Schema).where(
+            Schema.id == schema_id,
+            Schema.tenant_id == auth.tenant_id,
+            Schema.user_id == auth.user_id,
+        )
+    )
     schema = result.scalar_one_or_none()
     if not schema:
         raise HTTPException(status_code=404, detail="Schema not found")
@@ -115,9 +156,9 @@ async def delete_schema(
 @router.post("/ensure-defaults")
 async def ensure_default_schemas(
     app_id: str = Query(...),
-    db: AsyncSession = Depends(get_db),
+    _auth: AuthContext = Depends(get_auth_context),
 ):
-    """Seed default schemas for an app if they don't exist."""
+    """No-op — system seeds happen at startup."""
     return {"message": "Default schemas ensured", "app_id": app_id}
 
 
@@ -167,10 +208,18 @@ class SyncSchemaRequest(BaseModel):
 @router.post("/sync-from-listing")
 async def sync_schema_from_listing(
     body: SyncSchemaRequest,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate JSON Schema from a listing's api_response and update the default API transcription schema."""
-    listing = await db.get(Listing, body.listing_id)
+    # Verify listing ownership
+    listing = await db.scalar(
+        select(Listing).where(
+            Listing.id == body.listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+        )
+    )
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 

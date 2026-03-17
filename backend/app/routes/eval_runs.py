@@ -7,6 +7,7 @@ from sqlalchemy import select, desc, func, delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
 from app.models.listing import Listing
@@ -31,10 +32,20 @@ async def list_eval_runs(
     command: Optional[str] = Query(None, description="Legacy filter — maps to eval_type"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unified list with filters."""
-    query = select(EvalRun).order_by(desc(EvalRun.created_at)).limit(limit).offset(offset)
+    """Unified list with filters, scoped to current user."""
+    query = (
+        select(EvalRun)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+        .order_by(desc(EvalRun.created_at))
+        .limit(limit)
+        .offset(offset)
+    )
 
     if app_id:
         query = query.where(EvalRun.app_id == app_id)
@@ -78,7 +89,10 @@ class CsvPreviewResponse(CamelModel):
 
 
 @router.post("/preview", response_model=CsvPreviewResponse)
-async def preview_csv(file: UploadFile = File(...)):
+async def preview_csv(
+    file: UploadFile = File(...),
+    _auth: AuthContext = Depends(get_auth_context),
+):
     """Parse an uploaded CSV and return statistics without persisting anything."""
     from app.services.evaluators.data_loader import DataLoader
 
@@ -114,25 +128,37 @@ async def preview_csv(file: UploadFile = File(...)):
 @router.get("/stats/summary")
 async def get_summary_stats(
     app_id: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stats across evaluation runs, optionally scoped by app_id."""
+    """Stats across evaluation runs, scoped to current user."""
     # Total runs
-    runs_q = select(func.count(EvalRun.id))
+    runs_q = select(func.count(EvalRun.id)).where(
+        EvalRun.tenant_id == auth.tenant_id,
+        EvalRun.user_id == auth.user_id,
+    )
     if app_id:
         runs_q = runs_q.where(EvalRun.app_id == app_id)
     total_runs = (await db.execute(runs_q)).scalar() or 0
 
-    # Thread/adversarial queries need JOIN to EvalRun only when app_id is set
+    # Thread/adversarial queries need JOIN to EvalRun for ownership check
     def _thread_q(base_select):
-        if not app_id:
-            return base_select
-        return base_select.join(EvalRun, ThreadEvaluation.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
+        q = base_select.join(EvalRun, ThreadEvaluation.run_id == EvalRun.id).where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+        if app_id:
+            q = q.where(EvalRun.app_id == app_id)
+        return q
 
     def _adv_q(base_select):
-        if not app_id:
-            return base_select
-        return base_select.join(EvalRun, AdversarialEvaluation.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
+        q = base_select.join(EvalRun, AdversarialEvaluation.run_id == EvalRun.id).where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+        if app_id:
+            q = q.where(EvalRun.app_id == app_id)
+        return q
 
     total_threads = (await db.execute(
         _thread_q(select(func.count(func.distinct(ThreadEvaluation.thread_id))))
@@ -214,10 +240,11 @@ async def get_summary_stats(
 async def get_trends(
     days: int = Query(30, ge=1, le=365),
     app_id: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate correctness verdicts by day for trend charts, optionally scoped by app_id."""
-    from datetime import datetime, timedelta, timezone
+    """Aggregate correctness verdicts by day for trend charts, scoped to current user."""
+    from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     q = (
@@ -226,11 +253,16 @@ async def get_trends(
             ThreadEvaluation.worst_correctness,
             func.count().label("cnt"),
         )
-        .where(ThreadEvaluation.created_at >= cutoff)
-        .where(ThreadEvaluation.worst_correctness.isnot(None))  # F5: exclude disabled evaluator rows
+        .join(EvalRun, ThreadEvaluation.run_id == EvalRun.id)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+            ThreadEvaluation.created_at >= cutoff,
+            ThreadEvaluation.worst_correctness.isnot(None),
+        )
     )
     if app_id:
-        q = q.join(EvalRun, ThreadEvaluation.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
+        q = q.where(EvalRun.app_id == app_id)
     q = q.group_by(func.date(ThreadEvaluation.created_at), ThreadEvaluation.worst_correctness)
     q = q.order_by(func.date(ThreadEvaluation.created_at))
 
@@ -251,22 +283,45 @@ async def list_all_logs(
     app_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List API logs globally or filtered by run_id and/or app_id."""
-    query = select(ApiLog).order_by(desc(ApiLog.id)).limit(limit).offset(offset)
+    """List API logs scoped to current user's runs."""
+    # Base: logs from runs owned by this user
+    query = (
+        select(ApiLog)
+        .join(EvalRun, ApiLog.run_id == EvalRun.id)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+        .order_by(desc(ApiLog.id))
+        .limit(limit)
+        .offset(offset)
+    )
     if run_id:
         query = query.where(ApiLog.run_id == UUID(run_id))
     if app_id:
-        query = query.join(EvalRun, ApiLog.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
+        query = query.where(EvalRun.app_id == app_id)
+
     result = await db.execute(query)
     logs = result.scalars().all()
-    total_q = select(func.count(ApiLog.id))
+
+    # Total count
+    total_q = (
+        select(func.count(ApiLog.id))
+        .join(EvalRun, ApiLog.run_id == EvalRun.id)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
     if run_id:
         total_q = total_q.where(ApiLog.run_id == UUID(run_id))
     if app_id:
-        total_q = total_q.join(EvalRun, ApiLog.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
+        total_q = total_q.where(EvalRun.app_id == app_id)
     total = (await db.execute(total_q)).scalar() or 0
+
     return {
         "logs": [_log_to_dict_full(log) for log in logs],
         "total": total,
@@ -280,31 +335,47 @@ async def list_all_logs(
 async def delete_logs(
     run_id: Optional[str] = Query(None),
     app_id: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete API logs, optionally filtered by run_id and/or app_id."""
-    if app_id and not run_id:
-        # Delete logs belonging to runs of a specific app
-        sub = select(ApiLog.id).join(EvalRun, ApiLog.run_id == EvalRun.id).where(EvalRun.app_id == app_id)
-        stmt = sql_delete(ApiLog).where(ApiLog.id.in_(sub))
-    else:
-        stmt = sql_delete(ApiLog)
-        if run_id:
-            stmt = stmt.where(ApiLog.run_id == UUID(run_id))
+    """Delete API logs scoped to current user's runs."""
+    # Build subquery of log IDs belonging to user's runs
+    sub = (
+        select(ApiLog.id)
+        .join(EvalRun, ApiLog.run_id == EvalRun.id)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if run_id:
+        sub = sub.where(ApiLog.run_id == UUID(run_id))
+    if app_id:
+        sub = sub.where(EvalRun.app_id == app_id)
+
+    stmt = sql_delete(ApiLog).where(ApiLog.id.in_(sub))
     result = await db.execute(stmt)
     await db.commit()
     return {"deleted": result.rowcount, "run_id": run_id}
+
 
 
 @router.put("/{ai_run_id}/human-review")
 async def upsert_human_review(
     ai_run_id: UUID,
     req: HumanReviewUpsert,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert a human review linked to an AI evaluation run."""
-    # 1. Fetch AI eval run
-    ai_run = await db.get(EvalRun, ai_run_id)
+    # 1. Fetch AI eval run with ownership check
+    ai_run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == ai_run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
     if not ai_run:
         raise HTTPException(404, "AI evaluation run not found")
 
@@ -315,9 +386,13 @@ async def upsert_human_review(
     # 3. Query existing human review for this AI run
     existing_q = (
         select(EvalRun)
-        .where(EvalRun.eval_type == "human")
-        .where(EvalRun.listing_id == ai_run.listing_id)
-        .where(EvalRun.config["aiEvalRunId"].as_string() == str(ai_run_id))
+        .where(
+            EvalRun.eval_type == "human",
+            EvalRun.listing_id == ai_run.listing_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+            EvalRun.config["aiEvalRunId"].as_string() == str(ai_run_id),
+        )
         .order_by(desc(EvalRun.created_at))
         .limit(1)
     )
@@ -350,11 +425,19 @@ async def upsert_human_review(
             result=req.result,
             summary=req.summary,
             completed_at=now,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
         )
         db.add(human_run)
 
     # 6. Mark the parent listing as completed
-    listing = await db.get(Listing, ai_run.listing_id)
+    listing = await db.scalar(
+        select(Listing).where(
+            Listing.id == ai_run.listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+        )
+    )
     if listing and listing.status != "completed":
         listing.status = "completed"
 
@@ -366,13 +449,29 @@ async def upsert_human_review(
 @router.get("/{ai_run_id}/human-review")
 async def get_human_review(
     ai_run_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch the human review linked to an AI eval run. Returns null if none exists."""
+    # Verify ownership of the AI run
+    ai_run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == ai_run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if not ai_run:
+        raise HTTPException(404, "AI evaluation run not found")
+
     query = (
         select(EvalRun)
-        .where(EvalRun.eval_type == "human")
-        .where(EvalRun.config["aiEvalRunId"].as_string() == str(ai_run_id))
+        .where(
+            EvalRun.eval_type == "human",
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+            EvalRun.config["aiEvalRunId"].as_string() == str(ai_run_id),
+        )
         .order_by(desc(EvalRun.created_at))
         .limit(1)
     )
@@ -385,17 +484,37 @@ async def get_human_review(
 
 
 @router.get("/{run_id}")
-async def get_eval_run(run_id: UUID, db: AsyncSession = Depends(get_db)):
-    run = await db.get(EvalRun, run_id)
+async def get_eval_run(
+    run_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
     if not run:
         raise HTTPException(404, "Run not found")
     return _run_to_dict(run)
 
 
 @router.delete("/{run_id}")
-async def delete_eval_run(run_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_eval_run(
+    run_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete an eval run and all its cascaded data."""
-    run = await db.get(EvalRun, run_id)
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
     if not run:
         raise HTTPException(404, "Run not found")
     if run.status == "running":
@@ -406,7 +525,13 @@ async def delete_eval_run(run_id: UUID, db: AsyncSession = Depends(get_db)):
 
     # Clean up orphaned job
     if job_id:
-        job = await db.get(Job, job_id)
+        job = await db.scalar(
+            select(Job).where(
+                Job.id == job_id,
+                Job.tenant_id == auth.tenant_id,
+                Job.user_id == auth.user_id,
+            )
+        )
         if job:
             await db.delete(job)
 
@@ -415,7 +540,22 @@ async def delete_eval_run(run_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{run_id}/threads")
-async def get_run_threads(run_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_run_threads(
+    run_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify run ownership
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if not run:
+        raise HTTPException(404, "Run not found")
+
     result = await db.execute(
         select(ThreadEvaluation).where(ThreadEvaluation.run_id == run_id)
     )
@@ -424,7 +564,22 @@ async def get_run_threads(run_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{run_id}/adversarial")
-async def get_run_adversarial(run_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_run_adversarial(
+    run_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify run ownership
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if not run:
+        raise HTTPException(404, "Run not found")
+
     result = await db.execute(
         select(AdversarialEvaluation).where(AdversarialEvaluation.run_id == run_id)
     )
@@ -437,8 +592,20 @@ async def get_run_logs(
     run_id: UUID,
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verify run ownership
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if not run:
+        raise HTTPException(404, "Run not found")
+
     result = await db.execute(
         select(ApiLog).where(ApiLog.run_id == run_id)
         .order_by(desc(ApiLog.id)).limit(limit).offset(offset)
@@ -449,11 +616,20 @@ async def get_run_logs(
 # ── Thread history (separate router) ───────────────────────────
 
 @threads_router.get("/{thread_id}/history")
-async def get_thread_history(thread_id: str, db: AsyncSession = Depends(get_db)):
-    """Get all evaluation results for a specific thread across runs."""
+async def get_thread_history(
+    thread_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all evaluation results for a specific thread across user's runs."""
     result = await db.execute(
         select(ThreadEvaluation)
-        .where(ThreadEvaluation.thread_id == thread_id)
+        .join(EvalRun, ThreadEvaluation.run_id == EvalRun.id)
+        .where(
+            ThreadEvaluation.thread_id == thread_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
         .order_by(desc(ThreadEvaluation.id))
     )
     evals = result.scalars().all()
@@ -533,7 +709,7 @@ def _build_evaluator_descriptors(run: EvalRun) -> list[dict]:
         elif cev_data.get("distribution"):
             pf_format = "verdict"
 
-        desc = {
+        desc_item = {
             "id": cev_id,
             "name": cev_data.get("name", "Unknown"),
             "type": "custom",
@@ -549,14 +725,14 @@ def _build_evaluator_descriptors(run: EvalRun) -> list[dict]:
         }
 
         if cev_data.get("distribution"):
-            desc["primaryField"]["verdictOrder"] = list(cev_data["distribution"].keys())
-            desc["aggregation"]["distribution"] = cev_data["distribution"]
+            desc_item["primaryField"]["verdictOrder"] = list(cev_data["distribution"].keys())
+            desc_item["aggregation"]["distribution"] = cev_data["distribution"]
 
         if cev_data.get("average") is not None:
-            desc["aggregation"]["average"] = cev_data["average"]
-            desc["primaryField"]["format"] = "percentage" if cev_data["average"] <= 1 else "number"
+            desc_item["aggregation"]["average"] = cev_data["average"]
+            desc_item["primaryField"]["format"] = "percentage" if cev_data["average"] <= 1 else "number"
 
-        descriptors.append(desc)
+        descriptors.append(desc_item)
 
     return descriptors
 
@@ -599,6 +775,8 @@ def _run_to_dict(r: EvalRun) -> dict:
         "llmProvider": r.llm_provider,
         "llmModel": r.llm_model,
         "batchMetadata": batch,
+        "tenantId": str(r.tenant_id),
+        "userId": str(r.user_id),
         # snake_case (legacy compat for batch/adversarial pages)
         "run_id": str(r.id),
         "app_id": r.app_id,

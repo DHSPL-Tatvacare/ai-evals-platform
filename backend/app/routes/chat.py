@@ -6,6 +6,7 @@ from pydantic.alias_generators import to_camel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.chat import ChatSession, ChatMessage
 from app.schemas.chat import (
@@ -30,12 +31,17 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """List all chat sessions for an app."""
     result = await db.execute(
         select(ChatSession)
-        .where(ChatSession.app_id == app_id)
+        .where(
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+            ChatSession.app_id == app_id,
+        )
         .order_by(desc(ChatSession.updated_at))
     )
     return result.scalars().all()
@@ -44,11 +50,16 @@ async def list_sessions(
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single chat session by ID."""
     result = await db.execute(
-        select(ChatSession).where(ChatSession.id == session_id)
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+        )
     )
     session = result.scalar_one_or_none()
     if not session:
@@ -59,10 +70,15 @@ async def get_session(
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(
     body: SessionCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new chat session."""
-    session = ChatSession(**body.model_dump())
+    session = ChatSession(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -73,10 +89,17 @@ async def create_session(
 async def update_session(
     session_id: UUID,
     body: SessionUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a chat session. Only provided fields are updated."""
-    result = await db.execute(select(ChatSession).where(ChatSession.id == session_id))
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+        )
+    )
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -93,10 +116,17 @@ async def update_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a chat session. Messages are cascade deleted by DB."""
-    result = await db.execute(select(ChatSession).where(ChatSession.id == session_id))
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+        )
+    )
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -111,10 +141,16 @@ async def delete_session(
 @router.put("/messages/tags/rename")
 async def rename_tag_in_all_messages(
     body: TagRenameRequest,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Rename a tag across all messages that contain it in metadata.tags."""
-    result = await db.execute(select(ChatMessage))
+    """Rename a tag across all messages owned by this user."""
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.tenant_id == auth.tenant_id,
+            ChatMessage.user_id == auth.user_id,
+        )
+    )
     messages = result.scalars().all()
     count = 0
     for msg in messages:
@@ -131,10 +167,16 @@ async def rename_tag_in_all_messages(
 @router.post("/messages/tags/delete")
 async def delete_tag_from_all_messages(
     body: TagDeleteRequest,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a tag from all messages that contain it in metadata.tags."""
-    result = await db.execute(select(ChatMessage))
+    """Remove a tag from all messages owned by this user."""
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.tenant_id == auth.tenant_id,
+            ChatMessage.user_id == auth.user_id,
+        )
+    )
     messages = result.scalars().all()
     count = 0
     for msg in messages:
@@ -151,9 +193,21 @@ async def delete_tag_from_all_messages(
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse])
 async def list_messages(
     session_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all messages in a chat session."""
+    """List all messages in a chat session (verify session ownership first)."""
+    # Verify session ownership
+    session = await db.scalar(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+        )
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
@@ -165,11 +219,16 @@ async def list_messages(
 @router.get("/messages/{message_id}", response_model=MessageResponse)
 async def get_message(
     message_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single message by ID."""
     result = await db.execute(
-        select(ChatMessage).where(ChatMessage.id == message_id)
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.tenant_id == auth.tenant_id,
+            ChatMessage.user_id == auth.user_id,
+        )
     )
     message = result.scalar_one_or_none()
     if not message:
@@ -180,10 +239,26 @@ async def get_message(
 @router.post("/messages", response_model=MessageResponse, status_code=201)
 async def create_message(
     body: MessageCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new chat message."""
-    message = ChatMessage(**body.model_dump())
+    """Create a new chat message (verify session ownership first)."""
+    # Verify session ownership
+    session = await db.scalar(
+        select(ChatSession).where(
+            ChatSession.id == body.session_id,
+            ChatSession.tenant_id == auth.tenant_id,
+            ChatSession.user_id == auth.user_id,
+        )
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    message = ChatMessage(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     db.add(message)
     await db.commit()
     await db.refresh(message)
@@ -194,10 +269,17 @@ async def create_message(
 async def update_message(
     message_id: UUID,
     body: MessageUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a chat message. Only provided fields are updated."""
-    result = await db.execute(select(ChatMessage).where(ChatMessage.id == message_id))
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.tenant_id == auth.tenant_id,
+            ChatMessage.user_id == auth.user_id,
+        )
+    )
     message = result.scalar_one_or_none()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -214,10 +296,17 @@ async def update_message(
 @router.delete("/messages/{message_id}")
 async def delete_message(
     message_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a chat message."""
-    result = await db.execute(select(ChatMessage).where(ChatMessage.id == message_id))
+    result = await db.execute(
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.tenant_id == auth.tenant_id,
+            ChatMessage.user_id == auth.user_id,
+        )
+    )
     message = result.scalar_one_or_none()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")

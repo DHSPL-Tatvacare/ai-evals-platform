@@ -11,6 +11,8 @@ import { apiRequest } from './client';
 interface ApiSession {
   id: string;
   appId: string;
+  tenantId: string;
+  userId: string;
   externalUserId?: string;
   threadId?: string;
   serverSessionId?: string;
@@ -27,6 +29,7 @@ function toSession(s: ApiSession): KairaChatSession {
   return {
     id: s.id,
     appId: s.appId as AppId,
+    tenantId: s.tenantId,
     userId: s.externalUserId || '',
     threadId: s.threadId,
     serverSessionId: s.serverSessionId,
@@ -82,7 +85,7 @@ export const chatSessionsRepository = {
 
   async create(
     appId: AppId,
-    session: Omit<KairaChatSession, 'id' | 'appId' | 'createdAt' | 'updatedAt'>
+    session: Omit<KairaChatSession, 'id' | 'appId' | 'tenantId' | 'createdAt' | 'updatedAt'>
   ): Promise<KairaChatSession> {
     const data = await apiRequest<ApiSession>('/api/chat/sessions', {
       method: 'POST',
@@ -103,7 +106,7 @@ export const chatSessionsRepository = {
   async update(
     _appId: AppId,
     id: string,
-    updates: Partial<Omit<KairaChatSession, 'id' | 'appId' | 'createdAt'>>
+    updates: Partial<Omit<KairaChatSession, 'id' | 'appId' | 'tenantId' | 'createdAt'>>
   ): Promise<void> {
     await apiRequest(`/api/chat/sessions/${id}`, {
       method: 'PUT',

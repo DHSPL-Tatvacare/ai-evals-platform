@@ -3,9 +3,10 @@
 Typed endpoints for managing adversarial evaluation config, with validation.
 Preferred over raw settings writes so the FE gets validation errors early.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+from app.auth.context import AuthContext, get_auth_context
 from app.services.evaluators.adversarial_config import (
     AdversarialConfig, get_default_config,
     load_config_from_db, save_config_to_db,
@@ -15,36 +16,36 @@ router = APIRouter(prefix="/api/adversarial-config", tags=["adversarial-config"]
 
 
 @router.get("")
-async def get_config():
-    """Return current adversarial config (from DB or built-in default)."""
-    config = await load_config_from_db()
+async def get_config(auth: AuthContext = Depends(get_auth_context)):
+    """Return current adversarial config for this user (from DB or built-in default)."""
+    config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()
 
 
 @router.put("")
-async def update_config(body: dict):
-    """Validate and save adversarial config. Returns validated config or 422."""
+async def update_config(body: dict, auth: AuthContext = Depends(get_auth_context)):
+    """Validate and save adversarial config for this user. Returns validated config or 422."""
     try:
         config = AdversarialConfig.model_validate(body)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    await save_config_to_db(config)
+    await save_config_to_db(config, tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()
 
 
 @router.post("/reset")
-async def reset_config():
-    """Restore built-in default config."""
+async def reset_config(auth: AuthContext = Depends(get_auth_context)):
+    """Restore built-in default config for this user."""
     config = get_default_config()
-    await save_config_to_db(config)
+    await save_config_to_db(config, tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()
 
 
 @router.get("/export")
-async def export_config():
+async def export_config(auth: AuthContext = Depends(get_auth_context)):
     """Export current config as downloadable JSON."""
-    config = await load_config_from_db()
+    config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
     return JSONResponse(
         content=config.model_dump(),
         headers={"Content-Disposition": "attachment; filename=adversarial-config.json"},
@@ -52,12 +53,12 @@ async def export_config():
 
 
 @router.post("/import")
-async def import_config(body: dict):
+async def import_config(body: dict, auth: AuthContext = Depends(get_auth_context)):
     """Validate and replace config from imported JSON."""
     try:
         config = AdversarialConfig.model_validate(body)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    await save_config_to_db(config)
+    await save_config_to_db(config, tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()

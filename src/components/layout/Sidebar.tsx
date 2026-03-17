@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   ShieldAlert,
   LogOut,
+  Users,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -61,6 +62,8 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   // Auth
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+  const isAdminActive = location.pathname.startsWith('/admin');
 
   // Modal management (for batch/adversarial wizards)
   const openModal = useUIStore((s) => s.openModal);
@@ -218,6 +221,20 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           >
             <BookOpen className="h-5 w-5" />
           </a>
+          {isAdmin && (
+            <Link
+              to={routes.adminUsers}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
+                isAdminActive
+                  ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
+              )}
+              title="User Management"
+            >
+              <Users className="h-5 w-5" />
+            </Link>
+          )}
           {user && (
             <button
               onClick={logout}
@@ -317,6 +334,20 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           <BookOpen className="h-4 w-4" />
           Guide
         </a>
+        {isAdmin && (
+          <Link
+            to={routes.adminUsers}
+            className={cn(
+              "flex items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] font-medium transition-colors",
+              isAdminActive
+                ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
+                : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
+            )}
+          >
+            <Users className="h-4 w-4" />
+            Users
+          </Link>
+        )}
       </div>
       {user && (
         <div className="border-t border-[var(--border-subtle)] p-3">

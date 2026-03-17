@@ -56,6 +56,7 @@ interface LLMSettingsState extends LLMSettings {
   // Persistence
   save: () => Promise<void>;
   loadSettings: () => Promise<void>;
+  reset: () => void;
 }
 
 /**
@@ -240,6 +241,8 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
       },
     }));
   },
+
+  reset: () => set({ ...defaultLLMSettings, _hasHydrated: false, _serviceAccountConfigured: false }),
 
   updateLLMSettings: (updates) => {
     set((state) => ({

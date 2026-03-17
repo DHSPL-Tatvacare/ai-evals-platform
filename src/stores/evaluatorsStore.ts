@@ -22,6 +22,7 @@ interface EvaluatorsStore {
   forkEvaluator: (sourceId: string, targetListingId?: string) => Promise<EvaluatorDefinition>;
   seedDefaults: (listingId: string) => Promise<EvaluatorDefinition[]>;
   seedAppDefaults: (appId: string) => Promise<EvaluatorDefinition[]>;
+  reset: () => void;
 }
 
 // Track in-flight fetch to deduplicate parallel calls
@@ -130,5 +131,17 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
       evaluators: [...state.evaluators, ...seeded],
     }));
     return seeded;
+  },
+
+  reset: () => {
+    _loadingListingId = null;
+    set({
+      evaluators: [],
+      isLoaded: false,
+      currentListingId: null,
+      currentAppId: null,
+      registry: [],
+      isRegistryLoaded: false,
+    });
   },
 }));

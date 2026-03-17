@@ -48,7 +48,8 @@ class ListingResponse(CamelORMModel):
     structured_outputs: list = []
     created_at: datetime
     updated_at: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str
 
     @field_validator(
         'structured_output_references', 'structured_outputs',

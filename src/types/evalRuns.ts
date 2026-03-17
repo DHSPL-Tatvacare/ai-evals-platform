@@ -65,6 +65,7 @@ export interface EvalRun {
   flowType?: string;
   createdAt: string;
   userId?: string;
+  tenantId?: string;
   // Legacy compat fields from _run_to_dict
   run_id?: string;
   command?: string;

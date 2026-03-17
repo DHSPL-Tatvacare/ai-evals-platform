@@ -12,6 +12,7 @@ import type { AppId } from './app.types';
 export interface KairaChatSession {
   id: string;                    // Local UUID
   appId: AppId;                  // Always 'kaira-bot'
+  tenantId: string;              // Owning tenant UUID
   userId: string;                // Kaira API user_id
   threadId?: string;             // Kaira API thread_id (from server on first response)
   serverSessionId?: string;      // From API session_id response (from server on first response)

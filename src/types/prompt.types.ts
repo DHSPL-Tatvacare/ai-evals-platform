@@ -1,5 +1,7 @@
 export interface PromptDefinition {
   id: string;
+  userId?: string;
+  tenantId?: string;
   name: string;                    // Auto-generated: "Evaluation Prompt v3"
   version: number;                 // Auto-increment per promptType
   createdAt: Date;

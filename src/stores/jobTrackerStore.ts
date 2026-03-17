@@ -23,6 +23,7 @@ interface JobTrackerState {
   resolveRunId: (jobId: string, runId: string) => void;
   untrackJob: (jobId: string) => void;
   hasActiveJobs: () => boolean;
+  reset: () => void;
 }
 
 export const useJobTrackerStore = create<JobTrackerState>()(
@@ -51,6 +52,8 @@ export const useJobTrackerStore = create<JobTrackerState>()(
         })),
 
       hasActiveJobs: () => get().activeJobs.length > 0,
+
+      reset: () => set({ activeJobs: [] }),
     }),
     {
       name: 'job-tracker',

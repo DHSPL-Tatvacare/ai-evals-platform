@@ -12,4 +12,5 @@ class FileResponse(CamelORMModel):
     size_bytes: Optional[int] = None
     storage_path: str
     created_at: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str

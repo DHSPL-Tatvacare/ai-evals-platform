@@ -19,6 +19,7 @@ interface CrossRunState {
   loadAnalytics: () => Promise<void>;
   refreshAnalytics: (limit?: number) => Promise<void>;
   clear: () => void;
+  reset: () => void;
 }
 
 const INITIAL = {
@@ -88,6 +89,7 @@ export const useCrossRunStore = create<CrossRunState>()(
       },
 
       clear: () => set({ ...INITIAL }),
+      reset: () => set({ ...INITIAL }),
     }),
     {
       name: 'cross-run-analytics',

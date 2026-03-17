@@ -6,6 +6,7 @@ import { DEFAULT_APP } from '@/types';
 interface AppStoreState {
   currentApp: AppId;
   setCurrentApp: (app: AppId) => void;
+  reset: () => void;
 }
 
 export const useAppStore = create<AppStoreState>()(
@@ -13,6 +14,7 @@ export const useAppStore = create<AppStoreState>()(
     (set) => ({
       currentApp: DEFAULT_APP,
       setCurrentApp: (app) => set({ currentApp: app }),
+      reset: () => set({ currentApp: DEFAULT_APP }),
     }),
     {
       name: 'app-selection',

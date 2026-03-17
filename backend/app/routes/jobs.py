@@ -6,6 +6,7 @@ from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.job import Job
 from app.models.eval_run import EvalRun
@@ -17,10 +18,20 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 @router.post("", response_model=JobResponse, status_code=201)
 async def submit_job(
     body: JobCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Submit a new background job."""
-    job = Job(**body.model_dump())
+    """Submit a new background job. Injects auth context into params for downstream runners."""
+    job_data = body.model_dump()
+    # Inject auth context into params — runners read this
+    job_data["params"]["tenant_id"] = str(auth.tenant_id)
+    job_data["params"]["user_id"] = str(auth.user_id)
+
+    job = Job(
+        **job_data,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     db.add(job)
     await db.commit()
     await db.refresh(job)
@@ -33,10 +44,20 @@ async def list_jobs(
     job_type: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List jobs, optionally filtered by status and/or job_type."""
-    query = select(Job).order_by(desc(Job.created_at)).limit(limit).offset(offset)
+    """List jobs for the current user."""
+    query = (
+        select(Job)
+        .where(
+            Job.tenant_id == auth.tenant_id,
+            Job.user_id == auth.user_id,
+        )
+        .order_by(desc(Job.created_at))
+        .limit(limit)
+        .offset(offset)
+    )
     if status:
         query = query.where(Job.status == status)
     if job_type:
@@ -46,9 +67,19 @@ async def list_jobs(
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_job(
+    job_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
     """Get job status and progress."""
-    job = await db.get(Job, job_id)
+    job = await db.scalar(
+        select(Job).where(
+            Job.id == job_id,
+            Job.tenant_id == auth.tenant_id,
+            Job.user_id == auth.user_id,
+        )
+    )
     if not job:
         raise HTTPException(404, "Job not found")
 
@@ -61,9 +92,19 @@ async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{job_id}/cancel")
-async def cancel_job(job_id: UUID, db: AsyncSession = Depends(get_db)):
+async def cancel_job(
+    job_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
     """Cancel a queued or running job."""
-    job = await db.get(Job, job_id)
+    job = await db.scalar(
+        select(Job).where(
+            Job.id == job_id,
+            Job.tenant_id == auth.tenant_id,
+            Job.user_id == auth.user_id,
+        )
+    )
     if not job:
         raise HTTPException(404, "Job not found")
     if job.status in ("completed", "failed"):

@@ -54,7 +54,8 @@ class EvalRunResponse(CamelORMModel):
     summary: Optional[dict] = None
     batch_metadata: Optional[dict] = None
     created_at: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str
 
 
 class HumanReviewUpsert(CamelModel):
@@ -82,4 +83,5 @@ class EvalRunListResponse(CamelORMModel):
     summary: Optional[dict] = None
     batch_metadata: Optional[dict] = None
     created_at: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str

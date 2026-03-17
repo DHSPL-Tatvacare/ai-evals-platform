@@ -26,6 +26,7 @@ interface PromptsState {
     },
   ) => Promise<PromptDefinition>;
   deletePrompt: (appId: AppId, id: string) => Promise<void>;
+  reset: () => void;
 }
 
 export const usePromptsStore = create<PromptsState>((set, get) => ({
@@ -116,4 +117,11 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       throw err;
     }
   },
+
+  reset: () =>
+    set({
+      prompts: { "voice-rx": [], "kaira-bot": [] },
+      isLoading: false,
+      error: null,
+    }),
 }));

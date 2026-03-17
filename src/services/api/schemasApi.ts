@@ -13,6 +13,8 @@ import { apiRequest } from './client';
 /** Shape returned by backend (camelCase, dates as strings) */
 interface ApiSchema {
   id: number;
+  userId?: string;
+  tenantId?: string;
   appId: string;
   promptType: string;
   version: number;
@@ -28,6 +30,8 @@ interface ApiSchema {
 function toSchemaDefinition(s: ApiSchema): SchemaDefinition {
   return {
     id: String(s.id),
+    userId: s.userId,
+    tenantId: s.tenantId,
     name: s.name,
     version: s.version,
     promptType: s.promptType as SchemaDefinition['promptType'],

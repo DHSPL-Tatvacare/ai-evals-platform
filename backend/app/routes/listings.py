@@ -1,10 +1,10 @@
 """Listings API routes."""
 from uuid import UUID
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.listing import Listing
 from app.models.file_record import FileRecord
@@ -16,12 +16,17 @@ router = APIRouter(prefix="/api/listings", tags=["listings"])
 @router.get("", response_model=list[ListingResponse])
 async def list_listings(
     app_id: str = Query(..., description="App ID filter (required)"),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """List all listings for an app, sorted by updated_at DESC."""
     result = await db.execute(
         select(Listing)
-        .where(Listing.app_id == app_id)
+        .where(
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+            Listing.app_id == app_id,
+        )
         .order_by(desc(Listing.updated_at))
     )
     return result.scalars().all()
@@ -31,12 +36,17 @@ async def list_listings(
 async def search_listings(
     app_id: str = Query(...),
     q: str = Query("", description="Search query for title"),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Search listings by title."""
     result = await db.execute(
         select(Listing)
-        .where(Listing.app_id == app_id)
+        .where(
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+            Listing.app_id == app_id,
+        )
         .where(Listing.title.ilike(f"%{q}%"))
         .order_by(desc(Listing.updated_at))
     )
@@ -47,11 +57,17 @@ async def search_listings(
 async def get_listing(
     listing_id: UUID,
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single listing by ID."""
     result = await db.execute(
-        select(Listing).where(Listing.id == listing_id, Listing.app_id == app_id)
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+            Listing.app_id == app_id,
+        )
     )
     listing = result.scalar_one_or_none()
     if not listing:
@@ -62,10 +78,15 @@ async def get_listing(
 @router.post("", response_model=ListingResponse, status_code=201)
 async def create_listing(
     body: ListingCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new listing."""
-    listing = Listing(**body.model_dump())
+    listing = Listing(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     db.add(listing)
     await db.commit()
     await db.refresh(listing)
@@ -76,10 +97,17 @@ async def create_listing(
 async def update_listing(
     listing_id: UUID,
     body: ListingUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a listing. Only provided fields are updated."""
-    result = await db.execute(select(Listing).where(Listing.id == listing_id))
+    result = await db.execute(
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+        )
+    )
     listing = result.scalar_one_or_none()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
@@ -110,13 +138,19 @@ async def update_listing(
 async def delete_listing(
     listing_id: UUID,
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a listing. ORM cascade deletes eval_runs → api_logs/threads/adversarial.
     Manual cleanup for file storage only.
     """
     result = await db.execute(
-        select(Listing).where(Listing.id == listing_id, Listing.app_id == app_id)
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+            Listing.app_id == app_id,
+        )
     )
     listing = result.scalar_one_or_none()
     if not listing:

@@ -21,4 +21,5 @@ class TagResponse(CamelORMModel):
     name: str
     count: int
     last_used: datetime
-    user_id: str = "default"
+    tenant_id: str
+    user_id: str

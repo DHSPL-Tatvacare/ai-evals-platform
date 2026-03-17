@@ -24,6 +24,8 @@ export interface TranscriptFileReference extends FileReference {
 export interface Listing {
   id: string;
   appId: AppId;
+  userId?: string;
+  tenantId?: string;
   title: string;
   createdAt: Date;
   updatedAt: Date;

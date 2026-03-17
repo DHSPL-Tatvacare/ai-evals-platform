@@ -1,9 +1,11 @@
 """Evaluators API routes."""
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
+from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.evaluator import Evaluator
 from app.models.listing import Listing
@@ -35,10 +37,17 @@ def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
 async def list_evaluators(
     app_id: str = Query(...),
     listing_id: str = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List evaluators for an app, optionally filtered by listing_id."""
-    query = select(Evaluator).where(Evaluator.app_id == app_id)
+    """List evaluators for an app — user's own + system globals."""
+    query = select(Evaluator).where(
+        or_(
+            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+            Evaluator.tenant_id == SYSTEM_TENANT_ID,
+        ),
+        Evaluator.app_id == app_id,
+    )
     if listing_id:
         query = query.where(Evaluator.listing_id == UUID(listing_id))
     elif app_id == "kaira-bot":
@@ -53,12 +62,20 @@ async def list_evaluators(
 @router.get("/registry", response_model=list[EvaluatorResponse])
 async def list_registry(
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all global evaluators (the registry) for an app."""
+    """List all global evaluators (the registry) for an app — system + user's globals."""
     query = (
         select(Evaluator)
-        .where(Evaluator.app_id == app_id, Evaluator.is_global == True)
+        .where(
+            or_(
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+            ),
+            Evaluator.app_id == app_id,
+            Evaluator.is_global == True,
+        )
         .order_by(desc(Evaluator.created_at))
     )
     result = await db.execute(query)
@@ -75,6 +92,7 @@ async def list_registry(
 async def list_variables(
     app_id: str = Query(..., alias="appId"),
     source_type: str | None = Query(None, alias="sourceType"),
+    _auth: AuthContext = Depends(get_auth_context),
 ):
     """List available template variables for custom evaluator prompts."""
     from app.services.evaluators.variable_registry import get_registry
@@ -100,6 +118,7 @@ async def validate_prompt(
     app_id: str = Query(..., alias="appId"),
     source_type: str | None = Query(None, alias="sourceType"),
     body: dict = Body(...),
+    _auth: AuthContext = Depends(get_auth_context),
 ):
     """Validate template variables in a prompt against the registry."""
     prompt = body.get("prompt", "")
@@ -113,6 +132,7 @@ async def validate_prompt(
 async def seed_defaults(
     app_id: str = Query(..., alias="appId"),
     listing_id: str | None = Query(None, alias="listingId"),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create recommended evaluators for an app.
@@ -121,19 +141,25 @@ async def seed_defaults(
     - kaira-bot: no listingId needed, seeds app-level evaluators.
     """
     if app_id == "voice-rx":
-        return await _seed_voice_rx(listing_id, db)
+        return await _seed_voice_rx(listing_id, auth, db)
     elif app_id == "kaira-bot":
-        return await _seed_kaira_bot(db)
+        return await _seed_kaira_bot(auth, db)
     else:
         raise HTTPException(status_code=400, detail=f"Seed evaluators not available for app '{app_id}'")
 
 
-async def _seed_voice_rx(listing_id: str | None, db: AsyncSession) -> list[Evaluator]:
+async def _seed_voice_rx(listing_id: str | None, auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
     """Seed recommended evaluators for a voice-rx listing."""
     if not listing_id:
         raise HTTPException(status_code=400, detail="listingId is required for voice-rx")
 
-    listing = await db.get(Listing, listing_id)
+    listing = await db.scalar(
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+        )
+    )
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
     if listing.app_id != "voice-rx":
@@ -152,10 +178,15 @@ async def _seed_voice_rx(listing_id: str | None, db: AsyncSession) -> list[Evalu
             detail=f"Listing source type '{source_type}' is not supported",
         )
 
-    # Idempotency: check existing evaluators on this listing
+    # Idempotency: check existing evaluators on this listing for this user
     result = await db.execute(
         select(Evaluator)
-        .where(Evaluator.listing_id == listing.id, Evaluator.app_id == "voice-rx")
+        .where(
+            Evaluator.listing_id == listing.id,
+            Evaluator.app_id == "voice-rx",
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+        )
     )
     existing_names = {e.name for e in result.scalars().all()}
 
@@ -172,6 +203,8 @@ async def _seed_voice_rx(listing_id: str | None, db: AsyncSession) -> list[Evalu
             model_id=None,
             is_global=False,
             show_in_header=seed["name"] == "Critical Safety Audit",
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
         )
         db.add(evaluator)
         created.append(evaluator)
@@ -184,15 +217,17 @@ async def _seed_voice_rx(listing_id: str | None, db: AsyncSession) -> list[Evalu
     return created
 
 
-async def _seed_kaira_bot(db: AsyncSession) -> list[Evaluator]:
+async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
     """Seed recommended app-level evaluators for kaira-bot."""
     from app.services.seed_defaults import KAIRA_BOT_EVALUATORS
 
-    # Idempotency: check existing app-level evaluators
+    # Idempotency: check existing app-level evaluators for this user
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.app_id == "kaira-bot",
             Evaluator.listing_id == None,
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
         )
     )
     existing_names = {e.name for e in result.scalars().all()}
@@ -210,6 +245,8 @@ async def _seed_kaira_bot(db: AsyncSession) -> list[Evaluator]:
             model_id=None,
             is_global=seed.get("is_global", True),
             show_in_header=seed.get("show_in_header", False),
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
         )
         db.add(evaluator)
         created.append(evaluator)
@@ -225,10 +262,17 @@ async def _seed_kaira_bot(db: AsyncSession) -> list[Evaluator]:
 @router.get("/variables/api-paths")
 async def list_api_paths(
     listing_id: str = Query(..., alias="listingId"),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract available variable paths from a listing's API response."""
-    listing = await db.get(Listing, listing_id)
+    listing = await db.scalar(
+        select(Listing).where(
+            Listing.id == listing_id,
+            Listing.tenant_id == auth.tenant_id,
+            Listing.user_id == auth.user_id,
+        )
+    )
     if not listing or not listing.api_response:
         return []
     return _extract_paths(listing.api_response, prefix="")
@@ -240,11 +284,18 @@ async def list_api_paths(
 @router.get("/{evaluator_id}", response_model=EvaluatorResponse)
 async def get_evaluator(
     evaluator_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single evaluator by ID."""
+    """Get a single evaluator by ID (own or system)."""
     result = await db.execute(
-        select(Evaluator).where(Evaluator.id == evaluator_id)
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            or_(
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+            ),
+        )
     )
     evaluator = result.scalar_one_or_none()
     if not evaluator:
@@ -255,10 +306,15 @@ async def get_evaluator(
 @router.post("", response_model=EvaluatorResponse, status_code=201)
 async def create_evaluator(
     body: EvaluatorCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new evaluator."""
-    evaluator = Evaluator(**body.model_dump())
+    evaluator = Evaluator(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     db.add(evaluator)
     await db.commit()
     await db.refresh(evaluator)
@@ -269,10 +325,17 @@ async def create_evaluator(
 async def update_evaluator(
     evaluator_id: UUID,
     body: EvaluatorUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an evaluator. Only provided fields are updated."""
-    result = await db.execute(select(Evaluator).where(Evaluator.id == evaluator_id))
+    """Update an evaluator. Cannot edit system evaluators."""
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+        )
+    )
     evaluator = result.scalar_one_or_none()
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found")
@@ -289,10 +352,17 @@ async def update_evaluator(
 @router.delete("/{evaluator_id}")
 async def delete_evaluator(
     evaluator_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete an evaluator."""
-    result = await db.execute(select(Evaluator).where(Evaluator.id == evaluator_id))
+    """Delete an evaluator. Cannot delete system evaluators."""
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+        )
+    )
     evaluator = result.scalar_one_or_none()
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found")
@@ -306,10 +376,19 @@ async def delete_evaluator(
 async def fork_evaluator(
     evaluator_id: UUID,
     listing_id: str = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fork an evaluator for a specific listing (or app-level if listing_id is empty)."""
-    result = await db.execute(select(Evaluator).where(Evaluator.id == evaluator_id))
+    """Fork an evaluator. Source can be system or own; fork belongs to current user."""
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            or_(
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+            ),
+        )
+    )
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Evaluator not found")
@@ -324,6 +403,8 @@ async def fork_evaluator(
         is_global=False,
         show_in_header=source.show_in_header,
         forked_from=source.id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
     )
     db.add(forked)
     await db.commit()
@@ -335,10 +416,17 @@ async def fork_evaluator(
 async def set_global(
     evaluator_id: UUID,
     body: EvaluatorSetGlobal,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set the is_global flag on an evaluator."""
-    result = await db.execute(select(Evaluator).where(Evaluator.id == evaluator_id))
+    """Set the is_global flag on an evaluator (own only)."""
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+        )
+    )
     evaluator = result.scalar_one_or_none()
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found")

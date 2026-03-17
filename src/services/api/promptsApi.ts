@@ -10,6 +10,8 @@ import { apiRequest } from './client';
 /** Shape returned by backend (camelCase, dates as strings) */
 interface ApiPrompt {
   id: number;
+  userId?: string;
+  tenantId?: string;
   appId: string;
   promptType: string;
   version: number;
@@ -25,6 +27,8 @@ interface ApiPrompt {
 function toPromptDefinition(p: ApiPrompt): PromptDefinition {
   return {
     id: String(p.id),
+    userId: p.userId,
+    tenantId: p.tenantId,
     name: p.name,
     version: p.version,
     promptType: p.promptType as PromptDefinition['promptType'],

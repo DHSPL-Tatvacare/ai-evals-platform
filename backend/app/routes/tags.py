@@ -3,9 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.tag import Tag
-from app.models.chat import ChatMessage
 from app.schemas.tag import TagCreate, TagUpdate, TagResponse
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
@@ -14,12 +14,17 @@ router = APIRouter(prefix="/api/tags", tags=["tags"])
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """List all tags for an app."""
     result = await db.execute(
         select(Tag)
-        .where(Tag.app_id == app_id)
+        .where(
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+            Tag.app_id == app_id,
+        )
         .order_by(Tag.name)
     )
     return result.scalars().all()
@@ -28,11 +33,16 @@ async def list_tags(
 @router.get("/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single tag by ID."""
     result = await db.execute(
-        select(Tag).where(Tag.id == tag_id)
+        select(Tag).where(
+            Tag.id == tag_id,
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+        )
     )
     tag = result.scalar_one_or_none()
     if not tag:
@@ -43,11 +53,17 @@ async def get_tag(
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     body: TagCreate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new tag or increment count if it already exists."""
     result = await db.execute(
-        select(Tag).where(Tag.app_id == body.app_id, Tag.name == body.name)
+        select(Tag).where(
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+            Tag.app_id == body.app_id,
+            Tag.name == body.name,
+        )
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -57,7 +73,11 @@ async def create_tag(
         await db.refresh(existing)
         return existing
 
-    tag = Tag(**body.model_dump())
+    tag = Tag(
+        **body.model_dump(),
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
     tag.count = 1
     db.add(tag)
     await db.commit()
@@ -69,10 +89,17 @@ async def create_tag(
 async def update_tag(
     tag_id: int,
     body: TagUpdate,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a tag. Only provided fields are updated."""
-    result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    result = await db.execute(
+        select(Tag).where(
+            Tag.id == tag_id,
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+        )
+    )
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -89,10 +116,17 @@ async def update_tag(
 @router.delete("/{tag_id}")
 async def delete_tag(
     tag_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a tag."""
-    result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    result = await db.execute(
+        select(Tag).where(
+            Tag.id == tag_id,
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+        )
+    )
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -105,10 +139,17 @@ async def delete_tag(
 @router.post("/{tag_id}/increment", response_model=TagResponse)
 async def increment_tag_count(
     tag_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Increment tag usage count."""
-    result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    result = await db.execute(
+        select(Tag).where(
+            Tag.id == tag_id,
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+        )
+    )
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -123,10 +164,17 @@ async def increment_tag_count(
 @router.post("/{tag_id}/decrement", response_model=TagResponse)
 async def decrement_tag_count(
     tag_id: int,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Decrement tag usage count."""
-    result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    result = await db.execute(
+        select(Tag).where(
+            Tag.id == tag_id,
+            Tag.tenant_id == auth.tenant_id,
+            Tag.user_id == auth.user_id,
+        )
+    )
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")

@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.file_record import FileRecord
 from app.schemas.file import FileResponse as FileResponseSchema
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 @router.post("/upload", response_model=FileResponseSchema, status_code=201)
 async def upload_file(
     file: UploadFile = FastAPIFile(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a file and create a file record."""
@@ -27,6 +29,8 @@ async def upload_file(
         mime_type=file.content_type,
         size_bytes=len(contents),
         storage_path=storage_path,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
     )
     db.add(record)
     await db.commit()
@@ -37,11 +41,16 @@ async def upload_file(
 @router.get("/{file_id}", response_model=FileResponseSchema)
 async def get_file_metadata(
     file_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get file metadata by ID."""
     result = await db.execute(
-        select(FileRecord).where(FileRecord.id == file_id)
+        select(FileRecord).where(
+            FileRecord.id == file_id,
+            FileRecord.tenant_id == auth.tenant_id,
+            FileRecord.user_id == auth.user_id,
+        )
     )
     file_rec = result.scalar_one_or_none()
     if not file_rec:
@@ -52,11 +61,16 @@ async def get_file_metadata(
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Download a file by ID."""
     result = await db.execute(
-        select(FileRecord).where(FileRecord.id == file_id)
+        select(FileRecord).where(
+            FileRecord.id == file_id,
+            FileRecord.tenant_id == auth.tenant_id,
+            FileRecord.user_id == auth.user_id,
+        )
     )
     file_rec = result.scalar_one_or_none()
     if not file_rec:
@@ -72,11 +86,16 @@ async def download_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: UUID,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a file and its record."""
     result = await db.execute(
-        select(FileRecord).where(FileRecord.id == file_id)
+        select(FileRecord).where(
+            FileRecord.id == file_id,
+            FileRecord.tenant_id == auth.tenant_id,
+            FileRecord.user_id == auth.user_id,
+        )
     )
     file_rec = result.scalar_one_or_none()
     if not file_rec:

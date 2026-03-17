@@ -61,6 +61,7 @@ interface ChatStoreState {
     messageId: string,
     metadata: Partial<KairaChatMessage["metadata"]>,
   ) => Promise<void>;
+  reset: () => void;
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
@@ -731,4 +732,20 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       ),
     }));
   },
+
+  reset: () => set({
+    currentSessionId: null,
+    sessions: { "voice-rx": [], "kaira-bot": [] },
+    messages: [],
+    isStreaming: false,
+    streamingContent: "",
+    error: null,
+    isLoadingSessions: false,
+    isLoadingMessages: false,
+    isCreatingSession: false,
+    isSending: false,
+    isDeleting: false,
+    isSessionsLoaded: { "voice-rx": false, "kaira-bot": false },
+    abortController: null,
+  }),
 }));

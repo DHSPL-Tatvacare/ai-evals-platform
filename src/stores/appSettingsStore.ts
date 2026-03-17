@@ -81,6 +81,7 @@ interface AppSettingsState {
   // Backend persistence for credentials
   loadCredentialsFromBackend: (appId: AppId) => Promise<void>;
   saveCredentialsToBackend: (appId: AppId) => Promise<void>;
+  reset: () => void;
 }
 
 export const useAppSettingsStore = create<AppSettingsState>()(
@@ -131,6 +132,13 @@ export const useAppSettingsStore = create<AppSettingsState>()(
         })),
 
       getAppSettings: (appId) => get().settings[appId],
+
+      reset: () => set({
+        settings: {
+          'voice-rx': defaultVoiceRxSettings,
+          'kaira-bot': defaultKairaBotSettings,
+        },
+      }),
 
       /**
        * Load API credentials from the backend settings table.

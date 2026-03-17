@@ -9,6 +9,8 @@ export type TriggeredBy = 'manual' | 'auto' | 'batch' | 'scheduled' | 'system';
  */
 export interface HistoryEntry {
   id: string;
+  userId?: string;
+  tenantId?: string;
   timestamp: number;
 
   // Universal Context

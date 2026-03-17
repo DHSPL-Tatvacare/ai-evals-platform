@@ -13,6 +13,7 @@ interface SchemasState {
   getSchemasByType: (appId: AppId, promptType: SchemaDefinition['promptType'], sourceType?: ListingSourceType) => SchemaDefinition[];
   saveSchema: (appId: AppId, schema: Partial<SchemaDefinition> & { promptType: SchemaDefinition['promptType']; schema: Record<string, unknown> }) => Promise<SchemaDefinition>;
   deleteSchema: (appId: AppId, id: string) => Promise<void>;
+  reset: () => void;
 }
 
 export const useSchemasStore = create<SchemasState>((set, get) => ({
@@ -88,4 +89,10 @@ export const useSchemasStore = create<SchemasState>((set, get) => ({
       throw err;
     }
   },
+
+  reset: () => set({
+    schemas: { 'voice-rx': [], 'kaira-bot': [] },
+    isLoading: false,
+    error: null,
+  }),
 }));
