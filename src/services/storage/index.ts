@@ -16,3 +16,4 @@ export {
 } from '@/services/api';
 
 export type { TagRegistryItem, TagRegistryData } from '@/services/api';
+export { authApi } from '@/services/api';

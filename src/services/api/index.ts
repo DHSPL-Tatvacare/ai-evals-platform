@@ -16,3 +16,4 @@ export { jobsApi } from './jobsApi';
 export type { Job } from './jobsApi';
 export * from './evalRunsApi';
 export { reportsApi } from './reportsApi';
+export { authApi } from './authApi';

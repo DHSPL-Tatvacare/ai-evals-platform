@@ -6,6 +6,8 @@
  * In prod: Reverse proxy routes /api/* to the backend service
  */
 
+import { useAuthStore } from '@/stores/authStore';
+
 const API_BASE = ''; // Empty = use same origin (Vite proxy handles it)
 
 export class ApiError extends Error {
@@ -20,34 +22,78 @@ export class ApiError extends Error {
   }
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = useAuthStore.getState().accessToken;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+function parseErrorResponse(text: string): { errorData: unknown; detail: string | null } {
+  let errorData: unknown = text;
+  try {
+    errorData = JSON.parse(text);
+  } catch {
+    // keep as plain text
+  }
+  const detail =
+    typeof errorData === 'object' && errorData !== null && 'detail' in errorData
+      ? String((errorData as Record<string, unknown>).detail)
+      : null;
+  return { errorData, detail };
+}
+
+/**
+ * Try to refresh the access token and retry the original request.
+ * Returns null if refresh/retry failed (caller should throw).
+ */
+async function tryRefreshAndRetry(url: string, options?: RequestInit): Promise<Response | null> {
+  const refreshed = await useAuthStore.getState().refreshToken();
+  if (!refreshed) return null;
+
+  const retryResponse = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+      ...options?.headers,
+    },
+    credentials: 'include',
+  });
+
+  return retryResponse.ok ? retryResponse : null;
+}
+
 export async function apiRequest<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
   const response = await fetch(url, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       ...options?.headers,
     },
-    ...options,
+    credentials: 'include',
   });
+
+  if (response.status === 401) {
+    const retryResponse = await tryRefreshAndRetry(url, options);
+    if (retryResponse) {
+      if (retryResponse.status === 204) return undefined as T;
+      return retryResponse.json();
+    }
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
 
   if (!response.ok) {
     const text = await response.text();
-    let errorData: unknown = text;
-    try {
-      errorData = JSON.parse(text);
-    } catch {
-      // keep as plain text
-    }
-
-    // Extract detail from FastAPI's standard error response
-    const detail =
-      typeof errorData === 'object' && errorData !== null && 'detail' in errorData
-        ? String((errorData as Record<string, unknown>).detail)
-        : null;
-
+    const { errorData, detail } = parseErrorResponse(text);
     throw new ApiError(
       response.status,
       detail || `API error ${response.status}: ${response.statusText}`,
@@ -75,20 +121,32 @@ export async function apiUpload<T>(
   const formData = new FormData();
   formData.append('file', file, filename || 'upload');
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const response = await fetch(url, {
     method: 'POST',
     body: formData,
-    // Do NOT set Content-Type - browser handles multipart boundary
+    headers: getAuthHeaders(),
+    credentials: 'include',
   });
+
+  if (response.status === 401) {
+    const refreshed = await useAuthStore.getState().refreshToken();
+    if (refreshed) {
+      const retryResponse = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+      if (retryResponse.ok) return retryResponse.json();
+    }
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
 
   if (!response.ok) {
     const text = await response.text();
-    let errorData: unknown = text;
-    try { errorData = JSON.parse(text); } catch { /* keep as text */ }
-    const detail =
-      typeof errorData === 'object' && errorData !== null && 'detail' in errorData
-        ? String((errorData as Record<string, unknown>).detail)
-        : null;
+    const { errorData, detail } = parseErrorResponse(text);
     throw new ApiError(
       response.status,
       detail || `Upload failed: ${response.statusText}`,
@@ -103,15 +161,28 @@ export async function apiUpload<T>(
  * Download a file as a Blob.
  */
 export async function apiDownload(path: string): Promise<Blob> {
-  const response = await fetch(`${API_BASE}${path}`);
+  const url = `${API_BASE}${path}`;
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
+
+  if (response.status === 401) {
+    const refreshed = await useAuthStore.getState().refreshToken();
+    if (refreshed) {
+      const retryResponse = await fetch(url, {
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+      if (retryResponse.ok) return retryResponse.blob();
+    }
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+
   if (!response.ok) {
     const text = await response.text();
-    let errorData: unknown = text;
-    try { errorData = JSON.parse(text); } catch { /* keep as text */ }
-    const detail =
-      typeof errorData === 'object' && errorData !== null && 'detail' in errorData
-        ? String((errorData as Record<string, unknown>).detail)
-        : null;
+    const { errorData, detail } = parseErrorResponse(text);
     throw new ApiError(
       response.status,
       detail || `Download failed: ${response.statusText}`,

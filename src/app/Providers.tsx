@@ -1,19 +1,27 @@
 import { useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './ThemeProvider';
+import { useAuthStore } from '@/stores/authStore';
 import { useLLMSettingsStore } from '@/stores/llmSettingsStore';
 import { useAppSettingsStore } from '@/stores/appSettingsStore';
 import { usePromptsStore } from '@/stores/promptsStore';
 
+function loadAllStores() {
+  useLLMSettingsStore.getState().loadSettings();
+  useAppSettingsStore.getState().loadCredentialsFromBackend('voice-rx');
+  useAppSettingsStore.getState().loadCredentialsFromBackend('kaira-bot');
+  usePromptsStore.getState().loadPrompts('voice-rx');
+  usePromptsStore.getState().loadPrompts('kaira-bot');
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
-  // Load all settings from backend on app startup
+  // Load auth first, then app data only if authenticated
   useEffect(() => {
-    useLLMSettingsStore.getState().loadSettings();
-    useAppSettingsStore.getState().loadCredentialsFromBackend('voice-rx');
-    useAppSettingsStore.getState().loadCredentialsFromBackend('kaira-bot');
-    // Load prompts so resolvePromptText() has data available
-    usePromptsStore.getState().loadPrompts('voice-rx');
-    usePromptsStore.getState().loadPrompts('kaira-bot');
+    useAuthStore.getState().loadUser().then(() => {
+      if (useAuthStore.getState().isAuthenticated) {
+        loadAllStores();
+      }
+    });
   }, []);
 
   return (

@@ -11,6 +11,7 @@ import {
   MessageSquare,
   FileSpreadsheet,
   ShieldAlert,
+  LogOut,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -25,6 +26,7 @@ import {
   useChatStore,
   useKairaBotSettings,
 } from "@/stores";
+import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { routes } from "@/config/routes";
@@ -55,6 +57,10 @@ export function Sidebar({ onNewEval }: SidebarProps) {
     location.pathname === routes.voiceRx.settings ||
     location.pathname === routes.kaira.settings;
   const guideUrl = import.meta.env.VITE_GUIDE_URL || "http://localhost:5174";
+
+  // Auth
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
   // Modal management (for batch/adversarial wizards)
   const openModal = useUIStore((s) => s.openModal);
@@ -212,6 +218,15 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           >
             <BookOpen className="h-5 w-5" />
           </a>
+          {user && (
+            <button
+              onClick={logout}
+              className="flex h-9 w-9 items-center justify-center rounded-[6px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
+              title={`Logout (${user.email})`}
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </aside>
     );
@@ -303,6 +318,40 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           Guide
         </a>
       </div>
+      {user && (
+        <div className="border-t border-[var(--border-subtle)] p-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand-accent)]/20 text-[11px] font-semibold text-[var(--text-brand)]">
+              {user.displayName
+                .split(' ')
+                .map((n) => n[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                {user.displayName}
+              </div>
+              <div className="truncate text-[11px] text-[var(--text-muted)]">
+                {user.tenantName}
+                {(user.role === 'admin' || user.role === 'owner') && (
+                  <span className="ml-1 text-[var(--text-brand)]">
+                    {user.role}
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="shrink-0 rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

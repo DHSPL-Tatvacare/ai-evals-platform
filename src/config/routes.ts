@@ -3,6 +3,9 @@
  * Use these instead of hardcoded string literals.
  */
 export const routes = {
+  login: '/login',
+  adminUsers: '/admin/users',
+  profile: '/profile',
   voiceRx: {
     home: "/",
     upload: "/upload",

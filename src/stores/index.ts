@@ -19,3 +19,4 @@ export { useEvaluatorsStore } from './evaluatorsStore';
 export { useMiniPlayerStore } from './miniPlayerStore';
 export { useJobTrackerStore, type TrackedJob } from './jobTrackerStore';
 export { useCrossRunStore } from './crossRunStore';
+export { useAuthStore } from './authStore';

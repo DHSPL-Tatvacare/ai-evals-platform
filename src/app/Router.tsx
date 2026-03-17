@@ -18,6 +18,7 @@ import {
   EvalAdversarialDetailV2,
   EvalLogs,
 } from "@/features/evalRuns";
+import { LoginPage, AuthGuard } from "@/features/auth";
 import { HomePage } from "./pages/HomePage";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -27,8 +28,18 @@ import { routes } from "@/config/routes";
 export function Router() {
   return (
     <BrowserRouter>
-      <MainLayout>
-        <Routes>
+      <Routes>
+        {/* Public route — login */}
+        <Route path={routes.login} element={<LoginPage />} />
+
+        {/* Protected routes — wrapped with AuthGuard + MainLayout */}
+        <Route
+          element={
+            <AuthGuard>
+              <MainLayout />
+            </AuthGuard>
+          }
+        >
           {/* Voice Rx routes */}
           <Route
             path={routes.voiceRx.home}
@@ -79,8 +90,8 @@ export function Router() {
           <Route path={routes.kaira.logs} element={<EvalLogs />} />
 
           <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </MainLayout>
+        </Route>
+      </Routes>
     </BrowserRouter>
   );
 }
