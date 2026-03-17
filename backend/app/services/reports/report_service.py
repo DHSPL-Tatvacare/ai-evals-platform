@@ -6,6 +6,7 @@ Phase 3: AI narrative generation via LLM.
 """
 
 import logging
+import uuid
 from uuid import UUID
 
 from sqlalchemy import select
@@ -46,8 +47,10 @@ class ReportService:
         payload = await service.generate(run_id)
     """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID):
         self.db = db
+        self.tenant_id = tenant_id
+        self.user_id = user_id
 
     async def generate(
         self,
@@ -197,6 +200,7 @@ class ReportService:
         """Call LLM for narrative. Returns (narrative, model_used) tuple."""
         try:
             settings = await get_llm_settings_from_db(
+                tenant_id=self.tenant_id, user_id=self.user_id,
                 auth_intent="managed_job",
                 provider_override=llm_provider or None,
             )
@@ -331,6 +335,7 @@ class ReportService:
                 existing.computed_at = now
             else:
                 row = EvaluationAnalytics(
+                    tenant_id=self.tenant_id,
                     app_id=app_id,
                     scope="single_run",
                     run_id=UUID(run_id),
@@ -347,7 +352,13 @@ class ReportService:
 
     async def _load_run(self, run_id: str) -> EvalRun:
         """Load EvalRun or raise ValueError (caught as 404 by route)."""
-        run = await self.db.get(EvalRun, UUID(run_id))
+        run = await self.db.scalar(
+            select(EvalRun).where(
+                EvalRun.id == UUID(run_id),
+                EvalRun.tenant_id == self.tenant_id,
+                EvalRun.user_id == self.user_id,
+            )
+        )
         if not run:
             raise ValueError(f"Eval run not found: {run_id}")
         return run
@@ -469,6 +480,7 @@ class ReportService:
         """Generate AI narrative for custom eval report. Returns report with narrative attached."""
         try:
             settings = await get_llm_settings_from_db(
+                tenant_id=self.tenant_id, user_id=self.user_id,
                 auth_intent="managed_job",
                 provider_override=llm_provider or None,
             )

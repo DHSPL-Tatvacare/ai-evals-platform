@@ -501,20 +501,44 @@ def _migrate_v2_to_v3(raw: dict) -> dict:
 # ─── DB Load / Save ──────────────────────────────────────────────
 
 
-async def load_config_from_db() -> AdversarialConfig:
-    """Load adversarial config from settings table, auto-migrating v1/v2→v3."""
+async def load_config_from_db(
+    tenant_id,
+    user_id,
+) -> AdversarialConfig:
+    """Load adversarial config from settings table, auto-migrating v1/v2→v3.
+
+    Scopes the query to the given tenant/user. Falls back to system default
+    if no user-specific config exists.
+    """
     from sqlalchemy import select
     from app.database import async_session
     from app.models.setting import Setting
+    from app.constants import SYSTEM_TENANT_ID
 
     try:
         async with async_session() as db:
+            # Try user-specific config first
             result = await db.execute(
-                select(Setting)
-                .where(Setting.app_id == SETTINGS_APP_ID)
-                .where(Setting.key == SETTINGS_KEY)
+                select(Setting).where(
+                    Setting.tenant_id == tenant_id,
+                    Setting.user_id == user_id,
+                    Setting.app_id == SETTINGS_APP_ID,
+                    Setting.key == SETTINGS_KEY,
+                )
             )
             setting = result.scalar_one_or_none()
+
+            # Fall back to system default
+            if not setting:
+                result = await db.execute(
+                    select(Setting).where(
+                        Setting.tenant_id == SYSTEM_TENANT_ID,
+                        Setting.app_id == SETTINGS_APP_ID,
+                        Setting.key == SETTINGS_KEY,
+                    )
+                )
+                setting = result.scalar_one_or_none()
+
             if setting and setting.value:
                 raw = setting.value
                 version = raw.get("version", 1) if isinstance(raw, dict) else 1
@@ -523,7 +547,7 @@ async def load_config_from_db() -> AdversarialConfig:
                     raw = _migrate_v2_to_v3(raw)
                 config = AdversarialConfig.model_validate(raw)
                 if version < 3:
-                    await save_config_to_db(config)  # persist migration
+                    await save_config_to_db(config, tenant_id=tenant_id, user_id=user_id)
                 return config
     except Exception as e:
         logger.warning(
@@ -533,8 +557,15 @@ async def load_config_from_db() -> AdversarialConfig:
     return get_default_config()
 
 
-async def save_config_to_db(config: AdversarialConfig) -> None:
-    """Validate and persist adversarial config to settings table."""
+async def save_config_to_db(
+    config: AdversarialConfig,
+    tenant_id,
+    user_id,
+) -> None:
+    """Validate and persist adversarial config to settings table.
+
+    Scopes the upsert to the given tenant/user.
+    """
     from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from app.database import async_session
@@ -542,15 +573,18 @@ async def save_config_to_db(config: AdversarialConfig) -> None:
 
     data = config.model_dump()
 
+    values = {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "app_id": SETTINGS_APP_ID,
+        "key": SETTINGS_KEY,
+        "value": data,
+    }
+
     async with async_session() as db:
         stmt = (
             pg_insert(Setting)
-            .values(
-                app_id=SETTINGS_APP_ID,
-                key=SETTINGS_KEY,
-                value=data,
-                user_id="default",
-            )
+            .values(**values)
             .on_conflict_do_update(
                 constraint="uq_setting",
                 set_={"value": data, "updated_at": func.now()},

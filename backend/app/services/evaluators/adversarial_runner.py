@@ -42,7 +42,9 @@ ProgressCallback = Callable  # async (job_id, current, total, message) -> None
 
 async def run_adversarial_evaluation(
     job_id,
-    user_id: str,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    kaira_test_user_id: str = "",
     kaira_api_url: str = "",
     kaira_auth_token: str = "",
     test_count: int = 15,
@@ -71,7 +73,7 @@ async def run_adversarial_evaluation(
     run_id = uuid.uuid4()
 
     # Resolve adversarial config (from DB or defaults)
-    config = await load_config_from_db()
+    config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
 
     # Filter to selected goals if specified
     if selected_goals:
@@ -92,6 +94,8 @@ async def run_adversarial_evaluation(
     # Create eval run record FIRST so failures are always visible in the UI
     await create_eval_run(
         id=run_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
         app_id="kaira-bot",
         eval_type="batch_adversarial",
         job_id=job_id,
@@ -121,7 +125,10 @@ async def run_adversarial_evaluation(
     auth_method = "api_key"  # default when caller provides api_key directly
     if not api_key:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
-        db_settings = await get_llm_settings_from_db(auth_intent="managed_job", provider_override=llm_provider or None)
+        db_settings = await get_llm_settings_from_db(
+            tenant_id=tenant_id, user_id=user_id,
+            auth_intent="managed_job", provider_override=llm_provider or None,
+        )
         api_key = db_settings["api_key"]
         sa_path = db_settings.get("service_account_path", "")
         auth_method = db_settings.get("auth_method", "api_key")
@@ -148,7 +155,7 @@ async def run_adversarial_evaluation(
     # Update run with resolved model name and auth method
     async with async_session() as db:
         await db.execute(
-            update(EvalRun).where(EvalRun.id == run_id).values(
+            update(EvalRun).where(EvalRun.id == run_id, EvalRun.tenant_id == tenant_id).values(
                 llm_provider=llm_provider, llm_model=inner_llm.model_name,
                 config={"auth_method": auth_method},
             )
@@ -202,7 +209,7 @@ async def run_adversarial_evaluation(
             transcript = None
             try:
                 transcript = await worker_evaluator.conversation_agent.run_conversation(
-                    test_case=tc, goals=tc_goals, client=client, user_id=user_id,
+                    test_case=tc, goals=tc_goals, client=client, user_id=kaira_test_user_id,
                     turn_delay=turn_delay, thinking=thinking, test_case_label=case_label,
                 )
 
@@ -322,6 +329,7 @@ async def run_adversarial_evaluation(
 
         await finalize_eval_run(
             run_id,
+            tenant_id,
             status=final_status,
             duration_ms=round(duration * 1000, 2),
             summary=summary,
@@ -334,6 +342,7 @@ async def run_adversarial_evaluation(
         summary = {"cancelled": True}
         await finalize_eval_run(
             run_id,
+            tenant_id,
             status="cancelled",
             duration_ms=round(duration * 1000, 2),
             summary=summary,
@@ -344,6 +353,7 @@ async def run_adversarial_evaluation(
     except Exception as e:
         await finalize_eval_run(
             run_id,
+            tenant_id,
             status="failed",
             duration_ms=round((time.monotonic() - start_time) * 1000, 2),
             error_message=safe_error_message(e),

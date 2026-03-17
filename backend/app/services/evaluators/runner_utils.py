@@ -60,6 +60,8 @@ async def save_api_log(log_entry: dict) -> None:
 async def create_eval_run(
     *,
     id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
     app_id: str,
     eval_type: str,
     job_id,
@@ -77,6 +79,8 @@ async def create_eval_run(
     async with async_session() as db:
         db.add(EvalRun(
             id=id,
+            tenant_id=tenant_id,
+            user_id=user_id,
             app_id=app_id,
             eval_type=eval_type,
             job_id=job_id,
@@ -94,6 +98,7 @@ async def create_eval_run(
 
 async def finalize_eval_run(
     run_id: uuid.UUID,
+    tenant_id: uuid.UUID,
     *,
     status: str,
     duration_ms: float,
@@ -106,6 +111,7 @@ async def finalize_eval_run(
 
     Guards against overwriting a cancel for non-cancel finalize
     (WHERE status != 'cancelled').  Cancel finalize always applies.
+    Filters by tenant_id to ensure we only update our own records.
     """
     values: dict = {
         "status": status,
@@ -122,7 +128,7 @@ async def finalize_eval_run(
         values["config"] = config
 
     async with async_session() as db:
-        condition = EvalRun.id == run_id
+        condition = (EvalRun.id == run_id) & (EvalRun.tenant_id == tenant_id)
         if status != "cancelled":
             # Don't overwrite a cancel that arrived via the cancel route
             condition = condition & (EvalRun.status != "cancelled")  # type: ignore[assignment]

@@ -4,8 +4,9 @@ import logging
 import os
 from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth.context import AuthContext, get_auth_context
 from app.config import settings
 from app.schemas.base import CamelModel
 
@@ -29,7 +30,7 @@ class DiscoverModelsRequest(CamelModel):
 
 
 @router.get("/auth-status")
-async def auth_status():
+async def auth_status(_auth: AuthContext = Depends(get_auth_context)):
     """Check whether service account auth is configured on the server."""
     sa_path = settings.GEMINI_SERVICE_ACCOUNT_PATH
     sa_configured = bool(sa_path and os.path.isfile(sa_path))
@@ -46,30 +47,36 @@ async def auth_status():
 
 
 @router.post("/discover-models")
-async def discover_models(body: DiscoverModelsRequest):
+async def discover_models(
+    body: DiscoverModelsRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Unified model discovery — accepts unsaved credentials in the request body."""
     if body.provider == "gemini":
-        return await _discover_gemini_models(api_key_override=body.api_key)
+        return await _discover_gemini_models(auth=auth, api_key_override=body.api_key)
     if body.provider == "openai":
-        return await _discover_openai_models(api_key_override=body.api_key)
+        return await _discover_openai_models(auth=auth, api_key_override=body.api_key)
     if body.provider == "azure_openai":
         return _discover_azure_openai_models()
     if body.provider == "anthropic":
-        return await _discover_anthropic_models(api_key_override=body.api_key)
+        return await _discover_anthropic_models(auth=auth, api_key_override=body.api_key)
     return {"error": f"Model discovery not supported for provider: {body.provider}"}
 
 
 @router.get("/models")
-async def list_models(provider: str = "gemini"):
+async def list_models(
+    provider: str = "gemini",
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Server-side model discovery (backward compat for runners / non-interactive callers)."""
     if provider == "gemini":
-        return await _discover_gemini_models()
+        return await _discover_gemini_models(auth=auth)
     if provider == "openai":
-        return await _discover_openai_models()
+        return await _discover_openai_models(auth=auth)
     if provider == "azure_openai":
         return _discover_azure_openai_models()
     if provider == "anthropic":
-        return await _discover_anthropic_models()
+        return await _discover_anthropic_models(auth=auth)
     return {"error": f"Model discovery not supported for provider: {provider}"}
 
 
@@ -92,7 +99,10 @@ def _discover_azure_openai_models() -> list[dict]:
     }]
 
 
-async def _discover_anthropic_models(api_key_override: Optional[str] = None) -> list[dict]:
+async def _discover_anthropic_models(
+    auth: Optional[AuthContext] = None,
+    api_key_override: Optional[str] = None,
+) -> list[dict]:
     """Discover Anthropic models via the real API, with hardcoded fallback."""
     FALLBACK = [
         {"name": "claude-sonnet-4-6", "displayName": "Claude Sonnet 4.6", "inputTokenLimit": 200000, "outputTokenLimit": 64000},
@@ -103,7 +113,7 @@ async def _discover_anthropic_models(api_key_override: Optional[str] = None) -> 
     # Resolve API key: override → DB → env
     api_key = api_key_override
     if not api_key:
-        api_key = await _get_provider_key_from_db("anthropic")
+        api_key = await _get_provider_key_from_db("anthropic", auth=auth)
     if not api_key:
         api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
@@ -128,7 +138,10 @@ async def _discover_anthropic_models(api_key_override: Optional[str] = None) -> 
         return FALLBACK
 
 
-async def _discover_openai_models(api_key_override: Optional[str] = None) -> list[dict]:
+async def _discover_openai_models(
+    auth: Optional[AuthContext] = None,
+    api_key_override: Optional[str] = None,
+) -> list[dict]:
     """Discover OpenAI models via the real API, with fallback list."""
     FALLBACK = [
         {"name": "gpt-4o", "displayName": "GPT-4o", "inputTokenLimit": 128000, "outputTokenLimit": 16384},
@@ -139,7 +152,7 @@ async def _discover_openai_models(api_key_override: Optional[str] = None) -> lis
     # Resolve API key: override → DB → env
     api_key = api_key_override
     if not api_key:
-        api_key = await _get_provider_key_from_db("openai")
+        api_key = await _get_provider_key_from_db("openai", auth=auth)
     if not api_key:
         api_key = settings.OPENAI_API_KEY
     if not api_key:
@@ -166,7 +179,10 @@ async def _discover_openai_models(api_key_override: Optional[str] = None) -> lis
         return FALLBACK
 
 
-async def _discover_gemini_models(api_key_override: Optional[str] = None) -> list[dict]:
+async def _discover_gemini_models(
+    auth: Optional[AuthContext] = None,
+    api_key_override: Optional[str] = None,
+) -> list[dict]:
     """Discover Gemini models using server credentials or an API key override."""
     if api_key_override:
         try:
@@ -178,9 +194,14 @@ async def _discover_gemini_models(api_key_override: Optional[str] = None) -> lis
             return []
 
     # DB settings → service account → env API key
+    if not auth:
+        return []
     try:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
-        db_settings = await get_llm_settings_from_db(provider_override="gemini")
+        db_settings = await get_llm_settings_from_db(
+            tenant_id=auth.tenant_id, user_id=auth.user_id,
+            provider_override="gemini",
+        )
     except Exception as e:
         logger.warning("Could not load LLM settings for model discovery: %s", e)
         return []
@@ -248,11 +269,19 @@ def _parse_gemini_model_list(client) -> list[dict]:
 # ── Helpers ──────────────────────────────────────────────────────
 
 
-async def _get_provider_key_from_db(provider: str) -> str:
+async def _get_provider_key_from_db(
+    provider: str,
+    auth: Optional[AuthContext] = None,
+) -> str:
     """Try to read a provider's API key from the DB settings table. Returns '' on failure."""
+    if not auth:
+        return ""
     try:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
-        db_settings = await get_llm_settings_from_db(provider_override=provider)
+        db_settings = await get_llm_settings_from_db(
+            tenant_id=auth.tenant_id, user_id=auth.user_id,
+            provider_override=provider,
+        )
         return db_settings.get("api_key", "")
     except Exception:
         pass

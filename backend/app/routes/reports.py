@@ -11,6 +11,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
+from app.auth.context import AuthContext, get_auth_context
 from app.database import get_db
 from app.models.eval_run import EvalRun
 from app.models.evaluation_analytics import EvaluationAnalytics
@@ -45,12 +46,14 @@ class CrossRunAnalyticsResponse(CamelModel):
 @router.get("/cross-run-analytics", response_model=CrossRunAnalyticsResponse)
 async def get_cross_run_analytics(
     app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return cached cross-run analytics from evaluation_analytics table."""
+    """Return cached cross-run analytics scoped to tenant + app_id."""
     result = await db.execute(
         select(EvaluationAnalytics)
         .where(
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
             EvaluationAnalytics.app_id == app_id,
             EvaluationAnalytics.scope == "cross_run",
             EvaluationAnalytics.run_id.is_(None),
@@ -69,6 +72,7 @@ async def get_cross_run_analytics(
         select(func.count())
         .select_from(EvaluationAnalytics)
         .where(
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
             EvaluationAnalytics.app_id == app_id,
             EvaluationAnalytics.scope == "single_run",
             EvaluationAnalytics.computed_at > cached.computed_at,
@@ -92,13 +96,15 @@ async def get_cross_run_analytics(
 async def refresh_cross_run_analytics(
     app_id: str = Query(...),
     limit: int = Query(50, ge=1, le=100),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Recompute cross-run analytics from single_run caches and persist."""
-    # Load single_run analytics rows + their EvalRun metadata
+    """Recompute cross-run analytics from single_run caches for user's runs within tenant."""
+    # Load single_run analytics rows scoped to tenant
     analytics_stmt = (
         select(EvaluationAnalytics)
         .where(
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
             EvaluationAnalytics.app_id == app_id,
             EvaluationAnalytics.scope == "single_run",
         )
@@ -128,11 +134,15 @@ async def refresh_cross_run_analytics(
         )
         runs_by_id = {str(r.id): r for r in runs_result.scalars().all()}
 
-    # Total runs count for coverage indicator
+    # Total runs count for coverage indicator (scoped to user within tenant)
     count_stmt = (
         select(func.count())
         .select_from(EvalRun)
-        .where(EvalRun.app_id == app_id)
+        .where(
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+            EvalRun.app_id == app_id,
+        )
     )
     count_result = await db.execute(count_stmt)
     all_runs_count = count_result.scalar() or 0
@@ -165,10 +175,11 @@ async def refresh_cross_run_analytics(
 
     now = datetime.now(timezone.utc)
 
-    # Upsert cross_run cache
+    # Upsert cross_run cache scoped to tenant
     existing_result = await db.execute(
         select(EvaluationAnalytics)
         .where(
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
             EvaluationAnalytics.app_id == app_id,
             EvaluationAnalytics.scope == "cross_run",
             EvaluationAnalytics.run_id.is_(None),
@@ -190,6 +201,7 @@ async def refresh_cross_run_analytics(
             analytics_data=analytics_dict,
             computed_at=now,
             source_run_count=len(runs_data),
+            tenant_id=auth.tenant_id,
         )
         db.add(row)
 
@@ -205,10 +217,18 @@ async def refresh_cross_run_analytics(
 
 
 @router.get("/{run_id}/export-pdf")
-async def export_report_pdf(run_id: str, db: AsyncSession = Depends(get_db)):
+async def export_report_pdf(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
     """Export report as PDF via headless browser rendering of self-contained HTML."""
-    # Verify run exists
-    stmt = select(EvalRun).where(EvalRun.id == UUID(run_id))
+    # Verify run ownership
+    stmt = select(EvalRun).where(
+        EvalRun.id == UUID(run_id),
+        EvalRun.tenant_id == auth.tenant_id,
+        EvalRun.user_id == auth.user_id,
+    )
     result = await db.execute(stmt)
     run = result.scalar_one_or_none()
     if not run:
@@ -283,6 +303,7 @@ async def get_report(
     cache_only: bool = Query(False, description="Only return cached report; 404 if not cached"),
     provider: str | None = Query(None, description="LLM provider for narrative generation"),
     model: str | None = Query(None, description="LLM model for narrative generation"),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an evaluation report for a completed run.
@@ -292,6 +313,17 @@ async def get_report(
     after first generation; use ?refresh=true to force regeneration.
     Use ?cache_only=true to check for cached data without triggering generation.
     """
+    # Verify run ownership
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == UUID(run_id),
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+        )
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Evaluation run not found")
+
     if cache_only:
         # Load from evaluation_analytics instead of EvalRun.report_cache
         cache_result = await db.execute(
@@ -310,7 +342,7 @@ async def get_report(
         except Exception:
             raise HTTPException(status_code=404, detail="No cached report")
 
-    service = ReportService(db)
+    service = ReportService(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
     try:
         return await service.generate(
             run_id,
@@ -335,6 +367,7 @@ class CrossRunSummaryRequest(CamelModel):
 @router.post("/cross-run-ai-summary", response_model=CrossRunAISummary)
 async def generate_cross_run_ai_summary(
     request: CrossRunSummaryRequest,
+    auth: AuthContext = Depends(get_auth_context),
     _db: AsyncSession = Depends(get_db),
 ):
     """Generate AI summary of cross-run analytics."""
@@ -344,6 +377,8 @@ async def generate_cross_run_ai_summary(
 
     try:
         settings = await get_llm_settings_from_db(
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
             auth_intent="managed_job",
             provider_override=request.provider or None,
         )

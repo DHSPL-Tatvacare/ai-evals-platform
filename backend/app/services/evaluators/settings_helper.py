@@ -5,7 +5,8 @@ them in job params (avoids storing secrets in the jobs table).
 """
 import logging
 import os
-from typing import Literal, Optional
+import uuid
+from typing import Literal, Optional, Union
 
 from sqlalchemy import select
 
@@ -25,6 +26,8 @@ def _detect_service_account_path() -> str:
 
 
 async def get_llm_settings_from_db(
+    tenant_id: Union[uuid.UUID, str],
+    user_id: Union[uuid.UUID, str],
     app_id: Optional[str] = None,
     key: str = "llm-settings",
     auth_intent: Literal["managed_job", "interactive"] = "interactive",
@@ -35,6 +38,8 @@ async def get_llm_settings_from_db(
     Returns dict with keys: api_key, provider, selected_model,
     auth_method, service_account_path.
 
+    Settings are always scoped to a specific tenant + user.
+
     If *provider_override* is given, the returned ``api_key`` is resolved
     for that provider rather than the saved default. This is needed when
     a job overrides the provider (e.g. report narrative with Anthropic
@@ -44,11 +49,19 @@ async def get_llm_settings_from_db(
     Both api_key and service_account_path can coexist.
     Raises RuntimeError if NEITHER is available.
     """
+    tid = uuid.UUID(str(tenant_id)) if not isinstance(tenant_id, uuid.UUID) else tenant_id
+    uid = uuid.UUID(str(user_id)) if not isinstance(user_id, uuid.UUID) else user_id
+
     async with async_session() as db:
         query = select(Setting).where(Setting.key == key)
         # app_id is stored as empty string (not NULL) for global settings
         resolved_app_id = app_id or ""
-        query = query.where(Setting.app_id == resolved_app_id)
+        query = query.where(
+            Setting.app_id == resolved_app_id,
+            Setting.tenant_id == tid,
+            Setting.user_id == uid,
+        )
+
         result = await db.execute(query)
         setting = result.scalar_one_or_none()
 
@@ -57,6 +70,8 @@ async def get_llm_settings_from_db(
             query_null = select(Setting).where(
                 Setting.key == key,
                 Setting.app_id.is_(None),
+                Setting.tenant_id == tid,
+                Setting.user_id == uid,
             )
             result_null = await db.execute(query_null)
             setting = result_null.scalar_one_or_none()

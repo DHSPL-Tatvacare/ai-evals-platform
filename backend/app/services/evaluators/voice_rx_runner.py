@@ -68,9 +68,11 @@ logger = logging.getLogger(__name__)
 
 async def _load_default_prompt(app_id: str, prompt_type: str, source_type: str) -> str:
     """Load the default prompt text from the DB for a given app/type/source."""
+    from app.constants import SYSTEM_TENANT_ID
     async with async_session() as db:
         result = await db.execute(
             select(Prompt).where(
+                Prompt.tenant_id == SYSTEM_TENANT_ID,
                 Prompt.app_id == app_id,
                 Prompt.prompt_type == prompt_type,
                 Prompt.source_type == source_type,
@@ -85,9 +87,11 @@ async def _load_default_prompt(app_id: str, prompt_type: str, source_type: str) 
 
 async def _load_default_schema(app_id: str, prompt_type: str, source_type: str) -> dict:
     """Load the default schema from the DB for a given app/type/source."""
+    from app.constants import SYSTEM_TENANT_ID
     async with async_session() as db:
         result = await db.execute(
             select(Schema).where(
+                Schema.tenant_id == SYSTEM_TENANT_ID,
                 Schema.app_id == app_id,
                 Schema.prompt_type == prompt_type,
                 Schema.source_type == source_type,
@@ -135,7 +139,7 @@ def _validate_pipeline_inputs(flow, listing, params: dict) -> list[str]:
     return errors
 
 
-async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
+async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx FlowConfig-driven evaluation pipeline.
 
     Three-step sequence: transcription -> normalization -> critique.
@@ -163,6 +167,8 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
     await create_eval_run(
         id=eval_run_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
         app_id=app_id,
         eval_type="full_evaluation",
         job_id=job_id,
@@ -196,6 +202,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
     # ── Resolve LLM settings ────────────────────────────────────
     from app.services.evaluators.settings_helper import get_llm_settings_from_db
     db_settings = await get_llm_settings_from_db(
+        tenant_id=tenant_id, user_id=user_id,
         app_id=None, key="llm-settings", auth_intent="managed_job",
         provider_override=params.get("provider") or None,
     )
@@ -287,7 +294,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
     # Update eval_run with config and LLM info
     async with async_session() as db:
         await db.execute(
-            update(EvalRun).where(EvalRun.id == eval_run_id).values(
+            update(EvalRun).where(EvalRun.id == eval_run_id, EvalRun.tenant_id == tenant_id).values(
                 config=config_snapshot,
                 llm_provider=provider,
                 llm_model=selected_model,
@@ -449,6 +456,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
                 update(EvalRun)
                 .where(
                     EvalRun.id == eval_run_id,
+                    EvalRun.tenant_id == tenant_id,
                     EvalRun.status != "cancelled",  # Don't overwrite cancel
                 )
                 .values(
@@ -478,6 +486,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
         evaluation["status"] = "cancelled"
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="cancelled",
             duration_ms=(time.monotonic() - start_time) * 1000,
             result=evaluation,
@@ -500,6 +509,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="failed",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message=f"[{e.step}] {e.message}",
@@ -518,6 +528,7 @@ async def run_voice_rx_evaluation(job_id, params: dict) -> dict:
 
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="failed",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message=error_msg,

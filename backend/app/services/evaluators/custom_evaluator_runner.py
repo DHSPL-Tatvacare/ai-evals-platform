@@ -106,7 +106,7 @@ def _extract_scores(output: dict, output_schema: list[dict]) -> Optional[dict]:
 # ── Single Custom Evaluator ─────────────────────────────────────────
 
 
-async def run_custom_evaluator(job_id, params: dict) -> dict:
+async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Execute a custom evaluator on a voice-rx listing or kaira-bot session.
 
     Params:
@@ -130,6 +130,8 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
 
     await create_eval_run(
         id=eval_run_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
         app_id=app_id,
         eval_type="custom",
         job_id=job_id,
@@ -218,6 +220,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     # ── Resolve LLM settings ────────────────────────────────────
     from app.services.evaluators.settings_helper import get_llm_settings_from_db
     db_settings = await get_llm_settings_from_db(
+        tenant_id=tenant_id, user_id=user_id,
         app_id=None, key="llm-settings", auth_intent="managed_job",
         provider_override=params.get("provider") or None,
     )
@@ -255,7 +258,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     # Update eval_run with config and LLM info
     async with async_session() as db:
         await db.execute(
-            update(EvalRun).where(EvalRun.id == eval_run_id).values(
+            update(EvalRun).where(EvalRun.id == eval_run_id, EvalRun.tenant_id == tenant_id).values(
                 config=config_snapshot,
                 llm_provider=db_settings["provider"],
                 llm_model=model,
@@ -303,6 +306,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
 
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="completed",
             duration_ms=duration_ms,
             result={
@@ -316,6 +320,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
     except JobCancelledError:
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="cancelled",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message="Cancelled",
@@ -327,6 +332,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
         error_msg = safe_error_message(e)
         await finalize_eval_run(
             eval_run_id,
+            tenant_id,
             status="failed",
             duration_ms=(time.monotonic() - start_time) * 1000,
             error_message=error_msg,
@@ -353,7 +359,7 @@ async def run_custom_evaluator(job_id, params: dict) -> dict:
 # Merged from voice_rx_batch_custom_runner.py
 
 
-async def run_custom_eval_batch(job_id, params: dict) -> dict:
+async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run multiple custom evaluators on a single listing/session.
 
     Params:
@@ -412,7 +418,7 @@ async def run_custom_eval_batch(job_id, params: dict) -> dict:
             sub_params["session_id"] = session_id
 
         try:
-            result = await run_custom_evaluator(job_id=job_id, params=sub_params)
+            result = await run_custom_evaluator(job_id=job_id, params=sub_params, tenant_id=tenant_id, user_id=user_id)
             run_id = result.get("eval_run_id")
             if run_id:
                 eval_run_ids.append(run_id)

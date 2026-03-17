@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 import traceback
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, select, update
@@ -132,11 +133,18 @@ def register_job_handler(job_type: str):
 
 
 async def process_job(job_id, job_type: str, params: dict) -> dict:
-    """Dispatch job to the appropriate handler."""
+    """Dispatch job to the appropriate handler.
+
+    Extracts tenant_id/user_id from params (injected by the job submission
+    route) and passes them as keyword args to the handler.
+    """
     handler = JOB_HANDLERS.get(job_type)
     if not handler:
         raise ValueError(f"Unknown job type: {job_type}")
-    return await handler(job_id, params)
+
+    tenant_id = uuid.UUID(params["tenant_id"])
+    user_id = uuid.UUID(params["user_id"])
+    return await handler(job_id, params, tenant_id=tenant_id, user_id=user_id)
 
 
 async def update_job_progress(
@@ -372,12 +380,14 @@ async def get_queue_position(job_id: str) -> int:
 
 
 @register_job_handler("evaluate-batch")
-async def handle_evaluate_batch(job_id, params: dict) -> dict:
+async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run batch evaluation on threads from a data file."""
     from app.services.evaluators.batch_runner import run_batch_evaluation
 
     result = await run_batch_evaluation(
         job_id=job_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
         data_path=params.get("data_path"),
         csv_content=params.get("csv_content"),
         app_id=params.get("app_id", "kaira-bot"),
@@ -410,13 +420,15 @@ async def handle_evaluate_batch(job_id, params: dict) -> dict:
 
 
 @register_job_handler("evaluate-adversarial")
-async def handle_evaluate_adversarial(job_id, params: dict) -> dict:
+async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run adversarial stress test against live Kaira API."""
     from app.services.evaluators.adversarial_runner import run_adversarial_evaluation
 
     result = await run_adversarial_evaluation(
         job_id=job_id,
-        user_id=params.get("user_id", ""),
+        tenant_id=tenant_id,
+        user_id=user_id,
+        kaira_test_user_id=params.get("user_id", ""),
         kaira_api_url=params.get("kaira_api_url", ""),
         kaira_auth_token=params.get("kaira_auth_token", ""),
         test_count=params.get("test_count", 15),
@@ -444,31 +456,31 @@ async def handle_evaluate_adversarial(job_id, params: dict) -> dict:
 
 
 @register_job_handler("evaluate-voice-rx")
-async def handle_evaluate_voice_rx(job_id, params: dict) -> dict:
+async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx two-call evaluation (transcription + critique)."""
     from app.services.evaluators.voice_rx_runner import run_voice_rx_evaluation
 
-    return await run_voice_rx_evaluation(job_id=job_id, params=params)
+    return await run_voice_rx_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
 @register_job_handler("evaluate-custom")
-async def handle_evaluate_custom(job_id, params: dict) -> dict:
+async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run a custom evaluator on a voice-rx listing."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_evaluator
 
-    return await run_custom_evaluator(job_id=job_id, params=params)
+    return await run_custom_evaluator(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
 @register_job_handler("evaluate-custom-batch")
-async def handle_evaluate_custom_batch(job_id, params: dict) -> dict:
+async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run multiple custom evaluators on a single entity."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_eval_batch
 
-    return await run_custom_eval_batch(job_id=job_id, params=params)
+    return await run_custom_eval_batch(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
 @register_job_handler("generate-report")
-async def handle_generate_report(job_id, params: dict) -> dict:
+async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate a single-run evaluation report (aggregation + AI narrative).
 
     Params:
@@ -492,7 +504,7 @@ async def handle_generate_report(job_id, params: dict) -> dict:
     )
 
     async with _async_session() as db:
-        service = ReportService(db)
+        service = ReportService(db, tenant_id=tenant_id, user_id=user_id)
         await update_job_progress(
             job_id, 1, 2, "Generating AI narrative…", run_id=run_id
         )
@@ -514,7 +526,7 @@ async def handle_generate_report(job_id, params: dict) -> dict:
 
 
 @register_job_handler("generate-cross-run-report")
-async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
+async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate cross-run AI summary (LLM call on aggregated analytics).
 
     Params:
@@ -540,7 +552,8 @@ async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
     # provider-specific API key is resolved from the DB settings.
     job_provider = params.get("provider") or None
     db_settings = await get_llm_settings_from_db(
-        provider_override=job_provider, auth_intent="managed_job"
+        tenant_id=tenant_id, user_id=user_id,
+        provider_override=job_provider, auth_intent="managed_job",
     )
     provider_name = job_provider or db_settings.get("provider", "gemini")
     model_name = params.get("model") or db_settings.get("selected_model", "")
@@ -571,6 +584,7 @@ async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
 
         result = await db.execute(
             _select(EvaluationAnalytics).where(
+                EvaluationAnalytics.tenant_id == tenant_id,
                 EvaluationAnalytics.scope == "cross_run_summary",
                 EvaluationAnalytics.app_id == app_id,
             )
@@ -585,6 +599,7 @@ async def handle_generate_cross_run_report(job_id, params: dict) -> dict:
         else:
             db.add(
                 EvaluationAnalytics(
+                    tenant_id=tenant_id,
                     app_id=app_id,
                     scope="cross_run_summary",
                     analytics_data=summary_data,

@@ -79,6 +79,8 @@ def _file_hash(path: str) -> str:
 
 async def run_batch_evaluation(
     job_id,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
     data_path: Optional[str] = None,
     csv_content: Optional[str] = None,
     app_id: str = "kaira-bot",
@@ -121,6 +123,8 @@ async def run_batch_evaluation(
     data_hash = _file_hash(data_path) if data_path else ""
     await create_eval_run(
         id=run_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
         app_id=app_id,
         eval_type="batch_thread",
         job_id=job_id,
@@ -157,7 +161,10 @@ async def run_batch_evaluation(
     if not api_key:
         from app.services.evaluators.settings_helper import get_llm_settings_from_db
 
-        db_settings = await get_llm_settings_from_db(auth_intent="managed_job", provider_override=llm_provider or None)
+        db_settings = await get_llm_settings_from_db(
+            tenant_id=tenant_id, user_id=user_id,
+            auth_intent="managed_job", provider_override=llm_provider or None,
+        )
         api_key = db_settings["api_key"]
         auth_method = db_settings.get("auth_method", "api_key")
         if not service_account_path:
@@ -216,7 +223,7 @@ async def run_batch_evaluation(
     async with async_session() as db:
         await db.execute(
             update(EvalRun)
-            .where(EvalRun.id == run_id)
+            .where(EvalRun.id == run_id, EvalRun.tenant_id == tenant_id)
             .values(
                 llm_provider=llm_provider,
                 llm_model=llm_model or "",
@@ -271,12 +278,22 @@ async def run_batch_evaluation(
         if not enabled
     ]
 
-    # Load custom evaluators if specified
+    # Load custom evaluators if specified (ownership check)
     custom_evaluators: list[Evaluator] = []
     if custom_evaluator_ids:
+        from sqlalchemy import or_, and_
+        from app.constants import SYSTEM_TENANT_ID
         async with async_session() as db:
             for eid in custom_evaluator_ids:
-                ev = await db.get(Evaluator, eid)
+                ev = await db.scalar(
+                    select(Evaluator).where(
+                        Evaluator.id == eid,
+                        or_(
+                            and_(Evaluator.tenant_id == tenant_id, Evaluator.user_id == user_id),
+                            Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                        ),
+                    )
+                )
                 if ev:
                     custom_evaluators.append(ev)
 
@@ -694,7 +711,7 @@ async def run_batch_evaluation(
         async with async_session() as db:
             await db.execute(
                 update(EvalRun)
-                .where(EvalRun.id == run_id)
+                .where(EvalRun.id == run_id, EvalRun.tenant_id == tenant_id)
                 .values(
                     status=final_status,
                     completed_at=datetime.now(timezone.utc),
@@ -732,6 +749,7 @@ async def run_batch_evaluation(
         }
         await finalize_eval_run(
             run_id,
+            tenant_id,
             status="cancelled",
             duration_ms=round(duration * 1000, 2),
             summary=summary,
@@ -744,6 +762,7 @@ async def run_batch_evaluation(
     except Exception as e:
         await finalize_eval_run(
             run_id,
+            tenant_id,
             status="failed",
             duration_ms=round((time.monotonic() - start_time) * 1000, 2),
             error_message=safe_error_message(e),
