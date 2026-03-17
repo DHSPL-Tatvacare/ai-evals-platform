@@ -154,14 +154,31 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
     mime_type = "audio/mpeg"
 
     async with async_session() as db:
-        evaluator = await db.get(Evaluator, evaluator_id)
+        from sqlalchemy import or_, and_
+        from app.constants import SYSTEM_TENANT_ID
+
+        evaluator = await db.scalar(
+            select(Evaluator).where(
+                Evaluator.id == evaluator_id,
+                or_(
+                    and_(Evaluator.tenant_id == tenant_id, Evaluator.user_id == user_id),
+                    Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                ),
+            )
+        )
         if not evaluator:
-            raise ValueError(f"Evaluator {evaluator_id} not found")
+            raise ValueError(f"Evaluator {evaluator_id} not found or not accessible")
 
         if is_session_flow:
-            session = await db.get(ChatSession, session_id)
+            session = await db.scalar(
+                select(ChatSession).where(
+                    ChatSession.id == session_id,
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.user_id == user_id,
+                )
+            )
             if not session:
-                raise ValueError(f"ChatSession {session_id} not found")
+                raise ValueError(f"ChatSession {session_id} not found or not accessible")
             result = await db.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session.id)
@@ -172,9 +189,15 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
                 for m in result.scalars().all()
             ]
         else:
-            listing = await db.get(Listing, listing_id)
+            listing = await db.scalar(
+                select(Listing).where(
+                    Listing.id == listing_id,
+                    Listing.tenant_id == tenant_id,
+                    Listing.user_id == user_id,
+                )
+            )
             if not listing:
-                raise ValueError(f"Listing {listing_id} not found")
+                raise ValueError(f"Listing {listing_id} not found or not accessible")
 
     # ── Load audio bytes if available (voice-rx only) ────────────
     if listing:
@@ -270,7 +293,7 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
     response_text = None
 
     try:
-        if await is_job_cancelled(job_id):
+        if await is_job_cancelled(job_id, tenant_id=tenant_id):
             raise JobCancelledError("Job was cancelled by user")
 
         # Update progress
@@ -297,7 +320,7 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
             )
             response_text = json.dumps(output, ensure_ascii=False)
 
-        if await is_job_cancelled(job_id):
+        if await is_job_cancelled(job_id, tenant_id=tenant_id):
             raise JobCancelledError("Job was cancelled by user")
 
         # ── Build completed result ──────────────────────────────
@@ -376,15 +399,26 @@ async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
     app_id = params.get("app_id", "voice-rx")
     parallel = params.get("parallel", True)
 
-    # Validate evaluators exist
+    # Validate evaluators exist and are accessible
     async with async_session() as db:
+        from sqlalchemy import or_, and_
+        from app.constants import SYSTEM_TENANT_ID
+
         valid_ids = []
         for eid in evaluator_ids:
-            ev = await db.get(Evaluator, eid)
+            ev = await db.scalar(
+                select(Evaluator).where(
+                    Evaluator.id == eid,
+                    or_(
+                        and_(Evaluator.tenant_id == tenant_id, Evaluator.user_id == user_id),
+                        Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                    ),
+                )
+            )
             if ev:
                 valid_ids.append(eid)
             else:
-                logger.warning("Evaluator %s not found, skipping", eid)
+                logger.warning("Evaluator %s not found or not accessible, skipping", eid)
 
         if not valid_ids:
             raise ValueError("No valid evaluators found")
@@ -401,7 +435,7 @@ async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
         """Run one evaluator, creating its own EvalRun via run_custom_evaluator."""
         nonlocal completed, errors, first_run_id_written
 
-        if await is_job_cancelled(job_id):
+        if await is_job_cancelled(job_id, tenant_id=tenant_id):
             raise JobCancelledError("Batch cancelled")
 
         sub_params = {

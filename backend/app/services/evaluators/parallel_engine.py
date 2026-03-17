@@ -7,6 +7,7 @@ With concurrency=1, behavior is identical to a sequential for-loop.
 """
 import asyncio
 import logging
+import uuid
 from typing import TypeVar, Sequence, Callable, Awaitable
 
 from app.services.job_worker import is_job_cancelled, JobCancelledError
@@ -23,6 +24,7 @@ async def run_parallel(
     *,
     concurrency: int = 1,
     job_id,
+    tenant_id: uuid.UUID,
     progress_callback: Callable[[int, int, str], Awaitable[None]] | None = None,
     progress_message: Callable[[int, int, int, int], str] | None = None,
     inter_item_delay: float = 0,
@@ -63,7 +65,7 @@ async def run_parallel(
     async def _run_one(index: int, item: T):
         nonlocal completed_count, ok_count, error_count
 
-        if await is_job_cancelled(job_id):
+        if await is_job_cancelled(job_id, tenant_id=tenant_id):
             raise JobCancelledError("Job was cancelled by user")
 
         # Stagger starts if delay is configured
@@ -72,7 +74,7 @@ async def run_parallel(
                 await asyncio.sleep(inter_item_delay)
 
         async with semaphore:
-            if await is_job_cancelled(job_id):
+            if await is_job_cancelled(job_id, tenant_id=tenant_id):
                 raise JobCancelledError("Job was cancelled by user")
 
             try:

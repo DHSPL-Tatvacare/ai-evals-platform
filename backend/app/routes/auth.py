@@ -43,7 +43,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
         secure=True,
         samesite="lax",
         max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400,
-        path="/api/auth",
+        path="/api/auth/refresh",
     )
 
 
@@ -152,7 +152,7 @@ async def logout(
             await db.delete(stored)
             await db.commit()
 
-    response.delete_cookie("refresh_token", path="/api/auth")
+    response.delete_cookie("refresh_token", path="/api/auth/refresh")
     return {"status": "ok"}
 
 

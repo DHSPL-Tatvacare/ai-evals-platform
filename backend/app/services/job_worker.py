@@ -201,7 +201,7 @@ def _cleanup_cancelled_job(job_id) -> None:
     _cancel_check_times.pop(job_key, None)
 
 
-async def is_job_cancelled(job_id) -> bool:
+async def is_job_cancelled(job_id, tenant_id: uuid.UUID | None = None) -> bool:
     """Check if a job has been cancelled (cooperative cancellation).
 
     Memory-first: returns immediately if the cancel route has signalled.
@@ -219,8 +219,11 @@ async def is_job_cancelled(job_id) -> bool:
         return False
     _cancel_check_times[job_key] = now
     async with async_session() as db:
-        job = await db.get(Job, job_id)
-        if job is not None and job.status == "cancelled":
+        stmt = select(Job).where(Job.id == job_id, Job.status == "cancelled")
+        if tenant_id is not None:
+            stmt = stmt.where(Job.tenant_id == tenant_id)
+        job = await db.scalar(stmt)
+        if job is not None:
             _cancelled_jobs.add(job_key)
             return True
     return False

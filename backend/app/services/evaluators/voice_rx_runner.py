@@ -182,9 +182,15 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
 
     # ── Load listing ─────────────────────────────────────────────
     async with async_session() as db:
-        listing = await db.get(Listing, listing_id)
+        listing = await db.scalar(
+            select(Listing).where(
+                Listing.id == listing_id,
+                Listing.tenant_id == tenant_id,
+                Listing.user_id == user_id,
+            )
+        )
         if not listing:
-            raise ValueError(f"Listing {listing_id} not found")
+            raise ValueError(f"Listing {listing_id} not found or not accessible")
 
     audio_file_meta = listing.audio_file
     if not audio_file_meta:
@@ -319,7 +325,7 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
 
     try:
         async def check_cancel():
-            if await is_job_cancelled(job_id):
+            if await is_job_cancelled(job_id, tenant_id=tenant_id):
                 raise JobCancelledError("Job was cancelled by user")
 
         # ── STEP 1: Transcription ───────────────────────────────

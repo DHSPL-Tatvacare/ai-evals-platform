@@ -283,6 +283,7 @@ async def run_adversarial_evaluation(
             worker=_evaluate_one_case,
             concurrency=effective_concurrency,
             job_id=job_id,
+            tenant_id=tenant_id,
             progress_callback=_progress_bridge,
             progress_message=_progress_message,
             inter_item_delay=case_delay,

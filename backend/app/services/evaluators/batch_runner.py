@@ -590,6 +590,7 @@ async def run_batch_evaluation(
             worker=_evaluate_one_thread,
             concurrency=effective_concurrency,
             job_id=job_id,
+            tenant_id=tenant_id,
             progress_callback=_progress_bridge,
             progress_message=_progress_message,
             inter_item_delay=1.5,
