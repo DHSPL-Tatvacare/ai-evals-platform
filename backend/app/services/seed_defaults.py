@@ -13,6 +13,7 @@ from app.config import settings
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import async_session as get_async_session
 from app.models.tenant import Tenant
+from app.models.tenant_config import TenantConfig
 from app.models.user import User, UserRole
 from app.models.prompt import Prompt
 from app.models.schema import Schema
@@ -1815,6 +1816,19 @@ async def seed_bootstrap_admin() -> None:
             password_hash=hash_password(password),
             display_name="Admin",
             role=UserRole.OWNER,
+        ))
+
+        # Create tenant config (allowed domains from env)
+        allowed_domains_str = settings.ADMIN_TENANT_ALLOWED_DOMAINS
+        allowed_domains = [
+            d.strip().lower() if d.strip().startswith("@") else f"@{d.strip().lower()}"
+            for d in allowed_domains_str.split(",")
+            if d.strip()
+        ] if allowed_domains_str else []
+
+        db.add(TenantConfig(
+            tenant_id=tenant.id,
+            allowed_domains=allowed_domains,
         ))
 
         await db.commit()

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     KAIRA_AUTH_TOKEN: str = ""
     KAIRA_TEST_USER_ID: str = ""
 
+    # Frontend URL (used for invite link URLs — must point to where users access the app)
+    APP_BASE_URL: str = "http://localhost:5173"
+
     # Auth / JWT
     JWT_SECRET: str = ""  # Required — validated on startup
     JWT_ALGORITHM: str = "HS256"
@@ -46,6 +49,7 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = ""
     ADMIN_PASSWORD: str = ""
     ADMIN_TENANT_NAME: str = ""
+    ADMIN_TENANT_ALLOWED_DOMAINS: str = ""  # Comma-separated, e.g. "@tatvacare.in,@tatva.com"
 
     # Adversarial test settings
     ADVERSARIAL_MAX_TURNS: int = 10

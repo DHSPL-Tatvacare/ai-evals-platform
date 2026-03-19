@@ -18,7 +18,7 @@ import {
   EvalAdversarialDetailV2,
   EvalLogs,
 } from "@/features/evalRuns";
-import { LoginPage, AuthGuard, AdminGuard } from "@/features/auth";
+import { LoginPage, SignupPage, AuthGuard, AdminGuard } from "@/features/auth";
 import { AdminUsersPage } from "@/features/admin";
 import { HomePage } from "./pages/HomePage";
 import { ListingPage } from "./pages/ListingPage";
@@ -30,8 +30,9 @@ export function Router() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public route — login */}
+        {/* Public routes — login + signup */}
         <Route path={routes.login} element={<LoginPage />} />
+        <Route path={routes.signup} element={<SignupPage />} />
 
         {/* Protected routes — wrapped with AuthGuard + MainLayout */}
         <Route

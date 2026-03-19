@@ -39,8 +39,8 @@ class SessionResponse(CamelORMModel):
     is_first_message: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
 
 
 class MessageCreate(CamelModel):
@@ -69,5 +69,5 @@ class MessageResponse(CamelORMModel):
     status: str
     error_message: Optional[str] = None
     created_at: datetime
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID

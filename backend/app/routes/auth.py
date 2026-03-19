@@ -15,11 +15,30 @@ from app.auth.utils import (
 )
 from app.config import settings
 from app.database import get_db
+from app.models.invite_link import InviteLink
 from app.models.tenant import Tenant
-from app.models.user import RefreshToken, User
-from app.schemas.auth import ChangePasswordRequest, LoginRequest
+from app.models.tenant_config import TenantConfig
+from app.models.user import RefreshToken, User, UserRole
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, SignupRequest
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+async def _check_allowed_domains(email: str, tenant_id, db: AsyncSession) -> None:
+    """Raise 403 if the tenant restricts email domains and this email doesn't match."""
+    config = await db.scalar(
+        select(TenantConfig).where(TenantConfig.tenant_id == tenant_id)
+    )
+    if not config or not config.allowed_domains:
+        return  # No restrictions
+    email_lower = email.strip().lower()
+    for domain in config.allowed_domains:
+        if email_lower.endswith(domain.lower()):
+            return
+    raise HTTPException(
+        403,
+        detail=f"Email domain not allowed. Permitted domains: {', '.join(config.allowed_domains)}",
+    )
 
 
 def _user_response(user: User, tenant: Tenant) -> dict:
@@ -66,6 +85,9 @@ async def login(
     tenant = await db.get(Tenant, user.tenant_id)
     if not tenant or not tenant.is_active:
         raise HTTPException(403, detail="Tenant disabled")
+
+    # 2b. Check allowed email domains
+    await _check_allowed_domains(user.email, tenant.id, db)
 
     # 3. Create access token
     access_token = create_access_token(user.id, user.tenant_id, user.email, user.role.value)
@@ -145,12 +167,10 @@ async def logout(
     raw_token = request.cookies.get("refresh_token")
     if raw_token:
         token_hash = hash_refresh_token(raw_token)
-        stored = await db.scalar(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        await db.execute(
+            delete(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
-        if stored:
-            await db.delete(stored)
-            await db.commit()
+        await db.commit()
 
     response.delete_cookie("refresh_token", path="/api/auth/refresh")
     return {"status": "ok"}
@@ -170,6 +190,22 @@ async def get_me(
     return _user_response(user, tenant)
 
 
+def _validate_password_strength(password: str) -> str | None:
+    """Return an error message if password is weak, or None if strong."""
+    if len(password) < 8:
+        return "Password must be at least 8 characters"
+    import re
+    if not re.search(r"[A-Z]", password):
+        return "Password must contain at least one uppercase letter"
+    if not re.search(r"[a-z]", password):
+        return "Password must contain at least one lowercase letter"
+    if not re.search(r"\d", password):
+        return "Password must contain at least one number"
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return "Password must contain at least one special character"
+    return None
+
+
 @router.put("/me/password")
 async def change_password(
     body: ChangePasswordRequest,
@@ -181,6 +217,12 @@ async def change_password(
         raise HTTPException(404, detail="User not found")
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(400, detail="Current password incorrect")
+    if verify_password(body.new_password, user.password_hash):
+        raise HTTPException(400, detail="New password must be different from current password")
+
+    strength_error = _validate_password_strength(body.new_password)
+    if strength_error:
+        raise HTTPException(400, detail=strength_error)
 
     user.password_hash = hash_password(body.new_password)
 
@@ -190,3 +232,128 @@ async def change_password(
     )
     await db.commit()
     return {"status": "ok"}
+
+
+# ── Invite Link Signup ──────────────────────────────────────────────────────
+
+
+async def _validate_invite(token: str, db: AsyncSession) -> tuple[InviteLink | None, Tenant | None]:
+    """Validate an invite token. Returns (invite, tenant) or (None, None)."""
+    token_hash = hash_refresh_token(token)
+    invite = await db.scalar(
+        select(InviteLink).where(InviteLink.token_hash == token_hash)
+    )
+    if not invite or not invite.is_active:
+        return None, None
+    if invite.expires_at < datetime.now(timezone.utc):
+        return None, None
+    if invite.max_uses is not None and invite.uses_count >= invite.max_uses:
+        return None, None
+
+    tenant = await db.get(Tenant, invite.tenant_id)
+    if not tenant or not tenant.is_active:
+        return None, None
+
+    return invite, tenant
+
+
+@router.get("/validate-invite")
+async def validate_invite(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if an invite token is valid (public endpoint)."""
+    invite, tenant = await _validate_invite(token, db)
+    if not invite or not tenant:
+        return {"valid": False}
+
+    # Include allowed domains so frontend can hint at restrictions
+    config = await db.scalar(
+        select(TenantConfig).where(TenantConfig.tenant_id == tenant.id)
+    )
+    allowed_domains = config.allowed_domains if config and config.allowed_domains else []
+
+    return {
+        "valid": True,
+        "tenantName": tenant.name,
+        "defaultRole": invite.default_role.value,
+        "expiresAt": invite.expires_at.isoformat(),
+        "allowedDomains": allowed_domains,
+    }
+
+
+@router.post("/signup")
+async def signup(
+    body: SignupRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new user account via invite link (public endpoint)."""
+    # 1. Validate invite (with row lock to prevent race on uses_count)
+    token_hash = hash_refresh_token(body.token)
+    invite = await db.scalar(
+        select(InviteLink)
+        .where(InviteLink.token_hash == token_hash)
+        .with_for_update()
+    )
+    if not invite or not invite.is_active:
+        raise HTTPException(400, detail="Invalid or expired invite link")
+    if invite.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(400, detail="Invalid or expired invite link")
+    if invite.max_uses is not None and invite.uses_count >= invite.max_uses:
+        raise HTTPException(400, detail="Invalid or expired invite link")
+
+    tenant = await db.get(Tenant, invite.tenant_id)
+    if not tenant or not tenant.is_active:
+        raise HTTPException(400, detail="Invalid or expired invite link")
+
+    # 1b. Check allowed email domains
+    await _check_allowed_domains(body.email, tenant.id, db)
+
+    # 2. Validate password strength
+    strength_error = _validate_password_strength(body.password)
+    if strength_error:
+        raise HTTPException(400, detail=strength_error)
+
+    # 3. Check duplicate email within tenant
+    existing = await db.scalar(
+        select(User).where(
+            User.tenant_id == invite.tenant_id,
+            func.lower(User.email) == func.lower(body.email),
+        )
+    )
+    if existing:
+        raise HTTPException(400, detail="An account with this email already exists. Please sign in instead.")
+
+    # 4. Create user
+    user = User(
+        tenant_id=invite.tenant_id,
+        email=body.email.strip().lower(),
+        password_hash=hash_password(body.password),
+        display_name=body.display_name.strip(),
+        role=invite.default_role,
+    )
+    db.add(user)
+
+    # 5. Increment invite usage
+    invite.uses_count += 1
+
+    await db.flush()
+
+    # 6. Create tokens (same as login)
+    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role.value)
+    raw_refresh, refresh_hash = create_refresh_token()
+    db.add(RefreshToken(
+        user_id=user.id,
+        token_hash=refresh_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
+    ))
+
+    await db.commit()
+
+    # 7. Set refresh cookie and return
+    _set_refresh_cookie(response, raw_refresh)
+    return {
+        "accessToken": access_token,
+        "user": _user_response(user, tenant),
+    }

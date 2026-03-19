@@ -29,6 +29,9 @@ interface AuthStore {
   setAccessToken: (token: string) => void;
 }
 
+// Singleton refresh promise — prevents concurrent refresh calls from racing
+let refreshPromise: Promise<boolean> | null = null;
+
 export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   accessToken: localStorage.getItem('accessToken'),
@@ -69,14 +72,23 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   refreshToken: async () => {
-    try {
-      const { accessToken } = await authApi.refresh();
-      localStorage.setItem('accessToken', accessToken);
-      set({ accessToken });
-      return true;
-    } catch {
-      return false;
-    }
+    // If a refresh is already in-flight, reuse it instead of firing another
+    if (refreshPromise) return refreshPromise;
+
+    refreshPromise = (async () => {
+      try {
+        const { accessToken } = await authApi.refresh();
+        localStorage.setItem('accessToken', accessToken);
+        set({ accessToken });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+
+    return refreshPromise;
   },
 
   loadUser: async () => {

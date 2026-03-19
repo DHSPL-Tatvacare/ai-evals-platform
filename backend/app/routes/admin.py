@@ -1,5 +1,6 @@
-"""Admin API routes — database stats, selective data erasure, user management, tenant management."""
+"""Admin API routes — database stats, selective data erasure, user management, tenant management, invite links."""
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,9 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, require_admin, require_owner
+from app.auth.utils import create_refresh_token, hash_password, hash_refresh_token
 from app.database import get_db
+from app.models.invite_link import InviteLink
 from app.models.listing import Listing
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
 from app.models.chat import ChatSession, ChatMessage
@@ -19,8 +22,9 @@ from app.models.job import Job
 from app.models.history import History
 from app.models.setting import Setting
 from app.models.tag import Tag
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, RefreshToken
 from app.models.tenant import Tenant
+from app.models.tenant_config import TenantConfig
 from app.schemas.base import CamelModel
 
 logger = logging.getLogger(__name__)
@@ -341,6 +345,15 @@ async def create_user(
     """Create a new user in the tenant."""
     from app.auth.utils import hash_password
 
+    # Enforce tenant domain policy
+    from app.routes.auth import _check_allowed_domains, _validate_password_strength
+    await _check_allowed_domains(body.email, auth.tenant_id, db)
+
+    # Validate password strength
+    strength_error = _validate_password_strength(body.password)
+    if strength_error:
+        raise HTTPException(400, detail=strength_error)
+
     # Check duplicate email
     existing = await db.scalar(
         select(User).where(User.tenant_id == auth.tenant_id, User.email == body.email)
@@ -408,6 +421,50 @@ async def update_user(
     }
 
 
+class AdminResetPasswordRequest(CamelModel):
+    new_password: str
+
+
+@router.put("/users/{user_id}/password")
+async def admin_reset_password(
+    user_id: str,
+    body: AdminResetPasswordRequest,
+    auth: AuthContext = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset a user's password (admin+). Revokes all their refresh tokens."""
+    from uuid import UUID
+    from app.routes.auth import _validate_password_strength
+
+    strength_error = _validate_password_strength(body.new_password)
+    if strength_error:
+        raise HTTPException(400, detail=strength_error)
+
+    user = await db.scalar(
+        select(User).where(User.id == UUID(user_id), User.tenant_id == auth.tenant_id)
+    )
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    # Admins cannot reset owner passwords unless they are owners themselves
+    if user.role == UserRole.OWNER and auth.role != "owner":
+        raise HTTPException(403, detail="Only owners can reset owner passwords")
+
+    # Prevent reusing the same password
+    from app.auth.utils import verify_password as _verify
+    if _verify(body.new_password, user.password_hash):
+        raise HTTPException(400, detail="New password must be different from current password")
+
+    user.password_hash = hash_password(body.new_password)
+
+    # Revoke all refresh tokens to force re-login
+    await db.execute(
+        delete(RefreshToken).where(RefreshToken.user_id == user.id)
+    )
+    await db.commit()
+    return {"status": "ok", "id": user_id}
+
+
 @router.delete("/users/{user_id}")
 async def deactivate_user(
     user_id: str,
@@ -471,3 +528,174 @@ async def update_tenant(
         "slug": tenant.slug,
         "isActive": tenant.is_active,
     }
+
+
+# ── Invite Links ─────────────────────────────────────────────────────────────
+
+
+class CreateInviteLinkRequest(CamelModel):
+    label: Optional[str] = None
+    default_role: str = "member"
+    max_uses: Optional[int] = None
+    expires_in_hours: int = 168  # 7 days
+
+
+def _invite_response(invite: InviteLink, creator_email: str) -> dict:
+    return {
+        "id": str(invite.id),
+        "label": invite.label,
+        "defaultRole": invite.default_role.value,
+        "maxUses": invite.max_uses,
+        "usesCount": invite.uses_count,
+        "expiresAt": invite.expires_at.isoformat(),
+        "isActive": invite.is_active,
+        "createdAt": invite.created_at.isoformat() if invite.created_at else None,
+        "createdByEmail": creator_email,
+    }
+
+
+@router.post("/invite-links", status_code=201)
+async def create_invite_link(
+    body: CreateInviteLinkRequest,
+    auth: AuthContext = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate an invite link for self-service signup (admin+)."""
+    # Validate role
+    if body.default_role not in ("member", "admin"):
+        raise HTTPException(400, detail="Role must be 'member' or 'admin'")
+    if body.expires_in_hours < 1 or body.expires_in_hours > 720:
+        raise HTTPException(400, detail="Expiry must be between 1 and 720 hours")
+    if body.max_uses is not None and body.max_uses < 1:
+        raise HTTPException(400, detail="Max uses must be at least 1")
+
+    raw_token, token_hash = create_refresh_token()  # reuse same random+hash pattern
+
+    invite = InviteLink(
+        tenant_id=auth.tenant_id,
+        created_by=auth.user_id,
+        token_hash=token_hash,
+        label=body.label,
+        default_role=UserRole(body.default_role),
+        max_uses=body.max_uses,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours),
+    )
+    db.add(invite)
+    await db.commit()
+    await db.refresh(invite)
+
+    # Build the invite URL from the configured frontend base URL
+    from app.config import settings
+    base = settings.APP_BASE_URL.rstrip("/")
+    invite_url = f"{base}/signup?invite={raw_token}"
+
+    resp = _invite_response(invite, auth.email)
+    resp["inviteUrl"] = invite_url
+    return resp
+
+
+@router.get("/invite-links")
+async def list_invite_links(
+    auth: AuthContext = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all invite links for the tenant (admin+)."""
+    result = await db.execute(
+        select(InviteLink, User.email)
+        .join(User, InviteLink.created_by == User.id)
+        .where(InviteLink.tenant_id == auth.tenant_id)
+        .order_by(InviteLink.created_at.desc())
+    )
+    return [_invite_response(invite, email) for invite, email in result.all()]
+
+
+@router.delete("/invite-links/{link_id}")
+async def revoke_invite_link(
+    link_id: str,
+    auth: AuthContext = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke an invite link (admin+)."""
+    from uuid import UUID
+    invite = await db.scalar(
+        select(InviteLink).where(
+            InviteLink.id == UUID(link_id),
+            InviteLink.tenant_id == auth.tenant_id,
+        )
+    )
+    if not invite:
+        raise HTTPException(404, detail="Invite link not found")
+
+    invite.is_active = False
+    await db.commit()
+    return {"revoked": True, "id": link_id}
+
+
+# ── Tenant Config ─────────────────────────────────────────────────────────────
+
+
+class UpdateTenantConfigRequest(CamelModel):
+    app_url: Optional[str] = None
+    logo_url: Optional[str] = None
+    allowed_domains: Optional[list[str]] = None
+
+
+def _tenant_config_response(config: TenantConfig) -> dict:
+    return {
+        "id": str(config.id),
+        "tenantId": str(config.tenant_id),
+        "appUrl": config.app_url,
+        "logoUrl": config.logo_url,
+        "allowedDomains": config.allowed_domains or [],
+        "createdAt": config.created_at.isoformat() if config.created_at else None,
+        "updatedAt": config.updated_at.isoformat() if config.updated_at else None,
+    }
+
+
+@router.get("/tenant-config")
+async def get_tenant_config(
+    auth: AuthContext = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get tenant config (owner only). Creates default config if none exists."""
+    config = await db.scalar(
+        select(TenantConfig).where(TenantConfig.tenant_id == auth.tenant_id)
+    )
+    if not config:
+        config = TenantConfig(tenant_id=auth.tenant_id)
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+    return _tenant_config_response(config)
+
+
+@router.patch("/tenant-config")
+async def update_tenant_config(
+    body: UpdateTenantConfigRequest,
+    auth: AuthContext = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update tenant config (owner only)."""
+    config = await db.scalar(
+        select(TenantConfig).where(TenantConfig.tenant_id == auth.tenant_id)
+    )
+    if not config:
+        config = TenantConfig(tenant_id=auth.tenant_id)
+        db.add(config)
+        await db.flush()
+
+    if body.app_url is not None:
+        config.app_url = body.app_url or None
+    if body.logo_url is not None:
+        config.logo_url = body.logo_url or None
+    if body.allowed_domains is not None:
+        # Normalize: lowercase, ensure @ prefix
+        config.allowed_domains = [
+            d.lower() if d.startswith("@") else f"@{d.lower()}"
+            for d in body.allowed_domains
+            if d.strip()
+        ]
+
+    await db.commit()
+    await db.refresh(config)
+    return _tenant_config_response(config)

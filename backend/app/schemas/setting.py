@@ -1,4 +1,5 @@
 """Setting request/response schemas."""
+import uuid
 from typing import Optional
 from datetime import datetime
 from app.schemas.base import CamelModel, CamelORMModel
@@ -20,5 +21,5 @@ class SettingResponse(CamelORMModel):
     key: str
     value: dict
     updated_at: datetime
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID

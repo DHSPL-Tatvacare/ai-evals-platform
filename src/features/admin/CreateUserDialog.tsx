@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Button, Input } from '@/components/ui';
+import { Modal, Button, Input, PasswordStrengthIndicator, validatePasswordStrength } from '@/components/ui';
 
 interface CreateUserDialogProps {
   isOpen: boolean;
@@ -33,14 +33,16 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
     onClose();
   };
 
+  const { valid: passwordStrong } = validatePasswordStrength(password);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !displayName.trim() || !password.trim()) {
       setError('All fields are required');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (!passwordStrong) {
+      setError('Password does not meet strength requirements');
       return;
     }
 
@@ -90,8 +92,9 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Min. 8 characters"
+            placeholder="Create a strong password"
           />
+          <PasswordStrengthIndicator password={password} className="mt-2" />
         </div>
         <div>
           <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">
@@ -115,7 +118,7 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
           <Button type="button" variant="secondary" size="md" onClick={handleClose}>
             Cancel
           </Button>
-          <Button type="submit" size="md" isLoading={isSubmitting}>
+          <Button type="submit" size="md" isLoading={isSubmitting} disabled={!passwordStrong}>
             Create User
           </Button>
         </div>

@@ -37,8 +37,8 @@ class JobResponse(CamelORMModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
     queue_position: Optional[int] = None
 
     @model_validator(mode="after")

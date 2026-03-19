@@ -1,4 +1,5 @@
 """Tag request/response schemas."""
+import uuid
 from typing import Optional
 from datetime import datetime
 from app.schemas.base import CamelModel, CamelORMModel
@@ -21,5 +22,5 @@ class TagResponse(CamelORMModel):
     name: str
     count: int
     last_used: datetime
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID

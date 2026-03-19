@@ -4,6 +4,7 @@
  */
 export const routes = {
   login: '/login',
+  signup: '/signup',
   adminUsers: '/admin/users',
   profile: '/profile',
   voiceRx: {

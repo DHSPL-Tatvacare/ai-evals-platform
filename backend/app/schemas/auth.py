@@ -24,3 +24,18 @@ class UserResponse(CamelModel):
 class TokenResponse(CamelModel):
     access_token: str
     user: UserResponse
+
+
+class SignupRequest(CamelModel):
+    token: str
+    email: str
+    password: str
+    display_name: str
+
+
+class ValidateInviteResponse(CamelModel):
+    valid: bool
+    tenant_name: str | None = None
+    default_role: str | None = None
+    expires_at: str | None = None
+    allowed_domains: list[str] = []

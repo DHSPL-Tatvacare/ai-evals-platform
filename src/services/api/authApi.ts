@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { User, LoginCredentials } from '@/types/auth.types';
+import type { User, LoginCredentials, SignupCredentials, ValidateInviteResult } from '@/types/auth.types';
 
 interface LoginResponse {
   accessToken: string;
@@ -38,5 +38,20 @@ export const authApi = {
     apiRequest('/api/auth/me/password', {
       method: 'PUT',
       body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
+  validateInvite: (token: string): Promise<ValidateInviteResult> =>
+    fetch(`/api/auth/validate-invite?token=${encodeURIComponent(token)}`)
+      .then((r) => r.json()),
+
+  signup: (data: SignupCredentials): Promise<LoginResponse> =>
+    fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || 'Signup failed'); });
+      return r.json();
     }),
 };

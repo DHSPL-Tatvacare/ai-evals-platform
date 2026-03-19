@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { Button } from '@/components/ui';
 import { routes } from '@/config/routes';
 
 export function LoginPage() {
@@ -11,35 +12,53 @@ export function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !isLoading;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     setIsLoading(true);
     setError('');
     try {
       await login({ email, password });
       navigate(routes.voiceRx.home);
-    } catch {
-      setError('Invalid email or password');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('Email domain not allowed')) {
+        setError(msg);
+      } else {
+        setError('Invalid email or password. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-      <div className="w-full max-w-[380px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-8 shadow-lg">
-        <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            AI Evals Platform
-          </h1>
-          <p className="mt-1 text-[13px] text-[var(--text-muted)]">
-            Sign in to your account
-          </p>
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url(/primary_background.svg)' }}>
+      <div className="w-full max-w-[400px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-8 shadow-lg">
+        {/* Logo */}
+        <div className="mb-8 flex flex-col items-center gap-4">
+          <div className="rounded-lg bg-white px-5 py-2.5">
+            <img
+              src="/tatvacare-logo.svg"
+              alt="Tatvacare"
+              className="h-8 w-auto"
+            />
+          </div>
+          <div className="text-center">
+            <h1 className="text-lg font-semibold text-[var(--text-primary)]">
+              AI Evals Platform
+            </h1>
+            <p className="mt-1 text-[13px] text-[var(--text-muted)]">
+              Sign in to your account
+            </p>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="rounded-md bg-red-500/10 px-3 py-2 text-[13px] text-red-400">
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2.5 text-[13px] text-red-400">
               {error}
             </div>
           )}
@@ -47,7 +66,7 @@ export function LoginPage() {
           <div>
             <label
               htmlFor="email"
-              className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]"
+              className="mb-1.5 block text-[13px] font-medium text-[var(--text-secondary)]"
             >
               Email
             </label>
@@ -59,7 +78,7 @@ export function LoginPage() {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
               placeholder="you@example.com"
             />
           </div>
@@ -67,7 +86,7 @@ export function LoginPage() {
           <div>
             <label
               htmlFor="password"
-              className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]"
+              className="mb-1.5 block text-[13px] font-medium text-[var(--text-secondary)]"
             >
               Password
             </label>
@@ -78,18 +97,20 @@ export function LoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
               placeholder="Enter your password"
             />
           </div>
 
-          <button
+          <Button
             type="submit"
-            disabled={isLoading || !email || !password}
-            className="w-full rounded-md bg-[var(--color-brand-accent)] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            size="lg"
+            disabled={!canSubmit}
+            isLoading={isLoading}
+            className="mt-2 w-full"
           >
             {isLoading ? 'Signing in...' : 'Sign in'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

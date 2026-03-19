@@ -46,8 +46,8 @@ class EvaluatorResponse(CamelORMModel):
     forked_from: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
 
     @field_validator('listing_id', 'forked_from', mode='before')
     @classmethod

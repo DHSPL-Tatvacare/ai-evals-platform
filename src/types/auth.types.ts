@@ -18,3 +18,18 @@ export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 }
+
+export interface SignupCredentials {
+  token: string;
+  email: string;
+  password: string;
+  displayName: string;
+}
+
+export interface ValidateInviteResult {
+  valid: boolean;
+  tenantName?: string;
+  defaultRole?: string;
+  expiresAt?: string;
+  allowedDomains?: string[];
+}

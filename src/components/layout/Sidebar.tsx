@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   LogOut,
   Users,
+  KeyRound,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -34,6 +35,7 @@ import { routes } from "@/config/routes";
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
+import { ChangePasswordDialog } from "@/features/auth/ChangePasswordDialog";
 
 interface SidebarProps {
   onNewEval?: () => void;
@@ -73,6 +75,12 @@ export function Sidebar({ onNewEval }: SidebarProps) {
 
   // Controlled state for the +New popover
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+
+  // Change password dialog
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+  // User menu popover
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Disable new button when creating session or streaming
   const isNewButtonDisabled =
@@ -230,7 +238,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                   ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
               )}
-              title="User Management"
+              title="Admin"
             >
               <Users className="h-5 w-5" />
             </Link>
@@ -311,78 +319,56 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         />
       )}
 
-      <div className="border-t border-[var(--border-subtle)] p-3 space-y-1">
-        <Link
-          to={settingsPath}
-          className={cn(
-            "flex items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] font-medium transition-colors",
-            isSettingsActive
-              ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
-              : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
-          )}
-        >
-          <Settings className="h-4 w-4" />
-          Settings
-        </Link>
-        <a
-          href={guideUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
-          title="Guide"
-        >
-          <BookOpen className="h-4 w-4" />
-          Guide
-        </a>
-        {isAdmin && (
-          <Link
-            to={routes.adminUsers}
-            className={cn(
-              "flex items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] font-medium transition-colors",
-              isAdminActive
-                ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
-            )}
-          >
-            <Users className="h-4 w-4" />
-            Users
-          </Link>
-        )}
-      </div>
+      {/* Bottom: single user row → popover with all options */}
       {user && (
-        <div className="border-t border-[var(--border-subtle)] p-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand-accent)]/20 text-[11px] font-semibold text-[var(--text-brand)]">
-              {user.displayName
-                .split(' ')
-                .map((n) => n[0])
-                .join('')
-                .toUpperCase()
-                .slice(0, 2)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                {user.displayName}
-              </div>
-              <div className="truncate text-[11px] text-[var(--text-muted)]">
-                {user.tenantName}
-                {(user.role === 'admin' || user.role === 'owner') && (
-                  <span className="ml-1 text-[var(--text-brand)]">
-                    {user.role}
-                  </span>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={logout}
-              className="shrink-0 rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
-              title="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
+        <div className="mt-auto border-t border-[var(--border-subtle)] p-2">
+          <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className="flex w-full items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-[var(--interactive-secondary)]"
+              >
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand-accent)]/20 text-[10px] font-semibold text-[var(--text-brand)]">
+                  {user.displayName
+                    .split(' ')
+                    .map((n) => n[0])
+                    .join('')
+                    .toUpperCase()
+                    .slice(0, 2)}
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="truncate text-[12px] font-medium leading-tight text-[var(--text-primary)]">
+                    {user.displayName}
+                  </div>
+                  <div className="truncate text-[11px] leading-tight text-[var(--text-muted)]">
+                    {user.tenantName}
+                    {(user.role === 'admin' || user.role === 'owner') && (
+                      <span className="ml-1 text-[var(--text-brand)]">{user.role}</span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-[220px] p-1">
+              <UserMenu
+                settingsPath={settingsPath}
+                isSettingsActive={isSettingsActive}
+                guideUrl={guideUrl}
+                isAdmin={isAdmin}
+                isAdminActive={isAdminActive}
+                onLogout={logout}
+                onChangePassword={() => {
+                  setUserMenuOpen(false);
+                  setIsChangePasswordOpen(true);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
       )}
+      <ChangePasswordDialog
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </aside>
   );
 }
@@ -441,6 +427,66 @@ function KairaNewMenu({
           </div>
         </button>
       ))}
+    </div>
+  );
+}
+
+function UserMenu({
+  settingsPath,
+  isSettingsActive,
+  guideUrl,
+  isAdmin,
+  isAdminActive,
+  onLogout,
+  onChangePassword,
+}: {
+  settingsPath: string;
+  isSettingsActive: boolean;
+  guideUrl: string;
+  isAdmin: boolean;
+  isAdminActive: boolean;
+  onLogout: () => void;
+  onChangePassword: () => void;
+}) {
+  const menuLinkClass = "flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]";
+  const activeLinkClass = "flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]";
+
+  return (
+    <div className="py-1">
+      <Link to={settingsPath} className={isSettingsActive ? activeLinkClass : menuLinkClass}>
+        <Settings className="h-4 w-4" />
+        Settings
+      </Link>
+      <a
+        href={guideUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={menuLinkClass}
+      >
+        <BookOpen className="h-4 w-4" />
+        Guide
+      </a>
+      {isAdmin && (
+        <Link to={routes.adminUsers} className={isAdminActive ? activeLinkClass : menuLinkClass}>
+          <Users className="h-4 w-4" />
+          Admin
+        </Link>
+      )}
+      <div className="my-1 border-t border-[var(--border-subtle)]" />
+      <button
+        onClick={onChangePassword}
+        className={menuLinkClass}
+      >
+        <KeyRound className="h-4 w-4" />
+        Change Password
+      </button>
+      <button
+        onClick={onLogout}
+        className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-red-400 hover:bg-red-500/10 hover:text-red-300"
+      >
+        <LogOut className="h-4 w-4" />
+        Sign out
+      </button>
     </div>
   );
 }

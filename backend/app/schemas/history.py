@@ -47,8 +47,8 @@ class HistoryResponse(CamelORMModel):
     schema_version: Optional[str] = None
     user_context: Optional[dict] = None
     timestamp: int
-    tenant_id: str
-    user_id: str
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
 
 
 class HistoryPageResponse(CamelModel):
