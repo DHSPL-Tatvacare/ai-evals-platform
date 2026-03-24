@@ -39,6 +39,8 @@ async def lifespan(app: FastAPI):
     _validate_startup_config()
 
     async with engine.begin() as conn:
+        # Drop orphaned cache table (replaced by lsq_lead_cache)
+        await conn.execute(text("DROP TABLE IF EXISTS lsq_call_cache"))
         await conn.run_sync(Base.metadata.create_all)
 
         # Add source_type column to schemas table if missing
