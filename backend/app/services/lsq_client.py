@@ -192,9 +192,9 @@ async def hydrate_leads_bulk(
                             pid = lead.get("ProspectId", "")
                             if pid:
                                 result[pid] = {
-                                    "firstName": lead.get("FirstName", ""),
-                                    "lastName": lead.get("LastName", ""),
-                                    "phone": lead.get("Phone", ""),
+                                    "firstName": lead.get("FirstName") or "",
+                                    "lastName": lead.get("LastName") or "",
+                                    "phone": lead.get("Phone") or "",
                                 }
                     else:
                         # Fallback: if ProspectId not in response, match by input order
@@ -208,9 +208,9 @@ async def hydrate_leads_bulk(
                             if idx < len(batch):
                                 pid = batch[idx]
                                 result[pid] = {
-                                    "firstName": lead.get("FirstName", ""),
-                                    "lastName": lead.get("LastName", ""),
-                                    "phone": lead.get("Phone", ""),
+                                    "firstName": lead.get("FirstName") or "",
+                                    "lastName": lead.get("LastName") or "",
+                                    "phone": lead.get("Phone") or "",
                                 }
             except Exception as e:
                 logger.warning(
