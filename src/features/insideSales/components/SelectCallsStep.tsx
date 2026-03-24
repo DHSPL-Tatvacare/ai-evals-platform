@@ -15,6 +15,7 @@ export interface CallSelectionConfig {
   dateTo: string;
   agent: string;
   direction: string;
+  status: string;
   selectionMode: 'all' | 'sample' | 'specific';
   sampleSize: number;
   selectedCallIds: string[];
@@ -50,6 +51,7 @@ export function SelectCallsStep({
       });
       if (config.agent) params.set('agent', config.agent);
       if (config.direction) params.set('direction', config.direction);
+      if (config.status) params.set('status', config.status);
 
       const data = await apiRequest<{ calls: CallRecord[]; total: number }>(
         `/api/inside-sales/calls?${params.toString()}`
@@ -60,7 +62,7 @@ export function SelectCallsStep({
     } finally {
       setIsLoading(false);
     }
-  }, [config.dateFrom, config.dateTo, config.agent, config.direction, onPreviewLoaded]);
+  }, [config.dateFrom, config.dateTo, config.agent, config.direction, config.status, onPreviewLoaded]);
 
   useEffect(() => {
     const timer = setTimeout(fetchPreview, 300);
@@ -100,8 +102,8 @@ export function SelectCallsStep({
         </div>
       </div>
 
-      {/* Agent + Direction */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Agent + Direction + Status */}
+      <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-[var(--text-secondary)]">Agent</label>
           <input
@@ -121,6 +123,18 @@ export function SelectCallsStep({
             <option value="">All</option>
             <option value="inbound">Inbound</option>
             <option value="outbound">Outbound</option>
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-[var(--text-secondary)]">Status</label>
+          <select
+            value={config.status}
+            onChange={(e) => onConfigChange({ status: e.target.value })}
+            className="w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+          >
+            <option value="">All</option>
+            <option value="answered">Answered</option>
+            <option value="notanswered">Missed</option>
           </select>
         </div>
       </div>

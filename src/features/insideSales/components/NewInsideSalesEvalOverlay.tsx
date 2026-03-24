@@ -55,6 +55,7 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
       dateTo: todayStr() + ' 23:59:59',
       agent: '',
       direction: '',
+      status: '',
       selectionMode: ids.length ? 'specific' : 'all',
       sampleSize: 20,
       selectedCallIds: ids,
@@ -154,6 +155,7 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
         { key: 'Calls', value: String(callCount) },
         ...(callConfig.agent ? [{ key: 'Agent', value: callConfig.agent }] : []),
         ...(callConfig.direction ? [{ key: 'Direction', value: callConfig.direction }] : []),
+        ...(callConfig.status ? [{ key: 'Status', value: callConfig.status === 'notanswered' ? 'Missed' : 'Answered' }] : []),
       ],
     },
     {
@@ -192,6 +194,7 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
         date_to: callConfig.dateTo,
         agent: callConfig.agent,
         direction: callConfig.direction,
+        status: callConfig.status,
         selection_mode: callConfig.selectionMode,
         sample_size: callConfig.sampleSize,
         selected_call_ids: callConfig.selectedCallIds,
