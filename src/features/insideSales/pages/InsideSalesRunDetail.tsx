@@ -220,7 +220,12 @@ export function InsideSalesRunDetail() {
         </div>
 
         {/* Call results table */}
-        {filteredThreads.length === 0 ? (
+        {filteredThreads.length === 0 && isActive ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-[var(--text-brand)]" />
+            <p className="text-xs text-[var(--text-muted)]">Evaluation in progress — results will appear here as calls are processed.</p>
+          </div>
+        ) : filteredThreads.length === 0 ? (
           <EmptyState icon={Phone} title="No results" description="No evaluated calls found." compact />
         ) : (
           <div className="rounded-md border border-[var(--border-default)] overflow-auto">
