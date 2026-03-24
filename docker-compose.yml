@@ -28,7 +28,7 @@ services:
       FILE_STORAGE_TYPE: local
       FILE_STORAGE_PATH: /app/uploads
       API_PORT: 8721
-      CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+      CORS_ORIGINS: http://localhost:5173
     env_file:
       - .env.backend
     volumes:
@@ -55,20 +55,6 @@ services:
       - /app/node_modules # prevent host override
     depends_on:
       - backend
-
-  guide:
-    container_name: evals-guide
-    build:
-      context: ./docs/guide
-      dockerfile: Dockerfile
-    ports:
-      - "5174:5174"
-    environment:
-      API_PROXY_TARGET: http://backend:8721
-    depends_on:
-      - backend
-    profiles:
-      - guide
 
 volumes:
   pgdata:

@@ -7,6 +7,7 @@ export const routes = {
   signup: '/signup',
   adminUsers: '/admin/users',
   profile: '/profile',
+  guide: '/guide',
   voiceRx: {
     home: "/",
     upload: "/upload",

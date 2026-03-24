@@ -1,0 +1,127 @@
+/* Guide feature — scoped styles
+   Maps guide-only tokens → main app tokens.
+   Only defines variables that the guide uses with DIFFERENT names
+   from the main app. Variables with the same name (--bg-secondary,
+   --text-secondary, --text-muted, --border-subtle) are inherited
+   from the main app's :root and must NOT be redefined here. */
+
+.guide-root {
+  /* Guide-only variable names → main app equivalents */
+  --bg: var(--bg-primary);
+  --surface: var(--bg-elevated);
+  --surface-hover: var(--bg-tertiary);
+
+  --text: var(--text-primary);
+
+  --border: var(--border-subtle);
+
+  --accent: var(--interactive-primary);
+  --accent-light: var(--interactive-hover);
+  --accent-surface: var(--surface-info);
+  --accent-text: var(--text-brand);
+
+  /* Semantic */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --info: #6366f1;
+  --info-bg: var(--surface-info);
+  --info-border: var(--border-info);
+
+  /* Workflow accents (guide-specific, no main app equivalent) */
+  --workflow-voice-accent: #2563eb;
+  --workflow-voice-surface: #eff6ff;
+  --workflow-voice-border: #bfdbfe;
+  --workflow-kaira-accent: #059669;
+  --workflow-kaira-surface: #ecfdf5;
+  --workflow-kaira-border: #a7f3d0;
+  --workflow-evals-accent: #7c3aed;
+  --workflow-evals-surface: #f5f3ff;
+  --workflow-evals-border: #ddd6fe;
+
+  /* Code */
+  --code-bg: var(--bg-code);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.03);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.4);
+
+  /* Layout */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark mode overrides for guide-specific tokens */
+[data-theme="dark"] .guide-root {
+  --workflow-voice-accent: #60a5fa;
+  --workflow-voice-surface: rgba(37, 99, 235, 0.16);
+  --workflow-voice-border: rgba(96, 165, 250, 0.35);
+  --workflow-kaira-accent: #34d399;
+  --workflow-kaira-surface: rgba(5, 150, 105, 0.16);
+  --workflow-kaira-border: rgba(52, 211, 153, 0.32);
+  --workflow-evals-accent: #c4b5fd;
+  --workflow-evals-surface: rgba(124, 58, 237, 0.16);
+  --workflow-evals-border: rgba(196, 181, 253, 0.34);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
+
+  --glass-bg: rgba(26, 26, 36, 0.72);
+  --glass-border: rgba(73, 73, 90, 0.4);
+}
+
+/* Animations */
+.guide-root .animate-fade-in-up {
+  animation: guidesFadeInUp 0.4s ease both;
+}
+
+@keyframes guidesFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Section rail */
+.guide-root .page-content h2 {
+  scroll-margin-top: 32px;
+}
+
+.guide-root .group:hover .section-rail-tooltip {
+  opacity: 1 !important;
+  transform: translateX(0) !important;
+}
+
+/* Print */
+@media print {
+  .guide-root .guide-sidebar,
+  .guide-root .export-btn,
+  .guide-root .section-rail,
+  .guide-root .footer {
+    display: none !important;
+  }
+
+  .guide-root .page-content {
+    display: block !important;
+  }
+
+  .guide-root .page-content::before {
+    content: attr(data-title);
+    font-size: 24px;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 1rem;
+  }
+}

@@ -59,7 +59,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const isSettingsActive =
     location.pathname === routes.voiceRx.settings ||
     location.pathname === routes.kaira.settings;
-  const guideUrl = import.meta.env.VITE_GUIDE_URL || "http://localhost:5174";
+  const isGuideActive = location.pathname === routes.guide;
 
   // Auth
   const user = useAuthStore((s) => s.user);
@@ -220,15 +220,18 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           >
             <Settings className="h-5 w-5" />
           </Link>
-          <a
-            href={guideUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex h-9 w-9 items-center justify-center rounded-[6px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
+          <Link
+            to={routes.guide}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
+              isGuideActive
+                ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
+                : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
+            )}
             title="Guide"
           >
             <BookOpen className="h-5 w-5" />
-          </a>
+          </Link>
           {isAdmin && (
             <Link
               to={routes.adminUsers}
@@ -352,7 +355,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
               <UserMenu
                 settingsPath={settingsPath}
                 isSettingsActive={isSettingsActive}
-                guideUrl={guideUrl}
+                isGuideActive={isGuideActive}
                 isAdmin={isAdmin}
                 isAdminActive={isAdminActive}
                 onLogout={logout}
@@ -434,7 +437,7 @@ function KairaNewMenu({
 function UserMenu({
   settingsPath,
   isSettingsActive,
-  guideUrl,
+  isGuideActive,
   isAdmin,
   isAdminActive,
   onLogout,
@@ -442,7 +445,7 @@ function UserMenu({
 }: {
   settingsPath: string;
   isSettingsActive: boolean;
-  guideUrl: string;
+  isGuideActive: boolean;
   isAdmin: boolean;
   isAdminActive: boolean;
   onLogout: () => void;
@@ -457,15 +460,10 @@ function UserMenu({
         <Settings className="h-4 w-4" />
         Settings
       </Link>
-      <a
-        href={guideUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={menuLinkClass}
-      >
+      <Link to={routes.guide} className={isGuideActive ? activeLinkClass : menuLinkClass}>
         <BookOpen className="h-4 w-4" />
         Guide
-      </a>
+      </Link>
       {isAdmin && (
         <Link to={routes.adminUsers} className={isAdminActive ? activeLinkClass : menuLinkClass}>
           <Users className="h-4 w-4" />

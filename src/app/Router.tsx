@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout";
 import {
@@ -26,6 +27,8 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { KairaBotHomePage } from "./pages/kaira";
 import { routes } from "@/config/routes";
 
+const GuidePage = lazy(() => import("@/features/guide"));
+
 export function Router() {
   return (
     <BrowserRouter>
@@ -33,6 +36,18 @@ export function Router() {
         {/* Public routes — login + signup */}
         <Route path={routes.login} element={<LoginPage />} />
         <Route path={routes.signup} element={<SignupPage />} />
+
+        {/* Guide — full-page layout, lazy-loaded, behind auth */}
+        <Route
+          path={routes.guide}
+          element={
+            <AuthGuard>
+              <Suspense fallback={null}>
+                <GuidePage />
+              </Suspense>
+            </AuthGuard>
+          }
+        />
 
         {/* Protected routes — wrapped with AuthGuard + MainLayout */}
         <Route
