@@ -482,6 +482,14 @@ async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.
     return await run_custom_eval_batch(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
+@register_job_handler("evaluate-inside-sales")
+async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Run inside-sales call quality evaluation."""
+    from app.services.evaluators.inside_sales_runner import run_inside_sales_evaluation
+
+    return await run_inside_sales_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
+
+
 @register_job_handler("generate-report")
 async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate a single-run evaluation report (aggregation + AI narrative).
