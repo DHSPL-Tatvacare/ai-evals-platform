@@ -38,11 +38,13 @@ function formatDateTime(dateStr: string): string {
 export function InsideSalesCallDetail() {
   const navigate = useNavigate();
   const { activityId } = useParams<{ activityId: string }>();
+  const activeCall = useInsideSalesStore((s) => s.activeCall);
   const calls = useInsideSalesStore((s) => s.calls);
 
+  // Prefer activeCall (set on row click), fall back to searching the loaded page
   const call = useMemo(
-    () => calls.find((c) => c.activityId === activityId),
-    [calls, activityId]
+    () => (activeCall?.activityId === activityId ? activeCall : calls.find((c) => c.activityId === activityId)) ?? null,
+    [activeCall, calls, activityId]
   );
 
   if (!call) {

@@ -46,6 +46,9 @@ interface InsideSalesState {
   selectedCallIds: Set<string>;
   /** Cache key for the last successful fetch — skip re-fetch if unchanged */
   _lastFetchKey: string;
+  /** Currently viewed call (set when clicking into detail) */
+  activeCall: CallRecord | null;
+  setActiveCall: (call: CallRecord | null) => void;
 
   setFilters: (filters: Partial<CallFilters>) => void;
   clearFilters: () => void;
@@ -86,6 +89,9 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   filters: { ...DEFAULT_FILTERS },
   selectedCallIds: new Set(),
   _lastFetchKey: '',
+  activeCall: null,
+
+  setActiveCall: (call) => set({ activeCall: call }),
 
   setFilters: (updates) =>
     set((s) => ({ filters: { ...s.filters, ...updates }, page: 1 })),
@@ -156,5 +162,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       filters: { ...DEFAULT_FILTERS },
       selectedCallIds: new Set(),
       _lastFetchKey: '',
+      activeCall: null,
     }),
 }));

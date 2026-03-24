@@ -134,31 +134,33 @@ def normalize_activity(raw: dict[str, Any]) -> dict[str, Any]:
 async def hydrate_lead_names(
     prospect_ids: list[str],
 ) -> dict[str, str]:
-    """Bulk fetch lead names for prospect IDs. Uses cache."""
+    """Fetch lead names for prospect IDs. Uses in-memory cache.
+
+    LSQ endpoint: GET /v2/LeadManagement.svc/Leads.GetById?id=<prospectId>
+    Returns a list with one lead object containing FirstName, LastName, Phone, etc.
+    """
     uncached = [pid for pid in prospect_ids if pid and pid not in _lead_cache]
 
     if uncached:
         async with httpx.AsyncClient(timeout=30) as client:
-            # Batch in groups of 50
-            for i in range(0, len(uncached), 50):
-                batch = uncached[i : i + 50]
-                url = f"{LSQ_BASE_URL}/Leads.svc/Leads.GetByIds"
-                params = {**_auth_params(), "ids": ",".join(batch)}
+            for pid in uncached:
+                url = f"{LSQ_BASE_URL}/LeadManagement.svc/Leads.GetById"
+                params = {**_auth_params(), "id": pid}
                 try:
                     resp = await _rate_limited_request(
                         client, "GET", url, params=params
                     )
-                    leads = resp.json()
-                    if isinstance(leads, list):
-                        for lead in leads:
-                            pid = lead.get("ProspectID", "")
-                            name = lead.get("FirstName", "")
-                            last = lead.get("LastName", "")
-                            full = f"{name} {last}".strip() or pid[:8]
-                            _lead_cache[pid] = full
+                    data = resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        lead = data[0]
+                        first = lead.get("FirstName", "")
+                        last = lead.get("LastName", "")
+                        full = f"{first} {last}".strip() or pid[:8]
+                        _lead_cache[pid] = full
+                    else:
+                        _lead_cache[pid] = pid[:8]
                 except Exception as e:
-                    logger.warning("Lead hydration failed for batch: %s", e)
-                    for pid in batch:
-                        _lead_cache[pid] = pid[:8]  # Fallback to truncated ID
+                    logger.warning("Lead hydration failed for %s: %s", pid, e)
+                    _lead_cache[pid] = pid[:8]
 
     return {pid: _lead_cache.get(pid, pid[:8]) for pid in prospect_ids}
