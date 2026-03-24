@@ -155,7 +155,7 @@ export function InsideSalesEvaluators() {
 
   // Table view
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 pb-4">
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Evaluators</h1>
@@ -380,7 +380,7 @@ function EvaluatorDetail({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height))] gap-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back button */}
       <div className="shrink-0">
         <button

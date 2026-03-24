@@ -123,8 +123,8 @@ export function Router() {
           <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
           <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
           <Route path={routes.insideSales.dashboard} element={<InsideSalesDashboard />} />
-          <Route path={routes.insideSales.logs} element={<InsideSalesListing />} />
-          <Route path={routes.insideSales.settings} element={<InsideSalesListing />} />
+          <Route path={routes.insideSales.logs} element={<EvalLogs />} />
+          <Route path={routes.insideSales.settings} element={<InsideSalesDashboard />} />
 
           {/* Admin routes */}
           <Route

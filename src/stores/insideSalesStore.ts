@@ -111,15 +111,15 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const params = new URLSearchParams({
-        dateFrom: filters.dateFrom,
-        dateTo: filters.dateTo,
+        date_from: filters.dateFrom,
+        date_to: filters.dateTo,
         page: String(page),
-        pageSize: String(pageSize),
+        page_size: String(pageSize),
       });
       if (filters.agent) params.set('agent', filters.agent);
       if (filters.direction) params.set('direction', filters.direction);
       if (filters.status) params.set('status', filters.status);
-      if (filters.eventCodes) params.set('eventCodes', filters.eventCodes);
+      if (filters.eventCodes) params.set('event_codes', filters.eventCodes);
 
       const data = await apiRequest<{
         calls: CallRecord[];
@@ -130,8 +130,9 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 
       set({ calls: data.calls, total: data.total, isLoading: false });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Failed to load calls';
       set({
-        error: e instanceof Error ? e.message : 'Failed to load calls',
+        error: msg,
         isLoading: false,
       });
     }

@@ -185,7 +185,7 @@ export function InsideSalesListing() {
   }, []);
 
   const tableContent = (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col h-full">
       {/* Search + filter toolbar */}
       <div className="flex items-center gap-2 py-3">
         <div className="relative flex-1 max-w-sm">
@@ -426,7 +426,7 @@ export function InsideSalesListing() {
   );
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Page header */}
       <div className="flex items-center justify-between shrink-0 pb-2">
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Calls</h1>

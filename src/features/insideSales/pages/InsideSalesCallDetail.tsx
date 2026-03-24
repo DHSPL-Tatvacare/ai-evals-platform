@@ -47,7 +47,7 @@ export function InsideSalesCallDetail() {
 
   if (!call) {
     return (
-      <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
+      <div className="flex flex-col flex-1 min-h-0">
         <div className="shrink-0 pb-4">
           <button
             onClick={() => navigate(routes.insideSales.listing)}
@@ -103,7 +103,7 @@ export function InsideSalesCallDetail() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height))] gap-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back button */}
       <div className="shrink-0">
         <button

@@ -3,7 +3,7 @@ import { EmptyState } from '@/components/ui';
 
 export function InsideSalesRunDetail() {
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
+    <div className="flex flex-col flex-1 min-h-0">
       <div className="shrink-0 pb-4">
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Run Detail</h1>
       </div>
