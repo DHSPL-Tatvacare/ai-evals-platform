@@ -1,10 +1,8 @@
 """Inside Sales call quality evaluation runner.
 
-Evaluates sales calls against rubric evaluators. For each call:
-1. Fetch recording URL (already in call_data from wizard)
-2. Transcribe if needed (reuse Voice Rx transcription via LLM)
-3. Run rubric evaluation: send transcript + evaluator prompt → structured JSON scores
-4. Store results as ThreadEvaluation row
+Two-step pipeline per call:
+  1. TRANSCRIBE: Download MP3 from Ozonetel S3 → send audio to LLM via generate_with_audio → get transcript
+  2. EVALUATE:   Send transcript + rubric prompt to LLM via generate_json → get dimension scores
 
 Creates one EvalRun with eval_type='call_quality', one ThreadEvaluation per call.
 """
@@ -15,6 +13,7 @@ import time
 import uuid
 from typing import Any
 
+import httpx
 from sqlalchemy import select, or_, and_
 
 from app.database import async_session
@@ -208,15 +207,67 @@ async def run_inside_sales_evaluation(
             call_id = call.get("activityId", f"call-{idx}")
             agent = call.get("agentName", "Unknown")
             lead = call.get("leadName", "Unknown")
+            recording_url = call.get("recordingUrl", "")
 
             llm.set_thread_id(call_id)
 
             try:
-                # For now, use call metadata as pseudo-transcript
-                # Real transcription will be added when audio pipeline is integrated
-                transcript = _build_pseudo_transcript(call)
+                # ── Step 1: Transcribe ──────────────────────────────
+                transcript = ""
 
-                # Evaluate against each evaluator
+                if recording_url:
+                    await update_job_progress(
+                        job_id, idx, total,
+                        f"Transcribing call {idx + 1}/{total}...",
+                    )
+
+                    # Download MP3 from Ozonetel S3
+                    async with httpx.AsyncClient(timeout=60) as http:
+                        audio_resp = await http.get(recording_url)
+                        audio_resp.raise_for_status()
+                        audio_bytes = audio_resp.content
+
+                    # Determine mime type from URL
+                    mime_type = "audio/mpeg"
+                    if recording_url.lower().endswith(".wav"):
+                        mime_type = "audio/wav"
+
+                    # Transcribe via LLM (same as Voice Rx step 1)
+                    transcription_prompt = (
+                        "Transcribe this sales call recording. "
+                        "Identify two speakers: the sales agent and the customer/lead. "
+                        "Output the full conversation as a transcript with speaker labels. "
+                        "Use format: [Agent]: ... and [Lead]: ... for each turn. "
+                        "Transcribe in the original language (likely Hindi or Hindi-English mix). "
+                        "Include all dialogue, even small talk and greetings."
+                    )
+
+                    transcript = await llm.generate_with_audio(
+                        prompt=transcription_prompt,
+                        audio_bytes=audio_bytes,
+                        mime_type=mime_type,
+                        system_prompt="You are an expert multilingual transcriptionist. Transcribe sales calls accurately with speaker diarization.",
+                    )
+
+                    if not transcript or not transcript.strip():
+                        transcript = "[Transcription returned empty result]"
+
+                else:
+                    transcript = (
+                        f"[No recording available for this call]\n"
+                        f"Agent: {agent}, Lead: {lead}, "
+                        f"Duration: {call.get('durationSeconds', 0)}s, "
+                        f"Status: {call.get('status', 'unknown')}"
+                    )
+                    if call.get("callNotes"):
+                        transcript += f"\nCall Notes: {call['callNotes']}"
+
+                # ── Step 2: Evaluate against rubric ─────────────────
+                await update_job_progress(
+                    job_id, idx, total,
+                    f"Evaluating call {idx + 1}/{total}...",
+                )
+
                 for evaluator in evaluators:
                     prompt = evaluator["prompt"].replace("{{transcript}}", transcript)
                     output_schema = evaluator["output_schema"]
@@ -246,11 +297,13 @@ async def run_inside_sales_evaluation(
                                 "evaluator_id": evaluator["id"],
                                 "evaluator_name": evaluator["name"],
                                 "output": parsed,
+                                "transcript": transcript,
                                 "call_metadata": {
                                     "agent": agent,
                                     "lead": lead,
                                     "direction": call.get("direction"),
                                     "duration": call.get("durationSeconds"),
+                                    "recording_url": recording_url,
                                 },
                             },
                             success_status=True,
@@ -274,7 +327,7 @@ async def run_inside_sales_evaluation(
 
             await update_job_progress(
                 job_id, idx + 1, total,
-                f"Evaluated {idx + 1}/{total} calls",
+                f"Processed {idx + 1}/{total} calls",
             )
 
     # Run all calls
@@ -315,25 +368,3 @@ async def run_inside_sales_evaluation(
     }
 
 
-def _build_pseudo_transcript(call: dict) -> str:
-    """Build a text representation of the call for evaluation.
-
-    Until real audio transcription is integrated, this uses available metadata.
-    """
-    parts = []
-    parts.append(f"Call from agent {call.get('agentName', 'Unknown')} to lead {call.get('leadName', 'Unknown')}")
-    parts.append(f"Direction: {call.get('direction', 'unknown')}")
-    parts.append(f"Duration: {call.get('durationSeconds', 0)} seconds")
-    parts.append(f"Status: {call.get('status', 'unknown')}")
-
-    if call.get("callNotes"):
-        parts.append(f"\nCall Notes: {call['callNotes']}")
-
-    if call.get("recordingUrl"):
-        parts.append(f"\n[Recording available at: {call['recordingUrl']}]")
-        parts.append("\nNote: Full audio transcription will be available in a future update. "
-                     "Please evaluate based on available metadata and call notes.")
-    else:
-        parts.append("\n[No recording available for this call]")
-
-    return "\n".join(parts)
