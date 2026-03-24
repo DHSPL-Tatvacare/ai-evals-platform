@@ -17,7 +17,6 @@ export interface CallRecord {
   callNotes: string;
   callSessionId: string;
   createdOn: string;
-  leadName: string;
 }
 
 export interface CallFilters {

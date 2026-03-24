@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -9,13 +9,25 @@ import {
   Users,
   Phone as PhoneIcon,
   Calendar,
+  RefreshCw,
+  Mail,
 } from 'lucide-react';
 import { Button, Tabs, EmptyState } from '@/components/ui';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
+import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
 import { useInsideSalesStore } from '@/stores';
+import { apiRequest } from '@/services/api/client';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
 import { routes } from '@/config/routes';
+
+interface LeadDetail {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  cached: boolean;
+}
 
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return '—';
@@ -47,6 +59,30 @@ export function InsideSalesCallDetail() {
     [activeCall, calls, activityId]
   );
 
+  const [leadData, setLeadData] = useState<LeadDetail | null>(null);
+  const [leadLoading, setLeadLoading] = useState(false);
+
+  const fetchLead = useCallback(async (prospectId: string, refresh = false) => {
+    setLeadLoading(true);
+    try {
+      const url = refresh
+        ? `/api/inside-sales/leads/${prospectId}?refresh=true`
+        : `/api/inside-sales/leads/${prospectId}`;
+      const data = await apiRequest<LeadDetail>(url);
+      setLeadData(data);
+    } catch {
+      // silently fail — lead data is supplemental
+    } finally {
+      setLeadLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (call?.prospectId) {
+      fetchLead(call.prospectId);
+    }
+  }, [call?.prospectId, fetchLead]);
+
   if (!call) {
     return (
       <div className="flex flex-col flex-1 min-h-0">
@@ -71,8 +107,11 @@ export function InsideSalesCallDetail() {
     );
   }
 
+  const [evalOpen, setEvalOpen] = useState(false);
+
   const isInbound = call.direction === 'inbound';
   const isAnswered = call.status.toLowerCase() === 'answered';
+  const canEvaluate = isAnswered && !!call.recordingUrl;
 
   const transcriptTab = {
     id: 'transcript',
@@ -122,10 +161,46 @@ export function InsideSalesCallDetail() {
         <div>
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">
             {call.agentName || 'Unknown Agent'}
-            {call.leadName && (
-              <span className="text-[var(--text-muted)] font-normal"> → {call.leadName}</span>
+            {leadData && (leadData.firstName || leadData.lastName) && (
+              <span className="text-[var(--text-muted)] font-normal">
+                {' → '}
+                {[leadData.firstName, leadData.lastName].filter(Boolean).join(' ')}
+              </span>
+            )}
+            {leadLoading && (
+              <span className="ml-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)] align-middle" />
             )}
           </h1>
+          {leadData && (
+            <div className="flex items-center gap-3 mt-0.5">
+              {leadData.phone && (
+                <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] font-mono">
+                  <PhoneIcon className="h-3 w-3 text-[var(--text-muted)]" />
+                  {leadData.phone}
+                </span>
+              )}
+              {leadData.email && (
+                <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+                  <Mail className="h-3 w-3 text-[var(--text-muted)]" />
+                  {leadData.email}
+                </span>
+              )}
+              {leadData.cached && (
+                <span className="text-[10px] text-[var(--text-muted)]">(cached)</span>
+              )}
+              <button
+                onClick={() => fetchLead(call.prospectId, true)}
+                disabled={leadLoading}
+                title="Refresh lead data from LSQ"
+                className={cn(
+                  'rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors',
+                  leadLoading && 'animate-spin'
+                )}
+              >
+                <RefreshCw className="h-3 w-3" />
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-1">
             <span
               className={cn(
@@ -150,17 +225,16 @@ export function InsideSalesCallDetail() {
             </span>
           </div>
         </div>
-        <Button size="sm" disabled>
+        <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
           Evaluate
         </Button>
       </div>
 
       {/* Metadata grid */}
-      <div className="shrink-0 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="shrink-0 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <MetaCard icon={Calendar} label="Date" value={formatDateTime(call.callStartTime)} />
         <MetaCard icon={User} label="Agent" value={call.agentName || '—'} />
-        <MetaCard icon={Users} label="Lead" value={call.leadName || '—'} />
-        <MetaCard icon={PhoneIcon} label="Phone" value={call.phoneNumber || call.displayNumber || '—'} mono />
+        <MetaCard icon={Users} label="Prospect" value={call.prospectId || '—'} mono />
         <MetaCard icon={Clock} label="Duration" value={call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'} />
         <MetaCard icon={PhoneIcon} label="Session" value={call.callSessionId ? call.callSessionId.slice(-8) : '—'} mono />
       </div>
@@ -174,6 +248,13 @@ export function InsideSalesCallDetail() {
 
       {/* Tabs: Transcript + Scorecard */}
       <Tabs tabs={[transcriptTab, scorecardTab]} defaultTab="transcript" fillHeight />
+
+      {evalOpen && (
+        <NewInsideSalesEvalOverlay
+          onClose={() => setEvalOpen(false)}
+          preSelectedCallIds={[call.activityId]}
+        />
+      )}
     </div>
   );
 }

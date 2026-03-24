@@ -116,8 +116,7 @@ export function SelectCallsStep({
     return allCalls.filter(
       (c) =>
         c.agentName.toLowerCase().includes(q) ||
-        c.leadName.toLowerCase().includes(q) ||
-        c.phoneNumber.includes(q) ||
+        c.displayNumber.includes(q) ||
         c.activityId.toLowerCase().includes(q)
     );
   }, [allCalls, callSearch]);
@@ -141,7 +140,7 @@ export function SelectCallsStep({
   };
 
   const callLabel = (c: CallRecord) => {
-    const name = c.leadName || c.phoneNumber || c.activityId.slice(0, 8);
+    const name = c.displayNumber || c.prospectId || c.activityId.slice(0, 8);
     const agent = c.agentName || '—';
     const dur = c.durationSeconds > 0 ? formatDuration(c.durationSeconds) : '—';
     return { name, agent, dur, status: c.status || '—' };

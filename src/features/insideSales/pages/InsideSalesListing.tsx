@@ -117,8 +117,6 @@ export function InsideSalesListing() {
       result = result.filter(
         (c) =>
           c.agentName.toLowerCase().includes(q) ||
-          c.leadName.toLowerCase().includes(q) ||
-          c.phoneNumber.includes(q) ||
           c.displayNumber.includes(q)
       );
     }
@@ -212,7 +210,7 @@ export function InsideSalesListing() {
             type="text"
             value={filters.search}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search agent, lead, phone..."
+            placeholder="Search agent, number..."
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
           />
         </div>
@@ -342,9 +340,7 @@ export function InsideSalesListing() {
                   </th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Date / Time</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent Name</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead Name</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Prospect ID</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead Mobile</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Duration</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Direction</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
@@ -377,14 +373,8 @@ export function InsideSalesListing() {
                     <td className="px-3 py-2.5 text-[var(--text-primary)]">
                       {call.agentName || '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-[var(--text-primary)]">
-                      {call.leadName || '—'}
-                    </td>
                     <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)] text-[11px]">
                       {call.prospectId || '—'}
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)]">
-                      {call.phoneNumber || call.displayNumber || '—'}
                     </td>
                     <td className="px-3 py-2.5 text-[var(--text-secondary)] whitespace-nowrap">
                       {call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'}
