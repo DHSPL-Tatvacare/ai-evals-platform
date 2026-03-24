@@ -40,6 +40,7 @@ export const routes = {
     runs: '/inside-sales/runs',
     runDetail: (runId: string) => `/inside-sales/runs/${runId}`,
     callDetail: (runId: string, callId: string) => `/inside-sales/runs/${runId}/calls/${callId}`,
+    callView: (activityId: string) => `/inside-sales/calls/${activityId}`,
     dashboard: '/inside-sales/dashboard',
     logs: '/inside-sales/logs',
     settings: '/inside-sales/settings',

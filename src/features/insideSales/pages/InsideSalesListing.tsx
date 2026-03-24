@@ -143,7 +143,7 @@ export function InsideSalesListing() {
 
   const handleRowClick = useCallback(
     (call: CallRecord) => {
-      navigate(routes.insideSales.runDetail(call.activityId));
+      navigate(routes.insideSales.callView(call.activityId));
     },
     [navigate]
   );
