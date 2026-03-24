@@ -21,6 +21,13 @@ import {
 } from "@/features/evalRuns";
 import { LoginPage, SignupPage, AuthGuard, AdminGuard } from "@/features/auth";
 import { AdminUsersPage } from "@/features/admin";
+import {
+  InsideSalesListing,
+  InsideSalesEvaluators,
+  InsideSalesRunList,
+  InsideSalesRunDetail,
+  InsideSalesDashboard,
+} from "@/features/insideSales";
 import { HomePage } from "./pages/HomePage";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -105,6 +112,20 @@ export function Router() {
             element={<EvalThreadDetailV2 />}
           />
           <Route path={routes.kaira.logs} element={<EvalLogs />} />
+
+          {/* Inside Sales routes */}
+          <Route
+            path={routes.insideSales.home}
+            element={<Navigate to={routes.insideSales.dashboard} replace />}
+          />
+          <Route path={routes.insideSales.evaluators} element={<InsideSalesEvaluators />} />
+          <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluators />} />
+          <Route path={routes.insideSales.runs} element={<InsideSalesRunList />} />
+          <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
+          <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
+          <Route path={routes.insideSales.dashboard} element={<InsideSalesDashboard />} />
+          <Route path={routes.insideSales.logs} element={<InsideSalesListing />} />
+          <Route path={routes.insideSales.settings} element={<InsideSalesListing />} />
 
           {/* Admin routes */}
           <Route
