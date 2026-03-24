@@ -36,9 +36,9 @@ export function InsideSalesRunList() {
   const stableSetRuns = useStableEvalRunUpdate(setRuns);
   const openModal = useUIStore((s) => s.openModal);
 
-  const loadRuns = useCallback(() => {
+  const loadRuns = useCallback((): Promise<void> => {
     if (isInitialLoad.current) setIsLoading(true);
-    fetchEvalRuns({ app_id: 'inside-sales' })
+    return fetchEvalRuns({ app_id: 'inside-sales' })
       .then(stableSetRuns)
       .catch(() => {})
       .finally(() => {
@@ -223,7 +223,7 @@ export function InsideSalesRunList() {
       <ConfirmDialog
         isOpen={!!deleteTarget}
         title="Delete run"
-        description={`Delete "${deleteTarget ? ((deleteTarget.config as Record<string, unknown>)?.run_name as string) ?? deleteTarget.id.slice(0, 8) : ''}"? This cannot be undone.`}
+        description={`Delete "${deleteTarget ? getRunName(deleteTarget) : ''}"? This cannot be undone.`}
         confirmLabel="Delete"
         variant="danger"
         onConfirm={handleDeleteConfirmed}
