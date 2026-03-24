@@ -124,11 +124,34 @@ This departs from Voice Rx / Kaira which have scrollable item lists below nav li
 5. **Table** with server-side pagination
 6. **Pagination:** "Page X of Y · N calls"
 
-### Data source
+### Data source & API flow
 
-Table paginates directly against the LSQ API. No local sync/caching step. Backend proxies `POST /v2/ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent` with filters mapped from frontend query params.
+Table paginates directly against the LSQ API. No local sync/caching step. **2 API calls per page load:**
 
-**Lead name hydration:** LSQ call activities only return `RelatedProspectId`. Backend uses `GET /v2/Leads.svc/Leads.GetByIds` for bulk lookup and maintains an in-memory lead name cache (`lead_id → name`). On page load, batch-fetch any uncached lead IDs from the page results, cache them. Agents call the same leads repeatedly so the cache warms quickly. No new DB model needed.
+```
+Frontend: GET /api/inside-sales/calls?page=1&pageSize=50&dateFrom=...&dateTo=...
+
+Backend (LSQClient):
+  1. POST LSQ RetrieveByActivityEvent (PageIndex=1, PageSize=50)
+     → Returns 50 call activity records
+     → Each has: agent name, phone, duration, recording URL, status, event code
+     → Each has: RelatedProspectId (lead UUID) — but NOT the lead name
+
+  2. Collect 50 RelatedProspectIds from step 1
+     → Check in-memory cache: which IDs do we already have names for?
+     → For uncached IDs (e.g. 30 of 50 on first load):
+       GET LSQ Leads.GetByIds with those 30 IDs → returns 30 lead names
+     → Cache all results (lead_id → name)
+     → On repeat pages, cache hits more — second call shrinks or skips entirely
+
+  3. Merge lead names into call records → return to frontend
+```
+
+**Default page:** today's date, 50 calls. 1 LSQ call for activities + 1 for lead names = 2 total. Fast.
+
+**Rate limit (25 req/5s):** Not a concern at 2 calls per page. Only relevant during bulk eval wizard pagination — sequential and throttled.
+
+**Lead cache:** In-memory dict on the backend process. No DB model needed. Agents call the same leads repeatedly so it warms fast. Cache lives for the process lifetime; cold-starts are cheap (one bulk lookup).
 
 ### Table columns
 
