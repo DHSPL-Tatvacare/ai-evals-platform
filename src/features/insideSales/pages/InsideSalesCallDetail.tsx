@@ -203,7 +203,7 @@ export function InsideSalesCallDetail() {
                 <RefreshCw className="h-3 w-3" />
               </button>
             )}
-            <span className="text-[var(--border-default)]">·</span>
+            {leadData && <span className="text-[var(--border-default)]">·</span>}
             <span
               className={cn(
                 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
