@@ -54,6 +54,7 @@ async def fetch_call_activities(
         event_codes = [21, 22]  # Inbound + Outbound system telephony
 
     all_activities: list[dict[str, Any]] = []
+    total_record_count = 0
 
     async with httpx.AsyncClient(timeout=30) as client:
         for event_code in event_codes:
@@ -77,10 +78,14 @@ async def fetch_call_activities(
                 client, "POST", url, params=_auth_params(), json=body
             )
             data = resp.json()
-            if isinstance(data, list):
+            if isinstance(data, dict) and "List" in data:
+                all_activities.extend(data["List"])
+                total_record_count += data.get("RecordCount", len(data["List"]))
+            elif isinstance(data, list):
                 all_activities.extend(data)
+                total_record_count += len(data)
 
-    return {"activities": all_activities, "total": len(all_activities)}
+    return {"activities": all_activities, "total": total_record_count}
 
 
 def _parse_source_data(note: str) -> dict[str, Any]:
