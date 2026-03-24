@@ -228,13 +228,6 @@ export function InsideSalesCallDetail() {
         <MetaCard icon={PhoneIcon} label="Session" value={call.callSessionId ? call.callSessionId.slice(-8) : '—'} mono />
       </div>
 
-      {/* Audio player */}
-      {call.recordingUrl && (
-        <div className="shrink-0">
-          <AudioPlayer audioUrl={call.recordingUrl} appId="inside-sales" />
-        </div>
-      )}
-
       {/* Eval history */}
       {evalHistory.length > 0 && (
         <div className="shrink-0 flex items-center justify-between gap-3 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)] px-3 py-1.5">
@@ -269,7 +262,11 @@ export function InsideSalesCallDetail() {
         </div>
       ) : evalHistory.length > 0 ? (
         <div className="flex flex-col flex-1 min-h-0">
-          <CallResultPanel thread={evalHistory[evalIdx]} />
+          <CallResultPanel
+            thread={evalHistory[evalIdx]}
+            recordingUrl={call.recordingUrl || undefined}
+            appId="inside-sales"
+          />
         </div>
       ) : (
         <div className="flex flex-col flex-1 min-h-0">
@@ -279,8 +276,13 @@ export function InsideSalesCallDetail() {
                 id: 'transcript',
                 label: 'Transcript',
                 content: (
-                  <div className="flex items-center justify-center py-16">
-                    <EmptyState icon={PhoneIcon} title="No transcript yet" description="Transcription will be available after evaluation." compact />
+                  <div className="flex flex-col gap-4 py-4">
+                    {call.recordingUrl && (
+                      <AudioPlayer audioUrl={call.recordingUrl} appId="inside-sales" />
+                    )}
+                    <div className="flex items-center justify-center py-8">
+                      <EmptyState icon={PhoneIcon} title="No transcript yet" description="Transcription will be available after evaluation." compact />
+                    </div>
                   </div>
                 ),
               },

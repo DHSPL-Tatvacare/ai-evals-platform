@@ -2,13 +2,16 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/utils';
 import { scoreColor } from '@/utils/scoreUtils';
-import type { ThreadEvalRow } from '@/types';
+import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
+import type { ThreadEvalRow, AppId } from '@/types';
 
 interface CallResultPanelProps {
   thread: ThreadEvalRow;
+  recordingUrl?: string;
+  appId?: AppId;
 }
 
-export function CallResultPanel({ thread }: CallResultPanelProps) {
+export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanelProps) {
   const [activeTab, setActiveTab] = useState<'scorecard' | 'compliance'>('scorecard');
 
   const result = thread.result as unknown as Record<string, unknown> | undefined;
@@ -50,6 +53,11 @@ export function CallResultPanel({ thread }: CallResultPanelProps) {
           <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-muted)] uppercase">
             Transcript
           </div>
+          {recordingUrl && appId && (
+            <div className="shrink-0 px-3 py-2 border-b border-[var(--border-subtle)]">
+              <AudioPlayer audioUrl={recordingUrl} appId={appId} />
+            </div>
+          )}
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
             {transcript ? (
               <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed font-mono">
@@ -185,6 +193,11 @@ export function CallResultPanel({ thread }: CallResultPanelProps) {
 
       {/* Mobile: stacked */}
       <div className="flex flex-col flex-1 min-h-0 md:hidden space-y-3 overflow-y-auto">
+        {recordingUrl && appId && (
+          <div className="shrink-0 px-1">
+            <AudioPlayer audioUrl={recordingUrl} appId={appId} />
+          </div>
+        )}
         {transcript && (
           <details className="shrink-0">
             <summary className="text-xs text-[var(--text-muted)] font-medium cursor-pointer py-1.5 px-1">
