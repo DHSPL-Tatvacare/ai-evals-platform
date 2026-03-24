@@ -44,6 +44,8 @@ interface InsideSalesState {
   error: string | null;
   filters: CallFilters;
   selectedCallIds: Set<string>;
+  /** Cache key for the last successful fetch — skip re-fetch if unchanged */
+  _lastFetchKey: string;
 
   setFilters: (filters: Partial<CallFilters>) => void;
   clearFilters: () => void;
@@ -51,7 +53,7 @@ interface InsideSalesState {
   toggleCallSelection: (activityId: string) => void;
   selectAllOnPage: () => void;
   deselectAll: () => void;
-  loadCalls: () => Promise<void>;
+  loadCalls: (force?: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -83,6 +85,7 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   error: null,
   filters: { ...DEFAULT_FILTERS },
   selectedCallIds: new Set(),
+  _lastFetchKey: '',
 
   setFilters: (updates) =>
     set((s) => ({ filters: { ...s.filters, ...updates }, page: 1 })),
@@ -106,8 +109,13 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 
   deselectAll: () => set({ selectedCallIds: new Set() }),
 
-  loadCalls: async () => {
-    const { filters, page, pageSize } = get();
+  loadCalls: async (force?: boolean) => {
+    const { filters, page, pageSize, _lastFetchKey } = get();
+    const fetchKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agent}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}|${pageSize}`;
+
+    // Skip if already loaded for this exact filter+page combo
+    if (!force && fetchKey === _lastFetchKey) return;
+
     set({ isLoading: true, error: null });
     try {
       const params = new URLSearchParams({
@@ -128,7 +136,7 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
         pageSize: number;
       }>(`/api/inside-sales/calls?${params.toString()}`);
 
-      set({ calls: data.calls, total: data.total, isLoading: false });
+      set({ calls: data.calls, total: data.total, isLoading: false, _lastFetchKey: fetchKey });
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Failed to load calls';
       set({
@@ -147,5 +155,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       error: null,
       filters: { ...DEFAULT_FILTERS },
       selectedCallIds: new Set(),
+      _lastFetchKey: '',
     }),
 }));
