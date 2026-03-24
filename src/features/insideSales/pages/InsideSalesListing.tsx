@@ -325,11 +325,12 @@ export function InsideSalesListing() {
                     />
                   </th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Date / Time</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Phone</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent Name</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead Name</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Prospect ID</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead Mobile</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Duration</th>
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Dir</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Direction</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
                   <th className="w-10 px-2 py-2" />
                 </tr>
@@ -357,11 +358,14 @@ export function InsideSalesListing() {
                     <td className="px-3 py-2.5 text-[var(--text-primary)] whitespace-nowrap">
                       {formatCallTime(call.callStartTime)}
                     </td>
-                    <td className="px-3 py-2.5 text-[var(--text-primary)] max-w-[120px] truncate">
+                    <td className="px-3 py-2.5 text-[var(--text-primary)]">
                       {call.agentName || '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-[var(--text-primary)] max-w-[120px] truncate">
+                    <td className="px-3 py-2.5 text-[var(--text-primary)]">
                       {call.leadName || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)] text-[11px]">
+                      {call.prospectId || '—'}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)]">
                       {call.phoneNumber || call.displayNumber || '—'}
