@@ -20,6 +20,7 @@ export const useSchemasStore = create<SchemasState>((set, get) => ({
   schemas: {
     'voice-rx': [],
     'kaira-bot': [],
+    'inside-sales': [],
   },
   isLoading: false,
   error: null,
@@ -91,7 +92,7 @@ export const useSchemasStore = create<SchemasState>((set, get) => ({
   },
 
   reset: () => set({
-    schemas: { 'voice-rx': [], 'kaira-bot': [] },
+    schemas: { 'voice-rx': [], 'kaira-bot': [], 'inside-sales': [] },
     isLoading: false,
     error: null,
   }),

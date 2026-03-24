@@ -33,6 +33,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
   prompts: {
     "voice-rx": [],
     "kaira-bot": [],
+    "inside-sales": [],
   },
   isLoading: false,
   error: null,
@@ -120,7 +121,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
 
   reset: () =>
     set({
-      prompts: { "voice-rx": [], "kaira-bot": [] },
+      prompts: { "voice-rx": [], "kaira-bot": [], "inside-sales": [] },
       isLoading: false,
       error: null,
     }),

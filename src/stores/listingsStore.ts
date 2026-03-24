@@ -29,6 +29,7 @@ export const useListingsStore = create<ListingsState>((set, get) => ({
   listings: {
     'voice-rx': [],
     'kaira-bot': [],
+    'inside-sales': [],
   },
   selectedId: null,
   searchQuery: '',
@@ -72,7 +73,7 @@ export const useListingsStore = create<ListingsState>((set, get) => ({
   getListingsForApp: (appId) => get().listings[appId] || [],
 
   reset: () => set({
-    listings: { 'voice-rx': [], 'kaira-bot': [] },
+    listings: { 'voice-rx': [], 'kaira-bot': [], 'inside-sales': [] },
     selectedId: null,
     searchQuery: '',
     isLoading: true,

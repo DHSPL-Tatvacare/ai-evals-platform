@@ -69,6 +69,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   sessions: {
     "voice-rx": [],
     "kaira-bot": [],
+    "inside-sales": [],
   },
   messages: [],
   isStreaming: false,
@@ -82,6 +83,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   isSessionsLoaded: {
     "voice-rx": false,
     "kaira-bot": false,
+    "inside-sales": false,
   },
   abortController: null,
 
@@ -735,7 +737,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
 
   reset: () => set({
     currentSessionId: null,
-    sessions: { "voice-rx": [], "kaira-bot": [] },
+    sessions: { "voice-rx": [], "kaira-bot": [], "inside-sales": [] },
     messages: [],
     isStreaming: false,
     streamingContent: "",
@@ -745,7 +747,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     isCreatingSession: false,
     isSending: false,
     isDeleting: false,
-    isSessionsLoaded: { "voice-rx": false, "kaira-bot": false },
+    isSessionsLoaded: { "voice-rx": false, "kaira-bot": false, "inside-sales": false },
     abortController: null,
   }),
 }));

@@ -14,7 +14,7 @@ import type { AppId } from '@/types';
 import { settingsRepository } from '@/services/api';
 
 // Version to track settings shape changes
-const APP_SETTINGS_VERSION = 5; // v5: Removed kaira-evals, only voice-rx + kaira-bot
+const APP_SETTINGS_VERSION = 6; // v6: Added inside-sales app
 
 // Voice Rx specific settings
 export interface VoiceRxSettings {
@@ -38,10 +38,16 @@ export interface KairaBotSettings {
   kairaAuthToken: string;
 }
 
+// Inside Sales specific settings (placeholder — no credentials yet)
+export interface InsideSalesSettings {
+  // Will be populated in later phases as needed
+}
+
 // All app-specific settings
 export interface AppSpecificSettings {
   'voice-rx': VoiceRxSettings;
   'kaira-bot': KairaBotSettings;
+  'inside-sales': InsideSalesSettings;
 }
 
 // New installs start with empty credentials — user must configure via Settings.
@@ -91,6 +97,7 @@ export const useAppSettingsStore = create<AppSettingsState>()(
       settings: {
         'voice-rx': defaultVoiceRxSettings,
         'kaira-bot': defaultKairaBotSettings,
+        'inside-sales': {},
       },
 
       updateVoiceRxSettings: (updates) =>
@@ -137,6 +144,7 @@ export const useAppSettingsStore = create<AppSettingsState>()(
         settings: {
           'voice-rx': defaultVoiceRxSettings,
           'kaira-bot': defaultKairaBotSettings,
+          'inside-sales': {},
         },
       }),
 
@@ -215,12 +223,13 @@ export const useAppSettingsStore = create<AppSettingsState>()(
       version: APP_SETTINGS_VERSION,
       storage: createJSONStorage(() => localStorage),
       migrate: () => {
-        // v5: Removed kaira-evals — only voice-rx and kaira-bot
+        // v6: Added inside-sales app
         return {
           _version: APP_SETTINGS_VERSION,
           settings: {
             'voice-rx': defaultVoiceRxSettings,
             'kaira-bot': defaultKairaBotSettings,
+            'inside-sales': {},
           },
         } as AppSettingsState;
       },
@@ -237,6 +246,10 @@ export const useAppSettingsStore = create<AppSettingsState>()(
             'kaira-bot': {
               ...currentState.settings['kaira-bot'],
               ...persisted.settings?.['kaira-bot'],
+            },
+            'inside-sales': {
+              ...currentState.settings['inside-sales'],
+              ...persisted.settings?.['inside-sales'],
             },
           },
         };

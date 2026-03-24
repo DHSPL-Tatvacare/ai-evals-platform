@@ -3,7 +3,7 @@
  * Central definitions for multi-app support
  */
 
-export type AppId = 'voice-rx' | 'kaira-bot';
+export type AppId = 'voice-rx' | 'kaira-bot' | 'inside-sales';
 
 export interface AppMetadata {
   id: AppId;
@@ -30,6 +30,14 @@ export const APPS: Record<AppId, AppMetadata> = {
     description: 'Health chat bot assistant',
     searchPlaceholder: 'Search chats...',
     newItemLabel: 'New Chat',
+  },
+  'inside-sales': {
+    id: 'inside-sales',
+    name: 'Inside Sales',
+    icon: '/inside-sales-icon.svg',
+    description: 'Inside sales call quality evaluation',
+    searchPlaceholder: 'Search calls...',
+    newItemLabel: 'New Run',
   },
 };
 
