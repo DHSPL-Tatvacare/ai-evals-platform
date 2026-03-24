@@ -108,18 +108,32 @@ export function InsideSalesListing() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // Search filtering (client-side on already-fetched data)
+  // Client-side filtering (search + duration)
   const filteredCalls = useMemo(() => {
+    let result = calls;
+
     const q = filters.search.toLowerCase().trim();
-    if (!q) return calls;
-    return calls.filter(
-      (c) =>
-        c.agentName.toLowerCase().includes(q) ||
-        c.leadName.toLowerCase().includes(q) ||
-        c.phoneNumber.includes(q) ||
-        c.displayNumber.includes(q)
-    );
-  }, [calls, filters.search]);
+    if (q) {
+      result = result.filter(
+        (c) =>
+          c.agentName.toLowerCase().includes(q) ||
+          c.leadName.toLowerCase().includes(q) ||
+          c.phoneNumber.includes(q) ||
+          c.displayNumber.includes(q)
+      );
+    }
+
+    if (filters.durationMin) {
+      const min = Number(filters.durationMin);
+      result = result.filter((c) => c.durationSeconds >= min);
+    }
+    if (filters.durationMax) {
+      const max = Number(filters.durationMax);
+      result = result.filter((c) => c.durationSeconds <= max);
+    }
+
+    return result;
+  }, [calls, filters.search, filters.durationMin, filters.durationMax]);
 
   // Active filter count (excluding dateFrom/dateTo/search which have dedicated UI)
   const activeFilterCount = useMemo(() => {
