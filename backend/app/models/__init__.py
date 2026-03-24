@@ -16,7 +16,7 @@ from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
 from app.models.evaluation_analytics import EvaluationAnalytics
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
-from app.models.lsq_call_cache import LsqCallCache
+from app.models.lsq_call_cache import LsqLeadCache
 
 __all__ = [
     "Base",
@@ -25,5 +25,5 @@ __all__ = [
     "ChatSession", "ChatMessage", "History", "Setting", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
     "EvaluationAnalytics",
-    "LsqCallCache",
+    "LsqLeadCache",
 ]
