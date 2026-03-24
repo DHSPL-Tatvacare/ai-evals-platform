@@ -162,7 +162,7 @@ async def run_inside_sales_evaluation(
     # ── Resolve LLM credentials ──────────────────────────────────
     llm_settings = await get_llm_settings_from_db(
         tenant_id, user_id,
-        app_id="inside-sales",
+        app_id=None,
         auth_intent="managed_job",
         provider_override=llm_config.get("provider"),
     )
