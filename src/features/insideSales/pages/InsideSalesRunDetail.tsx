@@ -221,9 +221,10 @@ export function InsideSalesRunDetail() {
 
         {/* Call results table */}
         {filteredThreads.length === 0 && isActive ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--text-brand)]" />
-            <p className="text-xs text-[var(--text-muted)]">Evaluation in progress — results will appear here as calls are processed.</p>
+          <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
+            <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Evaluations are being processed...</p>
+            <p className="text-sm text-[var(--text-secondary)]">Results will appear here as calls are evaluated.</p>
           </div>
         ) : filteredThreads.length === 0 ? (
           <EmptyState icon={Phone} title="No results" description="No evaluated calls found." compact />
