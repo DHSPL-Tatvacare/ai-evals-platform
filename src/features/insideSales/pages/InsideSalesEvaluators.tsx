@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   FileText,
   Plus,
+  Upload,
   ArrowLeft,
   GitFork,
   Pencil,
@@ -16,6 +17,7 @@ import { cn } from '@/utils';
 import { routes } from '@/config/routes';
 import type { EvaluatorDefinition, EvaluatorOutputField } from '@/types';
 import { CreateEvaluatorOverlay } from '@/features/evals/components/CreateEvaluatorOverlay';
+import { EvaluatorCSVImport } from '../components/EvaluatorCSVImport';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -81,6 +83,7 @@ export function InsideSalesEvaluators() {
   const [selectedEval, setSelectedEval] = useState<EvaluatorDefinition | null>(null);
   const [showCreateOverlay, setShowCreateOverlay] = useState(false);
   const [editEval, setEditEval] = useState<EvaluatorDefinition | undefined>(undefined);
+  const [showCSVImport, setShowCSVImport] = useState(false);
 
   const loadEvaluators = useCallback(async () => {
     setIsLoading(true);
@@ -162,6 +165,10 @@ export function InsideSalesEvaluators() {
               Seed Defaults
             </Button>
           )}
+          <Button variant="secondary" size="sm" onClick={() => setShowCSVImport(true)}>
+            <Upload className="h-3.5 w-3.5" />
+            Import CSV
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -252,6 +259,13 @@ export function InsideSalesEvaluators() {
           </table>
         </div>
       )}
+
+      {/* CSV Import modal */}
+      <EvaluatorCSVImport
+        isOpen={showCSVImport}
+        onClose={() => setShowCSVImport(false)}
+        onImported={loadEvaluators}
+      />
 
       {/* Create/Edit overlay */}
       <CreateEvaluatorOverlay
