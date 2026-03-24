@@ -11,11 +11,16 @@ import {
   Calendar,
   RefreshCw,
   Mail,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Button, Tabs, EmptyState } from '@/components/ui';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
+import { CallResultPanel } from '../components/CallResultPanel';
+import { fetchThreadHistory } from '@/services/api/evalRunsApi';
 import { useInsideSalesStore } from '@/stores';
+import type { ThreadEvalRow } from '@/types';
 import { apiRequest } from '@/services/api/client';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
@@ -62,6 +67,9 @@ export function InsideSalesCallDetail() {
   const [leadData, setLeadData] = useState<LeadDetail | null>(null);
   const [leadLoading, setLeadLoading] = useState(false);
   const [evalOpen, setEvalOpen] = useState(false);
+  const [evalHistory, setEvalHistory] = useState<ThreadEvalRow[]>([]);
+  const [evalIdx, setEvalIdx] = useState(0);
+  const [evalLoading, setEvalLoading] = useState(false);
 
   const fetchLead = useCallback(async (prospectId: string, refresh = false) => {
     setLeadLoading(true);
@@ -83,6 +91,17 @@ export function InsideSalesCallDetail() {
       fetchLead(call.prospectId);
     }
   }, [call?.prospectId, fetchLead]);
+
+  useEffect(() => {
+    if (!call?.activityId) return;
+    setEvalLoading(true);
+    fetchThreadHistory(call.activityId)
+      .then((r) => setEvalHistory(r.history))
+      .catch(() => { /* supplemental — silent fail */ })
+      .finally(() => setEvalLoading(false));
+  }, [call?.activityId]);
+
+  useEffect(() => { setEvalIdx(0); }, [call?.activityId]);
 
   if (!call) {
     return (
@@ -115,36 +134,6 @@ export function InsideSalesCallDetail() {
     : !call.recordingUrl
     ? 'No recording available'
     : undefined;
-
-  const transcriptTab = {
-    id: 'transcript',
-    label: 'Transcript',
-    content: (
-      <div className="flex items-center justify-center py-16">
-        <EmptyState
-          icon={PhoneIcon}
-          title="No transcript yet"
-          description="Transcription will be available after evaluation."
-          compact
-        />
-      </div>
-    ),
-  };
-
-  const scorecardTab = {
-    id: 'scorecard',
-    label: 'Scorecard',
-    content: (
-      <div className="flex items-center justify-center py-16">
-        <EmptyState
-          icon={PhoneIcon}
-          title="Not yet evaluated"
-          description="Run an evaluation to see the scorecard."
-          compact
-        />
-      </div>
-    ),
-  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -246,8 +235,70 @@ export function InsideSalesCallDetail() {
         </div>
       )}
 
-      {/* Tabs: Transcript + Scorecard */}
-      <Tabs tabs={[transcriptTab, scorecardTab]} defaultTab="transcript" fillHeight />
+      {/* Eval history */}
+      {evalHistory.length > 0 && (
+        <div className="shrink-0 flex items-center justify-between gap-3 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)] px-3 py-1.5">
+          <button
+            disabled={evalIdx >= evalHistory.length - 1}
+            onClick={() => setEvalIdx((i) => i + 1)}
+            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded transition-colors cursor-pointer disabled:cursor-default"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <span className="text-xs text-[var(--text-secondary)] tabular-nums">
+            Run {evalHistory.length - evalIdx} of {evalHistory.length}
+            {evalHistory[evalIdx]?.created_at && (
+              <span className="text-[var(--text-muted)] ml-2">
+                · {new Date(evalHistory[evalIdx].created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
+              </span>
+            )}
+          </span>
+          <button
+            disabled={evalIdx <= 0}
+            onClick={() => setEvalIdx((i) => i - 1)}
+            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded transition-colors cursor-pointer disabled:cursor-default"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {evalLoading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
+        </div>
+      ) : evalHistory.length > 0 ? (
+        <div className="flex flex-col flex-1 min-h-0">
+          <CallResultPanel thread={evalHistory[evalIdx]} />
+        </div>
+      ) : (
+        <div className="flex flex-col flex-1 min-h-0">
+          <Tabs
+            tabs={[
+              {
+                id: 'transcript',
+                label: 'Transcript',
+                content: (
+                  <div className="flex items-center justify-center py-16">
+                    <EmptyState icon={PhoneIcon} title="No transcript yet" description="Transcription will be available after evaluation." compact />
+                  </div>
+                ),
+              },
+              {
+                id: 'scorecard',
+                label: 'Scorecard',
+                content: (
+                  <div className="flex items-center justify-center py-16">
+                    <EmptyState icon={PhoneIcon} title="Not yet evaluated" description="Run an evaluation to see the scorecard." compact />
+                  </div>
+                ),
+              },
+            ]}
+            defaultTab="transcript"
+            fillHeight
+          />
+        </div>
+      )}
 
       {evalOpen && (
         <NewInsideSalesEvalOverlay
