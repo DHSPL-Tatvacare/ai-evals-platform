@@ -84,7 +84,7 @@ async def fetch_call_activities(
                 client, "POST", url, params=_auth_params(), json=body
             )
             data = resp.json()
-            if isinstance(data, dict) and "List" in data:
+            if isinstance(data, dict) and data.get("List"):
                 all_activities.extend(data["List"])
                 total_record_count += data.get("RecordCount", len(data["List"]))
             elif isinstance(data, list):
