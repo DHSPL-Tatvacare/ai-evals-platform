@@ -88,10 +88,12 @@ export function InsideSalesListing() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioEl] = useState(() => typeof Audio !== 'undefined' ? new Audio() : null);
 
-  // Load calls on mount and when page/filters change
+  // Stable key from filter values + page — only re-fetch when these actually change
+  const filterKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agent}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}`;
+
   useEffect(() => {
     useInsideSalesStore.getState().loadCalls();
-  }, [page, filters]);
+  }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup audio on unmount
   useEffect(() => {
