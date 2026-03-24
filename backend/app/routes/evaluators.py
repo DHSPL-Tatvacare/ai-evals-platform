@@ -144,6 +144,8 @@ async def seed_defaults(
         return await _seed_voice_rx(listing_id, auth, db)
     elif app_id == "kaira-bot":
         return await _seed_kaira_bot(auth, db)
+    elif app_id == "inside-sales":
+        return await _seed_inside_sales(auth, db)
     else:
         raise HTTPException(status_code=400, detail=f"Seed evaluators not available for app '{app_id}'")
 
@@ -234,6 +236,47 @@ async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator
 
     created = []
     for seed in KAIRA_BOT_EVALUATORS:
+        if seed["name"] in existing_names:
+            continue
+        evaluator = Evaluator(
+            app_id=seed["app_id"],
+            listing_id=None,
+            name=seed["name"],
+            prompt=seed["prompt"],
+            output_schema=seed["output_schema"],
+            model_id=None,
+            is_global=seed.get("is_global", True),
+            show_in_header=seed.get("show_in_header", False),
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
+        )
+        db.add(evaluator)
+        created.append(evaluator)
+
+    if created:
+        await db.commit()
+        for e in created:
+            await db.refresh(e)
+
+    return created
+
+
+async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
+    """Seed recommended evaluators for inside-sales."""
+    from app.services.seed_defaults import INSIDE_SALES_EVALUATORS
+
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.app_id == "inside-sales",
+            Evaluator.listing_id == None,
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+        )
+    )
+    existing_names = {e.name for e in result.scalars().all()}
+
+    created = []
+    for seed in INSIDE_SALES_EVALUATORS:
         if seed["name"] in existing_names:
             continue
         evaluator = Evaluator(

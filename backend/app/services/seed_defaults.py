@@ -523,6 +523,129 @@ VOICE_RX_SCHEMAS = [
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# INSIDE-SALES EVALUATORS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GOODFLIP_QA_SCHEMA = [
+    {"key": "overall_score", "type": "number", "description": "Total score out of 100", "displayMode": "header", "isMainMetric": True, "thresholds": {"green": 80, "yellow": 65}},
+    {"key": "call_opening", "type": "number", "description": "Call Opening & Permission (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "brand_positioning", "type": "number", "description": "Brand Positioning & Promise (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "metabolism_explanation", "type": "number", "description": "Metabolism Explanation (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "metabolic_score_explanation", "type": "number", "description": "Metabolic Score Explanation (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "credibility_safety", "type": "number", "description": "Credibility, Boundaries & Safety (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "transition_probing", "type": "number", "description": "Transition to Probing (max 5)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
+    {"key": "probing_quality", "type": "number", "description": "Probing Quality (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "intent_decision_mapping", "type": "number", "description": "Intent & Decision Mapping (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "program_mapping", "type": "number", "description": "Program Mapping & Next Step (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "closing_impression", "type": "number", "description": "Closing & Brand Impression (max 5)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
+    {"key": "compliance_no_misinformation", "type": "boolean", "description": "No medical misinformation", "displayMode": "card", "isMainMetric": False},
+    {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "displayMode": "card", "isMainMetric": False},
+    {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "displayMode": "card", "isMainMetric": False},
+    {"key": "reasoning", "type": "text", "description": "Detailed critique per dimension with evidence", "displayMode": "hidden", "isMainMetric": False, "role": "reasoning"},
+]
+
+INSIDE_SALES_EVALUATORS = [
+    {
+        "app_id": "inside-sales",
+        "name": "GoodFlip Sales Call QA",
+        "is_global": True,
+        "listing_id": None,
+        "show_in_header": True,
+        "prompt": """You are an expert sales call quality evaluator for GoodFlip, a metabolic health program by TatvaCare. Evaluate the following sales call transcript against the GoodFlip QA rubric.
+
+═══════════════════════════════════════════════════════════════════════════════
+CALL TRANSCRIPT
+═══════════════════════════════════════════════════════════════════════════════
+
+{{transcript}}
+
+═══════════════════════════════════════════════════════════════════════════════
+SCORING RUBRIC — 10 DIMENSIONS (105 total points, normalized to 100)
+═══════════════════════════════════════════════════════════════════════════════
+
+Score each dimension based on the checks below. Award points only when the check is clearly demonstrated in the transcript.
+
+1. CALL OPENING & PERMISSION (max 10 pts)
+   - Clear self-introduction with name and company (3 pts)
+   - Reference to lead context — how they found GoodFlip or prior interaction (2 pts)
+   - Asked permission or checked availability before proceeding (3 pts)
+   - Warm, professional tone from the start (2 pts)
+
+2. BRAND POSITIONING & PROMISE (max 15 pts)
+   - Explained GoodFlip as a metabolic health program (not just weight loss) (4 pts)
+   - Mentioned the core promise: sustainable health improvement through metabolism (4 pts)
+   - Differentiated from generic diet/gym programs (3 pts)
+   - Referenced credibility markers: doctor-backed, scientific approach, patient outcomes (4 pts)
+
+3. METABOLISM EXPLANATION (max 15 pts)
+   - Explained what metabolism is in simple terms (4 pts)
+   - Connected metabolism to the lead's specific health concern (4 pts)
+   - Used relatable analogies or examples (3 pts)
+   - Explained why fixing metabolism matters more than calorie counting (4 pts)
+
+4. METABOLIC SCORE EXPLANATION (max 10 pts)
+   - Mentioned the metabolic score assessment (3 pts)
+   - Explained what it measures and why it matters (4 pts)
+   - Created curiosity or urgency to get assessed (3 pts)
+
+5. CREDIBILITY, BOUNDARIES & SAFETY (max 10 pts)
+   - Referenced doctor involvement or medical backing (3 pts)
+   - Stayed within scope — did not make medical diagnoses (3 pts)
+   - Did not advise stopping prescribed medicines (2 pts)
+   - Did not make guaranteed outcome claims (2 pts)
+
+6. TRANSITION TO PROBING (max 5 pts)
+   - Natural segue from pitch to discovery questions (3 pts)
+   - Did not abruptly jump to interrogation mode (2 pts)
+
+7. PROBING QUALITY (max 15 pts)
+   - Asked about current health conditions (3 pts)
+   - Asked about lifestyle: diet, exercise, sleep, stress (4 pts)
+   - Asked about previous attempts to improve health (3 pts)
+   - Asked about goals and timeline expectations (3 pts)
+   - Listened actively — acknowledged responses before next question (2 pts)
+
+8. INTENT & DECISION MAPPING (max 10 pts)
+   - Gauged the lead's readiness to take action (3 pts)
+   - Identified decision-makers (self, family, doctor) (3 pts)
+   - Addressed potential objections or hesitations (4 pts)
+
+9. PROGRAM MAPPING & NEXT STEP (max 10 pts)
+   - Mapped the lead's needs to a specific GoodFlip plan (4 pts)
+   - Explained pricing or next steps clearly (3 pts)
+   - Set a clear follow-up action (book assessment, schedule callback, etc.) (3 pts)
+
+10. CLOSING & BRAND IMPRESSION (max 5 pts)
+    - Professional sign-off with next step reminder (3 pts)
+    - Left a positive brand impression (2 pts)
+
+═══════════════════════════════════════════════════════════════════════════════
+COMPLIANCE GATES (instant flags — do NOT affect score but MUST be reported)
+═══════════════════════════════════════════════════════════════════════════════
+
+- compliance_no_misinformation: TRUE if the agent did NOT share any medical misinformation. FALSE if they did.
+- compliance_no_stop_medicines: TRUE if the agent did NOT advise stopping prescribed medicines. FALSE if they did.
+- compliance_no_guarantees: TRUE if the agent did NOT make guaranteed or fear-based outcome claims. FALSE if they did.
+
+═══════════════════════════════════════════════════════════════════════════════
+SCORING INTERPRETATION
+═══════════════════════════════════════════════════════════════════════════════
+
+- 80-100: Strong — ready for independent calling
+- 65-79: Good — minor coaching points
+- 50-64: Needs work — structured coaching required
+- Below 50: Poor — re-training recommended
+
+═══════════════════════════════════════════════════════════════════════════════
+OUTPUT
+═══════════════════════════════════════════════════════════════════════════════
+
+Score each dimension. Sum all dimension scores, normalize to 100, and provide as overall_score. For each compliance gate, report TRUE (passed) or FALSE (violated). In the reasoning field, provide a detailed critique for each dimension with specific transcript evidence (quote relevant portions).""",
+        "output_schema": GOODFLIP_QA_SCHEMA,
+    },
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # KAIRA-BOT EVALUATORS (4 rows)
 # ═══════════════════════════════════════════════════════════════════════════════
 
