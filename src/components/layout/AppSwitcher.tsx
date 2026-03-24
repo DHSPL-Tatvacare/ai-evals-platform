@@ -26,6 +26,12 @@ const apps: AppConfig[] = [
     icon: APPS['kaira-bot'].icon,
     route: routes.kaira.dashboard,
   },
+  {
+    id: 'inside-sales',
+    name: APPS['inside-sales'].name,
+    icon: APPS['inside-sales'].icon,
+    route: routes.insideSales.dashboard,
+  },
 ];
 
 export function AppSwitcher() {

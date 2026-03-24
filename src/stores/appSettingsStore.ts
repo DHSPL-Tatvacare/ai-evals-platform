@@ -39,9 +39,8 @@ export interface KairaBotSettings {
 }
 
 // Inside Sales specific settings (placeholder — no credentials yet)
-export interface InsideSalesSettings {
-  // Will be populated in later phases as needed
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface InsideSalesSettings {}
 
 // All app-specific settings
 export interface AppSpecificSettings {

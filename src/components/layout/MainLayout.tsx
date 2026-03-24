@@ -25,7 +25,8 @@ export function MainLayout({ children }: MainLayoutProps) {
   // Sync app store from route — route is the single source of truth
   useEffect(() => {
     const isKairaRoute = location.pathname.startsWith('/kaira');
-    const newApp = isKairaRoute ? 'kaira-bot' : 'voice-rx';
+    const isInsideSalesRoute = location.pathname.startsWith('/inside-sales');
+    const newApp = isInsideSalesRoute ? 'inside-sales' : isKairaRoute ? 'kaira-bot' : 'voice-rx';
     setCurrentApp(newApp);
     useMiniPlayerStore.getState().closeIfAppChanged(newApp);
   }, [location.pathname, setCurrentApp]);

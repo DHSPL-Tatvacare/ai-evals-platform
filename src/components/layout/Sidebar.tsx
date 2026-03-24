@@ -35,6 +35,7 @@ import { routes } from "@/config/routes";
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
+import { InsideSalesSidebarContent } from "./InsideSalesSidebarContent";
 import { ChangePasswordDialog } from "@/features/auth/ChangePasswordDialog";
 
 interface SidebarProps {
@@ -55,10 +56,13 @@ export function Sidebar({ onNewEval }: SidebarProps) {
 
   // Compute settings path based on current app
   const settingsPath =
-    appId === "kaira-bot" ? routes.kaira.settings : routes.voiceRx.settings;
+    appId === "kaira-bot" ? routes.kaira.settings
+    : appId === "inside-sales" ? routes.insideSales.settings
+    : routes.voiceRx.settings;
   const isSettingsActive =
     location.pathname === routes.voiceRx.settings ||
-    location.pathname === routes.kaira.settings;
+    location.pathname === routes.kaira.settings ||
+    location.pathname === routes.insideSales.settings;
   const isGuideActive = location.pathname === routes.guide;
 
   // Auth
@@ -70,8 +74,9 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   // Modal management (for batch/adversarial wizards)
   const openModal = useUIStore((s) => s.openModal);
 
-  // Check if this is Kaira Bot app
+  // Check app type
   const isKairaBot = appId === "kaira-bot";
+  const isInsideSales = appId === "inside-sales";
 
   // Controlled state for the +New popover
   const [newMenuOpen, setNewMenuOpen] = useState(false);
@@ -131,7 +136,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           </button>
         </div>
         <div className="flex-1 flex flex-col items-center py-3 gap-2">
-          {isKairaBot ? (
+          {!isInsideSales && (isKairaBot ? (
             <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
               <PopoverTrigger asChild>
                 <Button
@@ -166,10 +171,33 @@ export function Sidebar({ onNewEval }: SidebarProps) {
             >
               <Plus className="h-4 w-4" />
             </Button>
-          )}
+          ))}
 
           <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
-          {isKairaBot ? (
+          {isInsideSales ? (
+            <>
+              <CollapsedNavLink
+                to={routes.insideSales.listing}
+                icon={LayoutDashboard}
+                title="Listing"
+              />
+              <CollapsedNavLink
+                to={routes.insideSales.runs}
+                icon={ListChecks}
+                title="Runs"
+              />
+              <CollapsedNavLink
+                to={routes.insideSales.dashboard}
+                icon={LayoutDashboard}
+                title="Dashboard"
+              />
+              <CollapsedNavLink
+                to={routes.insideSales.logs}
+                icon={ScrollText}
+                title="Logs"
+              />
+            </>
+          ) : isKairaBot ? (
             <>
               <CollapsedNavLink
                 to={routes.kaira.dashboard}
@@ -265,7 +293,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
       <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)] px-4">
         <AppSwitcher />
         <div className="flex items-center gap-1">
-          {isKairaBot ? (
+          {!isInsideSales && (isKairaBot ? (
             <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
               <PopoverTrigger asChild>
                 <Button
@@ -300,7 +328,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
               <Plus className="h-4 w-4" />
               New
             </Button>
-          )}
+          ))}
           <button
             onClick={toggleSidebar}
             className="ml-1 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
@@ -312,7 +340,9 @@ export function Sidebar({ onNewEval }: SidebarProps) {
       </div>
 
       {/* Conditional content based on app */}
-      {isKairaBot ? (
+      {isInsideSales ? (
+        <InsideSalesSidebarContent />
+      ) : isKairaBot ? (
         <KairaSidebarContent
           searchPlaceholder={appMetadata.searchPlaceholder}
         />
