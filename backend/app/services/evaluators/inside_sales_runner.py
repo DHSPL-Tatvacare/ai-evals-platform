@@ -355,7 +355,7 @@ async def run_inside_sales_evaluation(
                     "transcript": transcript,
                     "call_metadata": {
                         "agent": call.get("agentName", ""),
-                        "lead": call.get("prospectId", ""),
+                        "lead": call.get("leadName", "") or call.get("prospectId", ""),
                         "direction": call.get("direction"),
                         "duration": call.get("durationSeconds"),
                         "recording_url": recording_url,

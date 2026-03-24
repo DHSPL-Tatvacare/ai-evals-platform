@@ -39,10 +39,18 @@ function getRunName(run: EvalRun): string {
 }
 
 function getOverallScore(thread: ThreadEvalRow): number | null {
-  const output = (thread.result as unknown as Record<string, unknown>)?.output as Record<string, unknown> | undefined;
-  if (!output) return null;
-  const score = output.overall_score;
-  return typeof score === 'number' ? score : null;
+  const result = thread.result as unknown as Record<string, unknown> | undefined;
+  if (!result) return null;
+  // Score lives in evaluations[0].output.overall_score
+  const evals = result.evaluations as Array<Record<string, unknown>> | undefined;
+  if (evals && evals.length > 0) {
+    const output = evals[0].output as Record<string, unknown> | undefined;
+    if (output && typeof output.overall_score === 'number') return output.overall_score;
+  }
+  // Fallback: check top-level output
+  const output = result.output as Record<string, unknown> | undefined;
+  if (output && typeof output.overall_score === 'number') return output.overall_score;
+  return null;
 }
 
 function getScoreBand(score: number | null): string {
