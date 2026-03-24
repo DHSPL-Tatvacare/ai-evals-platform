@@ -311,7 +311,7 @@ export function InsideSalesRunDetail() {
   const selectedThread = callId ? threads.find((t) => t.thread_id === callId) : null;
 
   if (callId && selectedThread) {
-    return <CallEvalDetail run={run} thread={selectedThread} />;
+    return <CallEvalDetail run={run} thread={selectedThread} siblings={threads} />;
   }
 
   return (
@@ -378,10 +378,20 @@ function StatCard({ label, value, color }: { label: string; value: string; color
   );
 }
 
-/* ── Call Eval Detail ───────────────────────────────────── */
+/* ── Call Eval Detail (split-pane, mirrors ThreadDetailV2 layout) ── */
 
-function CallEvalDetail({ run, thread }: { run: EvalRun; thread: ThreadEvalRow }) {
+function CallEvalDetail({
+  run,
+  thread,
+  siblings,
+}: {
+  run: EvalRun;
+  thread: ThreadEvalRow;
+  siblings: ThreadEvalRow[];
+}) {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'scorecard' | 'compliance'>('scorecard');
+
   const result = thread.result as unknown as Record<string, unknown> | undefined;
   const meta = result?.call_metadata as Record<string, unknown> | undefined;
   const evals = result?.evaluations as Array<Record<string, unknown>> | undefined;
@@ -390,123 +400,269 @@ function CallEvalDetail({ run, thread }: { run: EvalRun; thread: ThreadEvalRow }
   const overallScore = getOverallScore(thread);
   const transcript = result?.transcript as string | undefined;
 
-  // Extract dimension scores (numeric fields from evalOutput, excluding overall_score)
+  // Dimension scores (numeric fields, excluding overall_score and reasoning)
   const dimensions = evalOutput
     ? Object.entries(evalOutput).filter(
         ([k, v]) => typeof v === 'number' && k !== 'overall_score'
       )
     : [];
 
-  // Extract compliance gates (boolean fields)
+  // Compliance gates (boolean fields)
   const complianceGates = evalOutput
     ? Object.entries(evalOutput).filter(([, v]) => typeof v === 'boolean')
     : [];
 
-  return (
-    <div className="space-y-4">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-        <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)]">Runs</Link>
-        <span>/</span>
-        <button onClick={() => navigate(routes.insideSales.runDetail(run.id))} className="hover:text-[var(--text-brand)]">
-          {run.id.slice(0, 12)}
-        </button>
-        <span>/</span>
-        <span className="font-mono text-[var(--text-secondary)]">{thread.thread_id.slice(0, 12)}</span>
-      </div>
+  const allPassed = complianceGates.every(([, v]) => v === true);
 
+  // Thread navigation
+  const currentIdx = siblings.findIndex((s) => s.thread_id === thread.thread_id);
+  const prevThread = currentIdx > 0 ? siblings[currentIdx - 1] : null;
+  const nextThread = currentIdx < siblings.length - 1 ? siblings[currentIdx + 1] : null;
+  const goToThread = (id: string) => navigate(`/inside-sales/runs/${run.id}/calls/${id}`);
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
       {/* Header */}
-      <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(routes.insideSales.runDetail(run.id))}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-          <div>
-            <h1 className="text-[14px] font-bold text-[var(--text-primary)]">
+      <div className="shrink-0 pb-3 space-y-2">
+        {/* Row 1: breadcrumb + thread nav */}
+        <div className="flex items-center justify-between gap-4">
+          <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] min-w-0">
+            <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)] shrink-0">Runs</Link>
+            <span>/</span>
+            <button
+              onClick={() => navigate(routes.insideSales.runDetail(run.id))}
+              className="hover:text-[var(--text-brand)] font-mono shrink-0"
+            >
+              {run.id.slice(0, 12)}
+            </button>
+            <span>/</span>
+            <span className="font-mono text-[var(--text-primary)] font-medium truncate">
               {(meta?.agent as string) || '—'} → {(meta?.lead as string) || '—'}
-            </h1>
-            <div className="flex items-center gap-3 mt-0.5 text-[11px] text-[var(--text-muted)]">
-              <span>{(meta?.direction as string) || '—'}</span>
-              {typeof meta?.duration === 'number' && meta.duration > 0 && <span>{formatDuration(meta.duration)}</span>}
-              <span className="font-mono">{thread.thread_id.slice(0, 8)}</span>
+            </span>
+          </nav>
+
+          {/* Thread navigation */}
+          {siblings.length > 1 && (
+            <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)] shrink-0">
+              <button
+                disabled={!prevThread}
+                onClick={() => prevThread && goToThread(prevThread.thread_id)}
+                className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
+              >
+                <ArrowLeft size={14} />
+              </button>
+              <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)]">
+                {currentIdx + 1}/{siblings.length}
+              </span>
+              <button
+                disabled={!nextThread}
+                onClick={() => nextThread && goToThread(nextThread.thread_id)}
+                className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
+              >
+                <ArrowLeft size={14} className="rotate-180" />
+              </button>
+            </span>
+          )}
+        </div>
+
+        {/* Row 2: summary bar */}
+        <div className="overflow-x-auto scrollbar-thin">
+          <div className="w-fit mx-auto">
+            <div className="inline-flex items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm">
+              <SummaryPill label="Score" value={overallScore !== null ? `${overallScore}/100` : '—'} color={scoreColor(overallScore)} />
+              <SummaryPill label="Verdict" value={getScoreBand(overallScore)} color={scoreColor(overallScore)} />
+              <SummaryPill
+                label="Compliance"
+                value={complianceGates.length > 0 ? (allPassed ? 'Pass' : 'Fail') : '—'}
+                color={complianceGates.length > 0 ? (allPassed ? 'var(--color-success)' : 'var(--color-error)') : undefined}
+              />
+              <SummaryPill label="Agent" value={(meta?.agent as string) || '—'} />
+              <SummaryPill label="Duration" value={typeof meta?.duration === 'number' ? formatDuration(meta.duration) : '—'} />
             </div>
-          </div>
-          <div className="ml-auto text-right">
-            <div className="text-2xl font-bold" style={{ color: scoreColor(overallScore) }}>
-              {overallScore !== null ? `${overallScore}/100` : '—'}
-            </div>
-            <VerdictBadge verdict={getScoreBand(overallScore)} category="status" />
           </div>
         </div>
       </div>
 
-      {/* Dimension scores */}
-      {dimensions.length > 0 && (
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Dimension Scores</h3>
-          <div className="grid grid-cols-2 gap-2">
+      {/* Split pane: transcript left, scorecard/compliance right */}
+      <div className="hidden md:flex flex-1 min-h-0">
+        {/* Left: transcript */}
+        <div className="w-[35%] min-w-[280px] max-w-[420px] flex flex-col min-h-0 border-r border-[var(--border-subtle)]">
+          <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-muted)] uppercase">
+            Transcript
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+            {transcript ? (
+              <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed font-mono">
+                {transcript}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--text-muted)] py-4 text-center">No transcript available.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Right: tabs */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+          {/* Tab bar */}
+          <div className="flex border-b border-[var(--border-subtle)]">
+            {(['scorecard', 'compliance'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  'px-4 py-2 text-xs font-semibold transition-colors border-b-2',
+                  activeTab === tab
+                    ? 'border-[var(--interactive-primary)] text-[var(--text-brand)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                )}
+              >
+                {tab === 'scorecard' ? 'Scorecard' : 'Compliance'}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+            {activeTab === 'scorecard' && (
+              <div className="space-y-0">
+                {dimensions.map(([key, val]) => {
+                  const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                  const score = val as number;
+                  const pctVal = Math.min(100, Math.max(0, score * 100 / (score <= 15 ? 15 : 100)));
+                  return (
+                    <div key={key} className="flex items-center gap-2 py-2 border-b border-[var(--border-subtle)] last:border-b-0">
+                      <span className="text-xs text-[var(--text-primary)] w-[45%] shrink-0">{label}</span>
+                      <div className="flex-1 h-2 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${pctVal}%`,
+                            background: score >= 8 ? 'var(--color-success)' : score >= 5 ? 'var(--color-warning)' : 'var(--color-error)',
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold w-12 text-right" style={{ color: scoreColor(score) }}>
+                        {score}
+                      </span>
+                    </div>
+                  );
+                })}
+                {/* Total row */}
+                {overallScore !== null && (
+                  <div className="flex items-center justify-between mt-3 px-3 py-2.5 bg-[var(--bg-secondary)] rounded-md border border-[var(--border-subtle)]">
+                    <span className="text-[13px] font-semibold text-[var(--text-primary)]">Total</span>
+                    <span className="text-lg font-bold" style={{ color: scoreColor(overallScore) }}>
+                      {overallScore}/100
+                    </span>
+                  </div>
+                )}
+                {/* Reasoning */}
+                {reasoning && (
+                  <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]">
+                    <h4 className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">Reasoning</h4>
+                    <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+                      {reasoning}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'compliance' && (
+              <div>
+                {/* Filter chips */}
+                <div className="flex flex-wrap gap-1 pb-3">
+                  <span className="px-2 py-0.5 text-xs rounded-full border border-[var(--border-brand)] bg-[var(--surface-info)] text-[var(--text-brand)]">
+                    All ({complianceGates.length})
+                  </span>
+                  <span className="px-2 py-0.5 text-xs rounded-full border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                    Violations ({complianceGates.filter(([, v]) => !v).length})
+                  </span>
+                  <span className="px-2 py-0.5 text-xs rounded-full border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                    Passed ({complianceGates.filter(([, v]) => v).length})
+                  </span>
+                </div>
+                {/* Compliance table */}
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-[var(--border-subtle)]">
+                      <th className="text-center w-12 py-1.5 px-2 font-semibold text-[var(--text-muted)]">Status</th>
+                      <th className="text-left py-1.5 px-2 font-semibold text-[var(--text-muted)]">Rule</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {complianceGates.map(([key, val]) => {
+                      const label = key.replace(/^compliance_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                      const passed = val as boolean;
+                      return (
+                        <tr key={key} className="border-b border-[var(--border-subtle)]">
+                          <td className="text-center py-2 px-2">
+                            <span className={cn(
+                              'inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold',
+                              passed ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'
+                            )}>
+                              {passed ? '✓' : '✗'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2">
+                            <span className={cn(
+                              'text-[13px] font-semibold',
+                              passed ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'
+                            )}>
+                              {label}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile: stacked */}
+      <div className="flex flex-col flex-1 min-h-0 md:hidden space-y-3 overflow-y-auto">
+        {transcript && (
+          <details className="shrink-0">
+            <summary className="text-xs text-[var(--text-muted)] font-medium cursor-pointer py-1.5 px-1">
+              Transcript
+            </summary>
+            <div className="max-h-[300px] overflow-y-auto px-2 py-1">
+              <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed font-mono">
+                {transcript}
+              </div>
+            </div>
+          </details>
+        )}
+        {dimensions.length > 0 && (
+          <div className="px-2">
             {dimensions.map(([key, val]) => {
               const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
               const score = val as number;
               return (
-                <div key={key} className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] px-3 py-2">
-                  <span className="text-xs text-[var(--text-secondary)]">{label}</span>
-                  <span className="text-sm font-bold" style={{ color: scoreColor(score) }}>{score}</span>
+                <div key={key} className="flex items-center justify-between py-1.5 border-b border-[var(--border-subtle)] text-xs">
+                  <span className="text-[var(--text-secondary)]">{label}</span>
+                  <span className="font-bold" style={{ color: scoreColor(score) }}>{score}</span>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    </div>
+  );
+}
 
-      {/* Compliance gates */}
-      {complianceGates.length > 0 && (
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Compliance Gates</h3>
-          <div className="flex flex-wrap gap-2">
-            {complianceGates.map(([key, val]) => {
-              const label = key.replace(/^compliance_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-              const passed = val as boolean;
-              return (
-                <span
-                  key={key}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium',
-                    passed
-                      ? 'bg-green-500/10 text-green-400'
-                      : 'bg-red-500/10 text-red-400'
-                  )}
-                >
-                  {passed ? '✓' : '✗'} {label}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
+/* ── Summary Pill ───────────────────────────────────────── */
 
-      {/* Reasoning */}
-      {reasoning && (
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Reasoning</h3>
-          <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
-            {reasoning}
-          </div>
-        </div>
-      )}
-
-      {/* Transcript */}
-      {transcript && (
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Transcript</h3>
-          <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto font-mono">
-            {transcript}
-          </div>
-        </div>
-      )}
+function SummaryPill({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)] first:border-l-0">
+      <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">{label}</span>
+      <span className="leading-none font-semibold text-sm" style={{ color: color || 'var(--text-primary)' }}>{value}</span>
     </div>
   );
 }
