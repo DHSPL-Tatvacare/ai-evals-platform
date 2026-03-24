@@ -289,6 +289,7 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
       onSubmit={handleSubmit}
       isSubmitting={isSubmitting}
       submitLabel="Start Evaluation"
+      isDirty={Boolean(runName || runDescription || currentStep > 0)}
     >
       {stepContent}
     </WizardOverlay>
