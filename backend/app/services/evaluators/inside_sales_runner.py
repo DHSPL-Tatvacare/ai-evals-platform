@@ -178,10 +178,7 @@ async def run_inside_sales_evaluation(
     llm.set_context(str(eval_run_id))
 
     # ── Resolve calls to evaluate ─────────────────────────────────
-    from app.services.lsq_client import (
-        fetch_call_activities, normalize_activity, get_cached_calls,
-    )
-    from app.database import async_session as _async_session
+    from app.services.lsq_client import fetch_call_activities, normalize_activity
 
     await update_job_progress(
         job_id, 0, 1, "Fetching calls from LeadSquared...",
@@ -189,53 +186,36 @@ async def run_inside_sales_evaluation(
     )
 
     mode = call_selection.get("selection_mode", "all")
+    specific_ids = set(call_selection.get("selected_call_ids", [])) if mode == "specific" else set()
     all_calls: list[dict[str, Any]] = []
 
-    if mode == "specific":
-        # For specific calls, try DB cache first — avoids full LSQ fetch
-        specific_ids = list(call_selection.get("selected_call_ids", []))
-        if specific_ids:
-            async with _async_session() as db:
-                cached = await get_cached_calls(db, tenant_id, specific_ids)
-            all_calls = list(cached.values())
-            # Any IDs not in cache — fall back to LSQ fetch for those
-            missing_ids = set(specific_ids) - set(cached.keys())
-            if missing_ids:
-                logger.info("Cache miss for %d specific calls, fetching from LSQ", len(missing_ids))
-                date_from = call_selection.get("date_from", "")
-                date_to = call_selection.get("date_to", "")
-                result = await fetch_call_activities(
-                    date_from=date_from, date_to=date_to,
-                    event_codes=None, page=1, page_size=100,
-                )
-                for a in result.get("activities", []):
-                    norm = normalize_activity(a)
-                    if norm["activityId"] in missing_ids:
-                        all_calls.append(norm)
-    else:
-        # For all/sample modes, fetch full activity list from LSQ
-        date_from = call_selection.get("date_from", "")
-        date_to = call_selection.get("date_to", "")
-        lsq_page = 1
-        lsq_page_size = 100
+    # Fetch from LSQ activity API
+    date_from = call_selection.get("date_from", "")
+    date_to = call_selection.get("date_to", "")
+    lsq_page = 1
+    lsq_page_size = 100
 
-        while True:
-            result = await fetch_call_activities(
-                date_from=date_from,
-                date_to=date_to,
-                event_codes=None,
-                page=lsq_page,
-                page_size=lsq_page_size,
-            )
-            activities = result.get("activities", [])
-            if not activities:
-                break
-            all_calls.extend(normalize_activity(a) for a in activities)
-            if len(activities) < lsq_page_size:
-                break
-            lsq_page += 1
+    while True:
+        result = await fetch_call_activities(
+            date_from=date_from,
+            date_to=date_to,
+            event_codes=None,
+            page=lsq_page,
+            page_size=lsq_page_size,
+        )
+        activities = result.get("activities", [])
+        if not activities:
+            break
+        all_calls.extend(normalize_activity(a) for a in activities)
+        if len(activities) < lsq_page_size:
+            break
+        lsq_page += 1
 
-        logger.info("Fetched %d total calls from LSQ (%d pages)", len(all_calls), lsq_page)
+    logger.info("Fetched %d total calls from LSQ (%d pages)", len(all_calls), lsq_page)
+
+    # For specific mode, filter to selected IDs
+    if specific_ids:
+        all_calls = [c for c in all_calls if c.get("activityId") in specific_ids]
 
     # ── Apply filters ────────────────────────────────────────────
     calls = all_calls
@@ -291,6 +271,16 @@ async def run_inside_sales_evaluation(
         """
         call_id = call.get("activityId", f"call-{index}")
         recording_url = call.get("recordingUrl", "")
+
+        # Fetch lead name (individual GetById — reliable 1:1 mapping)
+        prospect_id = call.get("prospectId", "")
+        if prospect_id:
+            from app.services.lsq_client import fetch_lead_by_id
+            lead_info = await fetch_lead_by_id(prospect_id)
+            lead_name = f"{lead_info.get('firstName', '')} {lead_info.get('lastName', '')}".strip()
+            call["_leadName"] = lead_name or prospect_id[:8]
+        else:
+            call["_leadName"] = ""
 
         # Thread-safe LLM clone
         worker_llm = llm.clone_for_thread(call_id)
@@ -355,7 +345,8 @@ async def run_inside_sales_evaluation(
                     "transcript": transcript,
                     "call_metadata": {
                         "agent": call.get("agentName", ""),
-                        "lead": call.get("leadName", "") or call.get("prospectId", ""),
+                        "lead": call.get("_leadName", "") or call.get("prospectId", "")[:8],
+                        "prospect_id": call.get("prospectId", ""),
                         "direction": call.get("direction"),
                         "duration": call.get("durationSeconds"),
                         "recording_url": recording_url,
