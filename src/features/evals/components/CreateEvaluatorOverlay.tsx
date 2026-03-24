@@ -15,6 +15,7 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { ArrayItemConfigModal } from "./ArrayItemConfigModal";
+import { RubricBuilder } from "@/features/insideSales/components/RubricBuilder";
 import { evaluatorsRepository } from "@/services/api/evaluatorsApi";
 import { cn } from "@/utils";
 import type {
@@ -157,6 +158,7 @@ export function CreateEvaluatorOverlay({
 
   const effectiveAppId = listing?.appId || context?.appId || "voice-rx";
   const effectiveEntityId = listing?.id || context?.entityId;
+  const isRubricMode = effectiveAppId === "inside-sales";
 
   const handleSave = async () => {
     // Non-blocking validation: warn about unknown variables but still allow save
@@ -247,7 +249,8 @@ export function CreateEvaluatorOverlay({
           </div>
 
           <div className="py-4 space-y-6">
-            {/* Prompt Canvas */}
+            {/* Prompt Canvas (hidden in rubric mode — prompt is auto-generated) */}
+            {!isRubricMode && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-semibold text-[var(--text-primary)]">
@@ -324,8 +327,16 @@ export function CreateEvaluatorOverlay({
                   </div>
                 )}
             </div>
+            )}
 
-            {/* Output Schema */}
+            {/* Output Schema / Rubric Builder */}
+            {isRubricMode ? (
+              <RubricBuilder
+                outputFields={outputFields}
+                onFieldsChange={setOutputFields}
+                onPromptGenerated={setPrompt}
+              />
+            ) : (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -676,6 +687,7 @@ export function CreateEvaluatorOverlay({
                 body, X=Hidden
               </p>
             </div>
+            )}
           </div>
         </div>
 
