@@ -4,15 +4,15 @@
  */
 
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, FileText, GitCompareArrows, LayoutDashboard, ScrollText } from 'lucide-react';
+import { LayoutGrid, FileText, ListChecks, LayoutDashboard, ScrollText } from 'lucide-react';
 import { cn } from '@/utils';
 import { routes } from '@/config/routes';
 
 const NAV_ITEMS = [
   { to: routes.insideSales.listing, icon: LayoutGrid, label: 'Listing' },
-  { to: routes.insideSales.evaluators, icon: FileText, label: 'Evaluators' },
-  { to: routes.insideSales.runs, icon: GitCompareArrows, label: 'Runs' },
   { to: routes.insideSales.dashboard, icon: LayoutDashboard, label: 'Dashboard' },
+  { to: routes.insideSales.evaluators, icon: FileText, label: 'Evaluators' },
+  { to: routes.insideSales.runs, icon: ListChecks, label: 'Runs' },
   { to: routes.insideSales.logs, icon: ScrollText, label: 'Logs' },
 ];
 

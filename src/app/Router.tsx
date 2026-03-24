@@ -115,10 +115,7 @@ export function Router() {
           <Route path={routes.kaira.logs} element={<EvalLogs />} />
 
           {/* Inside Sales routes */}
-          <Route
-            path={routes.insideSales.home}
-            element={<Navigate to={routes.insideSales.dashboard} replace />}
-          />
+          <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
           <Route path={routes.insideSales.evaluators} element={<InsideSalesEvaluators />} />
           <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluators />} />
           <Route path={routes.insideSales.runs} element={<InsideSalesRunList />} />

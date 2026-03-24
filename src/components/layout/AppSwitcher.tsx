@@ -30,7 +30,7 @@ const apps: AppConfig[] = [
     id: 'inside-sales',
     name: APPS['inside-sales'].name,
     icon: APPS['inside-sales'].icon,
-    route: routes.insideSales.dashboard,
+    route: routes.insideSales.listing,
   },
 ];
 
