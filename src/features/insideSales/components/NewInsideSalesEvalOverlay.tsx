@@ -15,6 +15,7 @@ import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { routes } from '@/config/routes';
 import { cn } from '@/utils';
+import { useInsideSalesStore } from '@/stores';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import type { EvaluatorDefinition } from '@/types';
 
@@ -37,6 +38,10 @@ interface NewInsideSalesEvalOverlayProps {
 }
 
 export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewInsideSalesEvalOverlayProps) {
+  // Read selected call IDs from store if not passed as prop
+  const storeSelectedIds = useInsideSalesStore((s) => [...s.selectedCallIds]);
+  const initialIds = preSelectedCallIds?.length ? preSelectedCallIds : storeSelectedIds;
+
   const [currentStep, setCurrentStep] = useState(0);
 
   // Step 1: Run Info
@@ -49,9 +54,9 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
     dateTo: todayStr() + ' 23:59:59',
     agent: '',
     direction: '',
-    selectionMode: preSelectedCallIds?.length ? 'specific' : 'all',
+    selectionMode: initialIds.length ? 'specific' : 'all',
     sampleSize: 20,
-    selectedCallIds: preSelectedCallIds || [],
+    selectedCallIds: initialIds,
     skipEvaluated: true,
     minDuration: true,
   });
