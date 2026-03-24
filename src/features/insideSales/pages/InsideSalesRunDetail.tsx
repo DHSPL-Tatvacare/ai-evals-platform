@@ -24,6 +24,7 @@ import { routes } from '@/config/routes';
 import { formatDuration } from '@/utils/formatters';
 import { timeAgo } from '@/utils/evalFormatters';
 import { isActiveStatus } from '@/utils/runStatus';
+import { scoreColor, getScoreBand } from '@/utils/scoreUtils';
 import type { EvalRun, ThreadEvalRow } from '@/types';
 import type { Job } from '@/services/api/jobsApi';
 
@@ -53,21 +54,6 @@ function getOverallScore(thread: ThreadEvalRow): number | null {
   const output = result.output as Record<string, unknown> | undefined;
   if (output && typeof output.overall_score === 'number') return output.overall_score;
   return null;
-}
-
-function getScoreBand(score: number | null): string {
-  if (score === null) return 'Unknown';
-  if (score >= 80) return 'Strong';
-  if (score >= 65) return 'Good';
-  if (score >= 50) return 'Needs work';
-  return 'Poor';
-}
-
-function scoreColor(score: number | null): string {
-  if (score === null) return 'var(--text-muted)';
-  if (score >= 80) return 'var(--color-success)';
-  if (score >= 65) return 'var(--color-warning)';
-  return 'var(--color-error)';
 }
 
 /* ── Main Component ──────────────────────────────────────── */

@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores';
 import { routes } from '@/config/routes';
 import { timeAgo, formatDuration } from '@/utils/evalFormatters';
 import { isActiveStatus } from '@/utils/runStatus';
+import { scoreColor } from '@/utils/scoreUtils';
 import { usePoll } from '@/hooks';
 import type { EvalRun } from '@/types';
 
@@ -82,7 +83,7 @@ export function InsideSalesRunList() {
     const score = summary?.overall_score as number | undefined;
     if (typeof score !== 'number') return { display: '--', color: 'var(--text-muted)' };
     const rounded = Math.round(score);
-    const color = rounded >= 80 ? 'var(--color-success)' : rounded >= 65 ? 'var(--color-warning)' : 'var(--color-error)';
+    const color = scoreColor(rounded);
     return { display: String(rounded), color };
   };
 
