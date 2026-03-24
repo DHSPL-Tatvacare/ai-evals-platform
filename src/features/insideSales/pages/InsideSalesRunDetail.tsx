@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { cn } from '@/utils';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -71,7 +72,7 @@ function scoreColor(score: number | null): string {
 /* ── Main Component ──────────────────────────────────────── */
 
 export function InsideSalesRunDetail() {
-  const { runId } = useParams<{ runId: string }>();
+  const { runId, callId } = useParams<{ runId: string; callId?: string }>();
   const navigate = useNavigate();
   const [run, setRun] = useState<EvalRun | null>(null);
   const [threads, setThreads] = useState<ThreadEvalRow[]>([]);
@@ -306,6 +307,13 @@ export function InsideSalesRunDetail() {
     ),
   };
 
+  // If callId is present, show call eval detail instead of run overview
+  const selectedThread = callId ? threads.find((t) => t.thread_id === callId) : null;
+
+  if (callId && selectedThread) {
+    return <CallEvalDetail run={run} thread={selectedThread} />;
+  }
+
   return (
     <div className="space-y-4">
       {/* Breadcrumb */}
@@ -366,6 +374,139 @@ function StatCard({ label, value, color }: { label: string; value: string; color
       <div className="text-lg font-bold mt-0.5" style={{ color: color || 'var(--text-primary)' }}>
         {value}
       </div>
+    </div>
+  );
+}
+
+/* ── Call Eval Detail ───────────────────────────────────── */
+
+function CallEvalDetail({ run, thread }: { run: EvalRun; thread: ThreadEvalRow }) {
+  const navigate = useNavigate();
+  const result = thread.result as unknown as Record<string, unknown> | undefined;
+  const meta = result?.call_metadata as Record<string, unknown> | undefined;
+  const evals = result?.evaluations as Array<Record<string, unknown>> | undefined;
+  const evalOutput = evals?.[0]?.output as Record<string, unknown> | undefined;
+  const reasoning = evalOutput?.reasoning as string | undefined;
+  const overallScore = getOverallScore(thread);
+  const transcript = result?.transcript as string | undefined;
+
+  // Extract dimension scores (numeric fields from evalOutput, excluding overall_score)
+  const dimensions = evalOutput
+    ? Object.entries(evalOutput).filter(
+        ([k, v]) => typeof v === 'number' && k !== 'overall_score'
+      )
+    : [];
+
+  // Extract compliance gates (boolean fields)
+  const complianceGates = evalOutput
+    ? Object.entries(evalOutput).filter(([, v]) => typeof v === 'boolean')
+    : [];
+
+  return (
+    <div className="space-y-4">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
+        <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)]">Runs</Link>
+        <span>/</span>
+        <button onClick={() => navigate(routes.insideSales.runDetail(run.id))} className="hover:text-[var(--text-brand)]">
+          {run.id.slice(0, 12)}
+        </button>
+        <span>/</span>
+        <span className="font-mono text-[var(--text-secondary)]">{thread.thread_id.slice(0, 12)}</span>
+      </div>
+
+      {/* Header */}
+      <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(routes.insideSales.runDetail(run.id))}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div>
+            <h1 className="text-[14px] font-bold text-[var(--text-primary)]">
+              {(meta?.agent as string) || '—'} → {(meta?.lead as string) || '—'}
+            </h1>
+            <div className="flex items-center gap-3 mt-0.5 text-[11px] text-[var(--text-muted)]">
+              <span>{(meta?.direction as string) || '—'}</span>
+              {typeof meta?.duration === 'number' && meta.duration > 0 && <span>{formatDuration(meta.duration)}</span>}
+              <span className="font-mono">{thread.thread_id.slice(0, 8)}</span>
+            </div>
+          </div>
+          <div className="ml-auto text-right">
+            <div className="text-2xl font-bold" style={{ color: scoreColor(overallScore) }}>
+              {overallScore !== null ? `${overallScore}/100` : '—'}
+            </div>
+            <VerdictBadge verdict={getScoreBand(overallScore)} category="status" />
+          </div>
+        </div>
+      </div>
+
+      {/* Dimension scores */}
+      {dimensions.length > 0 && (
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Dimension Scores</h3>
+          <div className="grid grid-cols-2 gap-2">
+            {dimensions.map(([key, val]) => {
+              const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+              const score = val as number;
+              return (
+                <div key={key} className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] px-3 py-2">
+                  <span className="text-xs text-[var(--text-secondary)]">{label}</span>
+                  <span className="text-sm font-bold" style={{ color: scoreColor(score) }}>{score}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Compliance gates */}
+      {complianceGates.length > 0 && (
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Compliance Gates</h3>
+          <div className="flex flex-wrap gap-2">
+            {complianceGates.map(([key, val]) => {
+              const label = key.replace(/^compliance_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+              const passed = val as boolean;
+              return (
+                <span
+                  key={key}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium',
+                    passed
+                      ? 'bg-green-500/10 text-green-400'
+                      : 'bg-red-500/10 text-red-400'
+                  )}
+                >
+                  {passed ? '✓' : '✗'} {label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Reasoning */}
+      {reasoning && (
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Reasoning</h3>
+          <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+            {reasoning}
+          </div>
+        </div>
+      )}
+
+      {/* Transcript */}
+      {transcript && (
+        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Transcript</h3>
+          <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto font-mono">
+            {transcript}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
