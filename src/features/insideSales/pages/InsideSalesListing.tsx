@@ -13,7 +13,7 @@ import {
   Square,
 } from 'lucide-react';
 import { Button, EmptyState, Tabs } from '@/components/ui';
-import { useInsideSalesStore } from '@/stores';
+import { useInsideSalesStore, useUIStore } from '@/stores';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
@@ -84,6 +84,7 @@ export function InsideSalesListing() {
   const filters = useInsideSalesStore((s) => s.filters);
   const selectedCallIds = useInsideSalesStore((s) => s.selectedCallIds);
 
+  const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioEl] = useState(() => typeof Audio !== 'undefined' ? new Audio() : null);
@@ -273,7 +274,7 @@ export function InsideSalesListing() {
           >
             Deselect all
           </button>
-          <Button size="sm" className="ml-auto">
+          <Button size="sm" className="ml-auto" onClick={() => openModal('insideSalesEval')}>
             Evaluate Selected
           </Button>
         </div>
@@ -438,7 +439,7 @@ export function InsideSalesListing() {
       <div className="flex items-center justify-between shrink-0 pb-2">
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Calls</h1>
         {selectedCallIds.size > 0 && (
-          <Button size="sm">
+          <Button size="sm" onClick={() => openModal('insideSalesEval')}>
             Evaluate Selected ({selectedCallIds.size})
           </Button>
         )}
