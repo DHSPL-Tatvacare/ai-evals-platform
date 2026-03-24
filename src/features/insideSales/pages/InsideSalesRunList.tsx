@@ -135,7 +135,7 @@ export function InsideSalesRunList() {
       ) : (
         <div className="flex-1 overflow-auto space-y-1.5">
           {filteredRuns.map((run) => {
-            const { display: scoreDisplay, color: scoreColor } = getScore(run);
+            const { display: scoreDisplay, color: scoreColorValue } = getScore(run);
             const active = isActiveStatus(run.status);
             return (
               <RunRowCard
@@ -144,7 +144,7 @@ export function InsideSalesRunList() {
                 status={run.status}
                 title={getRunName(run)}
                 score={scoreDisplay}
-                scoreColor={scoreColor}
+                scoreColor={scoreColorValue}
                 id={run.id}
                 timeAgo={run.startedAt ? timeAgo(run.startedAt) : '—'}
                 isRunning={active}
