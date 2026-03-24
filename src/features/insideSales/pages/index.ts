@@ -4,3 +4,4 @@ export { InsideSalesRunList } from './InsideSalesRunList';
 export { InsideSalesRunDetail } from './InsideSalesRunDetail';
 export { InsideSalesDashboard } from './InsideSalesDashboard';
 export { InsideSalesCallDetail } from './InsideSalesCallDetail';
+export { InsideSalesSettings } from './InsideSalesSettings';

@@ -381,19 +381,26 @@ export function InsideSalesListing() {
                     <td className="px-3 py-2.5">
                       <StatusBadge status={call.status} />
                     </td>
-                    <td className="w-10 px-2 py-2.5">
-                      {call.recordingUrl && (
+                    <td className="w-12 px-2 py-2.5">
+                      {call.recordingUrl ? (
                         <button
                           onClick={(e) => handlePlayToggle(call, e)}
-                          className="rounded-full p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)] transition-colors"
+                          className={cn(
+                            'rounded-full p-1.5 transition-colors',
+                            playingId === call.activityId
+                              ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]'
+                              : 'bg-[var(--color-brand-accent)]/10 text-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent)]/25'
+                          )}
                           title={playingId === call.activityId ? 'Stop' : 'Play'}
                         >
                           {playingId === call.activityId ? (
-                            <Square className="h-3.5 w-3.5" />
+                            <Square className="h-4 w-4" />
                           ) : (
-                            <Play className="h-3.5 w-3.5" />
+                            <Play className="h-4 w-4" />
                           )}
                         </button>
+                      ) : (
+                        <span className="text-[var(--text-muted)] text-[10px]">—</span>
                       )}
                     </td>
                   </tr>
