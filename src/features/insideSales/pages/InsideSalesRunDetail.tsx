@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { cn } from '@/utils';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -560,8 +561,8 @@ function CallEvalDetail({
                 {reasoning && (
                   <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]">
                     <h4 className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">Reasoning</h4>
-                    <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
-                      {reasoning}
+                    <div className="text-xs text-[var(--text-secondary)] leading-relaxed prose prose-sm prose-invert max-w-none [&_strong]:text-[var(--text-primary)] [&_p]:mb-2 [&_ol]:pl-4 [&_li]:mb-1">
+                      <ReactMarkdown>{reasoning}</ReactMarkdown>
                     </div>
                   </div>
                 )}
