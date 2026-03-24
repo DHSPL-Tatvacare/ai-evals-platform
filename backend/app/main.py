@@ -128,6 +128,7 @@ from app.routes.adversarial_config import router as adversarial_config_router
 from app.routes.admin import router as admin_router
 from app.routes.reports import router as reports_router
 from app.routes.auth import router as auth_router
+from app.routes.inside_sales import router as inside_sales_router
 app.include_router(auth_router)
 app.include_router(listings_router)
 app.include_router(files_router)
@@ -145,3 +146,4 @@ app.include_router(llm_router)
 app.include_router(adversarial_config_router)
 app.include_router(admin_router)
 app.include_router(reports_router)
+app.include_router(inside_sales_router)
