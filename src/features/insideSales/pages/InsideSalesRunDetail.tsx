@@ -139,6 +139,18 @@ export function InsideSalesRunDetail() {
     }
   }, [run, fetchData]);
 
+  // Must be above early returns — Rules of Hooks
+  const filteredThreads = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return threads;
+    return threads.filter((t) => {
+      const meta = (t.result as unknown as Record<string, unknown>)?.call_metadata as Record<string, unknown> | undefined;
+      const agent = (meta?.agent as string) || '';
+      const lead = (meta?.lead as string) || '';
+      return agent.toLowerCase().includes(q) || lead.toLowerCase().includes(q) || t.thread_id.includes(q);
+    });
+  }, [threads, searchQuery]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -169,18 +181,6 @@ export function InsideSalesRunDetail() {
 
   const scoreBands: Record<string, number> = { Strong: 0, Good: 0, 'Needs work': 0, Poor: 0 };
   scores.forEach((s) => { scoreBands[getScoreBand(s)]++; });
-
-  // Filter threads by search
-  const filteredThreads = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return threads;
-    return threads.filter((t) => {
-      const meta = (t.result as unknown as Record<string, unknown>)?.call_metadata as Record<string, unknown> | undefined;
-      const agent = (meta?.agent as string) || '';
-      const lead = (meta?.lead as string) || '';
-      return agent.toLowerCase().includes(q) || lead.toLowerCase().includes(q) || t.thread_id.includes(q);
-    });
-  }, [threads, searchQuery]);
 
   const resultsTab = {
     id: 'results',
