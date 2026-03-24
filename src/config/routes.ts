@@ -32,12 +32,27 @@ export const routes = {
     settings: "/kaira/settings",
     settingsTags: "/kaira/settings/tags",
   },
+  insideSales: {
+    home: '/inside-sales',
+    listing: '/inside-sales',
+    evaluators: '/inside-sales/evaluators',
+    evaluatorDetail: (id: string) => `/inside-sales/evaluators/${id}`,
+    runs: '/inside-sales/runs',
+    runDetail: (runId: string) => `/inside-sales/runs/${runId}`,
+    callDetail: (runId: string, callId: string) => `/inside-sales/runs/${runId}/calls/${callId}`,
+    dashboard: '/inside-sales/dashboard',
+    logs: '/inside-sales/logs',
+    settings: '/inside-sales/settings',
+  },
 };
 
 /** Resolve the run detail path for a given appId. */
 export function runDetailForApp(appId: string, runId: string): string {
   if (appId === "kaira-bot") {
     return routes.kaira.runDetail(runId);
+  }
+  if (appId === "inside-sales") {
+    return routes.insideSales.runDetail(runId);
   }
   return routes.voiceRx.runDetail(runId);
 }
@@ -47,15 +62,18 @@ export function apiLogsForApp(appId: string): string {
   if (appId === "kaira-bot") {
     return routes.kaira.logs;
   }
+  if (appId === "inside-sales") {
+    return routes.insideSales.logs;
+  }
   return routes.voiceRx.logs;
 }
 
 /** Check if a pathname is a run detail page for a given runId (Kaira or VoiceRx). */
 export function isRunDetailPath(pathname: string, runId?: string): boolean {
   if (runId) {
-    return pathname === `/kaira/runs/${runId}` || pathname === `/runs/${runId}`;
+    return pathname === `/kaira/runs/${runId}` || pathname === `/runs/${runId}` || pathname === `/inside-sales/runs/${runId}`;
   }
   return (
-    /^\/kaira\/runs\/[^/]+$/.test(pathname) || /^\/runs\/[^/]+$/.test(pathname)
+    /^\/kaira\/runs\/[^/]+$/.test(pathname) || /^\/runs\/[^/]+$/.test(pathname) || /^\/inside-sales\/runs\/[^/]+$/.test(pathname)
   );
 }
