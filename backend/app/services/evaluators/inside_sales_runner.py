@@ -177,37 +177,65 @@ async def run_inside_sales_evaluation(
     llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
     llm.set_context(str(eval_run_id))
 
-    # ── Fetch ALL matching calls from LSQ ────────────────────────
-    from app.services.lsq_client import fetch_call_activities, normalize_activity
+    # ── Resolve calls to evaluate ─────────────────────────────────
+    from app.services.lsq_client import (
+        fetch_call_activities, normalize_activity, get_cached_calls,
+    )
+    from app.database import async_session as _async_session
 
     await update_job_progress(
         job_id, 0, 1, "Fetching calls from LeadSquared...",
         run_id=str(eval_run_id),
     )
 
+    mode = call_selection.get("selection_mode", "all")
     all_calls: list[dict[str, Any]] = []
-    date_from = call_selection.get("date_from", "")
-    date_to = call_selection.get("date_to", "")
-    lsq_page = 1
-    lsq_page_size = 100
 
-    while True:
-        result = await fetch_call_activities(
-            date_from=date_from,
-            date_to=date_to,
-            event_codes=None,
-            page=lsq_page,
-            page_size=lsq_page_size,
-        )
-        activities = result.get("activities", [])
-        if not activities:
-            break
-        all_calls.extend(normalize_activity(a) for a in activities)
-        if len(activities) < lsq_page_size:
-            break
-        lsq_page += 1
+    if mode == "specific":
+        # For specific calls, try DB cache first — avoids full LSQ fetch
+        specific_ids = list(call_selection.get("selected_call_ids", []))
+        if specific_ids:
+            async with _async_session() as db:
+                cached = await get_cached_calls(db, tenant_id, specific_ids)
+            all_calls = list(cached.values())
+            # Any IDs not in cache — fall back to LSQ fetch for those
+            missing_ids = set(specific_ids) - set(cached.keys())
+            if missing_ids:
+                logger.info("Cache miss for %d specific calls, fetching from LSQ", len(missing_ids))
+                date_from = call_selection.get("date_from", "")
+                date_to = call_selection.get("date_to", "")
+                result = await fetch_call_activities(
+                    date_from=date_from, date_to=date_to,
+                    event_codes=None, page=1, page_size=100,
+                )
+                for a in result.get("activities", []):
+                    norm = normalize_activity(a)
+                    if norm["activityId"] in missing_ids:
+                        all_calls.append(norm)
+    else:
+        # For all/sample modes, fetch full activity list from LSQ
+        date_from = call_selection.get("date_from", "")
+        date_to = call_selection.get("date_to", "")
+        lsq_page = 1
+        lsq_page_size = 100
 
-    logger.info("Fetched %d total calls from LSQ (%d pages)", len(all_calls), lsq_page)
+        while True:
+            result = await fetch_call_activities(
+                date_from=date_from,
+                date_to=date_to,
+                event_codes=None,
+                page=lsq_page,
+                page_size=lsq_page_size,
+            )
+            activities = result.get("activities", [])
+            if not activities:
+                break
+            all_calls.extend(normalize_activity(a) for a in activities)
+            if len(activities) < lsq_page_size:
+                break
+            lsq_page += 1
+
+        logger.info("Fetched %d total calls from LSQ (%d pages)", len(all_calls), lsq_page)
 
     # ── Apply filters ────────────────────────────────────────────
     calls = all_calls
@@ -218,22 +246,19 @@ async def run_inside_sales_evaluation(
         calls = [c for c in calls if agent_filter in (c.get("agentName", "") or "").lower()]
     if call_selection.get("direction"):
         calls = [c for c in calls if c.get("direction") == call_selection["direction"]]
+    if call_selection.get("status"):
+        calls = [c for c in calls if (c.get("status") or "").lower() == call_selection["status"].lower()]
 
     # Skip calls without recordings — no audio = nothing to transcribe
     skipped_no_recording = len([c for c in calls if not c.get("recordingUrl")])
     calls = [c for c in calls if c.get("recordingUrl")]
 
-    # Apply selection mode
-    mode = call_selection.get("selection_mode", "all")
+    # Apply selection mode (sample only — specific already resolved above)
     if mode == "sample":
         import random
         sample_size = call_selection.get("sample_size", 20)
         if len(calls) > sample_size:
             calls = random.sample(calls, sample_size)
-    elif mode == "specific":
-        specific_ids = set(call_selection.get("selected_call_ids", []))
-        if specific_ids:
-            calls = [c for c in calls if c.get("activityId") in specific_ids]
 
     total = len(calls)
     logger.info(
