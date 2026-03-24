@@ -17,7 +17,83 @@ Evaluate inside sales agent call performance using LLM judges. Agents make calls
 
 ---
 
-## 2. Sidebar — Nav Only
+## 2. Component Reuse Policy
+
+**Strict rule: reuse existing components. No duplicate components.** Every UI element must use the existing component stack. Only create new components when no existing component can serve the purpose. Below is the authoritative mapping.
+
+### Existing components → Inside Sales usage
+
+| Existing Component | Location | Inside Sales Usage |
+|---|---|---|
+| `WizardOverlay` | `src/features/evalRuns/components/WizardOverlay.tsx` | Eval wizard shell (6-step) |
+| `RunInfoStep` | `src/features/evalRuns/components/RunInfoStep.tsx` | Wizard step 1 (run name + description) |
+| `EvaluatorToggleStep` | `src/features/evalRuns/components/EvaluatorToggleStep.tsx` | Wizard step 4 — adapt for inside-sales evaluator picker |
+| `LLMConfigStep` | `src/features/evalRuns/components/LLMConfigStep.tsx` | Wizard step 5 — provider/model/temp/thinking |
+| `ParallelConfigSection` | `src/features/evalRuns/components/ParallelConfigSection.tsx` | Wizard step 5 — parallel workers |
+| `ReviewStep` | `src/features/evalRuns/components/ReviewStep.tsx` | Wizard step 6 — summary banner + grouped details |
+| `RunHeader` (in `VoiceRxRunDetail`) | `src/features/voiceRx/pages/VoiceRxRunDetail.tsx` | Run detail header — extract to shared if not already |
+| `RunProgressBar` | `src/features/evalRuns/components/RunProgressBar.tsx` | Active run progress |
+| `VerdictBadge` | `src/features/evalRuns/components/VerdictBadge.tsx` | Status badges everywhere |
+| `DistributionBar` | `src/features/evalRuns/components/DistributionBar.tsx` | Score band + compliance distribution |
+| `RunRowCard` | `src/features/evalRuns/components/RunRowCard.tsx` | Run list items |
+| `RuleComplianceTab` | `src/features/evalRuns/components/threadReview/RuleComplianceTab.tsx` | Compliance tab in call drilldown |
+| `SummaryBar` | `src/features/evalRuns/components/threadReview/SummaryBar.tsx` | Call drilldown summary boxes |
+| `ReportTab` | `src/features/evalRuns/components/report/ReportTab.tsx` | Report tab in run detail |
+| `OutputFieldRenderer` | `src/features/evalRuns/components/OutputFieldRenderer.tsx` | Evaluator output display |
+| `CreateEvaluatorOverlay` | `src/features/evals/components/CreateEvaluatorOverlay.tsx` | Evaluator create/edit — extend for rubric builder |
+| `EvaluatorCard` | `src/features/evals/components/EvaluatorCard.tsx` | Evaluator picker cards in wizard |
+| `AudioPlayer` | `src/features/transcript/components/AudioPlayer.tsx` | Call playback (wavesurfer.js) |
+| `TranscriptView` | `src/features/transcript/components/TranscriptView.tsx` | Adapt for diarized call transcript display |
+| `EvaluationOverlay` | `src/features/evals/components/EvaluationOverlay.tsx` | Reference for transcription config UI patterns |
+| `Tabs` | `src/components/ui/Tabs.tsx` | All tab bars |
+| `Button` | `src/components/ui/Button.tsx` | All buttons |
+| `EmptyState` | `src/components/ui/EmptyState.tsx` | All zero states |
+| `Modal` / `ConfirmDialog` | `src/components/ui/Modal.tsx` | Delete confirmations |
+| `Popover` | `src/components/ui/Popover.tsx` | Overflow menus, app switcher |
+| `Skeleton` | `src/components/ui/Skeleton.tsx` | Loading states |
+| `Alert` | `src/components/ui/Alert.tsx` | Error states |
+| `MainLayout` | `src/components/layout/MainLayout.tsx` | App shell |
+| `Sidebar` | `src/components/layout/Sidebar.tsx` | Extend with InsideSalesSidebarContent |
+| `AppSwitcher` | `src/components/layout/AppSwitcher.tsx` | Add inside-sales to app list |
+| `submitAndPollJob()` | `src/services/api/jobPolling.ts` | Wizard submission |
+| `apiRequest` | `src/services/api/client.ts` | All HTTP calls |
+| `notificationService` | `src/services/notifications/` | Toasts |
+| `logger` | Logger utility | Diagnostics |
+| `cn()` | `src/utils/cn.ts` | CSS class merging |
+| `JobCompletionWatcher` | `src/components/JobCompletionWatcher.tsx` | Toast on eval completion |
+| `Evaluator` model | `backend/app/models/evaluator.py` | `app_id="inside-sales"` |
+| `EvalRun` + `ThreadEvaluation` models | `backend/app/models/eval_run.py` | `eval_type="call_quality"` |
+| `Job` model + worker | `backend/app/services/job_worker.py` | `@register_job_handler("evaluate-inside-sales")` |
+| LLM factory (`llm_base.py`) | `backend/app/services/evaluators/llm_base.py` | All LLM calls |
+| `LoggingLLMWrapper` | `backend/app/services/evaluators/` | API call logging |
+| Fork endpoint | `POST /api/evaluators/{id}/fork` | Evaluator forking |
+| Seed defaults | `backend/app/services/seed_defaults.py` | Seed GoodFlip QA evaluator |
+| Report generation | `backend/app/services/reports/` | New template, reuse pipeline |
+| Auth + multi-tenancy | `backend/app/auth/` | Standard |
+| `CamelModel` / `CamelORMModel` | `backend/app/schemas/base.py` | All new schemas |
+| `TenantUserMixin` | `backend/app/models/base.py` | All new models |
+
+### New components to create (only these)
+
+| New Component | Purpose | Why existing doesn't suffice |
+|---|---|---|
+| `InsideSalesSidebarContent` | Nav-only sidebar (5 links, no item list) | Voice Rx/Kaira sidebars have scrollable item lists; this app needs nav-only |
+| `CallListingPage` | Table with LSQ API pagination + filter panel overlay | No existing table-based listing page; Voice Rx uses sidebar-driven navigation |
+| `CallFilterPanel` | Right-slide filter overlay (date, agent, direction, status, duration, score) | No existing filter panel component; this is the only new overlay |
+| `SelectCallsStep` | Wizard step 2: LSQ API call selection with filters/stats/preview | Replaces `CsvUploadStep`; fundamentally different data source |
+| `TranscriptionConfigStep` | Wizard step 3: language, script, model, diarization toggles | Adapted from `EvaluationOverlay` prerequisites tab; restructured as wizard step |
+| `ScorecardTab` | Call drilldown: expandable dimensions with LLM critique + per-check evidence | New scoring format; `RuleComplianceTab` handles pass/fail, this handles scored dimensions with narrative |
+| `InsideSalesRunResults` | Run detail results tab: stat cards + distributions + call table | Adapted from Kaira `RunDetail` results; different columns and metrics |
+| `InsideSalesReportTemplate` | Backend: report generation template for call quality | New template; reuses report pipeline |
+| `LSQClient` | Backend service: LSQ API pagination, rate limiting, lead hydration | New external API integration |
+| `insideSalesStore` | Zustand store: calls, filters, pagination, selected calls | New app-specific state |
+| `insideSalesRoutes` | Backend router: `/api/inside-sales/*` | New routes |
+
+**No hardcoding.** All colors use CSS variables. All routes use `routes.ts` constants. All API calls go through `apiRequest`. All notifications through `notificationService`. All class merging through `cn()`.
+
+---
+
+## 3. Sidebar — Nav Only
 
 No scrollable item list. No search bar. Five nav links:
 
@@ -35,7 +111,7 @@ This departs from Voice Rx / Kaira which have scrollable item lists below nav li
 
 ---
 
-## 3. Listing Page
+## 4. Listing Page
 
 ### Layout hierarchy
 
@@ -52,17 +128,20 @@ This departs from Voice Rx / Kaira which have scrollable item lists below nav li
 
 Table paginates directly against the LSQ API. No local sync/caching step. Backend proxies `POST /v2/ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent` with filters mapped from frontend query params.
 
+**Lead name hydration:** LSQ call activities only return `RelatedProspectId`. Backend uses `GET /v2/Leads.svc/Leads.GetByIds` for bulk lookup and maintains an in-memory lead name cache (`lead_id → name`). On page load, batch-fetch any uncached lead IDs from the page results, cache them. Agents call the same leads repeatedly so the cache warms quickly. No new DB model needed.
+
 ### Table columns
 
 | Column | Source | Notes |
 |--------|--------|-------|
 | Date / Time | `mx_Custom_2` | Sortable, formatted |
 | Agent | `CreatedByName` | Sortable, filterable |
-| Lead | Hydrated from `RelatedProspectId` | Searchable |
+| Lead | Hydrated from `RelatedProspectId` via bulk lookup + cache | Searchable |
 | Phone | `DestinationNumber` from SourceData JSON | Mono font, formatted |
 | Duration | `mx_Custom_3` (formatted mm:ss) | Sortable |
 | Dir | Event code 21=In, 22=Out | Badge: blue "Out", purple "In" |
 | Status | `Status` field | Badge: green "Answered", red "Missed" |
+| Call Type | From activity event code (21/22 system + 204-241 custom) | Shows event name (Welcome Call, Assessment, etc.) |
 | Eval | From eval_runs join | Badge: "Evaluated", "Pending", "In Progress" |
 | Score | Overall eval score | Brand-purple badge |
 | Actions | Play (inline) + overflow (⋮) | Play disabled for missed calls |
@@ -71,12 +150,13 @@ Row click → Call Detail drilldown page.
 
 ### Filter panel
 
-Right-slide overlay (matches `WizardOverlay` pattern: `fixed inset-0 z-50`, backdrop blur, `w-[380px]`). Contains:
+Right-slide overlay (new `CallFilterPanel`, follows overlay pattern: `fixed inset-0 z-50`, backdrop blur, `w-[380px]`). Contains:
 
 - Date range (from/to date inputs)
 - Agent (multi-select dropdown with pills)
 - Direction (checkbox: Outbound, Inbound)
 - Call Status (checkbox: Answered, Missed)
+- Call Type (dropdown: All, or specific event codes)
 - Eval Status (dropdown: All, Evaluated, Pending, In Progress)
 - Duration range (min/max inputs, seconds)
 - Score range (min/max inputs)
@@ -86,22 +166,22 @@ Active filters show as dismissible pills below the toolbar.
 
 ### Call Detail (drilldown from table row)
 
-Follows ListingPage.tsx pattern:
+Follows `ListingPage.tsx` pattern:
 
 - Back button "Back to Calls"
 - Page header: "Agent → Lead" + direction/status badges + "Evaluate" button + overflow menu
 - Metadata grid: Date, Agent, Lead, Phone (mono), Duration, Score badge
-- Audio player (wavesurfer.js, reuse existing `AudioPlayer` component)
-- Tab bar: Transcript / Scorecard
+- Audio player (reuse `AudioPlayer` component from `src/features/transcript/`)
+- Tab bar (reuse `Tabs` component): Transcript / Scorecard
 
 ---
 
-## 4. Evaluators Page
+## 5. Evaluators Page
 
 ### Hub (table view)
 
-1. **Page header:** h1 "Evaluators" + "Import CSV" button + "New Evaluator" primary button
-2. **Tab bar:** "All Evaluators"
+1. **Page header:** h1 "Evaluators" + "Import CSV" button + "New Evaluator" primary button (reuse `Button`)
+2. **Tab bar:** "All Evaluators" (reuse `Tabs`)
 3. **Table:**
 
 | Column | Description |
@@ -111,7 +191,7 @@ Follows ListingPage.tsx pattern:
 | Dimensions | Count |
 | Total Pts | Sum of all dimension max points |
 | Pass | Pass threshold score |
-| Type | Badge: System (brand), Custom (grey), Forked (blue + git-fork icon) |
+| Type | Badge (reuse `VerdictBadge` pattern): System (brand), Custom (grey), Forked (blue + git-fork icon) |
 | Used In | Run count |
 | Actions | Open (→) + overflow (⋮) |
 
@@ -120,9 +200,9 @@ Row click → Evaluator Detail drilldown.
 ### Detail (drilldown)
 
 - Back button "Back to Evaluators"
-- Page header: name + type badge + "Fork & Edit" button (for system evaluators) + "Edit" button (for own) + "Export CSV" + overflow menu
+- Page header: name + type badge + "Fork & Edit" button (for system evaluators, reuses existing fork endpoint) + "Edit" button (for own) + "Export CSV" + overflow menu
 - Metadata bar: dimensions count, total pts, pass threshold, excellent threshold, compliance gate count, usage count
-- Tab bar: **Scoring Criteria** / **Compliance & Thresholds**
+- Tab bar (reuse `Tabs`): **Scoring Criteria** / **Compliance & Thresholds**
 
 **Scoring Criteria tab:** Dimension cards, each showing:
 - Header: dimension name + point allocation (brand-purple badge)
@@ -135,44 +215,42 @@ Row click → Evaluator Detail drilldown.
 
 ### Create / Edit overlay
 
-Right-slide panel (matches `CreateEvaluatorOverlay` pattern). Fields:
+Extend existing `CreateEvaluatorOverlay` — add rubric builder mode for `app_id="inside-sales"`. Fields:
 
 - Name (text input)
 - Description (textarea)
 - Pass / Excellent thresholds (two inputs)
 - **Dimensions & Checks builder:**
-  - Repeatable dimension blocks: name input + points input + trash icon
+  - Repeatable dimension blocks: name input + points input + trash icon (remove)
   - Within each: repeatable check rows: trash icon + name input + points input
   - "Add check" / "Add dimension" links
-- **Compliance gates:** list of gate text inputs with warning icons + trash icons. "Add gate" link.
+- **Compliance gates:** list of gate text inputs with warning icons + trash icons (remove). "Add gate" link.
 - Footer: Cancel + Create/Save button
 
-**Fork:** `POST /api/evaluators/{id}/fork` — copies all fields, sets `forked_from`, user owns the fork. Fork opens the edit overlay pre-populated.
+**Fork:** Reuses existing `POST /api/evaluators/{id}/fork` endpoint. Fork opens the edit overlay pre-populated.
 
 **CSV Import:** Upload a CSV with columns mapping to dimensions/checks/points. Backend parses and creates evaluator.
 
 ### Data model
 
-Evaluators use the existing `Evaluator` model with `app_id="inside-sales"`. The evaluator's `prompt` contains the full rubric template (dimensions, checks, scoring instructions). The `output_schema` contains dimension fields (type: number, with thresholds) plus compliance boolean fields.
+Reuses existing `Evaluator` model with `app_id="inside-sales"`. The evaluator's `prompt` contains the full rubric template. The `output_schema` contains dimension fields (type: number, with thresholds) plus compliance boolean fields.
 
-Rubric structure (dimensions, checks, points, compliance gates, thresholds) is stored as structured JSON within the evaluator's config — NOT as a separate model. This reuses the existing evaluator infrastructure.
+**Seed:** GoodFlip Sales Call QA framework is seeded as a system evaluator (`tenant_id=SYSTEM_TENANT_ID`). Sales team creates additional evaluators through the create UI.
 
 ---
 
-## 5. Evaluation Wizard
+## 6. Evaluation Wizard
 
-6-step `WizardOverlay` (900px, right-slide). Entry points:
+6-step `WizardOverlay` (reuse existing shell). Entry points:
 - "Evaluate Selected" on Listing page (pre-populates step 2 with selected calls)
 - "New" button in sidebar (starts fresh)
 - "New Run" on Runs page
 
 ### Steps
 
-**Step 1 — Run Info:**
-- Run name (text)
-- Description (optional textarea)
+**Step 1 — Run Info:** Reuse `RunInfoStep` component directly.
 
-**Step 2 — Select Calls:**
+**Step 2 — Select Calls (new: `SelectCallsStep`):**
 - Info callout: "Calls fetched live from LeadSquared"
 - Date range (from/to)
 - Agent dropdown + Direction dropdown
@@ -183,157 +261,99 @@ Rubric structure (dimensions, checks, points, compliance gates, thresholds) is s
 - Live stats: Matching → After Filters → Not Yet Evaluated
 - Preview table (first 5 calls)
 
-**Step 3 — Transcription:**
+**Step 3 — Transcription (new: `TranscriptionConfigStep`, adapted from `EvaluationOverlay` prerequisites):**
 - Stats: total, already transcribed, need transcription
 - Language dropdown (Hindi, English, mixed, etc.)
 - Source script (Auto-detect, Devanagari, Latin)
 - Transcription model dropdown (Gemini 2.5 Flash, Pro, Whisper)
 - Toggles: Force re-transcription, Preserve code-switching, Speaker diarization
 
-**Step 4 — Evaluators:**
-- Search input
-- Evaluator picker cards (checkbox, name, type badge, meta: dimensions/pts/threshold)
-- Selection summary: "N evaluators selected · Each call → N LLM judge calls"
+**Step 4 — Evaluators:** Adapt `EvaluatorToggleStep` for inside-sales evaluator picker with cards showing dimension/pts/threshold.
 
-**Step 5 — LLM Config:**
-- Provider + Model dropdowns
-- Temperature + Thinking level
-- Parallel workers toggle + count input
-- Estimated workload: calls, LLM calls, duration
+**Step 5 — LLM Config:** Reuse `LLMConfigStep` + `ParallelConfigSection` directly. Add estimated workload display.
 
-**Step 6 — Review:**
-- `ReviewStep` component (exact existing pattern):
-  - Zone 1: Summary banner (name, description, rounded-full badge pills)
-  - Zone 2: Grouped details card with dashed dividers between sections:
-    - Call Selection (date range, direction, agent, selection, skip eval, min duration, total)
-    - Transcription (already done, need, language, model, code-switching, diarization)
-    - Evaluators (count, name, dimensions, compliance gates, LLM calls)
-    - Execution (provider, model, temp, thinking, parallel, total LLM calls, est duration)
-- "Start Evaluation" submit button
+**Step 6 — Review:** Reuse `ReviewStep` component with sections: Call Selection, Transcription, Evaluators, Execution.
 
 ### Job submission
 
-Submits `evaluate-inside-sales` job with params. Reuses existing `submitAndPollJob()` + `jobTrackerStore` for progress. Toast on completion via `JobCompletionWatcher`.
+Submits `evaluate-inside-sales` job via `submitAndPollJob()`. Progress tracked by `jobTrackerStore`. Toast on completion via `JobCompletionWatcher`.
 
 ---
 
-## 6. Run Detail
+## 7. Run Detail
 
 ### Layout (exact Kaira `RunDetail` pattern)
 
 1. **Breadcrumb:** Runs / runId
-2. **RunHeader card:** name + Completed badge + Logs/Delete buttons + metadata row (ID mono, timestamp, duration, model, temperature)
-3. **Results / Report tabs** (same page, same level)
+2. **RunHeader card** (reuse/extract from `VoiceRxRunDetail`): name + `VerdictBadge` + Logs/Delete buttons + metadata row
+3. **Results / Report tabs** (reuse `Tabs`, same page)
 
-### Results tab
+### Results tab (new: `InsideSalesRunResults`)
 
-- **3 stat cards:** Calls (evaluated/total), Avg Score (/100), Compliance Pass (pass/total + violation count)
-- **Side-by-side distribution bars:** Score Bands (Strong/Good/Needs work/Poor with counts) + Compliance (Pass/Violation)
-- **Search + filter chips:** All, Strong, Good, Needs work, Poor, Violation + call count
-- **Call results table:** Agent→Lead, Phone, Duration, Score (bold), Compliance (pill badge), Completed (✓/✗)
+- **3 stat cards** (reuse `StatCard` pattern): Calls (evaluated/total), Avg Score (/100), Compliance Pass (pass/total + violation count)
+- **Side-by-side distribution bars** (reuse `DistributionBar`): Score Bands + Compliance
+- **Search + filter chips** (same pattern as Kaira run detail)
+- **Call results table:** Agent→Lead, Phone, Duration, Score, Compliance (pill badge), Completed (✓/✗)
 - Row click → Call Drilldown
 
 ### Report tab
 
-- **Score hero:** grade circle (A/B/C/D/F + color) + score/100 + metadata + Export PDF / Refresh buttons
-- **Summary / Detailed Analysis tabs**
-- **Summary tab:**
-  - Metric bars (dimension label + percentage + colored mini-bar)
-  - Executive summary prose block (LLM-generated narrative with bold highlights)
-  - Top Issues table (colored dots + issue text + focus area + calls affected count)
-- **Detailed Analysis tab:** (future — recommendations, agent breakdown, exemplars)
+Reuse existing `ReportTab` component. New `InsideSalesReportTemplate` on backend generates:
+- Score hero with grade circle
+- Metric bars per dimension
+- Executive summary prose
+- Top Issues table (focus area + calls affected)
+- Recommendations
 
-Report is generated as a background job (`generate-report`), reusing existing report infrastructure.
+Report generated as background job (`generate-report`), reusing existing report pipeline.
 
 ---
 
-## 7. Call Drilldown (from Run Detail)
+## 8. Call Drilldown (from Run Detail)
 
 Follows exact `ThreadDetailV2` pattern:
 
 1. **Breadcrumb:** Runs / runId / call name + timestamp
-2. **Prev/next nav:** `< N/M >` buttons for navigating between calls in the run
-3. **Summary boxes** (4 horizontal, bordered): SCORE | VERDICT | COMPLIANCE | STATUS
+2. **Prev/next nav:** `< N/M >` buttons (same component pattern)
+3. **Summary boxes** (reuse `SummaryBar` pattern, 4 horizontal): SCORE | VERDICT | COMPLIANCE | STATUS
 4. **Split pane** (fills remaining height):
-   - **Left (40%):** Transcript with turn labels, speaker badges (Agent green, Lead grey), timestamps
-   - **Right (60%):** Tab bar + tab content
+   - **Left (40%):** Transcript (adapt `TranscriptView` / `LinkedChatViewer` for diarized call format)
+   - **Right (60%):** Tab bar (reuse `Tabs`) + tab content
 
 ### Tabs
 
-**Scorecard tab (N dimensions):**
+**Scorecard tab (new: `ScorecardTab`):**
 - Expandable dimension rows. Each shows:
   - Header: dimension name + score/max (color-coded) + chevron
   - Expanded detail:
     - **LLM critique narrative** — why the score was assigned, what was good/bad
-    - **Per-check breakdown:** status dot (✓ pass green / ~ partial yellow / ✗ miss red) + check name + **transcript evidence** (italic, what the LLM observed in the call) + points awarded/max
+    - **Per-check breakdown:** status dot (✓ pass / ~ partial / ✗ miss) + check name + **transcript evidence** (italic) + points awarded/max
 
-**Compliance tab (N gates):**
-- Exact `RuleComplianceTab` layout
+**Compliance tab:** Reuse `RuleComplianceTab` directly with compliance gate data.
 - Header: "COMPLIANCE — All N rules followed" (or "N violations")
-- Table rows: status dot (green ✓ or red ✗) + rule_id (colored by status) + evidence text
+- Table rows: status dot + rule_id + evidence text
 
 ---
 
-## 8. Zero States
+## 9. Zero States
 
-All use the existing `EmptyState` component (`border-dashed`, icon circle, title, description, optional CTA button).
+All reuse existing `EmptyState` component.
 
 | Screen | Icon | Title | Description | CTA |
 |--------|------|-------|-------------|-----|
-| Listing — no calls | Phone | No calls found | No call records for selected date range and filters. Adjust filters or date. | — |
-| Listing — search no match | Search | No matching calls | Try a different search term or adjust filters. | — |
-| Listing — API error | AlertTriangle (red) | Failed to load calls | Could not connect to LeadSquared API. | Retry |
-| Evaluators — empty | FileText | No evaluators yet | Create an evaluator to define scoring criteria. | Create Evaluator |
-| Runs — empty | GitCompareArrows | No evaluation runs yet | Select calls from Listing and click Evaluate Selected. | — |
-| Dashboard — no data | LayoutDashboard | No analytics data yet | Complete evaluation runs first. | — |
+| Listing — no calls | `Phone` | No calls found | No call records for selected date range and filters. | — |
+| Listing — search no match | `Search` | No matching calls | Try a different search term or adjust filters. | — |
+| Listing — API error | `AlertTriangle` | Failed to load calls | Could not connect to LeadSquared API. | Retry |
+| Evaluators — empty | `FileText` | No evaluators yet | Create an evaluator to define scoring criteria. | Create Evaluator |
+| Runs — empty | `GitCompareArrows` | No evaluation runs yet | Select calls from Listing and click Evaluate Selected. | — |
+| Dashboard — no data | `LayoutDashboard` | No analytics data yet | Complete evaluation runs first. | — |
 
 ---
 
-## 9. Platform Integration
+## 10. Resolved Questions
 
-### Reuse directly
-
-| Component | Adaptation |
-|-----------|-----------|
-| `WizardOverlay` | Shell for eval wizard |
-| `ReviewStep` | Review step content |
-| `LLMConfigStep` | LLM config in wizard |
-| `ParallelConfigSection` | Worker config |
-| `EvalRun` + `ThreadEvaluation` models | `app_id="inside-sales"`, new `eval_type="call_quality"` |
-| `Evaluator` model | `app_id="inside-sales"`, rubric stored in prompt/output_schema |
-| Job worker + `@register_job_handler` | New `evaluate-inside-sales` handler |
-| `AudioPlayer` (wavesurfer.js) | Reuse for call playback |
-| `EmptyState` | All zero states |
-| `VerdictBadge` | Status badges |
-| `RuleComplianceTab` pattern | Compliance tab in call drilldown |
-| `RunProgressBar` | Active run progress |
-| `JobCompletionWatcher` | Toast on completion |
-| `submitAndPollJob()` | Wizard submission |
-| Report generation pipeline | New template for call eval report |
-| Auth + multi-tenancy | Standard |
-| LLM factory | Standard |
-
-### Build new
-
-| Component | Description |
-|-----------|-------------|
-| LSQ API client | Backend service: fetch call activities, paginate, rate-limit (25 req/5s) |
-| Call listing route | `GET /api/inside-sales/calls` — proxies LSQ with filters |
-| Call detail route | `GET /api/inside-sales/calls/:activityId` — single call with lead hydration |
-| Evaluators page (hub + detail) | Table view, drilldown, create/edit overlay |
-| Eval wizard step components | `SelectCallsStep`, `TranscriptionStep` (adapted from Voice Rx) |
-| Scorecard tab with LLM critique | Dimension cards with expandable critique + per-check evidence |
-| Run detail results tab | Stat cards, distribution bars, call table (adapted from Kaira) |
-| Report template | Dimension performance, executive summary, top issues |
-| Call Quality sidebar content | Nav-only (no item list) |
-| Zustand store | `callQualityStore` for calls, filters, pagination state |
-
----
-
-## 10. Open Questions (from overview, still valid)
-
-1. **S3 URL durability** — Do Ozonetel recording URLs expire? Test with week-old URL.
-2. **Hindi/regional transcription quality** — Verify Gemini quality for Hindi/mixed calls. May need Whisper fallback.
-3. **Lead bulk lookup limits** — Test `GetByIds` with 100+ IDs for hydration.
-4. **Custom event codes** — Should 204-241 (Welcome Call, Assessment Call, etc.) be ingested alongside 21/22?
-5. **Rubric design** — GoodFlip Sales Call QA framework is the first evaluator. More rubrics need sales ops input.
+1. **S3 URL durability** — Not a concern. Ozonetel S3 URLs are permanent. No need to mirror MP3s.
+2. **Hindi/regional transcription quality** — Already handled by the existing Voice Rx transcription pipeline. Plug it in faithfully (language selection, code-switching, diarization) and it works for Hindi/mixed calls.
+3. **Lead bulk lookup** — Backend uses `GET /v2/Leads.svc/Leads.GetByIds` for batch hydration with an in-memory cache (`lead_id → name`). Agents call the same leads repeatedly, so cache warms fast. No DB model needed.
+4. **Custom event codes** — Event codes 204-241 (Welcome Call, Assessment Call, etc.) are included. The listing table shows a "Call Type" column derived from the event code. Filters allow selecting specific call types.
+5. **Rubric design** — GoodFlip Sales Call QA is seeded as a built-in system evaluator. Sales team creates additional evaluators through the Evaluators page create UI. No gating on this from engineering side.
