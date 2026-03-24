@@ -38,27 +38,29 @@ interface NewInsideSalesEvalOverlayProps {
 }
 
 export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewInsideSalesEvalOverlayProps) {
-  // Read selected call IDs from store if not passed as prop
-  const storeSelectedIds = useInsideSalesStore((s) => [...s.selectedCallIds]);
-  const initialIds = preSelectedCallIds?.length ? preSelectedCallIds : storeSelectedIds;
-
   const [currentStep, setCurrentStep] = useState(0);
 
   // Step 1: Run Info
   const [runName, setRunName] = useState('');
   const [runDescription, setRunDescription] = useState('');
 
-  // Step 2: Select Calls
-  const [callConfig, setCallConfig] = useState<CallSelectionConfig>({
-    dateFrom: todayStr() + ' 00:00:00',
-    dateTo: todayStr() + ' 23:59:59',
-    agent: '',
-    direction: '',
-    selectionMode: initialIds.length ? 'specific' : 'all',
-    sampleSize: 20,
-    selectedCallIds: initialIds,
-    skipEvaluated: true,
-    minDuration: true,
+  // Step 2: Select Calls — read store once at mount via getState() (not a selector,
+  // avoids re-render loop from creating new array refs)
+  const [callConfig, setCallConfig] = useState<CallSelectionConfig>(() => {
+    const ids = preSelectedCallIds?.length
+      ? preSelectedCallIds
+      : [...useInsideSalesStore.getState().selectedCallIds];
+    return {
+      dateFrom: todayStr() + ' 00:00:00',
+      dateTo: todayStr() + ' 23:59:59',
+      agent: '',
+      direction: '',
+      selectionMode: ids.length ? 'specific' : 'all',
+      sampleSize: 20,
+      selectedCallIds: ids,
+      skipEvaluated: true,
+      minDuration: true,
+    };
   });
   const [previewCalls, setPreviewCalls] = useState<CallRecord[]>([]);
   const [matchingCount, setMatchingCount] = useState(0);
