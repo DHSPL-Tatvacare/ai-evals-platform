@@ -9,6 +9,7 @@ import { cn } from '@/utils';
 import { routes } from '@/config/routes';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
+import { NewInsideSalesEvalOverlay } from '@/features/insideSales/components/NewInsideSalesEvalOverlay';
 
 interface MainLayoutProps {
   children?: ReactNode;
@@ -60,6 +61,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       <JobCompletionWatcher />
       {activeModal === 'batchEval' && <NewBatchEvalOverlay onClose={closeModal} />}
       {activeModal === 'adversarialTest' && <NewAdversarialOverlay onClose={closeModal} />}
+      {activeModal === 'insideSalesEval' && <NewInsideSalesEvalOverlay onClose={closeModal} />}
       <OfflineBanner />
       <ShortcutsHelpModal
         isOpen={showShortcutsHelp}
