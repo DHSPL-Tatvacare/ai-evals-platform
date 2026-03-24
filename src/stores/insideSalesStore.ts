@@ -17,12 +17,15 @@ export interface CallRecord {
   callNotes: string;
   callSessionId: string;
   createdOn: string;
+  lastEvalScore?: number;
+  evalCount?: number;
 }
 
 export interface CallFilters {
   dateFrom: string;
   dateTo: string;
-  agent: string;
+  agents: string[];
+  prospectId: string;
   direction: string;
   status: string;
   eventCodes: string;
@@ -66,7 +69,8 @@ function todayDateString(): string {
 const DEFAULT_FILTERS: CallFilters = {
   dateFrom: todayDateString() + ' 00:00:00',
   dateTo: todayDateString() + ' 23:59:59',
-  agent: '',
+  agents: [],
+  prospectId: '',
   direction: '',
   status: '',
   eventCodes: '',
@@ -116,7 +120,7 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 
   loadCalls: async (force?: boolean) => {
     const { filters, page, pageSize, _lastFetchKey } = get();
-    const fetchKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agent}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}|${pageSize}`;
+    const fetchKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agents.join(',')}|${filters.prospectId}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}|${pageSize}`;
 
     // Skip if already loaded for this exact filter+page combo
     if (!force && fetchKey === _lastFetchKey) return;
@@ -129,7 +133,8 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
         page: String(page),
         page_size: String(pageSize),
       });
-      if (filters.agent) params.set('agent', filters.agent);
+      if (filters.agents.length > 0) params.set('agents', filters.agents.join(','));
+      if (filters.prospectId) params.set('prospect_id', filters.prospectId);
       if (filters.direction) params.set('direction', filters.direction);
       if (filters.status) params.set('status', filters.status);
       if (filters.eventCodes) params.set('event_codes', filters.eventCodes);

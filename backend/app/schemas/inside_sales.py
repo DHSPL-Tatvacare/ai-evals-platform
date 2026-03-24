@@ -21,6 +21,8 @@ class CallRecord(CamelModel):
     call_notes: str
     call_session_id: str
     created_on: str
+    last_eval_score: Optional[float] = None
+    eval_count: int = 0
 
 
 class CallListResponse(CamelModel):
@@ -28,6 +30,10 @@ class CallListResponse(CamelModel):
     total: int
     page: int
     page_size: int
+
+
+class AgentListResponse(CamelModel):
+    agents: list[str]
 
 
 class LeadDetailResponse(CamelModel):

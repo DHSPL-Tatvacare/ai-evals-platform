@@ -17,6 +17,7 @@ import { useInsideSalesStore, useUIStore } from '@/stores';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
+import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
 import { CallFilterPanel } from '../components/CallFilterPanel';
 
@@ -90,7 +91,7 @@ export function InsideSalesListing() {
   const [audioEl] = useState(() => typeof Audio !== 'undefined' ? new Audio() : null);
 
   // Stable key from filter values + page — only re-fetch when these actually change
-  const filterKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agent}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}`;
+  const filterKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agents.join(',')}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}`;
 
   useEffect(() => {
     useInsideSalesStore.getState().loadCalls();
@@ -136,7 +137,8 @@ export function InsideSalesListing() {
   // Active filter count (excluding dateFrom/dateTo/search which have dedicated UI)
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (filters.agent) count++;
+    if (filters.agents.length > 0) count++;
+    if (filters.prospectId) count++;
     if (filters.direction) count++;
     if (filters.status) count++;
     if (filters.eventCodes) count++;
@@ -247,10 +249,16 @@ export function InsideSalesListing() {
       {/* Active filter pills */}
       {activeFilterCount > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
-          {filters.agent && (
+          {filters.agents.length > 0 && (
             <FilterPill
-              label={`Agent: ${filters.agent}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ agent: '' })}
+              label={`Agent: ${filters.agents.length === 1 ? filters.agents[0] : `${filters.agents.length} agents`}`}
+              onRemove={() => useInsideSalesStore.getState().setFilters({ agents: [] })}
+            />
+          )}
+          {filters.prospectId && (
+            <FilterPill
+              label={`Prospect: ${filters.prospectId.length > 12 ? filters.prospectId.slice(0, 8) + '…' : filters.prospectId}`}
+              onRemove={() => useInsideSalesStore.getState().setFilters({ prospectId: '' })}
             />
           )}
           {filters.direction && (
@@ -342,6 +350,7 @@ export function InsideSalesListing() {
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent Name</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Prospect ID</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Duration</th>
+                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Score</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Direction</th>
                   <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
                   <th className="w-10 px-2 py-2" />
@@ -378,6 +387,17 @@ export function InsideSalesListing() {
                     </td>
                     <td className="px-3 py-2.5 text-[var(--text-secondary)] whitespace-nowrap">
                       {call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {call.evalCount && call.evalCount > 0 ? (
+                        <span style={{ color: scoreColor(call.lastEvalScore ?? null) }} className="text-xs font-mono font-semibold">
+                          {call.lastEvalScore !== null && call.lastEvalScore !== undefined
+                            ? Math.round(call.lastEvalScore)
+                            : '—'}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)] text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
                       <DirectionBadge direction={call.direction} />
