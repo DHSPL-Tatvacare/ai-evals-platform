@@ -60,7 +60,6 @@ async def run_inside_sales_evaluation(
     parallel_workers = params.get("parallel_workers", 3)
     run_name = params.get("run_name", "Inside Sales Eval")
     run_description = params.get("run_description", "")
-    preview_calls = params.get("preview_calls", [])
 
     # Create eval_run immediately
     eval_run_id = uuid.uuid4()
@@ -135,30 +134,40 @@ async def run_inside_sales_evaluation(
     llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
     llm.set_context(str(eval_run_id))
 
-    # Fetch calls to evaluate
+    # Fetch ALL matching calls from LSQ (paginate through all pages)
     from app.services.lsq_client import fetch_call_activities, normalize_activity, hydrate_lead_names
 
+    await update_job_progress(job_id, 0, 1, "Fetching calls from LeadSquared...", run_id=str(eval_run_id))
+
     calls_to_evaluate: list[dict[str, Any]] = []
+    date_from = call_selection.get("date_from", "")
+    date_to = call_selection.get("date_to", "")
+    lsq_page = 1
+    lsq_page_size = 100
 
-    if preview_calls:
-        # Use preview calls from wizard (already normalized)
-        calls_to_evaluate = preview_calls
-    else:
-        # Fetch from LSQ
+    while True:
         result = await fetch_call_activities(
-            date_from=call_selection.get("date_from", ""),
-            date_to=call_selection.get("date_to", ""),
-            page=1,
-            page_size=100,
+            date_from=date_from,
+            date_to=date_to,
+            event_codes=None,  # 21 + 22 default
+            page=lsq_page,
+            page_size=lsq_page_size,
         )
-        calls_to_evaluate = [normalize_activity(a) for a in result.get("activities", [])]
+        activities = result.get("activities", [])
+        if not activities:
+            break
+        calls_to_evaluate.extend(normalize_activity(a) for a in activities)
+        # If we got fewer than page_size, we've reached the end
+        if len(activities) < lsq_page_size:
+            break
+        lsq_page += 1
 
-        # Hydrate lead names
-        pids = [c.get("prospectId", "") for c in calls_to_evaluate if c.get("prospectId")]
-        if pids:
-            names = await hydrate_lead_names(pids)
-            for c in calls_to_evaluate:
-                c["leadName"] = names.get(c.get("prospectId", ""), "")
+    # Hydrate lead names
+    pids = [c.get("prospectId", "") for c in calls_to_evaluate if c.get("prospectId")]
+    if pids:
+        names = await hydrate_lead_names(pids)
+        for c in calls_to_evaluate:
+            c["leadName"] = names.get(c.get("prospectId", ""), "")
 
     # Apply filters
     if call_selection.get("min_duration"):
@@ -232,21 +241,32 @@ async def run_inside_sales_evaluation(
                     if recording_url.lower().endswith(".wav"):
                         mime_type = "audio/wav"
 
-                    # Transcribe via LLM (same as Voice Rx step 1)
+                    # Transcribe via LLM (audio → text, like Voice Rx step 1)
+                    lang = transcription_config.get("language", "hi-en")
+                    lang_map = {"hi": "Hindi", "en": "English", "hi-en": "Hindi-English (code-mixed)", "auto": "auto-detect"}
+                    lang_display = lang_map.get(lang, lang)
+                    diarize = transcription_config.get("speakerDiarization", True)
+
                     transcription_prompt = (
-                        "Transcribe this sales call recording. "
-                        "Identify two speakers: the sales agent and the customer/lead. "
-                        "Output the full conversation as a transcript with speaker labels. "
-                        "Use format: [Agent]: ... and [Lead]: ... for each turn. "
-                        "Transcribe in the original language (likely Hindi or Hindi-English mix). "
-                        "Include all dialogue, even small talk and greetings."
+                        f"Transcribe this sales call recording in {lang_display}. "
                     )
+                    if diarize:
+                        transcription_prompt += (
+                            "Identify two speakers: the sales agent and the customer/lead. "
+                            "Use format: [Agent]: ... and [Lead]: ... for each turn. "
+                        )
+                    transcription_prompt += (
+                        "Include all dialogue, even small talk and greetings. "
+                        "Preserve the original language — do not translate."
+                    )
+                    if transcription_config.get("preserveCodeSwitching", True):
+                        transcription_prompt += " Preserve code-switching between Hindi and English as spoken."
 
                     transcript = await llm.generate_with_audio(
                         prompt=transcription_prompt,
                         audio_bytes=audio_bytes,
                         mime_type=mime_type,
-                        system_prompt="You are an expert multilingual transcriptionist. Transcribe sales calls accurately with speaker diarization.",
+                        system_prompt=f"You are an expert multilingual transcriptionist specializing in {lang_display} sales calls. Transcribe accurately with speaker diarization.",
                     )
 
                     if not transcript or not transcript.strip():
