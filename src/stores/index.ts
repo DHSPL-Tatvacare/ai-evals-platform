@@ -20,3 +20,4 @@ export { useMiniPlayerStore } from './miniPlayerStore';
 export { useJobTrackerStore, type TrackedJob } from './jobTrackerStore';
 export { useCrossRunStore } from './crossRunStore';
 export { useAuthStore } from './authStore';
+export { useInsideSalesStore, type CallRecord, type CallFilters } from './insideSalesStore';
