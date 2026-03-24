@@ -459,11 +459,6 @@ export function InsideSalesListing() {
       {/* Page header */}
       <div className="flex items-center justify-between shrink-0 pb-2">
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Calls</h1>
-        {selectedCallIds.size > 0 && (
-          <Button size="sm" onClick={() => openModal('insideSalesEval')}>
-            Evaluate Selected ({selectedCallIds.size})
-          </Button>
-        )}
       </div>
 
       {/* Tabs (single tab for now) */}
