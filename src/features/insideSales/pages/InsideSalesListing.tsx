@@ -96,7 +96,7 @@ function LeadsTableContent() {
 
   if (leadsLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex flex-col items-center gap-2">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
           <span className="text-xs text-[var(--text-muted)]">Loading leads...</span>
@@ -107,7 +107,7 @@ function LeadsTableContent() {
 
   if (leadsError) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center">
         <EmptyState
           icon={Phone}
           title="Failed to load leads"
@@ -499,14 +499,14 @@ export function InsideSalesListing() {
 
       {/* Table */}
       {isLoading ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex min-h-[60vh] items-center justify-center">
           <div className="flex flex-col items-center gap-2">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
             <span className="text-xs text-[var(--text-muted)]">Loading calls...</span>
           </div>
         </div>
       ) : error ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex min-h-[60vh] items-center justify-center">
           <EmptyState
             icon={Phone}
             title="Failed to load calls"
@@ -518,7 +518,7 @@ export function InsideSalesListing() {
           />
         </div>
       ) : filteredCalls.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex min-h-[60vh] items-center justify-center">
           <EmptyState
             icon={Phone}
             title={filters.search ? 'No matching calls' : 'No calls found'}
