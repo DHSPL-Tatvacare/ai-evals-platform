@@ -340,8 +340,12 @@ async def get_report(
         cached_data = cache_result.scalar_one_or_none()
         if not cached_data:
             raise HTTPException(status_code=404, detail="No cached report")
-        # Return raw dict — shape varies by app (ReportPayload vs InsideSalesReportPayload)
-        return cached_data
+        # Validate through the correct schema to get camelCase aliases
+        if run.app_id == "inside-sales":
+            from app.services.reports.inside_sales_schemas import InsideSalesReportPayload
+            return InsideSalesReportPayload.model_validate(cached_data)
+        else:
+            return ReportPayload.model_validate(cached_data)
 
     # Dispatch to app-specific service
     if run.app_id == "inside-sales":

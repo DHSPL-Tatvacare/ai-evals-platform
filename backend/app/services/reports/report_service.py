@@ -164,7 +164,7 @@ class ReportService(BaseReportService):
         )
 
         # Cache for future requests
-        await self._save_cache(run_id, run.app_id, payload.model_dump())
+        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
 
         return payload
 

@@ -94,7 +94,7 @@ class InsideSalesReportService(BaseReportService):
             narrative=narrative,
         )
 
-        await self._save_cache(run_id, run.app_id, payload.model_dump())
+        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
         return payload
 
     async def _load_evaluator_schema(self, run: EvalRun) -> list[dict]:
