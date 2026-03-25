@@ -345,7 +345,6 @@ async def get_lead_detail(
                 ThreadEvaluation.thread_id.in_(activity_ids),
                 EvalRun.app_id == "inside-sales",
                 EvalRun.tenant_id == auth.tenant_id,
-                EvalRun.user_id == auth.user_id,
                 EvalRun.status == "completed",
             )
             .group_by(ThreadEvaluation.thread_id)
@@ -383,7 +382,6 @@ async def get_lead_detail(
                 ThreadEvaluation.thread_id.in_(activity_ids),
                 EvalRun.app_id == "inside-sales",
                 EvalRun.tenant_id == auth.tenant_id,
-                EvalRun.user_id == auth.user_id,
             )
             .order_by(ThreadEvaluation.id.desc())
         )
@@ -393,7 +391,7 @@ async def get_lead_detail(
                 "threadId": te.thread_id,
                 "runId": str(te.run_id),
                 "result": te.result,
-                "createdAt": str(te.created_at) if hasattr(te, "created_at") else "",
+                "createdAt": str(te.created_at),
             })
 
     # 5. Compute drilldown metrics
