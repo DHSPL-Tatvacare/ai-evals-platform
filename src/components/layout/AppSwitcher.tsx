@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { APPS, type AppId } from '@/types';
 import { cn } from '@/utils';
 import { routes } from '@/config/routes';
@@ -39,8 +40,10 @@ export function AppSwitcher() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { currentApp, setCurrentApp } = useAppStore();
+  const user = useAuthStore((s) => s.user);
 
-  const currentAppConfig = apps.find((app) => app.id === currentApp) ?? apps[0];
+  const accessibleApps = user?.isOwner ? apps : apps.filter((a) => user?.appAccess.includes(a.id) ?? false);
+  const currentAppConfig = accessibleApps.find((app) => app.id === currentApp) ?? accessibleApps[0];
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -89,7 +92,7 @@ export function AppSwitcher() {
 
       {isOpen && (
         <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] py-1 shadow-lg">
-          {apps.map((app) => (
+          {accessibleApps.map((app) => (
             <button
               key={app.id}
               onClick={() => handleSelectApp(app)}

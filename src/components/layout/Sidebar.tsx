@@ -68,7 +68,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   // Auth
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+  const isAdmin = !!(user?.isOwner || user?.permissions.some((p) => ['user:create', 'user:edit', 'user:invite'].includes(p)));
   const isAdminActive = location.pathname.startsWith('/admin');
 
   // Modal management (for batch/adversarial wizards)
@@ -374,8 +374,8 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                   </div>
                   <div className="truncate text-[11px] leading-tight text-[var(--text-muted)]">
                     {user.tenantName}
-                    {(user.role === 'admin' || user.role === 'owner') && (
-                      <span className="ml-1 text-[var(--text-brand)]">{user.role}</span>
+                    {user.roleName && (
+                      <span className="ml-1 text-[var(--text-brand)]">{user.roleName}</span>
                     )}
                   </div>
                 </div>
