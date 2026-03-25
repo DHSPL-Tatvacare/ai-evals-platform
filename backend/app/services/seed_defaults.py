@@ -695,7 +695,8 @@ outcome_flags:
     attempted: true | false | "not_relevant"
     accepted: true | false | null
     products_mentioned: ["<product names>"]
-    evidence: "<quote or brief explanation>" """,
+    evidence: "<quote or brief explanation>"
+""",
         "output_schema": GOODFLIP_QA_SCHEMA,
     },
 ]
