@@ -19,7 +19,6 @@ router = APIRouter(prefix="/api/adversarial-config", tags=["adversarial-config"]
 @router.get("")
 async def get_config(
     auth: AuthContext = require_permission('settings:edit'),
-    _app_check: AuthContext = require_app_access(),
 ):
     """Return current adversarial config for this user (from DB or built-in default)."""
     config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
@@ -30,7 +29,6 @@ async def get_config(
 async def update_config(
     body: dict,
     auth: AuthContext = require_permission('settings:edit'),
-    _app_check: AuthContext = require_app_access(),
 ):
     """Validate and save adversarial config for this user. Returns validated config or 422."""
     try:
@@ -45,7 +43,6 @@ async def update_config(
 @router.post("/reset")
 async def reset_config(
     auth: AuthContext = require_permission('settings:edit'),
-    _app_check: AuthContext = require_app_access(),
 ):
     """Restore built-in default config for this user."""
     config = get_default_config()
@@ -56,7 +53,6 @@ async def reset_config(
 @router.get("/export")
 async def export_config(
     auth: AuthContext = require_permission('eval:export'),
-    _app_check: AuthContext = require_app_access(),
 ):
     """Export current config as downloadable JSON."""
     config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
@@ -70,7 +66,6 @@ async def export_config(
 async def import_config(
     body: dict,
     auth: AuthContext = require_permission('settings:edit'),
-    _app_check: AuthContext = require_app_access(),
 ):
     """Validate and replace config from imported JSON."""
     try:
