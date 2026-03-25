@@ -43,11 +43,12 @@
 |---|---|
 | `backend/app/models/user.py` | Drop `UserRole` enum + `role` column, add `role_id` FK |
 | `backend/app/models/invite_link.py` | Drop `default_role`, add `role_id` FK |
-| `backend/app/models/__init__.py` | Register new models |
+| `backend/app/models/__init__.py` | Register new models, remove `UserRole` export |
+| `backend/app/auth/__init__.py` | Replace `require_admin` export with `require_permission`, `require_app_access` |
 | `backend/app/auth/context.py` | New `AuthContext` with `role_id`, `is_owner`, `permissions`, `app_access` |
 | `backend/app/auth/utils.py` | JWT `role` → `rid` (role_id) |
-| `backend/app/services/seed_defaults.py` | Seed apps table + Owner role per tenant |
-| `backend/app/routes/auth.py` | Update `/me`, login, signup for new role model |
+| `backend/app/services/seed_defaults.py` | Seed apps + Owner role, rewrite `_seed_system_tenant_and_user` + `seed_bootstrap_admin` |
+| `backend/app/routes/auth.py` | Update `/me`, login, signup, validate-invite, refresh for new role model |
 | `backend/app/routes/admin.py` | Replace `require_admin`/`require_owner` with `require_permission()` |
 | `backend/app/routes/listings.py` | Add `require_permission()` + `require_app_access()` |
 | `backend/app/routes/eval_runs.py` | Add `require_permission()` + `require_app_access()` |
@@ -74,6 +75,7 @@
 | `src/services/api/adminApi.ts` | Add roles + audit log endpoints |
 | `src/components/layout/AppSwitcher.tsx` | Filter by app access |
 | `src/features/auth/AdminGuard.tsx` | Replace role check with permission check |
+| `src/components/layout/Sidebar.tsx` | Replace `user.role` checks with `user.isOwner` / `user.roleName` |
 | `src/app/Router.tsx` | Add `AppAccessGuard` wrapping per-app routes |
 | `src/features/admin/AdminUsersPage.tsx` | Wire Roles tab + Security tab, PermissionGate on buttons |
 | `src/features/admin/InviteLinksSection.tsx` | Role dropdown instead of enum, PermissionGate |
@@ -252,7 +254,7 @@ class AuditLog(Base):
     )
 
     __table_args__ = (
-        Index("idx_audit_log_tenant_created", "tenant_id", "created_at"),
+        Index("idx_audit_log_tenant_created", "tenant_id", created_at.desc()),
         Index("idx_audit_log_entity", "entity_type", "entity_id"),
     )
 ```
@@ -582,10 +584,22 @@ def create_access_token(
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Update auth/__init__.py**
+
+Replace exports:
+```python
+# backend/app/auth/__init__.py
+"""Authentication package — JWT utils, auth context, dependencies."""
+from app.auth.context import AuthContext, get_auth_context, require_owner
+from app.auth.permissions import require_permission, require_app_access
+
+__all__ = ["AuthContext", "get_auth_context", "require_owner", "require_permission", "require_app_access"]
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/auth/permissions.py backend/app/auth/context.py backend/app/auth/utils.py
+git add backend/app/auth/permissions.py backend/app/auth/context.py backend/app/auth/utils.py backend/app/auth/__init__.py
 git commit -m "feat(rbac): Permission enum, AuthContext with permissions/app_access, JWT rid"
 ```
 
@@ -653,23 +667,73 @@ async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.U
 
 Then update the main `seed_defaults()` function to call these first and assign the Owner role to the system user.
 
-- [ ] **Step 2: Update the existing seeding flow**
+- [ ] **Step 2: Rewrite `_seed_system_tenant_and_user` to use role_id**
 
-In the main `seed_defaults()` function, add calls to `seed_apps()` and `seed_owner_role()` at the top, before seeding prompts/schemas. After seeding the owner role, update the system user's `role_id` if it's not set:
+The current function sets `role=UserRole.OWNER` which no longer exists. Rewrite it:
 
 ```python
-# Inside seed_defaults():
-app_ids = await seed_apps(session)
-owner_role_id = await seed_owner_role(session, SYSTEM_TENANT_ID)
+async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
+    # Seed system tenant (unchanged)
+    existing_tenant = await session.get(Tenant, SYSTEM_TENANT_ID)
+    if not existing_tenant:
+        session.add(Tenant(id=SYSTEM_TENANT_ID, name="System", slug="system", is_active=False))
+        logger.info("Created system tenant (id=%s)", SYSTEM_TENANT_ID)
+    await session.flush()
 
-# Ensure system user has Owner role
-system_user = await session.execute(
-    select(User).where(User.id == SYSTEM_USER_ID)
-)
-user = system_user.scalar_one_or_none()
-if user and user.role_id != owner_role_id:
-    user.role_id = owner_role_id
+    # Seed Owner role for system tenant
+    owner_role_id = await seed_owner_role(session, SYSTEM_TENANT_ID)
+
+    # Seed system user with role_id
+    existing_user = await session.get(User, SYSTEM_USER_ID)
+    if not existing_user:
+        session.add(User(
+            id=SYSTEM_USER_ID,
+            tenant_id=SYSTEM_TENANT_ID,
+            email="system@internal",
+            password_hash="!nologin",
+            display_name="System",
+            role_id=owner_role_id,
+            is_active=False,
+        ))
+        logger.info("Created system user (id=%s)", SYSTEM_USER_ID)
+    elif existing_user.role_id != owner_role_id:
+        existing_user.role_id = owner_role_id
+    await session.flush()
 ```
+
+- [ ] **Step 3: Rewrite `seed_bootstrap_admin` to use role_id**
+
+The current function sets `role=UserRole.OWNER`. Rewrite it:
+
+```python
+async def seed_bootstrap_admin(...):
+    # ... (existing tenant creation code stays same) ...
+
+    # Seed apps + Owner role for the new tenant
+    await seed_apps(db)
+    owner_role_id = await seed_owner_role(db, tenant.id)
+
+    # Create admin user with role_id
+    db.add(User(
+        tenant_id=tenant.id,
+        email=email,
+        password_hash=hash_password(password),
+        display_name="Admin",
+        role_id=owner_role_id,
+    ))
+    # ... rest unchanged ...
+```
+
+- [ ] **Step 4: Update main `seed_all_defaults` to call `seed_apps` first**
+
+At the top of `seed_all_defaults()`:
+```python
+await seed_apps(session)
+```
+
+- [ ] **Step 5: Remove all `UserRole` imports from seed_defaults.py**
+
+Remove `from app.models.user import User, UserRole` → `from app.models.user import User`
 
 - [ ] **Step 3: Commit**
 
@@ -738,7 +802,24 @@ The refresh endpoint queries the user and creates a new access token. Update:
 create_access_token(user.id, user.tenant_id, user.email, user.role_id)
 ```
 
-- [ ] **Step 7: Remove all UserRole imports from auth routes**
+- [ ] **Step 7: Update validate-invite endpoint**
+
+The `validate_invite` endpoint returns `"defaultRole": invite.default_role.value`. Update to:
+```python
+    # Load role name for display
+    from app.models.role import Role
+    role = await db.get(Role, invite.role_id)
+    return {
+        "valid": True,
+        "tenantName": tenant.name,
+        "roleId": str(invite.role_id),
+        "roleName": role.name if role else "Unknown",
+        "expiresAt": invite.expires_at.isoformat(),
+        "allowedDomains": allowed_domains,
+    }
+```
+
+- [ ] **Step 8: Remove all UserRole imports from auth routes**
 
 Search for `from app.models.user import UserRole` and remove it. Remove any `UserRole` references.
 
@@ -762,64 +843,29 @@ git commit -m "feat(rbac): update auth routes for role_id, permissions in /me re
 ```python
 # backend/app/schemas/role.py
 """Pydantic schemas for role CRUD API."""
-from pydantic import BaseModel, Field
+from pydantic import Field
+from app.schemas.base import CamelModel
 
 
-class RoleCreate(BaseModel):
+class RoleCreate(CamelModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
-    app_access: list[str] = Field(default_factory=list)  # App slugs
+    app_access: list[str] = Field(default_factory=list)  # App slugs — frontend sends as "appAccess"
     permissions: list[str] = Field(default_factory=list)  # Permission strings
 
 
-class RoleUpdate(BaseModel):
+class RoleUpdate(CamelModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
     app_access: list[str] | None = None
     permissions: list[str] | None = None
-
-
-class RoleResponse(BaseModel):
-    id: str
-    name: str
-    description: str | None
-    is_system: bool
-    app_access: list[str]    # App slugs
-    permissions: list[str]   # Permission strings
-    user_count: int          # Number of users assigned this role
-    created_at: str
-    updated_at: str
-
-
-class AppResponse(BaseModel):
-    id: str
-    slug: str
-    display_name: str
-    description: str
-    icon_url: str
-    is_active: bool
 ```
 
-- [ ] **Step 2: Create audit log schemas**
+**Note:** Response schemas are not needed — route handlers return hand-built dicts with camelCase keys. Only request schemas (`RoleCreate`, `RoleUpdate`) need CamelModel for automatic `appAccess` → `app_access` parsing.
 
-```python
-# backend/app/schemas/audit.py
-"""Pydantic schemas for audit log API."""
-from pydantic import BaseModel
+- [ ] **Step 2: Remove audit schema file — not needed**
 
-
-class AuditLogEntry(BaseModel):
-    id: str
-    actor_id: str
-    actor_email: str | None = None  # Joined from users table
-    action: str
-    entity_type: str
-    entity_id: str
-    before_state: dict | None
-    after_state: dict | None
-    ip_address: str | None
-    created_at: str
-```
+Audit log responses are built as hand-crafted dicts in the route handler (Task 8). No separate schema file needed — delete `backend/app/schemas/audit.py` from the file map.
 
 - [ ] **Step 3: Commit**
 
@@ -1056,8 +1102,8 @@ async def create_role(
     )
     await db.commit()
 
-    # Reload with relationships
-    return await _get_role_detail(db, role.id)
+    # Reload with relationships (always pass tenant_id)
+    return await _get_role_detail(db, role.id, auth.tenant_id)
 
 
 @router.get("/roles/{role_id}")
@@ -1142,16 +1188,18 @@ async def delete_role(
     if role.is_system:
         raise HTTPException(403, "Cannot delete system roles")
 
-    # Check for assigned users
+    # Check for assigned users (filter by tenant_id per invariant)
     user_count = await db.execute(
-        select(func.count(User.id)).where(User.role_id == role_id)
+        select(func.count(User.id)).where(User.role_id == role_id, User.tenant_id == auth.tenant_id)
     )
     if user_count.scalar_one() > 0:
         raise HTTPException(409, "Cannot delete role — users are still assigned to it")
 
-    # Check for invite links
+    # Check for invite links (filter by tenant_id)
     link_count = await db.execute(
-        select(func.count(InviteLink.id)).where(InviteLink.role_id == role_id, InviteLink.is_active == True)
+        select(func.count(InviteLink.id)).where(
+            InviteLink.role_id == role_id, InviteLink.tenant_id == auth.tenant_id, InviteLink.is_active == True
+        )
     )
     if link_count.scalar_one() > 0:
         raise HTTPException(409, "Cannot delete role — active invite links reference it")
@@ -1335,7 +1383,23 @@ async def update_user(
 
 - [ ] **Step 5: Update user creation to use role_id**
 
-In `POST /api/admin/users`, change `role=UserRole(body.role)` to `role_id=body.role_id`. Update `CreateUserRequest` schema to accept `role_id: str` instead of `role: str`.
+In `POST /api/admin/users`, change `role=UserRole(body.role)` to `role_id=uuid.UUID(body.role_id)`. Update `CreateUserRequest` schema to accept `role_id: str` instead of `role: str`.
+
+- [ ] **Step 5b: Update `GET /api/admin/users` response**
+
+The user list must include the new role fields. In the response builder, add `roleId`, `roleName`, `isOwner` per user. The `User` model has `role` relationship (lazy="joined"), so:
+```python
+{
+    "id": str(user.id),
+    "email": user.email,
+    "displayName": user.display_name,
+    "roleId": str(user.role_id),
+    "roleName": user.role.name,
+    "isOwner": user.role.is_system and user.role.name == "Owner",
+    "isActive": user.is_active,
+    "createdAt": user.created_at.isoformat(),
+}
+```
 
 - [ ] **Step 6: Update invite link creation to use role_id**
 
@@ -1377,18 +1441,30 @@ Change mutating routes:
 - `PUT /api/listings/{id}` → `auth: AuthContext = require_permission('listing:create')`
 - `DELETE /api/listings/{id}` → `auth: AuthContext = require_permission('listing:delete')`
 
-Add `require_app_access()` to all routes — but since `app_id` is already a required query param that's used for filtering, `require_app_access()` can be added as a second dependency:
+Add `require_app_access()` to all routes. The pattern depends on whether the route also needs `require_permission`:
+
+**Read-only routes (no permission check):** Use `require_app_access()` as the sole auth dependency:
 ```python
 @router.get("")
 async def list_listings(
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
-    _app: AuthContext = require_app_access(),
+    auth: AuthContext = require_app_access(),  # checks app access, returns AuthContext
     db: AsyncSession = Depends(get_db),
 ):
 ```
 
-**Note:** Since `require_app_access()` internally depends on `get_auth_context`, FastAPI will reuse the same `AuthContext` instance (dependency caching). This means we don't double-query. The `_app` variable is unused — it's just for the side-effect of the access check.
+**Mutating routes (permission + app access):** Use `require_permission()` for `auth`, add app access as a side-effect check:
+```python
+@router.post("")
+async def create_listing(
+    app_id: str = Query(...),
+    auth: AuthContext = require_permission('listing:create'),
+    _: None = require_app_access(),  # side-effect only, FastAPI caches get_auth_context
+    db: AsyncSession = Depends(get_db),
+):
+```
+
+**Note:** `require_app_access()` returns `Depends(_checker)` where `_checker` returns `AuthContext`. FastAPI caches `get_auth_context` per request, so the DB query runs once regardless of how many dependencies use it.
 
 - [ ] **Step 2: Migrate eval_runs.py**
 
@@ -1434,7 +1510,25 @@ Same CRUD pattern as Step 4.
 
 - [ ] **Step 9: Migrate inside_sales.py**
 
-All routes: add `require_app_access()` only (read-only routes). The `app_id` for inside-sales is implicit (`"inside-sales"` slug). If routes don't have `app_id` as a query param, hardcode the check or add the param.
+Inside Sales routes have no `app_id` query param — the app is implicit. Create a specialized dependency:
+
+```python
+# At the top of inside_sales.py
+from app.auth.context import get_auth_context, AuthContext
+from fastapi import Depends, HTTPException
+
+async def require_inside_sales_access(
+    auth: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
+    """Require access to the inside-sales app."""
+    if auth.is_owner:
+        return auth
+    if "inside-sales" not in auth.app_access:
+        raise HTTPException(403, "No access to app: inside-sales")
+    return auth
+```
+
+Then use `auth: AuthContext = Depends(require_inside_sales_access)` on every route in this file.
 
 - [ ] **Step 10: Verify — start the backend**
 
@@ -1720,7 +1814,19 @@ const accessibleApps = user
 
 Replace `apps.map(...)` with `accessibleApps.map(...)` in the dropdown render.
 
-- [ ] **Step 4: Add AppAccessGuard to Router.tsx**
+- [ ] **Step 4: Update Sidebar.tsx**
+
+In `src/components/layout/Sidebar.tsx`:
+- Line 71: Replace `user?.role === 'admin' || user?.role === 'owner'` with a permission check:
+  ```tsx
+  const isAdmin = user?.isOwner || ['user:create', 'user:edit', 'user:invite'].some(p => user?.permissions.includes(p));
+  ```
+- Line 377-378: Replace `user.role === 'admin' || user.role === 'owner'` with `user.isOwner || user.roleName` check, and replace `{user.role}` with `{user.roleName}`:
+  ```tsx
+  <span className="ml-1 text-[var(--text-brand)]">{user.roleName}</span>
+  ```
+
+- [ ] **Step 5: Add AppAccessGuard to Router.tsx**
 
 In `src/app/Router.tsx`, wrap each app's routes with `<AppAccessGuard>`:
 
@@ -1760,6 +1866,14 @@ git commit -m "feat(rbac): update auth store, AdminGuard, AppSwitcher, route gua
 - Modify: `src/features/admin/AdminUsersPage.tsx`
 - Modify: `src/features/admin/InviteLinksSection.tsx`
 - Modify: Multiple listing and eval run components
+
+- [ ] **Step 0: Fix all `user.role` references in AdminUsersPage.tsx**
+
+Before tagging buttons, replace all `user.role` references that will be TypeScript errors:
+- Line ~103: `const isOwner = currentUser?.role === 'owner'` → `const isOwner = currentUser?.isOwner`
+- Line ~160: Role badge display `{user.role}` → `{user.roleName}`
+- Line ~173: `user.role !== 'owner'` → `!user.isOwner`
+- Any `roleBadgeVariant(user.role)` helper needs to accept the new role name string
 
 - [ ] **Step 1: Tag admin buttons**
 
