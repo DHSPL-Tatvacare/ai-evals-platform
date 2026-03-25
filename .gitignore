@@ -28,6 +28,9 @@ dist-ssr
 
 # Local agent/tool artifacts
 .agent/*.md
+
+# Local strategy artifacts (not for version control)
+docs/proposals/ai-concierge-routing.html
 .gemini/*.md
 .claude/
 .ruff_cache/

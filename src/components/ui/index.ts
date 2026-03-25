@@ -24,3 +24,4 @@ export { SearchableSelect, type SearchableSelectOption } from './SearchableSelec
 export { ProviderToggle } from './ProviderToggle';
 export { LLMConfigSection } from './LLMConfigSection';
 export { PasswordStrengthIndicator, validatePasswordStrength } from './PasswordStrengthIndicator';
+export { MultiSelect, type MultiSelectOption } from './MultiSelect';
