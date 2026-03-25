@@ -193,7 +193,19 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
           {/* App Access */}
           {apps.length > 0 && (
             <div>
-              <p className="mb-2 text-[13px] font-medium text-[var(--text-secondary)]">App Access</p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[13px] font-medium text-[var(--text-secondary)]">App Access</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSlugs = apps.map((a) => a.slug);
+                    setSelectedApps((prev) => prev.size === allSlugs.length ? new Set() : new Set(allSlugs));
+                  }}
+                  className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
+                >
+                  {selectedApps.size === apps.length ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 {apps.map((app) => {
                   const checked = selectedApps.has(app.slug);
@@ -223,7 +235,19 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
 
           {/* Permissions */}
           <div>
-            <p className="mb-3 text-[13px] font-medium text-[var(--text-secondary)]">Permissions</p>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-[var(--text-secondary)]">Permissions</p>
+              <button
+                type="button"
+                onClick={() => {
+                  const allPerms = PERMISSION_GROUPS.flatMap((g) => g.permissions.map((p) => p.id));
+                  setSelectedPerms((prev) => prev.size === allPerms.length ? new Set() : new Set(allPerms));
+                }}
+                className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
+              >
+                {selectedPerms.size === PERMISSION_GROUPS.flatMap((g) => g.permissions).length ? 'Deselect All' : 'Select All'}
+              </button>
+            </div>
             <div className="space-y-4">
               {PERMISSION_GROUPS.map((group) => (
                 <div key={group.label}>

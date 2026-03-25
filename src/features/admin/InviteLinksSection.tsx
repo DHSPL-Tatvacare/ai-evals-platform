@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Link2, Copy, Check, Trash2, Plus, Search, SearchX } from 'lucide-react';
+import { Link2, Copy, Check, Trash2, Plus, Search, SearchX, X } from 'lucide-react';
 import { Button, Badge, Spinner, ConfirmDialog, EmptyState } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
@@ -158,38 +158,47 @@ export function InviteLinksSection() {
         </div>
       )}
 
-      {/* Create form */}
+      {/* Create form — right overlay panel */}
       {showCreateForm && (
-        <div className="mb-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="mb-1 block text-[12px] font-medium text-[var(--text-secondary)]">Label (optional)</label>
-              <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} className={inputClass} placeholder="e.g. Engineering team" />
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCreateForm(false)} />
+          <div className="relative w-full max-w-md bg-[var(--bg-primary)] shadow-xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between border-b border-[var(--border-default)] px-5 py-4">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Generate Invite Link</h2>
+              <button onClick={() => setShowCreateForm(false)} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-medium text-[var(--text-secondary)]">Default Role</label>
-              <select value={roleId} onChange={(e) => setRoleId(e.target.value)} className={cn(selectClass, 'w-full')}>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Label (optional)</label>
+                <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} className={inputClass} placeholder="e.g. Engineering team" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Role</label>
+                <select value={roleId} onChange={(e) => setRoleId(e.target.value)} className={cn(selectClass, 'w-full')}>
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Max Uses</label>
+                <input type="number" min="1" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} className={inputClass} placeholder="Unlimited" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Expires In</label>
+                <select value={expiresInHours} onChange={(e) => setExpiresInHours(Number(e.target.value))} className={cn(selectClass, 'w-full')}>
+                  {EXPIRY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-medium text-[var(--text-secondary)]">Max Uses</label>
-              <input type="number" min="1" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} className={inputClass} placeholder="Unlimited" />
+            <div className="border-t border-[var(--border-default)] px-5 py-3 flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="md" onClick={() => setShowCreateForm(false)}>Cancel</Button>
+              <Button size="md" onClick={handleCreate} isLoading={isCreating} icon={Link2}>Generate</Button>
             </div>
-            <div className="col-span-2">
-              <label className="mb-1 block text-[12px] font-medium text-[var(--text-secondary)]">Expires In</label>
-              <select value={expiresInHours} onChange={(e) => setExpiresInHours(Number(e.target.value))} className={cn(selectClass, 'w-full')}>
-                {EXPIRY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setShowCreateForm(false)}>Cancel</Button>
-            <Button size="sm" onClick={handleCreate} isLoading={isCreating} icon={Link2}>Generate</Button>
           </div>
         </div>
       )}
@@ -260,7 +269,7 @@ export function InviteLinksSection() {
           </tbody>
         </table>
       </div>
-      {filtered.length === 0 && (
+      {filtered.length === 0 && !showCreateForm && (
         <EmptyState
           icon={search ? SearchX : Link2}
           title={search ? 'No results found' : 'No invite links yet'}

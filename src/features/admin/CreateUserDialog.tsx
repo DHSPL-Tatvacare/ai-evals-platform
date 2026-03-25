@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Modal, Button, Input, PasswordStrengthIndicator, validatePasswordStrength } from '@/components/ui';
+import { X } from 'lucide-react';
+import { Button, Input, PasswordStrengthIndicator, validatePasswordStrength } from '@/components/ui';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 
@@ -70,71 +71,78 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Add User">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">
-            Email
-          </label>
-          <Input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="user@example.com"
-            autoFocus
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">
-            Display Name
-          </label>
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Full name"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">
-            Temporary Password
-          </label>
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Create a strong password"
-          />
-          <PasswordStrengthIndicator password={password} className="mt-2" />
-        </div>
-        <div>
-          <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">
-            Role
-          </label>
-          <select
-            value={roleId}
-            onChange={(e) => setRoleId(e.target.value)}
-            className="h-9 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[14px] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50"
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
+
+      {/* Panel */}
+      <div className="relative w-full max-w-md bg-[var(--bg-primary)] shadow-xl flex flex-col animate-in slide-in-from-right duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-5 py-4">
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Add User</h2>
+          <button
+            onClick={handleClose}
+            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] transition-colors"
           >
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
-        {error && (
-          <p className="text-[13px] text-[var(--color-error)]">{error}</p>
-        )}
+        {/* Body */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <div>
+            <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Email</label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="user@example.com"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Display Name</label>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Full name"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Temporary Password</label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Create a strong password"
+            />
+            <PasswordStrengthIndicator password={password} className="mt-2" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Role</label>
+            <select
+              value={roleId}
+              onChange={(e) => setRoleId(e.target.value)}
+              className="h-9 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[14px] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50"
+            >
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="secondary" size="md" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="md" isLoading={isSubmitting} disabled={!passwordStrong}>
-            Create User
-          </Button>
+          {error && <p className="text-[13px] text-[var(--color-error)]">{error}</p>}
+        </form>
+
+        {/* Footer */}
+        <div className="border-t border-[var(--border-default)] px-5 py-3 flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="md" onClick={handleClose}>Cancel</Button>
+          <Button size="md" isLoading={isSubmitting} disabled={!passwordStrong} onClick={handleSubmit}>Create User</Button>
         </div>
-      </form>
-    </Modal>
+      </div>
+    </div>
   );
 }
