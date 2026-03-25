@@ -6,7 +6,7 @@ import { CallResultPanel } from '../components/CallResultPanel';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { LeadCallTimeline } from '../components/LeadCallTimeline';
 import { fetchLeadDetail } from '@/services/api/insideSales';
-import type { LeadDetailFullResponse } from '@/services/api/insideSales';
+import type { LeadDetailFullResponse, LeadEvalHistoryEntry } from '@/services/api/insideSales';
 import type { ThreadEvalRow } from '@/types';
 import { cn } from '@/utils';
 import { routes } from '@/config/routes';
@@ -146,9 +146,9 @@ export function InsideSalesLeadDetail() {
   const evaluatableCall = [...lead.callHistory].find((c) => c.recordingUrl && c.evalScore === null);
   const canEvaluate = Boolean(evaluatableCall);
 
-  const evalHistory = lead.evalHistory;
-  const currentEval = evalHistory[evalIdx] ?? null;
-  const activeEvalActivityId = currentEval?.threadId as string ?? null;
+  const evalHistory: LeadEvalHistoryEntry[] = lead.evalHistory;
+  const currentEval: LeadEvalHistoryEntry | null = evalHistory[evalIdx] ?? null;
+  const activeEvalActivityId = currentEval?.threadId ?? null;
 
   const timelineTab = (
     <>
@@ -180,8 +180,7 @@ export function InsideSalesLeadDetail() {
               className="p-1 rounded hover:bg-[var(--interactive-secondary)] disabled:opacity-40">›</button>
           </div>
         )}
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        <CallResultPanel thread={currentEval as any as ThreadEvalRow} appId="inside-sales" />
+        <CallResultPanel thread={currentEval as unknown as ThreadEvalRow} appId="inside-sales" />
       </div>
     )
   );
@@ -241,7 +240,7 @@ export function InsideSalesLeadDetail() {
         <KpiTile label="Connect Rate" value={lead.connectRate !== null ? `${Math.round(lead.connectRate)}%` : '—'} />
         <KpiTile
           label="Counseling"
-          value={lead.historyTruncated ? '⚠' : String(lead.counselingCount)}
+          value={lead.historyTruncated ? '?' : String(lead.counselingCount)}
           sub={lead.historyTruncated ? 'History incomplete' : 'calls ≥ 10 min'}
         />
         <KpiTile label={tile5.label} value={tile5.value} />

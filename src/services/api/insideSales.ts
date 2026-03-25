@@ -47,6 +47,14 @@ export interface LeadCallRecord {
   isCounseling: boolean;
 }
 
+export interface LeadEvalHistoryEntry {
+  id: string;
+  threadId: string;
+  runId: string;
+  result: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface LeadDetailFullResponse {
   prospectId: string;
   firstName: string;
@@ -81,7 +89,7 @@ export interface LeadDetailFullResponse {
   daysSinceLastContact: number | null;
   callHistory: LeadCallRecord[];
   historyTruncated: boolean;
-  evalHistory: Record<string, unknown>[];
+  evalHistory: LeadEvalHistoryEntry[];
 }
 
 // ── API functions ──────────────────────────────────────────────────────────
