@@ -41,7 +41,7 @@ function ColHeader({ label, tip }: { label: string; tip: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       {label}
-      <Tooltip content={<span className="text-[11px]">{tip}</span>} position="bottom" maxWidth={220}>
+      <Tooltip content={<span className="text-xs">{tip}</span>} position="bottom" maxWidth={220}>
         <Info className="h-3 w-3 text-[var(--text-muted)] cursor-default shrink-0" />
       </Tooltip>
     </span>
@@ -145,7 +145,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
           <Filter className="h-3.5 w-3.5" />
           Filters
           {activeFilterCount > 0 && (
-            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[10px] font-bold text-white">
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[13px] font-bold text-white">
               {activeFilterCount}
             </span>
           )}
@@ -243,7 +243,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
                     <div className="font-medium text-[var(--text-primary)]">
                       {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
                     </div>
-                    <div className="font-mono text-[10px] text-[var(--text-muted)]">{lead.phone}</div>
+                    <div className="font-mono text-[13px] text-[var(--text-muted)]">{lead.phone}</div>
                   </td>
                   <td className="px-3 py-2.5">
                     <StageBadge stage={lead.prospectStage} />
@@ -318,7 +318,7 @@ function DirectionBadge({ direction }: { direction: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
         isInbound
           ? 'bg-purple-500/15 text-purple-400'
           : 'bg-blue-500/15 text-blue-400'
@@ -335,7 +335,7 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
         isAnswered
           ? 'bg-emerald-500/15 text-emerald-400'
           : 'bg-red-500/15 text-red-400'
@@ -501,7 +501,7 @@ export function InsideSalesListing() {
           <Filter className="h-3.5 w-3.5" />
           Filters
           {activeFilterCount > 0 && (
-            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[10px] font-bold text-white">
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[13px] font-bold text-white">
               {activeFilterCount}
             </span>
           )}
@@ -656,7 +656,7 @@ export function InsideSalesListing() {
                     <td className="px-3 py-2.5 text-[var(--text-primary)]">
                       {call.agentName || '—'}
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)] text-[11px]">
+                    <td className="px-3 py-2.5 font-mono text-[var(--text-secondary)] text-xs">
                       {call.prospectId || '—'}
                     </td>
                     <td className="px-3 py-2.5 text-[var(--text-secondary)] whitespace-nowrap">
@@ -698,7 +698,7 @@ export function InsideSalesListing() {
                           )}
                         </button>
                       ) : (
-                        <span className="text-[var(--text-muted)] text-[10px]">—</span>
+                        <span className="text-[var(--text-muted)] text-[13px]">—</span>
                       )}
                     </td>
                   </tr>
@@ -768,7 +768,7 @@ export function InsideSalesListing() {
 
 function FilterPill({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--interactive-secondary)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--interactive-secondary)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
       {label}
       <button
         onClick={onRemove}
