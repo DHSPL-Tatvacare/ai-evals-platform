@@ -4,7 +4,9 @@ export interface AdminUser {
   id: string;
   email: string;
   displayName: string;
-  role: 'owner' | 'admin' | 'member';
+  roleId: string;
+  roleName: string;
+  isOwner: boolean;
   isActive: boolean;
   createdAt: string;
 }
@@ -49,7 +51,7 @@ export interface UpdateTenantConfigRequest {
 export interface InviteLink {
   id: string;
   label: string | null;
-  defaultRole: string;
+  roleId: string;
   maxUses: number | null;
   usesCount: number;
   expiresAt: string;

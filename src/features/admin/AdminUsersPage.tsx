@@ -14,13 +14,6 @@ import { InviteLinksSection } from './InviteLinksSection';
 
 const ROWS_PER_PAGE = 20;
 
-const roleBadgeVariant = (role: string) => {
-  switch (role) {
-    case 'owner': return 'primary' as const;
-    case 'admin': return 'info' as const;
-    default: return 'neutral' as const;
-  }
-};
 
 function UsersTab() {
   const currentUser = useAuthStore((s) => s.user);
@@ -55,7 +48,7 @@ function UsersTab() {
       (u) =>
         u.displayName.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
-        u.role.toLowerCase().includes(q),
+        u.roleName.toLowerCase().includes(q),
     );
   }, [users, search]);
 
@@ -69,7 +62,7 @@ function UsersTab() {
     email: string;
     displayName: string;
     password: string;
-    role: 'admin' | 'member';
+    roleId: string;
   }) => {
     await adminApi.createUser(data);
     notificationService.success('User created');
@@ -160,7 +153,7 @@ function UsersTab() {
                   </td>
                   <td className="px-4 py-2.5 text-[13px] text-[var(--text-secondary)]">{user.email}</td>
                   <td className="px-4 py-2.5">
-                    <Badge variant={roleBadgeVariant(user.role)} size="sm">{user.role}</Badge>
+                    <Badge variant={user.isOwner ? 'warning' : 'info'} size="sm">{user.roleName}</Badge>
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge variant={user.isActive ? 'success' : 'neutral'} dot={user.isActive ? 'success' : 'neutral'} size="sm">
@@ -177,7 +170,7 @@ function UsersTab() {
                           <Button variant="ghost" size="sm" icon={KeyRound} iconOnly title="Reset password" onClick={() => setResetPasswordUser(user)} />
                         </PermissionGate>
                       )}
-                      {isOwner && !isSelf && user.role !== 'owner' && user.isActive && (
+                      {isOwner && !isSelf && !user.isOwner && user.isActive && (
                         <PermissionGate action="user:deactivate">
                           <Button variant="ghost" size="sm" icon={UserX} iconOnly title="Deactivate user" onClick={() => setDeactivatingUser(user)} />
                         </PermissionGate>
@@ -231,7 +224,6 @@ function UsersTab() {
         isOpen={!!editingUser}
         user={editingUser}
         currentUserId={currentUser?.id ?? ''}
-        currentUserRole={currentUser?.roleName ?? 'member'}
         onClose={() => setEditingUser(null)}
         onSubmit={handleUpdateUser}
       />
