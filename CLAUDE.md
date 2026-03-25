@@ -13,7 +13,7 @@ At session start, read `~/.claude` project memory for context from prior convers
 ## Architecture Mental Models
 
 1. Frontend is a thin client. All business logic, LLM calls, and persistence run on the backend. Frontend manages UI state and makes API calls.
-2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`.
+2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`, `call_quality`.
 3. Jobs are the execution model. Operations longer than a few seconds run as background jobs: create → poll → get result. Never write custom polling loops in components.
 4. Stores are caches. Zustand stores cache server data. PostgreSQL is the source of truth. On page load, stores call their `load*()` methods.
 5. The provider abstraction protects runners. Runners never call Gemini/OpenAI/Anthropic SDKs directly. They go through `llm_base.py`, which handles auth, retries, timeouts, and logging.
@@ -33,11 +33,11 @@ At session start, read `~/.claude` project memory for context from prior convers
 ## Current Registry
 
 - Routers (17): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
-- ORM tables (19): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
+- ORM tables (20): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents
 - Zustand stores (15): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
 - LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
 - Job handlers (7): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, generate-report, generate-cross-run-report
-- Active app IDs: `voice-rx`, `kaira-bot`
+- Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`
 
 ## Invariants — Do Not Break
 
