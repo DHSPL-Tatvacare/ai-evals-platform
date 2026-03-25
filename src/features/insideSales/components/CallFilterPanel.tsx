@@ -18,9 +18,11 @@ interface CallFilterPanelProps {
 const STAGE_OPTIONS = [
   'New Lead', 'Call Back', 'RNR', 'Interested in future plan',
   'Not Interested', 'Converted', 'Invalid / Junk', 'Re-enquired',
-];
+].map((s) => ({ value: s, label: s }));
 
-const CONDITION_OPTIONS = ['Diabetes', 'PCOS', 'Fatty Liver', 'Obesity', 'Hypertension'];
+const CONDITION_OPTIONS = ['Diabetes', 'PCOS', 'Fatty Liver', 'Obesity', 'Hypertension']
+  .map((c) => ({ value: c, label: c }));
+
 
 export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
   const filters = useInsideSalesStore((s) => s.filters);
@@ -83,35 +85,43 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
             {/* Date range */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Date Range (Lead Created)</label>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="datetime-local" value={leadFilters.dateFrom.replace(' ', 'T')}
-                  onChange={(e) => useLeadsStore.getState().setLeadFilters({ dateFrom: e.target.value.replace('T', ' ') })}
-                  className="text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5 text-[var(--text-primary)]" />
-                <input type="datetime-local" value={leadFilters.dateTo.replace(' ', 'T')}
-                  onChange={(e) => useLeadsStore.getState().setLeadFilters({ dateTo: e.target.value.replace('T', ' ') })}
-                  className="text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5 text-[var(--text-primary)]" />
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={leadFilters.dateFrom.split(' ')[0]}
+                  onChange={(e) => useLeadsStore.getState().setLeadFilters({ dateFrom: e.target.value + ' 00:00:00' })}
+                  className="flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+                />
+                <input
+                  type="date"
+                  value={leadFilters.dateTo.split(' ')[0]}
+                  onChange={(e) => useLeadsStore.getState().setLeadFilters({ dateTo: e.target.value + ' 23:59:59' })}
+                  className="flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+                />
               </div>
+            </div>
+
+            {/* Prospect ID */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Prospect ID</label>
+              <input
+                type="text"
+                value={leadFilters.prospectId}
+                onChange={(e) => useLeadsStore.getState().setLeadFilters({ prospectId: e.target.value })}
+                placeholder="Paste or type prospect ID..."
+                className="w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+              />
             </div>
 
             {/* Stage */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Stage</label>
-              <div className="space-y-1.5">
-                {STAGE_OPTIONS.map((s) => (
-                  <label key={s} className="flex items-center gap-2 text-xs text-[var(--text-primary)] cursor-pointer">
-                    <input type="checkbox"
-                      checked={leadFilters.stage.includes(s)}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                          ? [...leadFilters.stage, s]
-                          : leadFilters.stage.filter((x) => x !== s);
-                        useLeadsStore.getState().setLeadFilters({ stage: next });
-                      }}
-                      className="h-3.5 w-3.5 rounded border-[var(--border-default)] accent-[var(--color-brand-accent)]" />
-                    {s}
-                  </label>
-                ))}
-              </div>
+              <MultiSelect
+                values={leadFilters.stage}
+                onChange={(stage) => useLeadsStore.getState().setLeadFilters({ stage })}
+                options={STAGE_OPTIONS}
+                placeholder="Select stages..."
+              />
             </div>
 
             {/* MQL Score */}
@@ -136,31 +146,12 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
             {/* Condition */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Condition</label>
-              <div className="space-y-1.5">
-                {CONDITION_OPTIONS.map((c) => (
-                  <label key={c} className="flex items-center gap-2 text-xs text-[var(--text-primary)] cursor-pointer">
-                    <input type="checkbox"
-                      checked={leadFilters.condition.includes(c)}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                          ? [...leadFilters.condition, c]
-                          : leadFilters.condition.filter((x) => x !== c);
-                        useLeadsStore.getState().setLeadFilters({ condition: next });
-                      }}
-                      className="h-3.5 w-3.5 rounded border-[var(--border-default)] accent-[var(--color-brand-accent)]" />
-                    {c}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* City */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-[var(--text-secondary)]">City (substring)</label>
-              <input type="text" value={leadFilters.city}
-                onChange={(e) => useLeadsStore.getState().setLeadFilters({ city: e.target.value })}
-                placeholder="e.g. Mumbai"
-                className="w-full text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1.5 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]" />
+              <MultiSelect
+                values={leadFilters.condition}
+                onChange={(condition) => useLeadsStore.getState().setLeadFilters({ condition })}
+                options={CONDITION_OPTIONS}
+                placeholder="Select conditions..."
+              />
             </div>
           </div>
         ) : (

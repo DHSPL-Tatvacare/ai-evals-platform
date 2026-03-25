@@ -101,7 +101,8 @@ export interface LeadFilters {
   stage: string[];
   mqlMin: string;
   condition: string[];
-  city: string;
+  city: string[];
+  prospectId: string;
 }
 
 export async function fetchLeads(
@@ -119,7 +120,8 @@ export async function fetchLeads(
   if (filters.stage.length > 0) params.set('stage', filters.stage.join(','));
   if (filters.mqlMin) params.set('mql_min', filters.mqlMin);
   if (filters.condition.length > 0) params.set('condition', filters.condition.join(','));
-  if (filters.city) params.set('city', filters.city);
+  if (filters.city.length > 0) params.set('city', filters.city.join(','));
+  if (filters.prospectId) params.set('prospect_id', filters.prospectId);
 
   return apiRequest<LeadListResponse>(`/api/inside-sales/leads?${params.toString()}`);
 }

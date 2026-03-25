@@ -228,20 +228,24 @@ async def list_leads(
     mql_min: int | None = Query(None, ge=0, le=5, description="Minimum MQL score"),
     condition: str | None = Query(None, description="Comma-separated condition values"),
     city: str | None = Query(None, description="City substring filter"),
+    prospect_id: str | None = Query(None, description="Filter by exact prospect ID"),
     auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch leads from LSQ by CreatedOn range with MQL scoring.
+    """Fetch one page of leads from LSQ by CreatedOn range with MQL scoring.
 
-    Note: LSQ Leads.Get only supports a >= date filter, so date_to is applied
-    client-side after fetch. This means page_size caps the raw LSQ result before
-    the date_to filter runs; actual returned records may be fewer than page_size
-    when many leads fall outside the date_to bound.
+    Single LSQ request per call. Filters (agents, stage, condition, prospect_id)
+    applied server-side after fetch. FRT uses ProspectActivityDate_Min with a
+    60-second minimum threshold to exclude system-generated activities.
+    Pagination uses has_more: Next is enabled when LSQ returned a full page.
     """
-    result = await fetch_leads(date_from=date_from, date_to=date_to)
+    result = await fetch_leads(
+        date_from=date_from, date_to=date_to, page=page, page_size=page_size,
+    )
     raw_leads = result["leads"]
+    has_more: bool = result["has_more"]
 
-    # Server-side filters
+    # Server-side filters (applied after LSQ fetch)
     if agents:
         agent_set = {a.strip().lower() for a in agents.split(",") if a.strip()}
         raw_leads = [l for l in raw_leads if (l.get("OwnerIdName") or "").lower() in agent_set]
@@ -255,8 +259,10 @@ async def list_leads(
             if any(c in (l.get("mx_utm_disease") or "").lower() for c in cond_set)
         ]
     if city:
-        city_lower = city.strip().lower()
-        raw_leads = [l for l in raw_leads if city_lower in (l.get("mx_City") or "").lower()]
+        city_set = {c.strip().lower() for c in city.split(",") if c.strip()}
+        raw_leads = [l for l in raw_leads if any(c in (l.get("mx_City") or "").lower() for c in city_set)]
+    if prospect_id:
+        raw_leads = [l for l in raw_leads if l.get("ProspectID") == prospect_id.strip()]
 
     records: list[LeadListRecord] = []
     for raw in raw_leads:
@@ -274,6 +280,12 @@ async def list_leads(
             first_activity_on=lead["firstActivityOn"],
         )
 
+        # Suppress FRT < 60s — system-generated activities fire within seconds of
+        # lead creation and are not meaningful as a first response time.
+        frt = metrics["frt_seconds"]
+        if frt is not None and frt < 60:
+            frt = None
+
         records.append(LeadListRecord(
             prospect_id=lead["prospectId"],
             first_name=lead["firstName"],
@@ -290,7 +302,7 @@ async def list_leads(
             answered_count=lead["answeredCount"],
             total_dials=metrics["total_dials"],
             connect_rate=metrics["connect_rate"],
-            frt_seconds=metrics["frt_seconds"],
+            frt_seconds=frt,
             lead_age_days=metrics["lead_age_days"],
             days_since_last_contact=metrics["days_since_last_contact"],
             mql_score=mql_score,
@@ -301,15 +313,10 @@ async def list_leads(
             source_campaign=lead["sourceCampaign"],
         ))
 
-    # Slice for requested page
-    total = len(records)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_records = records[start:end]
-
+    # total=-1 signals "unknown" — frontend uses has_more for Next/Prev buttons
     return LeadListResponse(
-        leads=page_records,
-        total=total,
+        leads=records,
+        total=-1 if has_more else len(records) + (page - 1) * page_size,
         page=page,
         page_size=page_size,
     )

@@ -48,9 +48,9 @@ interface InsideSalesState {
   error: string | null;
   filters: CallFilters;
   selectedCallIds: Set<string>;
-  /** Cache key for the last successful fetch — skip re-fetch if unchanged */
   _lastFetchKey: string;
-  /** Currently viewed call (set when clicking into detail) */
+  /** Page cache: filterHash → { pageNum: records[] }. Cleared on filter change. */
+  _callsCache: Record<string, Record<number, CallRecord[]>>;
   activeCall: CallRecord | null;
   setActiveCall: (call: CallRecord | null) => void;
 
@@ -68,8 +68,14 @@ function todayDateString(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+function daysAgoDateString(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0];
+}
+
 const DEFAULT_FILTERS: CallFilters = {
-  dateFrom: todayDateString() + ' 00:00:00',
+  dateFrom: daysAgoDateString(7) + ' 00:00:00',
   dateTo: todayDateString() + ' 23:59:59',
   agents: [],
   prospectId: '',
@@ -94,14 +100,15 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   filters: { ...DEFAULT_FILTERS },
   selectedCallIds: new Set(),
   _lastFetchKey: '',
+  _callsCache: {},
   activeCall: null,
 
   setActiveCall: (call) => set({ activeCall: call }),
 
   setFilters: (updates) =>
-    set((s) => ({ filters: { ...s.filters, ...updates }, page: 1 })),
+    set((s) => ({ filters: { ...s.filters, ...updates }, page: 1, _callsCache: {} })),
 
-  clearFilters: () => set({ filters: { ...DEFAULT_FILTERS }, page: 1 }),
+  clearFilters: () => set({ filters: { ...DEFAULT_FILTERS }, page: 1, _callsCache: {} }),
 
   setPage: (page) => set({ page }),
 
@@ -121,11 +128,18 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   deselectAll: () => set({ selectedCallIds: new Set() }),
 
   loadCalls: async (force?: boolean) => {
-    const { filters, page, pageSize, _lastFetchKey } = get();
-    const fetchKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agents.join(',')}|${filters.prospectId}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}|${pageSize}`;
+    const { filters, page, pageSize, _lastFetchKey, _callsCache } = get();
+    const filterHash = `${filters.dateFrom}|${filters.dateTo}|${filters.agents.join(',')}|${filters.prospectId}|${filters.direction}|${filters.status}|${filters.eventCodes}|${pageSize}`;
+    const fetchKey = `${filterHash}|${page}`;
 
-    // Skip if already loaded for this exact filter+page combo
     if (!force && fetchKey === _lastFetchKey) return;
+
+    // Serve from cache (e.g. navigating back to a previously loaded page)
+    const cached = _callsCache[filterHash]?.[page];
+    if (!force && cached) {
+      set({ calls: cached, _lastFetchKey: fetchKey });
+      return;
+    }
 
     set({ isLoading: true, error: null });
     try {
@@ -148,13 +162,19 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
         pageSize: number;
       }>(`/api/inside-sales/calls?${params.toString()}`);
 
-      set({ calls: data.calls, total: data.total, isLoading: false, _lastFetchKey: fetchKey });
+      set((s) => ({
+        calls: data.calls,
+        total: data.total,
+        isLoading: false,
+        _lastFetchKey: fetchKey,
+        _callsCache: {
+          ...s._callsCache,
+          [filterHash]: { ...s._callsCache[filterHash], [page]: data.calls },
+        },
+      }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Failed to load calls';
-      set({
-        error: msg,
-        isLoading: false,
-      });
+      set({ error: msg, isLoading: false });
     }
   },
 
@@ -168,6 +188,7 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       filters: { ...DEFAULT_FILTERS },
       selectedCallIds: new Set(),
       _lastFetchKey: '',
+      _callsCache: {},
       activeCall: null,
     }),
 }));
@@ -176,13 +197,14 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 export type { LeadListRecord, LeadFilters };
 
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
-  dateFrom: todayDateString() + ' 00:00:00',
+  dateFrom: daysAgoDateString(7) + ' 00:00:00',
   dateTo: todayDateString() + ' 23:59:59',
   agents: [],
   stage: [],
   mqlMin: '',
   condition: [],
-  city: '',
+  city: [],
+  prospectId: '',
 };
 
 interface LeadsState {
@@ -195,6 +217,8 @@ interface LeadsState {
   leadFilters: LeadFilters;
 
   _lastLeadsFetchKey: string;
+  /** Page cache: filterHash → { pageNum: records[] }. Cleared on filter change. */
+  _leadsCache: Record<string, Record<number, LeadListRecord[]>>;
 
   setLeadFilters: (updates: Partial<LeadFilters>) => void;
   clearLeadFilters: () => void;
@@ -211,35 +235,52 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
   leadsError: null,
   leadFilters: { ...DEFAULT_LEAD_FILTERS },
   _lastLeadsFetchKey: '',
+  _leadsCache: {},
 
   setLeadFilters: (updates) =>
-    set((s) => ({ leadFilters: { ...s.leadFilters, ...updates }, leadsPage: 1 })),
+    set((s) => ({ leadFilters: { ...s.leadFilters, ...updates }, leadsPage: 1, _leadsCache: {} })),
 
   clearLeadFilters: () =>
-    set({ leadFilters: { ...DEFAULT_LEAD_FILTERS }, leadsPage: 1, _lastLeadsFetchKey: '' }),
+    set({ leadFilters: { ...DEFAULT_LEAD_FILTERS }, leadsPage: 1, _lastLeadsFetchKey: '', _leadsCache: {} }),
 
   setLeadsPage: (page) => set({ leadsPage: page }),
 
   loadLeads: async (force?: boolean) => {
-    const { leadFilters, leadsPage, leadsPageSize, _lastLeadsFetchKey } = get();
-    const fetchKey = [
+    const { leadFilters, leadsPage, leadsPageSize, _lastLeadsFetchKey, _leadsCache } = get();
+    const filterHash = [
       leadFilters.dateFrom,
       leadFilters.dateTo,
       leadFilters.agents.join(','),
       leadFilters.stage.join(','),
       leadFilters.condition.join(','),
       leadFilters.mqlMin,
-      leadFilters.city,
-      leadsPage,
+      leadFilters.city.join(','),
+      leadFilters.prospectId,
       leadsPageSize,
     ].join('|');
+    const fetchKey = `${filterHash}|${leadsPage}`;
 
     if (!force && fetchKey === _lastLeadsFetchKey) return;
+
+    const cached = _leadsCache[filterHash]?.[leadsPage];
+    if (!force && cached) {
+      set({ leads: cached, _lastLeadsFetchKey: fetchKey });
+      return;
+    }
 
     set({ leadsLoading: true, leadsError: null });
     try {
       const data = await apiFetchLeads(leadFilters, leadsPage, leadsPageSize);
-      set({ leads: data.leads, leadsTotal: data.total, leadsLoading: false, _lastLeadsFetchKey: fetchKey });
+      set((s) => ({
+        leads: data.leads,
+        leadsTotal: data.total,
+        leadsLoading: false,
+        _lastLeadsFetchKey: fetchKey,
+        _leadsCache: {
+          ...s._leadsCache,
+          [filterHash]: { ...s._leadsCache[filterHash], [leadsPage]: data.leads },
+        },
+      }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load leads';
       set({ leadsError: msg, leadsLoading: false });

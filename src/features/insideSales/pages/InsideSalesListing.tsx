@@ -59,7 +59,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
   const leadFilters = useLeadsStore((s) => s.leadFilters);
   const [search, setSearch] = useState('');
 
-  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city}|${leadsPage}`;
+  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city.join(',')}|${leadFilters.prospectId}|${leadsPage}`;
 
   // Client-side search filter
   const visibleLeads = useMemo(() => {
@@ -78,7 +78,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
     if (leadFilters.stage.length > 0) count++;
     if (leadFilters.condition.length > 0) count++;
     if (leadFilters.mqlMin) count++;
-    if (leadFilters.city) count++;
+    if (leadFilters.city.length > 0) count++;
     if (leadFilters.agents.length > 0) count++;
     return count;
   }, [leadFilters]);
@@ -87,7 +87,8 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
     useLeadsStore.getState().loadLeads();
   }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalPages = Math.max(1, Math.ceil(leadsTotal / leadsPageSize));
+  // leadsTotal === -1 means LSQ returned a full page (more may exist)
+  const hasMore = leadsTotal === -1 || leads.length === leadsPageSize;
 
   const handleRowClick = useCallback((lead: LeadListRecord) => {
     navigate(routes.insideSales.leadDetail(lead.prospectId));
@@ -159,9 +160,6 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
           </button>
         )}
 
-        <span className="ml-auto text-xs text-[var(--text-muted)]">
-          {leadsTotal} lead{leadsTotal !== 1 ? 's' : ''}
-        </span>
       </div>
 
       {/* Active filter pills */}
@@ -185,10 +183,10 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
               onRemove={() => useLeadsStore.getState().setLeadFilters({ mqlMin: '' })}
             />
           )}
-          {leadFilters.city && (
+          {leadFilters.city.length > 0 && (
             <FilterPill
-              label={`City: ${leadFilters.city}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ city: '' })}
+              label={`City: ${leadFilters.city.length === 1 ? leadFilters.city[0] : `${leadFilters.city.length} cities`}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ city: [] })}
             />
           )}
           {leadFilters.agents.length > 0 && (
@@ -214,7 +212,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
                 <ColHeader label="MQL" tip="Marketing Qualified Lead score (0–5). One point per signal: age in range, target city, qualifying condition, HbA1c, intent to pay." />
               </th>
               <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
-                <ColHeader label="Agent" tip="Assigned counselor (OwnerIdName in LeadSquared)." />
+                <ColHeader label="Owner" tip="Assigned lead owner in LeadSquared (OwnerIdName). May differ from the agent shown in call timeline, who is the person who made each call." />
               </th>
               <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                 <ColHeader label="Dials" tip="Total call attempts = RNR (no answer) + Answered. From LSQ mx_RNR_Count + mx_Answered_Call_Count." />
@@ -280,7 +278,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
 
       <div className="flex items-center justify-between pt-3 pb-1">
         <span className="text-xs text-[var(--text-muted)]">
-          Page {leadsPage} of {totalPages} · {leadsTotal} leads
+          Page {leadsPage}{hasMore ? '' : ` · ${visibleLeads.length + (leadsPage - 1) * leadsPageSize} leads`}
         </span>
         <div className="flex items-center gap-1">
           <Button variant="secondary" size="sm" disabled={leadsPage <= 1}
@@ -288,7 +286,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
             className="h-7 w-7 p-0">
             <ChevronLeft className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="secondary" size="sm" disabled={leadsPage >= totalPages}
+          <Button variant="secondary" size="sm" disabled={!hasMore}
             onClick={() => useLeadsStore.getState().setLeadsPage(leadsPage + 1)}
             className="h-7 w-7 p-0">
             <ChevronRight className="h-3.5 w-3.5" />
@@ -518,9 +516,6 @@ export function InsideSalesListing() {
           </button>
         )}
 
-        <span className="ml-auto text-xs text-[var(--text-muted)]">
-          {total} call{total !== 1 ? 's' : ''}
-        </span>
       </div>
 
       {/* Active filter pills */}
