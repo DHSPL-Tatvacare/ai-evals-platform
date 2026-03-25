@@ -5,6 +5,7 @@ Idempotent: checks for existing defaults before inserting.
 import json
 import logging
 import re
+import uuid
 import unicodedata
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,9 @@ from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import async_session as get_async_session
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
-from app.models.user import User, UserRole
+from app.models.user import User
+from app.models.app import App
+from app.models.role import Role
 from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
@@ -1697,11 +1700,57 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# APPS + ROLES SEEDING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+APP_SEEDS = [
+    {"slug": "voice-rx", "display_name": "Voice Rx", "description": "Audio file evaluation tool", "icon_url": "/voice-rx-icon.jpeg"},
+    {"slug": "kaira-bot", "display_name": "Kaira Bot", "description": "Health chat bot assistant", "icon_url": "/kaira-icon.svg"},
+    {"slug": "inside-sales", "display_name": "Inside Sales", "description": "Inside sales call quality evaluation", "icon_url": "/inside-sales-icon.svg"},
+]
+
+
+async def seed_apps(session: AsyncSession) -> dict[str, uuid.UUID]:
+    """Seed apps table. Returns {slug: id} mapping."""
+    app_ids = {}
+    for app_data in APP_SEEDS:
+        existing = await session.execute(
+            select(App).where(App.slug == app_data["slug"])
+        )
+        app = existing.scalar_one_or_none()
+        if not app:
+            app = App(**app_data)
+            session.add(app)
+            await session.flush()
+            logger.info(f"Seeded app: {app_data['slug']}")
+        app_ids[app.slug] = app.id
+    return app_ids
+
+
+async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.UUID:
+    """Ensure Owner role exists for a tenant. Returns role_id."""
+    existing = await session.execute(
+        select(Role).where(
+            Role.tenant_id == tenant_id,
+            Role.is_system == True,
+            Role.name == "Owner",
+        )
+    )
+    role = existing.scalar_one_or_none()
+    if not role:
+        role = Role(tenant_id=tenant_id, name="Owner", description="Full access", is_system=True)
+        session.add(role)
+        await session.flush()
+        logger.info(f"Seeded Owner role for tenant {tenant_id}")
+    return role.id
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SEED FUNCTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
-    """Ensure system tenant and system user exist. Required before seeding any data."""
+    """Ensure system tenant, Owner role, and system user exist."""
     # System tenant
     existing_tenant = await session.get(Tenant, SYSTEM_TENANT_ID)
     if not existing_tenant:
@@ -1709,6 +1758,10 @@ async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
             id=SYSTEM_TENANT_ID, name="System", slug="system", is_active=True,
         ))
         logger.info("Created system tenant (id=%s)", SYSTEM_TENANT_ID)
+    await session.flush()
+
+    # Seed Owner role for system tenant
+    owner_role_id = await seed_owner_role(session, SYSTEM_TENANT_ID)
 
     # System user (placeholder password hash — this user cannot log in)
     existing_user = await session.get(User, SYSTEM_USER_ID)
@@ -1719,11 +1772,12 @@ async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
             email="system@internal",
             password_hash="!nologin",
             display_name="System",
-            role=UserRole.OWNER,
+            role_id=owner_role_id,
             is_active=False,
         ))
         logger.info("Created system user (id=%s)", SYSTEM_USER_ID)
-
+    elif existing_user.role_id != owner_role_id:
+        existing_user.role_id = owner_role_id
     await session.flush()
 
 
@@ -1932,13 +1986,17 @@ async def seed_bootstrap_admin() -> None:
         db.add(tenant)
         await db.flush()  # Get tenant.id
 
+        # Seed apps and Owner role for new tenant
+        await seed_apps(db)
+        owner_role_id = await seed_owner_role(db, tenant.id)
+
         # Create admin user
         db.add(User(
             tenant_id=tenant.id,
             email=email,
             password_hash=hash_password(password),
             display_name="Admin",
-            role=UserRole.OWNER,
+            role_id=owner_role_id,
         ))
 
         # Create tenant config (allowed domains from env)
@@ -1961,6 +2019,7 @@ async def seed_bootstrap_admin() -> None:
 async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
     logger.info("Checking seed defaults...")
+    await seed_apps(session)
     await _seed_system_tenant_and_user(session)
     await _seed_prompts(session)
     await _seed_schemas(session)
