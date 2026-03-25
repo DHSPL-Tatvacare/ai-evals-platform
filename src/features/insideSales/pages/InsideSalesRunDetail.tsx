@@ -10,13 +10,15 @@ import {
   Phone,
   Search,
 } from 'lucide-react';
-import { Button, Tabs, EmptyState } from '@/components/ui';
+import { Button, Tabs, EmptyState, Spinner } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import VerdictBadge from '@/features/evalRuns/components/VerdictBadge';
 import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import { fetchEvalRun, fetchRunThreads, deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi } from '@/services/api/jobsApi';
+import { reportsApi } from '@/services/api/reportsApi';
+import { submitAndPollJob } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { usePoll } from '@/hooks';
 import { routes } from '@/config/routes';
@@ -25,8 +27,10 @@ import { timeAgo } from '@/utils/evalFormatters';
 import { isActiveStatus } from '@/utils/runStatus';
 import { scoreColor, getScoreBand } from '@/utils/scoreUtils';
 import { CallResultPanel } from '../components/CallResultPanel';
+import { InsideSalesReportView } from '../components/report/InsideSalesReportView';
 import type { EvalRun, ThreadEvalRow } from '@/types';
 import type { Job } from '@/services/api/jobsApi';
+import type { InsideSalesReportPayload } from '@/types/insideSalesReport';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -69,6 +73,8 @@ export function InsideSalesRunDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [report, setReport] = useState<InsideSalesReportPayload | null>(null);
+  const [reportStatus, setReportStatus] = useState<'idle' | 'loading' | 'generating' | 'ready' | 'error'>('idle');
 
   const fetchData = useCallback(async () => {
     if (!runId) return;
@@ -134,6 +140,36 @@ export function InsideSalesRunDetail() {
       setCancelling(false);
     }
   }, [run, fetchData]);
+
+  const generateReport = useCallback(async (refresh = false) => {
+    if (!runId) return;
+    try {
+      setReportStatus('generating');
+      await submitAndPollJob('generate-report', { run_id: runId, refresh });
+      const cached = await reportsApi.fetchReport(runId, { cacheOnly: true });
+      setReport(cached as unknown as InsideSalesReportPayload);
+      setReportStatus('ready');
+    } catch {
+      setReportStatus('error');
+      notificationService.error('Failed to generate report');
+    }
+  }, [runId]);
+
+  const loadCachedReport = useCallback(async () => {
+    if (!runId || report || reportStatus === 'generating') return;
+    try {
+      setReportStatus('loading');
+      const cached = await reportsApi.fetchReport(runId, { cacheOnly: true });
+      if (cached) {
+        setReport(cached as unknown as InsideSalesReportPayload);
+        setReportStatus('ready');
+      } else {
+        setReportStatus('idle');
+      }
+    } catch {
+      setReportStatus('idle');
+    }
+  }, [runId, report, reportStatus]);
 
   // Must be above early returns — Rules of Hooks
   const filteredThreads = useMemo(() => {
@@ -283,13 +319,44 @@ export function InsideSalesRunDetail() {
     id: 'report',
     label: 'Report',
     content: (
-      <div className="flex items-center justify-center py-16">
-        <EmptyState
-          icon={FileText}
-          title="Reports coming soon"
-          description="Report generation for inside-sales will be available in a future update."
-          compact
-        />
+      <div className="py-4">
+        {reportStatus === 'ready' && report ? (
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <button
+                className="text-xs text-[var(--text-secondary)] underline"
+                onClick={() => generateReport(true)}
+              >
+                Regenerate
+              </button>
+            </div>
+            <InsideSalesReportView report={report} />
+          </div>
+        ) : reportStatus === 'generating' || reportStatus === 'loading' ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <Spinner />
+            <p className="text-sm text-[var(--text-secondary)]">
+              {reportStatus === 'generating' ? 'Generating report...' : 'Loading...'}
+            </p>
+          </div>
+        ) : reportStatus === 'error' ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <p className="text-sm text-[var(--text-secondary)]">Failed to generate report.</p>
+            <button className="text-sm text-[var(--accent)] underline" onClick={() => generateReport()}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <p className="text-sm text-[var(--text-secondary)]">No report generated yet.</p>
+            <button
+              className="px-4 py-2 bg-[var(--accent)] text-white rounded-lg text-sm font-medium"
+              onClick={() => generateReport()}
+            >
+              Generate Report
+            </button>
+          </div>
+        )}
       </div>
     ),
   };
@@ -351,7 +418,11 @@ export function InsideSalesRunDetail() {
       {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
 
       {/* Tabs */}
-      <Tabs tabs={[resultsTab, reportTab]} defaultTab="results" />
+      <Tabs
+        tabs={[resultsTab, reportTab]}
+        defaultTab="results"
+        onChange={(tabId) => { if (tabId === 'report') loadCachedReport(); }}
+      />
     </div>
   );
 }

@@ -20,6 +20,7 @@ from app.models.evaluation_analytics import EvaluationAnalytics
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
 from app.models.lsq_call_cache import LsqLeadCache
+from app.models.external_agent import ExternalAgent
 
 __all__ = [
     "Base",
@@ -30,4 +31,5 @@ __all__ = [
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
     "EvaluationAnalytics",
     "LsqLeadCache",
+    "ExternalAgent",
 ]

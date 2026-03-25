@@ -545,6 +545,24 @@ GOODFLIP_QA_SCHEMA = [
     {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "displayMode": "card", "isMainMetric": False},
     {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "displayMode": "card", "isMainMetric": False},
     {"key": "reasoning", "type": "text", "description": "Detailed critique per dimension with evidence", "displayMode": "hidden", "isMainMetric": False, "role": "reasoning"},
+    # ── Behavioral flags ──
+    {
+        "key": "behavioral_flags",
+        "type": "object",
+        "label": "Behavioral Flags",
+        "role": "flags",
+        "hidden": True,
+        "description": "Escalation, disagreement, and tension detection. Use 'not_relevant' if the signal does not apply to this call.",
+    },
+    # ── Outcome flags ──
+    {
+        "key": "outcome_flags",
+        "type": "object",
+        "label": "Outcome Flags",
+        "role": "flags",
+        "hidden": True,
+        "description": "Meeting setup, purchase, callback, cross-sell outcomes. Use 'not_relevant' if the outcome was not applicable.",
+    },
 ]
 
 INSIDE_SALES_EVALUATORS = [
@@ -643,7 +661,42 @@ SCORING INTERPRETATION
 OUTPUT
 ═══════════════════════════════════════════════════════════════════════════════
 
-Score each dimension. Sum all dimension scores, normalize to 100, and provide as overall_score. For each compliance gate, report TRUE (passed) or FALSE (violated). In the reasoning field, provide a detailed critique for each dimension with specific transcript evidence (quote relevant portions).""",
+Score each dimension. Sum all dimension scores, normalize to 100, and provide as overall_score. For each compliance gate, report TRUE (passed) or FALSE (violated). In the reasoning field, provide a detailed critique for each dimension with specific transcript evidence (quote relevant portions).
+
+## BEHAVIORAL FLAGS
+
+In addition to the scored dimensions above, extract the following behavioral signals from the call. For each flag, output one of: true, false, or "not_relevant" (if the behavior/situation did not arise in this call).
+
+behavioral_flags:
+  escalation:
+    present: true | false | "not_relevant"
+    evidence: "<quote or brief explanation>"
+  disagreement:
+    present: true | false | "not_relevant"
+    evidence: "<quote or brief explanation>"
+  tension_moments:
+    moments: [{"quote": "<exact quote>", "severity": "low|medium|high"}] OR "not_relevant"
+
+## OUTCOME FLAGS
+
+Extract call outcomes. Use "not_relevant" if the outcome category was not applicable to this call (e.g., call was too short, wrong call type, no opportunity arose).
+
+outcome_flags:
+  meeting_setup:
+    occurred: true | false | "not_relevant"
+    evidence: "<quote or brief explanation>"
+  purchase_made:
+    occurred: true | false | "not_relevant"
+    evidence: "<quote or brief explanation>"
+  callback_scheduled:
+    occurred: true | false | "not_relevant"
+    evidence: "<quote or brief explanation>"
+  cross_sell:
+    attempted: true | false | "not_relevant"
+    accepted: true | false | null
+    products_mentioned: ["<product names>"]
+    evidence: "<quote or brief explanation>"
+""",
         "output_schema": GOODFLIP_QA_SCHEMA,
     },
 ]
