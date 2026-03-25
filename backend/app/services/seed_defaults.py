@@ -544,7 +544,23 @@ GOODFLIP_QA_SCHEMA = [
     {"key": "compliance_no_misinformation", "type": "boolean", "description": "No medical misinformation", "displayMode": "card", "isMainMetric": False},
     {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "displayMode": "card", "isMainMetric": False},
     {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "displayMode": "card", "isMainMetric": False},
-    {"key": "reasoning", "type": "text", "description": "Detailed critique per dimension with evidence", "displayMode": "hidden", "isMainMetric": False, "role": "reasoning"},
+    {
+        "key": "reasoning",
+        "type": "array",
+        "description": "Per-dimension critique with scores — one entry per scored dimension",
+        "displayMode": "hidden",
+        "isMainMetric": False,
+        "role": "reasoning",
+        "arrayItemSchema": {
+            "itemType": "object",
+            "properties": [
+                {"key": "dimension", "type": "string", "description": "Exact dimension name as listed in the rubric (e.g. 'Call Opening & Permission')"},
+                {"key": "score", "type": "number", "description": "Score awarded for this dimension"},
+                {"key": "max", "type": "number", "description": "Maximum possible score for this dimension"},
+                {"key": "explanation", "type": "string", "description": "Specific evidence from the transcript supporting the score awarded"},
+            ],
+        },
+    },
     # ── Behavioral flags (flat for schema enforcement) ──
     {"key": "escalation_present", "type": "enum", "description": "Was there an escalation?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
     {"key": "escalation_evidence", "type": "text", "description": "Quote or explanation for escalation flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},

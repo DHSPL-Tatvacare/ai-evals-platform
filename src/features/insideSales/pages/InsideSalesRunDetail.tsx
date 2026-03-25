@@ -1,19 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
   Loader2,
   AlertTriangle,
-  FileText,
-  Trash2,
-  XCircle,
   Phone,
   Search,
 } from 'lucide-react';
-import { Button, Tabs, EmptyState } from '@/components/ui';
-import { PermissionGate } from '@/components/auth/PermissionGate';
+import { useMemo } from 'react';
+import { Tabs, EmptyState } from '@/components/ui';
 import VerdictBadge from '@/features/evalRuns/components/VerdictBadge';
 import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
+import { RunHeaderActions } from '@/features/evalRuns/components/RunHeaderActions';
+import { useElapsedTime } from '@/features/evalRuns/hooks';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import ReportTab from '@/features/evalRuns/components/report/ReportTab';
 import { InsideSalesReportView } from '../components/report/InsideSalesReportView';
@@ -104,11 +103,7 @@ export function InsideSalesRunDetail() {
   const isActive = run ? isActiveStatus(run.status) : false;
   usePoll({ fn: async () => { await fetchData(); return true; }, enabled: isActive, intervalMs: 3000 });
 
-  const elapsed = useMemo(() => {
-    if (!run?.startedAt) return '';
-    const ms = Date.now() - new Date(run.startedAt).getTime();
-    return formatDuration(Math.floor(ms / 1000));
-  }, [run?.startedAt]);
+  const elapsed = useElapsedTime(activeJob?.startedAt ?? run?.startedAt ?? null, isActive);
 
   const handleDelete = useCallback(async () => {
     if (!run) return;
@@ -314,29 +309,14 @@ export function InsideSalesRunDetail() {
         <div className="flex items-center gap-2">
           <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">{getRunName(run)}</h1>
           <VerdictBadge verdict={run.status} category="status" />
-          <div className="ml-auto flex items-center gap-2">
-            <Link
-              to={`${routes.insideSales.logs}?run_id=${run.id}`}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded transition-colors"
-            >
-              <FileText className="h-3 w-3" />
-              Logs
-            </Link>
-            {isActive && (
-              <PermissionGate action="eval:delete">
-                <Button variant="ghost" size="sm" onClick={handleCancel} disabled={cancelling}>
-                  <XCircle className="h-3.5 w-3.5" />
-                  {cancelling ? 'Cancelling...' : 'Cancel'}
-                </Button>
-              </PermissionGate>
-            )}
-            <PermissionGate action="eval:delete">
-              <Button variant="danger" size="sm" onClick={handleDelete} disabled={isDeleting}>
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </Button>
-            </PermissionGate>
-          </div>
+          <RunHeaderActions
+            logsHref={`${routes.insideSales.logs}?run_id=${run.id}`}
+            isActive={isActive}
+            cancelling={cancelling}
+            deleting={isDeleting}
+            onCancel={handleCancel}
+            onDelete={handleDelete}
+          />
         </div>
         <div className="flex items-center gap-3 mt-1 text-[11px] text-[var(--text-muted)]">
           <span className="font-mono">{run.id.slice(0, 8)}</span>

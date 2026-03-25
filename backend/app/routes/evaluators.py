@@ -275,11 +275,14 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
             Evaluator.user_id == auth.user_id,
         )
     )
-    existing_names = {e.name for e in result.scalars().all()}
+    existing_map = {e.name: e for e in result.scalars().all()}
 
     created = []
     for seed in INSIDE_SALES_EVALUATORS:
-        if seed["name"] in existing_names:
+        existing = existing_map.get(seed["name"])
+        if existing:
+            existing.output_schema = seed["output_schema"]
+            existing.prompt = seed["prompt"]
             continue
         evaluator = Evaluator(
             app_id=seed["app_id"],
@@ -296,10 +299,9 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
         db.add(evaluator)
         created.append(evaluator)
 
-    if created:
-        await db.commit()
-        for e in created:
-            await db.refresh(e)
+    await db.commit()
+    for e in created:
+        await db.refresh(e)
 
     return created
 

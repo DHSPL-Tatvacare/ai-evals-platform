@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { cn } from '@/utils';
 import { scoreColor } from '@/utils/scoreUtils';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
@@ -17,7 +16,13 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
   const result = thread.result as unknown as Record<string, unknown> | undefined;
   const evals = result?.evaluations as Array<Record<string, unknown>> | undefined;
   const evalOutput = evals?.[0]?.output as Record<string, unknown> | undefined;
-  const reasoning = evalOutput?.reasoning as string | undefined;
+  const reasoningRaw = evalOutput?.reasoning;
+  // reasoning is now a structured array from the output schema; fall back to string parsing for old data
+  const reasoningItems: ReasoningItem[] = Array.isArray(reasoningRaw)
+    ? (reasoningRaw as ReasoningItem[])
+    : typeof reasoningRaw === 'string'
+    ? parseReasoningString(reasoningRaw)
+    : [];
   const transcript = result?.transcript as string | undefined;
 
   // Overall score
@@ -91,50 +96,57 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
 
           {/* Tab content */}
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
-            {activeTab === 'scorecard' && (
-              <div className="space-y-0">
-                {dimensions.map(([key, val]) => {
-                  const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-                  const score = val as number;
-                  const pctVal = Math.min(100, Math.max(0, score * 100 / (score <= 15 ? 15 : 100)));
-                  return (
-                    <div key={key} className="flex items-center gap-2 py-2 border-b border-[var(--border-subtle)] last:border-b-0">
-                      <span className="text-xs text-[var(--text-primary)] w-[45%] shrink-0">{label}</span>
-                      <div className="flex-1 h-2 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${pctVal}%`,
-                            background: score >= 8 ? 'var(--color-success)' : score >= 5 ? 'var(--color-warning)' : 'var(--color-error)',
-                          }}
-                        />
+            {activeTab === 'scorecard' && (() => {
+              // Build dimension → max map from structured reasoning items
+              const maxMap = new Map(reasoningItems.map((r) => [normalizeLabel(r.dimension), r.max]));
+              return (
+                <div className="space-y-0">
+                  {dimensions.map(([key, val]) => {
+                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                    const score = val as number;
+                    const dimMax = maxMap.get(normalizeLabel(label)) ?? (score <= 15 ? 15 : 100);
+                    const ratio = dimMax > 0 ? score / dimMax : 0;
+                    const pctVal = Math.min(100, Math.max(0, ratio * 100));
+                    const bandColor = dimensionBandColor(ratio);
+                    const band = dimensionBand(ratio);
+                    return (
+                      <div key={key} className="py-2 border-b border-[var(--border-subtle)] last:border-b-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs text-[var(--text-primary)] flex-1 min-w-0">{label}</span>
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-default"
+                            title={`${band}: ${score}/${dimMax} (${Math.round(ratio * 100)}%)\nStrong ≥80% · Good ≥65% · Needs Work ≥50% · Poor <50%`}
+                            style={{ color: bandColor, background: `color-mix(in srgb, ${bandColor} 12%, transparent)` }}
+                          >
+                            {band}
+                          </span>
+                          <span className="text-xs font-bold tabular-nums w-12 text-right" style={{ color: bandColor }}>
+                            {score}/{dimMax}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${pctVal}%`, background: bandColor }}
+                          />
+                        </div>
                       </div>
-                      <span className="text-xs font-bold w-12 text-right" style={{ color: scoreColor(score) }}>
-                        {score}
+                    );
+                  })}
+                  {/* Total row */}
+                  {overallScore !== null && (
+                    <div className="flex items-center justify-between mt-3 px-3 py-2.5 bg-[var(--bg-secondary)] rounded-md border border-[var(--border-subtle)]">
+                      <span className="text-[13px] font-semibold text-[var(--text-primary)]">Total</span>
+                      <span className="text-lg font-bold" style={{ color: scoreColor(overallScore) }}>
+                        {overallScore}/100
                       </span>
                     </div>
-                  );
-                })}
-                {/* Total row */}
-                {overallScore !== null && (
-                  <div className="flex items-center justify-between mt-3 px-3 py-2.5 bg-[var(--bg-secondary)] rounded-md border border-[var(--border-subtle)]">
-                    <span className="text-[13px] font-semibold text-[var(--text-primary)]">Total</span>
-                    <span className="text-lg font-bold" style={{ color: scoreColor(overallScore) }}>
-                      {overallScore}/100
-                    </span>
-                  </div>
-                )}
-                {/* Reasoning */}
-                {reasoning && (
-                  <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]">
-                    <h4 className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">Reasoning</h4>
-                    <div className="text-xs text-[var(--text-secondary)] leading-relaxed prose prose-sm prose-invert max-w-none [&_strong]:text-[var(--text-primary)] [&_p]:mb-2 [&_ol]:pl-4 [&_li]:mb-1">
-                      <ReactMarkdown>{reasoning}</ReactMarkdown>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                  {/* Reasoning */}
+                  {reasoningItems.length > 0 && <ReasoningBreakdown items={reasoningItems} />}
+                </div>
+              );
+            })()}
 
             {activeTab === 'compliance' && (
               <div>
@@ -226,5 +238,87 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
         )}
       </div>
     </>
+  );
+}
+
+// ── Reasoning breakdown ────────────────────────────────────────────────────
+
+/** Structured reasoning item — enforced by output schema array type */
+interface ReasoningItem {
+  dimension: string;
+  score: number;
+  max: number;
+  explanation: string;
+}
+
+function normalizeLabel(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Legacy fallback: parse old free-text reasoning strings into ReasoningItem[] */
+function parseReasoningString(text: string): ReasoningItem[] {
+  return text
+    .split(/\n\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const match = block.match(/^(.+?)\s*\((\d+)\/(\d+)\)\s*:\s*([\s\S]+)/);
+      if (match) {
+        return {
+          dimension: match[1].trim(),
+          score: Number(match[2]),
+          max: Number(match[3]),
+          explanation: match[4].trim(),
+        };
+      }
+      return { dimension: '', score: 0, max: 0, explanation: block };
+    })
+    .filter((b) => b.dimension);
+}
+
+function dimensionBand(ratio: number): string {
+  if (ratio >= 0.8) return 'Strong';
+  if (ratio >= 0.65) return 'Good';
+  if (ratio >= 0.5) return 'Needs Work';
+  return 'Poor';
+}
+
+function dimensionBandColor(ratio: number): string {
+  if (ratio >= 0.8) return 'var(--color-success)';
+  if (ratio >= 0.65) return 'var(--color-warning)';
+  return 'var(--color-error)';
+}
+
+function ReasoningBreakdown({ items }: { items: ReasoningItem[] }) {
+  if (!items.length) return null;
+
+  return (
+    <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]">
+      <h4 className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">Reasoning</h4>
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="border-b border-[var(--border-subtle)]">
+            <th className="text-left py-1.5 px-2 font-semibold text-[var(--text-muted)] w-[36%]">Dimension</th>
+            <th className="text-center py-1.5 px-2 font-semibold text-[var(--text-muted)] w-[10%]">Score</th>
+            <th className="text-left py-1.5 px-2 font-semibold text-[var(--text-muted)]">Feedback</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => {
+            const ratio = item.max > 0 ? item.score / item.max : 0;
+            const color = dimensionBandColor(ratio);
+            return (
+              <tr key={i} className="border-b border-[var(--border-subtle)] last:border-b-0 align-top">
+                <td className="py-2 px-2 font-medium text-[var(--text-primary)]">{item.dimension}</td>
+                <td className="py-2 px-2 text-center font-bold tabular-nums" style={{ color }}>
+                  {item.score}/{item.max}
+                </td>
+                <td className="py-2 px-2 text-[var(--text-secondary)] leading-relaxed">{item.explanation}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

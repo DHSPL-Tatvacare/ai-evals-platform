@@ -42,7 +42,11 @@ interface ThreadGroup {
 
 export default function Logs() {
   const location = useLocation();
-  const appId = location.pathname.startsWith("/kaira") ? "kaira-bot" : "voice-rx";
+  const appId = location.pathname.startsWith("/kaira")
+    ? "kaira-bot"
+    : location.pathname.startsWith("/inside-sales")
+    ? "inside-sales"
+    : "voice-rx";
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdFilter = searchParams.get("run_id") || "";
   const [logs, setLogs] = useState<ApiLogEntry[]>([]);

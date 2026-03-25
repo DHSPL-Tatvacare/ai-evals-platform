@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { usePoll } from "@/hooks";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText, Trash2 } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText } from "lucide-react";
 import { EmptyState, ConfirmDialog } from "@/components/ui";
-import { PermissionGate } from "@/components/auth/PermissionGate";
+import { RunHeaderActions } from "../components/RunHeaderActions";
 import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
 import {
   fetchRun,
@@ -400,38 +400,14 @@ export default function RunDetail() {
             {run.description && (
               <span className="text-xs text-[var(--text-secondary)] truncate hidden sm:inline">{run.description}</span>
             )}
-            <div className="ml-auto flex items-center gap-1.5 shrink-0">
-              <Link
-                to={`${routes.kaira.logs}?run_id=${run.run_id}`}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-              >
-                <FileText className="h-3 w-3" />
-                Logs
-              </Link>
-              {isRunActive && activeJob && (
-                <PermissionGate action="eval:delete">
-                  <button
-                    onClick={handleCancel}
-                    disabled={cancelling}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--color-warning)] bg-[var(--surface-warning)] border border-[var(--border-warning)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                  >
-                    <Ban className="h-3 w-3" />
-                    {cancelling ? "Cancelling\u2026" : "Cancel"}
-                  </button>
-                </PermissionGate>
-              )}
-              <PermissionGate action="eval:delete">
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={deleting || isRunActive}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[var(--color-error)] bg-[var(--surface-error)] border border-[var(--border-error)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                  title={isRunActive ? "Cannot delete a running evaluation. Cancel it first." : undefined}
-                >
-                  <Trash2 className="h-3 w-3" />
-                  {deleting ? "Deleting\u2026" : "Delete"}
-                </button>
-              </PermissionGate>
-            </div>
+            <RunHeaderActions
+              logsHref={`${routes.kaira.logs}?run_id=${run.run_id}`}
+              isActive={isRunActive}
+              cancelling={cancelling}
+              deleting={deleting}
+              onCancel={handleCancel}
+              onDelete={() => setConfirmDelete(true)}
+            />
           </div>
           <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">
             <span className="font-mono">{run.run_id.slice(0, 12)}</span>

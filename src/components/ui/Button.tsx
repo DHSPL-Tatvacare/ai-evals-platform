@@ -2,7 +2,7 @@ import { type ButtonHTMLAttributes, forwardRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/utils';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-outline' | 'warning';
 export type { ButtonVariant };
 type ButtonSize = 'sm' | 'md' | 'lg';
 
@@ -19,6 +19,8 @@ const variantStyles: Record<ButtonVariant, string> = {
   secondary: 'bg-[var(--interactive-secondary)] text-[var(--text-primary)] hover:bg-[var(--interactive-secondary-hover)] border border-[var(--border-default)]',
   ghost: 'bg-transparent text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]',
   danger: 'bg-[var(--interactive-danger)] text-[var(--text-on-color)] hover:bg-[var(--interactive-danger-hover)]',
+  'danger-outline': 'bg-[var(--surface-error)] text-[var(--color-error)] border border-[var(--border-error)] hover:opacity-80',
+  warning: 'bg-[var(--surface-warning)] text-[var(--color-warning)] border border-[var(--border-warning)] hover:opacity-80',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
