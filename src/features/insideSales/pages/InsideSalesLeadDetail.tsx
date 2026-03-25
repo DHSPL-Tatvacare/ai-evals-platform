@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, FileText } from 'lucide-react';
 import { Button, Tabs, EmptyState } from '@/components/ui';
 import { CallResultPanel } from '../components/CallResultPanel';
+import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { LeadCallTimeline } from '../components/LeadCallTimeline';
 import { fetchLeadDetail } from '@/services/api/insideSales';
@@ -101,6 +102,7 @@ export function InsideSalesLeadDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [evalIdx, setEvalIdx] = useState(0);
+  const [evalOpen, setEvalOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!prospectId) return;
@@ -204,7 +206,7 @@ export function InsideSalesLeadDetail() {
           <p className="text-xs text-[var(--text-muted)]">{subtitle}</p>
         </div>
         <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
-          <Button size="sm" disabled={!canEvaluate}>Evaluate</Button>
+          <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>Evaluate</Button>
         </span>
       </div>
 
@@ -255,6 +257,13 @@ export function InsideSalesLeadDetail() {
         defaultTab="timeline"
         fillHeight
       />
+
+      {evalOpen && evaluatableCall && (
+        <NewInsideSalesEvalOverlay
+          onClose={() => { setEvalOpen(false); load(); }}
+          preSelectedCallIds={[evaluatableCall.activityId]}
+        />
+      )}
     </div>
   );
 }

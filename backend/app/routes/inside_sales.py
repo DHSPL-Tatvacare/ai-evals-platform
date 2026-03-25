@@ -231,7 +231,13 @@ async def list_leads(
     auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch leads from LSQ by CreatedOn range with MQL scoring."""
+    """Fetch leads from LSQ by CreatedOn range with MQL scoring.
+
+    Note: LSQ Leads.Get only supports a >= date filter, so date_to is applied
+    client-side after fetch. This means page_size caps the raw LSQ result before
+    the date_to filter runs; actual returned records may be fewer than page_size
+    when many leads fall outside the date_to bound.
+    """
     result = await fetch_leads(date_from=date_from, date_to=date_to, page=page, page_size=page_size)
     raw_leads = result["leads"]
 

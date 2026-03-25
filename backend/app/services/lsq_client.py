@@ -202,8 +202,9 @@ async def fetch_leads(
         )
         data = resp.json()
         leads: list[dict[str, Any]] = data if isinstance(data, list) else []
-        # Filter to date range (LSQ Leads.Get only supports >= operator)
-        leads = [l for l in leads if (l.get("CreatedOn") or "") <= date_to]
+        # Filter to date range (LSQ Leads.Get only supports >= operator).
+        # Strip milliseconds from CreatedOn before comparing to avoid format mismatch.
+        leads = [l for l in leads if (l.get("CreatedOn") or "").split(".")[0] <= date_to]
         return {"leads": leads, "total": len(leads)}
 
 
