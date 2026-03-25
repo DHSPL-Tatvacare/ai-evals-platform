@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from statistics import mean
 
+import json as _json
+
 from .flag_utils import aggregate_flag, aggregate_outcome_flag
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,15 @@ def _get_eval_output(thread: dict) -> dict | None:
 
 def _get_call_metadata(thread: dict) -> dict:
     return thread.get("result", {}).get("call_metadata", {})
+
+
+def _safe_parse_list(raw: str) -> list:
+    """Parse a JSON array string, returning [] on failure."""
+    try:
+        parsed = _json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except (ValueError, TypeError):
+        return []
 
 
 class InsideSalesAggregator:
@@ -149,47 +160,58 @@ class InsideSalesAggregator:
         return breakdown
 
     def _flag_stats(self, outputs):
-        bf_items = [out.get("behavioral_flags", {}) for _, out in outputs]
-        of_items = [out.get("outcome_flags", {}) for _, out in outputs]
+        # Build dicts from flat enum fields for aggregate_flag / aggregate_outcome_flag.
+        # Enum values are strings ("true"/"false"/"not_relevant") — convert to bool/str.
+        def _parse_flag(val: str | None) -> bool | str:
+            if val == "true":
+                return True
+            if val == "not_relevant":
+                return "not_relevant"
+            return False
 
-        # Tension needs special handling for severity
-        tension_items = [bf.get("tension_moments", {}) for bf in bf_items]
+        escalation = [{"present": _parse_flag(out.get("escalation_present"))} for _, out in outputs]
+        disagreement = [{"present": _parse_flag(out.get("disagreement_present"))} for _, out in outputs]
+
+        # Tension: text field containing JSON array or "not_relevant"
         tension_relevant = 0
         tension_not_relevant = 0
         severity_counts = {"low": 0, "medium": 0, "high": 0}
-        for item in tension_items:
-            moments = item.get("moments", "not_relevant")
-            if moments == "not_relevant":
+        for _, out in outputs:
+            raw = out.get("tension_moments", "not_relevant")
+            if raw == "not_relevant" or not raw:
                 tension_not_relevant += 1
             else:
                 tension_relevant += 1
-                if isinstance(moments, list):
-                    for m in moments:
-                        sev = m.get("severity", "low")
-                        if sev in severity_counts:
-                            severity_counts[sev] += 1
+                moments = raw if isinstance(raw, list) else _safe_parse_list(raw)
+                for m in moments:
+                    sev = m.get("severity", "low") if isinstance(m, dict) else "low"
+                    if sev in severity_counts:
+                        severity_counts[sev] += 1
+
+        # Outcomes: flat enum fields → dicts for aggregate_outcome_flag
+        meeting = [{"occurred": _parse_flag(out.get("meeting_occurred"))} for _, out in outputs]
+        purchase = [{"occurred": _parse_flag(out.get("purchase_occurred"))} for _, out in outputs]
+        callback = [{"occurred": _parse_flag(out.get("callback_occurred"))} for _, out in outputs]
+        crosssell = [
+            {
+                "attempted": _parse_flag(out.get("crosssell_attempted")),
+                "accepted": _parse_flag(out.get("crosssell_accepted")),
+            }
+            for _, out in outputs
+        ]
 
         return {
-            "escalation": aggregate_flag([bf.get("escalation", {}) for bf in bf_items]),
-            "disagreement": aggregate_flag([bf.get("disagreement", {}) for bf in bf_items]),
+            "escalation": aggregate_flag(escalation),
+            "disagreement": aggregate_flag(disagreement),
             "tension": {
                 "relevant": tension_relevant,
                 "notRelevant": tension_not_relevant,
                 "bySeverity": severity_counts,
             },
-            "meetingSetup": aggregate_outcome_flag(
-                [of.get("meeting_setup", {}) for of in of_items], attempted_key="occurred",
-            ),
-            "purchaseMade": aggregate_outcome_flag(
-                [of.get("purchase_made", {}) for of in of_items], attempted_key="occurred",
-            ),
-            "callbackScheduled": aggregate_outcome_flag(
-                [of.get("callback_scheduled", {}) for of in of_items], attempted_key="occurred",
-            ),
-            "crossSell": aggregate_outcome_flag(
-                [of.get("cross_sell", {}) for of in of_items],
-                attempted_key="attempted", accepted_key="accepted",
-            ),
+            "meetingSetup": aggregate_outcome_flag(meeting, attempted_key="occurred"),
+            "purchaseMade": aggregate_outcome_flag(purchase, attempted_key="occurred"),
+            "callbackScheduled": aggregate_outcome_flag(callback, attempted_key="occurred"),
+            "crossSell": aggregate_outcome_flag(crosssell, attempted_key="attempted", accepted_key="accepted"),
         }
 
     def _agent_slices(self, outputs):

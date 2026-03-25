@@ -545,24 +545,23 @@ GOODFLIP_QA_SCHEMA = [
     {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "displayMode": "card", "isMainMetric": False},
     {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "displayMode": "card", "isMainMetric": False},
     {"key": "reasoning", "type": "text", "description": "Detailed critique per dimension with evidence", "displayMode": "hidden", "isMainMetric": False, "role": "reasoning"},
-    # ── Behavioral flags ──
-    {
-        "key": "behavioral_flags",
-        "type": "object",
-        "label": "Behavioral Flags",
-        "role": "flags",
-        "hidden": True,
-        "description": "Escalation, disagreement, and tension detection. Use 'not_relevant' if the signal does not apply to this call.",
-    },
-    # ── Outcome flags ──
-    {
-        "key": "outcome_flags",
-        "type": "object",
-        "label": "Outcome Flags",
-        "role": "flags",
-        "hidden": True,
-        "description": "Meeting setup, purchase, callback, cross-sell outcomes. Use 'not_relevant' if the outcome was not applicable.",
-    },
+    # ── Behavioral flags (flat for schema enforcement) ──
+    {"key": "escalation_present", "type": "enum", "description": "Was there an escalation?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "escalation_evidence", "type": "text", "description": "Quote or explanation for escalation flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "disagreement_present", "type": "enum", "description": "Was there a disagreement?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "disagreement_evidence", "type": "text", "description": "Quote or explanation for disagreement flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "tension_moments", "type": "text", "description": "JSON array of {quote, severity} objects, or 'not_relevant' if no tension", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    # ── Outcome flags (flat for schema enforcement) ──
+    {"key": "meeting_occurred", "type": "enum", "description": "Was a meeting/assessment set up?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "meeting_evidence", "type": "text", "description": "Quote or explanation for meeting flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "purchase_occurred", "type": "enum", "description": "Was a purchase made?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "purchase_evidence", "type": "text", "description": "Quote or explanation for purchase flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "callback_occurred", "type": "enum", "description": "Was a callback scheduled?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "callback_evidence", "type": "text", "description": "Quote or explanation for callback flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "crosssell_attempted", "type": "enum", "description": "Was cross-sell attempted?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "crosssell_accepted", "type": "enum", "description": "Was cross-sell accepted?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "null", "not_relevant"]},
+    {"key": "crosssell_products", "type": "text", "description": "Comma-separated product names mentioned for cross-sell, or empty", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "crosssell_evidence", "type": "text", "description": "Quote or explanation for cross-sell flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
 ]
 
 INSIDE_SALES_EVALUATORS = [
@@ -665,37 +664,28 @@ Score each dimension. Sum all dimension scores, normalize to 100, and provide as
 
 ## BEHAVIORAL FLAGS
 
-In addition to the scored dimensions above, extract the following behavioral signals from the call. For each flag, output one of: true, false, or "not_relevant" (if the behavior/situation did not arise in this call).
+In addition to the scored dimensions above, extract the following behavioral signals. Use "not_relevant" if the behavior/situation did not arise in this call.
 
-behavioral_flags:
-  escalation:
-    present: true | false | "not_relevant"
-    evidence: "<quote or brief explanation>"
-  disagreement:
-    present: true | false | "not_relevant"
-    evidence: "<quote or brief explanation>"
-  tension_moments:
-    moments: [{"quote": "<exact quote>", "severity": "low|medium|high"}] OR "not_relevant"
+- escalation_present: "true" | "false" | "not_relevant"
+- escalation_evidence: quote or brief explanation (empty string if not_relevant)
+- disagreement_present: "true" | "false" | "not_relevant"
+- disagreement_evidence: quote or brief explanation (empty string if not_relevant)
+- tension_moments: JSON array of objects like [{"quote": "exact quote", "severity": "low|medium|high"}], OR the string "not_relevant" if no tension arose
 
 ## OUTCOME FLAGS
 
-Extract call outcomes. Use "not_relevant" if the outcome category was not applicable to this call (e.g., call was too short, wrong call type, no opportunity arose).
+Extract call outcomes. Use "not_relevant" if the outcome was not applicable to this call (e.g., call too short, wrong call type, no opportunity arose).
 
-outcome_flags:
-  meeting_setup:
-    occurred: true | false | "not_relevant"
-    evidence: "<quote or brief explanation>"
-  purchase_made:
-    occurred: true | false | "not_relevant"
-    evidence: "<quote or brief explanation>"
-  callback_scheduled:
-    occurred: true | false | "not_relevant"
-    evidence: "<quote or brief explanation>"
-  cross_sell:
-    attempted: true | false | "not_relevant"
-    accepted: true | false | null
-    products_mentioned: ["<product names>"]
-    evidence: "<quote or brief explanation>"
+- meeting_occurred: "true" | "false" | "not_relevant"
+- meeting_evidence: quote or brief explanation (empty string if not_relevant)
+- purchase_occurred: "true" | "false" | "not_relevant"
+- purchase_evidence: quote or brief explanation (empty string if not_relevant)
+- callback_occurred: "true" | "false" | "not_relevant"
+- callback_evidence: quote or brief explanation (empty string if not_relevant)
+- crosssell_attempted: "true" | "false" | "not_relevant"
+- crosssell_accepted: "true" | "false" | "null" | "not_relevant" (null if not attempted)
+- crosssell_products: comma-separated product names, or empty string
+- crosssell_evidence: quote or brief explanation (empty string if not_relevant)
 """,
         "output_schema": GOODFLIP_QA_SCHEMA,
     },
