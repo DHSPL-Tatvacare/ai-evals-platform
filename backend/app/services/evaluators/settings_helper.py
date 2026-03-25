@@ -77,6 +77,17 @@ async def get_llm_settings_from_db(
             setting = result_null.scalar_one_or_none()
 
     if not setting or not setting.value:
+        # No DB row — SA is the credential of last resort for Gemini.
+        if provider_override in (None, "gemini"):
+            sa_path = _detect_service_account_path()
+            if sa_path:
+                return {
+                    "api_key": "",
+                    "provider": "gemini",
+                    "selected_model": "",
+                    "auth_method": "service_account",
+                    "service_account_path": sa_path,
+                }
         raise RuntimeError(
             "No LLM settings found in database. "
             "Go to Settings to configure your API key."

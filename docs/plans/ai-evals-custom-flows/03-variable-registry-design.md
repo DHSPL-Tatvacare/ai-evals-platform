@@ -1,0 +1,535 @@
+# Variable Registry, Schema Builder & Score Engine
+
+## Design Principle: Single Source of Truth
+
+The backend owns the variable registry. The frontend fetches from the API. No hardcoded duplicates.
+
+After implementation:
+- **DELETE** `src/services/templates/variableRegistry.ts` entirely
+- **DELETE** `src/services/templates/apiVariableExtractor.ts` (move logic to backend)
+- `VariablePickerPopover.tsx` fetches from `GET /api/evaluators/variables` instead
+- `prompt_resolver.py` remains the runtime resolver — the registry is metadata + validation only
+
+---
+
+## Variable Registry
+
+### Backend Module
+
+**New file**: `backend/app/services/evaluators/variable_registry.py`
+
+```python
+@dataclass(frozen=True)
+class VariableDefinition:
+    """Metadata for a single template variable."""
+    key: str                           # "transcript", "chat_transcript", etc. (no braces)
+    display_name: str                  # "Transcript Text"
+    description: str                   # "Full transcript formatted as [Speaker]: text"
+    category: str                      # "transcript", "audio", "structured_data", "context"
+    value_type: str                    # "text", "json", "file", "number"
+    app_ids: list[str]                 # ["voice-rx"] or ["kaira-bot"] or both
+    requires_audio: bool = False       # True for {{audio}} — triggers generate_with_audio
+    requires_eval_output: bool = False # True for {{llm_transcript}}, {{llm_structured}}
+    source_types: list[str] | None = None  # ["upload"], ["api"], or None for all
+    example: str = ""                  # "User: Hi\nBot: Hello, how can I help?"
+
+
+class VariableRegistry:
+    """Authoritative registry of all template variables."""
+
+    _variables: dict[str, VariableDefinition]
+
+    def __init__(self):
+        self._variables = {}
+        self._register_voice_rx_variables()
+        self._register_kaira_variables()
+
+    def _register(self, v: VariableDefinition):
+        self._variables[v.key] = v
+
+    def get_for_app(self, app_id: str, source_type: str | None = None) -> list[VariableDefinition]:
+        """Get variables available for an app, optionally filtered by source_type."""
+        results = []
+        for v in self._variables.values():
+            if app_id not in v.app_ids:
+                continue
+            if source_type and v.source_types and source_type not in v.source_types:
+                continue
+            results.append(v)
+        return sorted(results, key=lambda v: (v.category, v.key))
+
+    def validate_prompt(self, prompt: str, app_id: str, source_type: str | None = None) -> dict:
+        """Validate template variables in a prompt against the registry."""
+        import re
+        used = set(re.findall(r"\{\{([a-zA-Z0-9_.]+)\}\}", prompt))
+        available = {v.key for v in self.get_for_app(app_id, source_type)}
+        # rx.* dynamic paths are always valid for voice-rx api flow
+        known = set()
+        unknown = set()
+        for k in used:
+            if k in available:
+                known.add(k)
+            elif k.startswith("rx.") and app_id == "voice-rx":
+                known.add(k)  # Dynamic API path — always valid
+            else:
+                unknown.add(k)
+
+        requires_audio = any(
+            self._variables.get(k) and self._variables[k].requires_audio
+            for k in known
+        )
+        requires_eval_output = any(
+            self._variables.get(k) and self._variables[k].requires_eval_output
+            for k in known
+        )
+        return {
+            "valid": len(unknown) == 0,
+            "used_variables": sorted(known),
+            "unknown_variables": sorted(unknown),
+            "requires_audio": requires_audio,
+            "requires_eval_output": requires_eval_output,
+        }
+
+
+# Singleton
+_registry: VariableRegistry | None = None
+
+def get_registry() -> VariableRegistry:
+    global _registry
+    if _registry is None:
+        _registry = VariableRegistry()
+    return _registry
+```
+
+### Variable Registration (all variables from `prompt_resolver.py`)
+
+```python
+def _register_voice_rx_variables(self):
+    self._register(VariableDefinition(
+        key="audio", display_name="Audio File",
+        description="The audio recording. Triggers audio-capable LLM call.",
+        category="audio", value_type="file", app_ids=["voice-rx"],
+        requires_audio=True, example="[Audio file attached]",
+    ))
+    self._register(VariableDefinition(
+        key="transcript", display_name="Original Transcript",
+        description="Full transcript as [Speaker]: text lines from the listing.",
+        category="transcript", value_type="text", app_ids=["voice-rx"],
+        example="[Doctor]: How are you feeling?\n[Patient]: I've been having headaches.",
+    ))
+    self._register(VariableDefinition(
+        key="llm_transcript", display_name="Judge Transcript",
+        description="Transcript generated by judge AI in Step 1. Requires a prior evaluation.",
+        category="transcript", value_type="text", app_ids=["voice-rx"],
+        requires_eval_output=True,
+    ))
+    self._register(VariableDefinition(
+        key="script_preference", display_name="Script Preference",
+        description="User preference for output script (devanagari, romanized, auto).",
+        category="context", value_type="text", app_ids=["voice-rx"],
+    ))
+    self._register(VariableDefinition(
+        key="language_hint", display_name="Language Hint",
+        description="Language hint for the audio (e.g., Hindi, Hinglish).",
+        category="context", value_type="text", app_ids=["voice-rx"],
+    ))
+    self._register(VariableDefinition(
+        key="preserve_code_switching", display_name="Code Switching",
+        description="Whether to preserve code-switching (yes/no).",
+        category="context", value_type="text", app_ids=["voice-rx"],
+    ))
+    self._register(VariableDefinition(
+        key="original_script", display_name="Detected Script",
+        description="Detected script of the original transcript.",
+        category="context", value_type="text", app_ids=["voice-rx"],
+        source_types=["upload"],
+    ))
+    self._register(VariableDefinition(
+        key="segment_count", display_name="Segment Count",
+        description="Number of time-aligned segments in the transcript.",
+        category="transcript", value_type="number", app_ids=["voice-rx"],
+        source_types=["upload"],
+    ))
+    self._register(VariableDefinition(
+        key="speaker_list", display_name="Speakers",
+        description="Comma-separated list of speakers in the transcript.",
+        category="transcript", value_type="text", app_ids=["voice-rx"],
+        source_types=["upload"],
+    ))
+    self._register(VariableDefinition(
+        key="time_windows", display_name="Time Windows",
+        description="Time windows from original transcript for segment-aligned transcription.",
+        category="transcript", value_type="text", app_ids=["voice-rx"],
+        source_types=["upload"],
+    ))
+    self._register(VariableDefinition(
+        key="structured_output", display_name="Structured Output (rx)",
+        description="AI-generated structured data (rx object) from API response.",
+        category="structured_data", value_type="json", app_ids=["voice-rx"],
+        source_types=["api"],
+    ))
+    self._register(VariableDefinition(
+        key="api_input", display_name="API Input",
+        description="Input payload sent to the API.",
+        category="structured_data", value_type="text", app_ids=["voice-rx"],
+        source_types=["api"],
+    ))
+    self._register(VariableDefinition(
+        key="api_rx", display_name="API Response (Full)",
+        description="Complete API response including metadata.",
+        category="structured_data", value_type="json", app_ids=["voice-rx"],
+        source_types=["api"],
+    ))
+    self._register(VariableDefinition(
+        key="llm_structured", display_name="LLM Structured Output",
+        description="Structured data extracted by Judge AI in Step 1. Requires a prior evaluation.",
+        category="structured_data", value_type="json", app_ids=["voice-rx"],
+        requires_eval_output=True,
+    ))
+    # Dynamic API paths documented as a pattern entry
+    self._register(VariableDefinition(
+        key="rx.*", display_name="API Response Fields (dynamic)",
+        description="Access any nested field in the API response via dot notation: {{rx.vitals.temperature}}.",
+        category="structured_data", value_type="dynamic", app_ids=["voice-rx"],
+        source_types=["api"],
+        example="{{rx.vitals.bloodPressure}} → '120/80'",
+    ))
+
+def _register_kaira_variables(self):
+    self._register(VariableDefinition(
+        key="chat_transcript", display_name="Chat Transcript",
+        description="Full conversation formatted as User: / Bot: lines.",
+        category="transcript", value_type="text", app_ids=["kaira-bot"],
+        example="User: I had rice and dal for lunch\nBot: Sure! Let me log that meal for you.",
+    ))
+```
+
+### API Endpoints
+
+```python
+# backend/app/routes/evaluators.py — two new endpoints
+
+@router.get("/variables")
+async def list_variables(
+    app_id: str = Query(...),
+    source_type: str = Query(None),
+):
+    """List available template variables for custom evaluator prompts."""
+    from app.services.evaluators.variable_registry import get_registry
+    registry = get_registry()
+    variables = registry.get_for_app(app_id, source_type)
+    return [
+        {
+            "key": v.key,
+            "displayName": v.display_name,
+            "description": v.description,
+            "category": v.category,
+            "valueType": v.value_type,
+            "requiresAudio": v.requires_audio,
+            "requiresEvalOutput": v.requires_eval_output,
+            "sourceTypes": v.source_types,
+            "example": v.example,
+        }
+        for v in variables
+    ]
+
+
+@router.post("/validate-prompt")
+async def validate_prompt(
+    app_id: str = Query(...),
+    source_type: str = Query(None),
+    body: dict = ...,  # { "prompt": "..." }
+):
+    """Validate template variables in a prompt."""
+    from app.services.evaluators.variable_registry import get_registry
+    return get_registry().validate_prompt(body["prompt"], app_id, source_type)
+```
+
+### Frontend: Replace Hardcoded Registry with API
+
+**Delete**: `src/services/templates/variableRegistry.ts`
+**Delete**: `src/services/templates/apiVariableExtractor.ts`
+
+**Rewrite `VariablePickerPopover.tsx`** to:
+1. Fetch `GET /api/evaluators/variables?appId=...&sourceType=...` on open
+2. Cache in component state (variables don't change per session)
+3. Group by `category` for display
+4. Show `description` and `example` on hover
+5. Disable variables based on entity data availability (same logic, but metadata comes from API)
+
+**Rewrite `CreateEvaluatorOverlay.tsx`** to:
+1. Call `POST /api/evaluators/validate-prompt` on save
+2. Show warnings for unknown variables (non-blocking — still allows save)
+3. Show info badges for `requiresAudio` and `requiresEvalOutput`
+
+### API Variable Paths
+
+The current `apiVariableExtractor.ts` extracts `rx.*` paths from a listing's API response client-side. Move this to the backend:
+
+```python
+# backend/app/routes/evaluators.py
+
+@router.get("/variables/api-paths")
+async def list_api_paths(
+    listing_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract available {{rx.*}} variable paths from a listing's API response."""
+    listing = await db.get(Listing, listing_id)
+    if not listing or not listing.api_response:
+        return []
+    return _extract_paths(listing.api_response, prefix="rx")
+
+def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
+    """Recursively extract dot-notation paths from a dict."""
+    paths = []
+    def _walk(obj, path, depth):
+        if depth > max_depth:
+            return
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                full = f"{path}.{k}" if path else k
+                paths.append(full)
+                _walk(v, full, depth + 1)
+    _walk(data, prefix, 0)
+    return paths
+```
+
+---
+
+## Schema Builder Enhancements
+
+### Add `enum` Field Type
+
+The schema builder currently supports `number | text | boolean | array`. Add `enum` for constrained values (verdicts, categories):
+
+**Backend — `schema_generator.py`:**
+
+```python
+# Add to _generate_field_schema():
+elif field_type == "enum":
+    allowed = field.get("enumValues", [])
+    return {**base, "type": "string", "enum": allowed}
+```
+
+**Frontend — `evaluator.types.ts`:**
+
+```typescript
+export type EvaluatorFieldType = 'number' | 'text' | 'boolean' | 'array' | 'enum';
+
+export interface EvaluatorOutputField {
+  // ... existing fields ...
+  enumValues?: string[];   // Only for type === 'enum', e.g. ["PASS", "FAIL", "PARTIAL"]
+}
+```
+
+**Frontend — `CreateEvaluatorOverlay.tsx`:**
+
+Add `<option value="enum">Enum</option>` to type selector. When `enum` is selected, show a tag-input for allowed values.
+
+**Frontend — `OutputFieldRenderer.tsx`:**
+
+```typescript
+case 'enum':
+  return <VerdictBadge verdict={String(value)} />;
+```
+
+No more heuristic-based `str === str.toUpperCase()` guessing. The `enum` type tells the renderer this is a verdict.
+
+### Add Field `role` for Score Extraction
+
+The current `_extract_scores()` uses substring matching (`"reason" in key_lower`) to find reasoning fields. Replace with explicit roles:
+
+**Frontend — `evaluator.types.ts`:**
+
+```typescript
+export interface EvaluatorOutputField {
+  // ... existing fields ...
+  role?: 'metric' | 'reasoning' | 'detail';  // Optional explicit role
+}
+```
+
+- `metric` — This field is a score/verdict to aggregate (can have multiple)
+- `reasoning` — This field contains LLM reasoning/explanation
+- `detail` — Default; informational field
+
+**Backend — `_extract_scores()` updated logic:**
+
+```python
+def _extract_scores(output: dict, output_schema: list[dict]) -> dict | None:
+    if not output:
+        return None
+
+    main_field = next((f for f in output_schema if f.get("isMainMetric")), None)
+
+    # Find reasoning field by explicit role, fallback to heuristic
+    reasoning_field = next(
+        (f for f in output_schema if f.get("role") == "reasoning"),
+        None
+    )
+    if not reasoning_field:
+        for f in output_schema:
+            key_lower = f["key"].lower()
+            if any(kw in key_lower for kw in ("reason", "explanation", "comment", "justification", "notes")):
+                reasoning_field = f
+                break
+
+    reasoning = str(output.get(reasoning_field["key"], "")) if reasoning_field else None
+
+    if not main_field:
+        return {
+            "overall_score": None,
+            "max_score": None,
+            "breakdown": output,
+            "reasoning": reasoning,
+            "metadata": None,
+        }
+
+    overall_score = output.get(main_field["key"])
+
+    # Breakdown: all visible fields
+    breakdown = {}
+    for field in output_schema:
+        if field.get("displayMode") != "hidden" and field["key"] in output:
+            breakdown[field["key"]] = output[field["key"]]
+
+    max_score = None
+    if main_field.get("type") == "number":
+        thresholds = main_field.get("thresholds")
+        if thresholds:
+            max_score = thresholds.get("green")
+
+    return {
+        "overall_score": overall_score,
+        "max_score": max_score,
+        "breakdown": breakdown if breakdown else None,
+        "reasoning": reasoning,
+        "metadata": {
+            "main_metric_key": main_field["key"],
+            "main_metric_type": main_field.get("type"),
+            "thresholds": main_field.get("thresholds"),
+        },
+    }
+```
+
+**Key changes from current:**
+- Explicit `role` field checked first, heuristic as fallback
+- Added "justification" and "notes" to the heuristic list
+- Removed the arbitrary `max_score = 100` default — if no thresholds, `max_score` is `None`
+
+---
+
+## Schema System: Current Dual Approach (No Changes)
+
+The platform has two schema systems that should remain separate:
+
+### 1. JSON Schema (Standard Pipelines)
+
+Hardcoded in `evaluation_constants.py` and evaluator classes. Passed directly to `llm.generate_json()`. Part of the standard contract. Never user-editable.
+
+### 2. Field-Based Schema (Custom Evaluators)
+
+`EvaluatorOutputField[]` stored in `Evaluator.output_schema`. Converted to JSON Schema at runtime by `schema_generator.py`. This is the user-facing format — simpler than raw JSON Schema and carries UI metadata (displayMode, thresholds, role).
+
+---
+
+## End-to-End Custom Eval Contract
+
+This is the complete flow from evaluator config through execution to display:
+
+```
+┌─ Evaluator Config ──────────────────────────────────────────────────────┐
+│ User creates evaluator via CreateEvaluatorOverlay:                       │
+│   name, prompt (with {{variables}}), model, output_schema (fields)      │
+│   POST /api/evaluators → Evaluator row in DB                            │
+│   Variables come from GET /api/evaluators/variables?appId=...            │
+│   Prompt validated via POST /api/evaluators/validate-prompt              │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ Job Submission ────────────────────────────────────────────────────────┐
+│ Single: EvaluationOverlay → evaluatorExecutor.execute()                  │
+│   → submitAndPollJob('evaluate-custom', params)                         │
+│   → JobCompletionWatcher tracks completion                              │
+│                                                                         │
+│ Batch: RunAllOverlay → useSubmitAndRedirect                             │
+│   → jobsApi.submit('evaluate-custom-batch', params)                     │
+│   → JobCompletionWatcher tracks + polls for run_id → redirects          │
+│                                                                         │
+│ params: { evaluator_id(s), listing_id|session_id, app_id, timeouts }    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ Job Worker Dispatch ───────────────────────────────────────────────────┐
+│ job_worker.py picks up job → dispatches to handler:                      │
+│   evaluate-custom       → custom_evaluator_runner.run_custom_evaluator  │
+│   evaluate-custom-batch → custom_evaluator_runner.run_custom_eval_batch │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ Runner Execution ──────────────────────────────────────────────────────┐
+│ 1. Create EvalRun (status=running) immediately                          │
+│ 2. Write run_id to job.progress immediately                             │
+│ 3. Load Evaluator + Entity (Listing or ChatSession+Messages)            │
+│ 4. resolve_prompt(evaluator.prompt, context) → resolved prompt          │
+│ 5. generate_json_schema(evaluator.output_schema) → JSON Schema          │
+│ 6. Resolve LLM settings from DB                                        │
+│ 7. Store config snapshot in EvalRun.config                              │
+│ 8. LLM call: generate_json() or generate_with_audio()                  │
+│ 9. _extract_scores(output, output_schema) → summary                    │
+│ 10. Update EvalRun: result={output, rawRequest, rawResponse},           │
+│     summary={overall_score, breakdown, reasoning, metadata}             │
+│ 11. API logs saved via LoggingLLMWrapper → api_logs table               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ Frontend Polling & Redirect ───────────────────────────────────────────┐
+│ Single eval:                                                            │
+│   evaluatorExecutor polls job.progress → gets run_id                    │
+│   → fetches EvalRun → returns to EvaluationOverlay                     │
+│   → Evaluator card shows output via OutputFieldRenderer                 │
+│                                                                         │
+│ Batch eval:                                                             │
+│   useSubmitAndRedirect polls job.progress → gets run_id                 │
+│   → redirects to RunDetail page (VoiceRxRunDetail or RunDetail)         │
+│   → JobCompletionWatcher shows completion toast                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ RunDetail Display ─────────────────────────────────────────────────────┐
+│ VoiceRxRunDetail (eval_type=custom):                                    │
+│   RunHeader: evaluator name from config.evaluator_name                  │
+│   Score card: summary.overall_score with color thresholds               │
+│   Output fields: OutputFieldRenderer(schema=config.output_schema)       │
+│   Breakdown: summary.breakdown                                          │
+│   Reasoning: summary.reasoning                                          │
+│   Raw data: collapsible rawRequest + rawResponse                        │
+│                                                                         │
+│ Kaira RunDetail (batch_thread with custom_evaluations):                 │
+│   CustomEvaluationsBlock: per-evaluator cards with OutputFieldRenderer   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─ RunList Display ───────────────────────────────────────────────────────┐
+│ VoiceRxRunList / RunList:                                               │
+│   getEvalRunName() → summary.evaluator_name or config.evaluator_name   │
+│   Status badge, duration, model, timestamp                              │
+│   Click → navigates to RunDetail                                        │
+│                                                                         │
+│ API Logs:                                                               │
+│   GET /api/eval-runs/{id}/logs → all LLM calls for this run            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## What NOT to Change
+
+1. **Standard pipeline prompts/schemas** — Keep hardcoded in `evaluation_constants.py` and evaluator classes
+2. **FlowConfig** — Keep frozen dataclass; don't generalize
+3. **EvalRun model columns** — No new columns needed
+4. **Evaluator model columns** — No new columns needed (`role` and `enumValues` live in the JSON `output_schema` field)
+5. **Job worker dispatch** — Keep existing handler registry pattern
+6. **AdversarialConfig** — Already well-designed, no changes
+7. **seed_defaults.py** — Keep existing seeded evaluators as-is
+8. **prompt_resolver.py** — Keep existing resolution logic; registry wraps, doesn't replace
