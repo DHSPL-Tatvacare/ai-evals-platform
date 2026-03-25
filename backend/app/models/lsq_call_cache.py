@@ -14,10 +14,10 @@ class LsqLeadCache(Base, TenantUserMixin):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     prospect_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    first_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    last_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    phone: Mapped[str] = mapped_column(String(50), nullable=False, default="")
-    email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    first_name: Mapped[str] = mapped_column(String(255), nullable=True, default="")
+    last_name: Mapped[str] = mapped_column(String(255), nullable=True, default="")
+    phone: Mapped[str] = mapped_column(String(50), nullable=True, default="")
+    email: Mapped[str] = mapped_column(String(255), nullable=True, default="")
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
