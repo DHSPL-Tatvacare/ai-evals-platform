@@ -18,7 +18,7 @@ from app.database import get_db
 from app.models.invite_link import InviteLink
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
-from app.models.user import RefreshToken, User, UserRole
+from app.models.user import RefreshToken, User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, SignupRequest
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -41,15 +41,21 @@ async def _check_allowed_domains(email: str, tenant_id, db: AsyncSession) -> Non
     )
 
 
-def _user_response(user: User, tenant: Tenant) -> dict:
-    """Build a camelCase user profile dict."""
+async def _user_response(user: User, tenant: Tenant, db: AsyncSession) -> dict:
+    """Build user response dict with RBAC fields."""
+    from app.auth.permissions import load_role_permissions
+    role, permissions, app_slugs = await load_role_permissions(db, user.role_id)
     return {
         "id": str(user.id),
         "email": user.email,
         "displayName": user.display_name,
-        "role": user.role.value,
         "tenantId": str(user.tenant_id),
         "tenantName": tenant.name,
+        "roleId": str(user.role_id),
+        "roleName": role.name,
+        "isOwner": role.is_system and role.name == "Owner",
+        "permissions": permissions,
+        "appAccess": app_slugs,
     }
 
 
@@ -90,7 +96,7 @@ async def login(
     await _check_allowed_domains(user.email, tenant.id, db)
 
     # 3. Create access token
-    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role.value)
+    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role_id)
 
     # 4. Create refresh token, store hash in DB
     raw_refresh, refresh_hash = create_refresh_token()
@@ -107,7 +113,7 @@ async def login(
     # 6. Return access token + user profile
     return {
         "accessToken": access_token,
-        "user": _user_response(user, tenant),
+        "user": await _user_response(user, tenant, db),
     }
 
 
@@ -150,7 +156,7 @@ async def refresh(
     await db.commit()
 
     # New access token
-    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role.value)
+    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role_id)
 
     # Set new refresh cookie
     _set_refresh_cookie(response, raw_refresh)
@@ -187,7 +193,7 @@ async def get_me(
     tenant = await db.get(Tenant, auth.tenant_id)
     if not tenant:
         raise HTTPException(404, detail="Tenant not found")
-    return _user_response(user, tenant)
+    return await _user_response(user, tenant, db)
 
 
 def _validate_password_strength(password: str) -> str | None:
@@ -273,10 +279,14 @@ async def validate_invite(
     )
     allowed_domains = config.allowed_domains if config and config.allowed_domains else []
 
+    from app.models.role import Role
+    role = await db.get(Role, invite.role_id)
+
     return {
         "valid": True,
         "tenantName": tenant.name,
-        "defaultRole": invite.default_role.value,
+        "roleId": str(invite.role_id),
+        "roleName": role.name if role else None,
         "expiresAt": invite.expires_at.isoformat(),
         "allowedDomains": allowed_domains,
     }
@@ -331,7 +341,7 @@ async def signup(
         email=body.email.strip().lower(),
         password_hash=hash_password(body.password),
         display_name=body.display_name.strip(),
-        role=invite.default_role,
+        role_id=invite.role_id,
     )
     db.add(user)
 
@@ -341,7 +351,7 @@ async def signup(
     await db.flush()
 
     # 6. Create tokens (same as login)
-    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role.value)
+    access_token = create_access_token(user.id, user.tenant_id, user.email, user.role_id)
     raw_refresh, refresh_hash = create_refresh_token()
     db.add(RefreshToken(
         user_id=user.id,
@@ -355,5 +365,5 @@ async def signup(
     _set_refresh_cookie(response, raw_refresh)
     return {
         "accessToken": access_token,
-        "user": _user_response(user, tenant),
+        "user": await _user_response(user, tenant, db),
     }
