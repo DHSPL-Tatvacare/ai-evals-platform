@@ -14,14 +14,207 @@ import {
 } from 'lucide-react';
 import { Button, EmptyState, Tabs } from '@/components/ui';
 import { useInsideSalesStore, useUIStore } from '@/stores';
+import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
+import type { LeadListRecord } from '@/services/api/insideSales';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
 import { CallFilterPanel } from '../components/CallFilterPanel';
+import { MqlScoreBadge } from '../components/MqlScoreBadge';
 
 /* ── Helpers ─────────────────────────────────────────────── */
+
+const STAGE_COLORS: Record<string, string> = {
+  'new lead': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
+  'call back': 'bg-amber-500/15 text-amber-400',
+  'rnr': 'bg-orange-500/15 text-orange-400',
+  'interested in future plan': 'bg-blue-500/15 text-blue-400',
+  'not interested': 'bg-red-500/15 text-red-400',
+  'converted': 'bg-emerald-500/15 text-emerald-400',
+  'invalid / junk': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
+  're-enquired': 'bg-purple-500/15 text-purple-400',
+};
+
+function StageBadge({ stage }: { stage: string }) {
+  const key = stage.toLowerCase();
+  const colorClass = STAGE_COLORS[key] ?? 'bg-[var(--bg-secondary)] text-[var(--text-muted)]';
+  const label = stage.replace('in future plan', '').trim() || stage;
+  return (
+    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', colorClass)}>
+      {label}
+    </span>
+  );
+}
+
+function formatFrt(seconds: number | null): { text: string; color: string } {
+  if (seconds === null) return { text: '—', color: '' };
+  if (seconds <= 3600) {
+    return { text: seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`, color: 'text-emerald-400' };
+  }
+  if (seconds <= 10800) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-amber-400' };
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-red-400' };
+}
+
+function formatLastContact(days: number | null): { text: string; isStale: boolean } {
+  if (days === null) return { text: '—', isStale: false };
+  if (days === 0) return { text: 'Today', isStale: false };
+  return { text: `${days}d ago`, isStale: days > 7 };
+}
+
+const TERMINAL_STAGES = new Set(['not interested', 'converted', 'invalid / junk']);
+
+function LeadsTableContent() {
+  const navigate = useNavigate();
+  const leads = useLeadsStore((s) => s.leads);
+  const leadsTotal = useLeadsStore((s) => s.leadsTotal);
+  const leadsPage = useLeadsStore((s) => s.leadsPage);
+  const leadsPageSize = useLeadsStore((s) => s.leadsPageSize);
+  const leadsLoading = useLeadsStore((s) => s.leadsLoading);
+  const leadsError = useLeadsStore((s) => s.leadsError);
+  const leadFilters = useLeadsStore((s) => s.leadFilters);
+
+  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadsPage}`;
+
+  useEffect(() => {
+    useLeadsStore.getState().loadLeads();
+  }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalPages = Math.max(1, Math.ceil(leadsTotal / leadsPageSize));
+
+  const handleRowClick = useCallback((lead: LeadListRecord) => {
+    navigate(routes.insideSales.leadDetail(lead.prospectId));
+  }, [navigate]);
+
+  if (leadsLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
+          <span className="text-xs text-[var(--text-muted)]">Loading leads...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (leadsError) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <EmptyState
+          icon={Phone}
+          title="Failed to load leads"
+          description={leadsError}
+          action={{ label: 'Retry', onClick: () => useLeadsStore.getState().loadLeads() }}
+        />
+      </div>
+    );
+  }
+
+  if (leads.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <EmptyState icon={Phone} title="No leads found" description="No leads for the selected date range and filters." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 py-3">
+        <span className="ml-auto text-xs text-[var(--text-muted)]">
+          {leadsTotal} lead{leadsTotal !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div className="flex-1 overflow-auto rounded-md border border-[var(--border-default)]">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
+            <tr className="border-b border-[var(--border-default)]">
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Stage</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">MQL</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Dials</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Connect %</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">FRT</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Last Contact</th>
+            </tr>
+          </thead>
+          <tbody>
+            {leads.map((lead) => {
+              const frt = formatFrt(lead.frtSeconds);
+              const lastContact = formatLastContact(lead.daysSinceLastContact);
+              const isTerminal = TERMINAL_STAGES.has(lead.prospectStage.toLowerCase());
+              return (
+                <tr
+                  key={lead.prospectId}
+                  onClick={() => handleRowClick(lead)}
+                  className="border-b border-[var(--border-subtle)] cursor-pointer transition-colors hover:bg-[var(--interactive-secondary)]"
+                >
+                  <td className="px-3 py-2.5">
+                    <div className="font-medium text-[var(--text-primary)]">
+                      {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
+                    </div>
+                    <div className="font-mono text-[10px] text-[var(--text-muted)]">{lead.phone}</div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <StageBadge stage={lead.prospectStage} />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <MqlScoreBadge score={lead.mqlScore} signals={lead.mqlSignals} />
+                  </td>
+                  <td className="px-3 py-2.5 text-[var(--text-secondary)]">
+                    {lead.agentName || '—'}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums text-[var(--text-secondary)]">
+                    {lead.totalDials > 0 ? lead.totalDials : '—'}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums text-[var(--text-secondary)]">
+                    {lead.connectRate !== null ? `${Math.round(lead.connectRate)}%` : '—'}
+                  </td>
+                  <td className={cn('px-3 py-2.5 tabular-nums', frt.color || 'text-[var(--text-secondary)]')}>
+                    {frt.text}
+                  </td>
+                  <td className={cn(
+                    'px-3 py-2.5 tabular-nums',
+                    lastContact.isStale && !isTerminal ? 'text-red-400' : 'text-[var(--text-secondary)]'
+                  )}>
+                    {lastContact.text}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between pt-3 pb-1">
+        <span className="text-xs text-[var(--text-muted)]">
+          Page {leadsPage} of {totalPages} · {leadsTotal} leads
+        </span>
+        <div className="flex items-center gap-1">
+          <Button variant="secondary" size="sm" disabled={leadsPage <= 1}
+            onClick={() => useLeadsStore.getState().setLeadsPage(leadsPage - 1)}
+            className="h-7 w-7 p-0">
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="secondary" size="sm" disabled={leadsPage >= totalPages}
+            onClick={() => useLeadsStore.getState().setLeadsPage(leadsPage + 1)}
+            className="h-7 w-7 p-0">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function formatCallTime(dateStr: string): string {
   if (!dateStr) return '—';
@@ -87,6 +280,7 @@ export function InsideSalesListing() {
 
   const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'leads' | 'calls'>('leads');
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioEl] = useState(() => typeof Audio !== 'undefined' ? new Audio() : null);
 
@@ -471,16 +665,20 @@ export function InsideSalesListing() {
         <h1 className="text-lg font-semibold text-[var(--text-primary)]">Calls</h1>
       </div>
 
-      {/* Tabs (single tab for now) */}
+      {/* Tabs */}
       <Tabs
-        tabs={[{ id: 'all', label: 'All Calls', content: tableContent }]}
-        defaultTab="all"
+        tabs={[
+          { id: 'leads', label: 'Leads', content: <LeadsTableContent /> },
+          { id: 'all', label: 'All Calls', content: tableContent },
+        ]}
+        defaultTab="leads"
+        onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
         fillHeight
       />
 
       {/* Filter panel */}
       {filterPanelOpen && (
-        <CallFilterPanel onClose={() => setFilterPanelOpen(false)} />
+        <CallFilterPanel activeTab={activeTab} onClose={() => setFilterPanelOpen(false)} />
       )}
     </div>
   );
