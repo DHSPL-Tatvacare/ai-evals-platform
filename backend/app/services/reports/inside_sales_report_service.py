@@ -55,7 +55,6 @@ class InsideSalesReportService(BaseReportService):
         aggregator = InsideSalesAggregator(thread_dicts, output_schema, agent_names)
         aggregate_data = aggregator.aggregate()
 
-        summary = run.summary or {}
         batch_meta = run.batch_metadata or {}
         metadata = InsideSalesReportMetadata(
             run_id=str(run.id),
