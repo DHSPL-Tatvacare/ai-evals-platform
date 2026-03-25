@@ -11,8 +11,9 @@ import {
   X,
   Play,
   Square,
+  Info,
 } from 'lucide-react';
-import { Button, EmptyState, Tabs } from '@/components/ui';
+import { Button, EmptyState, Tabs, Tooltip } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useInsideSalesStore, useUIStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
@@ -35,6 +36,17 @@ function formatLastContact(days: number | null): { text: string; isStale: boolea
 }
 
 const TERMINAL_STAGES = new Set(['not interested', 'converted', 'invalid / junk']);
+
+function ColHeader({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <Tooltip content={<span className="text-[11px]">{tip}</span>} position="bottom" maxWidth={220}>
+        <Info className="h-3 w-3 text-[var(--text-muted)] cursor-default shrink-0" />
+      </Tooltip>
+    </span>
+  );
+}
 
 function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
   const navigate = useNavigate();
@@ -192,14 +204,30 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
             <tr className="border-b border-[var(--border-default)]">
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Lead</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Stage</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">MQL</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Dials</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Connect %</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">FRT</th>
-              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Last Contact</th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Lead" tip="Name and phone from LeadSquared." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Stage" tip="Current CRM stage in LeadSquared (ProspectStage field)." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="MQL" tip="Marketing Qualified Lead score (0–5). One point per signal: age in range, target city, qualifying condition, HbA1c, intent to pay." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Agent" tip="Assigned counselor (OwnerIdName in LeadSquared)." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Dials" tip="Total call attempts = RNR (no answer) + Answered. From LSQ mx_RNR_Count + mx_Answered_Call_Count." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Connect %" tip="Answered ÷ Total Dials × 100. Blank when no dials recorded." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="FRT" tip="First Response Time: lead creation → first call. Green ≤ 1h, amber ≤ 3h, red > 3h." />
+              </th>
+              <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
+                <ColHeader label="Last Contact" tip="Days since most recent call activity. Red if > 7 days (stale) for active leads." />
+              </th>
             </tr>
           </thead>
           <tbody>
