@@ -238,7 +238,7 @@ async def list_leads(
     the date_to filter runs; actual returned records may be fewer than page_size
     when many leads fall outside the date_to bound.
     """
-    result = await fetch_leads(date_from=date_from, date_to=date_to, page=page, page_size=page_size)
+    result = await fetch_leads(date_from=date_from, date_to=date_to)
     raw_leads = result["leads"]
 
     # Server-side filters
@@ -301,9 +301,15 @@ async def list_leads(
             source_campaign=lead["sourceCampaign"],
         ))
 
+    # Slice for requested page
+    total = len(records)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_records = records[start:end]
+
     return LeadListResponse(
-        leads=records,
-        total=len(records),
+        leads=page_records,
+        total=total,
         page=page,
         page_size=page_size,
     )

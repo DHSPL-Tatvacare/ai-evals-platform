@@ -170,42 +170,58 @@ async def fetch_call_activities(
     return {"activities": all_activities, "total": total_record_count}
 
 
+LSQ_LEADS_PAGE_SIZE = 100  # batch size for internal LSQ pagination
+
+
 async def fetch_leads(
     date_from: str,
     date_to: str,
-    page: int = 1,
-    page_size: int = 50,
 ) -> dict[str, Any]:
-    """Fetch leads from LSQ by CreatedOn range.
+    """Fetch ALL leads from LSQ for the given CreatedOn date range.
 
-    Returns: {"leads": [...raw lead dicts...], "total": int}
-    Total is the len of returned list (LSQ does not paginate Leads.Get
-    by RecordCount in the same way as activity API).
+    Loops LSQ pages (PageIndex 0, 1, 2 ...) until a partial page is received.
+    date_to is applied client-side because LSQ Leads.Get only supports >= operator.
+
+    Returns: {"leads": list[raw_lead_dict]}
     """
+    all_leads: list[dict[str, Any]] = []
+    page_index = 0
+
     async with httpx.AsyncClient(timeout=30) as client:
-        body = {
-            "Parameter": {
-                "LookupName": "CreatedOn",
-                "LookupValue": date_from,
-                "SqlOperator": ">=",
-            },
-            "Paging": {"PageIndex": page, "PageSize": page_size},
-            "Columns": {"Include_CSV": _LEAD_FIELDS_CSV},
-            "Sorting": {"ColumnName": "CreatedOn", "Direction": 1},
-        }
-        # Secondary filter for date_to applied client-side after fetch
-        resp = await _rate_limited_request(
-            client, "POST",
-            f"{LSQ_BASE_URL}/LeadManagement.svc/Leads.Get",
-            params=_auth_params(),
-            json=body,
-        )
-        data = resp.json()
-        leads: list[dict[str, Any]] = data if isinstance(data, list) else []
-        # Filter to date range (LSQ Leads.Get only supports >= operator).
-        # Strip milliseconds from CreatedOn before comparing to avoid format mismatch.
-        leads = [l for l in leads if (l.get("CreatedOn") or "").split(".")[0] <= date_to]
-        return {"leads": leads, "total": len(leads)}
+        while True:
+            body = {
+                "Parameter": {
+                    "LookupName": "CreatedOn",
+                    "LookupValue": date_from,
+                    "SqlOperator": ">=",
+                },
+                "Paging": {"PageIndex": page_index, "PageSize": LSQ_LEADS_PAGE_SIZE},
+                "Columns": {"Include_CSV": _LEAD_FIELDS_CSV},
+                "Sorting": {"ColumnName": "CreatedOn", "Direction": 1},
+            }
+            resp = await _rate_limited_request(
+                client, "POST",
+                f"{LSQ_BASE_URL}/LeadManagement.svc/Leads.Get",
+                params=_auth_params(),
+                json=body,
+            )
+            raw_page: list[dict[str, Any]] = resp.json()
+            if not isinstance(raw_page, list):
+                break  # unexpected response shape — stop
+
+            # Apply date_to filter (strip ms to avoid format mismatch)
+            filtered = [
+                l for l in raw_page
+                if (l.get("CreatedOn") or "").split(".")[0] <= date_to
+            ]
+            all_leads.extend(filtered)
+
+            # Stop when LSQ returns partial page (no more data)
+            if len(raw_page) < LSQ_LEADS_PAGE_SIZE:
+                break
+            page_index += 1
+
+    return {"leads": all_leads}
 
 
 MAX_LEAD_CALL_HISTORY = 200  # cap on matched records returned per drilldown
