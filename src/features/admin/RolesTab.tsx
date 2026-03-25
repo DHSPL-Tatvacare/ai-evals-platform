@@ -6,7 +6,7 @@ import type { RoleResponse } from '@/services/api/rolesApi';
 import { useAuthStore } from '@/stores/authStore';
 import { notificationService } from '@/services/notifications';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { RoleEditorDialog } from './RoleEditorDialog';
+import { RoleEditorPanel } from './RoleEditorPanel';
 
 export function RolesTab() {
   const currentUser = useAuthStore((s) => s.user);
@@ -159,16 +159,17 @@ export function RolesTab() {
         </div>
       )}
 
-      {/* Dialogs */}
-      <RoleEditorDialog
-        isOpen={isCreateOpen || !!editingRole}
-        role={editingRole}
-        onClose={() => {
-          setIsCreateOpen(false);
-          setEditingRole(null);
-        }}
-        onSaved={loadRoles}
-      />
+      {/* Role Editor Panel (slide-over) */}
+      {(isCreateOpen || !!editingRole) && (
+        <RoleEditorPanel
+          role={editingRole}
+          onClose={() => {
+            setIsCreateOpen(false);
+            setEditingRole(null);
+          }}
+          onSaved={loadRoles}
+        />
+      )}
       <ConfirmDialog
         isOpen={!!deletingRole}
         title="Delete Role"

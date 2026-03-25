@@ -266,8 +266,8 @@ export function AdminUsersPage() {
       content: <RolesTab />,
     },
     {
-      id: 'security',
-      label: 'Security',
+      id: 'audit-log',
+      label: 'Audit Log',
       content: <AuditLogTab />,
     },
   ];
