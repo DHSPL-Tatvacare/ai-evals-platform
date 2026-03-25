@@ -5,3 +5,4 @@ export { InsideSalesRunDetail } from './InsideSalesRunDetail';
 export { InsideSalesDashboard } from './InsideSalesDashboard';
 export { InsideSalesCallDetail } from './InsideSalesCallDetail';
 export { InsideSalesSettings } from './InsideSalesSettings';
+export { InsideSalesLeadDetail } from './InsideSalesLeadDetail';

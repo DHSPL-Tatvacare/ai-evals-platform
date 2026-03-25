@@ -29,6 +29,7 @@ import {
   InsideSalesDashboard,
   InsideSalesCallDetail,
   InsideSalesSettings,
+  InsideSalesLeadDetail,
 } from "@/features/insideSales";
 import { HomePage } from "./pages/HomePage";
 import { ListingPage } from "./pages/ListingPage";
@@ -123,6 +124,7 @@ export function Router() {
           <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
           <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
           <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
+          <Route path="/inside-sales/leads/:prospectId" element={<InsideSalesLeadDetail />} />
           <Route path={routes.insideSales.dashboard} element={<InsideSalesDashboard />} />
           <Route path={routes.insideSales.logs} element={<EvalLogs />} />
           <Route path={routes.insideSales.settings} element={<InsideSalesSettings />} />
