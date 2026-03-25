@@ -170,17 +170,17 @@ async def get_lead(
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
             prospect_id=prospect_id,
-            first_name=lead.get("firstName", ""),
-            last_name=lead.get("lastName", ""),
-            phone=lead.get("phone", ""),
-            email=lead.get("email", ""),
+            first_name=lead.get("FirstName", ""),
+            last_name=lead.get("LastName", ""),
+            phone=lead.get("Phone", ""),
+            email=lead.get("EmailAddress", ""),
         ).on_conflict_do_update(
             constraint="uq_lsq_lead_cache_tenant_prospect",
             set_={
-                "first_name": lead.get("firstName", ""),
-                "last_name": lead.get("lastName", ""),
-                "phone": lead.get("phone", ""),
-                "email": lead.get("email", ""),
+                "first_name": lead.get("FirstName", ""),
+                "last_name": lead.get("LastName", ""),
+                "phone": lead.get("Phone", ""),
+                "email": lead.get("EmailAddress", ""),
             },
         )
         await db.execute(stmt)
@@ -190,9 +190,9 @@ async def get_lead(
 
     return LeadDetailResponse(
         prospect_id=prospect_id,
-        first_name=lead.get("firstName", ""),
-        last_name=lead.get("lastName", ""),
-        phone=lead.get("phone", ""),
-        email=lead.get("email", ""),
+        first_name=lead.get("FirstName", ""),
+        last_name=lead.get("LastName", ""),
+        phone=lead.get("Phone", ""),
+        email=lead.get("EmailAddress", ""),
         cached=False,
     )

@@ -5,6 +5,7 @@ import json
 import os
 import logging
 import re as _re
+from datetime import datetime as _dt, timezone as _tz
 from typing import Any
 
 import httpx
@@ -79,6 +80,20 @@ def compute_mql_score(lead: dict) -> tuple[int, dict[str, bool]]:
     }
     return sum(1 for v in signals.values() if v), signals
 
+
+_LEAD_FIELDS_CSV = (
+    "ProspectID,FirstName,LastName,Phone,EmailAddress,ProspectStage,"
+    "mx_City,mx_Age_Group,mx_utm_disease,"
+    "mx_Do_you_remember_your_HbA1c_levels,"
+    "mx_Do_you_know_your_recent_blood_sugar_level,"
+    "mx_Are_you_open_to_investing_in_this_paid_program_of,"
+    "mx_Diabetes_Duration,mx_Current_diabetes_management,"
+    "mx_What_is_your_main_health_goal,mx_Job_Title_or_Occupation,"
+    "mx_Preferred_Time_for_Call_with_Health_Counsellor,"
+    "mx_RNR_Count,mx_Answered_Call_Count,mx_Lead_Status,"
+    "CreatedOn,ProspectActivityDate_Min,ProspectActivityDate_Max,"
+    "OwnerIdName,Source,SourceCampaign"
+)
 
 LSQ_BASE_URL = os.getenv("LSQ_BASE_URL", "https://api-in21.leadsquared.com/v2")
 LSQ_ACCESS_KEY = os.getenv("LSQ_ACCESS_KEY", "")
@@ -155,6 +170,263 @@ async def fetch_call_activities(
     return {"activities": all_activities, "total": total_record_count}
 
 
+async def fetch_leads(
+    date_from: str,
+    date_to: str,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Fetch leads from LSQ by CreatedOn range.
+
+    Returns: {"leads": [...raw lead dicts...], "total": int}
+    Total is the len of returned list (LSQ does not paginate Leads.Get
+    by RecordCount in the same way as activity API).
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        body = {
+            "Parameter": {
+                "LookupName": "CreatedOn",
+                "LookupValue": date_from,
+                "SqlOperator": ">=",
+            },
+            "Paging": {"PageIndex": page, "PageSize": page_size},
+            "Columns": {"Include_CSV": _LEAD_FIELDS_CSV},
+            "Sorting": {"ColumnName": "CreatedOn", "Direction": 1},
+        }
+        # Secondary filter for date_to applied client-side after fetch
+        resp = await _rate_limited_request(
+            client, "POST",
+            f"{LSQ_BASE_URL}/LeadManagement.svc/Leads.Get",
+            params=_auth_params(),
+            json=body,
+        )
+        data = resp.json()
+        leads: list[dict[str, Any]] = data if isinstance(data, list) else []
+        # Filter to date range (LSQ Leads.Get only supports >= operator)
+        leads = [l for l in leads if (l.get("CreatedOn") or "") <= date_to]
+        return {"leads": leads, "total": len(leads)}
+
+
+MAX_LEAD_CALL_HISTORY = 200  # cap on matched records returned per drilldown
+
+
+async def fetch_lead_activities_for_prospect(
+    prospect_id: str,
+    date_from: str,
+    date_to: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Fetch all call activities for a single prospect across their lifetime.
+
+    Paginates RetrieveByActivityEvent for event codes 21+22 over [date_from, date_to],
+    filters server-side by RelatedProspectId == prospect_id.
+
+    Returns: (matched_activities, history_truncated)
+    history_truncated is True when matched records exceeded MAX_LEAD_CALL_HISTORY.
+    """
+    matched: list[dict[str, Any]] = []
+    truncated = False
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for event_code in [21, 22]:
+            page_idx = 1
+            while True:
+                body = {
+                    "Parameter": {
+                        "FromDate": date_from,
+                        "ToDate": date_to,
+                        "ActivityEvent": event_code,
+                    },
+                    "Paging": {"PageIndex": page_idx, "PageSize": 500},
+                    "Sorting": {"ColumnName": "CreatedOn", "Direction": 1},
+                }
+                resp = await _rate_limited_request(
+                    client, "POST",
+                    f"{LSQ_BASE_URL}/ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent",
+                    params=_auth_params(),
+                    json=body,
+                )
+                data = resp.json()
+                if isinstance(data, dict):
+                    activities = data.get("List") or []
+                    record_count = data.get("RecordCount", len(activities))
+                elif isinstance(data, list):
+                    activities = data
+                    record_count = len(activities)
+                else:
+                    break
+
+                for a in activities:
+                    if a.get("RelatedProspectId") == prospect_id:
+                        if len(matched) >= MAX_LEAD_CALL_HISTORY:
+                            truncated = True
+                        else:
+                            matched.append(a)
+
+                # Stop paginating when we've fetched all pages
+                fetched_so_far = (page_idx - 1) * 500 + len(activities)
+                if fetched_so_far >= record_count or len(activities) < 500:
+                    break
+                page_idx += 1
+
+    # Sort matched activities by CreatedOn descending
+    matched.sort(key=lambda a: a.get("CreatedOn", ""), reverse=True)
+    return matched, truncated
+
+
+def _parse_lsq_dt(s: str | None) -> _dt | None:
+    """Parse LSQ datetime string 'YYYY-MM-DD HH:MM:SS[.fff]' to UTC datetime."""
+    if not s:
+        return None
+    try:
+        s = s.split(".")[0]  # strip milliseconds
+        return _dt.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_tz.utc)
+    except ValueError:
+        return None
+
+
+def compute_frt_seconds(created_on: str, first_activity: str | None) -> int | None:
+    """Compute first response time in seconds. Returns None if negative or missing."""
+    created = _parse_lsq_dt(created_on)
+    first = _parse_lsq_dt(first_activity)
+    if not created or not first:
+        return None
+    delta = int((first - created).total_seconds())
+    return delta if delta >= 0 else None
+
+
+def compute_lead_metrics(
+    created_on: str,
+    last_activity_on: str | None,
+    rnr_count: int,
+    answered_count: int,
+    first_activity_on: str | None = None,
+) -> dict[str, Any]:
+    """Compute listing-level metrics from lead record fields."""
+    now = _dt.now(_tz.utc)
+    created = _parse_lsq_dt(created_on)
+
+    total_dials = rnr_count + answered_count
+    connect_rate: float | None = (answered_count / total_dials * 100) if total_dials > 0 else None
+    lead_age_days = int((now - created).total_seconds() / 86400) if created else 0
+
+    last_dt = _parse_lsq_dt(last_activity_on)
+    days_since_last = int((now - last_dt).total_seconds() / 86400) if last_dt else None
+
+    frt = compute_frt_seconds(created_on, first_activity_on)
+
+    return {
+        "total_dials": total_dials,
+        "connect_rate": round(connect_rate, 1) if connect_rate is not None else None,
+        "lead_age_days": lead_age_days,
+        "days_since_last_contact": days_since_last,
+        "frt_seconds": frt,
+    }
+
+
+def compute_drilldown_metrics(
+    created_on: str,
+    last_activity_on: str | None,
+    call_history: list[dict[str, Any]],
+    preferred_call_time_str: str | None,
+) -> dict[str, Any]:
+    """Compute drilldown-level metrics from per-call history.
+
+    call_history entries must have 'callTime', 'durationSeconds', 'status' keys
+    (already normalized by normalize_activity).
+    """
+    # Total dials and answered from history (not from LSQ counters)
+    total_dials = len(call_history)
+    answered_history = [c for c in call_history if c.get("status", "").lower() == "answered"]
+    answered_count = len(answered_history)
+    connect_rate: float | None = (
+        round(answered_count / total_dials * 100, 1) if total_dials > 0 else None
+    )
+
+    # Exact FRT — earliest call in history
+    call_times = [c.get("callTime") for c in call_history if c.get("callTime")]
+    first_call_time = min(call_times) if call_times else None
+    frt = compute_frt_seconds(created_on, first_call_time)
+
+    # Counseling sessions (>= 10 minutes = 600s)
+    counseling = [c for c in call_history if (c.get("durationSeconds") or 0) >= 600]
+    counseling_count = len(counseling)
+    counseling_rate: float | None = (
+        round(counseling_count / answered_count * 100, 1) if answered_count > 0 else None
+    )
+
+    # Callback adherence
+    adherence_seconds: int | None = None
+    if preferred_call_time_str:
+        pref_dt = _parse_lsq_dt(preferred_call_time_str)
+        if pref_dt:
+            after_pref = [
+                c for c in call_history
+                if (_parse_lsq_dt(c.get("callTime")) or _dt.min.replace(tzinfo=_tz.utc)) > pref_dt
+            ]
+            if after_pref:
+                earliest_after = min(after_pref, key=lambda c: c.get("callTime", ""))
+                earliest_dt = _parse_lsq_dt(earliest_after.get("callTime"))
+                if earliest_dt:
+                    adherence_seconds = int((earliest_dt - pref_dt).total_seconds())
+
+    # Lead age + days since last contact
+    now = _dt.now(_tz.utc)
+    created = _parse_lsq_dt(created_on)
+    lead_age_days = int((now - created).total_seconds() / 86400) if created else 0
+    last_dt = _parse_lsq_dt(last_activity_on)
+    days_since_last = int((now - last_dt).total_seconds() / 86400) if last_dt else None
+
+    return {
+        "frt_seconds": frt,
+        "total_dials": total_dials,
+        "connect_rate": connect_rate,
+        "counseling_count": counseling_count,
+        "counseling_rate": counseling_rate,
+        "callback_adherence_seconds": adherence_seconds,
+        "lead_age_days": lead_age_days,
+        "days_since_last_contact": days_since_last,
+    }
+
+
+def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw Leads.Get record into a clean field dict."""
+    return {
+        "prospectId": raw.get("ProspectID", ""),
+        "firstName": raw.get("FirstName", ""),
+        "lastName": raw.get("LastName"),
+        "phone": raw.get("Phone", ""),
+        "email": raw.get("EmailAddress"),
+        "prospectStage": raw.get("ProspectStage", ""),
+        "city": raw.get("mx_City"),
+        "ageGroup": raw.get("mx_Age_Group"),
+        "condition": raw.get("mx_utm_disease"),
+        "hba1cBand": raw.get("mx_Do_you_remember_your_HbA1c_levels"),
+        "bloodSugarBand": raw.get("mx_Do_you_know_your_recent_blood_sugar_level"),
+        "intentToPay": raw.get("mx_Are_you_open_to_investing_in_this_paid_program_of"),
+        "diabetesDuration": raw.get("mx_Diabetes_Duration"),
+        "currentManagement": raw.get("mx_Current_diabetes_management"),
+        "goal": raw.get("mx_What_is_your_main_health_goal"),
+        "jobTitle": raw.get("mx_Job_Title_or_Occupation"),
+        "preferredCallTime": raw.get("mx_Preferred_Time_for_Call_with_Health_Counsellor"),
+        "rnrCount": int(raw.get("mx_RNR_Count") or 0),
+        "answeredCount": int(raw.get("mx_Answered_Call_Count") or 0),
+        "agentName": raw.get("OwnerIdName"),
+        "createdOn": (raw.get("CreatedOn") or "").split(".")[0],
+        "firstActivityOn": (raw.get("ProspectActivityDate_Min") or "").split(".")[0] or None,
+        "lastActivityOn": (raw.get("ProspectActivityDate_Max") or "").split(".")[0] or None,
+        "source": raw.get("Source"),
+        "sourceCampaign": raw.get("SourceCampaign"),
+        # MQL input fields (passed through for compute_mql_score)
+        "mx_Age_Group": raw.get("mx_Age_Group"),
+        "mx_City": raw.get("mx_City"),
+        "mx_utm_disease": raw.get("mx_utm_disease"),
+        "mx_Do_you_remember_your_HbA1c_levels": raw.get("mx_Do_you_remember_your_HbA1c_levels"),
+        "mx_Are_you_open_to_investing_in_this_paid_program_of": raw.get(
+            "mx_Are_you_open_to_investing_in_this_paid_program_of"
+        ),
+    }
+
+
 def _parse_source_data(note: str) -> dict[str, Any]:
     """Parse ActivityEvent_Note to extract SourceData JSON."""
     try:
@@ -197,11 +469,10 @@ def normalize_activity(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def fetch_lead_by_id(prospect_id: str) -> dict[str, str]:
+async def fetch_lead_by_id(prospect_id: str) -> dict[str, Any]:
     """Fetch a single lead from LSQ by prospect ID.
 
-    GET /v2/LeadManagement.svc/Leads.GetById?id=<prospectId>
-    Returns: {"firstName": str, "lastName": str, "phone": str, "email": str}
+    Returns the raw lead dict (all fields) or {} if not found.
     """
     if not prospect_id:
         return {}
@@ -213,13 +484,7 @@ async def fetch_lead_by_id(prospect_id: str) -> dict[str, str]:
             resp = await _rate_limited_request(client, "GET", url, params=params)
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
-                lead = data[0]
-                return {
-                    "firstName": lead.get("FirstName") or "",
-                    "lastName": lead.get("LastName") or "",
-                    "phone": lead.get("Phone") or "",
-                    "email": lead.get("EmailAddress") or "",
-                }
+                return data[0]
         except Exception as e:
             logger.warning("Lead fetch failed for %s: %s", prospect_id, e)
 
