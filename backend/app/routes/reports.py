@@ -253,6 +253,13 @@ async def export_report_pdf(
             detail="Report has not been generated yet. Generate the report first.",
         )
 
+    # Inside sales uses a different report shape — PDF template not yet available
+    if run.app_id == "inside-sales":
+        raise HTTPException(
+            status_code=400,
+            detail="PDF export is not yet available for inside sales reports.",
+        )
+
     # Validate into Pydantic model and re-dump with aliases.
     try:
         payload = ReportPayload.model_validate(cached_data)

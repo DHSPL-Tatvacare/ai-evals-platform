@@ -49,7 +49,7 @@ class InsideSalesReportService(BaseReportService):
             for t in threads
         ]
 
-        output_schema = await self._load_evaluator_schema(run)
+        output_schema = await self._load_evaluator_schema(run, thread_dicts)
         agent_names = await self._load_agent_names(thread_dicts)
 
         aggregator = InsideSalesAggregator(thread_dicts, output_schema, agent_names)
@@ -97,7 +97,12 @@ class InsideSalesReportService(BaseReportService):
         await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
         return payload
 
-    async def _load_evaluator_schema(self, run: EvalRun) -> list[dict]:
+    async def _load_evaluator_schema(self, run: EvalRun, threads: list[dict] | None = None) -> list[dict]:
+        """Load evaluator output_schema for dimension discovery.
+
+        Tries three sources: run.summary.custom_evaluations, run.config.evaluator_id,
+        then falls back to the evaluator_id from the first thread evaluation result.
+        """
         summary = run.summary or {}
         evaluator_id = None
 
@@ -108,6 +113,14 @@ class InsideSalesReportService(BaseReportService):
         if not evaluator_id:
             config = run.config or {}
             evaluator_id = config.get("evaluator_id")
+
+        # Fallback: read from first thread evaluation result
+        if not evaluator_id and threads:
+            for t in threads:
+                evals = t.get("result", {}).get("evaluations", [])
+                if evals and evals[0].get("evaluator_id"):
+                    evaluator_id = evals[0]["evaluator_id"]
+                    break
 
         if not evaluator_id:
             logger.warning("No evaluator_id found for run %s, using empty schema", run.id)
