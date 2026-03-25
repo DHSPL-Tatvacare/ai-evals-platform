@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     ADVERSARIAL_TURN_DELAY: float = 1.5
     ADVERSARIAL_CASE_DELAY: float = 3.0
 
+    # LeadSquared API (Inside Sales)
+    LSQ_BASE_URL: str = ""
+    LSQ_ACCESS_KEY: str = ""
+    LSQ_SECRET_KEY: str = ""
+
     class Config:
         env_file = ".env.backend"
         env_file_encoding = "utf-8"
