@@ -3,6 +3,8 @@ import { Link2, Copy, Check, Trash2, Plus, Search, SearchX } from 'lucide-react'
 import { Button, Badge, Spinner, ConfirmDialog, EmptyState } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
+import { rolesApi } from '@/services/api/rolesApi';
+import type { RoleResponse } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
 import { PermissionGate } from '@/components/auth/PermissionGate';
@@ -27,7 +29,8 @@ export function InviteLinksSection() {
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [label, setLabel] = useState('');
-  const [defaultRole, setDefaultRole] = useState<'member' | 'admin'>('member');
+  const [roleId, setRoleId] = useState('');
+  const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [maxUses, setMaxUses] = useState('');
   const [expiresInHours, setExpiresInHours] = useState(168);
 
@@ -48,6 +51,13 @@ export function InviteLinksSection() {
 
   useEffect(() => { loadLinks(); }, [loadLinks]);
   useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => {
+    rolesApi.listRoles().then((all) => {
+      const filtered = all.filter((r) => !r.isSystem);
+      setRoles(filtered);
+      if (filtered.length > 0) setRoleId(filtered[0].id);
+    });
+  }, []);
 
   const isExpired = (link: InviteLink) => new Date(link.expiresAt) < new Date();
   const isExhausted = (link: InviteLink) => link.maxUses !== null && link.usesCount >= link.maxUses;
@@ -65,7 +75,7 @@ export function InviteLinksSection() {
     return links.filter(
       (l) =>
         (l.label ?? '').toLowerCase().includes(q) ||
-        l.defaultRole.toLowerCase().includes(q) ||
+        l.roleId.toLowerCase().includes(q) ||
         l.createdByEmail.toLowerCase().includes(q) ||
         linkStatus(l).label.toLowerCase().includes(q),
     );
@@ -78,7 +88,7 @@ export function InviteLinksSection() {
   const handleCreate = async () => {
     setIsCreating(true);
     try {
-      const body: CreateInviteLinkRequest = { defaultRole, expiresInHours };
+      const body: CreateInviteLinkRequest = { roleId, expiresInHours };
       if (label.trim()) body.label = label.trim();
       if (maxUses.trim()) body.maxUses = parseInt(maxUses, 10);
 
@@ -88,7 +98,7 @@ export function InviteLinksSection() {
       setShowCreateForm(false);
       setLabel('');
       setMaxUses('');
-      setDefaultRole('member');
+      setRoleId(roles.length > 0 ? roles[0].id : '');
       setExpiresInHours(168);
       await loadLinks();
     } catch {
@@ -158,9 +168,10 @@ export function InviteLinksSection() {
             </div>
             <div>
               <label className="mb-1 block text-[12px] font-medium text-[var(--text-secondary)]">Default Role</label>
-              <select value={defaultRole} onChange={(e) => setDefaultRole(e.target.value as 'member' | 'admin')} className={cn(selectClass, 'w-full')}>
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
+              <select value={roleId} onChange={(e) => setRoleId(e.target.value)} className={cn(selectClass, 'w-full')}>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -225,7 +236,7 @@ export function InviteLinksSection() {
                     {link.label || <span className="text-[var(--text-muted)] italic">No label</span>}
                   </td>
                   <td className="px-4 py-2.5">
-                    <Badge variant={link.defaultRole === 'admin' ? 'info' : 'neutral'} size="sm">{link.defaultRole}</Badge>
+                    <Badge variant="neutral" size="sm">{link.roleId}</Badge>
                   </td>
                   <td className="px-4 py-2.5 text-[13px] text-[var(--text-secondary)]">
                     {link.usesCount}{link.maxUses !== null ? ` / ${link.maxUses}` : ''}

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Modal, Button, Input } from '@/components/ui';
 import type { AdminUser, UpdateUserRequest } from '@/services/api/adminApi';
+import { rolesApi } from '@/services/api/rolesApi';
+import type { RoleResponse } from '@/services/api/rolesApi';
+import { usePermission } from '@/utils/permissions';
 
 interface EditUserDialogProps {
   isOpen: boolean;
   user: AdminUser | null;
   currentUserId: string;
-  currentUserRole: string;
   onClose: () => void;
   onSubmit: (userId: string, data: UpdateUserRequest) => Promise<void>;
 }
@@ -15,20 +17,28 @@ export function EditUserDialog({
   isOpen,
   user,
   currentUserId,
-  currentUserRole,
   onClose,
   onSubmit,
 }: EditUserDialogProps) {
   const [displayName, setDisplayName] = useState('');
-  const [role, setRole] = useState<'admin' | 'member'>('member');
+  const [roleId, setRoleId] = useState('');
+  const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  const canAssignRole = usePermission('role:assign');
+
+  useEffect(() => {
+    rolesApi.listRoles().then((all) => {
+      setRoles(all.filter((r) => !r.isSystem));
+    });
+  }, []);
+
   useEffect(() => {
     if (user) {
       setDisplayName(user.displayName);
-      setRole(user.role === 'owner' ? 'admin' : user.role);
+      setRoleId(user.roleId);
       setIsActive(user.isActive);
       setError('');
     }
@@ -37,9 +47,9 @@ export function EditUserDialog({
   if (!user) return null;
 
   const isSelf = user.id === currentUserId;
-  const isOwnerUser = user.role === 'owner';
-  const canChangeRole = !isSelf && !isOwnerUser;
-  const canToggleActive = !isSelf && currentUserRole === 'owner';
+  const isOwnerUser = user.isOwner;
+  const canChangeRole = canAssignRole && !isSelf && !isOwnerUser;
+  const canToggleActive = !isSelf && !isOwnerUser;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,8 +62,8 @@ export function EditUserDialog({
     if (displayName.trim() !== user.displayName) {
       updates.displayName = displayName.trim();
     }
-    if (canChangeRole && role !== user.role) {
-      updates.role = role;
+    if (canChangeRole && roleId !== user.roleId) {
+      updates.roleId = roleId;
     }
     if (canToggleActive && isActive !== user.isActive) {
       updates.isActive = isActive;
@@ -100,16 +110,17 @@ export function EditUserDialog({
             Role
           </label>
           {isOwnerUser ? (
-            <Input value="Owner" disabled />
+            <Input value={user.roleName} disabled />
           ) : (
             <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as 'admin' | 'member')}
+              value={roleId}
+              onChange={(e) => setRoleId(e.target.value)}
               disabled={!canChangeRole}
               className="h-9 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[14px] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
             </select>
           )}
           {isSelf && (

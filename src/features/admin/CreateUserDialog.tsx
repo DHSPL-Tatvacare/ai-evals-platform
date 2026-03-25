@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Modal, Button, Input, PasswordStrengthIndicator, validatePasswordStrength } from '@/components/ui';
+import { rolesApi } from '@/services/api/rolesApi';
+import type { RoleResponse } from '@/services/api/rolesApi';
 
 interface CreateUserDialogProps {
   isOpen: boolean;
@@ -8,7 +10,7 @@ interface CreateUserDialogProps {
     email: string;
     displayName: string;
     password: string;
-    role: 'admin' | 'member';
+    roleId: string;
   }) => Promise<void>;
 }
 
@@ -16,15 +18,24 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'admin' | 'member'>('member');
+  const [roleId, setRoleId] = useState('');
+  const [roles, setRoles] = useState<RoleResponse[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    rolesApi.listRoles().then((all) => {
+      const filtered = all.filter((r) => !r.isSystem);
+      setRoles(filtered);
+      if (filtered.length > 0) setRoleId(filtered[0].id);
+    });
+  }, []);
 
   const resetForm = () => {
     setEmail('');
     setDisplayName('');
     setPassword('');
-    setRole('member');
+    setRoleId(roles.length > 0 ? roles[0].id : '');
     setError('');
   };
 
@@ -49,7 +60,7 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
     setIsSubmitting(true);
     setError('');
     try {
-      await onSubmit({ email: email.trim(), displayName: displayName.trim(), password, role });
+      await onSubmit({ email: email.trim(), displayName: displayName.trim(), password, roleId });
       resetForm();
       onClose();
     } catch (err) {
@@ -101,12 +112,13 @@ export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialog
             Role
           </label>
           <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as 'admin' | 'member')}
+            value={roleId}
+            onChange={(e) => setRoleId(e.target.value)}
             className="h-9 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[14px] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50"
           >
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
+            {roles.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
           </select>
         </div>
 
