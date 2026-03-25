@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.job import Job
 from app.models.eval_run import EvalRun
@@ -18,7 +19,8 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 @router.post("", response_model=JobResponse, status_code=201)
 async def submit_job(
     body: JobCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('eval:run'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Submit a new background job. Injects auth context into params for downstream runners."""
@@ -44,7 +46,7 @@ async def list_jobs(
     job_type: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List jobs for the current user."""
@@ -69,7 +71,7 @@ async def list_jobs(
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get job status and progress."""
@@ -94,7 +96,8 @@ async def get_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('eval:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued or running job."""

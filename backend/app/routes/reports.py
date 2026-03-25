@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.eval_run import EvalRun
 from app.models.evaluation_analytics import EvaluationAnalytics
@@ -46,7 +47,8 @@ class CrossRunAnalyticsResponse(CamelModel):
 @router.get("/cross-run-analytics", response_model=CrossRunAnalyticsResponse)
 async def get_cross_run_analytics(
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('analytics:view'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Return cached cross-run analytics scoped to tenant + app_id."""
@@ -96,7 +98,8 @@ async def get_cross_run_analytics(
 async def refresh_cross_run_analytics(
     app_id: str = Query(...),
     limit: int = Query(50, ge=1, le=100),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('report:generate'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Recompute cross-run analytics from single_run caches for user's runs within tenant."""
@@ -219,7 +222,8 @@ async def refresh_cross_run_analytics(
 @router.get("/{run_id}/export-pdf")
 async def export_report_pdf(
     run_id: str,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('eval:export'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Export report as PDF via headless browser rendering of self-contained HTML."""
@@ -303,7 +307,8 @@ async def get_report(
     cache_only: bool = Query(False, description="Only return cached report; 404 if not cached"),
     provider: str | None = Query(None, description="LLM provider for narrative generation"),
     model: str | None = Query(None, description="LLM model for narrative generation"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('analytics:view'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an evaluation report for a completed run.
@@ -367,7 +372,8 @@ class CrossRunSummaryRequest(CamelModel):
 @router.post("/cross-run-ai-summary", response_model=CrossRunAISummary)
 async def generate_cross_run_ai_summary(
     request: CrossRunSummaryRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('report:generate'),
+    _app_check: AuthContext = require_app_access(),
     _db: AsyncSession = Depends(get_db),
 ):
     """Generate AI summary of cross-run analytics."""

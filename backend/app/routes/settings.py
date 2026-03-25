@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.setting import Setting
 from app.schemas.setting import SettingCreate, SettingResponse
@@ -57,7 +58,7 @@ async def get_setting(
 @router.put("", response_model=SettingResponse)
 async def upsert_setting(
     body: SettingCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('settings:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert a setting (insert or update if exists). Per-user scoped."""
@@ -85,7 +86,7 @@ async def upsert_setting(
 async def delete_setting_by_key(
     key: str = Query(...),
     app_id: str = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('settings:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by key + app_id for the current user."""
@@ -111,7 +112,7 @@ async def delete_setting_by_key(
 @router.delete("/{setting_id}")
 async def delete_setting(
     setting_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('settings:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by ID."""

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.file_record import FileRecord
 from app.schemas.file import FileResponse as FileResponseSchema
@@ -17,7 +18,8 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 @router.post("/upload", response_model=FileResponseSchema, status_code=201)
 async def upload_file(
     file: UploadFile = FastAPIFile(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a file and create a file record."""
@@ -41,7 +43,7 @@ async def upload_file(
 @router.get("/{file_id}", response_model=FileResponseSchema)
 async def get_file_metadata(
     file_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get file metadata by ID."""
@@ -61,7 +63,7 @@ async def get_file_metadata(
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Download a file by ID."""
@@ -86,7 +88,8 @@ async def download_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a file and its record."""

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.services.evaluators.adversarial_config import (
     AdversarialConfig, get_default_config,
     load_config_from_db, save_config_to_db,
@@ -16,14 +17,21 @@ router = APIRouter(prefix="/api/adversarial-config", tags=["adversarial-config"]
 
 
 @router.get("")
-async def get_config(auth: AuthContext = Depends(get_auth_context)):
+async def get_config(
+    auth: AuthContext = require_permission('settings:edit'),
+    _app_check: AuthContext = require_app_access(),
+):
     """Return current adversarial config for this user (from DB or built-in default)."""
     config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()
 
 
 @router.put("")
-async def update_config(body: dict, auth: AuthContext = Depends(get_auth_context)):
+async def update_config(
+    body: dict,
+    auth: AuthContext = require_permission('settings:edit'),
+    _app_check: AuthContext = require_app_access(),
+):
     """Validate and save adversarial config for this user. Returns validated config or 422."""
     try:
         config = AdversarialConfig.model_validate(body)
@@ -35,7 +43,10 @@ async def update_config(body: dict, auth: AuthContext = Depends(get_auth_context
 
 
 @router.post("/reset")
-async def reset_config(auth: AuthContext = Depends(get_auth_context)):
+async def reset_config(
+    auth: AuthContext = require_permission('settings:edit'),
+    _app_check: AuthContext = require_app_access(),
+):
     """Restore built-in default config for this user."""
     config = get_default_config()
     await save_config_to_db(config, tenant_id=auth.tenant_id, user_id=auth.user_id)
@@ -43,7 +54,10 @@ async def reset_config(auth: AuthContext = Depends(get_auth_context)):
 
 
 @router.get("/export")
-async def export_config(auth: AuthContext = Depends(get_auth_context)):
+async def export_config(
+    auth: AuthContext = require_permission('eval:export'),
+    _app_check: AuthContext = require_app_access(),
+):
     """Export current config as downloadable JSON."""
     config = await load_config_from_db(tenant_id=auth.tenant_id, user_id=auth.user_id)
     return JSONResponse(
@@ -53,7 +67,11 @@ async def export_config(auth: AuthContext = Depends(get_auth_context)):
 
 
 @router.post("/import")
-async def import_config(body: dict, auth: AuthContext = Depends(get_auth_context)):
+async def import_config(
+    body: dict,
+    auth: AuthContext = require_permission('settings:edit'),
+    _app_check: AuthContext = require_app_access(),
+):
     """Validate and replace config from imported JSON."""
     try:
         config = AdversarialConfig.model_validate(body)

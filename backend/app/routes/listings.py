@@ -5,6 +5,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.listing import Listing
 from app.models.file_record import FileRecord
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/api/listings", tags=["listings"])
 @router.get("", response_model=list[ListingResponse])
 async def list_listings(
     app_id: str = Query(..., description="App ID filter (required)"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List all listings for an app, sorted by updated_at DESC."""
@@ -36,7 +37,7 @@ async def list_listings(
 async def search_listings(
     app_id: str = Query(...),
     q: str = Query("", description="Search query for title"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Search listings by title."""
@@ -57,7 +58,7 @@ async def search_listings(
 async def get_listing(
     listing_id: UUID,
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single listing by ID."""
@@ -78,7 +79,8 @@ async def get_listing(
 @router.post("", response_model=ListingResponse, status_code=201)
 async def create_listing(
     body: ListingCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('listing:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new listing."""
@@ -97,7 +99,8 @@ async def create_listing(
 async def update_listing(
     listing_id: UUID,
     body: ListingUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('listing:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a listing. Only provided fields are updated."""
@@ -138,7 +141,8 @@ async def update_listing(
 async def delete_listing(
     listing_id: UUID,
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('listing:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a listing. ORM cascade deletes eval_runs → api_logs/threads/adversarial.

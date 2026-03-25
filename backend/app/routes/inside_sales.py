@@ -9,6 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth.context import AuthContext, get_auth_context
+
+
+async def require_inside_sales_access(
+    auth: AuthContext = Depends(require_inside_sales_access),
+) -> AuthContext:
+    """Require access to the inside-sales app."""
+    if auth.is_owner:
+        return auth
+    if "inside-sales" not in auth.app_access:
+        raise HTTPException(403, "No access to app: inside-sales")
+    return auth
 from app.models.eval_run import ThreadEvaluation, EvalRun
 from app.database import get_db
 from app.schemas.inside_sales import (
@@ -28,7 +39,7 @@ router = APIRouter(prefix="/api/inside-sales", tags=["inside-sales"])
 async def list_agents(
     date_from: str = Query(..., description="Start date YYYY-MM-DD HH:MM:SS"),
     date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(require_inside_sales_access),
 ):
     """Return sorted unique agent names for the given date range."""
     result = await fetch_call_activities(
@@ -56,7 +67,7 @@ async def list_calls(
     direction: str | None = Query(None),
     status: str | None = Query(None),
     event_codes: str | None = Query(None, description="Comma-separated event codes"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch call activities from LSQ. Activity-only — no lead hydration."""
@@ -140,7 +151,7 @@ async def list_calls(
 async def get_lead(
     prospect_id: str,
     refresh: bool = Query(False, description="Force re-fetch from LSQ"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch lead details by prospect ID. Cached in DB after first fetch.
@@ -217,7 +228,7 @@ async def list_leads(
     mql_min: int | None = Query(None, ge=0, le=5, description="Minimum MQL score"),
     condition: str | None = Query(None, description="Comma-separated condition values"),
     city: str | None = Query(None, description="City substring filter"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch leads from LSQ by CreatedOn range with MQL scoring."""
@@ -295,7 +306,7 @@ async def list_leads(
 @router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)
 async def get_lead_detail(
     prospect_id: str,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
 ):
     """Full lead drilldown: profile + call history + eval history."""

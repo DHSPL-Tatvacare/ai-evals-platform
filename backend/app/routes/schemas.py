@@ -8,6 +8,7 @@ from sqlalchemy import select, func, desc, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.listing import Listing
@@ -24,7 +25,7 @@ async def list_schemas(
     app_id: str = Query(...),
     prompt_type: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List user's schemas + system defaults for an app."""
@@ -50,7 +51,7 @@ async def list_schemas(
 @router.get("/{schema_id}", response_model=SchemaResponse)
 async def get_schema(
     schema_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single schema by ID (own or system)."""
@@ -72,7 +73,8 @@ async def get_schema(
 @router.post("", response_model=SchemaResponse, status_code=201)
 async def create_schema(
     body: SchemaCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new schema with auto-incremented version."""
@@ -103,7 +105,8 @@ async def create_schema(
 async def update_schema(
     schema_id: int,
     body: SchemaUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a schema. Cannot edit system schemas."""
@@ -130,7 +133,8 @@ async def update_schema(
 @router.delete("/{schema_id}")
 async def delete_schema(
     schema_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a schema. Cannot delete system schemas."""
@@ -201,7 +205,8 @@ class SyncSchemaRequest(BaseModel):
 @router.post("/sync-from-listing")
 async def sync_schema_from_listing(
     body: SyncSchemaRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate JSON Schema from a listing's api_response and update the default API transcription schema."""

@@ -6,6 +6,7 @@ from sqlalchemy import select, func, desc, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.prompt import Prompt
@@ -19,7 +20,7 @@ async def list_prompts(
     app_id: str = Query(...),
     prompt_type: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List user's prompts + system defaults for an app."""
@@ -45,7 +46,7 @@ async def list_prompts(
 @router.get("/{prompt_id}", response_model=PromptResponse)
 async def get_prompt(
     prompt_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single prompt by ID (own or system)."""
@@ -67,7 +68,8 @@ async def get_prompt(
 @router.post("", response_model=PromptResponse, status_code=201)
 async def create_prompt(
     body: PromptCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new prompt with auto-incremented version."""
@@ -98,7 +100,8 @@ async def create_prompt(
 async def update_prompt(
     prompt_id: int,
     body: PromptUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a prompt. Cannot edit system prompts."""
@@ -125,7 +128,8 @@ async def update_prompt(
 @router.delete("/{prompt_id}")
 async def delete_prompt(
     prompt_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a prompt. Cannot delete system prompts."""

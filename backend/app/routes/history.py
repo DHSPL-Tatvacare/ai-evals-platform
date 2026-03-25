@@ -8,6 +8,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.history import History
 from app.schemas.history import HistoryCreate, HistoryUpdate, HistoryResponse
@@ -24,7 +25,7 @@ async def query_history(
     source_id: str = Query(None),
     limit: int = Query(50),
     offset: int = Query(0),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Query history with multiple optional filters and pagination."""
@@ -56,7 +57,7 @@ async def query_history(
 @router.get("/{history_id}", response_model=HistoryResponse)
 async def get_history(
     history_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single history record by ID."""
@@ -76,7 +77,8 @@ async def get_history(
 @router.post("", response_model=HistoryResponse, status_code=201)
 async def create_history(
     body: HistoryCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new history record."""
@@ -95,7 +97,8 @@ async def create_history(
 async def update_history(
     history_id: UUID,
     body: HistoryUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a history record. Only provided fields are updated."""
@@ -122,7 +125,8 @@ async def update_history(
 @router.delete("/{history_id}")
 async def delete_history(
     history_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a history record."""

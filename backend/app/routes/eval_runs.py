@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
 from app.models.listing import Listing
@@ -32,7 +33,7 @@ async def list_eval_runs(
     command: Optional[str] = Query(None, description="Legacy filter — maps to eval_type"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Unified list with filters, scoped to current user."""
@@ -91,7 +92,7 @@ class CsvPreviewResponse(CamelModel):
 @router.post("/preview", response_model=CsvPreviewResponse)
 async def preview_csv(
     file: UploadFile = File(...),
-    _auth: AuthContext = Depends(get_auth_context),
+    _auth: AuthContext = require_app_access(),
 ):
     """Parse an uploaded CSV and return statistics without persisting anything."""
     from app.services.evaluators.data_loader import DataLoader
@@ -128,7 +129,8 @@ async def preview_csv(
 @router.get("/stats/summary")
 async def get_summary_stats(
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('analytics:view'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Stats across evaluation runs, scoped to current user."""
@@ -240,7 +242,8 @@ async def get_summary_stats(
 async def get_trends(
     days: int = Query(30, ge=1, le=365),
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('analytics:view'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate correctness verdicts by day for trend charts, scoped to current user."""
@@ -283,7 +286,8 @@ async def list_all_logs(
     app_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('analytics:view'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List API logs scoped to current user's runs."""
@@ -335,7 +339,8 @@ async def list_all_logs(
 async def delete_logs(
     run_id: Optional[str] = Query(None),
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('eval:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete API logs scoped to current user's runs."""
@@ -364,7 +369,7 @@ async def delete_logs(
 async def upsert_human_review(
     ai_run_id: UUID,
     req: HumanReviewUpsert,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert a human review linked to an AI evaluation run."""
@@ -449,7 +454,7 @@ async def upsert_human_review(
 @router.get("/{ai_run_id}/human-review")
 async def get_human_review(
     ai_run_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch the human review linked to an AI eval run. Returns null if none exists."""
@@ -486,7 +491,7 @@ async def get_human_review(
 @router.get("/{run_id}")
 async def get_eval_run(
     run_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     run = await db.scalar(
@@ -504,7 +509,8 @@ async def get_eval_run(
 @router.delete("/{run_id}")
 async def delete_eval_run(
     run_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('eval:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an eval run and all its cascaded data."""
@@ -542,7 +548,7 @@ async def delete_eval_run(
 @router.get("/{run_id}/threads")
 async def get_run_threads(
     run_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     # Verify run ownership
@@ -566,7 +572,7 @@ async def get_run_threads(
 @router.get("/{run_id}/adversarial")
 async def get_run_adversarial(
     run_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     # Verify run ownership
@@ -592,7 +598,7 @@ async def get_run_logs(
     run_id: UUID,
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     # Verify run ownership
@@ -618,7 +624,7 @@ async def get_run_logs(
 @threads_router.get("/{thread_id}/history")
 async def get_thread_history(
     thread_id: str,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all evaluation results for a specific thread across user's runs."""

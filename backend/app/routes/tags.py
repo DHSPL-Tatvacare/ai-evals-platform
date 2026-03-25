@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.tag import Tag
 from app.schemas.tag import TagCreate, TagUpdate, TagResponse
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/api/tags", tags=["tags"])
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List all tags for an app."""
@@ -33,7 +34,7 @@ async def list_tags(
 @router.get("/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single tag by ID."""
@@ -53,7 +54,8 @@ async def get_tag(
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     body: TagCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new tag or increment count if it already exists."""
@@ -89,7 +91,8 @@ async def create_tag(
 async def update_tag(
     tag_id: int,
     body: TagUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a tag. Only provided fields are updated."""
@@ -116,7 +119,8 @@ async def update_tag(
 @router.delete("/{tag_id}")
 async def delete_tag(
     tag_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a tag."""
@@ -139,7 +143,8 @@ async def delete_tag(
 @router.post("/{tag_id}/increment", response_model=TagResponse)
 async def increment_tag_count(
     tag_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Increment tag usage count."""
@@ -164,7 +169,8 @@ async def increment_tag_count(
 @router.post("/{tag_id}/decrement", response_model=TagResponse)
 async def decrement_tag_count(
     tag_id: int,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Decrement tag usage count."""

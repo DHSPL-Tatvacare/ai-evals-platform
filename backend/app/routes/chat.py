@@ -7,6 +7,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.chat import ChatSession, ChatMessage
 from app.schemas.chat import (
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List all chat sessions for an app."""
@@ -50,7 +51,7 @@ async def list_sessions(
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single chat session by ID."""
@@ -70,7 +71,8 @@ async def get_session(
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(
     body: SessionCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new chat session."""
@@ -89,7 +91,8 @@ async def create_session(
 async def update_session(
     session_id: UUID,
     body: SessionUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a chat session. Only provided fields are updated."""
@@ -116,7 +119,8 @@ async def update_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a chat session. Messages are cascade deleted by DB."""
@@ -141,7 +145,7 @@ async def delete_session(
 @router.put("/messages/tags/rename")
 async def rename_tag_in_all_messages(
     body: TagRenameRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Rename a tag across all messages owned by this user."""
@@ -167,7 +171,7 @@ async def rename_tag_in_all_messages(
 @router.post("/messages/tags/delete")
 async def delete_tag_from_all_messages(
     body: TagDeleteRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a tag from all messages owned by this user."""
@@ -193,7 +197,7 @@ async def delete_tag_from_all_messages(
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse])
 async def list_messages(
     session_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List all messages in a chat session (verify session ownership first)."""
@@ -219,7 +223,7 @@ async def list_messages(
 @router.get("/messages/{message_id}", response_model=MessageResponse)
 async def get_message(
     message_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single message by ID."""
@@ -239,7 +243,8 @@ async def get_message(
 @router.post("/messages", response_model=MessageResponse, status_code=201)
 async def create_message(
     body: MessageCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new chat message (verify session ownership first)."""
@@ -269,7 +274,8 @@ async def create_message(
 async def update_message(
     message_id: UUID,
     body: MessageUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a chat message. Only provided fields are updated."""
@@ -296,7 +302,8 @@ async def update_message(
 @router.delete("/messages/{message_id}")
 async def delete_message(
     message_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a chat message."""

@@ -5,6 +5,7 @@ from sqlalchemy import select, desc, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission, require_app_access
 from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.evaluator import Evaluator
@@ -37,7 +38,7 @@ def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
 async def list_evaluators(
     app_id: str = Query(...),
     listing_id: str = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List evaluators for an app — user's own + system globals."""
@@ -62,7 +63,7 @@ async def list_evaluators(
 @router.get("/registry", response_model=list[EvaluatorResponse])
 async def list_registry(
     app_id: str = Query(...),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List all global evaluators (the registry) for an app — system + user's globals."""
@@ -92,7 +93,7 @@ async def list_registry(
 async def list_variables(
     app_id: str = Query(..., alias="appId"),
     source_type: str | None = Query(None, alias="sourceType"),
-    _auth: AuthContext = Depends(get_auth_context),
+    _auth: AuthContext = require_app_access(),
 ):
     """List available template variables for custom evaluator prompts."""
     from app.services.evaluators.variable_registry import get_registry
@@ -118,7 +119,7 @@ async def validate_prompt(
     app_id: str = Query(..., alias="appId"),
     source_type: str | None = Query(None, alias="sourceType"),
     body: dict = Body(...),
-    _auth: AuthContext = Depends(get_auth_context),
+    _auth: AuthContext = require_app_access(),
 ):
     """Validate template variables in a prompt against the registry."""
     prompt = body.get("prompt", "")
@@ -132,7 +133,8 @@ async def validate_prompt(
 async def seed_defaults(
     app_id: str = Query(..., alias="appId"),
     listing_id: str | None = Query(None, alias="listingId"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create recommended evaluators for an app.
@@ -305,7 +307,7 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
 @router.get("/variables/api-paths")
 async def list_api_paths(
     listing_id: str = Query(..., alias="listingId"),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract available variable paths from a listing's API response."""
@@ -327,7 +329,7 @@ async def list_api_paths(
 @router.get("/{evaluator_id}", response_model=EvaluatorResponse)
 async def get_evaluator(
     evaluator_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single evaluator by ID (own or system)."""
@@ -349,7 +351,8 @@ async def get_evaluator(
 @router.post("", response_model=EvaluatorResponse, status_code=201)
 async def create_evaluator(
     body: EvaluatorCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new evaluator."""
@@ -368,7 +371,8 @@ async def create_evaluator(
 async def update_evaluator(
     evaluator_id: UUID,
     body: EvaluatorUpdate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an evaluator. Cannot edit system evaluators."""
@@ -395,7 +399,8 @@ async def update_evaluator(
 @router.delete("/{evaluator_id}")
 async def delete_evaluator(
     evaluator_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:delete'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an evaluator. Cannot delete system evaluators."""
@@ -419,7 +424,8 @@ async def delete_evaluator(
 async def fork_evaluator(
     evaluator_id: UUID,
     listing_id: str = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Fork an evaluator. Source can be system or own; fork belongs to current user."""
@@ -459,7 +465,8 @@ async def fork_evaluator(
 async def set_global(
     evaluator_id: UUID,
     body: EvaluatorSetGlobal,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Set the is_global flag on an evaluator (own only)."""
