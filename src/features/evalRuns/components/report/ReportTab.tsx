@@ -255,7 +255,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
   // ── Loading: checking for cached report ──
   if (status === 'loading') {
     return (
-      <div className="min-h-full flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <Loader2 className="h-5 w-5 text-[var(--text-muted)] animate-spin" />
       </div>
     );
@@ -264,7 +264,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
   // ── Idle: no report generated yet ──
   if (status === 'idle') {
     return (
-      <div className="min-h-full flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <div className="max-w-[500px] w-full px-4">
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6 space-y-5">
             {/* Header */}
@@ -319,7 +319,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
   // ── Generating: first-time load ──
   if (status === 'generating' && !report) {
     return (
-      <div className="min-h-full flex items-center justify-center px-4">
+      <div className="min-h-[60vh] flex items-center justify-center px-4">
         {inProgressCard('Generating report...')}
       </div>
     );
@@ -328,7 +328,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
   // ── Error: no report to show ──
   if (status === 'error' && !report) {
     return (
-      <div className="min-h-full flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <div className="max-w-[900px] w-full px-4">
           <EmptyState
             icon={FileBarChart}

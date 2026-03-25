@@ -300,7 +300,7 @@ async def export_report_pdf(
     )
 
 
-@router.get("/{run_id}", response_model=ReportPayload)
+@router.get("/{run_id}")
 async def get_report(
     run_id: str,
     refresh: bool = Query(False, description="Force regeneration, bypassing cache"),
@@ -313,8 +313,7 @@ async def get_report(
 ):
     """Generate an evaluation report for a completed run.
 
-    Returns the full ReportPayload with metrics, distributions,
-    rule compliance, exemplars, and AI narrative. Results are cached
+    Returns the report payload (shape varies by app_id). Results are cached
     after first generation; use ?refresh=true to force regeneration.
     Use ?cache_only=true to check for cached data without triggering generation.
     """
@@ -330,24 +329,27 @@ async def get_report(
         raise HTTPException(status_code=404, detail="Evaluation run not found")
 
     if cache_only:
-        # Load from evaluation_analytics instead of EvalRun.report_cache
         cache_result = await db.execute(
             select(EvaluationAnalytics.analytics_data)
             .where(
                 EvaluationAnalytics.scope == "single_run",
                 EvaluationAnalytics.run_id == UUID(run_id),
+                EvaluationAnalytics.tenant_id == auth.tenant_id,
             )
         )
         cached_data = cache_result.scalar_one_or_none()
         if not cached_data:
             raise HTTPException(status_code=404, detail="No cached report")
-        try:
-            payload = ReportPayload.model_validate(cached_data)
-            return payload
-        except Exception:
-            raise HTTPException(status_code=404, detail="No cached report")
+        # Return raw dict — shape varies by app (ReportPayload vs InsideSalesReportPayload)
+        return cached_data
 
-    service = ReportService(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
+    # Dispatch to app-specific service
+    if run.app_id == "inside-sales":
+        from app.services.reports.inside_sales_report_service import InsideSalesReportService
+        service = InsideSalesReportService(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
+    else:
+        service = ReportService(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
+
     try:
         return await service.generate(
             run_id,
