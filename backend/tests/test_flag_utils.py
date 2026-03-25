@@ -1,15 +1,19 @@
 # backend/tests/test_flag_utils.py
-"""Tests for flag aggregation utilities."""
+"""Tests for flag aggregation utilities.
+
+Uses importlib to load flag_utils directly — the reports/__init__.py
+imports ReportService which pulls in the full DB chain (asyncpg required).
+flag_utils has zero dependencies so direct loading is safe.
+"""
 
 import importlib.util
 import os
 
-# Load flag_utils directly to avoid triggering app/services/reports/__init__.py
-# which pulls in ReportService → SQLAlchemy models → DB init
-_spec = importlib.util.spec_from_file_location(
-    "flag_utils",
-    os.path.join(os.path.dirname(__file__), "..", "app", "services", "reports", "flag_utils.py"),
+_path = os.path.join(
+    os.path.dirname(__file__), '..', 'app', 'services', 'reports', 'flag_utils.py',
 )
+_spec = importlib.util.spec_from_file_location('flag_utils', _path)
+assert _spec and _spec.loader
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
