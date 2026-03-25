@@ -29,6 +29,7 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
 
   // Load agent list for the current date range
   useEffect(() => {
+    if (activeTab === 'leads') return;
     const params = new URLSearchParams({
       date_from: filters.dateFrom,
       date_to: filters.dateTo,
@@ -36,7 +37,7 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
     apiRequest<{ agents: string[] }>(`/api/inside-sales/agents?${params.toString()}`)
       .then((data) => setAgentOptions(data.agents.map((a) => ({ value: a, label: a }))))
       .catch(() => {});
-  }, [filters.dateFrom, filters.dateTo]);
+  }, [filters.dateFrom, filters.dateTo, activeTab]);
 
   const handleApply = () => {
     onClose();

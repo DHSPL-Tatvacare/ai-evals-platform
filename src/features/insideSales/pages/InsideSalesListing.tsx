@@ -81,7 +81,7 @@ function LeadsTableContent() {
   const leadsError = useLeadsStore((s) => s.leadsError);
   const leadFilters = useLeadsStore((s) => s.leadFilters);
 
-  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadsPage}`;
+  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city}|${leadsPage}`;
 
   useEffect(() => {
     useLeadsStore.getState().loadLeads();
