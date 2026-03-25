@@ -6,22 +6,15 @@ Phase 3: AI narrative generation via LLM.
 """
 
 import logging
-import uuid
-from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy.orm import load_only
 
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
-from app.models.evaluation_analytics import EvaluationAnalytics
 from app.models.evaluator import Evaluator
-from app.services.evaluators.llm_base import create_llm_provider, LoggingLLMWrapper
-from app.services.evaluators.runner_utils import save_api_log
-from app.services.evaluators.settings_helper import get_llm_settings_from_db
 
 from .aggregator import AdversarialAggregator, ReportAggregator
+from .base_report_service import BaseReportService
 from .custom_evaluations.aggregator import CustomEvaluationsAggregator
 from .custom_evaluations.narrator import CustomEvalNarrator
 from .custom_evaluations.schemas import CustomEvaluationsReport
@@ -39,18 +32,13 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
-class ReportService:
+class ReportService(BaseReportService):
     """Stateless per-request report generator.
 
     Usage:
         service = ReportService(db_session)
         payload = await service.generate(run_id)
     """
-
-    def __init__(self, db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID):
-        self.db = db
-        self.tenant_id = tenant_id
-        self.user_id = user_id
 
     async def generate(
         self,
@@ -176,7 +164,7 @@ class ReportService:
         )
 
         # Cache for future requests
-        await self._save_cache(run_id, run.app_id, payload)
+        await self._save_cache(run_id, run.app_id, payload.model_dump())
 
         return payload
 
@@ -199,36 +187,11 @@ class ReportService:
     ) -> tuple[NarrativeOutput | None, str | None]:
         """Call LLM for narrative. Returns (narrative, model_used) tuple."""
         try:
-            settings = await get_llm_settings_from_db(
-                tenant_id=self.tenant_id, user_id=self.user_id,
-                auth_intent="managed_job",
-                provider_override=llm_provider or None,
+            llm, effective_model = await self._create_llm_provider(
+                run, "report_narrative", llm_provider, llm_model,
             )
-
-            # Override with user-selected provider/model if provided
-            effective_provider = llm_provider or settings["provider"]
-            effective_model = llm_model or settings["selected_model"]
-
-            if not effective_model:
-                logger.warning("Narrative generation skipped: no model specified")
+            if not llm:
                 return None, None
-
-            factory_kwargs = {}
-            if effective_provider == "azure_openai":
-                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
-                factory_kwargs["api_version"] = settings.get("api_version", "")
-
-            provider = create_llm_provider(
-                provider=effective_provider,
-                api_key=settings["api_key"],
-                model_name=effective_model,
-                service_account_path=settings.get("service_account_path", ""),
-                **factory_kwargs,
-            )
-
-            # Wrap with logging for API log visibility
-            llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
-            llm.set_context(run_id=str(run.id), thread_id="report_narrative")
 
             narrator = ReportNarrator(llm)
             result = await narrator.generate(
@@ -292,92 +255,6 @@ class ReportService:
                     "Could not reconcile exemplar ID %r with known IDs",
                     ea.thread_id,
                 )
-
-    # --- Cache persistence ---
-
-    async def _load_cache(self, run_id: str, app_id: str) -> dict | None:
-        """Load cached report from evaluation_analytics table."""
-        try:
-            result = await self.db.execute(
-                select(EvaluationAnalytics.analytics_data)
-                .where(
-                    EvaluationAnalytics.scope == "single_run",
-                    EvaluationAnalytics.run_id == UUID(run_id),
-                    EvaluationAnalytics.app_id == app_id,
-                )
-            )
-            row = result.scalar_one_or_none()
-            return row if row else None
-        except Exception as e:
-            logger.warning("Failed to load cache for run %s: %s", run_id, e)
-            return None
-
-    async def _save_cache(self, run_id: str, app_id: str, payload: ReportPayload) -> None:
-        """Persist report payload to evaluation_analytics table."""
-        try:
-            from datetime import datetime, timezone
-            data = payload.model_dump()
-            now = datetime.now(timezone.utc)
-
-            # Check for existing row
-            result = await self.db.execute(
-                select(EvaluationAnalytics)
-                .where(
-                    EvaluationAnalytics.scope == "single_run",
-                    EvaluationAnalytics.run_id == UUID(run_id),
-                    EvaluationAnalytics.app_id == app_id,
-                )
-            )
-            existing = result.scalar_one_or_none()
-
-            if existing:
-                existing.analytics_data = data
-                existing.computed_at = now
-            else:
-                row = EvaluationAnalytics(
-                    tenant_id=self.tenant_id,
-                    app_id=app_id,
-                    scope="single_run",
-                    run_id=UUID(run_id),
-                    analytics_data=data,
-                    computed_at=now,
-                )
-                self.db.add(row)
-
-            await self.db.commit()
-        except Exception as e:
-            logger.warning("Failed to cache report for run %s: %s", run_id, e)
-
-    # --- Data loading ---
-
-    async def _load_run(self, run_id: str) -> EvalRun:
-        """Load EvalRun or raise ValueError (caught as 404 by route)."""
-        run = await self.db.scalar(
-            select(EvalRun).where(
-                EvalRun.id == UUID(run_id),
-                EvalRun.tenant_id == self.tenant_id,
-                EvalRun.user_id == self.user_id,
-            )
-        )
-        if not run:
-            raise ValueError(f"Eval run not found: {run_id}")
-        return run
-
-    async def _load_threads(self, run_id: str) -> list[ThreadEvaluation]:
-        """Load all ThreadEvaluation rows for a run."""
-        result = await self.db.execute(
-            select(ThreadEvaluation)
-            .where(ThreadEvaluation.run_id == UUID(run_id))
-        )
-        return list(result.scalars().all())
-
-    async def _load_adversarial(self, run_id: str) -> list[AdversarialEvaluation]:
-        """Load all AdversarialEvaluation rows for a run."""
-        result = await self.db.execute(
-            select(AdversarialEvaluation)
-            .where(AdversarialEvaluation.run_id == UUID(run_id))
-        )
-        return list(result.scalars().all())
 
     # --- Metadata ---
 
@@ -479,33 +356,11 @@ class ReportService:
     ) -> CustomEvaluationsReport:
         """Generate AI narrative for custom eval report. Returns report with narrative attached."""
         try:
-            settings = await get_llm_settings_from_db(
-                tenant_id=self.tenant_id, user_id=self.user_id,
-                auth_intent="managed_job",
-                provider_override=llm_provider or None,
+            llm, effective_model = await self._create_llm_provider(
+                run, "custom_eval_narrative", llm_provider, llm_model,
             )
-
-            effective_provider = llm_provider or settings["provider"]
-            effective_model = llm_model or settings["selected_model"]
-
-            if not effective_model:
+            if not llm:
                 return report
-
-            factory_kwargs = {}
-            if effective_provider == "azure_openai":
-                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
-                factory_kwargs["api_version"] = settings.get("api_version", "")
-
-            provider = create_llm_provider(
-                provider=effective_provider,
-                api_key=settings["api_key"],
-                model_name=effective_model,
-                service_account_path=settings.get("service_account_path", ""),
-                **factory_kwargs,
-            )
-
-            llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
-            llm.set_context(run_id=str(run.id), thread_id="custom_eval_narrative")
 
             # Collect text/array samples for narrative context
             text_samples: dict[str, dict[str, list[str]]] = {}

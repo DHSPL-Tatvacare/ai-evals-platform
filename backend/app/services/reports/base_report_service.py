@@ -1,0 +1,151 @@
+"""Base report service with shared cache, data loading, and LLM setup."""
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
+from app.models.evaluation_analytics import EvaluationAnalytics
+from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
+from app.services.evaluators.runner_utils import save_api_log
+from app.services.evaluators.settings_helper import get_llm_settings_from_db
+
+logger = logging.getLogger(__name__)
+
+
+class BaseReportService:
+    """Shared plumbing for report generation services.
+
+    Subclasses implement `generate()` with app-specific aggregation and narration.
+    """
+
+    def __init__(self, db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID):
+        self.db = db
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+
+    # --- Data loading ---
+
+    async def _load_run(self, run_id: str) -> EvalRun:
+        run = await self.db.scalar(
+            select(EvalRun).where(
+                EvalRun.id == UUID(run_id),
+                EvalRun.tenant_id == self.tenant_id,
+                EvalRun.user_id == self.user_id,
+            )
+        )
+        if not run:
+            raise ValueError(f"Eval run not found: {run_id}")
+        return run
+
+    async def _load_threads(self, run_id: str) -> list[ThreadEvaluation]:
+        result = await self.db.execute(
+            select(ThreadEvaluation).where(ThreadEvaluation.run_id == UUID(run_id))
+        )
+        return list(result.scalars().all())
+
+    async def _load_adversarial(self, run_id: str) -> list[AdversarialEvaluation]:
+        result = await self.db.execute(
+            select(AdversarialEvaluation).where(
+                AdversarialEvaluation.run_id == UUID(run_id)
+            )
+        )
+        return list(result.scalars().all())
+
+    # --- Cache ---
+
+    async def _load_cache(self, run_id: str, app_id: str) -> dict | None:
+        try:
+            result = await self.db.execute(
+                select(EvaluationAnalytics.analytics_data).where(
+                    EvaluationAnalytics.scope == "single_run",
+                    EvaluationAnalytics.run_id == UUID(run_id),
+                    EvaluationAnalytics.app_id == app_id,
+                    EvaluationAnalytics.tenant_id == self.tenant_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            return row if row else None
+        except Exception as e:
+            logger.warning("Failed to load cache for run %s: %s", run_id, e)
+            return None
+
+    async def _save_cache(self, run_id: str, app_id: str, data: dict) -> None:
+        try:
+            now = datetime.now(timezone.utc)
+
+            result = await self.db.execute(
+                select(EvaluationAnalytics).where(
+                    EvaluationAnalytics.scope == "single_run",
+                    EvaluationAnalytics.run_id == UUID(run_id),
+                    EvaluationAnalytics.app_id == app_id,
+                    EvaluationAnalytics.tenant_id == self.tenant_id,
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.analytics_data = data
+                existing.computed_at = now
+            else:
+                row = EvaluationAnalytics(
+                    tenant_id=self.tenant_id,
+                    app_id=app_id,
+                    scope="single_run",
+                    run_id=UUID(run_id),
+                    analytics_data=data,
+                    computed_at=now,
+                )
+                self.db.add(row)
+
+            await self.db.commit()
+        except Exception as e:
+            logger.warning("Failed to cache report for run %s: %s", run_id, e)
+
+    # --- LLM provider setup ---
+
+    async def _create_llm_provider(
+        self,
+        run: EvalRun,
+        thread_id: str,
+        provider_override: str | None = None,
+        model_override: str | None = None,
+    ) -> tuple[LoggingLLMWrapper, str] | tuple[None, None]:
+        try:
+            settings = await get_llm_settings_from_db(
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+                auth_intent="managed_job",
+                provider_override=provider_override or None,
+            )
+
+            effective_provider = provider_override or settings["provider"]
+            effective_model = model_override or settings["selected_model"]
+
+            if not effective_model:
+                logger.warning("LLM setup skipped: no model specified")
+                return None, None
+
+            factory_kwargs = {}
+            if effective_provider == "azure_openai":
+                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
+                factory_kwargs["api_version"] = settings.get("api_version", "")
+
+            provider = create_llm_provider(
+                provider=effective_provider,
+                api_key=settings["api_key"],
+                model_name=effective_model,
+                service_account_path=settings.get("service_account_path", ""),
+                **factory_kwargs,
+            )
+
+            llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
+            llm.set_context(run_id=str(run.id), thread_id=thread_id)
+            return llm, effective_model
+        except Exception as e:
+            logger.warning("LLM setup failed: %s", e)
+            return None, None
