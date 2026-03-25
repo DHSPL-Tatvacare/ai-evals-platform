@@ -36,7 +36,7 @@ function formatLastContact(days: number | null): { text: string; isStale: boolea
 
 const TERMINAL_STAGES = new Set(['not interested', 'converted', 'invalid / junk']);
 
-function LeadsTableContent() {
+function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
   const navigate = useNavigate();
   const leads = useLeadsStore((s) => s.leads);
   const leadsTotal = useLeadsStore((s) => s.leadsTotal);
@@ -45,8 +45,31 @@ function LeadsTableContent() {
   const leadsLoading = useLeadsStore((s) => s.leadsLoading);
   const leadsError = useLeadsStore((s) => s.leadsError);
   const leadFilters = useLeadsStore((s) => s.leadFilters);
+  const [search, setSearch] = useState('');
 
   const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city}|${leadsPage}`;
+
+  // Client-side search filter
+  const visibleLeads = useMemo(() => {
+    if (!search.trim()) return leads;
+    const q = search.toLowerCase();
+    return leads.filter(
+      (l) =>
+        [l.firstName, l.lastName].filter(Boolean).join(' ').toLowerCase().includes(q) ||
+        l.phone.includes(q)
+    );
+  }, [leads, search]);
+
+  // Active filter count (exclude date range — always set)
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (leadFilters.stage.length > 0) count++;
+    if (leadFilters.condition.length > 0) count++;
+    if (leadFilters.mqlMin) count++;
+    if (leadFilters.city) count++;
+    if (leadFilters.agents.length > 0) count++;
+    return count;
+  }, [leadFilters]);
 
   useEffect(() => {
     useLeadsStore.getState().loadLeads();
@@ -92,11 +115,78 @@ function LeadsTableContent() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Toolbar */}
       <div className="flex items-center gap-2 py-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, phone..."
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
+          />
+        </div>
+
+        <Button variant="secondary" size="sm" onClick={onOpenFilters} className="gap-1.5">
+          <Filter className="h-3.5 w-3.5" />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[10px] font-bold text-white">
+              {activeFilterCount}
+            </span>
+          )}
+        </Button>
+
+        {activeFilterCount > 0 && (
+          <button
+            onClick={() => useLeadsStore.getState().clearLeadFilters()}
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            Clear all
+          </button>
+        )}
+
         <span className="ml-auto text-xs text-[var(--text-muted)]">
           {leadsTotal} lead{leadsTotal !== 1 ? 's' : ''}
         </span>
       </div>
+
+      {/* Active filter pills */}
+      {activeFilterCount > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-2">
+          {leadFilters.stage.length > 0 && (
+            <FilterPill
+              label={`Stage: ${leadFilters.stage.length === 1 ? leadFilters.stage[0] : `${leadFilters.stage.length} stages`}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ stage: [] })}
+            />
+          )}
+          {leadFilters.condition.length > 0 && (
+            <FilterPill
+              label={`Condition: ${leadFilters.condition.length === 1 ? leadFilters.condition[0] : `${leadFilters.condition.length} conditions`}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ condition: [] })}
+            />
+          )}
+          {leadFilters.mqlMin && (
+            <FilterPill
+              label={`MQL ≥ ${leadFilters.mqlMin}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ mqlMin: '' })}
+            />
+          )}
+          {leadFilters.city && (
+            <FilterPill
+              label={`City: ${leadFilters.city}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ city: '' })}
+            />
+          )}
+          {leadFilters.agents.length > 0 && (
+            <FilterPill
+              label={`Agent: ${leadFilters.agents.length === 1 ? leadFilters.agents[0] : `${leadFilters.agents.length} agents`}`}
+              onRemove={() => useLeadsStore.getState().setLeadFilters({ agents: [] })}
+            />
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto rounded-md border border-[var(--border-default)]">
         <table className="w-full text-xs">
@@ -113,7 +203,7 @@ function LeadsTableContent() {
             </tr>
           </thead>
           <tbody>
-            {leads.map((lead) => {
+            {visibleLeads.map((lead) => {
               const frt = formatFrt(lead.frtSeconds);
               const lastContact = formatLastContact(lead.daysSinceLastContact);
               const isTerminal = TERMINAL_STAGES.has(lead.prospectStage.toLowerCase());
@@ -635,7 +725,7 @@ export function InsideSalesListing() {
       {/* Tabs */}
       <Tabs
         tabs={[
-          { id: 'leads', label: 'Leads', content: <LeadsTableContent /> },
+          { id: 'leads', label: 'Leads', content: <LeadsTableContent onOpenFilters={() => setFilterPanelOpen(true)} /> },
           { id: 'all', label: 'All Calls', content: tableContent },
         ]}
         defaultTab="leads"
