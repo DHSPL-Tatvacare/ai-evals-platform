@@ -42,7 +42,7 @@ Frontend mirrors this: `<PermissionGate>` reads from `authStore.permissions` + `
 
 #### `apps`
 
-Registers available applications. Seeded on startup.
+Registers available applications. Seeded on startup. **Global table (no tenant_id)** — all tenants see all apps. App visibility per tenant is controlled through `role_app_access`, not by hiding apps from the table. If a tenant should not use an app, the Owner simply doesn't grant any roles access to it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -53,6 +53,7 @@ Registers available applications. Seeded on startup.
 | `icon_url` | VARCHAR(255) | Path to icon asset |
 | `is_active` | BOOLEAN | Default true |
 | `created_at` | TIMESTAMPTZ | Server default now() |
+| `updated_at` | TIMESTAMPTZ | Server default now(), onupdate |
 
 #### `roles`
 
@@ -113,11 +114,31 @@ Records all RBAC and user-management changes.
 | `entity_id` | UUID | ID of affected entity |
 | `before_state` | JSONB | Nullable. State before change |
 | `after_state` | JSONB | Nullable. State after change |
+| `ip_address` | VARCHAR(45) | Request IP (IPv4/IPv6) |
+| `user_agent` | VARCHAR(500) | Request User-Agent header |
 | `created_at` | TIMESTAMPTZ | Server default now() |
 
 **Indexes:**
 - `(tenant_id, created_at DESC)` — for listing audit history
 - `(entity_type, entity_id)` — for entity-specific history
+
+**Audit log `before_state` / `after_state` shape:**
+
+```jsonc
+// Example: role.permission_added
+{ "before_state": { "permissions": ["eval:run", "listing:create"] },
+  "after_state":  { "permissions": ["eval:run", "listing:create", "eval:delete"] } }
+
+// Example: user.role_changed
+{ "before_state": { "role_id": "uuid-old", "role_name": "Viewer" },
+  "after_state":  { "role_id": "uuid-new", "role_name": "Analyst" } }
+
+// Example: role.created (no before_state)
+{ "before_state": null,
+  "after_state":  { "name": "Analyst", "permissions": [...], "app_access": [...] } }
+```
+
+Always include human-readable names alongside IDs so audit entries remain meaningful even if roles are later deleted.
 
 ### Modified Tables
 
@@ -206,7 +227,9 @@ These live in `role_permissions.permission` as `resource:action` strings.
 | `role:edit` | Edit role name, permissions, app access |
 | `role:delete` | Delete custom roles |
 
-These three are **not stored** in `role_permissions`. They are enforced by checking `role.is_system AND role.name == 'Owner'` (i.e., `is_owner` check). The role editor UI never shows these as checkboxes.
+These three are **not stored** in `role_permissions`. They are enforced by `auth.is_owner` which requires **both** `role.is_system == True AND role.name == "Owner"` (see section 5.2). The role editor UI never shows these as checkboxes.
+
+> **Safety note:** `is_owner` is never true for just `is_system == True` alone. If a future system role were added (e.g., a service account), it would NOT get Owner powers. Both conditions are always checked together.
 
 ---
 
@@ -231,24 +254,34 @@ class AuthContext:
 Replace `require_admin` / `require_owner` with:
 
 ```python
-async def get_auth_context(credentials, db) -> AuthContext:
-    """Decode JWT, load role + permissions from DB, build AuthContext."""
+async def get_auth_context(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> AuthContext:
+    """Decode JWT, load role + permissions from DB, build AuthContext.
+
+    NOTE: This now takes a db session dependency. All routes already use
+    Depends(get_db), so adding it here is compatible with existing DI chains.
+    """
     payload = decode_access_token(credentials.credentials)
     user_id = uuid.UUID(payload["sub"])
     tenant_id = uuid.UUID(payload["tid"])
     role_id = uuid.UUID(payload["rid"])
 
-    # Load role + permissions + app access in one query
-    role, permissions, app_access = await load_role_permissions(db, role_id)
+    # load_role_permissions joins:
+    #   roles → role_permissions (permission strings)
+    #   roles → role_app_access → apps (app slugs, NOT UUIDs)
+    # Returns: (Role, list[str], list[str])  — role obj, permission strings, app slugs
+    role, permissions, app_slugs = await load_role_permissions(db, role_id)
 
     return AuthContext(
         user_id=user_id,
         tenant_id=tenant_id,
         email=payload["email"],
         role_id=role_id,
-        is_owner=role.is_system,  # Only system role is Owner
+        is_owner=(role.is_system and role.name == "Owner"),  # Both checks required
         permissions=frozenset(permissions),
-        app_access=frozenset(app_access),
+        app_access=frozenset(app_slugs),   # Slugs like "voice-rx", not UUIDs
     )
 
 
@@ -265,13 +298,20 @@ def require_permission(*perms: str):
 
 
 def require_app_access(app_id_param: str = "app_id"):
-    """Dependency: require access to the app specified in query/path."""
+    """Dependency: require access to the app specified in query/path.
+
+    If the route uses this dependency, app_id MUST be present in the request.
+    Missing app_id → 400 Bad Request (not a silent pass).
+    app_access contains app SLUGS (e.g., "voice-rx"), not UUIDs.
+    """
     async def checker(request: Request, auth: AuthContext = Depends(get_auth_context)):
         if auth.is_owner:
             return auth
-        app_id = request.query_params.get(app_id_param) or request.path_params.get(app_id_param)
-        if app_id and app_id not in auth.app_access:
-            raise HTTPException(403, f"No access to app: {app_id}")
+        app_slug = request.query_params.get(app_id_param) or request.path_params.get(app_id_param)
+        if not app_slug:
+            raise HTTPException(400, f"Missing required parameter: {app_id_param}")
+        if app_slug not in auth.app_access:
+            raise HTTPException(403, f"No access to app: {app_slug}")
         return auth
     return Depends(checker)
 
@@ -304,25 +344,133 @@ def create_access_token(user_id, tenant_id, email, role_id):
 
 Every mutating route gets a `require_permission()` dependency. Read-only routes stay as `get_auth_context` but gain `require_app_access()` for app-scoped data.
 
-| Route Pattern | Current Auth | New Auth |
+**Listings**
+
+| Route | Current Auth | New Auth |
 |---|---|---|
+| `GET /api/listings` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/listings/{id}` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
 | `POST /api/listings` | `get_auth_context` | `require_permission('listing:create')` + `require_app_access()` |
+| `PUT /api/listings/{id}` | `get_auth_context` | `require_permission('listing:create')` + `require_app_access()` |
 | `DELETE /api/listings/{id}` | `get_auth_context` | `require_permission('listing:delete')` + `require_app_access()` |
-| `POST /api/jobs` | `get_auth_context` | `require_permission('eval:run')` + `require_app_access()` |
+
+**Eval Runs**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/eval-runs` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/eval-runs/{id}` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/eval-runs/{id}/threads` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/eval-runs/{id}/adversarial` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/eval-runs/stats/summary` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
+| `GET /api/eval-runs/trends` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
+| `GET /api/eval-runs/logs` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
+| `DELETE /api/eval-runs/logs` | `get_auth_context` | `require_permission('eval:delete')` + `require_app_access()` |
 | `DELETE /api/eval-runs/{id}` | `get_auth_context` | `require_permission('eval:delete')` + `require_app_access()` |
-| `POST /api/prompts` | `get_auth_context` | `require_permission('resource:create')` + `require_app_access()` |
-| `PUT /api/prompts/{id}` | `get_auth_context` | `require_permission('resource:edit')` + `require_app_access()` |
-| `DELETE /api/prompts/{id}` | `get_auth_context` | `require_permission('resource:delete')` + `require_app_access()` |
+| `PUT /api/eval-runs/{id}/human-review` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `POST /api/eval-runs/preview` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+
+**Jobs**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `POST /api/jobs` | `get_auth_context` | `require_permission('eval:run')` + `require_app_access()` |
+| `GET /api/jobs` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/jobs/{id}` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `POST /api/jobs/{id}/cancel` | `get_auth_context` | `require_permission('eval:delete')` + `require_app_access()` |
+
+**Prompts / Schemas / Evaluators** (same pattern for all three)
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/{prompts,schemas,evaluators}` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/{resource}/{id}` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `POST /api/{resource}` | `get_auth_context` | `require_permission('resource:create')` + `require_app_access()` |
+| `PUT /api/{resource}/{id}` | `get_auth_context` | `require_permission('resource:edit')` + `require_app_access()` |
+| `DELETE /api/{resource}/{id}` | `get_auth_context` | `require_permission('resource:delete')` + `require_app_access()` |
+| `POST /api/evaluators/{id}/fork` | `get_auth_context` | `require_permission('resource:create')` + `require_app_access()` |
+
+**Chat / Files / Tags / History** (same CRUD pattern)
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET` (list/detail) | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `POST` (create) | `get_auth_context` | `require_permission('resource:create')` + `require_app_access()` |
+| `PUT` (edit) | `get_auth_context` | `require_permission('resource:edit')` + `require_app_access()` |
+| `DELETE` | `get_auth_context` | `require_permission('resource:delete')` + `require_app_access()` |
+
+**Settings**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/settings` | `get_auth_context` | `get_auth_context` |
 | `PUT /api/settings` | `get_auth_context` | `require_permission('settings:edit')` |
+| `DELETE /api/settings` | `get_auth_context` | `require_permission('settings:edit')` |
+
+**Reports**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/reports/{id}` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
+| `GET /api/reports/{id}/export-pdf` | `get_auth_context` | `require_permission('eval:export')` + `require_app_access()` |
+| `GET /api/reports/cross-run-analytics` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
+| `POST /api/reports/cross-run-analytics/refresh` | `get_auth_context` | `require_permission('report:generate')` + `require_app_access()` |
+| `POST /api/reports/cross-run-ai-summary` | `get_auth_context` | `require_permission('report:generate')` + `require_app_access()` |
+
+**Adversarial Config**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/adversarial-config` | `get_auth_context` | `require_permission('settings:edit')` + `require_app_access()` |
+| `PUT /api/adversarial-config` | `get_auth_context` | `require_permission('settings:edit')` + `require_app_access()` |
+| `POST /api/adversarial-config/reset` | `get_auth_context` | `require_permission('settings:edit')` + `require_app_access()` |
+| `GET /api/adversarial-config/export` | `get_auth_context` | `require_permission('eval:export')` + `require_app_access()` |
+| `POST /api/adversarial-config/import` | `get_auth_context` | `require_permission('settings:edit')` + `require_app_access()` |
+
+**Inside Sales**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/inside-sales/*` | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+
+**LLM**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/llm/*` | `get_auth_context` | `get_auth_context` (no app scope — LLM config is global) |
+
+**Admin — User Management**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/admin/stats` | `require_admin` | `require_permission('analytics:view')` |
+| `POST /api/admin/erase` | `require_owner` | `require_owner` (unchanged — Owner-only, destructive) |
+| `GET /api/admin/users` | `require_admin` | `require_permission('user:edit')` |
 | `POST /api/admin/users` | `require_admin` | `require_permission('user:create')` |
-| `PATCH /api/admin/users/{id}` | `require_admin` | `require_permission('user:edit')` |
+| `PATCH /api/admin/users/{id}` | `require_admin` | see note below on `role:assign` vs `user:edit` |
+| `PUT /api/admin/users/{id}/password` | `require_admin` | `require_permission('user:reset_password')` |
 | `DELETE /api/admin/users/{id}` | `require_owner` | `require_permission('user:deactivate')` |
 | `POST /api/admin/invite-links` | `require_admin` | `require_permission('user:invite')` |
-| `PATCH /api/admin/tenant` | `require_owner` | `require_owner` (unchanged — Owner-only) |
-| `PATCH /api/admin/tenant-config` | `require_owner` | `require_owner` (unchanged — Owner-only) |
-| `POST /api/reports/{id}/...` | `get_auth_context` | `require_permission('report:generate')` + `require_app_access()` |
-| `GET /api/eval-runs/stats/*` | `get_auth_context` | `require_permission('analytics:view')` + `require_app_access()` |
-| All read-only GET routes | `get_auth_context` | `get_auth_context` + `require_app_access()` |
+| `GET /api/admin/invite-links` | `require_admin` | `require_permission('user:invite')` |
+| `DELETE /api/admin/invite-links/{id}` | `require_admin` | `require_permission('user:invite')` |
+
+**Admin — Tenant**
+
+| Route | Current Auth | New Auth |
+|---|---|---|
+| `GET /api/admin/tenant` | `require_owner` | `require_owner` |
+| `PATCH /api/admin/tenant` | `require_owner` | `require_owner` |
+| `GET /api/admin/tenant-config` | `require_owner` | `require_owner` |
+| `PATCH /api/admin/tenant-config` | `require_owner` | `require_owner` |
+
+**`PATCH /api/admin/users/{id}` — dual permission check:**
+
+This route handles both user profile edits (name, is_active) and role assignment (role_id). The backend must check permissions based on what's in the request body:
+- If request contains `roleId` → require `role:assign`
+- If request contains `displayName` or `isActive` → require `user:edit`
+- If request contains both → require both permissions
+
+> **Note on `analytics:view`:** This permission gates aggregate/statistical endpoints (stats summary, trends, cross-run analytics, report payloads) — NOT individual record reads. A user without `analytics:view` can still list and view individual eval runs, listings, etc. They just can't see dashboards, trends, or generated reports.
 
 ### 5.5 New Admin Routes for RBAC
 
@@ -659,10 +807,12 @@ Since there are no production users:
 
 ## 11. Open Considerations
 
-1. **Permission caching**: DB lookup per request (Option 9A). If performance becomes an issue later, add in-memory TTL cache keyed by `role_id` (not `user_id`) — since many users share a role, this is more cache-efficient.
+1. **Permission caching**: DB lookup per request. If performance becomes an issue later, add in-memory TTL cache keyed by `role_id` (not `user_id`) — since many users share a role, this is more cache-efficient.
 
-2. **Role deletion safety**: Cannot delete a role while users are assigned to it. Owner must reassign users first.
+2. **Role deletion safety**: Cannot delete a role while **users OR active invite links** reference it. Owner must reassign users AND revoke/update invite links first. The backend `DELETE /api/admin/roles/{id}` checks both `users.role_id` and `invite_links.role_id` before allowing deletion.
 
 3. **Owner transfer**: Not in scope. If needed later, it's a single DB update + audit log entry.
 
 4. **Frontend app metadata**: Currently hardcoded in `src/types/app.types.ts` (`APPS` constant). After the `apps` table exists, the frontend should fetch app metadata from `/api/apps` instead. The `APPS` constant becomes a fallback/type definition only.
+
+5. **Permission strings as Python enum**: Define a `Permission` enum in backend code that enumerates all valid permission strings. `role_permissions.permission` is validated against this enum on write. Catches typos at insertion time rather than silently storing garbage. Frontend gets a corresponding `PERMISSIONS` const object for the same reason.
