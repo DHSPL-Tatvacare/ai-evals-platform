@@ -1,13 +1,15 @@
 """Admin API routes — database stats, selective data erasure, user management, tenant management, invite links."""
 import logging
+import uuid as _uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import AuthContext, require_admin, require_owner
+from app.auth.context import AuthContext, get_auth_context, require_owner
+from app.auth.permissions import require_permission
 from app.auth.utils import create_refresh_token, hash_password, hash_refresh_token
 from app.database import get_db
 from app.models.invite_link import InviteLink
@@ -22,10 +24,11 @@ from app.models.job import Job
 from app.models.history import History
 from app.models.setting import Setting
 from app.models.tag import Tag
-from app.models.user import User, UserRole, RefreshToken
+from app.models.user import User, RefreshToken
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.schemas.base import CamelModel
+from app.services.audit import write_audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +47,12 @@ class CreateUserRequest(CamelModel):
     email: str
     password: str
     display_name: str
-    role: str = "member"
+    role_id: str
 
 
 class UpdateUserRequest(CamelModel):
     display_name: Optional[str] = None
-    role: Optional[str] = None
+    role_id: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -62,7 +65,7 @@ class UpdateTenantRequest(CamelModel):
 @router.get("/stats")
 async def get_stats(
     app_id: Optional[str] = None,
-    auth: AuthContext = Depends(require_admin),
+    auth: AuthContext = require_permission('analytics:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-table record counts within tenant. Optionally filtered by app_id."""
@@ -315,7 +318,7 @@ async def erase_data(
 
 @router.get("/users")
 async def list_users(
-    auth: AuthContext = Depends(require_admin),
+    auth: AuthContext = require_permission('user:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """List all users in the tenant."""
@@ -328,7 +331,9 @@ async def list_users(
             "id": str(u.id),
             "email": u.email,
             "displayName": u.display_name,
-            "role": u.role.value,
+            "roleId": str(u.role_id),
+            "roleName": u.role.name,
+            "isOwner": u.role.is_system and u.role.name == "Owner",
             "isActive": u.is_active,
             "createdAt": u.created_at.isoformat() if u.created_at else None,
         }
@@ -339,7 +344,8 @@ async def list_users(
 @router.post("/users", status_code=201)
 async def create_user(
     body: CreateUserRequest,
-    auth: AuthContext = Depends(require_admin),
+    request: Request,
+    auth: AuthContext = require_permission('user:create'),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user in the tenant."""
@@ -361,54 +367,85 @@ async def create_user(
     if existing:
         raise HTTPException(400, "A user with this email already exists in this tenant")
 
-    try:
-        role = UserRole(body.role)
-    except ValueError:
-        raise HTTPException(400, f"Invalid role: {body.role}")
-
     user = User(
         tenant_id=auth.tenant_id,
         email=body.email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
-        role=role,
+        role_id=_uuid.UUID(body.role_id),
     )
     db.add(user)
+    await db.flush()
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="user:create",
+        entity_type="user",
+        entity_id=user.id,
+        after_state={"email": user.email, "role_id": str(user.role_id)},
+        request=request,
+    )
+
     await db.commit()
     await db.refresh(user)
     return {
         "id": str(user.id),
         "email": user.email,
         "displayName": user.display_name,
-        "role": user.role.value,
+        "roleId": str(user.role_id),
+        "roleName": user.role.name,
+        "isOwner": user.role.is_system and user.role.name == "Owner",
         "isActive": user.is_active,
     }
 
 
 @router.patch("/users/{user_id}")
 async def update_user(
-    user_id: str,
+    user_id: _uuid.UUID,
     body: UpdateUserRequest,
-    auth: AuthContext = Depends(require_admin),
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a user (name, role, is_active) within the tenant."""
-    from uuid import UUID
+    """Update a user (name, role_id, is_active) within the tenant."""
+    if not auth.is_owner:
+        # Check what fields are being changed
+        if body.role_id is not None and "role:assign" not in auth.permissions:
+            raise HTTPException(403, "Missing permission: role:assign")
+        needs_edit = (body.display_name is not None or body.is_active is not None)
+        if needs_edit and "user:edit" not in auth.permissions:
+            raise HTTPException(403, "Missing permission: user:edit")
+        if not body.role_id and not needs_edit:
+            raise HTTPException(403, "No permitted changes in request")
+
     user = await db.scalar(
-        select(User).where(User.id == UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == user_id, User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
 
+    before_state = {"role_id": str(user.role_id), "display_name": user.display_name, "is_active": user.is_active}
+
     if body.display_name is not None:
         user.display_name = body.display_name
-    if body.role is not None:
-        try:
-            user.role = UserRole(body.role)
-        except ValueError:
-            raise HTTPException(400, f"Invalid role: {body.role}")
+    if body.role_id is not None:
+        user.role_id = _uuid.UUID(body.role_id)
     if body.is_active is not None:
         user.is_active = body.is_active
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="user:update",
+        entity_type="user",
+        entity_id=user.id,
+        before_state=before_state,
+        after_state={"role_id": str(user.role_id), "display_name": user.display_name, "is_active": user.is_active},
+        request=request,
+    )
 
     await db.commit()
     await db.refresh(user)
@@ -416,7 +453,9 @@ async def update_user(
         "id": str(user.id),
         "email": user.email,
         "displayName": user.display_name,
-        "role": user.role.value,
+        "roleId": str(user.role_id),
+        "roleName": user.role.name,
+        "isOwner": user.role.is_system and user.role.name == "Owner",
         "isActive": user.is_active,
     }
 
@@ -429,11 +468,11 @@ class AdminResetPasswordRequest(CamelModel):
 async def admin_reset_password(
     user_id: str,
     body: AdminResetPasswordRequest,
-    auth: AuthContext = Depends(require_admin),
+    request: Request,
+    auth: AuthContext = require_permission('user:reset_password'),
     db: AsyncSession = Depends(get_db),
 ):
     """Reset a user's password (admin+). Revokes all their refresh tokens."""
-    from uuid import UUID
     from app.routes.auth import _validate_password_strength
 
     strength_error = _validate_password_strength(body.new_password)
@@ -441,13 +480,13 @@ async def admin_reset_password(
         raise HTTPException(400, detail=strength_error)
 
     user = await db.scalar(
-        select(User).where(User.id == UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == _uuid.UUID(user_id), User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
 
-    # Admins cannot reset owner passwords unless they are owners themselves
-    if user.role == UserRole.OWNER and auth.role != "owner":
+    # Non-owners cannot reset owner passwords
+    if user.role.is_system and user.role.name == "Owner" and not auth.is_owner:
         raise HTTPException(403, detail="Only owners can reset owner passwords")
 
     # Prevent reusing the same password
@@ -461,6 +500,17 @@ async def admin_reset_password(
     await db.execute(
         delete(RefreshToken).where(RefreshToken.user_id == user.id)
     )
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="user:reset_password",
+        entity_type="user",
+        entity_id=user.id,
+        request=request,
+    )
+
     await db.commit()
     return {"status": "ok", "id": user_id}
 
@@ -468,13 +518,13 @@ async def admin_reset_password(
 @router.delete("/users/{user_id}")
 async def deactivate_user(
     user_id: str,
-    auth: AuthContext = Depends(require_owner),
+    request: Request,
+    auth: AuthContext = require_permission('user:deactivate'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a user (owner only). Does not delete data."""
-    from uuid import UUID
+    """Deactivate a user. Does not delete data."""
     user = await db.scalar(
-        select(User).where(User.id == UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == _uuid.UUID(user_id), User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
@@ -482,6 +532,19 @@ async def deactivate_user(
         raise HTTPException(400, "Cannot deactivate yourself")
 
     user.is_active = False
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="user:deactivate",
+        entity_type="user",
+        entity_id=user.id,
+        before_state={"is_active": True},
+        after_state={"is_active": False},
+        request=request,
+    )
+
     await db.commit()
     return {"deactivated": True, "id": user_id}
 
@@ -535,7 +598,7 @@ async def update_tenant(
 
 class CreateInviteLinkRequest(CamelModel):
     label: Optional[str] = None
-    default_role: str = "member"
+    role_id: str
     max_uses: Optional[int] = None
     expires_in_hours: int = 168  # 7 days
 
@@ -544,7 +607,7 @@ def _invite_response(invite: InviteLink, creator_email: str) -> dict:
     return {
         "id": str(invite.id),
         "label": invite.label,
-        "defaultRole": invite.default_role.value,
+        "roleId": str(invite.role_id),
         "maxUses": invite.max_uses,
         "usesCount": invite.uses_count,
         "expiresAt": invite.expires_at.isoformat(),
@@ -557,13 +620,11 @@ def _invite_response(invite: InviteLink, creator_email: str) -> dict:
 @router.post("/invite-links", status_code=201)
 async def create_invite_link(
     body: CreateInviteLinkRequest,
-    auth: AuthContext = Depends(require_admin),
+    request: Request,
+    auth: AuthContext = require_permission('user:invite'),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an invite link for self-service signup (admin+)."""
-    # Validate role
-    if body.default_role not in ("member", "admin"):
-        raise HTTPException(400, detail="Role must be 'member' or 'admin'")
     if body.expires_in_hours < 1 or body.expires_in_hours > 720:
         raise HTTPException(400, detail="Expiry must be between 1 and 720 hours")
     if body.max_uses is not None and body.max_uses < 1:
@@ -576,11 +637,24 @@ async def create_invite_link(
         created_by=auth.user_id,
         token_hash=token_hash,
         label=body.label,
-        default_role=UserRole(body.default_role),
+        role_id=_uuid.UUID(body.role_id),
         max_uses=body.max_uses,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours),
     )
     db.add(invite)
+    await db.flush()
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="invite_link:create",
+        entity_type="invite_link",
+        entity_id=invite.id,
+        after_state={"label": invite.label, "role_id": str(invite.role_id)},
+        request=request,
+    )
+
     await db.commit()
     await db.refresh(invite)
 
@@ -596,7 +670,7 @@ async def create_invite_link(
 
 @router.get("/invite-links")
 async def list_invite_links(
-    auth: AuthContext = Depends(require_admin),
+    auth: AuthContext = require_permission('user:invite'),
     db: AsyncSession = Depends(get_db),
 ):
     """List all invite links for the tenant (admin+)."""
@@ -612,14 +686,14 @@ async def list_invite_links(
 @router.delete("/invite-links/{link_id}")
 async def revoke_invite_link(
     link_id: str,
-    auth: AuthContext = Depends(require_admin),
+    request: Request,
+    auth: AuthContext = require_permission('user:invite'),
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke an invite link (admin+)."""
-    from uuid import UUID
     invite = await db.scalar(
         select(InviteLink).where(
-            InviteLink.id == UUID(link_id),
+            InviteLink.id == _uuid.UUID(link_id),
             InviteLink.tenant_id == auth.tenant_id,
         )
     )
@@ -627,6 +701,19 @@ async def revoke_invite_link(
         raise HTTPException(404, detail="Invite link not found")
 
     invite.is_active = False
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action="invite_link:revoke",
+        entity_type="invite_link",
+        entity_id=invite.id,
+        before_state={"is_active": True},
+        after_state={"is_active": False},
+        request=request,
+    )
+
     await db.commit()
     return {"revoked": True, "id": link_id}
 
