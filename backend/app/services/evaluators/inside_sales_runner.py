@@ -17,7 +17,7 @@ import httpx
 from sqlalchemy import select, or_, and_
 
 from app.database import async_session
-from app.models.eval_run import ThreadEvaluation
+from app.models.eval_run import EvalRun, ThreadEvaluation
 from app.models.evaluator import Evaluator
 from app.constants import SYSTEM_TENANT_ID
 from app.services.evaluators.llm_base import (
@@ -50,36 +50,51 @@ def _build_transcription_prompt(config: dict) -> tuple[str, str]:
 
     Returns: (prompt, system_prompt)
     """
-    lang = config.get("language", "hi-en")
-    lang_map = {
+    lang = config.get("language", "auto")
+    diarize = config.get("speakerDiarization", True)
+    preserve_cs = config.get("preserveCodeSwitching", True)
+
+    # Language-specific instruction — "auto" gets its own branch, not interpolated
+    _lang_instruction: dict[str, str] = {
+        "hi": "The call is in Hindi. Transcribe in Hindi.",
+        "en": "The call is in English. Transcribe in English.",
+        "hi-en": "The call is in Hindi-English (code-mixed). Transcribe in the original mix as spoken.",
+        "auto": "Detect the language(s) spoken and transcribe faithfully in the original language(s) — do not guess or default to any specific language.",
+    }
+    lang_instruction = _lang_instruction.get(lang, f"The call is in {lang}. Transcribe in {lang}.")
+
+    _sys_lang: dict[str, str] = {
         "hi": "Hindi",
         "en": "English",
-        "hi-en": "Hindi-English (code-mixed)",
-        "auto": "auto-detect the language",
+        "hi-en": "Hindi-English code-mixed",
+        "auto": "multilingual (language auto-detected from audio)",
     }
-    lang_display = lang_map.get(lang, lang)
-    diarize = config.get("speakerDiarization", True)
+    sys_lang = _sys_lang.get(lang, lang)
 
-    prompt = f"Transcribe this sales call recording in {lang_display}. "
+    parts = [
+        "Transcribe this sales call recording.",
+        lang_instruction,
+    ]
     if diarize:
-        prompt += (
+        parts.append(
             "Identify two speakers: the sales agent and the customer/lead. "
-            "Use format: [Agent]: ... and [Lead]: ... for each turn. "
+            "Use the format [Agent]: ... and [Lead]: ... for each turn."
         )
-    prompt += (
-        "Include all dialogue, even small talk and greetings. "
-        "Preserve the original language — do not translate."
+    parts.append(
+        "Include all dialogue, including small talk and greetings. "
+        "Do not translate — preserve the original language exactly."
     )
-    if config.get("preserveCodeSwitching", True):
-        prompt += " Preserve code-switching between Hindi and English as spoken."
+    if preserve_cs:
+        parts.append("Preserve code-switching between languages exactly as spoken.")
 
     sys_prompt = (
-        f"You are an expert multilingual transcriptionist specializing in "
-        f"{lang_display} sales calls. Transcribe accurately"
-        f"{' with speaker diarization' if diarize else ''}."
+        f"You are an expert multilingual transcriptionist specializing in sales calls. "
+        f"Language: {sys_lang}. "
+        f"Transcribe accurately{', with speaker diarization (mark [Agent] and [Lead] turns)' if diarize else ''}. "
+        f"Never translate — output the spoken language verbatim."
     )
 
-    return prompt, sys_prompt
+    return " ".join(parts), sys_prompt
 
 
 # ── Main entry point ─────────────────────────────────────────────────
@@ -221,13 +236,48 @@ async def run_inside_sales_evaluation(
     calls = all_calls
     if call_selection.get("min_duration"):
         calls = [c for c in calls if (c.get("durationSeconds", 0) or 0) >= 10]
-    if call_selection.get("agent"):
+    if call_selection.get("duration_min") not in (None, "", 0):
+        d_min = int(call_selection["duration_min"])
+        calls = [c for c in calls if (c.get("durationSeconds", 0) or 0) >= d_min]
+    if call_selection.get("duration_max") not in (None, "", 0):
+        d_max = int(call_selection["duration_max"])
+        calls = [c for c in calls if (c.get("durationSeconds", 0) or 0) <= d_max]
+    if call_selection.get("has_recording"):
+        calls = [c for c in calls if c.get("recordingUrl")]
+    # agents is now a list; also support legacy single-string "agent" key
+    agent_list = call_selection.get("agents") or []
+    if isinstance(agent_list, str):
+        agent_list = [agent_list] if agent_list else []
+    if agent_list:
+        agent_lower = [a.lower() for a in agent_list]
+        calls = [c for c in calls if any(a in (c.get("agentName", "") or "").lower() for a in agent_lower)]
+    elif call_selection.get("agent"):
         agent_filter = call_selection["agent"].lower()
         calls = [c for c in calls if agent_filter in (c.get("agentName", "") or "").lower()]
     if call_selection.get("direction"):
         calls = [c for c in calls if c.get("direction") == call_selection["direction"]]
     if call_selection.get("status"):
         calls = [c for c in calls if (c.get("status") or "").lower() == call_selection["status"].lower()]
+
+    # Skip already-evaluated calls if requested
+    if call_selection.get("skip_evaluated"):
+        activity_ids = [c["activityId"] for c in calls if c.get("activityId")]
+        async with async_session() as db:
+            evaluated_ids = set(
+                await db.scalars(
+                    select(ThreadEvaluation.thread_id)
+                    .join(EvalRun, ThreadEvaluation.run_id == EvalRun.id)
+                    .where(
+                        EvalRun.tenant_id == tenant_id,
+                        EvalRun.app_id == "inside-sales",
+                        EvalRun.status == "completed",
+                        ThreadEvaluation.thread_id.in_(activity_ids),
+                    )
+                )
+            )
+        skipped_evaluated = len([c for c in calls if c.get("activityId") in evaluated_ids])
+        calls = [c for c in calls if c.get("activityId") not in evaluated_ids]
+        logger.info("Skipped %d already-evaluated calls", skipped_evaluated)
 
     # Skip calls without recordings — no audio = nothing to transcribe
     skipped_no_recording = len([c for c in calls if not c.get("recordingUrl")])

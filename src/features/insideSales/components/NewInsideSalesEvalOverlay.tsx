@@ -53,9 +53,12 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
     return {
       dateFrom: todayStr() + ' 00:00:00',
       dateTo: todayStr() + ' 23:59:59',
-      agent: '',
+      agents: [],
       direction: '',
       status: '',
+      durationMin: '',
+      durationMax: '',
+      hasRecording: false,
       selectionMode: ids.length ? 'specific' : 'all',
       sampleSize: 20,
       selectedCallIds: ids,
@@ -68,7 +71,7 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
 
   // Step 3: Transcription
   const [transcriptionConfig, setTranscriptionConfig] = useState<TranscriptionConfig>({
-    language: 'hi-en',
+    language: 'auto',
     script: 'auto',
     model: 'gemini',
     forceRetranscribe: false,
@@ -153,9 +156,11 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
         { key: 'Date range', value: `${callConfig.dateFrom.split(' ')[0]} → ${callConfig.dateTo.split(' ')[0]}` },
         { key: 'Mode', value: callConfig.selectionMode },
         { key: 'Calls', value: String(callCount) },
-        ...(callConfig.agent ? [{ key: 'Agent', value: callConfig.agent }] : []),
+        ...(callConfig.agents.length ? [{ key: 'Agents', value: callConfig.agents.join(', ') }] : []),
         ...(callConfig.direction ? [{ key: 'Direction', value: callConfig.direction }] : []),
         ...(callConfig.status ? [{ key: 'Status', value: callConfig.status === 'notanswered' ? 'Missed' : 'Answered' }] : []),
+        ...((callConfig.durationMin || callConfig.durationMax) ? [{ key: 'Duration', value: `${callConfig.durationMin || '0'}s – ${callConfig.durationMax ? callConfig.durationMax + 's' : '∞'}` }] : []),
+        ...(callConfig.hasRecording ? [{ key: 'Recording', value: 'Required' }] : []),
       ],
     },
     {
@@ -192,9 +197,12 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
       call_selection: {
         date_from: callConfig.dateFrom,
         date_to: callConfig.dateTo,
-        agent: callConfig.agent,
+        agents: callConfig.agents,
         direction: callConfig.direction,
         status: callConfig.status,
+        duration_min: callConfig.durationMin,
+        duration_max: callConfig.durationMax,
+        has_recording: callConfig.hasRecording,
         selection_mode: callConfig.selectionMode,
         sample_size: callConfig.sampleSize,
         selected_call_ids: callConfig.selectedCallIds,

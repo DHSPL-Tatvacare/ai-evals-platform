@@ -1,13 +1,11 @@
 /**
  * SelectCallsStep — wizard step 2 for inside-sales eval wizard.
- * Mirrors ThreadScopeStep from Kaira batch eval: radio selection modes,
- * validated sample size, specific-call multi-select with search.
  */
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Search, Check, Info } from 'lucide-react';
+import { Search, Check, Info, Filter, X } from 'lucide-react';
 import { apiRequest } from '@/services/api/client';
-import { Input } from '@/components/ui';
+import { Input, Button, MultiSelect } from '@/components/ui';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import { formatDuration } from '@/utils/formatters';
 import { cn } from '@/utils';
@@ -15,9 +13,12 @@ import { cn } from '@/utils';
 export interface CallSelectionConfig {
   dateFrom: string;
   dateTo: string;
-  agent: string;
+  agents: string[];
   direction: string;
   status: string;
+  durationMin: string;
+  durationMax: string;
+  hasRecording: boolean;
   selectionMode: 'all' | 'sample' | 'specific';
   sampleSize: number;
   selectedCallIds: string[];
@@ -39,6 +40,191 @@ const SCOPE_OPTIONS: { value: CallSelectionConfig['selectionMode']; label: strin
   { value: 'specific', label: 'Specific calls', description: 'Select individual calls to evaluate' },
 ];
 
+function activeFilterCount(config: CallSelectionConfig): number {
+  return [
+    config.agents.length ? 'y' : '',
+    config.direction,
+    config.status,
+    config.durationMin,
+    config.durationMax,
+    config.hasRecording ? 'y' : '',
+  ].filter(Boolean).length;
+}
+
+// ── Inline filter panel ────────────────────────────────────────────────────
+
+interface FilterPanelProps {
+  config: CallSelectionConfig;
+  onConfigChange: (updates: Partial<CallSelectionConfig>) => void;
+  onClose: () => void;
+}
+
+function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) {
+  const [agentOptions, setAgentOptions] = useState<{ value: string; label: string }[]>([]);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ date_from: config.dateFrom, date_to: config.dateTo });
+    apiRequest<{ agents: string[] }>(`/api/inside-sales/agents?${params.toString()}`)
+      .then((d) => setAgentOptions(d.agents.map((a) => ({ value: a, label: a }))))
+      .catch(() => {});
+  }, [config.dateFrom, config.dateTo]);
+
+  const toggle = <K extends 'direction' | 'status'>(
+    field: K,
+    val: string,
+    current: string,
+  ) => onConfigChange({ [field]: current === val ? '' : val } as Partial<CallSelectionConfig>);
+
+  const handleReset = () =>
+    onConfigChange({ agents: [], direction: '', status: '', durationMin: '', durationMax: '', hasRecording: false });
+
+  const inputCls = 'w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
+
+  return (
+    <div className="fixed inset-0 z-[60]" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="absolute top-0 right-0 bottom-0 w-[380px] bg-[var(--bg-primary)] border-l border-[var(--border-default)] shadow-xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)]">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Filters</h2>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)] transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* Date Range */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Date Range</label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={config.dateFrom.split(' ')[0]}
+                onChange={(e) => onConfigChange({ dateFrom: e.target.value + ' 00:00:00' })}
+                className={inputCls}
+              />
+              <input
+                type="date"
+                value={config.dateTo.split(' ')[0]}
+                onChange={(e) => onConfigChange({ dateTo: e.target.value + ' 23:59:59' })}
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          {/* Agent */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Agent</label>
+            <MultiSelect
+              values={config.agents}
+              onChange={(agents) => onConfigChange({ agents })}
+              options={agentOptions}
+              placeholder="Select agents..."
+            />
+          </div>
+
+          {/* Direction */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Direction</label>
+            <div className="flex gap-2">
+              {(['', 'inbound', 'outbound'] as const).map((val) => (
+                <button
+                  key={val}
+                  onClick={() => toggle('direction', val, config.direction)}
+                  className={cn(
+                    'flex-1 rounded-md py-1.5 text-xs font-medium border transition-colors',
+                    config.direction === val
+                      ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10 text-[var(--text-brand)]'
+                      : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  {val === '' ? 'All' : val === 'inbound' ? 'Inbound' : 'Outbound'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Status */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Call Status</label>
+            <div className="flex gap-2">
+              {(['', 'answered', 'notanswered'] as const).map((val) => (
+                <button
+                  key={val}
+                  onClick={() => toggle('status', val, config.status)}
+                  className={cn(
+                    'flex-1 rounded-md py-1.5 text-xs font-medium border transition-colors',
+                    config.status === val
+                      ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10 text-[var(--text-brand)]'
+                      : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  {val === '' ? 'All' : val === 'answered' ? 'Answered' : 'Missed'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Duration */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Duration (seconds)</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={0}
+                value={config.durationMin}
+                onChange={(e) => onConfigChange({ durationMin: e.target.value })}
+                placeholder="Min"
+                className={inputCls}
+              />
+              <input
+                type="number"
+                min={0}
+                value={config.durationMax}
+                onChange={(e) => onConfigChange({ durationMax: e.target.value })}
+                placeholder="Max"
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          {/* Has Recording */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--text-secondary)]">Recording</label>
+            <label className="flex items-center gap-3 cursor-pointer rounded-md border border-[var(--border-default)] px-3 py-2.5 hover:bg-[var(--bg-secondary)] transition-colors">
+              <input
+                type="checkbox"
+                checked={config.hasRecording}
+                onChange={(e) => onConfigChange({ hasRecording: e.target.checked })}
+                className="accent-[var(--interactive-primary)] h-4 w-4"
+              />
+              <div>
+                <span className="text-xs font-medium text-[var(--text-primary)]">Has recording URL</span>
+                <p className="text-[11px] text-[var(--text-muted)]">Only include calls with audio available</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-default)]">
+          <Button variant="ghost" size="sm" onClick={() => { handleReset(); onClose(); }}>Reset</Button>
+          <Button size="sm" onClick={onClose}>Apply</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
+
 export function SelectCallsStep({
   config,
   onConfigChange,
@@ -50,23 +236,30 @@ export function SelectCallsStep({
   const [callSearch, setCallSearch] = useState('');
   const [sampleSizeLocal, setSampleSizeLocal] = useState<string | null>(null);
   const [sampleSizeError, setSampleSizeError] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const buildParams = useCallback((pageSize: number) => {
+    const params = new URLSearchParams({
+      date_from: config.dateFrom,
+      date_to: config.dateTo,
+      page: '1',
+      page_size: String(pageSize),
+    });
+    if (config.agents.length) params.set('agents', config.agents.join(','));
+    if (config.direction) params.set('direction', config.direction);
+    if (config.status) params.set('status', config.status);
+    if (config.durationMin) params.set('duration_min', config.durationMin);
+    if (config.durationMax) params.set('duration_max', config.durationMax);
+    if (config.hasRecording) params.set('has_recording', 'true');
+    return params;
+  }, [config.dateFrom, config.dateTo, config.agents, config.direction, config.status, config.durationMin, config.durationMax, config.hasRecording]);
 
   // Fetch preview (first 5) for stats + preview table
   const fetchPreview = useCallback(async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams({
-        date_from: config.dateFrom,
-        date_to: config.dateTo,
-        page: '1',
-        page_size: '5',
-      });
-      if (config.agent) params.set('agent', config.agent);
-      if (config.direction) params.set('direction', config.direction);
-      if (config.status) params.set('status', config.status);
-
       const data = await apiRequest<{ calls: CallRecord[]; total: number }>(
-        `/api/inside-sales/calls?${params.toString()}`
+        `/api/inside-sales/calls?${buildParams(5).toString()}`
       );
       onPreviewLoaded(data.calls, data.total);
     } catch {
@@ -74,42 +267,30 @@ export function SelectCallsStep({
     } finally {
       setIsLoading(false);
     }
-  }, [config.dateFrom, config.dateTo, config.agent, config.direction, config.status, onPreviewLoaded]);
+  }, [buildParams, onPreviewLoaded]);
 
   useEffect(() => {
     const timer = setTimeout(fetchPreview, 300);
     return () => clearTimeout(timer);
   }, [fetchPreview]);
 
-  // Fetch all calls when "specific" mode is selected (for the multi-select list)
+  // Fetch all calls for specific mode (debounced — same 300ms as preview to avoid LSQ hammering)
   useEffect(() => {
     if (config.selectionMode !== 'specific') return;
-
     let cancelled = false;
-    (async () => {
+    const timer = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({
-          date_from: config.dateFrom,
-          date_to: config.dateTo,
-          page: '1',
-          page_size: '100',
-        });
-        if (config.agent) params.set('agent', config.agent);
-        if (config.direction) params.set('direction', config.direction);
-        if (config.status) params.set('status', config.status);
-
         const data = await apiRequest<{ calls: CallRecord[]; total: number }>(
-          `/api/inside-sales/calls?${params.toString()}`
+          `/api/inside-sales/calls?${buildParams(200).toString()}`
         );
         if (!cancelled) setAllCalls(data.calls);
       } catch {
         if (!cancelled) setAllCalls([]);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [config.selectionMode, config.dateFrom, config.dateTo, config.agent, config.direction, config.status]);
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [config.selectionMode, buildParams]);
 
-  // Filtered call list for specific mode search
   const filteredCalls = useMemo(() => {
     if (!callSearch) return allCalls;
     const q = callSearch.toLowerCase();
@@ -146,6 +327,8 @@ export function SelectCallsStep({
     return { name, agent, dur, status: c.status || '—' };
   };
 
+  const filterCount = activeFilterCount(config);
+
   return (
     <div className="space-y-4">
       {/* Info callout */}
@@ -156,63 +339,64 @@ export function SelectCallsStep({
         </p>
       </div>
 
-      {/* Date range */}
-      <div className="space-y-1.5">
-        <label className="block text-[13px] font-medium text-[var(--text-primary)]">Date Range</label>
-        <div className="flex gap-2">
-          <input
-            type="date"
-            value={config.dateFrom.split(' ')[0]}
-            onChange={(e) => onConfigChange({ dateFrom: e.target.value + ' 00:00:00' })}
-            className="flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
-          />
-          <input
-            type="date"
-            value={config.dateTo.split(' ')[0]}
-            onChange={(e) => onConfigChange({ dateTo: e.target.value + ' 23:59:59' })}
-            className="flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
-          />
+      {/* Filters button */}
+      <div className="flex justify-between items-center">
+        <div className="text-[12px] text-[var(--text-muted)]">
+          {config.dateFrom.split(' ')[0]} → {config.dateTo.split(' ')[0]}
         </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setFiltersOpen(true)}
+          className="gap-1.5 shrink-0"
+        >
+          <Filter className="h-3.5 w-3.5" />
+          Filters
+          {filterCount > 0 && (
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[11px] font-bold text-white">
+              {filterCount}
+            </span>
+          )}
+        </Button>
       </div>
 
-      {/* Agent + Direction + Status */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="space-y-1.5">
-          <label className="text-[13px] font-medium text-[var(--text-primary)]">Agent</label>
-          <input
-            value={config.agent}
-            onChange={(e) => onConfigChange({ agent: e.target.value })}
-            placeholder="All agents"
-            className="w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
-          />
+      {/* Active filter summary pills */}
+      {filterCount > 0 && (
+        <div className="flex flex-wrap gap-1.5 -mt-1">
+          {config.agents.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              Agents: {config.agents.join(', ')}
+              <button onClick={() => onConfigChange({ agents: [] })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
+          {config.direction && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              {config.direction === 'inbound' ? 'Inbound' : 'Outbound'}
+              <button onClick={() => onConfigChange({ direction: '' })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
+          {config.status && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              {config.status === 'answered' ? 'Answered' : 'Missed'}
+              <button onClick={() => onConfigChange({ status: '' })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
+          {(config.durationMin || config.durationMax) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              Duration: {config.durationMin || '0'}s – {config.durationMax ? config.durationMax + 's' : '∞'}
+              <button onClick={() => onConfigChange({ durationMin: '', durationMax: '' })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
+          {config.hasRecording && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              Has recording
+              <button onClick={() => onConfigChange({ hasRecording: false })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
         </div>
-        <div className="space-y-1.5">
-          <label className="text-[13px] font-medium text-[var(--text-primary)]">Direction</label>
-          <select
-            value={config.direction}
-            onChange={(e) => onConfigChange({ direction: e.target.value })}
-            className="w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
-          >
-            <option value="">All</option>
-            <option value="inbound">Inbound</option>
-            <option value="outbound">Outbound</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[13px] font-medium text-[var(--text-primary)]">Status</label>
-          <select
-            value={config.status}
-            onChange={(e) => onConfigChange({ status: e.target.value })}
-            className="w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
-          >
-            <option value="">All</option>
-            <option value="answered">Answered</option>
-            <option value="notanswered">Missed</option>
-          </select>
-        </div>
-      </div>
+      )}
 
-      {/* Call Selection — radio group (mirrors ThreadScopeStep) */}
+      {/* Call Selection radio group */}
       <div>
         <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-2">
           Call Selection
@@ -275,11 +459,7 @@ export function SelectCallsStep({
             }}
             onBlur={() => {
               const parsed = parseInt(sampleSizeLocal ?? '');
-              if (isNaN(parsed) || parsed < 1) {
-                // Reset to last valid value
-              } else if (parsed > matchingCount) {
-                onConfigChange({ sampleSize: matchingCount });
-              }
+              if (!isNaN(parsed) && parsed > matchingCount) onConfigChange({ sampleSize: matchingCount });
               setSampleSizeError('');
               setSampleSizeLocal(null);
             }}
@@ -294,15 +474,11 @@ export function SelectCallsStep({
       {config.selectionMode === 'specific' && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-[13px] font-medium text-[var(--text-primary)]">
-              Select Calls
-            </label>
+            <label className="text-[13px] font-medium text-[var(--text-primary)]">Select Calls</label>
             <span className="text-[11px] text-[var(--text-muted)]">
               {config.selectedCallIds.length} of {allCalls.length} selected
             </span>
           </div>
-
-          {/* Search */}
           <Input
             icon={<Search className="h-4 w-4" />}
             value={callSearch}
@@ -310,19 +486,14 @@ export function SelectCallsStep({
             placeholder="Search by agent, lead, phone..."
             className="mb-2"
           />
-
-          {/* Select all toggle */}
           <button
             type="button"
             onClick={toggleAll}
             className="text-[11px] text-[var(--text-brand)] hover:underline mb-1.5"
           >
             {config.selectedCallIds.length === filteredCalls.length && filteredCalls.length > 0
-              ? 'Deselect all'
-              : 'Select all'}
+              ? 'Deselect all' : 'Select all'}
           </button>
-
-          {/* Call list */}
           <div className="max-h-48 overflow-y-auto rounded-[6px] border border-[var(--border-subtle)]">
             {filteredCalls.length === 0 ? (
               <p className="px-3 py-4 text-center text-[13px] text-[var(--text-muted)]">
@@ -343,14 +514,12 @@ export function SelectCallsStep({
                       isSelected && 'bg-[var(--color-brand-accent)]/5'
                     )}
                   >
-                    <div
-                      className={cn(
-                        'h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors',
-                        isSelected
-                          ? 'bg-[var(--interactive-primary)] border-[var(--interactive-primary)]'
-                          : 'border-[var(--border-default)] bg-[var(--bg-primary)]'
-                      )}
-                    >
+                    <div className={cn(
+                      'h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+                      isSelected
+                        ? 'bg-[var(--interactive-primary)] border-[var(--interactive-primary)]'
+                        : 'border-[var(--border-default)] bg-[var(--bg-primary)]'
+                    )}>
                       {isSelected && <Check className="h-3 w-3 text-[var(--text-on-color)]" />}
                     </div>
                     <span className="text-[var(--text-primary)] truncate flex-1">{info.name}</span>
@@ -365,7 +534,7 @@ export function SelectCallsStep({
         </div>
       )}
 
-      {/* Skip previously evaluated + minimum duration */}
+      {/* Skip evaluated + min duration checkboxes */}
       <div className="border-t border-[var(--border-subtle)] pt-3 mt-1">
         <label className="flex items-start gap-3 cursor-pointer mb-2">
           <input
@@ -375,9 +544,7 @@ export function SelectCallsStep({
             className="mt-0.5 accent-[var(--interactive-primary)]"
           />
           <div>
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
-              Skip previously evaluated calls
-            </span>
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">Skip previously evaluated calls</span>
             <p className="text-[11px] text-[var(--text-muted)]">
               Calls already evaluated in any past run will be excluded.
               {config.selectionMode === 'sample' && ' Sampling will draw from the remaining unevaluated calls.'}
@@ -392,12 +559,8 @@ export function SelectCallsStep({
             className="mt-0.5 accent-[var(--interactive-primary)]"
           />
           <div>
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
-              Minimum duration ≥ 10 seconds
-            </span>
-            <p className="text-[11px] text-[var(--text-muted)]">
-              Skip very short or failed calls with no meaningful conversation.
-            </p>
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">Minimum duration ≥ 10 seconds</span>
+            <p className="text-[11px] text-[var(--text-muted)]">Skip very short or failed calls with no meaningful conversation.</p>
           </div>
         </label>
       </div>
@@ -406,23 +569,28 @@ export function SelectCallsStep({
       <div className="flex gap-4 text-xs">
         <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
           <div className="text-[10px] font-medium text-[var(--text-muted)] uppercase">Matching</div>
-          <div className="text-sm font-semibold text-[var(--text-primary)]">
-            {isLoading ? '...' : matchingCount}
-          </div>
+          <div className="text-sm font-semibold text-[var(--text-primary)]">{isLoading ? '...' : matchingCount}</div>
         </div>
         <div className="rounded-md border border-[var(--border-brand)]/30 bg-[var(--color-brand-accent)]/5 px-3 py-2">
           <div className="text-[10px] font-medium text-[var(--text-brand)] uppercase">To Evaluate</div>
           <div className="text-sm font-semibold text-[var(--text-brand)]">
-            {isLoading
-              ? '...'
-              : config.selectionMode === 'specific'
-                ? config.selectedCallIds.length
-                : config.selectionMode === 'sample'
-                  ? Math.min(config.sampleSize, matchingCount)
-                  : matchingCount}
+            {isLoading ? '...' : config.selectionMode === 'specific'
+              ? config.selectedCallIds.length
+              : config.selectionMode === 'sample'
+                ? Math.min(config.sampleSize, matchingCount)
+                : matchingCount}
           </div>
         </div>
       </div>
+
+      {/* Filter panel overlay */}
+      {filtersOpen && (
+        <EvalFilterPanel
+          config={config}
+          onConfigChange={onConfigChange}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
     </div>
   );
 }

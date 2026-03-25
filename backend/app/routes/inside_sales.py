@@ -41,19 +41,26 @@ async def list_agents(
     date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
     auth: AuthContext = Depends(require_inside_sales_access),
 ):
-    """Return sorted unique agent names for the given date range."""
-    result = await fetch_call_activities(
-        date_from=date_from,
-        date_to=date_to,
-        page=1,
-        page_size=500,
-    )
-    names = sorted({
-        normalize_activity(a)["agentName"]
-        for a in result["activities"]
-        if normalize_activity(a).get("agentName")
-    })
-    return AgentListResponse(agents=names)
+    """Return sorted unique agent names for the given date range (all pages)."""
+    page = 1
+    page_size = 100
+    names: set[str] = set()
+    while True:
+        result = await fetch_call_activities(
+            date_from=date_from,
+            date_to=date_to,
+            page=page,
+            page_size=page_size,
+        )
+        activities = result.get("activities", [])
+        for a in activities:
+            agent = normalize_activity(a).get("agentName")
+            if agent:
+                names.add(agent)
+        if len(activities) < page_size:
+            break
+        page += 1
+    return AgentListResponse(agents=sorted(names))
 
 
 @router.get("/calls", response_model=CallListResponse)
@@ -66,6 +73,9 @@ async def list_calls(
     prospect_id: str | None = Query(None, description="Prospect ID substring"),
     direction: str | None = Query(None),
     status: str | None = Query(None),
+    duration_min: int | None = Query(None, description="Min call duration in seconds (inclusive)"),
+    duration_max: int | None = Query(None, description="Max call duration in seconds (inclusive)"),
+    has_recording: bool | None = Query(None, description="If true, only calls with a recording URL"),
     event_codes: str | None = Query(None, description="Comma-separated event codes"),
     auth: AuthContext = Depends(require_inside_sales_access),
     db: AsyncSession = Depends(get_db),
@@ -94,6 +104,12 @@ async def list_calls(
         calls = [c for c in calls if c["direction"] == direction]
     if status:
         calls = [c for c in calls if c["status"].lower() == status.lower()]
+    if duration_min is not None:
+        calls = [c for c in calls if (c.get("durationSeconds") or 0) >= duration_min]
+    if duration_max is not None:
+        calls = [c for c in calls if (c.get("durationSeconds") or 0) <= duration_max]
+    if has_recording is True:
+        calls = [c for c in calls if c.get("recordingUrl")]
 
     # Batch-fetch latest eval score per activity
     activity_ids = [c["activityId"] for c in calls]
