@@ -2,9 +2,13 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
-  role: 'owner' | 'admin' | 'member';
   tenantId: string;
   tenantName: string;
+  roleId: string;
+  roleName: string;
+  isOwner: boolean;
+  permissions: string[];
+  appAccess: string[];
 }
 
 export interface LoginCredentials {
@@ -29,7 +33,8 @@ export interface SignupCredentials {
 export interface ValidateInviteResult {
   valid: boolean;
   tenantName?: string;
-  defaultRole?: string;
+  roleId?: string;
+  roleName?: string;
   expiresAt?: string;
   allowedDomains?: string[];
 }
