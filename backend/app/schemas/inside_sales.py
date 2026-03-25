@@ -38,18 +38,18 @@ class AgentListResponse(CamelModel):
 
 class LeadDetailResponse(CamelModel):
     prospect_id: str
-    first_name: str
-    last_name: str
-    phone: str
-    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
     cached: bool = False
 
 
 class LeadListRecord(CamelModel):
     prospect_id: str
-    first_name: str
+    first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone: str
+    phone: Optional[str] = None
     prospect_stage: str
     city: Optional[str] = None
     age_group: Optional[str] = None
@@ -93,9 +93,9 @@ class LeadCallRecord(CamelModel):
 class LeadDetailFullResponse(CamelModel):
     # Profile
     prospect_id: str
-    first_name: str
+    first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone: str
+    phone: Optional[str] = None
     email: Optional[str] = None
     prospect_stage: str
     city: Optional[str] = None
