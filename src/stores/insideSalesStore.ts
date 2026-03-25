@@ -194,10 +194,12 @@ interface LeadsState {
   leadsError: string | null;
   leadFilters: LeadFilters;
 
+  _lastLeadsFetchKey: string;
+
   setLeadFilters: (updates: Partial<LeadFilters>) => void;
   clearLeadFilters: () => void;
   setLeadsPage: (page: number) => void;
-  loadLeads: () => Promise<void>;
+  loadLeads: (force?: boolean) => Promise<void>;
 }
 
 export const useLeadsStore = create<LeadsState>((set, get) => ({
@@ -208,21 +210,36 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
   leadsLoading: false,
   leadsError: null,
   leadFilters: { ...DEFAULT_LEAD_FILTERS },
+  _lastLeadsFetchKey: '',
 
   setLeadFilters: (updates) =>
     set((s) => ({ leadFilters: { ...s.leadFilters, ...updates }, leadsPage: 1 })),
 
   clearLeadFilters: () =>
-    set({ leadFilters: { ...DEFAULT_LEAD_FILTERS }, leadsPage: 1 }),
+    set({ leadFilters: { ...DEFAULT_LEAD_FILTERS }, leadsPage: 1, _lastLeadsFetchKey: '' }),
 
   setLeadsPage: (page) => set({ leadsPage: page }),
 
-  loadLeads: async () => {
-    const { leadFilters, leadsPage, leadsPageSize } = get();
+  loadLeads: async (force?: boolean) => {
+    const { leadFilters, leadsPage, leadsPageSize, _lastLeadsFetchKey } = get();
+    const fetchKey = [
+      leadFilters.dateFrom,
+      leadFilters.dateTo,
+      leadFilters.agents.join(','),
+      leadFilters.stage.join(','),
+      leadFilters.condition.join(','),
+      leadFilters.mqlMin,
+      leadFilters.city,
+      leadsPage,
+      leadsPageSize,
+    ].join('|');
+
+    if (!force && fetchKey === _lastLeadsFetchKey) return;
+
     set({ leadsLoading: true, leadsError: null });
     try {
       const data = await apiFetchLeads(leadFilters, leadsPage, leadsPageSize);
-      set({ leads: data.leads, leadsTotal: data.total, leadsLoading: false });
+      set({ leads: data.leads, leadsTotal: data.total, leadsLoading: false, _lastLeadsFetchKey: fetchKey });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load leads';
       set({ leadsError: msg, leadsLoading: false });
