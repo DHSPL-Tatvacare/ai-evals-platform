@@ -5,10 +5,13 @@ import json
 import os
 import logging
 import re as _re
+import uuid
 from datetime import datetime as _dt, timezone as _tz
 from typing import Any
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +462,7 @@ def normalize_activity(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "activityId": raw.get("ProspectActivityId", ""),
         "prospectId": raw.get("RelatedProspectId", ""),
+        "agentId": raw.get("CreatedBy", ""),
         "agentName": raw.get("CreatedByName", ""),
         "agentEmail": raw.get("CreatedByEmailAddress", ""),
         "eventCode": event_code,
@@ -495,3 +499,40 @@ async def fetch_lead_by_id(prospect_id: str) -> dict[str, Any]:
             logger.warning("Lead fetch failed for %s: %s", prospect_id, e)
 
     return {}
+
+
+async def upsert_external_agent(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    lsq_user_id: str,
+    name: str,
+    email: str | None = None,
+) -> uuid.UUID:
+    """Upsert an LSQ agent into external_agents. Returns the agent UUID."""
+    from app.models.external_agent import ExternalAgent
+
+    result = await db.execute(
+        select(ExternalAgent).where(
+            ExternalAgent.tenant_id == tenant_id,
+            ExternalAgent.source == "lsq",
+            ExternalAgent.external_id == lsq_user_id,
+        )
+    )
+    agent = result.scalar_one_or_none()
+
+    if agent:
+        agent.name = name
+        if email:
+            agent.email = email
+    else:
+        agent = ExternalAgent(
+            tenant_id=tenant_id,
+            source="lsq",
+            external_id=lsq_user_id,
+            name=name,
+            email=email,
+        )
+        db.add(agent)
+
+    await db.flush()
+    return agent.id

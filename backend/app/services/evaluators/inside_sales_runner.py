@@ -336,7 +336,15 @@ async def run_inside_sales_evaluation(
             })
 
         # ── Step 3: Persist ThreadEvaluation ─────────────────
+        agent_name = call.get("agentName", "")
+        agent_lsq_id = call.get("agentId") or ""
+        agent_id = None
         async with async_session() as db:
+            if agent_lsq_id:
+                from app.services.lsq_client import upsert_external_agent
+                agent_id = await upsert_external_agent(
+                    db, tenant_id=tenant_id, lsq_user_id=agent_lsq_id, name=agent_name,
+                )
             db.add(ThreadEvaluation(
                 run_id=eval_run_id,
                 thread_id=call_id,
@@ -344,7 +352,8 @@ async def run_inside_sales_evaluation(
                     "evaluations": eval_outputs,
                     "transcript": transcript,
                     "call_metadata": {
-                        "agent": call.get("agentName", ""),
+                        "agent_id": str(agent_id) if agent_id else None,
+                        "agent": agent_name,
                         "lead": call.get("_leadName", "") or call.get("prospectId", "")[:8],
                         "prospect_id": call.get("prospectId", ""),
                         "direction": call.get("direction"),
