@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, UserX, KeyRound, Search, Users, SearchX, ShieldCheck, Crown } from 'lucide-react';
+import { Plus, Pencil, UserX, KeyRound, Search, Users, SearchX } from 'lucide-react';
 import { Button, Badge, Spinner, ConfirmDialog, Tabs, EmptyState } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { AdminUser, UpdateUserRequest } from '@/services/api/adminApi';
@@ -11,6 +11,8 @@ import { CreateUserDialog } from './CreateUserDialog';
 import { EditUserDialog } from './EditUserDialog';
 import { ResetPasswordDialog } from './ResetPasswordDialog';
 import { InviteLinksSection } from './InviteLinksSection';
+import { RolesTab } from './RolesTab';
+import { AuditLogTab } from './AuditLogTab';
 
 const ROWS_PER_PAGE = 20;
 
@@ -261,28 +263,12 @@ export function AdminUsersPage() {
     {
       id: 'roles',
       label: 'Roles',
-      content: (
-        <div className="flex h-[calc(100vh-220px)] items-center justify-center">
-          <EmptyState
-            icon={Crown}
-            title="Roles"
-            description="Define custom roles with fine-grained permissions for your organization. Coming soon."
-          />
-        </div>
-      ),
+      content: <RolesTab />,
     },
     {
       id: 'security',
       label: 'Security',
-      content: (
-        <div className="flex h-[calc(100vh-220px)] items-center justify-center">
-          <EmptyState
-            icon={ShieldCheck}
-            title="Role-Based Access Control"
-            description="Configure granular access policies and permission boundaries for each role. Coming soon."
-          />
-        </div>
-      ),
+      content: <AuditLogTab />,
     },
   ];
 
