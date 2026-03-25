@@ -79,6 +79,15 @@ class LeadListResponse(CamelModel):
     page_size: int
 
 
+class LeadEvalHistoryEntry(CamelModel):
+    """One evaluation record for a lead's call history."""
+    id: str
+    thread_id: str
+    run_id: str
+    result: dict                    # raw evaluator JSON
+    created_at: str
+
+
 class LeadCallRecord(CamelModel):
     activity_id: str
     call_time: str
@@ -128,5 +137,5 @@ class LeadDetailFullResponse(CamelModel):
     # Call history
     call_history: list[LeadCallRecord] = Field(default_factory=list)
     history_truncated: bool = False
-    # Eval history — reuses existing ThreadEvalRow shape, typed as list for flexibility
-    eval_history: list[dict] = Field(default_factory=list)
+    # Eval history
+    eval_history: list[LeadEvalHistoryEntry] = Field(default_factory=list)

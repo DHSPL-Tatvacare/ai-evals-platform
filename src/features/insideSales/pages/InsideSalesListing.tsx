@@ -19,50 +19,14 @@ import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import type { LeadListRecord } from '@/services/api/insideSales';
 import { cn } from '@/utils';
-import { formatDuration } from '@/utils/formatters';
+import { formatDuration, formatFrt } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
 import { CallFilterPanel } from '../components/CallFilterPanel';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
+import { StageBadge } from '../components/StageBadge';
 
 /* ── Helpers ─────────────────────────────────────────────── */
-
-const STAGE_COLORS: Record<string, string> = {
-  'new lead': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
-  'call back': 'bg-amber-500/15 text-amber-400',
-  'rnr': 'bg-orange-500/15 text-orange-400',
-  'interested in future plan': 'bg-blue-500/15 text-blue-400',
-  'not interested': 'bg-red-500/15 text-red-400',
-  'converted': 'bg-emerald-500/15 text-emerald-400',
-  'invalid / junk': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
-  're-enquired': 'bg-purple-500/15 text-purple-400',
-};
-
-function StageBadge({ stage }: { stage: string }) {
-  const key = stage.toLowerCase();
-  const colorClass = STAGE_COLORS[key] ?? 'bg-[var(--bg-secondary)] text-[var(--text-muted)]';
-  const label = stage.replace('in future plan', '').trim() || stage;
-  return (
-    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', colorClass)}>
-      {label}
-    </span>
-  );
-}
-
-function formatFrt(seconds: number | null): { text: string; color: string } {
-  if (seconds === null) return { text: '—', color: '' };
-  if (seconds <= 3600) {
-    return { text: seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`, color: 'text-emerald-400' };
-  }
-  if (seconds <= 10800) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-amber-400' };
-  }
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-red-400' };
-}
 
 function formatLastContact(days: number | null): { text: string; isStale: boolean } {
   if (days === null) return { text: '—', isStale: false };

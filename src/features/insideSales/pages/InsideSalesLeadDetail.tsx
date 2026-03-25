@@ -10,25 +10,11 @@ import { fetchLeadDetail } from '@/services/api/insideSales';
 import type { LeadDetailFullResponse, LeadEvalHistoryEntry } from '@/services/api/insideSales';
 import type { ThreadEvalRow } from '@/types';
 import { cn } from '@/utils';
+import { formatFrt } from '@/utils/formatters';
 import { routes } from '@/config/routes';
+import { StageBadge } from '../components/StageBadge';
 
 // ── Formatting helpers ────────────────────────────────────────────────────
-
-function fmtFrt(seconds: number | null): { text: string; color: string } {
-  if (seconds === null) return { text: '—', color: '' };
-  if (seconds <= 3600) {
-    const m = Math.floor(seconds / 60);
-    return { text: m < 1 ? `${seconds}s` : `${m}m`, color: 'text-emerald-400' };
-  }
-  if (seconds <= 10800) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-amber-400' };
-  }
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-red-400' };
-}
 
 function fmtAdherence(seconds: number | null): string {
   if (seconds === null) return '—';
@@ -49,24 +35,6 @@ function fmtDateTime(dateStr: string | null): string {
 function clean(val: string | null | undefined): string {
   if (!val) return '—';
   return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim() || '—';
-}
-
-// ── Stage badge ────────────────────────────────────────────────────────────
-
-const STAGE_COLORS: Record<string, string> = {
-  'new lead': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
-  'call back': 'bg-amber-500/15 text-amber-400',
-  'rnr': 'bg-orange-500/15 text-orange-400',
-  'interested in future plan': 'bg-blue-500/15 text-blue-400',
-  'not interested': 'bg-red-500/15 text-red-400',
-  'converted': 'bg-emerald-500/15 text-emerald-400',
-  'invalid / junk': 'bg-[var(--bg-secondary)] text-[var(--text-muted)]',
-  're-enquired': 'bg-purple-500/15 text-purple-400',
-};
-
-function StageBadge({ stage }: { stage: string }) {
-  const colorClass = STAGE_COLORS[stage.toLowerCase()] ?? 'bg-[var(--bg-secondary)] text-[var(--text-muted)]';
-  return <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium', colorClass)}>{stage}</span>;
 }
 
 // ── KPI Tile ──────────────────────────────────────────────────────────────
@@ -140,7 +108,7 @@ export function InsideSalesLeadDetail() {
   const displayName = [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.phone;
   const subtitle = [lead.phone, lead.city, lead.condition].filter(Boolean).join(' · ');
 
-  const frt = fmtFrt(lead.frtSeconds);
+  const frt = formatFrt(lead.frtSeconds);
   const tile5 = lead.preferredCallTime
     ? { label: 'Callback Adherence', value: fmtAdherence(lead.callbackAdherenceSeconds) }
     : { label: 'Lead Age', value: `${lead.leadAgeDays}d` };
@@ -200,7 +168,7 @@ export function InsideSalesLeadDetail() {
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-[var(--text-primary)]">{displayName}</h1>
-            <StageBadge stage={lead.prospectStage} />
+            <StageBadge stage={lead.prospectStage} truncate={false} />
             <MqlScoreBadge score={lead.mqlScore} signals={lead.mqlSignals} />
           </div>
           <p className="text-xs text-[var(--text-muted)]">{subtitle}</p>

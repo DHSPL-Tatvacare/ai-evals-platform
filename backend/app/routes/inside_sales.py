@@ -13,7 +13,7 @@ from app.models.eval_run import ThreadEvaluation, EvalRun
 from app.database import get_db
 from app.schemas.inside_sales import (
     CallRecord, CallListResponse, LeadDetailResponse, AgentListResponse,
-    LeadListRecord, LeadListResponse, LeadCallRecord, LeadDetailFullResponse,
+    LeadListRecord, LeadListResponse, LeadCallRecord, LeadDetailFullResponse, LeadEvalHistoryEntry,
 )
 from app.services.lsq_client import (
     fetch_call_activities, normalize_activity, fetch_lead_by_id,
@@ -390,7 +390,7 @@ async def get_lead_detail(
                 c["evalScore"] = score_map[c["activityId"]]
 
     # 4. Build eval_history (all ThreadEvaluation for this prospect's calls, ordered by id desc)
-    eval_history_list: list[dict] = []
+    eval_history_list: list[LeadEvalHistoryEntry] = []
     if activity_ids:
         eval_rows_result = await db.execute(
             select(ThreadEvaluation)
@@ -403,13 +403,13 @@ async def get_lead_detail(
             .order_by(ThreadEvaluation.id.desc())
         )
         for te in eval_rows_result.scalars().all():
-            eval_history_list.append({
-                "id": str(te.id),
-                "threadId": te.thread_id,
-                "runId": str(te.run_id),
-                "result": te.result,
-                "createdAt": str(te.created_at),
-            })
+            eval_history_list.append(LeadEvalHistoryEntry(
+                id=str(te.id),
+                thread_id=te.thread_id,
+                run_id=str(te.run_id),
+                result=te.result or {},
+                created_at=str(te.created_at),
+            ))
 
     # 5. Compute drilldown metrics
     drilldown_metrics = compute_drilldown_metrics(
