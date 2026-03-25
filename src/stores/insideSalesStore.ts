@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { apiRequest } from '@/services/api/client';
+import { fetchLeads as apiFetchLeads } from '@/services/api/insideSales';
+import type { LeadListRecord, LeadFilters } from '@/services/api/insideSales';
 
 export interface CallRecord {
   activityId: string;
@@ -168,4 +170,62 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       _lastFetchKey: '',
       activeCall: null,
     }),
+}));
+
+// Re-export types so pages can import from one place
+export type { LeadListRecord, LeadFilters };
+
+const DEFAULT_LEAD_FILTERS: LeadFilters = {
+  dateFrom: todayDateString() + ' 00:00:00',
+  dateTo: todayDateString() + ' 23:59:59',
+  agents: [],
+  stage: [],
+  mqlMin: '',
+  condition: [],
+  city: '',
+};
+
+interface LeadsState {
+  leads: LeadListRecord[];
+  leadsTotal: number;
+  leadsPage: number;
+  leadsPageSize: number;
+  leadsLoading: boolean;
+  leadsError: string | null;
+  leadFilters: LeadFilters;
+
+  setLeadFilters: (updates: Partial<LeadFilters>) => void;
+  clearLeadFilters: () => void;
+  setLeadsPage: (page: number) => void;
+  loadLeads: () => Promise<void>;
+}
+
+export const useLeadsStore = create<LeadsState>((set, get) => ({
+  leads: [],
+  leadsTotal: 0,
+  leadsPage: 1,
+  leadsPageSize: 50,
+  leadsLoading: false,
+  leadsError: null,
+  leadFilters: { ...DEFAULT_LEAD_FILTERS },
+
+  setLeadFilters: (updates) =>
+    set((s) => ({ leadFilters: { ...s.leadFilters, ...updates }, leadsPage: 1 })),
+
+  clearLeadFilters: () =>
+    set({ leadFilters: { ...DEFAULT_LEAD_FILTERS }, leadsPage: 1 }),
+
+  setLeadsPage: (page) => set({ leadsPage: page }),
+
+  loadLeads: async () => {
+    const { leadFilters, leadsPage, leadsPageSize } = get();
+    set({ leadsLoading: true, leadsError: null });
+    try {
+      const data = await apiFetchLeads(leadFilters, leadsPage, leadsPageSize);
+      set({ leads: data.leads, leadsTotal: data.total, leadsLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load leads';
+      set({ leadsError: msg, leadsLoading: false });
+    }
+  },
 }));
