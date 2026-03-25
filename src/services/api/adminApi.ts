@@ -13,12 +13,12 @@ export interface CreateUserRequest {
   email: string;
   displayName: string;
   password: string;
-  role: 'admin' | 'member';
+  roleId: string;
 }
 
 export interface UpdateUserRequest {
   displayName?: string;
-  role?: 'admin' | 'member';
+  roleId?: string;
   isActive?: boolean;
 }
 
@@ -60,7 +60,7 @@ export interface InviteLink {
 
 export interface CreateInviteLinkRequest {
   label?: string;
-  defaultRole?: 'admin' | 'member';
+  roleId?: string;
   maxUses?: number | null;
   expiresInHours?: number;
 }
