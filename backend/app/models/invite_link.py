@@ -3,12 +3,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, Integer, Enum as SQLEnum, ForeignKey, DateTime, Index, func
+from sqlalchemy import String, Boolean, Integer, ForeignKey, DateTime, Index, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
-from app.models.user import UserRole
 
 
 class InviteLink(Base):
@@ -25,8 +24,8 @@ class InviteLink(Base):
     )
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    default_role: Mapped[UserRole] = mapped_column(
-        SQLEnum(UserRole), nullable=False, default=UserRole.MEMBER
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False
     )
     max_uses: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     uses_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

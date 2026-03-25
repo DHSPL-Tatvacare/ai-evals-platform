@@ -1,17 +1,10 @@
 """User and RefreshToken models — authenticated users within a tenant."""
-import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Boolean, Enum as SQLEnum, ForeignKey, DateTime, Index, UniqueConstraint, func
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, Index, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
-
-
-class UserRole(str, enum.Enum):
-    OWNER = "owner"      # Full control, can manage tenant settings
-    ADMIN = "admin"      # Can manage users within tenant
-    MEMBER = "member"    # Standard user, sees only own data
 
 
 class User(Base):
@@ -26,8 +19,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(
-        SQLEnum(UserRole), nullable=False, default=UserRole.MEMBER
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -39,6 +32,7 @@ class User(Base):
 
     # Relationships
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="users")
+    role: Mapped["Role"] = relationship("Role", lazy="joined")
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "email", name="uq_user_email_per_tenant"),

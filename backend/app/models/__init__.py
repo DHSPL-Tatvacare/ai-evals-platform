@@ -1,7 +1,10 @@
 """Import all models so SQLAlchemy metadata knows about them."""
 from app.models.base import Base
 from app.models.tenant import Tenant
-from app.models.user import User, UserRole, RefreshToken
+from app.models.user import User, RefreshToken
+from app.models.app import App
+from app.models.role import Role, RoleAppAccess, RolePermission
+from app.models.audit_log import AuditLog
 from app.models.listing import Listing
 from app.models.file_record import FileRecord
 from app.models.prompt import Prompt
@@ -20,7 +23,8 @@ from app.models.lsq_call_cache import LsqLeadCache
 
 __all__ = [
     "Base",
-    "Tenant", "TenantConfig", "User", "UserRole", "RefreshToken", "InviteLink",
+    "Tenant", "TenantConfig", "User", "RefreshToken", "InviteLink",
+    "App", "Role", "RoleAppAccess", "RolePermission", "AuditLog",
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
     "ChatSession", "ChatMessage", "History", "Setting", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
