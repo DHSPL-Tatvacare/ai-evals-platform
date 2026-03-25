@@ -4,11 +4,81 @@ import asyncio
 import json
 import os
 import logging
+import re as _re
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# ── MQL signal constants ──────────────────────────────────────────────────
+
+MQL_TARGET_CITIES: frozenset[str] = frozenset({
+    "mumbai", "bangalore", "bengaluru", "hyderabad", "chennai", "delhi",
+    "new delhi", "pune", "ahmedabad", "kolkata", "surat", "jaipur",
+    "lucknow", "kanpur", "nagpur", "indore", "thane", "bhopal", "visakhapatnam",
+    "pimpri", "patna", "vadodara", "ghaziabad", "ludhiana", "agra",
+})
+
+MQL_RELEVANT_CONDITIONS: frozenset[str] = frozenset({
+    "diabetes", "pcos", "fatty liver", "obesity", "hypertension",
+})
+
+# Age band strings (as returned by LSQ) that fall within 30–65
+_MQL_AGE_IN_RANGE: frozenset[str] = frozenset({
+    "31\u201340", "31-40",
+    "41\u201350", "41-50",
+    "51\u201360", "51-60",
+    "61\u201365", "61-65",
+    "61\u201370", "61-70",
+})
+
+
+def compute_mql_score(lead: dict) -> tuple[int, dict[str, bool]]:
+    """Compute MQL signal score (0–5) from a raw LSQ lead field dict.
+
+    Returns (score, signals).  signals keys: age, city, condition, hba1c, intent.
+    Each signal is True (1 point) or False (0 points).
+    Null/blank fields always yield False — never inferred.
+
+    This is a pure function: no side effects, no I/O, no DB access.
+    """
+    # Signal 1: age in range 30–65
+    age_group = (lead.get("mx_Age_Group") or "").strip()
+    sig_age = age_group in _MQL_AGE_IN_RANGE
+
+    # Signal 2: city in target list (case-insensitive)
+    city = (lead.get("mx_City") or "").strip().lower()
+    sig_city = city in MQL_TARGET_CITIES if city else False
+
+    # Signal 3: condition relevant (case-insensitive substring match)
+    condition = (lead.get("mx_utm_disease") or "").strip().lower()
+    sig_condition = any(c in condition for c in MQL_RELEVANT_CONDITIONS) if condition else False
+
+    # Signal 4: HbA1c ≥ 5.7 — extract first numeric token from the band string
+    hba1c_raw = (lead.get("mx_Do_you_remember_your_HbA1c_levels") or "").strip().lower()
+    sig_hba1c = False
+    if hba1c_raw:
+        m = _re.search(r"(\d+\.?\d*)", hba1c_raw)
+        if m:
+            try:
+                sig_hba1c = float(m.group(1)) >= 5.7
+            except ValueError:
+                pass
+
+    # Signal 5: intent not negative (non-null AND value does not contain "no")
+    intent_raw = (lead.get("mx_Are_you_open_to_investing_in_this_paid_program_of") or "").strip().lower()
+    sig_intent = bool(intent_raw) and "no" not in intent_raw
+
+    signals: dict[str, bool] = {
+        "age": sig_age,
+        "city": sig_city,
+        "condition": sig_condition,
+        "hba1c": sig_hba1c,
+        "intent": sig_intent,
+    }
+    return sum(1 for v in signals.values() if v), signals
+
 
 LSQ_BASE_URL = os.getenv("LSQ_BASE_URL", "https://api-in21.leadsquared.com/v2")
 LSQ_ACCESS_KEY = os.getenv("LSQ_ACCESS_KEY", "")
