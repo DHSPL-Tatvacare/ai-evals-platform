@@ -8,53 +8,94 @@
 
 Reporting layer for inside sales call evaluations. Lives at RunDetail → Report tab (same placement as Kaira). Aggregates all call evals in a run, provides agent-level drill-down with heatmaps, and generates AI coaching commentary. Completely separate lens from Kaira — focused on human agent QA performance, behavioral signals, and sales outcomes.
 
+## Design Principles
+
+1. **Extract, don't duplicate.** The existing `ReportService` has cache lifecycle, data loading, and LLM provider setup that any report service needs. Extract a `BaseReportService` so Inside Sales (and any future app) inherits plumbing and only implements app-specific aggregation + narration.
+2. **Shared components in shared locations.** UI components that are generic (dimension bar charts, flag stats panels, heatmap tables, compliance gates) live in `src/components/report/`, not inside `src/features/insideSales/`. Only the report view orchestrator is app-specific.
+3. **Generic agent identity.** The agent table is not LSQ-specific — it's an `external_agents` table with a `source` column, reusable if another CRM integration appears.
+4. **Flag aggregation is a utility.** The dual-denominator (relevant/notRelevant/present) counting pattern is a reusable function, not embedded in the aggregator class.
+5. **No hardcoded dimension names in aggregation logic.** The aggregator reads dimension keys and max scores from the evaluator's `output_schema` dynamically. Adding/removing dimensions = schema change only, no aggregator code change.
+
 ## Architecture
 
 **Pipeline:** Backend aggregates → LLM narrates → cache together → frontend renders
 
-Reuses existing infrastructure:
+### Reuses existing infrastructure:
 - `EvaluationAnalytics` cache table (scope=`single_run`, app_id=`inside-sales`)
 - `/api/reports/{run_id}` endpoint — branching in `handle_generate_report` (job_worker.py) based on `app_id`
 - LLM provider abstraction (`llm_base.py`) for narrative generation
 - User's configured LLM settings (provider/model at scope `(tenant_id, user_id, app_id="")` — same global settings pattern as Kaira)
 - `ReportTab` shell component (generation trigger, loading, refresh, PDF export)
+- `submitAndPollJob()` for async report generation
+- `reportsApi.ts` for API calls
 
-New code:
-- `InsideSalesReportService` — parallel to `ReportService`, owns its own `generate()` method and `InsideSalesReportPayload` schema. Does NOT share return type with Kaira's `ReportPayload`.
-- `InsideSalesAggregator` — computes aggregates from `ThreadEvaluation` rows
-- `InsideSalesNarrator` — generates coaching commentary from aggregates
-- `InsideSalesReportView` — frontend component rendering the report sections
-- `lsq_agents` table — stable agent identity
+### New shared code (reusable by any app):
+- `BaseReportService` — cache lifecycle, data loading, LLM provider setup
+- `src/components/report/DimensionBreakdownChart` — bar chart for any scored dimensions
+- `src/components/report/HeatmapTable` — generic rows × cols with threshold coloring
+- `src/components/report/FlagStatsPanel` — dual-denominator flag display
+- `src/components/report/ComplianceGatesPanel` — pass/fail gate display
+- `aggregate_flags()` utility — counts relevant/notRelevant/present from flag arrays
+- `external_agents` table — stable external identity for any CRM source
 
-### Service Separation (B1/B2 from review)
+### New app-specific code:
+- `InsideSalesReportService` extends `BaseReportService` — implements `_aggregate()` and `_narrate()`
+- `InsideSalesAggregator` — computes inside-sales-specific aggregate payload
+- `InsideSalesNarrator` — sales QA coaching prompt
+- `InsideSalesReportView` — orchestrates shared components with inside-sales data shape
+- `AgentHeatmapTable` — wraps generic `HeatmapTable` with agent click-to-filter behavior
 
-The existing `ReportService` returns `ReportPayload` (health_score, distributions, friction, exemplars) — a completely different shape from inside sales. Rather than polluting `ReportService` with conditionals:
+### BaseReportService extraction
 
-- New `InsideSalesReportService` with its own `generate()` → `InsideSalesReportPayload`
-- New `InsideSalesReportPayload` Pydantic schema in `backend/app/services/reports/inside_sales_schemas.py`
-- `handle_generate_report` in `job_worker.py` branches on `eval_run.app_id` to pick the right service class
-- Cache reads in `InsideSalesReportService._load_cache()` deserialize with `InsideSalesReportPayload.model_validate()`, not `ReportPayload`
-- Both services write to the same `EvaluationAnalytics` table (JSONB column accepts any shape), but each validates with its own schema on read
+The existing `ReportService` methods split cleanly into reusable vs. app-specific:
+
+| Method | Reusable (→ BaseReportService) | App-specific |
+|--------|-------------------------------|-------------|
+| `__init__(db, tenant_id, user_id)` | ✅ | |
+| `_load_run(run_id)` | ✅ | |
+| `_load_threads(run_id)` | ✅ | |
+| `_load_adversarial(run_id)` | ✅ | |
+| `_load_cache(run_id, app_id)` | ✅ | |
+| `_save_cache(run_id, app_id, payload)` | ✅ (accepts `dict`, not `ReportPayload`) | |
+| `_create_llm_provider(run, provider, model)` | ✅ (extract LLM setup boilerplate) | |
+| `generate()` | | ✅ (each app implements its own pipeline) |
+| `_generate_narrative()` | | ✅ (different narrator class + prompt) |
+| `_build_metadata()` | | ✅ (different metadata shape) |
+| Health score, exemplars, friction | | ✅ (Kaira-only concepts) |
+
+**Refactor plan:**
+1. Extract `BaseReportService` with the reusable methods
+2. Existing `ReportService` extends `BaseReportService` (no behavior change for Kaira)
+3. New `InsideSalesReportService` extends `BaseReportService`
+4. `_save_cache` accepts `dict` (from `.model_dump()`) instead of `ReportPayload` — both services call `payload.model_dump()` before saving
+5. `_load_cache` returns raw `dict` — each service validates with its own Pydantic schema
+6. `_create_llm_provider` extracts the repeated settings-fetch + factory pattern used by both `_generate_narrative` and `_generate_custom_eval_narrative`
+
+**Branching point:** `handle_generate_report` in `job_worker.py` loads the `EvalRun`, checks `app_id`, and dispatches to the right service class.
 
 ## 1. Data Model
 
-### New Table: `lsq_agents`
+### New Table: `external_agents`
+
+Generic table for external agent identity from any CRM/system. Not LSQ-specific.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | UUID | PK |
 | tenant_id | UUID | FK → tenants (manual column, NOT via TenantUserMixin — agents are shared across platform users within a tenant) |
-| lsq_user_id | String | Stable LSQ identifier, unique per tenant |
-| name | String | Display name (latest from LSQ, updated on every fetch) |
+| source | String | CRM source identifier: `"lsq"`, `"salesforce"`, etc. |
+| external_id | String | Stable identifier from the source system (e.g., LSQ user ID) |
+| name | String | Display name (latest from source, updated on every fetch) |
 | email | String | Nullable |
+| metadata | JSONB | Nullable. Source-specific extra fields (team, role, etc.) |
 | created_at | Timestamp | |
-| updated_at | Timestamp | Auto-update on name change |
+| updated_at | Timestamp | Auto-update on name/metadata change |
 
-**Unique constraint:** `(tenant_id, lsq_user_id)`
+**Unique constraint:** `(tenant_id, source, external_id)`
 
-**Note on mixins:** Do NOT use `TenantUserMixin` — `lsq_agents` represents external sales agents, not platform users. Use a manual `tenant_id` FK column only. All queries filter by `tenant_id` from `AuthContext` per CLAUDE.md invariant.
+**Note on mixins:** Do NOT use `TenantUserMixin` — external agents are not platform users. Use a manual `tenant_id` FK column only. All queries filter by `tenant_id` from `AuthContext` per CLAUDE.md invariant.
 
-**Upsert behavior:** On every LSQ data fetch, upsert by `(tenant_id, lsq_user_id)`. If exists, update `name` and `updated_at`. Eliminates string inconsistency for agent grouping.
+**Upsert behavior:** On every LSQ data fetch, upsert by `(tenant_id, source="lsq", external_id)`. If exists, update `name` and `updated_at`. Eliminates string inconsistency for agent grouping. Any future CRM integration follows the same pattern with a different `source` value.
 
 ### Eval Output: Extended Schema
 
@@ -113,7 +154,7 @@ The existing GoodFlip QA evaluator prompt produces 10 scored dimensions + 3 comp
 ```json
 {
   "call_metadata": {
-    "agent_id": "uuid (FK → lsq_agents)",
+    "agent_id": "uuid (FK → external_agents)",
     "agent_name": "string (denormalized for display)",
     "lead_name": "string",
     "city": "string",
@@ -127,7 +168,7 @@ The existing GoodFlip QA evaluator prompt produces 10 scored dimensions + 3 comp
 }
 ```
 
-### Result Nesting (B3 from review)
+### Result Nesting
 
 The inside sales runner stores `ThreadEvaluation.result` in this structure:
 ```json
@@ -139,31 +180,64 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
       "output": {
         "overall_score": 78,
         "call_opening": 8,
-        "behavioral_flags": { ... },
-        "outcome_flags": { ... },
+        "behavioral_flags": { "..." },
+        "outcome_flags": { "..." },
         "compliance_no_misinformation": true,
         "reasoning": "..."
       }
     }
   ],
   "transcript": "...",
-  "call_metadata": { ... }
+  "call_metadata": { "..." }
 }
 ```
 
 - **QA rubric scores, behavioral flags, and outcome flags** all live inside `result["evaluations"][0]["output"]` (produced by the extended evaluator prompt)
 - **Call metadata** lives at `result["call_metadata"]` (hydrated by the runner from LSQ, not LLM-extracted)
 - The aggregator reads from `result["evaluations"][N]["output"]` for all scored/flag fields
-- The runner resolves `agent_id` (UUID FK → `lsq_agents`) at eval time and stores it in `call_metadata.agent_id`
-- `agent_name` in `call_metadata` is denormalized at eval time for convenience, but the **aggregator joins from `lsq_agents` at report generation time** for the latest name (since names can change between evals)
+- The runner resolves `agent_id` (UUID FK → `external_agents`) at eval time and stores it in `call_metadata.agent_id`
+- `agent_name` in `call_metadata` is denormalized at eval time for convenience, but the **aggregator joins from `external_agents` at report generation time** for the latest name (since names can change between evals)
 
 ## 2. Aggregation Layer
+
+### Flag Aggregation Utility
+
+**Location:** `backend/app/services/reports/flag_utils.py`
+
+Reusable function for any app that has flags with `present | false | "not_relevant"` semantics:
+
+```python
+def aggregate_flags(
+    items: list[dict],
+    flag_path: str,       # e.g., "behavioral_flags.escalation"
+    present_key: str = "present",  # key that holds True/False/"not_relevant"
+) -> dict:
+    """Returns { relevant: int, notRelevant: int, present: int }"""
+
+def aggregate_outcome_flags(
+    items: list[dict],
+    flag_path: str,
+    attempted_key: str = "attempted",
+    accepted_key: str = "accepted",
+) -> dict:
+    """Returns { relevant: int, notRelevant: int, attempted: int, accepted: int }"""
+```
+
+Both functions skip items where the flag value is `"not_relevant"` in the denominator. Reusable by any future app that adopts the not-relevant pattern.
 
 ### `InsideSalesAggregator`
 
 **Location:** `backend/app/services/reports/inside_sales_aggregator.py`
 
-**Input:** All `ThreadEvaluation` rows for a run + `lsq_agents` lookup
+**Input:** All `ThreadEvaluation` rows for a run + evaluator `output_schema` (for dimension keys + thresholds) + `external_agents` lookup
+
+**Dynamic dimension reading:** The aggregator does NOT hardcode dimension names. It reads the evaluator's `output_schema` to discover:
+- Which fields are `type: "number"` → scored dimensions
+- `max` value → maxPossible for that dimension
+- `green_threshold`, `yellow_threshold` → color thresholds
+- Which fields are `type: "boolean"` with `compliance_` prefix → compliance gates
+
+This means adding/removing dimensions or compliance gates = evaluator schema change only. No aggregator code change.
 
 **Output structure:**
 
@@ -184,29 +258,30 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
     },
 
     "dimensionBreakdown": {
-        # Per dimension: avg, min, max, distribution across verdict buckets
-        "call_opening": {
-            "avg": float, "min": float, "max": float, "maxPossible": 10,
+        # Keys discovered from output_schema, not hardcoded
+        "<dimension_key>": {
+            "label": str,        # human-readable from schema
+            "avg": float, "min": float, "max": float, "maxPossible": int,
+            "greenThreshold": float, "yellowThreshold": float,
             "distribution": [int, int, int, int, int]  # 5 buckets
         },
-        # ... all 10 dimensions
+        # ... all scored dimensions from schema
     },
 
     "complianceBreakdown": {
-        "no_misinformation": { "passed": int, "failed": int, "total": int },
-        "no_stop_medicines": { "passed": int, "failed": int, "total": int },
-        "no_guarantees": { "passed": int, "failed": int, "total": int }
+        # Keys discovered from output_schema (boolean fields with compliance_ prefix)
+        "<gate_key>": { "label": str, "passed": int, "failed": int, "total": int },
+        # ...
     },
 
     "flagStats": {
-        # Behavioral — dual denominator: reach (relevant/total) + conversion (present/relevant)
+        # Computed by aggregate_flags() utility
         "escalation": { "relevant": int, "notRelevant": int, "present": int },
         "disagreement": { "relevant": int, "notRelevant": int, "present": int },
         "tension": {
             "relevant": int, "notRelevant": int,
             "bySeverity": { "low": int, "medium": int, "high": int }
         },
-        # Outcomes — dual denominator: reach + conversion
         "meeting_setup": { "relevant": int, "notRelevant": int, "occurred": int },
         "purchase_made": { "relevant": int, "notRelevant": int, "occurred": int },
         "callback_scheduled": { "relevant": int, "notRelevant": int, "occurred": int },
@@ -222,8 +297,8 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
             "callCount": int,
             "avgQaScore": float,
             "dimensions": {
-                "call_opening": { "avg": float },
-                # ... all 10
+                "<dimension_key>": { "avg": float },
+                # ... all dimensions
             },
             "compliance": { "passed": int, "failed": int },
             "flags": { /* same shape as flagStats */ },
@@ -231,19 +306,18 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
         }
     },
 
-    # Note: heatmap is derived from agentSlices on the frontend (sort by avgQaScore desc,
-    # read dimensions from each slice). No separate heatmap key needed — avoids data redundancy.
-    # Dimension order and maxScores come from the evaluator schema (already known to the frontend).
+    # Heatmap derived from agentSlices on frontend (sort by avgQaScore desc,
+    # read dimensions from each slice). No separate key — avoids redundancy.
+    # Dimension order and maxScores come from evaluator schema.
 }
 ```
 
 **Key decisions:**
 - `agentSlices` pre-computed — frontend filters, no math
 - `flagStats` always carries both denominators
-- Heatmap is top-level for direct rendering
 - **Two distinct threshold systems (do not confuse):**
   - **Verdict thresholds** (overall score buckets): Strong ≥80, Good ≥65, Needs Work ≥50, Poor <50. These classify entire calls.
-  - **Dimension color thresholds** (per-dimension coloring): Come from evaluator schema fields (`green_threshold`, `yellow_threshold`). These color individual cells in the heatmap and dimension bars.
+  - **Dimension color thresholds** (per-dimension coloring): Come from evaluator schema fields (`green_threshold`, `yellow_threshold`). Passed through in `dimensionBreakdown` for frontend to use.
 
 ## 3. AI Narrator
 
@@ -272,7 +346,7 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
 ```
 
 **Behavior:**
-- Uses existing LLM provider abstraction (`llm_base.py`)
+- Uses `BaseReportService._create_llm_provider()` — no duplicated LLM setup boilerplate
 - Uses user's configured LLM settings at scope `(tenant_id, user_id, app_id="")` — same global settings pattern as existing `ReportService`, no per-app LLM settings
 - Non-fatal narrative: generation is synchronous within the job (same as Kaira's `ReportService._generate_narrative`), but wrapped in try/catch — if it fails, the report still returns with data sections intact and `narrative: null`. Frontend shows "AI summary unavailable" placeholder.
 - `agentCoachingNotes` keyed by agent UUID — shown only when agent drill-down is active
@@ -284,65 +358,101 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
 
 `Inside Sales > Runs > RunID > Report tab` — identical to Kaira placement. Report tab triggers generation via existing `submitAndPollJob()` pattern.
 
+### Shared Components (in `src/components/report/`)
+
+These are generic, reusable by any app:
+
+**`DimensionBreakdownChart`**
+- Horizontal bar chart for any set of scored dimensions
+- Props: `dimensions: { key, label, avg, maxPossible, greenThreshold, yellowThreshold }[]`
+- Bar color computed from thresholds (green/yellow/red)
+- No hardcoded dimension names — renders whatever is passed
+
+**`HeatmapTable`**
+- Generic rows × columns table with threshold-colored cells
+- Props: `rows: { id, label, extraColumns }[]`, `columns: { key, label, max }[]`, `cells: Record<rowId, Record<colKey, number>>`, `thresholds: Record<colKey, { green, yellow }>`
+- Supports row click callback for selection
+- No knowledge of "agents" or "dimensions" — just renders data
+
+**`FlagStatsPanel`**
+- Displays flags with dual denominators (reach + conversion)
+- Props: `flags: { key, label, relevant, notRelevant, present?, occurred?, attempted?, accepted? }[]`
+- Renders count, reach %, conversion % with "not relevant" muted text
+- Works for any flag shape — behavioral or outcome
+
+**`ComplianceGatesPanel`**
+- Pass/fail gate bars
+- Props: `gates: { key, label, passed, failed, total }[]`
+- Color thresholds: green ≥95%, yellow ≥85%, red <85%
+
+### App-Specific Components (in `src/features/insideSales/components/report/`)
+
+**`InsideSalesReportView`**
+- Orchestrator: receives `InsideSalesReportPayload`, manages agent filter state, renders shared components with inside-sales data
+- Handles agent selection state: when an agent is clicked, re-slices data from `agentSlices` and passes filtered data to all sections
+
+**`AgentHeatmapTable`**
+- Wraps `HeatmapTable` with agent-specific behavior:
+  - Rows = agents (sorted by avgQaScore desc)
+  - Extra columns: call count, avg score, compliance %
+  - Click row → sets agent filter (managed by parent `InsideSalesReportView`)
+  - Shows coaching notes panel below when agent is selected
+
+### Component Location Summary
+
+| Component | Location | Reusable? |
+|-----------|----------|-----------|
+| `DimensionBreakdownChart` | `src/components/report/` | ✅ Any app with scored dimensions |
+| `HeatmapTable` | `src/components/report/` | ✅ Any rows × cols with thresholds |
+| `FlagStatsPanel` | `src/components/report/` | ✅ Any app with behavioral/outcome flags |
+| `ComplianceGatesPanel` | `src/components/report/` | ✅ Any app with pass/fail gates |
+| `InsideSalesReportView` | `src/features/insideSales/components/report/` | ❌ Inside sales only |
+| `AgentHeatmapTable` | `src/features/insideSales/components/report/` | ❌ Wraps HeatmapTable for agents |
+
 ### Section Layout (top to bottom)
 
 **Section 1: Executive Summary**
 - Stat cards: Avg QA Score, Compliance %, Verdict Distribution (mini bar chart)
-- AI narrative block (loads async, placeholder while generating)
+- AI narrative block (placeholder while generating, "AI summary unavailable" on failure)
 - Reuse: stat card patterns from existing report components
 
 **Section 2: QA Dimension Breakdown**
-- Horizontal bar chart, all 10 dimensions
-- Bar color from evaluator schema thresholds (green/yellow/red)
-- Shows `avg / maxPossible` per dimension
-- New component: `DimensionBreakdownChart`
+- `DimensionBreakdownChart` — renders all dimensions from payload
+- When agent filtered: shows that agent's dimension averages instead of run-wide
 
 **Section 3: Agent Performance Heatmap**
-- Table: agents (rows) × dimensions (columns)
-- Cells color-coded by threshold (green/yellow/red)
-- Additional columns: call count, avg score, compliance %
-- Click agent row → filters all other sections to that agent
+- `AgentHeatmapTable` wrapping `HeatmapTable`
+- Click agent row → filters all other sections to that agent's slice
 - Active filter shown as chip at top, click to clear
-- When filtered: sections 1, 2, 4, 5 re-render with agent's slice data
-- New component: `AgentHeatmapTable`
 
 **Section 4: Behavioral Signals & Outcomes**
-- Two sub-sections: Behavioral Flags, Outcome Flags
-- Each flag shows: count, reach (relevant/total), conversion (occurred/relevant)
-- "Not relevant" count shown in muted text
-- Cross-sell shows three-tier: reach → attempted → accepted
-- New component: `FlagStatsPanel`
+- `FlagStatsPanel` — two instances (behavioral flags, outcome flags)
+- When agent filtered: shows that agent's flag stats
 
 **Section 5: Compliance**
-- Per-gate pass rate bar + violation count
-- Color: green ≥95%, yellow ≥85%, red <85%
-- New component: `ComplianceGatesPanel` (existing `RuleComplianceTable` is structurally different — it renders `RuleComplianceMatrix` with rule_id/section/co_failures, whereas inside sales has 3 simple boolean gates)
+- `ComplianceGatesPanel`
+- When agent filtered: shows that agent's compliance breakdown
 
 **Section 6: AI Coaching Notes** (conditional)
 - Only visible when an agent is selected in the heatmap
 - Shows narrator's per-agent coaching paragraph
 - Styled with left-border accent, distinct from executive summary
-- Part of `AgentHeatmapTable` or sibling component
 
 **Section 7: AI Recommendations**
 - Priority-tagged list (P0/P1/P2)
 - From narrator output
 - Reuse: `Recommendations` component pattern from existing report
 
-### Component Reuse Plan
+### Existing Component Reuse
 
-| Need | Reuse | New |
-|------|-------|-----|
-| Report tab shell (generate, loading, refresh, PDF) | `ReportTab.tsx` | — |
-| Stat cards | Existing pattern | — |
-| Job polling | `submitAndPollJob()` | — |
-| API client | `reportsApi.ts` | — |
-| Dimension bar chart | — | `DimensionBreakdownChart` |
-| Agent heatmap table | — | `AgentHeatmapTable` |
-| Flag stats panel | — | `FlagStatsPanel` |
-| Compliance gates | — | `ComplianceGatesPanel` |
-| Recommendations | `Recommendations.tsx` pattern | — |
-| AI narrative block | `ExecutiveSummary.tsx` pattern | — |
+| Need | Reuse |
+|------|-------|
+| Report tab shell (generate, loading, refresh, PDF) | `ReportTab.tsx` |
+| Stat cards | Existing pattern |
+| Job polling | `submitAndPollJob()` |
+| API client | `reportsApi.ts` |
+| Recommendations list | `Recommendations.tsx` pattern |
+| AI narrative block | `ExecutiveSummary.tsx` pattern |
 
 ## 5. Backend Integration
 
@@ -351,18 +461,20 @@ The inside sales runner stores `ThreadEvaluation.result` in this structure:
 1. Frontend calls `POST /api/reports/{run_id}` (or triggers job for large runs)
 2. `handle_generate_report` in `job_worker.py` loads the `EvalRun` and checks `app_id`
 3. If `inside-sales` → dispatches to `InsideSalesReportService.generate()`; otherwise → existing `ReportService.generate()`
-4. `InsideSalesReportService` reads all `ThreadEvaluation` rows, delegates to `InsideSalesAggregator`
-5. Aggregator parses `result["evaluations"][0]["output"]` for scores/flags, joins `lsq_agents` for stable agent identity
-6. Computes full `InsideSalesReportPayload`
-7. `InsideSalesNarrator` generates AI commentary (synchronous but non-fatal — try/catch)
-8. Both cached in `EvaluationAnalytics` (scope=`single_run`, JSONB column)
-9. Returns `InsideSalesReportPayload` to frontend
+4. `InsideSalesReportService.generate()`:
+   a. Checks cache via inherited `_load_cache()` → validates with `InsideSalesReportPayload`
+   b. Loads threads via inherited `_load_threads()`
+   c. Loads evaluator schema for dynamic dimension discovery
+   d. Delegates to `InsideSalesAggregator` for computation
+   e. Delegates to `InsideSalesNarrator` via inherited `_create_llm_provider()` (non-fatal)
+   f. Caches via inherited `_save_cache()` with `payload.model_dump()`
+   g. Returns `InsideSalesReportPayload`
 
 ### Agent Table Integration
 
-- `lsq_agents` upserted during LSQ data fetch (existing `lsq_client.py` flow)
-- At eval time, `call_metadata.agent_id` resolved from `lsq_agents` by `(tenant_id, lsq_user_id)`
-- Aggregator groups by `agent_id`, joins for display name
+- `external_agents` upserted during LSQ data fetch (existing `lsq_client.py` flow), with `source="lsq"`
+- At eval time, `call_metadata.agent_id` resolved from `external_agents` by `(tenant_id, source="lsq", external_id)`
+- Aggregator groups by `agent_id`, joins `external_agents` for latest display name
 
 ### Prompt Update
 
@@ -389,29 +501,39 @@ The evaluator's `output_schema` in seed data must be updated to include the new 
 
 ## 8. File Inventory
 
-### New Files
+### New Files — Shared (reusable)
 
 | File | Purpose |
 |------|---------|
-| `backend/app/models/lsq_agent.py` | `LsqAgent` ORM model |
-| `backend/app/schemas/lsq_agent.py` | Pydantic schemas |
-| `backend/app/services/reports/inside_sales_report_service.py` | Report service (generate, cache, load) |
-| `backend/app/services/reports/inside_sales_schemas.py` | `InsideSalesReportPayload`, `InsideSalesNarrativeOutput` Pydantic schemas |
-| `backend/app/services/reports/inside_sales_aggregator.py` | Aggregation logic |
-| `backend/app/services/reports/inside_sales_narrator.py` | AI narrative generation |
-| `src/features/insideSales/components/report/InsideSalesReportView.tsx` | Report container |
-| `src/features/insideSales/components/report/DimensionBreakdownChart.tsx` | Dimension bars |
-| `src/features/insideSales/components/report/AgentHeatmapTable.tsx` | Heatmap + drill-down |
-| `src/features/insideSales/components/report/FlagStatsPanel.tsx` | Behavioral + outcome flags |
-| `src/types/insideSalesReport.ts` | TypeScript types for report payload |
+| `backend/app/models/external_agent.py` | `ExternalAgent` ORM model |
+| `backend/app/schemas/external_agent.py` | Pydantic schemas |
+| `backend/app/services/reports/base_report_service.py` | `BaseReportService` — cache, data loading, LLM setup |
+| `backend/app/services/reports/flag_utils.py` | `aggregate_flags()`, `aggregate_outcome_flags()` utilities |
+| `src/components/report/DimensionBreakdownChart.tsx` | Generic dimension bar chart |
+| `src/components/report/HeatmapTable.tsx` | Generic rows × cols threshold table |
+| `src/components/report/FlagStatsPanel.tsx` | Generic dual-denominator flag display |
+| `src/components/report/ComplianceGatesPanel.tsx` | Generic pass/fail gate display |
+
+### New Files — App-Specific
+
+| File | Purpose |
+|------|---------|
+| `backend/app/services/reports/inside_sales_report_service.py` | `InsideSalesReportService` extends `BaseReportService` |
+| `backend/app/services/reports/inside_sales_schemas.py` | `InsideSalesReportPayload`, `InsideSalesNarrativeOutput` |
+| `backend/app/services/reports/inside_sales_aggregator.py` | Inside sales aggregation logic |
+| `backend/app/services/reports/inside_sales_narrator.py` | Sales QA coaching narrative |
+| `src/features/insideSales/components/report/InsideSalesReportView.tsx` | Report orchestrator |
+| `src/features/insideSales/components/report/AgentHeatmapTable.tsx` | Agent heatmap wrapping HeatmapTable |
+| `src/types/insideSalesReport.ts` | TypeScript types for payload |
 
 ### Modified Files
 
 | File | Change |
 |------|--------|
+| `backend/app/services/reports/report_service.py` | Refactor to extend `BaseReportService` (no behavior change) |
 | `backend/app/services/seed_defaults.py` | Extend GoodFlip QA prompt + output schema with flags |
-| `backend/app/services/evaluators/inside_sales_runner.py` | Resolve `agent_id` from `lsq_agents` and store in `call_metadata` |
-| `backend/app/jobs/job_worker.py` | Branch `handle_generate_report` on `app_id` to pick `InsideSalesReportService` vs `ReportService` |
-| `backend/app/services/lsq_client.py` | Upsert `lsq_agents` on data fetch |
-| `backend/app/models/__init__.py` | Register `LsqAgent` model |
+| `backend/app/services/evaluators/inside_sales_runner.py` | Resolve `agent_id` from `external_agents` and store in `call_metadata` |
+| `backend/app/jobs/job_worker.py` | Branch `handle_generate_report` on `app_id` |
+| `backend/app/services/lsq_client.py` | Upsert `external_agents` (source="lsq") on data fetch |
+| `backend/app/models/__init__.py` | Register `ExternalAgent` model |
 | `src/features/insideSales/pages/InsideSalesRunDetail.tsx` | Wire Report tab to `InsideSalesReportView` |
