@@ -23,14 +23,14 @@ def create_access_token(
     user_id: uuid.UUID,
     tenant_id: uuid.UUID,
     email: str,
-    role: str,
+    role_id: uuid.UUID,
 ) -> str:
     """Create a short-lived JWT access token."""
     payload = {
         "sub": str(user_id),
         "tid": str(tenant_id),
         "email": email,
-        "role": role,
+        "rid": str(role_id),
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES),
         "type": "access",

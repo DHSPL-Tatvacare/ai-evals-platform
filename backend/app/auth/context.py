@@ -4,11 +4,12 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
 import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.utils import decode_access_token
-from app.models.user import UserRole
+from app.auth.permissions import load_role_permissions
+from app.database import get_db
 
 
 bearer_scheme = HTTPBearer()
@@ -20,13 +21,17 @@ class AuthContext:
     user_id: uuid.UUID
     tenant_id: uuid.UUID
     email: str
-    role: UserRole
+    role_id: uuid.UUID
+    is_owner: bool
+    permissions: frozenset[str]
+    app_access: frozenset[str]
 
 
 async def get_auth_context(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
-    """Extract and validate auth context from Bearer token."""
+    """Extract and validate auth context from Bearer token, load permissions."""
     try:
         payload = decode_access_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
@@ -34,27 +39,24 @@ async def get_auth_context(
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    role_id = uuid.UUID(payload["rid"])
+    role, permissions, app_slugs = await load_role_permissions(db, role_id)
+
     return AuthContext(
         user_id=uuid.UUID(payload["sub"]),
         tenant_id=uuid.UUID(payload["tid"]),
         email=payload["email"],
-        role=UserRole(payload["role"]),
+        role_id=role_id,
+        is_owner=(role.is_system and role.name == "Owner"),
+        permissions=frozenset(permissions),
+        app_access=frozenset(app_slugs),
     )
-
-
-async def require_admin(
-    auth: AuthContext = Depends(get_auth_context),
-) -> AuthContext:
-    """Require admin or owner role."""
-    if auth.role not in (UserRole.ADMIN, UserRole.OWNER):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return auth
 
 
 async def require_owner(
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuthContext:
-    """Require owner role."""
-    if auth.role != UserRole.OWNER:
+    """Require Owner role."""
+    if not auth.is_owner:
         raise HTTPException(status_code=403, detail="Owner access required")
     return auth
