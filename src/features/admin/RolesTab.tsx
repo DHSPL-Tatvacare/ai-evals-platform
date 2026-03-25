@@ -59,20 +59,8 @@ export function RolesTab() {
 
   return (
     <>
-      {/* Toolbar */}
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-[13px] text-[var(--text-muted)]">
-          {roles.length} role{roles.length !== 1 ? 's' : ''} defined
-        </p>
-        <PermissionGate action="role:assign">
-          <Button size="md" onClick={() => setIsCreateOpen(true)} icon={Plus}>
-            Create Role
-          </Button>
-        </PermissionGate>
-      </div>
-
-      {/* Table */}
-      {roles.length === 0 ? (
+      {/* Table or empty state */}
+      {roles.filter((r) => !r.isSystem).length === 0 ? (
         <EmptyState
           icon={ShieldAlert}
           title="No custom roles yet"
@@ -82,6 +70,17 @@ export function RolesTab() {
           action={isOwner ? { label: 'Create Role', onClick: () => setIsCreateOpen(true) } : undefined}
         />
       ) : (
+        <>
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-[13px] text-[var(--text-muted)]">
+            {roles.length} role{roles.length !== 1 ? 's' : ''} defined
+          </p>
+          <PermissionGate action="role:assign">
+            <Button size="md" onClick={() => setIsCreateOpen(true)} icon={Plus}>
+              Create Role
+            </Button>
+          </PermissionGate>
+        </div>
         <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)]">
           <table className="w-full">
             <thead>
@@ -157,6 +156,7 @@ export function RolesTab() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Role Editor Panel (slide-over) */}

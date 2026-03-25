@@ -194,8 +194,8 @@ export function InviteLinksSection() {
         </div>
       )}
 
-      {/* Toolbar: search + generate */}
-      <div className="mb-4 flex items-center gap-3">
+      {/* Toolbar: search + generate (hidden when empty and no search) */}
+      <div className={cn('mb-4 flex items-center gap-3', links.length === 0 && !search && 'hidden')}>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
@@ -213,8 +213,8 @@ export function InviteLinksSection() {
         </PermissionGate>
       </div>
 
-      {/* Links table */}
-      <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)]">
+      {/* Links table (hidden when no links at all) */}
+      <div className={cn('overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)]', filtered.length === 0 && 'hidden')}>
         <table className="w-full">
           <thead>
             <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
