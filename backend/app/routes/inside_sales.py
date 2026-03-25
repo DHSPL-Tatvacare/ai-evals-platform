@@ -9,17 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth.context import AuthContext, get_auth_context
-
-
-async def require_inside_sales_access(
-    auth: AuthContext = Depends(require_inside_sales_access),
-) -> AuthContext:
-    """Require access to the inside-sales app."""
-    if auth.is_owner:
-        return auth
-    if "inside-sales" not in auth.app_access:
-        raise HTTPException(403, "No access to app: inside-sales")
-    return auth
 from app.models.eval_run import ThreadEvaluation, EvalRun
 from app.database import get_db
 from app.schemas.inside_sales import (
@@ -33,6 +22,17 @@ from app.services.lsq_client import (
 )
 
 router = APIRouter(prefix="/api/inside-sales", tags=["inside-sales"])
+
+
+async def require_inside_sales_access(
+    auth: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
+    """Require access to the inside-sales app."""
+    if auth.is_owner:
+        return auth
+    if "inside-sales" not in auth.app_access:
+        raise HTTPException(403, "No access to app: inside-sales")
+    return auth
 
 
 @router.get("/agents", response_model=AgentListResponse)
