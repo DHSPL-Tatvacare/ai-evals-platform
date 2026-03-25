@@ -3,6 +3,7 @@ import { usePoll } from '@/hooks';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Loader2, AlertTriangle, Clock, Calendar, Cpu, ArrowLeft, Trash2, FileText, ChevronRight } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
@@ -188,21 +189,25 @@ function RunHeader({ run, onDelete, onCancel, cancelling, isActive }: {
             Logs
           </Link>
           {isActive && onCancel && (
-            <button
-              onClick={onCancel}
-              disabled={cancelling}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-warning)] hover:bg-[var(--surface-warning)] rounded transition-colors disabled:opacity-50"
-            >
-              {cancelling ? 'Cancelling...' : 'Cancel'}
-            </button>
+            <PermissionGate action="eval:delete">
+              <button
+                onClick={onCancel}
+                disabled={cancelling}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-warning)] hover:bg-[var(--surface-warning)] rounded transition-colors disabled:opacity-50"
+              >
+                {cancelling ? 'Cancelling...' : 'Cancel'}
+              </button>
+            </PermissionGate>
           )}
-          <button
-            onClick={onDelete}
-            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-error)] hover:bg-[var(--surface-error)] rounded transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete
-          </button>
+          <PermissionGate action="eval:delete">
+            <button
+              onClick={onDelete}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-error)] hover:bg-[var(--surface-error)] rounded transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+          </PermissionGate>
         </div>
       </div>
       <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">

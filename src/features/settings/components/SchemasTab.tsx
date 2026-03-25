@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Check, FileJson, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck } from 'lucide-react';
 import { Card, Button, EmptyState } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useCurrentSchemas, useCurrentAppId } from '@/hooks';
 import { useLLMSettingsStore } from '@/stores';
 import { useSchemasStore } from '@/stores/schemasStore';
@@ -332,44 +333,50 @@ export function SchemasTab() {
                                   </Button>
                                   
                                   {/* Edit */}
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleEditSchema(schema)}
-                                    className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                    title="Edit schema"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
+                                  <PermissionGate action="resource:edit">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleEditSchema(schema)}
+                                      className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                      title="Edit schema"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </PermissionGate>
                                   
                                   {/* Set Active */}
                                   <div className="w-7 flex justify-center">
                                     {!isDefault && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleSetDefault(type, schema.id)}
-                                        disabled={activatingSchema === schema.id}
-                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-success)]"
-                                        title="Set as active schema"
-                                      >
-                                        <CircleCheck className={`h-3.5 w-3.5 ${activatingSchema === schema.id ? 'animate-pulse' : ''}`} />
-                                      </Button>
+                                      <PermissionGate action="resource:edit">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleSetDefault(type, schema.id)}
+                                          disabled={activatingSchema === schema.id}
+                                          className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-success)]"
+                                          title="Set as active schema"
+                                        >
+                                          <CircleCheck className={`h-3.5 w-3.5 ${activatingSchema === schema.id ? 'animate-pulse' : ''}`} />
+                                        </Button>
+                                      </PermissionGate>
                                     )}
                                   </div>
                                   
                                   {/* Delete */}
                                   <div className="w-7 flex justify-center">
                                     {!schema.isDefault && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleDeleteClick(schema)}
-                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-error)]"
-                                        title="Delete schema"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
+                                      <PermissionGate action="resource:delete">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleDeleteClick(schema)}
+                                          className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-error)]"
+                                          title="Delete schema"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </PermissionGate>
                                     )}
                                   </div>
                                 </div>
@@ -391,15 +398,17 @@ export function SchemasTab() {
                   )}
                 </div>
                 <div className="px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleCreateNew(type)}
-                    className="h-8 text-[12px] gap-1.5"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Create New Schema
-                  </Button>
+                  <PermissionGate action="resource:create">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleCreateNew(type)}
+                      className="h-8 text-[12px] gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Create New Schema
+                    </Button>
+                  </PermissionGate>
                 </div>
               </>
             )}

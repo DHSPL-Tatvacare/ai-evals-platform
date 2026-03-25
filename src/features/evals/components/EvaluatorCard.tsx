@@ -11,6 +11,7 @@ import {
   GitFork,
 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ui";
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { cn } from "@/utils";
 import { EvaluatorHistoryListOverlay } from "./EvaluatorHistoryListOverlay";
 import { EvaluatorHistoryDetailsOverlay } from "./EvaluatorHistoryDetailsOverlay";
@@ -248,26 +249,30 @@ export function EvaluatorCard({
                     />
                     Show in Header
                   </button>
-                  <button
-                    onClick={() => {
-                      onEdit(evaluator);
-                      setShowMenu(false);
-                    }}
-                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                  >
-                    <Edit className="h-3.5 w-3.5" />
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => {
-                      onDelete(evaluator.id);
-                      setShowMenu(false);
-                    }}
-                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--color-error)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </button>
+                  <PermissionGate action="resource:edit">
+                    <button
+                      onClick={() => {
+                        onEdit(evaluator);
+                        setShowMenu(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                      Edit
+                    </button>
+                  </PermissionGate>
+                  <PermissionGate action="resource:delete">
+                    <button
+                      onClick={() => {
+                        onDelete(evaluator.id);
+                        setShowMenu(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--color-error)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  </PermissionGate>
                 </div>
               </>
             )}

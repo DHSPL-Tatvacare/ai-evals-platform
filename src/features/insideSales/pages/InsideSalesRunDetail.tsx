@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 import { Button, Tabs, EmptyState } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import VerdictBadge from '@/features/evalRuns/components/VerdictBadge';
 import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
@@ -323,15 +324,19 @@ export function InsideSalesRunDetail() {
               Logs
             </Link>
             {isActive && (
-              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={cancelling}>
-                <XCircle className="h-3.5 w-3.5" />
-                {cancelling ? 'Cancelling...' : 'Cancel'}
-              </Button>
+              <PermissionGate action="eval:delete">
+                <Button variant="ghost" size="sm" onClick={handleCancel} disabled={cancelling}>
+                  <XCircle className="h-3.5 w-3.5" />
+                  {cancelling ? 'Cancelling...' : 'Cancel'}
+                </Button>
+              </PermissionGate>
             )}
-            <Button variant="danger" size="sm" onClick={handleDelete} disabled={isDeleting}>
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </Button>
+            <PermissionGate action="eval:delete">
+              <Button variant="danger" size="sm" onClick={handleDelete} disabled={isDeleting}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            </PermissionGate>
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1 text-[11px] text-[var(--text-muted)]">

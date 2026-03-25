@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Trash2, Square, Clock } from 'lucide-react';
 import { ModelBadge } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import type { RunType } from '../types';
 import { RUN_TYPE_CONFIG } from '../types';
 
@@ -192,24 +193,28 @@ export default function RunRowCard({
               {/* Bottom-right actions: cancel + delete */}
               <div className="flex items-center gap-1 shrink-0">
                 {isRunning && onCancel && (
-                  <button
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
-                    disabled={cancelDisabled}
-                    className="h-6 w-6 p-0 flex items-center justify-center text-[var(--color-error)] bg-[var(--color-error)]/10 hover:bg-[var(--color-error)]/20 rounded transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                    title="Stop run"
-                  >
-                    <Square className="h-2.5 w-2.5 fill-current" />
-                  </button>
+                  <PermissionGate action="eval:delete">
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
+                      disabled={cancelDisabled}
+                      className="h-6 w-6 p-0 flex items-center justify-center text-[var(--color-error)] bg-[var(--color-error)]/10 hover:bg-[var(--color-error)]/20 rounded transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                      title="Stop run"
+                    >
+                      <Square className="h-2.5 w-2.5 fill-current" />
+                    </button>
+                  </PermissionGate>
                 )}
                 {onDelete && (
-                  <button
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
-                    disabled={deleteDisabled || isRunning}
-                    className="p-1 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error)] hover:bg-[var(--color-error)]/10 rounded transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                    title={isRunning ? 'Stop the run before deleting' : 'Delete run'}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <PermissionGate action="eval:delete">
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+                      disabled={deleteDisabled || isRunning}
+                      className="p-1 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error)] hover:bg-[var(--color-error)]/10 rounded transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                      title={isRunning ? 'Stop the run before deleting' : 'Delete run'}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </PermissionGate>
                 )}
               </div>
             </div>

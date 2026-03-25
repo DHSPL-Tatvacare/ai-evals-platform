@@ -5,6 +5,7 @@ import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 
 const ROWS_PER_PAGE = 20;
 
@@ -194,9 +195,11 @@ export function InviteLinksSection() {
             className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
           />
         </div>
-        <Button size="md" icon={Plus} onClick={() => { setShowCreateForm(true); setGeneratedUrl(null); }}>
-          Generate Link
-        </Button>
+        <PermissionGate action="user:invite">
+          <Button size="md" icon={Plus} onClick={() => { setShowCreateForm(true); setGeneratedUrl(null); }}>
+            Generate Link
+          </Button>
+        </PermissionGate>
       </div>
 
       {/* Links table */}
@@ -235,7 +238,9 @@ export function InviteLinksSection() {
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {canRevoke && (
-                      <Button variant="ghost" size="sm" icon={Trash2} iconOnly title="Revoke" onClick={() => setRevokingLink(link)} />
+                      <PermissionGate action="user:invite">
+                        <Button variant="ghost" size="sm" icon={Trash2} iconOnly title="Revoke" onClick={() => setRevokingLink(link)} />
+                      </PermissionGate>
                     )}
                   </td>
                 </tr>

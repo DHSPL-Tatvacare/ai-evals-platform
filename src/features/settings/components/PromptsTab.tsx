@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Check, FileText, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck } from 'lucide-react';
 import { Card, Button, EmptyState } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useCurrentPrompts, useCurrentAppId } from '@/hooks';
 import { useLLMSettingsStore } from '@/stores';
 import { usePromptsStore } from '@/stores/promptsStore';
@@ -338,45 +339,51 @@ export function PromptsTab() {
                                   
                                   {/* Edit (custom prompts only — defaults are read-only) */}
                                   {!prompt.isDefault && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleEditPrompt(prompt)}
-                                      className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                      title="Edit prompt"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
+                                    <PermissionGate action="resource:edit">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleEditPrompt(prompt)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title="Edit prompt"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </PermissionGate>
                                   )}
                                   
                                   {/* Set Active */}
                                   <div className="w-7 flex justify-center">
                                     {!isDefault && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleSetDefault(type, prompt.id)}
-                                        disabled={activatingPrompt === prompt.id}
-                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-success)]"
-                                        title="Set as active prompt"
-                                      >
-                                        <CircleCheck className={`h-3.5 w-3.5 ${activatingPrompt === prompt.id ? 'animate-pulse' : ''}`} />
-                                      </Button>
+                                      <PermissionGate action="resource:edit">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleSetDefault(type, prompt.id)}
+                                          disabled={activatingPrompt === prompt.id}
+                                          className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-success)]"
+                                          title="Set as active prompt"
+                                        >
+                                          <CircleCheck className={`h-3.5 w-3.5 ${activatingPrompt === prompt.id ? 'animate-pulse' : ''}`} />
+                                        </Button>
+                                      </PermissionGate>
                                     )}
                                   </div>
                                   
                                   {/* Delete */}
                                   <div className="w-7 flex justify-center">
                                     {!prompt.isDefault && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleDeleteClick(prompt)}
-                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-error)]"
-                                        title="Delete prompt"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
+                                      <PermissionGate action="resource:delete">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleDeleteClick(prompt)}
+                                          className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--color-error)]"
+                                          title="Delete prompt"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </PermissionGate>
                                     )}
                                   </div>
                                 </div>
@@ -400,15 +407,17 @@ export function PromptsTab() {
                   )}
                 </div>
                 <div className="px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleCreateNew(type)}
-                    className="h-8 text-[12px] gap-1.5"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Create New Prompt
-                  </Button>
+                  <PermissionGate action="resource:create">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleCreateNew(type)}
+                      className="h-8 text-[12px] gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Create New Prompt
+                    </Button>
+                  </PermissionGate>
                 </div>
               </>
             )}

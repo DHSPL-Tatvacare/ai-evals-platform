@@ -13,6 +13,7 @@ import {
   Square,
 } from 'lucide-react';
 import { Button, EmptyState, Tabs } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useInsideSalesStore, useUIStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
@@ -488,9 +489,11 @@ export function InsideSalesListing() {
           >
             Deselect all
           </button>
-          <Button size="sm" className="ml-auto" onClick={() => openModal('insideSalesEval')}>
-            Evaluate Selected
-          </Button>
+          <PermissionGate action="eval:run">
+            <Button size="sm" className="ml-auto" onClick={() => openModal('insideSalesEval')}>
+              Evaluate Selected
+            </Button>
+          </PermissionGate>
         </div>
       )}
 

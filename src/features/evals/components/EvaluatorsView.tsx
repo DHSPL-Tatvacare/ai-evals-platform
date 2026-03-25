@@ -9,6 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Button, ConfirmDialog, EmptyState, Skeleton } from "@/components/ui";
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { CreateEvaluatorOverlay } from "./CreateEvaluatorOverlay";
 import { EvaluatorCard } from "./EvaluatorCard";
 import { EvaluatorRegistryPicker } from "./EvaluatorRegistryPicker";
@@ -226,23 +227,27 @@ export function EvaluatorsView({
             className="w-full max-w-md"
           >
             {listing.appId === "voice-rx" && (
-              <Button
-                variant="secondary"
-                onClick={handleSeedDefaults}
-                disabled={isSeeding}
-                isLoading={isSeeding}
-                icon={Star}
-                className="mb-2"
-              >
-                Add Recommended Evaluators (5)
-              </Button>
+              <PermissionGate action="resource:create">
+                <Button
+                  variant="secondary"
+                  onClick={handleSeedDefaults}
+                  disabled={isSeeding}
+                  isLoading={isSeeding}
+                  icon={Star}
+                  className="mb-2"
+                >
+                  Add Recommended Evaluators (5)
+                </Button>
+              </PermissionGate>
             )}
             <div className="relative mt-1">
-              <Button onClick={() => setShowAddMenu(!showAddMenu)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Evaluator
-                <ChevronDown className="h-4 w-4 ml-2" />
-              </Button>
+              <PermissionGate action="resource:create">
+                <Button onClick={() => setShowAddMenu(!showAddMenu)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Evaluator
+                  <ChevronDown className="h-4 w-4 ml-2" />
+                </Button>
+              </PermissionGate>
 
               {showAddMenu && (
                 <>
@@ -282,19 +287,23 @@ export function EvaluatorsView({
               Evaluators ({evaluators.length})
             </h3>
             <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setRunAllOpen(true)}
-                icon={PlayCircle}
-              >
-                Run
-              </Button>
-              <div className="relative">
-                <Button onClick={() => setShowAddMenu(!showAddMenu)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Evaluator
-                  <ChevronDown className="h-4 w-4 ml-2" />
+              <PermissionGate action="eval:run">
+                <Button
+                  variant="secondary"
+                  onClick={() => setRunAllOpen(true)}
+                  icon={PlayCircle}
+                >
+                  Run
                 </Button>
+              </PermissionGate>
+              <div className="relative">
+                <PermissionGate action="resource:create">
+                  <Button onClick={() => setShowAddMenu(!showAddMenu)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Evaluator
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </PermissionGate>
 
                 {showAddMenu && (
                   <>

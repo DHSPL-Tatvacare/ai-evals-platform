@@ -6,6 +6,7 @@ import type { AdminUser, UpdateUserRequest } from '@/services/api/adminApi';
 import { useAuthStore } from '@/stores/authStore';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { CreateUserDialog } from './CreateUserDialog';
 import { EditUserDialog } from './EditUserDialog';
 import { ResetPasswordDialog } from './ResetPasswordDialog';
@@ -100,7 +101,7 @@ function UsersTab() {
     );
   }
 
-  const isOwner = currentUser?.role === 'owner';
+  const isOwner = currentUser?.isOwner;
 
   return (
     <>
@@ -116,9 +117,11 @@ function UsersTab() {
             className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
           />
         </div>
-        <Button size="md" onClick={() => setIsCreateOpen(true)} icon={Plus}>
-          Add User
-        </Button>
+        <PermissionGate action="user:create">
+          <Button size="md" onClick={() => setIsCreateOpen(true)} icon={Plus}>
+            Add User
+          </Button>
+        </PermissionGate>
       </div>
 
       {/* Table */}
@@ -166,12 +169,18 @@ function UsersTab() {
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="sm" icon={Pencil} iconOnly title="Edit user" onClick={() => setEditingUser(user)} />
+                      <PermissionGate action="user:edit">
+                        <Button variant="ghost" size="sm" icon={Pencil} iconOnly title="Edit user" onClick={() => setEditingUser(user)} />
+                      </PermissionGate>
                       {!isSelf && user.isActive && (
-                        <Button variant="ghost" size="sm" icon={KeyRound} iconOnly title="Reset password" onClick={() => setResetPasswordUser(user)} />
+                        <PermissionGate action="user:reset_password">
+                          <Button variant="ghost" size="sm" icon={KeyRound} iconOnly title="Reset password" onClick={() => setResetPasswordUser(user)} />
+                        </PermissionGate>
                       )}
                       {isOwner && !isSelf && user.role !== 'owner' && user.isActive && (
-                        <Button variant="ghost" size="sm" icon={UserX} iconOnly title="Deactivate user" onClick={() => setDeactivatingUser(user)} />
+                        <PermissionGate action="user:deactivate">
+                          <Button variant="ghost" size="sm" icon={UserX} iconOnly title="Deactivate user" onClick={() => setDeactivatingUser(user)} />
+                        </PermissionGate>
                       )}
                     </div>
                   </td>
@@ -222,7 +231,7 @@ function UsersTab() {
         isOpen={!!editingUser}
         user={editingUser}
         currentUserId={currentUser?.id ?? ''}
-        currentUserRole={currentUser?.role ?? 'member'}
+        currentUserRole={currentUser?.roleName ?? 'member'}
         onClose={() => setEditingUser(null)}
         onSubmit={handleUpdateUser}
       />
