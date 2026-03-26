@@ -12,7 +12,7 @@ Operational guide for coding agents working in this repository. Prefer existing 
 ## Architecture Mental Models
 
 1. Frontend is a thin client. All business logic, LLM calls, and persistence run on the backend. Frontend manages UI state and makes API calls.
-2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`.
+2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`, `call_quality`.
 3. Jobs are the execution model. Operations longer than a few seconds run as background jobs: create → poll → get result. Never write custom polling loops in components.
 4. Stores are caches. Zustand stores cache server data. PostgreSQL is the source of truth. On page load, stores call their `load*()` methods.
 5. The provider abstraction protects runners. Runners never call Gemini/OpenAI/Anthropic SDKs directly. They go through `llm_base.py`, which handles auth, retries, timeouts, and logging.
@@ -31,19 +31,22 @@ Operational guide for coding agents working in this repository. Prefer existing 
 
 ## Current Registry
 
-- Routers (16): listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
-- ORM tables (16): eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
-- Zustand stores (14): appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
+- Routers (20): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports, inside_sales, apps, roles
+- ORM tables (28): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents, apps, tenant_configs, roles, role_permissions, role_app_access, invite_links, audit_log, lsq_lead_cache
+- Zustand stores (16): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore
 - LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
-- Job handlers (7): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, generate-report, generate-cross-run-report
-- Active app IDs: `voice-rx`, `kaira-bot`
+- Job handlers (8): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-cross-run-report
+- Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`
 
 ## Invariants — Do Not Break
 
 - EvalRun `eval_type` polymorphism must be preserved. FK/cascade chain `listings`/`chat_sessions` → `eval_runs` → `thread_evaluations`/`adversarial_evaluations`/`api_logs` must remain intact.
 - Voice Rx two-call order is fixed: transcription first (with audio), critique second (text-only `generate_json`). Never send audio on the critique call. Compute statistics server-side from records, not LLM self-reports.
 - Job safety: `is_job_cancelled()` checks must exist in all long-running flows. `recover_stale_jobs()` and `recover_stale_eval_runs()` startup paths must remain functional.
-- LLM settings are global. Stored at `app_id=""`. Never pass an app_id to LLM settings lookup.
+- Every data row belongs to a tenant. Every query filters by `tenant_id` from `AuthContext`.
+- `SYSTEM_TENANT_ID` and `SYSTEM_USER_ID` are well-known UUIDs for seed data. System prompts/schemas/evaluators are read-only to all tenants.
+- LLM settings are per-user-per-tenant, stored at `(tenant_id, user_id, app_id="")`. Never pass an app_id to LLM settings lookup.
+- Auth routes (`/api/auth/*`) are the only public routes. All others require Bearer token.
 - Gemini on Vertex AI: use `Part.from_bytes()` for media — `client.files.upload()` is not available on Vertex. To disable thinking, omit `thinking_config` entirely. Thinking params differ by model family: 2.5 uses `thinking_budget` (int), 3+ uses `thinking_level` (enum). Do not mix them.
 - Do not reintroduce `kaira-evals` as an appId in any frontend store or settings.
 - Do not create additional agent rule files in subdirectories. `AGENTS.md` is the source of truth.

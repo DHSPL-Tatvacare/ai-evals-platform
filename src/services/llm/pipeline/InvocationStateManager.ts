@@ -4,6 +4,7 @@
  */
 
 import type { InvocationState } from './types';
+import { logger } from '@/services/logger';
 
 export class InvocationStateManager {
   private currentState: InvocationState | null = null;
@@ -22,7 +23,7 @@ export class InvocationStateManager {
     });
     
     // Log state changes
-    console.log('[LLMPipeline]', state);
+    logger.debug('[LLMPipeline] State change', { status: state.status, ...('step' in state ? { step: state.step } : {}) });
   }
   
   subscribe(listener: (state: InvocationState) => void): () => void {

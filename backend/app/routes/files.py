@@ -7,12 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
+from app.config import settings
 from app.database import get_db
 from app.models.file_record import FileRecord
 from app.schemas.file import FileResponse as FileResponseSchema
 from app.services.file_storage import file_storage
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+_MAX_UPLOAD_BYTES = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+_ALLOWED_MIMES = set(m.strip() for m in settings.ALLOWED_UPLOAD_MIMES.split(",") if m.strip())
 
 
 @router.post("/upload", response_model=FileResponseSchema, status_code=201)
@@ -23,6 +27,15 @@ async def upload_file(
 ):
     """Upload a file and create a file record."""
     contents = await file.read()
+
+    if len(contents) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail=f"File exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
+
+    if file.content_type and file.content_type not in _ALLOWED_MIMES:
+        raise HTTPException(
+            400, detail=f"File type '{file.content_type}' not allowed",
+        )
+
     storage_path = await file_storage.save(contents, file.filename or "unnamed")
 
     record = FileRecord(

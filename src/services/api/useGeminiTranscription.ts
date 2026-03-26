@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { transcribeWithGemini } from '@/services/api/geminiTranscription';
+import { logger } from '@/services/logger';
 import type { GeminiApiResponse } from '@/types';
 import { notificationService } from '@/services/notifications';
 
@@ -21,7 +22,7 @@ export function useGeminiTranscription() {
 
         setResult(response);
         notificationService.success('Transcription completed');
-        console.log('Gemini API Response:', response);
+        logger.debug('[GeminiTranscription] Response received', { hasResult: !!response });
       } catch (error) {
         console.error('Transcription error:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';

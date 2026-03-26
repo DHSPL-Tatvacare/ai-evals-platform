@@ -5,6 +5,7 @@
 
 import { create } from "zustand";
 import type { AppId, KairaChatSession, KairaChatMessage } from "@/types";
+import { logger } from "@/services/logger";
 import {
   chatSessionsRepository,
   chatMessagesRepository,
@@ -581,7 +582,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           set({ streamingContent: fullContent });
         }
         if (chunkContent.logMessage) {
-          console.log("[ChatStore]", chunkContent.logMessage);
+          logger.debug('[ChatStore]', { message: chunkContent.logMessage });
         }
         if (chunkContent.error) {
           throw new Error(chunkContent.error);

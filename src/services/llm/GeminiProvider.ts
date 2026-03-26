@@ -1,5 +1,6 @@
 import { GoogleGenAI, createUserContent, createPartFromUri } from '@google/genai';
 import type { ILLMProvider, LLMGenerateOptions, LLMResponse } from '@/types';
+import { logger } from '@/services/logger';
 import { createRetryableError } from './retryPolicy';
 import type { ErrorCode } from '@/types';
 export class GeminiProvider implements ILLMProvider {
@@ -89,7 +90,7 @@ export class GeminiProvider implements ILLMProvider {
       // Only set maxOutputTokens if explicitly provided
       if (options?.maxOutputTokens) {
         config.maxOutputTokens = options.maxOutputTokens;
-        console.log('[GeminiProvider] Setting maxOutputTokens:', options.maxOutputTokens);
+        logger.debug('[GeminiProvider] Setting maxOutputTokens', { maxOutputTokens: options.maxOutputTokens });
       }
 
       // Add structured output if schema provided
@@ -98,7 +99,7 @@ export class GeminiProvider implements ILLMProvider {
         config.responseSchema = options.responseSchema;
       }
 
-      console.log('[GeminiProvider] Final config being sent to API:', {
+      logger.debug('[GeminiProvider] Final config', {
         temperature: config.temperature,
         maxOutputTokens: config.maxOutputTokens,
         hasSchema: !!config.responseSchema,
@@ -111,16 +112,8 @@ export class GeminiProvider implements ILLMProvider {
         config,
       });
 
-      console.log('[GeminiProvider] Raw response received', {
-        hasText: !!response.text,
+      logger.debug('[GeminiProvider] Response received', {
         textLength: response.text?.length || 0,
-        hasCandidates: !!(response as any).candidates?.length,
-        finishReason: (response as any).candidates?.[0]?.finishReason,
-        promptTokens: response.usageMetadata?.promptTokenCount,
-        outputTokens: response.usageMetadata?.candidatesTokenCount,
-      });
-
-      console.log('[GeminiProvider] Response metadata:', {
         finishReason: (response as any).candidates?.[0]?.finishReason,
         promptTokens: response.usageMetadata?.promptTokenCount,
         outputTokens: response.usageMetadata?.candidatesTokenCount,
@@ -162,22 +155,14 @@ export class GeminiProvider implements ILLMProvider {
       // Upload the audio file first
       const file = new File([audioBlob], 'audio', { type: mimeType });
 
-      console.log('[GeminiProvider] Starting audio file upload', {
-        blobSize: audioBlob.size,
-        mimeType,
-      });
+      logger.debug('[GeminiProvider] Starting audio upload', { blobSize: audioBlob.size, mimeType });
 
       const uploadedFile = await this.client.files.upload({
         file,
         config: { mimeType },
       });
 
-      console.log('[GeminiProvider] Audio upload complete', {
-        uri: uploadedFile.uri,
-        state: (uploadedFile as any).state,
-        mimeType: uploadedFile.mimeType,
-        name: (uploadedFile as any).name,
-      });
+      logger.debug('[GeminiProvider] Audio upload complete', { uri: uploadedFile.uri, mimeType: uploadedFile.mimeType });
 
       if (!uploadedFile.uri || !uploadedFile.mimeType) {
         throw new Error('Failed to upload audio file');
@@ -211,10 +196,8 @@ export class GeminiProvider implements ILLMProvider {
         config,
       });
 
-      console.log('[GeminiProvider] Audio response received', {
-        hasText: !!response.text,
+      logger.debug('[GeminiProvider] Audio response received', {
         textLength: response.text?.length || 0,
-        hasCandidates: !!(response as any).candidates?.length,
         finishReason: (response as any).candidates?.[0]?.finishReason,
         promptTokens: response.usageMetadata?.promptTokenCount,
         outputTokens: response.usageMetadata?.candidatesTokenCount,

@@ -55,6 +55,7 @@ service-account*.json
 /docs/*
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
+!/docs/devops-handover.md
 !/docs/plans/
 
 # Allow guide app source/config

@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,8 @@ from app.auth.utils import (
     verify_password,
 )
 from app.config import settings
+
+limiter = Limiter(key_func=get_remote_address)
 from app.database import get_db
 from app.models.invite_link import InviteLink
 from app.models.tenant import Tenant
@@ -73,7 +77,9 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
 
 
 @router.post("/login")
+@limiter.limit(settings.AUTH_RATE_LIMIT)
 async def login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
@@ -118,6 +124,7 @@ async def login(
 
 
 @router.post("/refresh")
+@limiter.limit(settings.AUTH_RATE_LIMIT)
 async def refresh(
     request: Request,
     response: Response,
@@ -293,7 +300,9 @@ async def validate_invite(
 
 
 @router.post("/signup")
+@limiter.limit(settings.AUTH_RATE_LIMIT)
 async def signup(
+    request: Request,
     body: SignupRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),

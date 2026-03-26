@@ -8,10 +8,11 @@ Guided reference for this codebase. Covers what the platform is, why it exists, 
 
 AI Evals Platform is a full-stack evaluation system for AI outputs used in production clinical and conversational workflows. It gives QA teams a structured, reproducible way to measure, compare, and audit AI model performance — backed by a versioned prompt and schema system, a background job pipeline, and a unified result store.
 
-Two active workspaces:
+Three active workspaces:
 
 - **Voice Rx** (`voice-rx`): Evaluates medical transcription quality. Users upload audio files with reference transcripts and run a two-call LLM pipeline to assess accuracy at the segment level.
 - **Kaira Bot** (`kaira-bot`): Evaluates conversational AI quality. Users test chat sessions against custom or built-in evaluators, run bulk thread evaluations from CSV, and execute automated adversarial tests.
+- **Inside Sales** (`inside-sales`): Evaluates AI-assisted sales call quality. Pulls call recordings and transcripts from LeadSquared, runs structured scoring with a multi-agent reasoning pipeline, and generates per-agent scorecards.
 
 ---
 
@@ -84,7 +85,7 @@ Adversarial evaluation hits the live Kaira API, generates adversarial probes, si
 
 ### Built-in Evaluators
 
-Three evaluators are seeded on startup for both apps from `backend/app/services/seed_defaults.py`:
+Three evaluators are available for each app:
 
 | Evaluator | Purpose |
 |-----------|---------|
@@ -92,7 +93,12 @@ Three evaluators are seeded on startup for both apps from `backend/app/services/
 | Correctness | Assesses factual or clinical accuracy of the response |
 | Efficiency | Evaluates workflow efficiency and response conciseness |
 
-These are stored in the `evaluators` table and are available immediately after first run.
+**Important:** Evaluators are NOT auto-seeded on startup (unlike prompts and schemas). They must be seeded once per app after first login via:
+```
+POST /api/evaluators/seed-defaults?appId=voice-rx
+POST /api/evaluators/seed-defaults?appId=kaira-bot
+POST /api/evaluators/seed-defaults?appId=inside-sales
+```
 
 ---
 
@@ -224,11 +230,11 @@ This chain must not be broken. Deleting a listing or chat session cascades down.
 ```
 Browser (React)                         Server (FastAPI)                    Database
 ┌───────────────────────┐  HTTP/JSON   ┌──────────────────────────┐       ┌──────────┐
-│  UI Components         │────────────>│  API Routers (16)         │──────>│          │
-│  Zustand Stores (14)   │<────────────│  Services / Evaluators    │<──────│ Postgres │
+│  UI Components         │────────────>│  API Routers (17)         │──────>│          │
+│  Zustand Stores (15)   │<────────────│  Services / Evaluators    │<──────│ Postgres │
 │  API Client Layer      │             │  Job Worker (7 handlers)  │       │  (JSONB) │
 └───────────────────────┘             │  LLM Providers (4)        │       └──────────┘
-         :5173                        └──────────────────────────┘
+   dev: :5173 / prod: :80             └──────────────────────────┘
                                                 :8721
 ```
 
@@ -274,7 +280,7 @@ src/
 | `listings` | Listing cards, list views, detail views |
 | `common` | Shared cross-feature UI components |
 
-**Zustand stores (14):** appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
+**Zustand stores (16):** authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore
 
 **Critical Zustand pattern:**
 
@@ -303,12 +309,12 @@ const store = usePromptsStore();
 
 ```
 backend/app/
-├── main.py                    <- FastAPI app, router registration (16 routers), lifespan hooks
+├── main.py                    <- FastAPI app, router registration (20 routers), lifespan hooks
 ├── database.py                <- Async SQLAlchemy engine + session factory
 ├── config.py                  <- All config from env vars (pydantic-settings)
-├── models/                    <- 16 ORM models (SQLAlchemy 2 Mapped[] style)
+├── models/                    <- 28 ORM models (SQLAlchemy 2 Mapped[] style)
 ├── schemas/                   <- Pydantic request/response schemas (CamelModel)
-├── routes/                    <- 16 API routers
+├── routes/                    <- 20 API routers
 └── services/
     ├── evaluators/            <- llm_base.py providers + evaluation runners
     ├── reports/               <- Report aggregation, AI narrative, health scores
@@ -317,9 +323,9 @@ backend/app/
     └── evaluation_constants.py <- System prompts, normalization templates
 ```
 
-**ORM tables (16):** eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics
+**ORM tables (28):** tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents, apps, tenant_configs, roles, role_permissions, role_app_access, invite_links, audit_log, lsq_lead_cache
 
-**API routers (16):** listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
+**API routers (20):** auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports, inside_sales, apps, roles
 
 **Evaluation runners (`backend/app/services/evaluators/`):**
 
@@ -332,12 +338,16 @@ backend/app/
 | `correctness_evaluator.py` | Correctness assessment |
 | `efficiency_evaluator.py` | Efficiency/workflow evaluation |
 | `adversarial_evaluator.py` | Adversarial probe execution |
+| `inside_sales_runner.py` | Inside Sales call quality pipeline (LeadSquared integration) |
 
 **Seed defaults (`seed_defaults.py`):**
 
-On startup the backend seeds defaults for both apps if they don't exist:
-- Voice Rx: 5 prompts, 3 schemas, 3 evaluators (Intent, Correctness, Efficiency)
-- Kaira Bot: 2 prompts, 1 schema, 3 evaluators (Intent, Correctness, Efficiency)
+On startup the backend seeds prompts and schemas (NOT evaluators) if they don't exist:
+- Voice Rx: 5 prompts, 5 schemas
+- Kaira Bot: 2 prompts, 1 schema
+- Apps: 3 app records (voice-rx, kaira-bot, inside-sales)
+
+Evaluators must be seeded manually per app after first login (see `POST /api/evaluators/seed-defaults`).
 
 ---
 

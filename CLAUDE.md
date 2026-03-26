@@ -32,11 +32,11 @@ At session start, read `~/.claude` project memory for context from prior convers
 
 ## Current Registry
 
-- Routers (17): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports
-- ORM tables (20): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents
-- Zustand stores (15): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore
+- Routers (20): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports, inside_sales, apps, roles
+- ORM tables (28): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents, apps, tenant_configs, roles, role_permissions, role_app_access, invite_links, audit_log, lsq_lead_cache
+- Zustand stores (16): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore
 - LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
-- Job handlers (7): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, generate-report, generate-cross-run-report
+- Job handlers (8): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-cross-run-report
 - Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`
 
 ## Invariants — Do Not Break

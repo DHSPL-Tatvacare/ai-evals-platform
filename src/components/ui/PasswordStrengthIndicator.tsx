@@ -2,15 +2,16 @@ import { cn } from '@/utils';
 
 interface PasswordRule {
   label: string;
+  short: string;
   test: (pw: string) => boolean;
 }
 
 const PASSWORD_RULES: PasswordRule[] = [
-  { label: 'At least 8 characters', test: (pw) => pw.length >= 8 },
-  { label: 'One uppercase letter', test: (pw) => /[A-Z]/.test(pw) },
-  { label: 'One lowercase letter', test: (pw) => /[a-z]/.test(pw) },
-  { label: 'One number', test: (pw) => /\d/.test(pw) },
-  { label: 'One special character', test: (pw) => /[^A-Za-z0-9]/.test(pw) },
+  { label: 'At least 8 characters', short: '8+ chars', test: (pw) => pw.length >= 8 },
+  { label: 'One uppercase letter', short: 'Uppercase', test: (pw) => /[A-Z]/.test(pw) },
+  { label: 'One lowercase letter', short: 'Lowercase', test: (pw) => /[a-z]/.test(pw) },
+  { label: 'One number', short: 'Number', test: (pw) => /\d/.test(pw) },
+  { label: 'One special character', short: 'Special', test: (pw) => /[^A-Za-z0-9]/.test(pw) },
 ];
 
 export function validatePasswordStrength(password: string): { valid: boolean; passCount: number; total: number } {
@@ -48,8 +49,8 @@ export function PasswordStrengthIndicator({ password, className }: PasswordStren
     'text-green-400';
 
   return (
-    <div className={cn('space-y-2', className)}>
-      {/* Strength bar */}
+    <div className={cn('space-y-1.5', className)}>
+      {/* Strength bar + label */}
       <div className="flex items-center gap-2">
         <div className="flex-1 h-1 rounded-full bg-[var(--border-subtle)] overflow-hidden">
           <div
@@ -57,24 +58,28 @@ export function PasswordStrengthIndicator({ password, className }: PasswordStren
             style={{ width: `${strength * 100}%` }}
           />
         </div>
-        <span className={cn('text-[11px] font-medium', textColor)}>
+        <span className={cn('text-[11px] font-medium tabular-nums shrink-0', textColor)}>
           {strengthLabel}
         </span>
       </div>
 
-      {/* Rules checklist */}
-      <div className="space-y-0.5">
+      {/* Compact inline rule chips */}
+      <div className="flex flex-wrap gap-x-1.5 gap-y-1">
         {PASSWORD_RULES.map((rule) => {
           const passed = rule.test(password);
           return (
-            <div key={rule.label} className="flex items-center gap-1.5">
-              <span className={cn('text-[10px]', passed ? 'text-green-400' : 'text-[var(--text-muted)]')}>
-                {passed ? '\u2713' : '\u2022'}
-              </span>
-              <span className={cn('text-[11px]', passed ? 'text-green-400' : 'text-[var(--text-muted)]')}>
-                {rule.label}
-              </span>
-            </div>
+            <span
+              key={rule.label}
+              className={cn(
+                'inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[10px] leading-tight transition-colors',
+                passed
+                  ? 'bg-green-500/10 text-green-400'
+                  : 'bg-[var(--surface-secondary)] text-[var(--text-muted)]',
+              )}
+            >
+              <span className="text-[9px]">{passed ? '\u2713' : '\u2022'}</span>
+              {rule.short}
+            </span>
           );
         })}
       </div>

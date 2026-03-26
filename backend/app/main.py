@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import delete, text
 
 from app.config import settings
@@ -39,23 +42,16 @@ async def lifespan(app: FastAPI):
     _validate_startup_config()
 
     async with engine.begin() as conn:
-        # Drop orphaned cache table (replaced by lsq_lead_cache)
-        await conn.execute(text("DROP TABLE IF EXISTS lsq_call_cache"))
         await conn.run_sync(Base.metadata.create_all)
 
-        # Add source_type column to schemas table if missing
-        await conn.execute(
-            text("""
-                ALTER TABLE schemas ADD COLUMN IF NOT EXISTS source_type VARCHAR(20)
-            """)
-        )
-
-        # Drop legacy report_cache column (now in evaluation_analytics table)
-        await conn.execute(
-            text("""
-                ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache
-            """)
-        )
+        # One-time migrations — safe to run repeatedly (IF NOT EXISTS / IF EXISTS guards)
+        await conn.execute(text("DROP TABLE IF EXISTS lsq_call_cache"))
+        await conn.execute(text(
+            "ALTER TABLE schemas ADD COLUMN IF NOT EXISTS source_type VARCHAR(20)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache"
+        ))
 
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin
     from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
@@ -90,6 +86,11 @@ app = FastAPI(
     description="Backend API for AI evaluation pipelines.",
     lifespan=lifespan,
 )
+
+# Rate limiter (used by auth routes via app.state.limiter)
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS
 origins = [o.strip() for o in settings.CORS_ORIGINS.split(",")]

@@ -61,6 +61,17 @@ class Settings(BaseSettings):
     LSQ_ACCESS_KEY: str = ""
     LSQ_SECRET_KEY: str = ""
 
+    # Upload limits
+    MAX_UPLOAD_SIZE_MB: int = 100  # enforced in file upload route
+    ALLOWED_UPLOAD_MIMES: str = (
+        "audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/x-wav,audio/x-m4a,"
+        "audio/m4a,audio/mp4,audio/ogg,"
+        "text/csv,text/plain,application/json,application/octet-stream"
+    )
+
+    # Auth rate limiting
+    AUTH_RATE_LIMIT: str = "10/minute"  # login, signup, refresh
+
     class Config:
         env_file = ".env.backend"
         env_file_encoding = "utf-8"

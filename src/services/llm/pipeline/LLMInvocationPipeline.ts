@@ -12,6 +12,7 @@
 
 import { GeminiProvider } from '../GeminiProvider';
 import { createAbortControllerWithTimeout } from '@/utils';
+import { logger } from '@/services/logger';
 import { TimeoutStrategy } from './TimeoutStrategy';
 import { SchemaValidator } from './SchemaValidator';
 import { InvocationStateManager } from './InvocationStateManager';
@@ -54,7 +55,7 @@ export class LLMInvocationPipeline {
    * Single entry point for ALL LLM invocations
    */
   async invoke(request: LLMInvocationRequest): Promise<LLMInvocationResponse> {
-    console.log('[LLMPipeline] Starting invocation:', {
+    logger.debug('[LLMPipeline] Starting invocation', {
       source: request.context.source,
       sourceId: request.context.sourceId,
       hasSchema: !!request.output.schema,
@@ -133,7 +134,7 @@ export class LLMInvocationPipeline {
     
     const timeoutMs = this.timeoutStrategy.calculateTimeout(request);
     
-    console.log('[LLMPipeline] Using timeout:', timeoutMs, 'ms');
+    logger.debug('[LLMPipeline] Using timeout', { timeoutMs });
     
     // Create timeout-based abort controller
     const { controller, cleanup } = createAbortControllerWithTimeout(timeoutMs);

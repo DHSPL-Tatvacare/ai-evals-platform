@@ -9,6 +9,7 @@ import type {
   KairaStreamChunk,
 } from '@/types';
 import { parseSSEStream, createAbortControllerWithTimeout } from '@/utils/streamParser';
+import { logger } from '@/services/logger';
 import { useAppSettingsStore } from '@/stores/appSettingsStore';
 
 const DEFAULT_TIMEOUT_MS = 60000; // 60 seconds
@@ -157,7 +158,7 @@ export const kairaChatService = {
       
       requestBody.end_session = params.end_session;
 
-      console.log('[KairaChatService] Streaming request:', JSON.stringify(requestBody, null, 2));
+      logger.debug('[KairaChatService] Streaming request', { body: requestBody });
 
       const { baseUrl, authToken } = getKairaConfig();
       const response = await fetch(`${baseUrl}/chat/stream`, {

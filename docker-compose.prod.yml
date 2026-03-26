@@ -1,0 +1,81 @@
+# Production Docker Compose
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: docker compose -f docker-compose.prod.yml up -d
+#
+# Prerequisites:
+#   - ACR images already pushed (GitHub Actions does this on tag push)
+#   - All environment variables below set in Azure App Service Configuration
+#     or in a .env.prod file (NEVER commit .env.prod to git)
+#
+# Variables consumed from environment / App Service config:
+#   ACR_LOGIN_SERVER   e.g. myacr.azurecr.io
+#   IMAGE_TAG          git tag, e.g. v1.2.0  (defaults to "latest")
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    image: ${ACR_LOGIN_SERVER}/evals-backend:${IMAGE_TAG:-latest}
+    container_name: evals-backend
+    restart: unless-stopped
+    ports:
+      - "8721:8721"
+    environment:
+      # ── Database ───────────────────────────────────────────────────────────
+      DATABASE_URL: ${DATABASE_URL}                  # Azure PostgreSQL connection string
+
+      # ── File storage ───────────────────────────────────────────────────────
+      FILE_STORAGE_TYPE: azure_blob
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
+      AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-evals-files}
+
+      # ── API ────────────────────────────────────────────────────────────────
+      API_PORT: 8721
+      CORS_ORIGINS: ${CORS_ORIGINS}                  # e.g. https://evals.tatvacare.in
+      APP_BASE_URL: ${APP_BASE_URL}                  # same as CORS_ORIGINS (used in invite links)
+
+      # ── Auth ───────────────────────────────────────────────────────────────
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_TENANT_NAME: ${ADMIN_TENANT_NAME}
+      ADMIN_TENANT_ALLOWED_DOMAINS: ${ADMIN_TENANT_ALLOWED_DOMAINS:-}
+
+      # ── Gemini / Vertex AI ─────────────────────────────────────────────────
+      GEMINI_AUTH_METHOD: ${GEMINI_AUTH_METHOD:-service_account}
+      GEMINI_SERVICE_ACCOUNT_JSON: ${GEMINI_SERVICE_ACCOUNT_JSON}  # base64-encoded JSON
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}            # leave blank if using service account
+
+      # ── Other LLM providers (set only what you use) ────────────────────────
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-03-01-preview}
+      AZURE_OPENAI_MODEL: ${AZURE_OPENAI_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-gemini}
+      EVAL_TEMPERATURE: ${EVAL_TEMPERATURE:-0.1}
+
+      # ── LeadSquared (Inside Sales) ─────────────────────────────────────────
+      LSQ_BASE_URL: ${LSQ_BASE_URL:-}
+      LSQ_ACCESS_KEY: ${LSQ_ACCESS_KEY:-}
+      LSQ_SECRET_KEY: ${LSQ_SECRET_KEY:-}
+
+      # ── Kaira adversarial testing ─────────────────────────────────────────
+      KAIRA_API_URL: ${KAIRA_API_URL:-}
+      KAIRA_AUTH_TOKEN: ${KAIRA_AUTH_TOKEN:-}
+      KAIRA_TEST_USER_ID: ${KAIRA_TEST_USER_ID:-}
+
+  frontend:
+    image: ${ACR_LOGIN_SERVER}/evals-frontend:${IMAGE_TAG:-latest}
+    container_name: evals-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+# No postgres service — use Azure Database for PostgreSQL (Flexible Server)
+# No volumes for source code — code is baked into the images at build time

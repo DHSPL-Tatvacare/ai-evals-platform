@@ -3,7 +3,7 @@
 Two tracks:
 
 1. **Local Development** — Docker Compose (recommended)
-2. **Azure Production** — Container Apps + Static Web Apps + PostgreSQL Flexible Server
+2. **Azure Production** — App Service + Docker Compose + PostgreSQL Flexible Server
 
 ---
 
@@ -132,35 +132,40 @@ npm run dev
 
 ## 2) Azure Production Setup
 
+> **Full step-by-step guide for DevOps:** see `docs/devops-handover.md`
+
 ### Architecture overview
 
 ```
                     ┌──────────────────────────────────────┐
                     │           Azure Resource Group        │
-                    │           rg-ai-evals                │
                     │                                      │
-  Users ──HTTPS──▶  │  ┌─────────────────────┐            │
-                    │  │  Static Web Apps     │            │
-                    │  │  (React SPA)         │            │
-                    │  │  - Vite build output  │            │
-                    │  │  - /api/* → ACA proxy │            │
-                    │  └────────┬────────────┘            │
-                    │           │ /api/*                   │
-                    │           ▼                          │
-                    │  ┌─────────────────────┐            │
-                    │  │  Container Apps      │            │
-                    │  │  (FastAPI backend)   │            │
-                    │  │  - 1–3 replicas      │            │
-                    │  │  - Port 8721         │            │
-                    │  └──┬──────────┬───────┘            │
-                    │     │          │                     │
-                    │     ▼          ▼                     │
-                    │  ┌────────┐ ┌──────────┐            │
-                    │  │ PG 16  │ │ Blob     │            │
-                    │  │Flexible│ │ Storage  │            │
-                    │  │ Server │ │ (files)  │            │
-                    │  └────────┘ └──────────┘            │
-                    └──────────────────────────────────────┘
+  Users ──HTTPS──▶  │  ┌─────────────────────────────┐    │
+                    │  │  App Service (Linux)          │    │
+                    │  │  docker-compose.prod.yml      │    │
+                    │  │                               │    │
+                    │  │  ┌──────────┐ ┌───────────┐  │    │
+                    │  │  │ frontend │ │  backend  │  │    │
+                    │  │  │  :80     │ │   :8721   │  │    │
+                    │  │  │  nginx   │ │  FastAPI  │  │    │
+                    │  │  │  React   │ │  workers  │  │    │
+                    │  │  └──────────┘ └─────┬─────┘  │    │
+                    │  └────────────────────-┼────────┘    │
+                    │                        │             │
+                    │     ┌──────────────────┼──────────┐  │
+                    │     │                  │          │  │
+                    │     ▼                  ▼          │  │
+                    │  ┌────────┐       ┌──────────┐    │  │
+                    │  │ PG 16  │       │ Blob     │    │  │
+                    │  │Flexible│       │ Storage  │    │  │
+                    │  │ Server │       │ (files)  │    │  │
+                    │  └────────┘       └──────────┘    │  │
+                    │                                   │  │
+                    │  ┌────────┐  ┌────────────────┐   │  │
+                    │  │  ACR   │  │   Key Vault    │   │  │
+                    │  │(images)│  │  (secrets)     │   │  │
+                    │  └────────┘  └────────────────┘   │  │
+                    └───────────────────────────────────┘  │
                               │
                     External  │  LLM API calls
                               ▼
@@ -169,470 +174,164 @@ npm run dev
 
 ### Azure services used
 
-| Component     | Azure Service                        | SKU / Tier       | Purpose                                     |
-| ------------- | ------------------------------------ | ---------------- | ------------------------------------------- |
-| Database      | Azure Database for PostgreSQL        | Burstable B1ms   | Application data (19 ORM tables)            |
-| Backend API   | Azure Container Apps                 | Consumption      | FastAPI + background job worker             |
-| Frontend      | Azure Static Web Apps                | Standard         | React SPA + /api proxy to backend           |
-| File storage  | Azure Blob Storage                   | Standard LRS     | Uploaded audio, transcripts, JSON files     |
-| Image registry| Azure Container Registry             | Basic            | Backend Docker images                       |
-| Secrets       | Container Apps secrets               | Built-in         | JWT secret, DB credentials, API keys        |
+| Component      | Azure Service                        | SKU / Tier       | Purpose                                     |
+| -------------- | ------------------------------------ | ---------------- | ------------------------------------------- |
+| App hosting    | Azure App Service (Linux, Containers)| B2 or P1v3       | Runs docker-compose.prod.yml (both containers) |
+| Database       | Azure Database for PostgreSQL        | Burstable B2ms   | Application data                            |
+| File storage   | Azure Blob Storage                   | Standard LRS     | Uploaded audio, transcripts, JSON files     |
+| Image registry | Azure Container Registry             | Basic            | Docker images for frontend + backend        |
+| Secrets        | Azure Key Vault                      | Standard         | JWT secret, DB credentials, API keys        |
 
-### Prerequisites
+### CI/CD pipeline
 
-- Azure CLI installed and logged in (`az login`)
-- Node.js 20+ and npm installed
-- Docker installed (for local image build, or use ACR build)
-- Permission to create: resource group, PostgreSQL, storage, ACR, Container Apps, Static Web Apps
+Deploys are triggered by git tag push — not by every commit to main.
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+GitHub Actions (`.github/workflows/deploy.yml`) then:
+1. Builds frontend + backend Docker images
+2. Pushes both to ACR tagged as `v1.2.0` and `latest`
+3. Deploys `docker-compose.prod.yml` to App Service
+
+**Required GitHub repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | How to get it |
+|---|---|
+| `AZURE_CREDENTIALS` | `az ad sp create-for-rbac --name evals-deploy --role contributor --scopes /subscriptions/<sub>/resourceGroups/<rg> --sdk-auth` |
+| `ACR_LOGIN_SERVER` | ACR resource → Login server |
+| `ACR_USERNAME` | ACR resource → Access keys → Username |
+| `ACR_PASSWORD` | ACR resource → Access keys → Password |
+| `AZURE_RESOURCE_GROUP` | Your resource group name |
+| `AZURE_WEBAPP_NAME` | Your App Service name |
+
+### App URL
+
+App Service provides a free default URL out of the box:
+```
+https://your-app-name.azurewebsites.net
+```
+Set `CORS_ORIGINS` and `APP_BASE_URL` env vars to match this URL before first deploy. To switch to a custom domain later (e.g. `evals.tatvacare.in`), update only these two env vars — no redeploy needed.
+
+### Updating env vars after deployment
+
+Env vars can be changed at any time without redeploying. Container restarts automatically (~30 seconds):
+- **Portal:** App Service → Configuration → Application settings → edit → Save
+- **CLI:** `az webapp config appsettings set --resource-group <rg> --name <app> --settings KEY=value`
 
 ### Step 1 — Define deployment variables
 
-Set these once in your shell session. Replace all `<placeholder>` values.
+These are for reference only. The full step-by-step process is in `docs/devops-handover.md`.
 
 ```bash
-# Resource group
 export RG="rg-ai-evals"
 export LOCATION="eastus"
-
-# PostgreSQL
-export PG_SERVER="<globally-unique-pg-name>"          # e.g., evals-pg-prod
+export PG_SERVER="<globally-unique-pg-name>"         # e.g., evals-pg-prod
 export PG_DB="ai_evals_platform"
-export PG_ADMIN_USER="evals_admin"
-export PG_ADMIN_PASSWORD="<strong-password-min-8>"    # URL-encode special chars later
-
-# Blob Storage
-export STORAGE_ACCOUNT="<globally-unique-storage>"    # e.g., evalsstorageprod (lowercase, no hyphens)
+export STORAGE_ACCOUNT="<globally-unique-storage>"   # lowercase, no hyphens
 export STORAGE_CONTAINER="evals-files"
-
-# Container Registry
-export ACR_NAME="<globally-unique-acr>"               # e.g., evalscr
-
-# Container Apps
-export ACA_ENV="ai-evals-env"
-export ACA_APP="ai-evals-backend"
-
-# Static Web Apps
-export SWA_NAME="<globally-unique-swa>"               # e.g., evals-frontend
-
-# Auth
+export ACR_NAME="<globally-unique-acr>"
+export WEBAPP_NAME="<globally-unique-app-service>"
 export JWT_SECRET="$(openssl rand -hex 32)"
-
-# Admin bootstrap (first run only — creates initial tenant + owner account)
-export ADMIN_EMAIL="admin@yourcompany.com"
-export ADMIN_PASSWORD="<strong-admin-password>"
-export ADMIN_TENANT_NAME="YourCompany"
-export ADMIN_TENANT_ALLOWED_DOMAINS="@yourcompany.com"   # comma-separated, optional
+export ADMIN_EMAIL="admin@tatvacare.in"
+export ADMIN_PASSWORD="<strong-password>"
+export ADMIN_TENANT_NAME="Tatvacare"
 ```
 
-### Step 2 — Create resource group
+### Step 2 — Provision Azure resources (DevOps)
+
+See `docs/devops-handover.md` for the complete setup. Summary:
+
+1. Create resource group, ACR, App Service (Linux, B2), PostgreSQL Flexible Server, Blob Storage container
+2. Configure all App Service Application Settings (env vars from the reference table below)
+3. Set up GitHub Actions secrets in the repo
+4. Grant App Service pull access to ACR
+
+### Step 3 — First deploy
 
 ```bash
-az group create --name "$RG" --location "$LOCATION"
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-### Step 3 — Create PostgreSQL Flexible Server
+GitHub Actions builds images, pushes to ACR, deploys to App Service. Takes ~5-8 minutes.
 
+**Verify:**
 ```bash
-az postgres flexible-server create \
-  --resource-group "$RG" \
-  --name "$PG_SERVER" \
-  --location "$LOCATION" \
-  --admin-user "$PG_ADMIN_USER" \
-  --admin-password "$PG_ADMIN_PASSWORD" \
-  --sku-name Standard_B1ms \
-  --tier Burstable \
-  --version 16 \
-  --storage-size 32 \
-  --public-access 0.0.0.0
-
-az postgres flexible-server db create \
-  --resource-group "$RG" \
-  --server-name "$PG_SERVER" \
-  --database-name "$PG_DB"
-```
-
-Build the connection string (URL-encode the password if it has special characters):
-
-```bash
-export DATABASE_URL="postgresql+asyncpg://${PG_ADMIN_USER}:${PG_ADMIN_PASSWORD}@${PG_SERVER}.postgres.database.azure.com:5432/${PG_DB}?ssl=require"
-```
-
-**Verify connectivity** (optional, from a machine with psql):
-
-```bash
-psql "host=${PG_SERVER}.postgres.database.azure.com port=5432 dbname=${PG_DB} user=${PG_ADMIN_USER} password=${PG_ADMIN_PASSWORD} sslmode=require"
-```
-
-### Step 4 — Create Blob Storage
-
-```bash
-az storage account create \
-  --name "$STORAGE_ACCOUNT" \
-  --resource-group "$RG" \
-  --location "$LOCATION" \
-  --sku Standard_LRS \
-  --kind StorageV2
-
-az storage container create \
-  --name "$STORAGE_CONTAINER" \
-  --account-name "$STORAGE_ACCOUNT"
-
-export AZURE_STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
-  --name "$STORAGE_ACCOUNT" \
-  --resource-group "$RG" \
-  --query connectionString -o tsv)
-```
-
-### Step 5 — Create Container Registry and build backend image
-
-Create the production Dockerfile first. This differs from the dev Dockerfile:
-- No `--reload` flag
-- 4 uvicorn workers
-- Includes Playwright Chromium for PDF report export
-
-```bash
-cat > backend/Dockerfile.prod << 'PRODEOF'
-FROM python:3.12-slim
-WORKDIR /app
-
-# System deps (PostgreSQL client, Playwright Chromium runtime libs)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev \
-    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 \
-    libgbm1 libpango-1.0-0 libasound2 libxshmfence1 \
-    fonts-noto-cjk fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium
-
-COPY . .
-RUN mkdir -p /app/uploads
-EXPOSE 8721
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8721", "--workers", "4"]
-PRODEOF
-```
-
-Create registry and build:
-
-```bash
-az acr create \
-  --resource-group "$RG" \
-  --name "$ACR_NAME" \
-  --sku Basic \
-  --admin-enabled true
-
-az acr build \
-  --registry "$ACR_NAME" \
-  --image evals-backend:latest \
-  ./backend -f ./backend/Dockerfile.prod
-```
-
-### Step 6 — Deploy backend to Container Apps
-
-```bash
-# Create the Container Apps environment
-az containerapp env create \
-  --name "$ACA_ENV" \
-  --resource-group "$RG" \
-  --location "$LOCATION"
-
-# Get ACR credentials
-export ACR_PASSWORD=$(az acr credential show \
-  --name "$ACR_NAME" \
-  --query "passwords[0].value" -o tsv)
-
-# Deploy the backend container
-az containerapp create \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --environment "$ACA_ENV" \
-  --image "${ACR_NAME}.azurecr.io/evals-backend:latest" \
-  --registry-server "${ACR_NAME}.azurecr.io" \
-  --registry-username "$ACR_NAME" \
-  --registry-password "$ACR_PASSWORD" \
-  --target-port 8721 \
-  --ingress external \
-  --min-replicas 1 \
-  --max-replicas 3 \
-  --cpu 1.0 \
-  --memory 2Gi \
-  --env-vars \
-    DATABASE_URL="$DATABASE_URL" \
-    JWT_SECRET="$JWT_SECRET" \
-    FILE_STORAGE_TYPE=azure_blob \
-    AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
-    AZURE_STORAGE_CONTAINER="$STORAGE_CONTAINER" \
-    CORS_ORIGINS="https://placeholder.azurestaticapps.net" \
-    API_PORT=8721 \
-    DEFAULT_LLM_PROVIDER=gemini \
-    ADMIN_EMAIL="$ADMIN_EMAIL" \
-    ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-    ADMIN_TENANT_NAME="$ADMIN_TENANT_NAME" \
-    ADMIN_TENANT_ALLOWED_DOMAINS="$ADMIN_TENANT_ALLOWED_DOMAINS"
-```
-
-Get the backend FQDN:
-
-```bash
-export BACKEND_FQDN=$(az containerapp show \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --query properties.configuration.ingress.fqdn -o tsv)
-
-echo "Backend: https://${BACKEND_FQDN}"
-```
-
-**Verify backend health:**
-
-```bash
-curl "https://${BACKEND_FQDN}/api/health"
+curl "https://<your-app>.azurewebsites.net/api/health"
 # Expected: {"status":"ok","database":"connected"}
 ```
 
-### Step 7 — Move secrets out of env vars
+### Step 4 — First login checklist
 
-Plain `--env-vars` are visible in the Azure Portal. Move sensitive values to Container Apps secrets:
-
-```bash
-# Create secrets
-az containerapp secret set \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --secrets \
-    jwt-secret="$JWT_SECRET" \
-    database-url="$DATABASE_URL" \
-    storage-conn-str="$AZURE_STORAGE_CONNECTION_STRING" \
-    admin-password="$ADMIN_PASSWORD"
-
-# Reference secrets in env vars (secretref: syntax)
-az containerapp update \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --set-env-vars \
-    JWT_SECRET=secretref:jwt-secret \
-    DATABASE_URL=secretref:database-url \
-    AZURE_STORAGE_CONNECTION_STRING=secretref:storage-conn-str \
-    ADMIN_PASSWORD=secretref:admin-password
-```
-
-Add LLM API keys as secrets (add only the providers you use):
-
-```bash
-az containerapp secret set \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --secrets \
-    gemini-api-key="<your-gemini-key>" \
-    openai-api-key="<your-openai-key>"
-
-az containerapp update \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --set-env-vars \
-    GEMINI_API_KEY=secretref:gemini-api-key \
-    OPENAI_API_KEY=secretref:openai-api-key
-```
-
-### Step 8 — Deploy frontend to Static Web Apps
-
-Build the frontend:
-
-```bash
-npm ci
-npm run build
-```
-
-Create the SWA routing config. This rewrites `/api/*` requests to the backend Container App:
-
-```bash
-cat > staticwebapp.config.json << SWAEOF
-{
-  "routes": [
-    {
-      "route": "/api/*",
-      "rewrite": "https://${BACKEND_FQDN}/api/*"
-    }
-  ],
-  "navigationFallback": {
-    "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/guide/*"]
-  },
-  "globalHeaders": {
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Referrer-Policy": "strict-origin-when-cross-origin"
-  }
-}
-SWAEOF
-
-cp staticwebapp.config.json dist/
-```
-
-Create and deploy:
-
-```bash
-az staticwebapp create \
-  --name "$SWA_NAME" \
-  --resource-group "$RG" \
-  --location eastus2 \
-  --sku Standard
-
-export DEPLOY_TOKEN=$(az staticwebapp secrets list \
-  --name "$SWA_NAME" \
-  --resource-group "$RG" \
-  --query "properties.apiKey" -o tsv)
-
-npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$DEPLOY_TOKEN"
-```
-
-Get the frontend hostname:
-
-```bash
-export FRONTEND_HOST=$(az staticwebapp show \
-  --name "$SWA_NAME" \
-  --resource-group "$RG" \
-  --query defaultHostname -o tsv)
-
-echo "Frontend: https://${FRONTEND_HOST}"
-```
-
-### Step 9 — Finalize CORS
-
-Update the backend CORS to allow the actual frontend domain:
-
-```bash
-az containerapp update \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --set-env-vars CORS_ORIGINS="https://${FRONTEND_HOST}"
-```
-
-### Step 10 — Validate end-to-end
-
-```bash
-# Backend health
-curl "https://${BACKEND_FQDN}/api/health"
-
-# Frontend loads
-curl -s "https://${FRONTEND_HOST}" | head -5
-```
-
-Then open `https://${FRONTEND_HOST}` in a browser:
-
-1. Log in with the admin credentials from Step 1
-2. Navigate to Settings, configure an LLM provider API key
-3. Upload a test listing and run an evaluation
-4. Check the interactive guide at `/guide`
+1. Log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+2. Seed evaluators for each app (one-time, from admin panel or API):
+   - `POST /api/evaluators/seed-defaults?appId=voice-rx`
+   - `POST /api/evaluators/seed-defaults?appId=kaira-bot`
+   - `POST /api/evaluators/seed-defaults?appId=inside-sales`
+3. Create roles with appropriate permissions and app access before inviting users
+4. Generate invite links for your first users
+5. Rotate admin password
 
 ---
 
 ## Post-deployment
 
-### Custom domain + TLS
+### Custom domain
 
-```bash
-# Static Web Apps — custom domain
-az staticwebapp hostname set \
-  --name "$SWA_NAME" \
-  --resource-group "$RG" \
-  --hostname "evals.yourcompany.com"
-# SWA provisions a free TLS certificate automatically
+Start with the free `azurewebsites.net` URL. When ready to switch to a custom domain (e.g. `evals.tatvacare.in`):
 
-# Container Apps — custom domain (if backend needs its own)
-az containerapp hostname add \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --hostname "api-evals.yourcompany.com"
-
-# After adding the custom domain, update CORS:
-az containerapp update \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --set-env-vars CORS_ORIGINS="https://evals.yourcompany.com"
-```
+1. Add a CNAME in DNS: `evals.tatvacare.in` → `<app-name>.azurewebsites.net`
+2. Bind custom domain in App Service → Custom domains
+3. Update two env vars (no redeploy needed):
+   ```bash
+   az webapp config appsettings set \
+     --resource-group "$RG" --name "$WEBAPP_NAME" \
+     --settings CORS_ORIGINS=https://evals.tatvacare.in APP_BASE_URL=https://evals.tatvacare.in
+   ```
 
 ### Restrict PostgreSQL access
 
-After deployment, lock down the database to only allow Container Apps:
+After deployment, lock down the database to only allow App Service outbound IPs:
 
 ```bash
-# Get the Container Apps outbound IPs
-OUTBOUND_IPS=$(az containerapp show \
-  --name "$ACA_APP" \
-  --resource-group "$RG" \
-  --query "properties.outboundIpAddresses" -o tsv)
+# Get App Service outbound IPs
+OUTBOUND_IPS=$(az webapp show \
+  --resource-group "$RG" --name "$WEBAPP_NAME" \
+  --query outboundIpAddresses -o tsv)
 
-# Remove the 0.0.0.0 rule and add specific IPs
-az postgres flexible-server firewall-rule delete \
-  --resource-group "$RG" \
-  --name "$PG_SERVER" \
-  --rule-name "AllowAll_0_0_0_0" --yes
-
-# Add each outbound IP
+# Add each outbound IP to PostgreSQL firewall
 for IP in $(echo "$OUTBOUND_IPS" | tr ',' '\n'); do
-  RULE_NAME="aca-$(echo $IP | tr '.' '-')"
   az postgres flexible-server firewall-rule create \
-    --resource-group "$RG" \
-    --name "$PG_SERVER" \
-    --rule-name "$RULE_NAME" \
-    --start-ip-address "$IP" \
-    --end-ip-address "$IP"
+    --resource-group "$RG" --name "$PG_SERVER" \
+    --rule-name "appservice-$(echo $IP | tr '.' '-')" \
+    --start-ip-address "$IP" --end-ip-address "$IP"
 done
 ```
 
-For tighter security, use VNet integration with private endpoints (see [Azure docs](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom)).
+### Monitoring
 
-### Monitoring and alerts
-
-```bash
-# Enable Container Apps system logs
-az monitor diagnostic-settings create \
-  --name "aca-logs" \
-  --resource "/subscriptions/<sub>/resourceGroups/$RG/providers/Microsoft.App/containerApps/$ACA_APP" \
-  --workspace "<log-analytics-workspace-id>" \
-  --logs '[{"category":"ContainerAppSystemLogs","enabled":true},{"category":"ContainerAppConsoleLogs","enabled":true}]'
-
-# PostgreSQL metrics are available in the Azure Portal under Monitoring > Metrics
-# Key metrics to watch: active connections, CPU %, storage used
-```
+- **Logs:** App Service → Log stream (live) or Diagnose and solve problems → Application logs
+- **Database:** Azure Portal → PostgreSQL resource → Monitoring → Metrics (CPU, connections, storage)
 
 Recommended alerts:
 
-| Metric                         | Threshold       | Action                |
-| ------------------------------ | --------------- | --------------------- |
-| Backend `/api/health` failure  | 3 consecutive   | Email + Slack webhook |
-| PostgreSQL CPU > 80%           | 5 min sustained | Scale up SKU          |
-| PostgreSQL storage > 80%       | —               | Increase storage      |
-| Container App replica restarts | > 3 in 10 min   | Investigate logs      |
+| Metric                        | Threshold       | Action                |
+| ----------------------------- | --------------- | --------------------- |
+| Backend `/api/health` failure | 3 consecutive   | Email notification    |
+| PostgreSQL CPU > 80%          | 5 min sustained | Scale up SKU          |
+| PostgreSQL storage > 80%      | —               | Increase storage      |
 
-### Updating the deployment
-
-**Backend update:**
+### Deploying a new version
 
 ```bash
-# Rebuild and push new image
-az acr build \
-  --registry "$ACR_NAME" \
-  --image evals-backend:latest \
-  ./backend -f ./backend/Dockerfile.prod
-
-# Restart the container app to pull the new image
-az containerapp revision restart \
-  --name "$ACA_APP" \
-  --resource-group "$RG"
+git tag v1.2.3
+git push origin v1.2.3
 ```
 
-**Frontend update:**
-
-```bash
-npm ci
-npm run build
-cp staticwebapp.config.json dist/
-npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$DEPLOY_TOKEN"
-```
+GitHub Actions handles everything. No manual steps.
 
 ### Backup and disaster recovery
 
@@ -685,7 +384,8 @@ Costs scale with Container Apps replicas, database compute tier, and storage vol
 | `AZURE_STORAGE_CONNECTION_STRING`    | Prod     | —                    | Azure Blob connection string                    |
 | `AZURE_STORAGE_CONTAINER`            | Prod     | `evals-files`        | Blob container name                             |
 | `GEMINI_API_KEY`                     | If used  | —                    | Gemini Developer API key                        |
-| `GEMINI_SERVICE_ACCOUNT_PATH`        | If used  | —                    | Path to Vertex AI service account JSON          |
+| `GEMINI_SERVICE_ACCOUNT_PATH`        | Local dev| —                    | Path to Vertex AI service account JSON (dev only) |
+| `GEMINI_SERVICE_ACCOUNT_JSON`        | Prod     | —                    | Base64-encoded service account JSON (production) |
 | `GEMINI_AUTH_METHOD`                 | No       | `api_key`            | `api_key` or `service_account`                  |
 | `OPENAI_API_KEY`                     | If used  | —                    | OpenAI API key                                  |
 | `AZURE_OPENAI_API_KEY`              | If used  | —                    | Azure OpenAI API key                            |
@@ -704,3 +404,7 @@ Costs scale with Container Apps replicas, database compute tier, and storage vol
 | `ADVERSARIAL_MAX_TURNS`              | No       | `10`                 | Max turns per adversarial conversation          |
 | `ADVERSARIAL_TURN_DELAY`            | No       | `1.5`                | Seconds between adversarial turns               |
 | `ADVERSARIAL_CASE_DELAY`            | No       | `3.0`                | Seconds between adversarial test cases          |
+| `LSQ_BASE_URL`                       | If used  | —                    | LeadSquared API base URL (Inside Sales)         |
+| `LSQ_ACCESS_KEY`                     | If used  | —                    | LeadSquared access key                          |
+| `LSQ_SECRET_KEY`                     | If used  | —                    | LeadSquared secret key                          |
+| `APP_BASE_URL`                       | Prod     | `http://localhost:5173` | Public app URL — used in invite link emails  |
