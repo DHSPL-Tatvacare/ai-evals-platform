@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Loader2, RefreshCw, Download, FileBarChart, Sparkles, X, Clock } from 'lucide-react';
-import type { ReportPayload } from '@/types/reports';
-import type { LLMProvider } from '@/types';
+import type { AppId, LLMProvider } from '@/types';
 import { reportsApi } from '@/services/api/reportsApi';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
 import { poll } from '@/services/api/jobPolling';
@@ -9,16 +8,36 @@ import { notificationService } from '@/services/notifications';
 import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
 import { useLLMSettingsStore, hasProviderCredentials, LLM_PROVIDERS } from '@/stores';
 
-interface Props {
+interface ReportMetadataLike {
+  llmProvider?: string | null;
+  llmModel?: string | null;
+}
+
+interface ReportPayloadLike {
+  metadata?: ReportMetadataLike | null;
+}
+
+interface Props<TReport> {
+  appId: AppId;
   runId: string;
+  supportsPdf?: boolean;
   /** Renderer for the report content. Receives the raw report payload (any shape). */
-  renderReport: (report: unknown) => React.ReactNode;
+  renderReport: (report: TReport) => React.ReactNode;
 }
 
 type Status = 'loading' | 'idle' | 'generating' | 'ready' | 'error';
 
-export default function ReportTab({ runId, renderReport }: Props) {
-  const [report, setReport] = useState<ReportPayload | null>(null);
+function getReportMetadata<TReport extends ReportPayloadLike>(report: TReport | null): ReportMetadataLike | null {
+  return report?.metadata ?? null;
+}
+
+export default function ReportTab<TReport extends ReportPayloadLike>({
+  appId,
+  runId,
+  supportsPdf = true,
+  renderReport,
+}: Props<TReport>) {
+  const [report, setReport] = useState<TReport | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -90,16 +109,17 @@ export default function ReportTab({ runId, renderReport }: Props) {
       });
 
       if (finalJob?.status === 'completed') {
-        const data = await reportsApi.fetchReport(runId, { cacheOnly: true });
+        const data = await reportsApi.fetchReport<TReport>(runId, { cacheOnly: true });
         setReport(data);
         setStatus('ready');
+        const metadata = getReportMetadata(data);
         // Sync the provider/model selectors to match the report that was just
         // generated so the header bar and refresh popover show the correct values.
-        if (data.metadata?.llmProvider) {
-          setReportProvider(data.metadata.llmProvider as LLMProvider);
+        if (metadata?.llmProvider) {
+          setReportProvider(metadata.llmProvider as LLMProvider);
         }
-        if (data.metadata?.llmModel) {
-          setReportModel(data.metadata.llmModel);
+        if (metadata?.llmModel) {
+          setReportModel(metadata.llmModel);
         }
         const hasNarrative = finalJob.result?.has_narrative !== false;
         if (!hasNarrative) {
@@ -158,16 +178,17 @@ export default function ReportTab({ runId, renderReport }: Props) {
 
       // 2. No active job — check for cached report
       try {
-        const data = await reportsApi.fetchReport(runId, { cacheOnly: true });
+        const data = await reportsApi.fetchReport<TReport>(runId, { cacheOnly: true });
         if (!cancelled) {
           setReport(data);
           setStatus('ready');
+          const metadata = getReportMetadata(data);
           // Sync selectors to match the cached report's provider/model
-          if (data.metadata?.llmProvider) {
-            setReportProvider(data.metadata.llmProvider as LLMProvider);
+          if (metadata?.llmProvider) {
+            setReportProvider(metadata.llmProvider as LLMProvider);
           }
-          if (data.metadata?.llmModel) {
-            setReportModel(data.metadata.llmModel);
+          if (metadata?.llmModel) {
+            setReportModel(metadata.llmModel);
           }
         }
         return;
@@ -195,6 +216,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
     try {
       const job = await jobsApi.submit('generate-report', {
         run_id: runId,
+        app_id: appId,
         refresh,
         provider: reportProvider,
         model: reportModel || undefined,
@@ -207,7 +229,7 @@ export default function ReportTab({ runId, renderReport }: Props) {
       else notificationService.error(msg);
       setRefreshing(false);
     }
-  }, [runId, report, reportProvider, reportModel, pollAndLoad]);
+  }, [appId, runId, report, reportProvider, reportModel, pollAndLoad]);
 
   const handleExportPdf = useCallback(async () => {
     if (exporting) return;
@@ -349,18 +371,20 @@ export default function ReportTab({ runId, renderReport }: Props) {
   // ── Generic action bar: refresh + PDF export (shared by all report views) ──
   const actionBar = (
     <div className="report-actions flex items-center justify-end gap-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-2 mb-4">
-      <button
-        onClick={handleExportPdf}
-        disabled={refreshing || exporting}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[var(--interactive-primary)] rounded-md hover:opacity-90 transition-colors disabled:opacity-50"
-      >
-        {exporting ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
-        ) : (
-          <Download className="h-3 w-3" />
-        )}
-        {exporting ? 'Exporting...' : 'Export PDF'}
-      </button>
+      {supportsPdf && (
+        <button
+          onClick={handleExportPdf}
+          disabled={refreshing || exporting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[var(--interactive-primary)] rounded-md hover:opacity-90 transition-colors disabled:opacity-50"
+        >
+          {exporting ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Download className="h-3 w-3" />
+          )}
+          {exporting ? 'Exporting...' : 'Export PDF'}
+        </button>
+      )}
       <div className="relative" ref={refreshPopoverRef}>
         <button
           onClick={() => setShowRefreshSelector((v) => !v)}

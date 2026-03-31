@@ -26,28 +26,29 @@ logger = logging.getLogger(__name__)
 
 
 class InsideSalesReportService(BaseReportService):
-    async def generate(
+    payload_model = InsideSalesReportPayload
+
+    async def _load_source_data(self, run_id: str) -> dict[str, list[dict]]:
+        threads = await self._load_threads(run_id)
+        return {
+            "threads": [
+                {
+                    "thread_id": t.thread_id,
+                    "result": t.result,
+                    "success_status": t.success_status,
+                }
+                for t in threads
+            ],
+        }
+
+    async def _build_payload(
         self,
-        run_id: str,
-        force_refresh: bool = False,
+        run: EvalRun,
+        source_data: dict[str, list[dict]],
         llm_provider: str | None = None,
         llm_model: str | None = None,
     ) -> InsideSalesReportPayload:
-        run = await self._load_run(run_id)
-
-        if not force_refresh:
-            cached = await self._load_cache(run_id, run.app_id)
-            if cached:
-                try:
-                    return InsideSalesReportPayload.model_validate(cached)
-                except Exception:
-                    logger.warning("Inside sales report cache corrupted for run %s, regenerating", run_id)
-
-        threads = await self._load_threads(run_id)
-        thread_dicts = [
-            {"thread_id": t.thread_id, "result": t.result, "success_status": t.success_status}
-            for t in threads
-        ]
+        thread_dicts = source_data["threads"]
 
         output_schema = await self._load_evaluator_schema(run, thread_dicts)
         agent_names = await self._load_agent_names(thread_dicts)
@@ -93,8 +94,6 @@ class InsideSalesReportService(BaseReportService):
             agent_slices=aggregate_data["agentSlices"],
             narrative=narrative,
         )
-
-        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
         return payload
 
     async def _load_evaluator_schema(self, run: EvalRun, threads: list[dict] | None = None) -> list[dict]:

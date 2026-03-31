@@ -1,15 +1,18 @@
 """Base report service with shared cache, data loading, and LLM setup."""
 
+from abc import ABC, abstractmethod
 import logging
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
 from app.models.evaluation_analytics import EvaluationAnalytics
+from app.schemas.base import CamelModel
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log
 from app.services.evaluators.settings_helper import get_llm_settings_from_db
@@ -17,16 +20,52 @@ from app.services.evaluators.settings_helper import get_llm_settings_from_db
 logger = logging.getLogger(__name__)
 
 
-class BaseReportService:
+class BaseReportService(ABC):
     """Shared plumbing for report generation services.
 
     Subclasses implement `generate()` with app-specific aggregation and narration.
     """
 
+    payload_model: type[CamelModel]
+
     def __init__(self, db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID):
         self.db = db
         self.tenant_id = tenant_id
         self.user_id = user_id
+
+    async def generate(
+        self,
+        run_id: str,
+        force_refresh: bool = False,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> CamelModel:
+        """Standard single-run report lifecycle for all analytics-enabled apps."""
+        run = await self._load_run(run_id)
+
+        if not force_refresh:
+            cached = await self._load_cache(run_id, run.app_id)
+            if cached:
+                validated = self._validate_cached_payload(cached, run_id)
+                if validated is not None:
+                    return validated
+
+        source_data = await self._load_source_data(run_id)
+        payload = await self._build_payload(
+            run=run,
+            source_data=source_data,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        )
+        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
+        return payload
+
+    def _validate_cached_payload(self, cached: dict, run_id: str) -> CamelModel | None:
+        try:
+            return self.payload_model.model_validate(cached)
+        except Exception:
+            logger.warning("Report cache corrupted for run %s, regenerating", run_id)
+            return None
 
     # --- Data loading ---
 
@@ -55,6 +94,22 @@ class BaseReportService:
             )
         )
         return list(result.scalars().all())
+
+    async def _load_source_data(self, run_id: str) -> dict[str, Any]:
+        return {
+            "threads": await self._load_threads(run_id),
+            "adversarial": await self._load_adversarial(run_id),
+        }
+
+    @abstractmethod
+    async def _build_payload(
+        self,
+        run: EvalRun,
+        source_data: dict[str, Any],
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> CamelModel:
+        """Build the app-specific report payload from loaded source data."""
 
     # --- Cache ---
 

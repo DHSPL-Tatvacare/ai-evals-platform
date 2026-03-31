@@ -14,8 +14,6 @@ import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
 import { RunHeaderActions } from '@/features/evalRuns/components/RunHeaderActions';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
-import ReportTab from '@/features/evalRuns/components/report/ReportTab';
-import { InsideSalesReportView } from '../components/report/InsideSalesReportView';
 import { fetchEvalRun, fetchRunThreads, deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi } from '@/services/api/jobsApi';
 import { notificationService } from '@/services/notifications';
@@ -28,7 +26,7 @@ import { scoreColor, getScoreBand } from '@/utils/scoreUtils';
 import { CallResultPanel } from '../components/CallResultPanel';
 import type { EvalRun, ThreadEvalRow } from '@/types';
 import type { Job } from '@/services/api/jobsApi';
-import type { InsideSalesReportPayload } from '@/types/insideSalesReport';
+import { AppReportTab } from '@/features/analytics/AppReportTab';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -281,10 +279,7 @@ export function InsideSalesRunDetail() {
     id: 'report',
     label: 'Report',
     content: (
-      <ReportTab
-        runId={runId!}
-        renderReport={(data) => <InsideSalesReportView report={data as InsideSalesReportPayload} />}
-      />
+      <AppReportTab appId="inside-sales" runId={runId!} />
     ),
   };
 

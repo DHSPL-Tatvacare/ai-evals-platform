@@ -7,7 +7,7 @@ import type {
   CrossRunAISummary,
   HealthTrendPoint,
 } from '@/types/crossRunAnalytics';
-import type { LLMProvider } from '@/types';
+import type { AppId, LLMProvider } from '@/types';
 import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
 import { poll } from '@/services/api/jobPolling';
@@ -20,12 +20,13 @@ import InsightPanel from './InsightPanel';
 import type { InsightPanelItem } from './InsightPanel';
 
 interface Props {
+  appId: AppId;
   data: IssuesAndRecommendations;
   stats: CrossRunStats;
   healthTrend: HealthTrendPoint[];
 }
 
-export default function IssuesTab({ data, stats, healthTrend }: Props) {
+export default function IssuesTab({ appId, data, stats, healthTrend }: Props) {
   const [aiSummary, setAiSummary] = useState<CrossRunAISummary | null>(null);
   const [generating, setGenerating] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -55,7 +56,7 @@ export default function IssuesTab({ data, stats, healthTrend }: Props) {
     setProgressMsg('Submitting job...');
     try {
       const job = await jobsApi.submit('generate-cross-run-report', {
-        app_id: 'kaira-bot',
+        app_id: appId,
         stats: stats as unknown as Record<string, unknown>,
         health_trend: healthTrend as unknown as Record<string, unknown>[],
         top_issues: data.issues.slice(0, 10) as unknown as Record<string, unknown>[],
@@ -95,7 +96,7 @@ export default function IssuesTab({ data, stats, healthTrend }: Props) {
       setGenerating(false);
       setProgressMsg('');
     }
-  }, [stats, healthTrend, data, provider, model]);
+  }, [appId, stats, healthTrend, data, provider, model]);
 
   const noData = data.issues.length === 0 && data.recommendations.length === 0;
 

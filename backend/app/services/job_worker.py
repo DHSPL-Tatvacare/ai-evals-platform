@@ -503,6 +503,7 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
     import time as _time
     from app.database import async_session as _async_session
     from app.models.eval_run import EvalRun
+    from app.services.reports.registry import get_analytics_app_config
     from sqlalchemy import select as _select
     from uuid import UUID as _UUID
 
@@ -517,19 +518,16 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
     )
 
     async with _async_session() as db:
-        # Determine which service to use based on app_id
         run = await db.scalar(
             _select(EvalRun).where(EvalRun.id == _UUID(run_id), EvalRun.tenant_id == tenant_id)
         )
         if not run:
             raise ValueError(f"Eval run not found: {run_id}")
 
-        if run.app_id == "inside-sales":
-            from app.services.reports.inside_sales_report_service import InsideSalesReportService
-            service = InsideSalesReportService(db, tenant_id=tenant_id, user_id=user_id)
-        else:
-            from app.services.reports.report_service import ReportService
-            service = ReportService(db, tenant_id=tenant_id, user_id=user_id)
+        app_config = get_analytics_app_config(run.app_id)
+        if not app_config:
+            raise ValueError(f"Reporting is not enabled for app: {run.app_id}")
+        service = app_config.report_service_cls(db, tenant_id=tenant_id, user_id=user_id)
 
         await update_job_progress(
             job_id, 1, 2, "Generating AI narrative…", run_id=run_id

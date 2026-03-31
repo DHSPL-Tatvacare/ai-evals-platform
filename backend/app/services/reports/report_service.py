@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 
 class ReportService(BaseReportService):
+    payload_model = ReportPayload
+
     """Stateless per-request report generator.
 
     Usage:
@@ -40,35 +42,16 @@ class ReportService(BaseReportService):
         payload = await service.generate(run_id)
     """
 
-    async def generate(
+    async def _build_payload(
         self,
-        run_id: str,
-        force_refresh: bool = False,
+        run: EvalRun,
+        source_data: dict,
         llm_provider: str | None = None,
         llm_model: str | None = None,
     ) -> ReportPayload:
-        """Full report generation pipeline.
-
-        1. Check cache (unless force_refresh)
-        2. Load EvalRun + ThreadEvaluations + AdversarialEvaluations
-        3. Compute health score from run summary
-        4. Aggregate metrics via ReportAggregator
-        5. Generate AI narrative via LLM (non-blocking — failure is OK)
-        6. Assemble ReportPayload and cache it
-        """
-        run = await self._load_run(run_id)
-
-        # Return cached report if available
-        if not force_refresh:
-            cached = await self._load_cache(run_id, run.app_id)
-            if cached:
-                try:
-                    return ReportPayload.model_validate(cached)
-                except Exception:
-                    logger.warning("Report cache corrupted for run %s, regenerating", run_id)
-
-        threads = await self._load_threads(run_id)
-        adversarial = await self._load_adversarial(run_id)
+        """Full Kaira/adversarial report generation pipeline."""
+        threads = source_data["threads"]
+        adversarial = source_data["adversarial"]
 
         summary = run.summary or {}
         is_adversarial = run.eval_type == "batch_adversarial"
@@ -162,10 +145,6 @@ class ReportService(BaseReportService):
             narrative=narrative,
             custom_evaluations_report=custom_eval_report,
         )
-
-        # Cache for future requests
-        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
-
         return payload
 
     # --- AI Narrative ---

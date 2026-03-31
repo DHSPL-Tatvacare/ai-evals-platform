@@ -533,3 +533,10 @@ class CrossRunAggregator:
             runs_with_narrative=runs_with_narrative,
             runs_without_narrative=runs_without_narrative,
         )
+
+
+RuleComplianceHeatmap.model_rebuild()
+AdversarialHeatmap.model_rebuild()
+IssuesAndRecommendations.model_rebuild()
+CrossRunAISummary.model_rebuild()
+CrossRunAnalytics.model_rebuild()

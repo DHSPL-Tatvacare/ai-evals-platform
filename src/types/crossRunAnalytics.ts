@@ -103,8 +103,8 @@ export interface CrossRunAISummaryRequest {
   model?: string;
 }
 
-export interface CrossRunAnalyticsResponse {
-  analytics: CrossRunAnalytics;
+export interface CrossRunAnalyticsResponse<TAnalytics = CrossRunAnalytics> {
+  analytics: TAnalytics;
   computedAt: string;
   isStale: boolean;
   newRunsSince: number;

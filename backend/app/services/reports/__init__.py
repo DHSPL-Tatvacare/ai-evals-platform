@@ -1,3 +1,3 @@
-from .report_service import ReportService
+"""Report service package."""
 
-__all__ = ["ReportService"]
+__all__: list[str] = []

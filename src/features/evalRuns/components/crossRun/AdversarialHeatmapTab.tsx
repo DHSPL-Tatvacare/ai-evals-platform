@@ -1,14 +1,16 @@
 import { useNavigate } from 'react-router-dom';
+import type { AppId } from '@/types';
 import type { AdversarialHeatmap } from '@/types/crossRunAnalytics';
 import { routes } from '@/config/routes';
 import SectionHeader from '../report/shared/SectionHeader';
 import Heatmap from './Heatmap';
 
 interface Props {
+  appId: AppId;
   heatmap: AdversarialHeatmap;
 }
 
-export default function AdversarialHeatmapTab({ heatmap }: Props) {
+export default function AdversarialHeatmapTab({ appId, heatmap }: Props) {
   const navigate = useNavigate();
 
   const columnHeaders = heatmap.runs.map((r) => {
@@ -40,7 +42,7 @@ export default function AdversarialHeatmapTab({ heatmap }: Props) {
         columnHeaders={columnHeaders}
         rows={rows}
         rowHeaderLabel="Goal"
-        onColumnClick={(id) => navigate(routes.kaira.runDetail(id))}
+        onColumnClick={(id) => navigate(appId === 'inside-sales' ? routes.insideSales.runDetail(id) : routes.kaira.runDetail(id))}
         emptyMessage="No adversarial runs with reports found."
       />
     </div>

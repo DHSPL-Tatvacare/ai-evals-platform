@@ -1,95 +1,172 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { CrossRunAnalytics } from '@/types/crossRunAnalytics';
+import type { AppId } from '@/types';
 import { reportsApi } from '@/services/api/reportsApi';
 import { ApiError } from '@/services/api/client';
 import { notificationService } from '@/services/notifications';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
-interface CrossRunState {
-  data: CrossRunAnalytics | null;
+interface CrossRunEntry {
+  data: unknown | null;
   status: Status;
   error: string;
   computedAt: string;
   isStale: boolean;
   newRunsSince: number;
   sourceRunCount: number;
+}
 
-  loadAnalytics: () => Promise<void>;
-  refreshAnalytics: (limit?: number) => Promise<void>;
-  clear: () => void;
+interface CrossRunState {
+  entries: Partial<Record<AppId, CrossRunEntry>>;
+  loadAnalytics: (appId: AppId) => Promise<void>;
+  refreshAnalytics: (appId: AppId, limit?: number) => Promise<void>;
+  clear: (appId: AppId) => void;
   reset: () => void;
 }
 
-const INITIAL = {
+const createInitialEntry = (): CrossRunEntry => ({
   data: null,
-  status: 'idle' as Status,
+  status: 'idle',
   error: '',
   computedAt: '',
   isStale: false,
   newRunsSince: 0,
   sourceRunCount: 0,
-};
+});
+
+const getEntry = (
+  entries: Partial<Record<AppId, CrossRunEntry>>,
+  appId: AppId,
+): CrossRunEntry => entries[appId] ?? createInitialEntry();
 
 export const useCrossRunStore = create<CrossRunState>()(
   persist(
     (set, get) => ({
-      ...INITIAL,
+      entries: {},
 
-      loadAnalytics: async () => {
-        if (get().status === 'loading') return;
-        set({ status: 'loading', error: '' });
+      loadAnalytics: async (appId: AppId) => {
+        const current = getEntry(get().entries, appId);
+        if (current.status === 'loading') return;
+
+        set((state) => ({
+          entries: {
+            ...state.entries,
+            [appId]: {
+              ...getEntry(state.entries, appId),
+              status: 'loading',
+              error: '',
+            },
+          },
+        }));
+
         try {
-          const result = await reportsApi.fetchCrossRunAnalytics('kaira-bot');
-          set({
-            data: result.analytics,
-            status: 'ready',
-            computedAt: result.computedAt,
-            isStale: result.isStale,
-            newRunsSince: result.newRunsSince,
-            sourceRunCount: result.sourceRunCount,
-          });
+          const result = await reportsApi.fetchCrossRunAnalytics(appId);
+          set((state) => ({
+            entries: {
+              ...state.entries,
+              [appId]: {
+                data: result.analytics,
+                status: 'ready',
+                error: '',
+                computedAt: result.computedAt,
+                isStale: result.isStale,
+                newRunsSince: result.newRunsSince,
+                sourceRunCount: result.sourceRunCount,
+              },
+            },
+          }));
         } catch (e: unknown) {
-          // 404 = no cache yet (or no runs with reports) → idle, not error
           if (e instanceof ApiError && e.status === 404) {
-            set({ ...INITIAL });
+            set((state) => ({
+              entries: {
+                ...state.entries,
+                [appId]: createInitialEntry(),
+              },
+            }));
             return;
           }
           const msg = e instanceof Error ? e.message : 'Failed to load analytics';
-          set({ error: msg, status: 'error' });
+          set((state) => ({
+            entries: {
+              ...state.entries,
+              [appId]: {
+                ...getEntry(state.entries, appId),
+                status: 'error',
+                error: msg,
+              },
+            },
+          }));
           notificationService.error(msg);
         }
       },
 
-      refreshAnalytics: async (limit?: number) => {
-        if (get().status === 'loading') return;
-        set({ status: 'loading', error: '' });
+      refreshAnalytics: async (appId: AppId, limit?: number) => {
+        const current = getEntry(get().entries, appId);
+        if (current.status === 'loading') return;
+
+        set((state) => ({
+          entries: {
+            ...state.entries,
+            [appId]: {
+              ...getEntry(state.entries, appId),
+              status: 'loading',
+              error: '',
+            },
+          },
+        }));
+
         try {
-          const result = await reportsApi.refreshCrossRunAnalytics('kaira-bot', limit || 50);
-          set({
-            data: result.analytics,
-            status: 'ready',
-            computedAt: result.computedAt,
-            isStale: false,
-            newRunsSince: 0,
-            sourceRunCount: result.sourceRunCount,
-          });
+          const result = await reportsApi.refreshCrossRunAnalytics(appId, limit || 50);
+          set((state) => ({
+            entries: {
+              ...state.entries,
+              [appId]: {
+                data: result.analytics,
+                status: 'ready',
+                error: '',
+                computedAt: result.computedAt,
+                isStale: false,
+                newRunsSince: 0,
+                sourceRunCount: result.sourceRunCount,
+              },
+            },
+          }));
         } catch (e: unknown) {
-          // 404 = no runs with generated reports yet → idle with friendly message
           if (e instanceof ApiError && e.status === 404) {
-            set({ ...INITIAL });
+            set((state) => ({
+              entries: {
+                ...state.entries,
+                [appId]: createInitialEntry(),
+              },
+            }));
             notificationService.info('No runs with generated reports found. Generate a report first.');
             return;
           }
           const msg = e instanceof Error ? e.message : 'Failed to refresh analytics';
-          set({ error: msg, status: 'error' });
+          set((state) => ({
+            entries: {
+              ...state.entries,
+              [appId]: {
+                ...getEntry(state.entries, appId),
+                status: 'error',
+                error: msg,
+              },
+            },
+          }));
           notificationService.error(msg);
         }
       },
 
-      clear: () => set({ ...INITIAL }),
-      reset: () => set({ ...INITIAL }),
+      clear: (appId: AppId) =>
+        set((state) => ({
+          entries: {
+            ...state.entries,
+            [appId]: createInitialEntry(),
+          },
+        })),
+
+      reset: () => set({ entries: {} }),
     }),
     {
       name: 'cross-run-analytics',
@@ -102,13 +179,17 @@ export const useCrossRunStore = create<CrossRunState>()(
         removeItem: (name) => sessionStorage.removeItem(name),
       },
       partialize: (state) => ({
-        data: state.data,
-        status: (state.data ? 'ready' : 'idle') as Status,
-        computedAt: state.computedAt,
-        isStale: state.isStale,
-        newRunsSince: state.newRunsSince,
-        sourceRunCount: state.sourceRunCount,
-      } as unknown as CrossRunState),
+        entries: Object.fromEntries(
+          Object.entries(state.entries).map(([appId, entry]) => [
+            appId,
+            {
+              ...entry,
+              status: entry?.data ? 'ready' : 'idle',
+              error: '',
+            },
+          ]),
+        ) as Partial<Record<AppId, CrossRunEntry>>,
+      }) as unknown as CrossRunState,
     }
   )
 );

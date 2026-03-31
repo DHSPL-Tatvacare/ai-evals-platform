@@ -24,15 +24,13 @@ import {
   RunProgressBar,
 } from "../components";
 import AdversarialTable from "../components/AdversarialTable";
-import { ReportTab } from "../components/report";
-import { KairaReportView } from '../components/report/KairaReportView';
-import type { ReportPayload } from '@/types/reports';
 import { useElapsedTime } from "../hooks";
 import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from "@/utils/evalColors";
 import { getLabelDefinition } from "@/config/labelDefinitions";
 import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
 import { formatTimestamp, formatDuration, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
+import { AppReportTab } from '@/features/analytics/AppReportTab';
 
 function SuccessBanner({ durationSeconds }: { durationSeconds: number }) {
   return (
@@ -461,10 +459,7 @@ export default function RunDetail() {
       {/* ── Scrollable body ───────────────────────────────── */}
       <div className="run-detail-body flex-1 min-h-0 overflow-y-auto space-y-4 pt-4">
         {activeTab === 'report' && run && (
-          <ReportTab
-            runId={run.run_id}
-            renderReport={(report) => <KairaReportView report={report as ReportPayload} runId={run.run_id} />}
-          />
+          <AppReportTab appId="kaira-bot" runId={run.run_id} />
         )}
 
         {activeTab === 'results' && threadEvals.length > 0 && (

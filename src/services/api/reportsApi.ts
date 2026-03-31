@@ -8,14 +8,14 @@ export const reportsApi = {
    * Cached after first generation; pass refresh=true to force regeneration.
    * Optionally specify provider/model for AI narrative generation.
    */
-  fetchReport: (runId: string, opts?: { refresh?: boolean; cacheOnly?: boolean; provider?: string; model?: string }): Promise<ReportPayload> => {
+  fetchReport: <TReport = ReportPayload>(runId: string, opts?: { refresh?: boolean; cacheOnly?: boolean; provider?: string; model?: string }): Promise<TReport> => {
     const params = new URLSearchParams();
     if (opts?.refresh) params.set('refresh', 'true');
     if (opts?.cacheOnly) params.set('cache_only', 'true');
     if (opts?.provider) params.set('provider', opts.provider);
     if (opts?.model) params.set('model', opts.model);
     const qs = params.toString();
-    return apiRequest<ReportPayload>(
+    return apiRequest<TReport>(
       `/api/reports/${runId}${qs ? `?${qs}` : ''}`,
     );
   },
@@ -25,16 +25,16 @@ export const reportsApi = {
     apiDownload(`/api/reports/${runId}/export-pdf`),
 
   /** Fetch cached cross-run analytics for an app. */
-  fetchCrossRunAnalytics: (appId: string): Promise<CrossRunAnalyticsResponse> => {
+  fetchCrossRunAnalytics: <TAnalytics = unknown>(appId: string): Promise<CrossRunAnalyticsResponse<TAnalytics>> => {
     const params = new URLSearchParams({ app_id: appId });
-    return apiRequest<CrossRunAnalyticsResponse>(`/api/reports/cross-run-analytics?${params}`);
+    return apiRequest<CrossRunAnalyticsResponse<TAnalytics>>(`/api/reports/cross-run-analytics?${params}`);
   },
 
   /** Recompute cross-run analytics from single_run caches and persist. */
-  refreshCrossRunAnalytics: (appId: string, limit?: number): Promise<CrossRunAnalyticsResponse> => {
+  refreshCrossRunAnalytics: <TAnalytics = unknown>(appId: string, limit?: number): Promise<CrossRunAnalyticsResponse<TAnalytics>> => {
     const params = new URLSearchParams({ app_id: appId });
     if (limit) params.set('limit', String(limit));
-    return apiRequest<CrossRunAnalyticsResponse>(`/api/reports/cross-run-analytics/refresh?${params}`, {
+    return apiRequest<CrossRunAnalyticsResponse<TAnalytics>>(`/api/reports/cross-run-analytics/refresh?${params}`, {
       method: 'POST',
     });
   },
