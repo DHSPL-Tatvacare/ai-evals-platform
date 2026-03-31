@@ -36,6 +36,7 @@ interface CreateEvaluatorOverlayProps {
   listing?: Listing;
   context?: EvaluatorContext;
   editEvaluator?: EvaluatorDefinition;
+  defaultIsGlobal?: boolean;
 }
 
 export function CreateEvaluatorOverlay({
@@ -45,6 +46,7 @@ export function CreateEvaluatorOverlay({
   listing,
   context,
   editEvaluator,
+  defaultIsGlobal = false,
 }: CreateEvaluatorOverlayProps) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -184,7 +186,7 @@ export function CreateEvaluatorOverlay({
       outputSchema: outputFields,
       appId: effectiveAppId,
       listingId: editEvaluator?.listingId ?? effectiveEntityId,
-      isGlobal: editEvaluator?.isGlobal ?? false,
+      isGlobal: editEvaluator?.isGlobal ?? defaultIsGlobal,
       forkedFrom: editEvaluator?.forkedFrom,
       createdAt: editEvaluator?.createdAt || new Date(),
       updatedAt: new Date(),

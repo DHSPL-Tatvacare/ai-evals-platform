@@ -5,6 +5,7 @@ import {
   PanelLeft,
   Settings,
   LayoutDashboard,
+  FileText,
   ListChecks,
   ScrollText,
   BookOpen,
@@ -182,6 +183,11 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                 title="Listing"
               />
               <CollapsedNavLink
+                to={routes.insideSales.evaluators}
+                icon={FileText}
+                title="Evaluators"
+              />
+              <CollapsedNavLink
                 to={routes.insideSales.runs}
                 icon={ListChecks}
                 title="Runs"
@@ -205,6 +211,11 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                 title="Dashboard"
               />
               <CollapsedNavLink
+                to={routes.kaira.evaluators}
+                icon={FileText}
+                title="Evaluators"
+              />
+              <CollapsedNavLink
                 to={routes.kaira.runs}
                 icon={ListChecks}
                 title="Runs"
@@ -221,6 +232,11 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                 to={routes.voiceRx.dashboard}
                 icon={LayoutDashboard}
                 title="Dashboard"
+              />
+              <CollapsedNavLink
+                to={routes.voiceRx.evaluators}
+                icon={FileText}
+                title="Evaluators"
               />
               <CollapsedNavLink
                 to={routes.voiceRx.runs}

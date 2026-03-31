@@ -7,14 +7,14 @@
 import { useState, useCallback, useRef } from 'react';
 import { Upload, FileText, AlertTriangle } from 'lucide-react';
 import { Modal, Button } from '@/components/ui';
-import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { notificationService } from '@/services/notifications';
+import { useEvaluatorsStore } from '@/stores';
 import type { EvaluatorOutputField } from '@/types';
 
 interface EvaluatorCSVImportProps {
   isOpen: boolean;
   onClose: () => void;
-  onImported: () => void;
+  onImported?: () => void;
 }
 
 interface ParsedDimension {
@@ -165,6 +165,7 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [name, setName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const addEvaluator = useEvaluatorsStore((state) => state.addEvaluator);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -188,7 +189,7 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
       const outputSchema = buildOutputSchema(parsed);
       const prompt = buildPrompt(parsed);
 
-      await evaluatorsRepository.save({
+      await addEvaluator({
         id: '',
         name: name.trim(),
         prompt,
@@ -201,7 +202,7 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
       });
 
       notificationService.success('Evaluator imported from CSV');
-      onImported();
+      onImported?.();
       onClose();
       setParsed(null);
       setName('');
@@ -210,7 +211,7 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
     } finally {
       setIsSaving(false);
     }
-  }, [parsed, name, onImported, onClose]);
+  }, [addEvaluator, parsed, name, onImported, onClose]);
 
   const handleClose = () => {
     setParsed(null);

@@ -7,6 +7,7 @@ import {
   VoiceRxRunList,
   VoiceRxRunDetail,
 } from "@/features/voiceRx";
+import { AppEvaluatorsPage } from '@/features/evals';
 import {
   KairaBotSettingsPage,
   TagManagementPage,
@@ -25,6 +26,7 @@ import { AdminUsersPage } from "@/features/admin";
 import {
   InsideSalesListing,
   InsideSalesEvaluators,
+  InsideSalesEvaluatorDetail,
   InsideSalesRunList,
   InsideSalesRunDetail,
   InsideSalesDashboard,
@@ -92,6 +94,10 @@ export function Router() {
               path={routes.voiceRx.dashboard}
               element={<VoiceRxDashboard />}
             />
+            <Route
+              path={routes.voiceRx.evaluators}
+              element={<AppEvaluatorsPage />}
+            />
             <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
             <Route path={routes.voiceRx.runs} element={<VoiceRxRunList />} />
             <Route path={routes.voiceRx.logs} element={<EvalLogs />} />
@@ -120,6 +126,10 @@ export function Router() {
 
             {/* Kaira Evals routes */}
             <Route path={routes.kaira.dashboard} element={<EvalDashboard />} />
+            <Route
+              path={routes.kaira.evaluators}
+              element={<AppEvaluatorsPage />}
+            />
             <Route path={routes.kaira.runs} element={<EvalRunList />} />
             <Route path="/kaira/runs/:runId" element={<EvalRunDetail />} />
             <Route
@@ -137,7 +147,7 @@ export function Router() {
           <Route element={<InsideSalesGuard />}>
             <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
             <Route path={routes.insideSales.evaluators} element={<InsideSalesEvaluators />} />
-            <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluators />} />
+            <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluatorDetail />} />
             <Route path={routes.insideSales.runs} element={<InsideSalesRunList />} />
             <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />

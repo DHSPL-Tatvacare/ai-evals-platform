@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { X, GitFork, Search, Trash2, Library } from 'lucide-react';
+import { PermissionGate } from '@/components/auth/PermissionGate';
 import { Button, Input, EmptyState } from '@/components/ui';
 import { useEvaluatorsStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
 import type { Listing } from '@/types';
 
@@ -26,8 +28,15 @@ export function EvaluatorRegistryPicker({
   const [forking, setForking] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const user = useAuthStore((state) => state.user);
 
-  const { registry, isRegistryLoaded, loadRegistry, deleteEvaluator } = useEvaluatorsStore();
+  const {
+    registry,
+    isRegistryLoaded,
+    currentRegistryAppId,
+    loadRegistry,
+    deleteEvaluator,
+  } = useEvaluatorsStore();
 
   // Trigger slide-in animation after mount
   useEffect(() => {
@@ -56,10 +65,10 @@ export function EvaluatorRegistryPicker({
   const effectiveEntityId = entityId || listing?.id;
 
   useEffect(() => {
-    if (isOpen && !isRegistryLoaded) {
+    if (isOpen && (!isRegistryLoaded || currentRegistryAppId !== effectiveAppId)) {
       loadRegistry(effectiveAppId);
     }
-  }, [isOpen, isRegistryLoaded, effectiveAppId, loadRegistry]);
+  }, [currentRegistryAppId, effectiveAppId, isOpen, isRegistryLoaded, loadRegistry]);
 
   // Registry is a permanent catalog - show all global evaluators except those owned by this entity
   const availableRegistry = registry.filter(e =>
@@ -161,51 +170,62 @@ export function EvaluatorRegistryPicker({
             />
           ) : (
             <div className="space-y-3">
-              {availableRegistry.map(evaluator => (
-                <div
-                  key={evaluator.id}
-                  className={cn(
-                    "border border-[var(--border-default)] rounded-lg p-4",
-                    "hover:border-[var(--color-brand-accent)] transition-colors",
-                    "bg-[var(--bg-surface)]"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-[var(--text-primary)] truncate">
-                        {evaluator.name}
-                      </h3>
-                      <p className="text-sm text-[var(--text-muted)] mt-1 line-clamp-2">
-                        {evaluator.prompt.slice(0, 150)}...
-                      </p>
-                      <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-muted)]">
-                        <span>{evaluator.outputSchema.length} output field(s)</span>
-                        <span>•</span>
-                        <span>{evaluator.modelId}</span>
+              {availableRegistry.map((evaluator) => {
+                const isOwnedEvaluator =
+                  !!user &&
+                  evaluator.tenantId === user.tenantId &&
+                  evaluator.userId === user.id;
+
+                return (
+                  <div
+                    key={evaluator.id}
+                    className={cn(
+                      "border border-[var(--border-default)] rounded-lg p-4",
+                      "hover:border-[var(--color-brand-accent)] transition-colors",
+                      "bg-[var(--bg-surface)]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-[var(--text-primary)] truncate">
+                          {evaluator.name}
+                        </h3>
+                        <p className="text-sm text-[var(--text-muted)] mt-1 line-clamp-2">
+                          {evaluator.prompt.slice(0, 150)}...
+                        </p>
+                        <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-muted)]">
+                          <span>{evaluator.outputSchema.length} output field(s)</span>
+                          <span>•</span>
+                          <span>{evaluator.modelId}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isOwnedEvaluator && (
+                          <PermissionGate action="resource:delete">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDelete(evaluator.id)}
+                              disabled={deleting !== null || forking !== null}
+                              className="text-[var(--text-danger)] hover:text-[var(--text-danger)] hover:bg-[var(--bg-danger-subtle)]"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => handleFork(evaluator.id)}
+                          disabled={forking !== null || deleting !== null}
+                        >
+                          <GitFork className="h-4 w-4 mr-1.5" />
+                          {forking === evaluator.id ? 'Forking...' : 'Fork'}
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleDelete(evaluator.id)}
-                        disabled={deleting !== null || forking !== null}
-                        className="text-[var(--text-danger)] hover:text-[var(--text-danger)] hover:bg-[var(--bg-danger-subtle)]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleFork(evaluator.id)}
-                        disabled={forking !== null || deleting !== null}
-                      >
-                        <GitFork className="h-4 w-4 mr-1.5" />
-                        {forking === evaluator.id ? 'Forking...' : 'Fork'}
-                      </Button>
-                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

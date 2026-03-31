@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ui";
 import { PermissionGate } from '@/components/auth/PermissionGate';
+import { useAuthStore } from '@/stores/authStore';
 import { cn } from "@/utils";
 import { EvaluatorHistoryListOverlay } from "./EvaluatorHistoryListOverlay";
 import { EvaluatorHistoryDetailsOverlay } from "./EvaluatorHistoryDetailsOverlay";
@@ -29,6 +30,7 @@ interface EvaluatorCardProps {
   entityId?: string;
   latestRun?: EvalRun;
   onCancel?: (evaluatorId: string) => void;
+  onOpen?: (evaluator: EvaluatorDefinition) => void;
   onEdit: (evaluator: EvaluatorDefinition) => void;
   onDelete: (evaluatorId: string) => void;
   onToggleHeader: (evaluatorId: string, showInHeader: boolean) => void;
@@ -69,6 +71,7 @@ export function EvaluatorCard({
   entityId,
   latestRun,
   onCancel,
+  onOpen,
   onEdit,
   onDelete,
   onToggleHeader,
@@ -78,8 +81,14 @@ export function EvaluatorCard({
   const [showMenu, setShowMenu] = useState(false);
   const [overlayState, setOverlayState] = useState<OverlayState>("none");
   const [selectedRun, setSelectedRun] = useState<EvalRun | null>(null);
+  const user = useAuthStore((state) => state.user);
 
   const isRunning = latestRun?.status === "running";
+  const isOwnedEvaluator =
+    !!user &&
+    evaluator.tenantId === user.tenantId &&
+    evaluator.userId === user.id;
+  const isTenantEvaluator = !!user && evaluator.tenantId === user.tenantId;
   const runOutput = (latestRun?.result as Record<string, unknown> | undefined)
     ?.output as Record<string, unknown> | undefined;
   const mainMetricField = evaluator.outputSchema.find((f) => f.isMainMetric);
@@ -113,9 +122,19 @@ export function EvaluatorCard({
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <h4 className="font-medium text-[13px] truncate text-[var(--text-primary)]">
-            {evaluator.name}
-          </h4>
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={() => onOpen(evaluator)}
+              className="truncate text-left text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:text-[var(--text-brand)]"
+            >
+              {evaluator.name}
+            </button>
+          ) : (
+            <h4 className="font-medium text-[13px] truncate text-[var(--text-primary)]">
+              {evaluator.name}
+            </h4>
+          )}
           {latestRun && (
             <div className="flex-shrink-0">
               {isRunning && (
@@ -217,49 +236,53 @@ export function EvaluatorCard({
                     <History className="h-3.5 w-3.5" />
                     History
                   </button>
-                  <button
-                    onClick={() => {
-                      onToggleGlobal(evaluator.id, !evaluator.isGlobal);
-                      setShowMenu(false);
-                    }}
-                    className={cn(
-                      "w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)]",
-                      "flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]",
-                    )}
-                  >
-                    <Globe
+                  {isOwnedEvaluator && (
+                    <button
+                      onClick={() => {
+                        onToggleGlobal(evaluator.id, !evaluator.isGlobal);
+                        setShowMenu(false);
+                      }}
                       className={cn(
-                        "h-3.5 w-3.5",
-                        evaluator.isGlobal
-                          ? "text-[var(--color-brand-accent)]"
-                          : "text-[var(--text-muted)]",
+                        "w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)]",
+                        "flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]",
                       )}
-                    />
-                    {evaluator.isGlobal
-                      ? "Remove from Registry"
-                      : "Add to Registry"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      onToggleHeader(evaluator.id, !evaluator.showInHeader);
-                      setShowMenu(false);
-                    }}
-                    className={cn(
-                      "w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)]",
-                      "flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]",
-                    )}
-                  >
-                    <CheckCircle2
+                    >
+                      <Globe
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          evaluator.isGlobal
+                            ? "text-[var(--color-brand-accent)]"
+                            : "text-[var(--text-muted)]",
+                        )}
+                      />
+                      {evaluator.isGlobal
+                        ? "Remove from Registry"
+                        : "Add to Registry"}
+                    </button>
+                  )}
+                  {isOwnedEvaluator && (
+                    <button
+                      onClick={() => {
+                        onToggleHeader(evaluator.id, !evaluator.showInHeader);
+                        setShowMenu(false);
+                      }}
                       className={cn(
-                        "h-3.5 w-3.5",
-                        evaluator.showInHeader
-                          ? "text-[var(--color-success)]"
-                          : "text-[var(--text-muted)]",
+                        "w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)]",
+                        "flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]",
                       )}
-                    />
-                    Show in Header
-                  </button>
-                  {onToggleBuiltIn && (
+                    >
+                      <CheckCircle2
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          evaluator.showInHeader
+                            ? "text-[var(--color-success)]"
+                            : "text-[var(--text-muted)]",
+                        )}
+                      />
+                      Show in Header
+                    </button>
+                  )}
+                  {onToggleBuiltIn && isTenantEvaluator && (
                     <PermissionGate action="evaluator:promote">
                       <button
                         onClick={() => {
@@ -285,30 +308,34 @@ export function EvaluatorCard({
                       </button>
                     </PermissionGate>
                   )}
-                  <PermissionGate action="resource:edit">
-                    <button
-                      onClick={() => {
-                        onEdit(evaluator);
-                        setShowMenu(false);
-                      }}
-                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                    >
-                      <Edit className="h-3.5 w-3.5" />
-                      Edit
-                    </button>
-                  </PermissionGate>
-                  <PermissionGate action="resource:delete">
-                    <button
-                      onClick={() => {
-                        onDelete(evaluator.id);
-                        setShowMenu(false);
-                      }}
-                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--color-error)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </button>
-                  </PermissionGate>
+                  {isOwnedEvaluator && (
+                    <PermissionGate action="resource:edit">
+                      <button
+                        onClick={() => {
+                          onEdit(evaluator);
+                          setShowMenu(false);
+                        }}
+                        className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+                    </PermissionGate>
+                  )}
+                  {isOwnedEvaluator && (
+                    <PermissionGate action="resource:delete">
+                      <button
+                        onClick={() => {
+                          onDelete(evaluator.id);
+                          setShowMenu(false);
+                        }}
+                        className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)] flex items-center gap-2 text-[var(--color-error)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </PermissionGate>
+                  )}
                 </div>
               </>
             )}

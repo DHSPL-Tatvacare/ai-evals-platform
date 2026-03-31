@@ -11,6 +11,7 @@ interface EvaluatorsStore {
   // Registry state (for picker overlay)
   registry: EvaluatorDefinition[];
   isRegistryLoaded: boolean;
+  currentRegistryAppId: string | null;
 
   loadEvaluators: (appId: string, listingId: string) => Promise<void>;
   loadAppEvaluators: (appId: string) => Promise<void>;
@@ -36,6 +37,7 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   currentAppId: null,
   registry: [],
   isRegistryLoaded: false,
+  currentRegistryAppId: null,
 
   loadEvaluators: async (appId: string, listingId: string) => {
     const { currentListingId, isLoaded } = get();
@@ -71,7 +73,7 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   
   loadRegistry: async (appId: string) => {
     const registry = await evaluatorsRepository.getRegistry(appId);
-    set({ registry, isRegistryLoaded: true });
+    set({ registry, isRegistryLoaded: true, currentRegistryAppId: appId });
   },
   
   addEvaluator: async (evaluator: EvaluatorDefinition) => {
@@ -153,6 +155,7 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
       currentAppId: null,
       registry: [],
       isRegistryLoaded: false,
+      currentRegistryAppId: null,
     });
   },
 }));

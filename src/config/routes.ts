@@ -13,6 +13,7 @@ export const routes = {
     upload: "/upload",
     listing: (id: string) => `/listing/${id}`,
     dashboard: "/dashboard",
+    evaluators: '/evaluators',
     runs: "/runs",
     runDetail: (runId: string) => `/runs/${runId}`,
     logs: "/logs",
@@ -23,6 +24,7 @@ export const routes = {
     chat: "/kaira/chat",
     chatSession: (chatId: string) => `/kaira/chat/${chatId}`,
     dashboard: "/kaira/dashboard",
+    evaluators: '/kaira/evaluators',
     runs: "/kaira/runs",
     runDetail: (runId: string) => `/kaira/runs/${runId}`,
     adversarialDetail: (runId: string, evalId: string) =>
