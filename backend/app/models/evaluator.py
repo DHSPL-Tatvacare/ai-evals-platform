@@ -19,6 +19,7 @@ class Evaluator(Base, TimestampMixin, TenantUserMixin):
     model_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     output_schema: Mapped[list] = mapped_column(JSON, default=list)
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_built_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     show_in_header: Mapped[bool] = mapped_column(Boolean, default=False)
     forked_from: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluators.id", ondelete="SET NULL"), nullable=True

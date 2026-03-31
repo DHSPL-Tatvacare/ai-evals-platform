@@ -9,6 +9,7 @@ import {
   Square,
   Globe,
   GitFork,
+  ShieldCheck,
 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ui";
 import { PermissionGate } from '@/components/auth/PermissionGate';
@@ -32,6 +33,7 @@ interface EvaluatorCardProps {
   onDelete: (evaluatorId: string) => void;
   onToggleHeader: (evaluatorId: string, showInHeader: boolean) => void;
   onToggleGlobal: (evaluatorId: string, isGlobal: boolean) => void;
+  onToggleBuiltIn?: (evaluatorId: string, isBuiltIn: boolean) => void;
 }
 
 type OverlayState = "none" | "list" | "details";
@@ -71,6 +73,7 @@ export function EvaluatorCard({
   onDelete,
   onToggleHeader,
   onToggleGlobal,
+  onToggleBuiltIn,
 }: EvaluatorCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [overlayState, setOverlayState] = useState<OverlayState>("none");
@@ -132,9 +135,16 @@ export function EvaluatorCard({
             </div>
           )}
           {/* Badges - inline with title */}
-          {(evaluator.isGlobal || evaluator.forkedFrom) && (
+          {(evaluator.isBuiltIn || evaluator.isGlobal || evaluator.forkedFrom) && (
             <div className="flex items-center gap-1 flex-shrink-0">
-              {evaluator.isGlobal && (
+              {evaluator.isBuiltIn && (
+                <Tooltip content="Built-in evaluator — available to all tenant users">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-success)]/10 text-[var(--color-success)]">
+                    <ShieldCheck className="h-3 w-3" />
+                  </span>
+                </Tooltip>
+              )}
+              {evaluator.isGlobal && !evaluator.isBuiltIn && (
                 <Tooltip content="Available in Registry for other listings to fork">
                   <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[var(--color-brand-accent)]/10 text-[var(--color-brand-accent)]">
                     <Globe className="h-3 w-3" />
@@ -249,6 +259,32 @@ export function EvaluatorCard({
                     />
                     Show in Header
                   </button>
+                  {onToggleBuiltIn && (
+                    <PermissionGate action="evaluator:promote">
+                      <button
+                        onClick={() => {
+                          onToggleBuiltIn(evaluator.id, !evaluator.isBuiltIn);
+                          setShowMenu(false);
+                        }}
+                        className={cn(
+                          "w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--interactive-secondary)]",
+                          "flex items-center gap-2 text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]",
+                        )}
+                      >
+                        <ShieldCheck
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            evaluator.isBuiltIn
+                              ? "text-[var(--color-success)]"
+                              : "text-[var(--text-muted)]",
+                          )}
+                        />
+                        {evaluator.isBuiltIn
+                          ? "Demote from Built-in"
+                          : "Promote to Built-in"}
+                      </button>
+                    </PermissionGate>
+                  )}
                   <PermissionGate action="resource:edit">
                     <button
                       onClick={() => {

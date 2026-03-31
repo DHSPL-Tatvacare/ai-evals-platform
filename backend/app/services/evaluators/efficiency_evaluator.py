@@ -8,13 +8,31 @@ from app.services.evaluators.llm_base import BaseLLMProvider
 from app.services.evaluators.models import ConversationThread, EfficiencyEvaluation, RuleCompliance
 from app.services.evaluators.rule_catalog import get_rules_for_efficiency, PromptRule, normalize_rule_id
 
-EFFICIENCY_JUDGE_SYSTEM_PROMPT = """You are a conversation-quality auditor for a health-assistant chatbot that logs meals.
+EFFICIENCY_JUDGE_SYSTEM_PROMPT = """You are a conversation-quality auditor for a health assistant that handles multiple interaction types.
 
 You will receive a complete conversation thread. Your job is to produce a structured evaluation of the conversation's efficiency, task outcome, and rule compliance.
 
 CONTEXT
 
-The ideal meal-logging flow completes in 2 turns: the user describes food, the bot shows a summary with confirmation action chips, done. Any turn beyond that is friction. Friction is either justified (user failed to provide required information) or unjustified (bot made an error).
+This health assistant handles:
+1. MEAL LOGGING (FoodAgent): User describes or photographs food → bot shows nutritional summary → user confirms. Ideal flow completes in 2 turns. Extra turns are friction.
+2. FOOD ANALYSIS (FoodInsightAgent): User asks about nutrition trends, calorie goals, food diary → bot answers. Query-response — no multi-step flow.
+3. CGM/GLUCOSE (CgmAgent, CgmFoodInsightAgent): User asks about glucose levels, spikes, patterns → bot answers. Query-response.
+4. GENERAL / GREETING: General health questions, greetings, off-topic.
+
+YOUR FIRST TASK: Identify the thread_type from the conversation content and intent metadata.
+
+THREAD TYPE EVALUATION
+
+For NON-MEAL threads (food_analysis, cgm_query, general, greeting):
+- These are query-response interactions, not multi-step flows
+- Set verdict to NOT_APPLICABLE
+- Set task_completed = true if the bot provided a substantive response to the user's question, false if the bot could not answer (error, no data, service unavailable)
+- Set friction_turns to empty, recovery_quality to "not_needed"
+- Set failure_reason to empty string (or describe the limitation if task_completed is false)
+- Reasoning should note: "Thread is a {thread_type} interaction, not a meal-logging flow"
+
+For MEAL LOGGING threads: Apply the full efficiency framework below.
 
 CORRECT BOT BEHAVIORS (do NOT count as friction):
 - Asking for meal time when the user did not provide one
@@ -61,13 +79,35 @@ If task_completed is false, state the specific root cause in one sentence. If ta
 
 VERDICT CRITERIA
 
-Apply exactly one verdict per the rules below. Do not interpolate between levels. Evaluate both axes independently: (1) did the bot make errors? (2) did the task complete?
+Apply exactly one verdict per the rules below. Do not interpolate between levels.
 
+- NOT_APPLICABLE: The conversation is NOT a meal-logging flow (e.g. CGM query, food insight question, greeting, general health question). Efficiency evaluation does not apply.
 - EFFICIENT: Task completed correctly in 2 turns or fewer. No friction of any kind. Bot behaved correctly.
 - ACCEPTABLE: Task completed correctly but took more than 2 turns. Every extra turn was caused by the user not providing required information. The bot behaved correctly throughout.
-- INCOMPLETE: Task did NOT complete, but the bot made NO errors in the available turns. The conversation data is truncated, the user chose not to continue (e.g. clicked edit then stopped), or the user abandoned for reasons unrelated to bot behavior. Use this when there is no evidence of bot error causing the incompletion.
+- INCOMPLETE: Task did NOT complete, but the bot made NO errors in the available turns. Identify which sub-case applies and set incomplete_reason accordingly:
+  (a) "user_inactive": The bot presented a valid response or asked a legitimate question, and the user did not respond. No evidence of frustration, repeated attempts, or bot error preceding the silence. This is the most common case for single-turn threads where the bot showed a meal summary awaiting confirmation. Do NOT write a failure_reason that implies bot error — use "User did not continue the conversation."
+  (b) "data_truncated": The conversation appears cut off mid-flow. Both parties were actively engaged.
+  (c) "user_chose_to_stop": The user explicitly indicated they wanted to stop, or used edit/cancel.
 - FRICTION: At least one extra turn was caused by a bot error, but the conversation eventually recovered and reached a correct outcome, or the bot error did not prevent task completion.
-- BROKEN: A bot error directly caused task failure. The bot ignored a user correction and persisted the same error, OR the bot logged incorrect data despite the user pointing out the mistake, OR the user abandoned the conversation because the bot could not recover from its own error. Requires evidence of bot error in the transcript.
+- BROKEN: A bot error directly caused task failure. The bot ignored a user correction and persisted the same error, OR the bot logged incorrect data despite the user pointing out the mistake, OR the user abandoned the conversation BECAUSE the bot could not recover from its own error. This includes cases where the bot repeated the same error for 2+ turns and the user stopped responding — do NOT soften this to INCOMPLETE when the bot's failure clearly drove the user away.
+
+VERDICT DECISION TREE
+
+1. Is this a meal-logging thread?
+   NO → NOT_APPLICABLE (set thread_type accordingly)
+   YES → continue
+
+2. Did the bot make any errors?
+   YES → Did the task complete despite the error?
+     YES → FRICTION
+     NO → Did the bot error cause the user to abandon (e.g., bot stuck in loop, user stopped after repeated errors)?
+       YES → BROKEN
+       NO → INCOMPLETE
+   NO → continue
+
+3. Did the task complete?
+   YES → ≤2 turns? → EFFICIENT. >2 turns, all extra turns user-caused? → ACCEPTABLE
+   NO → INCOMPLETE (set incomplete_reason)
 
 OUTPUT FORMAT
 
@@ -78,10 +118,15 @@ EFFICIENCY_JSON_SCHEMA = {
     "type": "object",
     "description": "Structured evaluation of a single conversation thread's efficiency, task outcome, friction, recovery, and rule compliance.",
     "properties": {
+        "thread_type": {
+            "type": "string",
+            "enum": ["meal_logging", "food_analysis", "cgm_query", "general", "greeting"],
+            "description": "The primary purpose of this conversation thread, determined from content and intent metadata.",
+        },
         "verdict": {
             "type": "string",
-            "enum": ["EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN"],
-            "description": "Overall efficiency verdict. EFFICIENT: completed correctly in 2 or fewer turns. ACCEPTABLE: extra turns all caused by user, task completed. INCOMPLETE: task did not complete but no bot error is present (truncated data, user stopped). FRICTION: at least one bot-caused extra turn but task completed. BROKEN: bot error directly caused task failure.",
+            "enum": ["EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN", "NOT_APPLICABLE"],
+            "description": "Overall efficiency verdict. NOT_APPLICABLE: not a meal-logging flow. EFFICIENT: completed correctly in ≤2 turns. ACCEPTABLE: extra turns all user-caused, task completed. INCOMPLETE: task did not complete, no bot error. FRICTION: bot-caused extra turn but task completed. BROKEN: bot error caused task failure.",
         },
         "task_completed": {
             "type": "boolean",
@@ -120,6 +165,11 @@ EFFICIENCY_JSON_SCHEMA = {
             "type": "string",
             "description": "If task_completed is false, one sentence stating the root cause of failure. If task_completed is true, this MUST be an empty string.",
         },
+        "incomplete_reason": {
+            "type": "string",
+            "enum": ["user_inactive", "data_truncated", "user_chose_to_stop", ""],
+            "description": "When verdict is INCOMPLETE, which sub-category applies: user_inactive (user simply did not respond), data_truncated (conversation cut off mid-flow), user_chose_to_stop (user explicitly stopped). Empty string for all other verdicts.",
+        },
         "reasoning": {
             "type": "string",
             "description": "Two to three sentence assessment of the overall conversation quality, covering what went well and what went wrong.",
@@ -148,7 +198,7 @@ EFFICIENCY_JSON_SCHEMA = {
             },
         },
     },
-    "required": ["verdict", "task_completed", "friction_turns", "recovery_quality", "failure_reason", "reasoning", "rule_compliance"],
+    "required": ["thread_type", "verdict", "task_completed", "friction_turns", "recovery_quality", "failure_reason", "incomplete_reason", "reasoning", "rule_compliance"],
 }
 
 
@@ -232,7 +282,10 @@ class EfficiencyEvaluator:
     @staticmethod
     def _parse_result(thread: ConversationThread, raw: dict, rules: Optional[List[PromptRule]] = None) -> EfficiencyEvaluation:
         verdict = raw.get("verdict", "FRICTION")
-        if verdict not in ("EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN"):
+        # Normalize NOT_APPLICABLE variants
+        if verdict in ("NOT_APPLICABLE", "NOT APPLICABLE", "N/A"):
+            verdict = "NOT APPLICABLE"
+        elif verdict not in ("EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN"):
             verdict = "FRICTION"
 
         rule_compliance = []
@@ -278,6 +331,11 @@ class EfficiencyEvaluator:
                 f"{raw.get('reasoning', '')}"
             )
 
+        # Resolve thread_type — default to meal_logging for backwards compat
+        thread_type = raw.get("thread_type", "meal_logging")
+        if thread_type not in ("meal_logging", "food_analysis", "cgm_query", "general", "greeting"):
+            thread_type = "meal_logging"
+
         return EfficiencyEvaluation(
             thread=thread, verdict=verdict,
             task_completed=raw.get("task_completed", False),
@@ -286,4 +344,6 @@ class EfficiencyEvaluator:
             failure_reason=raw.get("failure_reason") or raw.get("abandonment_reason", ""),
             reasoning=raw.get("reasoning", ""),
             rule_compliance=rule_compliance,
+            thread_type=thread_type,
+            incomplete_reason=raw.get("incomplete_reason", ""),
         )

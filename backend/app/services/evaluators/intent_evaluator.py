@@ -26,13 +26,16 @@ KAIRA_DEFAULT_AGENTS = [
     "FoodAgent",
     "CgmAgent",
     "FoodInsightAgent",
+    "CgmFoodInsightAgent",
     "General",
     "Greeting",
+    "BCAAgent",
 ]
 
 KAIRA_DEFAULT_QUERY_TYPES = [
     "logging",
     "question",
+    "query",
 ]
 
 

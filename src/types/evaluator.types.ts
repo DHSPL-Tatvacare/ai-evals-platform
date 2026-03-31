@@ -43,6 +43,7 @@ export interface EvaluatorDefinition {
   appId: string;                  // 'voice-rx' | 'kaira-bot'
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
   isGlobal: boolean;              // If true, visible in Registry for forking
+  isBuiltIn?: boolean;            // If true, promoted as a tenant-level built-in evaluator
   forkedFrom?: string;            // Source evaluator ID if forked (lineage tracking)
   showInHeader?: boolean;         // Whether to display main metric in page header
   createdAt: Date;

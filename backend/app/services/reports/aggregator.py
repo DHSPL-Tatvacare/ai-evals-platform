@@ -44,9 +44,11 @@ CORRECTNESS_ORDINAL: dict[str, float] = {
 
 EFFICIENCY_ORDINAL: dict[str, float] = {
     "EFFICIENT": 1.0,
-    "ACCEPTABLE": 0.7,
-    "INCOMPLETE": 0.4,
-    "FRICTION": 0.2,
+    "ACCEPTABLE": 0.8,
+    "NOT APPLICABLE": 0.8,
+    "NOT_APPLICABLE": 0.8,
+    "INCOMPLETE": 0.6,
+    "FRICTION": 0.3,
     "BROKEN": 0.0,
 }
 

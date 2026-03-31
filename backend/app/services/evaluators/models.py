@@ -228,13 +228,15 @@ class CorrectnessEvaluation(SerializableMixin):
 @dataclass
 class EfficiencyEvaluation(SerializableMixin):
     thread: ConversationThread
-    verdict: Literal["EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN"]
+    verdict: Literal["EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN", "NOT APPLICABLE"]
     task_completed: bool
     friction_turns: List[Dict] = field(default_factory=list)
     recovery_quality: Literal["GOOD", "PARTIAL", "FAILED", "NOT NEEDED"] = "NOT NEEDED"
     failure_reason: str = ""
     reasoning: str = ""
     rule_compliance: List[RuleCompliance] = field(default_factory=list)
+    thread_type: str = "meal_logging"
+    incomplete_reason: str = ""
 
 
 # ─── Adversarial Stress Test ───────────────────────────────────────

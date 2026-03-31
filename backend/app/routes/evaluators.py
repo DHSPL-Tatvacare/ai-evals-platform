@@ -10,7 +10,7 @@ from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.evaluator import Evaluator
 from app.models.listing import Listing
-from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorSetGlobal, EvaluatorResponse
+from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorSetGlobal, EvaluatorSetBuiltIn, EvaluatorResponse
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 
@@ -41,10 +41,11 @@ async def list_evaluators(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List evaluators for an app — user's own + system globals."""
+    """List evaluators for an app — user's own + tenant built-ins + system globals."""
     query = select(Evaluator).where(
         or_(
             and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.is_built_in == True),
             Evaluator.tenant_id == SYSTEM_TENANT_ID,
         ),
         Evaluator.app_id == app_id,
@@ -66,12 +67,13 @@ async def list_registry(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all global evaluators (the registry) for an app — system + user's globals."""
+    """List all global evaluators (the registry) for an app — system + tenant built-ins + user's globals."""
     query = (
         select(Evaluator)
         .where(
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.is_built_in == True),
                 Evaluator.tenant_id == SYSTEM_TENANT_ID,
             ),
             Evaluator.app_id == app_id,
@@ -484,6 +486,36 @@ async def set_global(
         raise HTTPException(status_code=404, detail="Evaluator not found")
 
     evaluator.is_global = body.is_global
+    await db.commit()
+    await db.refresh(evaluator)
+    return evaluator
+
+
+@router.put("/{evaluator_id}/built-in", response_model=EvaluatorResponse)
+async def toggle_built_in(
+    evaluator_id: UUID,
+    body: EvaluatorSetBuiltIn,
+    auth: AuthContext = require_permission("evaluator:promote"),
+    _app_check: AuthContext = require_app_access(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote or demote an evaluator to/from built-in status.
+
+    Built-in evaluators appear as recommended defaults for all tenant users.
+    Requires evaluator:promote permission.
+    """
+    evaluator = (await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            Evaluator.tenant_id == auth.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if not evaluator:
+        raise HTTPException(status_code=404, detail="Evaluator not found")
+
+    evaluator.is_built_in = body.is_built_in
+    if body.is_built_in:
+        evaluator.is_global = True  # built-in implies global
     await db.commit()
     await db.refresh(evaluator)
     return evaluator

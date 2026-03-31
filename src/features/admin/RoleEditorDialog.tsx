@@ -19,6 +19,7 @@ const PERMISSION_GROUPS = [
       { id: 'eval:run', label: 'Run evaluations' },
       { id: 'eval:delete', label: 'Delete / cancel evaluations' },
       { id: 'eval:export', label: 'Export results' },
+      { id: 'evaluator:promote', label: 'Promote evaluator to built-in' },
     ],
   },
   {

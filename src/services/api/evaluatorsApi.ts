@@ -19,6 +19,7 @@ interface ApiEvaluator {
   modelId: string;
   outputSchema: unknown;
   isGlobal: boolean;
+  isBuiltIn?: boolean;
   showInHeader?: boolean;
   forkedFrom?: string;
   createdAt: string;
@@ -37,6 +38,7 @@ function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
     modelId: e.modelId,
     outputSchema: e.outputSchema as EvaluatorDefinition['outputSchema'],
     isGlobal: e.isGlobal,
+    isBuiltIn: e.isBuiltIn,
     showInHeader: e.showInHeader,
     forkedFrom: e.forkedFrom,
     createdAt: new Date(e.createdAt),
@@ -117,6 +119,14 @@ export const evaluatorsRepository = {
       method: 'PUT',
       body: JSON.stringify({ isGlobal }),
     });
+  },
+
+  async setBuiltIn(id: string, isBuiltIn: boolean): Promise<EvaluatorDefinition> {
+    const data = await apiRequest<ApiEvaluator>(`/api/evaluators/${id}/built-in`, {
+      method: 'PUT',
+      body: JSON.stringify({ isBuiltIn }),
+    });
+    return toEvaluatorDefinition(data);
   },
 
   async delete(id: string): Promise<void> {

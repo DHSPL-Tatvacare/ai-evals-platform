@@ -22,6 +22,7 @@ class Permission(str, enum.Enum):
     EVAL_RUN = "eval:run"
     EVAL_DELETE = "eval:delete"
     EVAL_EXPORT = "eval:export"
+    EVALUATOR_PROMOTE = "evaluator:promote"
     # Resources (prompts, schemas, evaluators, tags)
     RESOURCE_CREATE = "resource:create"
     RESOURCE_EDIT = "resource:edit"

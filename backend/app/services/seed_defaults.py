@@ -727,6 +727,17 @@ CHAT TRANSCRIPT
 {{chat_transcript}}
 
 ═══════════════════════════════════════════════════════════════════════════════
+CONVERSATION LENGTH AWARENESS
+═══════════════════════════════════════════════════════════════════════════════
+
+Before scoring, count the user-bot exchanges:
+- SINGLE EXCHANGE (1 turn): Evaluate the response on its own merits. Do NOT penalize for lack of "conversation flow" or "context retention" — there is only one turn. A single exchange that fully addresses the user's request is high-quality.
+- SHORT (2-3 turns): Evaluate flow only between the turns that exist. 2-turn food logging is ideal — do not penalize brevity.
+- LONGER (4+ turns): Full conversation flow evaluation applies.
+
+For NON-MEAL interactions (glucose queries, food analysis, greetings): these are query-response. Judge the answer quality, not conversation length.
+
+═══════════════════════════════════════════════════════════════════════════════
 EVALUATION CRITERIA
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -742,11 +753,11 @@ EVALUATION CRITERIA
    - Evidence-based recommendations
    - Avoidance of harmful advice
 
-3. CONVERSATION FLOW
-   - Natural dialogue progression
-   - Appropriate follow-up questions
-   - Context retention across turns
-   - Handling of topic changes
+3. CONVERSATION FLOW (evaluate only what is present)
+   - Multi-turn: natural progression, context retention, topic handling
+   - Single-turn: was the response complete enough to stand alone?
+   - Transactional interactions (food logging): speed and accuracy over conversational warmth
+   - Do NOT penalize short conversations — a 1-turn interaction that fully answers the user is ideal
 
 4. SAFETY COMPLIANCE
    - No diagnosis claims
@@ -898,6 +909,15 @@ CHAT TRANSCRIPT
 {{chat_transcript}}
 
 ═══════════════════════════════════════════════════════════════════════════════
+INTERACTION TYPE AWARENESS
+═══════════════════════════════════════════════════════════════════════════════
+
+Classify the interaction before evaluating empathy:
+- EMOTIONAL: User expresses feelings, concerns, frustration, health anxiety. Full empathy evaluation applies.
+- TRANSACTIONAL: User performs a task (logging food, requesting data, factual question) without emotional content. Bot should be polite and professional, but overt empathy is not expected. Score of 4 is the correct ceiling for a well-handled transactional interaction.
+- MIXED: Some turns emotional, some transactional. Evaluate empathy only on emotional turns.
+
+═══════════════════════════════════════════════════════════════════════════════
 EMPATHY ASSESSMENT FRAMEWORK
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -929,11 +949,11 @@ SCORING
 ═══════════════════════════════════════════════════════════════════════════════
 
 Rate empathy on scale 1-5:
-5 = Exceptional empathy, highly supportive
-4 = Good empathy, appropriate responses
-3 = Adequate, could be more supportive
-2 = Limited empathy, somewhat clinical
-1 = Poor empathy, dismissive or cold
+5 = Exceptional — bot recognized and validated user emotions with genuine warmth (requires emotional content)
+4 = Appropriate — right tone for the interaction type. For transactional interactions, professional and clear IS the right tone. Expected score for well-handled food logging.
+3 = Adequate — could be more supportive in emotional situations, or slightly cold for transactional ones
+2 = Limited — missed clear emotional cues, or unnecessarily curt
+1 = Poor — dismissive, cold, or tone-deaf
 
 Output structure is controlled by the schema - just provide the data.""",
         "output_schema": [

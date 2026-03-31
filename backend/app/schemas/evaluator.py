@@ -33,6 +33,10 @@ class EvaluatorSetGlobal(CamelModel):
     is_global: bool
 
 
+class EvaluatorSetBuiltIn(CamelModel):
+    is_built_in: bool
+
+
 class EvaluatorResponse(CamelORMModel):
     id: uuid.UUID
     app_id: str
@@ -42,6 +46,7 @@ class EvaluatorResponse(CamelORMModel):
     model_id: Optional[str] = None
     output_schema: list = []
     is_global: bool
+    is_built_in: bool = False
     show_in_header: bool
     forked_from: Optional[str] = None
     created_at: datetime

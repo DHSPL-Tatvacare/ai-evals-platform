@@ -19,6 +19,7 @@ interface EvaluatorsStore {
   updateEvaluator: (evaluator: EvaluatorDefinition) => Promise<void>;
   deleteEvaluator: (id: string) => Promise<void>;
   setGlobal: (id: string, isGlobal: boolean) => Promise<void>;
+  setBuiltIn: (id: string, isBuiltIn: boolean) => Promise<void>;
   forkEvaluator: (sourceId: string, targetListingId?: string) => Promise<EvaluatorDefinition>;
   seedDefaults: (listingId: string) => Promise<EvaluatorDefinition[]>;
   seedAppDefaults: (appId: string) => Promise<EvaluatorDefinition[]>;
@@ -98,9 +99,9 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
     set(state => {
       const updatedEvaluator = state.evaluators.find(e => e.id === id);
       if (!updatedEvaluator) return state;
-      
+
       const updated = { ...updatedEvaluator, isGlobal, updatedAt: new Date() };
-      
+
       return {
         evaluators: state.evaluators.map(e => e.id === id ? updated : e),
         // Update registry: add if now global, remove if no longer global
@@ -109,6 +110,16 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
           : state.registry.filter(e => e.id !== id),
       };
     });
+  },
+
+  setBuiltIn: async (id: string, isBuiltIn: boolean) => {
+    const result = await evaluatorsRepository.setBuiltIn(id, isBuiltIn);
+    set(state => ({
+      evaluators: state.evaluators.map(e => e.id === id ? result : e),
+      registry: isBuiltIn
+        ? [...state.registry.filter(e => e.id !== id), result]
+        : state.registry.filter(e => e.id !== id),
+    }));
   },
   
   forkEvaluator: async (sourceId: string, targetListingId?: string) => {

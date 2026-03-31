@@ -30,7 +30,6 @@ dist-ssr
 .agent/*.md
 
 # Local strategy artifacts (not for version control)
-docs/proposals/ai-concierge-routing.html
 .gemini/*.md
 .claude/
 .ruff_cache/
@@ -56,13 +55,3 @@ service-account*.json
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
 !/docs/devops-handover.md
-!/docs/plans/
-
-# Allow guide app source/config
-!/docs/guide/
-!/docs/guide/**
-
-# Re-ignore generated artifacts inside guide
-/docs/guide/node_modules/
-/docs/guide/dist/
-/docs/guide/**/.DS_Store
