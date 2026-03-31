@@ -21,6 +21,7 @@ export interface AdversarialTrait {
     id: string;
     label: string;
     description: string;
+    behaviorHint?: string;
     enabled: boolean;
 }
 
@@ -29,6 +30,7 @@ export interface AdversarialRule {
     section: string;
     ruleText: string;
     goalIds: string[];
+    evaluationScopes: string[];
 }
 
 export interface AdversarialConfig {
@@ -56,12 +58,21 @@ interface SnakeRule {
     section: string;
     rule_text: string;
     goal_ids: string[];
+    evaluation_scopes?: string[];
+}
+
+interface SnakeTrait {
+    id: string;
+    label: string;
+    description: string;
+    behavior_hint?: string;
+    enabled: boolean;
 }
 
 interface SnakeConfig {
     version: number;
     goals: SnakeGoal[];
-    traits: AdversarialTrait[];  // trait fields have no multi-word keys
+    traits: SnakeTrait[];
     rules: SnakeRule[];
 }
 
@@ -78,12 +89,19 @@ function fromSnake(raw: SnakeConfig): AdversarialConfig {
             signalPatterns: g.signal_patterns || [],
             enabled: g.enabled ?? true,
         })),
-        traits: raw.traits || [],
+        traits: (raw.traits || []).map((t) => ({
+            id: t.id,
+            label: t.label,
+            description: t.description,
+            behaviorHint: t.behavior_hint || '',
+            enabled: t.enabled ?? true,
+        })),
         rules: (raw.rules || []).map((r) => ({
             ruleId: r.rule_id,
             section: r.section,
             ruleText: r.rule_text,
             goalIds: r.goal_ids || [],
+            evaluationScopes: r.evaluation_scopes || [],
         })),
     };
 }
@@ -101,12 +119,19 @@ function toSnake(config: AdversarialConfig): SnakeConfig {
             signal_patterns: g.signalPatterns,
             enabled: g.enabled,
         })),
-        traits: config.traits,
+        traits: config.traits.map((t) => ({
+            id: t.id,
+            label: t.label,
+            description: t.description,
+            behavior_hint: t.behaviorHint || '',
+            enabled: t.enabled,
+        })),
         rules: config.rules.map((r) => ({
             rule_id: r.ruleId,
             section: r.section,
             rule_text: r.ruleText,
             goal_ids: r.goalIds,
+            evaluation_scopes: r.evaluationScopes,
         })),
     };
 }

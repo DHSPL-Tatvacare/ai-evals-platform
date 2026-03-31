@@ -8,22 +8,29 @@ goal_flow and active_traits as JSONB on adversarial_evaluations rows.
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 from typing import Optional, Callable, List
 
 from sqlalchemy import update
 
 from app.database import async_session
 from app.models.eval_run import AdversarialEvaluation as DBAdversarialEval, EvalRun
+from app.services.adversarial_test_case_service import (
+    dedupe_test_cases,
+    list_saved_test_cases,
+    load_retry_test_cases,
+    mark_cases_used,
+    model_to_runtime,
+    payload_to_runtime,
+)
 from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
 )
 from app.services.evaluators.adversarial_evaluator import AdversarialEvaluator
 from app.services.evaluators.adversarial_config import (
-    AdversarialConfig, load_config_from_db, get_default_config,
+    load_config_from_db, get_default_config,
 )
 from app.services.evaluators.kaira_client import KairaClient
-from app.services.evaluators.models import RunMetadata, serialize
+from app.services.evaluators.models import serialize
 from app.services.evaluators.parallel_engine import run_parallel
 from app.services.evaluators.runner_utils import (
     save_api_log, create_eval_run, finalize_eval_run,
@@ -35,6 +42,142 @@ from app.services.job_worker import (
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable  # async (job_id, current, total, message) -> None
+
+
+def _should_generate_cases(case_mode: str) -> bool:
+    return case_mode in {"generate", "hybrid"}
+
+
+def _normalize_manual_cases(raw_cases: list[dict] | None) -> list:
+    cases = []
+    for item in raw_cases or []:
+        if not isinstance(item, dict):
+            continue
+        normalized = {
+            "synthetic_input": item.get("synthetic_input") or item.get("syntheticInput", ""),
+            "difficulty": item.get("difficulty", "MEDIUM"),
+            "goal_flow": item.get("goal_flow") or item.get("goalFlow", []),
+            "active_traits": item.get("active_traits") or item.get("activeTraits", []),
+            "expected_challenges": item.get("expected_challenges") or item.get("expectedChallenges", []),
+            "expected_behavior": item.get("expected_behavior") or item.get("expectedBehavior", ""),
+        }
+        if not normalized["synthetic_input"]:
+            continue
+        cases.append(payload_to_runtime(normalized))
+    return cases
+
+
+async def _count_pinned_cases(tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+    async with async_session() as db:
+        records = await list_saved_test_cases(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pinned_only=True,
+        )
+        return len(records)
+
+
+async def _load_saved_and_pinned_cases(
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    saved_case_ids: list[uuid.UUID],
+    include_pinned_cases: bool,
+) -> tuple[list, list[uuid.UUID]]:
+    async with async_session() as db:
+        selected_records = await list_saved_test_cases(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ids=saved_case_ids or None,
+        ) if saved_case_ids else []
+        pinned_records = await list_saved_test_cases(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pinned_only=True,
+        ) if include_pinned_cases else []
+
+        records_by_id = {record.id: record for record in [*pinned_records, *selected_records]}
+        used_ids = list(records_by_id.keys())
+        if used_ids:
+            await mark_cases_used(
+                db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                case_ids=used_ids,
+            )
+        runtime_cases = [model_to_runtime(record) for record in records_by_id.values()]
+        return runtime_cases, used_ids
+
+
+async def _resolve_test_cases(
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    evaluator: AdversarialEvaluator,
+    case_mode: str,
+    test_count: int,
+    thinking: str,
+    extra_instructions: Optional[str],
+    selected_goals: Optional[List[str]],
+    flow_mode: str,
+    saved_case_ids: list[uuid.UUID],
+    include_pinned_cases: bool,
+    manual_cases: list[dict] | None,
+    retry_eval_ids: list[int],
+    source_run_id: uuid.UUID | None,
+) -> tuple[list, dict]:
+    generated_cases = []
+    if _should_generate_cases(case_mode):
+        generated_cases = await evaluator.generate_test_cases(
+            test_count,
+            thinking=thinking,
+            extra_instructions=extra_instructions,
+            selected_goals=selected_goals,
+            flow_mode=flow_mode,
+        )
+
+    saved_cases, used_saved_case_ids = await _load_saved_and_pinned_cases(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        saved_case_ids=saved_case_ids,
+        include_pinned_cases=include_pinned_cases,
+    )
+    manual_runtime_cases = _normalize_manual_cases(manual_cases)
+
+    retry_cases = []
+    if retry_eval_ids:
+        if not source_run_id:
+            raise RuntimeError("source_run_id is required when retry_eval_ids are provided")
+        async with async_session() as db:
+            retry_cases = await load_retry_test_cases(
+                db,
+                run_id=source_run_id,
+                eval_ids=retry_eval_ids,
+            )
+
+    combined_cases = dedupe_test_cases(
+        [
+            *retry_cases,
+            *saved_cases,
+            *manual_runtime_cases,
+            *generated_cases,
+        ]
+    )
+    source_summary = {
+        "case_mode": case_mode,
+        "generated_count": len(generated_cases),
+        "saved_count": len(saved_cases),
+        "manual_count": len(manual_runtime_cases),
+        "retry_count": len(retry_cases),
+        "include_pinned_cases": include_pinned_cases,
+        "saved_case_ids": [str(case_id) for case_id in used_saved_case_ids],
+        "retry_eval_ids": retry_eval_ids,
+        "source_run_id": str(source_run_id) if source_run_id else None,
+    }
+    return combined_cases, source_summary
 
 
 
@@ -64,6 +207,12 @@ async def run_adversarial_evaluation(
     selected_goals: Optional[List[str]] = None,
     flow_mode: str = "single",
     extra_instructions: Optional[str] = None,
+    case_mode: str = "generate",
+    saved_case_ids: Optional[List[str]] = None,
+    manual_cases: Optional[list[dict]] = None,
+    include_pinned_cases: bool = False,
+    retry_eval_ids: Optional[List[int]] = None,
+    source_run_id: Optional[str] = None,
     kaira_timeout: float = 120,
     azure_endpoint: str = "",
     api_version: str = "",
@@ -71,6 +220,15 @@ async def run_adversarial_evaluation(
     """Run adversarial stress test against live Kaira API."""
     start_time = time.monotonic()
     run_id = uuid.uuid4()
+    saved_case_uuid_ids = [uuid.UUID(str(case_id)) for case_id in (saved_case_ids or [])]
+    retry_case_ids = [int(case_id) for case_id in (retry_eval_ids or [])]
+    source_run_uuid = uuid.UUID(str(source_run_id)) if source_run_id else None
+    requested_total = len(saved_case_uuid_ids) + len(_normalize_manual_cases(manual_cases)) + len(retry_case_ids)
+    if include_pinned_cases:
+        requested_total += await _count_pinned_cases(tenant_id, user_id)
+    if _should_generate_cases(case_mode):
+        requested_total += max(test_count, 0)
+    requested_total = max(requested_total, test_count if _should_generate_cases(case_mode) else 0)
 
     # Resolve adversarial config (from DB or defaults)
     config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
@@ -106,17 +264,28 @@ async def run_adversarial_evaluation(
             "description": description,
             "command": "adversarial",
             "eval_temperature": temperature,
-            "total_items": test_count,
+            "total_items": requested_total,
             "thinking": thinking,
             "adversarial_config": config_snapshot,
             "extra_instructions": extra_instructions,
             "flow_mode": flow_mode,
+            "turn_delay": turn_delay,
+            "case_delay": case_delay,
+            "parallel_cases": parallel_cases,
+            "case_workers": case_workers,
+            "kaira_timeout": kaira_timeout,
+            "case_mode": case_mode,
+            "saved_case_ids": [str(case_id) for case_id in saved_case_uuid_ids],
+            "manual_case_count": len(_normalize_manual_cases(manual_cases)),
+            "include_pinned_cases": include_pinned_cases,
+            "retry_eval_ids": retry_case_ids,
+            "source_run_id": str(source_run_uuid) if source_run_uuid else None,
         },
     )
 
     # Write run_id to job progress so frontend can redirect early
     await update_job_progress(
-        job_id, 0, test_count, "Initializing...", run_id=str(run_id),
+        job_id, 0, requested_total or test_count, "Initializing...", run_id=str(run_id),
     )
 
     # Resolve API key from settings if not provided
@@ -171,23 +340,64 @@ async def run_adversarial_evaluation(
     )
     await client.open()
 
-    async def report_progress(current: int, total: int, message: str):
+    async def report_progress(current: int, total: int, message: str, **extra):
         await update_job_progress(
-            job_id, current, total, message, run_id=str(run_id),
+            job_id, current, total, message, run_id=str(run_id), **extra,
         )
 
     # Determine effective concurrency
     effective_concurrency = case_workers if parallel_cases else 1
 
     try:
-        # Phase 1: Generate test cases
-        await report_progress(0, test_count, "Generating test cases...")
-        llm.set_test_case_label("Test Case Generation")
-        cases = await evaluator.generate_test_cases(
-            test_count, thinking=thinking, extra_instructions=extra_instructions,
-            selected_goals=selected_goals, flow_mode=flow_mode,
+        # Phase 1: Resolve requested test cases
+        await report_progress(
+            0,
+            requested_total or test_count,
+            "Preparing test cases...",
+            details={
+                "phase": "prepare_cases",
+                "caseMode": case_mode,
+            },
+        )
+        llm.set_test_case_label("Test Case Preparation")
+        cases, case_source_summary = await _resolve_test_cases(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            evaluator=evaluator,
+            case_mode=case_mode,
+            test_count=test_count,
+            thinking=thinking,
+            extra_instructions=extra_instructions,
+            selected_goals=selected_goals,
+            flow_mode=flow_mode,
+            saved_case_ids=saved_case_uuid_ids,
+            include_pinned_cases=include_pinned_cases,
+            manual_cases=manual_cases,
+            retry_eval_ids=retry_case_ids,
+            source_run_id=source_run_uuid,
         )
         llm.set_test_case_label(None)
+        if not cases:
+            raise RuntimeError("No adversarial test cases were selected or generated")
+        actual_total = len(cases)
+        async with async_session() as db:
+            run = await db.get(EvalRun, run_id)
+            if run and isinstance(run.batch_metadata, dict):
+                run.batch_metadata = {
+                    **run.batch_metadata,
+                    "total_items": actual_total,
+                    "case_source_summary": case_source_summary,
+                }
+                await db.commit()
+        await report_progress(
+            0,
+            actual_total,
+            "Running test cases...",
+            details={
+                "phase": "execution",
+                **case_source_summary,
+            },
+        )
 
         # Phase 2: Run each test case with per-case error boundary.
 
@@ -205,12 +415,14 @@ async def run_adversarial_evaluation(
 
             # Resolve goals for this test case's flow
             tc_goals = worker_evaluator.get_goals_for_test_case(tc)
+            trait_hints_by_id = worker_evaluator.get_trait_hints_for_test_case(tc)
 
             transcript = None
             try:
                 transcript = await worker_evaluator.conversation_agent.run_conversation(
                     test_case=tc, goals=tc_goals, client=client, user_id=kaira_test_user_id,
                     turn_delay=turn_delay, thinking=thinking, test_case_label=case_label,
+                    trait_hints_by_id=trait_hints_by_id,
                 )
 
                 evaluation = await worker_evaluator.evaluate_transcript(tc, transcript, thinking=thinking)
@@ -319,6 +531,8 @@ async def run_adversarial_evaluation(
             "goal_achieved_count": goal_achieved_count,
             "errors": error_count,
             "flow_mode": flow_mode,
+            "case_mode": case_mode,
+            "case_sources": case_source_summary,
         }
 
         if error_count == total_cases:

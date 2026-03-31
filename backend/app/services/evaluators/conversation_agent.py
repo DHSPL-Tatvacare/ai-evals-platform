@@ -26,26 +26,16 @@ from app.services.evaluators.adversarial_config import AdversarialGoal
 
 logger = logging.getLogger(__name__)
 
-# ─── Per-Trait Behavior Hints ─────────────────────────────────────
-
-TRAIT_BEHAVIOR_HINTS = {
-    "ambiguous_quantity": "Give ambiguous quantities ('some', 'a bit', 'a plate'). When bot asks, provide specific amount.",
-    "multiple_meals_one_message": "Describe multiple meals in one message. Remind bot about missed ones.",
-    "user_corrects_bot": "After bot shows interpretation, CORRECT something specific (quantity, food item, or time).",
-    "edit_after_log": "Cooperate fully, confirm meal, then request an edit afterward.",
-    "future_meal_rejection": "Deliberately give future time. If rejected, provide past time.",
-    "no_food_mentioned": "Send ONLY quantity/time with NO food mentioned. When asked, provide food.",
-    "multi_ingredient_dish": "Describe dish with all ingredients TOGETHER as one item.",
-}
-
-
-def _build_trait_hints_block(active_traits: List[str]) -> str:
+def _build_trait_hints_block(
+    active_traits: List[str],
+    trait_hints_by_id: Optional[dict[str, str]] = None,
+) -> str:
     """Build the trait-specific behavior section for the system prompt."""
     if not active_traits:
         return ""
     lines = ["## Your active traits (persona behaviors)\n"]
     for trait_id in active_traits:
-        hint = TRAIT_BEHAVIOR_HINTS.get(trait_id, f"Behave according to trait: {trait_id}")
+        hint = (trait_hints_by_id or {}).get(trait_id, f"Behave according to trait: {trait_id}")
         lines.append(f"**{trait_id}:** {hint}")
     return "\n".join(lines)
 
@@ -153,6 +143,7 @@ def build_multi_goal_system_prompt(
     goals: List[AdversarialGoal],
     active_traits: List[str],
     difficulty: str,
+    trait_hints_by_id: Optional[dict[str, str]] = None,
 ) -> str:
     """Build the system prompt for a multi-goal conversation."""
     # Build goals block with numbered goals and criteria
@@ -171,7 +162,7 @@ def build_multi_goal_system_prompt(
         )
 
     goals_block = "## Your Goals (pursue in order)\n\n" + "\n\n".join(goal_lines)
-    trait_hints = _build_trait_hints_block(active_traits)
+    trait_hints = _build_trait_hints_block(active_traits, trait_hints_by_id)
 
     return AGENT_SYSTEM_PROMPT_TEMPLATE.format(
         goals_block=goals_block,
@@ -214,6 +205,7 @@ class ConversationAgent:
         turn_delay: float = 1.5,
         thinking: str = "low",
         test_case_label: Optional[str] = None,
+        trait_hints_by_id: Optional[dict[str, str]] = None,
     ) -> ConversationTranscript:
         # Scale max_turns for multi-goal conversations
         effective_max_turns = self.max_turns
@@ -242,7 +234,7 @@ class ConversationAgent:
 
         # Build system prompt with all goals
         system_prompt = build_multi_goal_system_prompt(
-            goals, test_case.active_traits, test_case.difficulty,
+            goals, test_case.active_traits, test_case.difficulty, trait_hints_by_id,
         )
 
         for turn_num in range(1, effective_max_turns + 1):

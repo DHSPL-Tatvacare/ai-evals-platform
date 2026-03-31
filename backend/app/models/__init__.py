@@ -13,6 +13,7 @@ from app.models.evaluator import Evaluator
 from app.models.chat import ChatSession, ChatMessage
 from app.models.history import History
 from app.models.setting import Setting
+from app.models.adversarial_test_case import AdversarialSavedTestCase
 from app.models.tag import Tag
 from app.models.job import Job
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
@@ -27,7 +28,7 @@ __all__ = [
     "Tenant", "TenantConfig", "User", "RefreshToken", "InviteLink",
     "App", "Role", "RoleAppAccess", "RolePermission", "AuditLog",
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
-    "ChatSession", "ChatMessage", "History", "Setting", "Tag",
+    "ChatSession", "ChatMessage", "History", "Setting", "AdversarialSavedTestCase", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
     "EvaluationAnalytics",
     "LsqLeadCache",

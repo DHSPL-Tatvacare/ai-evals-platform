@@ -126,8 +126,13 @@ CORRECTNESS_JSON_SCHEMA = {
 class CorrectnessEvaluator:
     """Evaluates nutritional correctness of meal summary responses (async)."""
 
-    def __init__(self, llm_provider: BaseLLMProvider):
+    def __init__(
+        self,
+        llm_provider: BaseLLMProvider,
+        rules: Optional[List[PromptRule]] = None,
+    ):
         self.llm = llm_provider
+        self.rules = rules or get_rules_for_correctness()
 
     async def evaluate_message(
         self, message: ChatMessage,
@@ -183,8 +188,7 @@ class CorrectnessEvaluator:
                 "Only check calorie sanity and arithmetic.\n"
             )
 
-        rules = get_rules_for_correctness()
-        rules_block = self._format_rules(rules)
+        rules_block = self._format_rules(self.rules)
 
         eval_prompt = (
             f"### Conversation history (for context)\n{history_block}\n"
@@ -201,7 +205,12 @@ class CorrectnessEvaluator:
             json_schema=CORRECTNESS_JSON_SCHEMA,
             thinking=thinking,
         )
-        return self._parse_result(message, result, has_image_context=has_image_context)
+        return self._parse_result(
+            message,
+            result,
+            rules=self.rules,
+            has_image_context=has_image_context,
+        )
 
     async def evaluate_thread(
         self, thread: ConversationThread, thinking: str = "low",
@@ -247,7 +256,12 @@ class CorrectnessEvaluator:
         return compliance
 
     @staticmethod
-    def _parse_result(message: ChatMessage, raw: dict, has_image_context: bool = False) -> CorrectnessEvaluation:
+    def _parse_result(
+        message: ChatMessage,
+        raw: dict,
+        rules: Optional[List[PromptRule]] = None,
+        has_image_context: bool = False,
+    ) -> CorrectnessEvaluation:
         verdict = raw.get("verdict", "SOFT FAIL").replace("_", " ")
         if verdict not in ("PASS", "SOFT FAIL", "HARD FAIL", "CRITICAL", "NOT APPLICABLE"):
             verdict = "SOFT FAIL"
@@ -263,8 +277,11 @@ class CorrectnessEvaluator:
                     verdict = "PASS"
                     reasoning = f"[Image-based meal — quantity coherence check skipped] {reasoning}"
 
-        rules = get_rules_for_correctness()
-        rule_compliance = CorrectnessEvaluator._parse_rule_compliance(raw.get("rule_compliance", []), rules)
+        resolved_rules = rules or get_rules_for_correctness()
+        rule_compliance = CorrectnessEvaluator._parse_rule_compliance(
+            raw.get("rule_compliance", []),
+            resolved_rules,
+        )
 
         return CorrectnessEvaluation(
             message=message, verdict=verdict,

@@ -7,18 +7,26 @@ v1 → v2 migration: Goals added, categories gain goal_ids.
 v2 → v3 migration: Categories renamed to Traits (drop weight, drop goal_ids).
                     Rules: categories replaced by goal_ids.
                     Traits are independent — no goal/rule mapping.
+v3 → v4 migration: Rules gain explicit evaluation_scopes so batch built-ins and
+                    adversarial flows can share the same contract source.
 """
 
 import logging
 from typing import List, Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.services.evaluators.rule_catalog import (
+    ALL_EVALUATION_SCOPES,
+    default_evaluation_scopes_for_rule,
+    PromptRule,
+)
 
 logger = logging.getLogger(__name__)
 
 SETTINGS_APP_ID = "kaira-bot"
 SETTINGS_KEY = "adversarial-config"
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 
 
 # ─── Pydantic Config Models ─────────────────────────────────────
@@ -56,6 +64,7 @@ class AdversarialTrait(BaseModel):
     id: str
     label: str
     description: str
+    behavior_hint: Optional[str] = None
     enabled: bool = True
 
     @field_validator("id")
@@ -73,6 +82,7 @@ class AdversarialRule(BaseModel):
     section: str
     rule_text: str
     goal_ids: List[str]  # which goals exercise this rule
+    evaluation_scopes: List[str] = Field(default_factory=list)
 
     @field_validator("rule_id")
     @classmethod
@@ -80,6 +90,18 @@ class AdversarialRule(BaseModel):
         if not v or not v.replace("_", "").isalnum():
             raise ValueError(f"Rule id must be snake_case alphanumeric: {v!r}")
         return v
+
+    @field_validator("evaluation_scopes", mode="before")
+    @classmethod
+    def normalize_evaluation_scopes(cls, value: List[str] | None) -> List[str]:
+        if not value:
+            return []
+        normalized: list[str] = []
+        for item in value:
+            scope = str(item).strip().lower()
+            if scope and scope not in normalized:
+                normalized.append(scope)
+        return normalized
 
 
 class AdversarialConfig(BaseModel):
@@ -127,6 +149,13 @@ class AdversarialConfig(BaseModel):
                 raise ValueError(
                     f"Rule {rule.rule_id!r} references non-existent goals: {dangling}"
                 )
+            if not rule.evaluation_scopes:
+                rule.evaluation_scopes = default_evaluation_scopes_for_rule(rule.rule_id)
+            invalid_scopes = set(rule.evaluation_scopes) - set(ALL_EVALUATION_SCOPES)
+            if invalid_scopes:
+                raise ValueError(
+                    f"Rule {rule.rule_id!r} uses invalid evaluation scopes: {invalid_scopes}"
+                )
 
         return self
 
@@ -160,14 +189,39 @@ class AdversarialConfig(BaseModel):
         goal_set = set(goal_ids)
         return [r for r in self.rules if goal_set & set(r.goal_ids)]
 
+    def prompt_rules_for_goals(self, goal_ids: List[str]) -> List[PromptRule]:
+        return [
+            PromptRule(
+                rule_id=rule.rule_id,
+                section=rule.section,
+                rule_text=rule.rule_text,
+                goal_ids=list(rule.goal_ids),
+                evaluation_scopes=list(rule.evaluation_scopes),
+            )
+            for rule in self.rules_for_goals(goal_ids)
+        ]
+
+    def prompt_rules_for_scope(self, scope: str) -> List[PromptRule]:
+        return [
+            PromptRule(
+                rule_id=rule.rule_id,
+                section=rule.section,
+                rule_text=rule.rule_text,
+                goal_ids=list(rule.goal_ids),
+                evaluation_scopes=list(rule.evaluation_scopes),
+            )
+            for rule in self.rules
+            if scope in rule.evaluation_scopes
+        ]
+
 
 # ─── Built-in Default ────────────────────────────────────────────
 
 
 def get_default_config() -> AdversarialConfig:
-    """Return the built-in 3-goal, 7-trait, 13-rule default v3 config."""
+    """Return the built-in 3-goal, 7-trait, 13-rule default v4 config."""
     return AdversarialConfig(
-        version=3,
+        version=4,
         goals=[
             AdversarialGoal(
                 id="meal_logged",
@@ -270,36 +324,43 @@ def get_default_config() -> AdversarialConfig:
                 id="ambiguous_quantity",
                 label="Ambiguous Quantity",
                 description="User gives vague, informal, or ambiguous quantities (e.g. 'some', 'a bit', 'a plate').",
+                behavior_hint="Give ambiguous quantities ('some', 'a bit', 'a plate'). When bot asks, provide a specific amount.",
             ),
             AdversarialTrait(
                 id="multiple_meals_one_message",
                 label="Multiple Meals One Message",
                 description="User describes multiple meals or meal times in a single message.",
+                behavior_hint="Describe multiple meals in one message. Remind the bot if it misses one.",
             ),
             AdversarialTrait(
                 id="user_corrects_bot",
                 label="User Corrects Bot",
                 description="User corrects the bot after it interprets something wrong (quantity, food item, or time).",
+                behavior_hint="After the bot summarizes your input, correct one specific mistake such as quantity, food item, or time.",
             ),
             AdversarialTrait(
                 id="edit_after_log",
                 label="Edit After Log",
                 description="User cooperates fully, confirms the meal, then requests an edit afterward.",
+                behavior_hint="Cooperate fully through logging, then request an edit after the meal is confirmed.",
             ),
             AdversarialTrait(
                 id="future_meal_rejection",
                 label="Future Meal Rejection",
                 description="User provides a future time for a meal (e.g. 'in 30 minutes', 'planning to eat at 5pm').",
+                behavior_hint="Deliberately give a future meal time first. If the bot rejects it, then provide a valid past time.",
             ),
             AdversarialTrait(
                 id="no_food_mentioned",
                 label="No Food Mentioned",
                 description="User sends ONLY quantity or time with no food item mentioned.",
+                behavior_hint="Start with only time or quantity and no food. Provide the missing food only after the bot asks.",
             ),
             AdversarialTrait(
                 id="multi_ingredient_dish",
                 label="Multi-Ingredient Dish",
                 description="User describes a composite dish with multiple ingredients as one item (e.g. 'porridge with almonds and honey').",
+                behavior_hint="Describe a dish with ingredients together as a single item, not as separate foods.",
             ),
         ],
         rules=[
@@ -439,7 +500,7 @@ def get_default_config() -> AdversarialConfig:
     )
 
 
-# ─── v2 → v3 Migration ───────────────────────────────────────────
+# ─── Legacy Migrations ───────────────────────────────────────────
 
 
 def _migrate_v2_to_v3(raw: dict) -> dict:
@@ -498,6 +559,24 @@ def _migrate_v2_to_v3(raw: dict) -> dict:
     }
 
 
+def _migrate_v3_to_v4(raw: dict) -> dict:
+    """Migrate v3 config dict to v4 by backfilling rule evaluation scopes."""
+    migrated_rules = []
+    for rule in raw.get("rules", []):
+        migrated_rules.append({
+            **rule,
+            "evaluation_scopes": rule.get("evaluation_scopes")
+            or default_evaluation_scopes_for_rule(rule.get("rule_id", "")),
+        })
+
+    return {
+        "version": 4,
+        "goals": raw.get("goals", []),
+        "traits": raw.get("traits", []),
+        "rules": migrated_rules,
+    }
+
+
 # ─── DB Load / Save ──────────────────────────────────────────────
 
 
@@ -545,8 +624,13 @@ async def load_config_from_db(
                 if version < 3:
                     logger.info(f"Migrating adversarial config v{version} → v3")
                     raw = _migrate_v2_to_v3(raw)
+                    version = 3
+                if version < 4:
+                    logger.info(f"Migrating adversarial config v{version} → v4")
+                    raw = _migrate_v3_to_v4(raw)
+                    version = 4
                 config = AdversarialConfig.model_validate(raw)
-                if version < 3:
+                if version < CURRENT_VERSION:
                     await save_config_to_db(config, tenant_id=tenant_id, user_id=user_id)
                 return config
     except Exception as e:

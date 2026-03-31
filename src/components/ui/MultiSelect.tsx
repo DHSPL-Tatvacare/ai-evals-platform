@@ -66,9 +66,13 @@ export function MultiSelect({
 
   const triggerLabel = useMemo(() => {
     if (values.length === 0) return null;
-    if (values.length === 1) return values[0];
-    return `${values.length} agents`;
-  }, [values]);
+    const labels = values
+      .map((value) => options.find((option) => option.value === value)?.label || value)
+      .filter(Boolean);
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) return labels.join(', ');
+    return `${labels.length} selected`;
+  }, [options, values]);
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>

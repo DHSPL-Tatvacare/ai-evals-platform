@@ -1,6 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { MessageSquare, Tag as TagIcon } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { MessageSquare } from 'lucide-react';
 import { useLLMSettingsStore, useGlobalSettingsStore, useKairaBotSettings, useAppSettingsStore } from '@/stores';
 import { Card, Tabs } from '@/components/ui';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
@@ -9,11 +8,10 @@ import { SettingsSaveBar } from '../../settings/components/SettingsSaveBar';
 import { ProviderConfigCard } from '../../settings/components/ProviderConfigCard';
 import { SchemasTab } from '../../settings/components/SchemasTab';
 import { PromptsTab } from '../../settings/components/PromptsTab';
-import { AdversarialCatalogTab } from './AdversarialCatalogTab';
+import { EvaluationContractsTab } from './AdversarialCatalogTab';
 import { getGlobalSettingsByCategory } from '../../settings/schemas/globalSettingsSchema';
 import { getKairaBotSettingsByCategory } from '../../settings/schemas/appSettingsSchema';
 import { useSettingsForm } from '../../settings/hooks/useSettingsForm';
-import { useToast } from '@/hooks';
 import type { LLMTimeoutSettings, LLMProvider } from '@/types';
 import type { BaseFormValues } from '../../settings/hooks/useSettingsForm';
 
@@ -32,17 +30,7 @@ interface KairaBotFormValues extends BaseFormValues {
   kairaChatUserId: string;
 }
 
-const defaultKairaBotPrefs = {
-  contextWindowSize: 4096,
-  maxResponseLength: 2048,
-  historyRetentionDays: 30,
-  streamResponses: true,
-};
-
 export function KairaBotSettingsPage() {
-  const toast = useToast();
-  const navigate = useNavigate();
-
   const llmApiKey = useLLMSettingsStore((s) => s.apiKey);
   const llmProvider = useLLMSettingsStore((s) => s.provider);
   const llmGeminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
@@ -77,7 +65,7 @@ export function KairaBotSettingsPage() {
   }, [updateKairaBotSettings]);
 
   const {
-    formValues, setFormValues, isDirty, isSaving, handleChange, handleSave, handleDiscard,
+    formValues, isDirty, isSaving, handleChange, handleSave, handleDiscard,
   } = useSettingsForm<KairaBotFormValues>({
     buildStoreValues: () => {
       const { kairaApiUrl, kairaAuthToken, kairaChatUserId, ...kairaBotPrefs } = kairaBotSettings;
@@ -139,40 +127,6 @@ export function KairaBotSettingsPage() {
       ),
     },
     {
-      id: 'chat',
-      label: 'Chat Configuration',
-      content: (
-        <Card>
-          <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
-            Configure chat behavior, context window, and response preferences for Kaira Bot evaluations.
-          </p>
-          <SettingsPanel
-            settings={getKairaBotSettingsByCategory('chat').map(s => ({ ...s, key: `kairaBot.${s.key}` }))}
-            values={formValues}
-            onChange={handleChange}
-          />
-          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
-            <button
-              onClick={() => {
-                setFormValues(prev => ({ ...prev, kairaBot: defaultKairaBotPrefs }));
-                toast.success('Chat configuration reset to defaults (save to apply)');
-              }}
-              className="text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline"
-            >
-              Reset to Defaults
-            </button>
-            <button
-              onClick={() => navigate('/kaira/settings/tags')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-[13px] text-[var(--text-brand)] hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              <TagIcon className="h-4 w-4" />
-              Manage Tags
-            </button>
-          </div>
-        </Card>
-      ),
-    },
-    {
       id: 'prompts',
       label: 'Prompts',
       content: (
@@ -198,8 +152,8 @@ export function KairaBotSettingsPage() {
     },
     {
       id: 'adversarial',
-      label: 'Adversarial Catalog',
-      content: <AdversarialCatalogTab />,
+      label: 'Evaluation Contracts',
+      content: <EvaluationContractsTab />,
     },
   ];
 

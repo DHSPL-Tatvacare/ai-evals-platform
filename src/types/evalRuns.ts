@@ -126,6 +126,7 @@ export interface Run {
   status: RunStatus;
   error_message: string | null;
   summary: Record<string, unknown>;
+  batch_metadata?: Record<string, unknown>;
   total_items: number;
   name: string | null;
   description: string | null;

@@ -1,8 +1,12 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import type { AdversarialEvalRow, AdversarialResult, ChatMessage } from '@/types';
-import { fetchRunAdversarial } from '@/services/api/evalRunsApi';
+import { BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui';
+import { PermissionGate } from '@/components/auth/PermissionGate';
+import type { AdversarialEvalRow, AdversarialResult, ChatMessage, Run } from '@/types';
+import { fetchRun, fetchRunAdversarial } from '@/services/api/evalRunsApi';
+import { adversarialTestCasesApi, buildSavedCasePayloadFromResult } from '@/services/api/adversarialTestCasesApi';
+import { notificationService } from '@/services/notifications';
 import { unwrapSerializedDates } from '@/utils/evalFormatters';
 import { humanize } from '@/utils/evalFormatters';
 import { Tabs } from '@/components/ui/Tabs';
@@ -13,6 +17,9 @@ import {
   RuleComplianceTab,
   AdversarialOverviewTab,
 } from '../components/threadReview';
+import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
+import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
+import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
 
 /** Normalize adversarial TranscriptTurns into ChatMessage[] so LinkedChatViewer works unmodified. */
 function transcriptToMessages(result: AdversarialResult): ChatMessage[] {
@@ -30,18 +37,30 @@ function transcriptToMessages(result: AdversarialResult): ChatMessage[] {
 export default function AdversarialDetailV2() {
   const { runId, evalId } = useParams<{ runId: string; evalId: string }>();
   const navigate = useNavigate();
+  const kairaSettings = useAppSettingsStore((s) => s.settings['kaira-bot']);
+  const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const [evalItem, setEvalItem] = useState<AdversarialEvalRow | null>(null);
+  const [run, setRun] = useState<Run | null>(null);
   const [siblingIds, setSiblingIds] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const [savingToLibrary, setSavingToLibrary] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const { submit: submitAdversarialRetry, isSubmitting: retryingCase } = useSubmitAndRedirect({
+    appId: 'kaira-bot',
+    label: 'Adversarial Case Retry',
+    successMessage: 'Adversarial case retry submitted. It will appear in the runs list shortly.',
+    fallbackRoute: routes.kaira.runs,
+    onClose: () => {},
+  });
 
   useEffect(() => {
     if (!runId) return;
-    fetchRunAdversarial(runId)
-      .then((r) => {
-        const match = r.evaluations.find((e) => String(e.id) === evalId);
-        setEvalItem(match ?? r.evaluations[0] ?? null);
-        setSiblingIds(r.evaluations.map((e) => String(e.id)));
+    Promise.all([fetchRun(runId), fetchRunAdversarial(runId)])
+      .then(([runResponse, evaluationsResponse]) => {
+        setRun(runResponse);
+        const match = evaluationsResponse.evaluations.find((e) => String(e.id) === evalId);
+        setEvalItem(match ?? evaluationsResponse.evaluations[0] ?? null);
+        setSiblingIds(evaluationsResponse.evaluations.map((e) => String(e.id)));
       })
       .catch((e: Error) => setError(e.message));
   }, [runId, evalId]);
@@ -83,6 +102,58 @@ export default function AdversarialDetailV2() {
   const verdict = evalItem?.verdict ?? null;
   const infraError = evalItem?.error ?? result?.error ?? null;
   const hasRules = (result?.rule_compliance?.length ?? 0) > 0;
+  const canRetryCase = Boolean(run && evalItem);
+
+  const handleRetryCase = useCallback(async () => {
+    if (!run || !evalItem) return;
+    if (!canSubmitAdversarialRun(kairaSettings)) {
+      notificationService.error(
+        'Configure the Kaira API URL and chat user ID before retrying adversarial cases.',
+        'Missing Kaira settings',
+      );
+      return;
+    }
+
+    await submitAdversarialRetry(
+      'evaluate-adversarial',
+      buildAdversarialRetryParams({
+        run,
+        kairaSettings,
+        timeouts,
+        retryEvalIds: [evalItem.id],
+        sourceRunId: run.run_id,
+        nameSuffix: ` Case ${evalItem.id} Retry`,
+      }),
+    );
+  }, [evalItem, kairaSettings, run, submitAdversarialRetry, timeouts]);
+
+  const handleSaveToLibrary = useCallback(async () => {
+    if (!result || !run) return;
+
+    setSavingToLibrary(true);
+    try {
+      const primaryGoal = result.test_case.goal_flow?.length
+        ? result.test_case.goal_flow.map(humanize).join(' → ')
+        : 'Adversarial Case';
+      await adversarialTestCasesApi.create(
+        buildSavedCasePayloadFromResult(result, {
+          name: `${primaryGoal} · ${result.test_case.difficulty}`,
+          description: `Saved from run ${run.run_id.slice(0, 8)} case ${evalItem?.id ?? ''}`.trim(),
+          sourceKind: 'generated',
+          createdFromRunId: run.run_id,
+          createdFromEvalId: evalItem?.id,
+        }),
+      );
+      notificationService.success('Test case saved to the adversarial library.');
+    } catch (e: unknown) {
+      notificationService.error(
+        e instanceof Error ? e.message : 'Failed to save adversarial case.',
+        'Save failed',
+      );
+    } finally {
+      setSavingToLibrary(false);
+    }
+  }, [evalItem?.id, result, run]);
 
   const tabs = useMemo(() => {
     if (!result) return [];
@@ -134,8 +205,7 @@ export default function AdversarialDetailV2() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
-      {/* Header — single row: breadcrumb+nav left, metrics right */}
-      <div className="shrink-0 pb-3 flex items-center justify-between gap-4 flex-wrap">
+      <div className="shrink-0 pb-3 space-y-3">
         <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
           <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>
           <span>/</span>
@@ -174,42 +244,67 @@ export default function AdversarialDetailV2() {
           )}
         </nav>
 
-        {/* Summary metrics container */}
-        <div
-          className="inline-flex flex-wrap items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm"
-        >
-          {verdict && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2">
-              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Verdict</span>
-              <span className="leading-none"><VerdictBadge verdict={verdict} category="adversarial" /></span>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div
+            className="inline-flex flex-wrap items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm"
+          >
+            {verdict && (
+              <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Verdict</span>
+                <span className="leading-none"><VerdictBadge verdict={verdict} category="adversarial" /></span>
+              </div>
+            )}
+            <div className={`flex flex-col items-center justify-center gap-0.5 px-4 py-2 ${verdict ? 'border-l border-[var(--border-subtle)]' : ''}`}>
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Difficulty</span>
+              <span className="leading-none"><VerdictBadge verdict={tc.difficulty} category="difficulty" /></span>
             </div>
-          )}
-          <div className={`flex flex-col items-center justify-center gap-0.5 px-4 py-2 ${verdict ? 'border-l border-[var(--border-subtle)]' : ''}`}>
-            <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Difficulty</span>
-            <span className="leading-none"><VerdictBadge verdict={tc.difficulty} category="difficulty" /></span>
-          </div>
-          <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Goal Flow</span>
-            <span className="font-medium text-[var(--text-primary)] leading-none">{(tc.goal_flow || []).map(humanize).join(' → ')}</span>
-          </div>
-          <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Turns</span>
-            <span className="font-medium text-[var(--text-primary)] leading-none">{turnCount}</span>
-          </div>
-          {result.transcript && (
             <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
-              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Goal</span>
-              <span className="font-semibold leading-none" style={{ color: result.transcript.goal_achieved ? 'var(--color-success)' : 'var(--color-error)' }}>
-                {result.transcript.goal_achieved ? '\u2713 Achieved' : '\u2717 Not Achieved'}
-              </span>
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Goal Flow</span>
+              <span className="font-medium text-[var(--text-primary)] leading-none">{(tc.goal_flow || []).map(humanize).join(' → ')}</span>
             </div>
-          )}
-          {(result.failure_modes?.length ?? 0) > 0 && (
             <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
-              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Failures</span>
-              <span className="font-semibold leading-none text-[var(--color-error)]">{result.failure_modes!.length}</span>
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Turns</span>
+              <span className="font-medium text-[var(--text-primary)] leading-none">{turnCount}</span>
             </div>
-          )}
+            {result.transcript && (
+              <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Goal</span>
+                <span className="font-semibold leading-none" style={{ color: result.transcript.goal_achieved ? 'var(--color-success)' : 'var(--color-error)' }}>
+                  {result.transcript.goal_achieved ? '\u2713 Achieved' : '\u2717 Not Achieved'}
+                </span>
+              </div>
+            )}
+            {(result.failure_modes?.length ?? 0) > 0 && (
+              <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Failures</span>
+                <span className="font-semibold leading-none text-[var(--color-error)]">{result.failure_modes!.length}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <PermissionGate action="settings:edit">
+              <Button
+                variant="secondary"
+                icon={BookmarkPlus}
+                onClick={() => { void handleSaveToLibrary(); }}
+                isLoading={savingToLibrary}
+              >
+                Save To Library
+              </Button>
+            </PermissionGate>
+            <PermissionGate action="eval:run">
+              <Button
+                variant="secondary"
+                icon={RotateCcw}
+                onClick={() => { void handleRetryCase(); }}
+                disabled={!canRetryCase}
+                isLoading={retryingCase}
+              >
+                Retry Case
+              </Button>
+            </PermissionGate>
+          </div>
         </div>
       </div>
 
@@ -266,4 +361,3 @@ export default function AdversarialDetailV2() {
     </div>
   );
 }
-

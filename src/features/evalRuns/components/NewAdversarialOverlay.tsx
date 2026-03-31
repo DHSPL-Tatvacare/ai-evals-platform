@@ -2,7 +2,11 @@ import { useState, useCallback, useMemo } from 'react';
 import { WizardOverlay, type WizardStep } from './WizardOverlay';
 import { RunInfoStep } from './RunInfoStep';
 import { KairaApiConfigStep } from './KairaApiConfigStep';
-import { TestConfigStep } from './TestConfigStep';
+import {
+  TestConfigStep,
+  type AdversarialCaseMode,
+  type AdversarialManualCaseInput,
+} from './TestConfigStep';
 import { LLMConfigStep, type LLMConfig } from './LLMConfigStep';
 import { ReviewStep, type ReviewSection, type ReviewSummary } from './ReviewStep';
 import { ParallelConfigSection } from './ParallelConfigSection';
@@ -48,6 +52,10 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   const [testCount, setTestCount] = useState(15);
   const [turnDelay, setTurnDelay] = useState(1.5);
   const [caseDelay, setCaseDelay] = useState(3.0);
+  const [caseMode, setCaseMode] = useState<AdversarialCaseMode>('generate');
+  const [selectedSavedCaseIds, setSelectedSavedCaseIds] = useState<string[]>([]);
+  const [includePinnedCases, setIncludePinnedCases] = useState(false);
+  const [manualCases, setManualCases] = useState<AdversarialManualCaseInput[]>([]);
   const [parallelCases, setParallelCases] = useState(false);
   const [caseWorkers, setCaseWorkers] = useState(3);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -65,15 +73,32 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
 
   // Validation per step
   const canGoNext = useMemo(() => {
+    const generatedConfigured = testCount >= 5 && testCount <= 50;
+    const savedConfigured =
+      selectedSavedCaseIds.length > 0 || includePinnedCases || manualCases.length > 0;
     switch (currentStep) {
       case 0: return runName.trim().length > 0;
       case 1: return kairaApiUrl.trim().length > 0;
-      case 2: return testCount >= 5 && testCount <= 50;
+      case 2:
+        if (caseMode === 'generate') return generatedConfigured;
+        if (caseMode === 'saved') return savedConfigured;
+        return generatedConfigured || savedConfigured;
       case 3: return Boolean(llmConfig.model) && !modelsLoading && hasProviderCredentials(llmConfig.provider as LLMProvider, useLLMSettingsStore.getState());
       case 4: return true;
       default: return false;
     }
-  }, [currentStep, runName, kairaApiUrl, testCount, llmConfig, modelsLoading]);
+  }, [
+    currentStep,
+    runName,
+    kairaApiUrl,
+    testCount,
+    llmConfig,
+    modelsLoading,
+    caseMode,
+    selectedSavedCaseIds.length,
+    includePinnedCases,
+    manualCases.length,
+  ]);
 
   const handleBack = useCallback(() => {
     setCurrentStep((s) => Math.max(0, s - 1));
@@ -85,17 +110,36 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
 
   // Build review summary (banner zone)
   const reviewSummary = useMemo((): ReviewSummary => {
+    const requestedCaseCount =
+      (caseMode !== 'saved' ? testCount : 0) +
+      selectedSavedCaseIds.length +
+      manualCases.length;
     return {
       name: runName,
       description: runDescription || undefined,
       badges: [
         { label: 'Model', value: llmConfig.model },
-        { label: 'Tests', value: String(testCount) },
+        {
+          label: 'Cases',
+          value: `${requestedCaseCount}${includePinnedCases ? '+' : ''}`,
+        },
         { label: 'Parallel', value: parallelCases ? `${caseWorkers} workers` : 'Off' },
         { label: 'Timeout', value: `${kairaTimeout}s` },
       ],
     };
-  }, [runName, runDescription, llmConfig.model, testCount, parallelCases, caseWorkers, kairaTimeout]);
+  }, [
+    runName,
+    runDescription,
+    llmConfig.model,
+    testCount,
+    parallelCases,
+    caseWorkers,
+    kairaTimeout,
+    caseMode,
+    selectedSavedCaseIds.length,
+    manualCases.length,
+    includePinnedCases,
+  ]);
 
   // Build review sections (details zone)
   const reviewSections = useMemo((): ReviewSection[] => {
@@ -112,9 +156,13 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       {
         label: 'Test Configuration',
         items: [
-          { key: 'Test Cases', value: String(testCount) },
-          { key: 'Goals', value: `${selectedGoals.length} selected` },
-          { key: 'Flow Mode', value: flowMode === 'single' ? 'Single Goal' : 'Multi-Goal' },
+          { key: 'Case Mode', value: caseMode === 'generate' ? 'Generate Fresh' : caseMode === 'saved' ? 'Saved Cases' : 'Hybrid' },
+          ...(caseMode !== 'saved' ? [{ key: 'Generated Cases', value: String(testCount) }] : []),
+          ...(caseMode !== 'saved' ? [{ key: 'Goals', value: `${selectedGoals.length} selected` }] : []),
+          ...(caseMode !== 'saved' ? [{ key: 'Flow Mode', value: flowMode === 'single' ? 'Single Goal' : 'Multi-Goal' }] : []),
+          ...(caseMode !== 'generate' ? [{ key: 'Saved Cases', value: `${selectedSavedCaseIds.length} selected` }] : []),
+          ...(caseMode !== 'generate' && includePinnedCases ? [{ key: 'Pinned Cases', value: 'Included automatically' }] : []),
+          ...(manualCases.length > 0 ? [{ key: 'Run-Only Cases', value: String(manualCases.length) }] : []),
           { key: 'Turn Delay', value: `${turnDelay.toFixed(1)}s` },
           { key: 'Case Delay', value: `${caseDelay.toFixed(1)}s` },
           ...(extraInstructions.trim() ? [{ key: 'Extra Instructions', value: extraInstructions.trim().slice(0, 80) + (extraInstructions.trim().length > 80 ? '...' : '') }] : []),
@@ -130,7 +178,25 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         ],
       },
     ];
-  }, [userId, kairaApiUrl, kairaAuthToken, kairaTimeout, testCount, turnDelay, caseDelay, llmConfig, parallelCases, caseWorkers, selectedGoals, flowMode, extraInstructions]);
+  }, [
+    userId,
+    kairaApiUrl,
+    kairaAuthToken,
+    kairaTimeout,
+    testCount,
+    turnDelay,
+    caseDelay,
+    llmConfig,
+    parallelCases,
+    caseWorkers,
+    selectedGoals,
+    flowMode,
+    extraInstructions,
+    caseMode,
+    selectedSavedCaseIds.length,
+    includePinnedCases,
+    manualCases.length,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     const { timeouts } = useGlobalSettingsStore.getState();
@@ -142,7 +208,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       kaira_api_url: kairaApiUrl.trim(),
       kaira_auth_token: kairaAuthToken || null,
       kaira_timeout: kairaTimeout,
-      test_count: testCount,
+      test_count: caseMode === 'saved' ? 0 : testCount,
       turn_delay: turnDelay,
       case_delay: caseDelay,
       llm_provider: llmConfig.provider,
@@ -151,9 +217,21 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       thinking: llmConfig.thinking,
       parallel_cases: parallelCases || undefined,
       case_workers: parallelCases ? caseWorkers : undefined,
-      selected_goals: selectedGoals.length > 0 ? selectedGoals : undefined,
-      flow_mode: flowMode,
-      extra_instructions: extraInstructions.trim() || undefined,
+      selected_goals: caseMode !== 'saved' && selectedGoals.length > 0 ? selectedGoals : undefined,
+      flow_mode: caseMode !== 'saved' ? flowMode : undefined,
+      extra_instructions: caseMode !== 'saved' ? extraInstructions.trim() || undefined : undefined,
+      case_mode: caseMode,
+      saved_case_ids: caseMode !== 'generate' && selectedSavedCaseIds.length > 0 ? selectedSavedCaseIds : undefined,
+      include_pinned_cases: caseMode !== 'generate' ? includePinnedCases || undefined : undefined,
+      manual_cases: manualCases.length > 0 ? manualCases.map((testCase) => ({
+        name: testCase.name?.trim() || undefined,
+        description: testCase.description?.trim() || undefined,
+        synthetic_input: testCase.syntheticInput,
+        difficulty: testCase.difficulty,
+        goal_flow: testCase.goalFlow,
+        active_traits: testCase.activeTraits,
+        expected_challenges: testCase.expectedChallenges,
+      })) : undefined,
       timeouts: {
         text_only: timeouts.textOnly,
         with_schema: timeouts.withSchema,
@@ -161,7 +239,28 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         with_audio_and_schema: timeouts.withAudioAndSchema,
       },
     });
-  }, [runName, runDescription, userId, kairaApiUrl, kairaAuthToken, kairaTimeout, testCount, turnDelay, caseDelay, llmConfig, parallelCases, caseWorkers, selectedGoals, flowMode, extraInstructions, submitJob]);
+  }, [
+    runName,
+    runDescription,
+    userId,
+    kairaApiUrl,
+    kairaAuthToken,
+    kairaTimeout,
+    testCount,
+    turnDelay,
+    caseDelay,
+    llmConfig,
+    parallelCases,
+    caseWorkers,
+    selectedGoals,
+    flowMode,
+    extraInstructions,
+    submitJob,
+    caseMode,
+    selectedSavedCaseIds,
+    includePinnedCases,
+    manualCases,
+  ]);
 
 
   // Step content
@@ -192,18 +291,26 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       case 2:
         return (
           <TestConfigStep
+            caseMode={caseMode}
             testCount={testCount}
             turnDelay={turnDelay}
             caseDelay={caseDelay}
             selectedGoals={selectedGoals}
             flowMode={flowMode}
             extraInstructions={extraInstructions}
+            selectedSavedCaseIds={selectedSavedCaseIds}
+            includePinnedCases={includePinnedCases}
+            manualCases={manualCases}
+            onCaseModeChange={setCaseMode}
             onTestCountChange={setTestCount}
             onTurnDelayChange={setTurnDelay}
             onCaseDelayChange={setCaseDelay}
             onGoalsChange={setSelectedGoals}
             onFlowModeChange={setFlowMode}
             onExtraInstructionsChange={setExtraInstructions}
+            onSavedCasesChange={setSelectedSavedCaseIds}
+            onIncludePinnedCasesChange={setIncludePinnedCases}
+            onManualCasesChange={setManualCases}
           />
         );
       case 3:
@@ -225,7 +332,30 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       default:
         return null;
     }
-  }, [currentStep, runName, runDescription, userId, kairaApiUrl, kairaAuthToken, kairaTimeout, testCount, turnDelay, caseDelay, llmConfig, parallelCases, caseWorkers, selectedGoals, flowMode, extraInstructions, reviewSummary, reviewSections]);
+  }, [
+    currentStep,
+    runName,
+    runDescription,
+    userId,
+    kairaApiUrl,
+    kairaAuthToken,
+    kairaTimeout,
+    testCount,
+    turnDelay,
+    caseDelay,
+    llmConfig,
+    parallelCases,
+    caseWorkers,
+    selectedGoals,
+    flowMode,
+    extraInstructions,
+    reviewSummary,
+    reviewSections,
+    caseMode,
+    selectedSavedCaseIds,
+    includePinnedCases,
+    manualCases,
+  ]);
 
   return (
     <WizardOverlay

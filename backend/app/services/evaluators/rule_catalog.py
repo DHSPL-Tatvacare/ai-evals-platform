@@ -7,6 +7,16 @@ from dataclasses import dataclass
 from typing import List
 
 
+EVALUATION_SCOPE_ADVERSARIAL = "adversarial"
+EVALUATION_SCOPE_CORRECTNESS = "correctness"
+EVALUATION_SCOPE_EFFICIENCY = "efficiency"
+ALL_EVALUATION_SCOPES = (
+    EVALUATION_SCOPE_ADVERSARIAL,
+    EVALUATION_SCOPE_CORRECTNESS,
+    EVALUATION_SCOPE_EFFICIENCY,
+)
+
+
 def normalize_rule_id(raw: str) -> str:
     """Strip number prefix and markdown bold from LLM-returned rule_id.
 
@@ -25,6 +35,7 @@ class PromptRule:
     section: str
     rule_text: str
     goal_ids: List[str]
+    evaluation_scopes: List[str] | None = None
 
 
 # Default rules — used by get_default_config() in adversarial_config.py.
@@ -192,11 +203,27 @@ def get_rules_for_goals(goal_ids: List[str], rules: List[PromptRule] | None = No
     return [r for r in source if goal_set & set(r.goal_ids)]
 
 
-def get_rules_for_correctness(rules: List[PromptRule] | None = None) -> List[PromptRule]:
+def default_evaluation_scopes_for_rule(rule_id: str) -> List[str]:
+    scopes = [EVALUATION_SCOPE_ADVERSARIAL]
+    if rule_id in _CORRECTNESS_RULE_IDS:
+        scopes.append(EVALUATION_SCOPE_CORRECTNESS)
+    if rule_id in _EFFICIENCY_RULE_IDS:
+        scopes.append(EVALUATION_SCOPE_EFFICIENCY)
+    return scopes
+
+
+def get_rules_for_scope(scope: str, rules: List[PromptRule] | None = None) -> List[PromptRule]:
     source = rules if rules is not None else _DEFAULT_RULES
-    return [r for r in source if r.rule_id in _CORRECTNESS_RULE_IDS]
+    return [
+        rule
+        for rule in source
+        if scope in (rule.evaluation_scopes or default_evaluation_scopes_for_rule(rule.rule_id))
+    ]
+
+
+def get_rules_for_correctness(rules: List[PromptRule] | None = None) -> List[PromptRule]:
+    return get_rules_for_scope(EVALUATION_SCOPE_CORRECTNESS, rules)
 
 
 def get_rules_for_efficiency(rules: List[PromptRule] | None = None) -> List[PromptRule]:
-    source = rules if rules is not None else _DEFAULT_RULES
-    return [r for r in source if r.rule_id in _EFFICIENCY_RULE_IDS]
+    return get_rules_for_scope(EVALUATION_SCOPE_EFFICIENCY, rules)

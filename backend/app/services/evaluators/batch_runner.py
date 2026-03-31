@@ -44,6 +44,7 @@ from app.services.evaluators.intent_evaluator import IntentEvaluator
 from app.services.evaluators.correctness_evaluator import CorrectnessEvaluator
 from app.services.evaluators.efficiency_evaluator import EfficiencyEvaluator
 from app.services.evaluators.models import RunMetadata, serialize
+from app.services.evaluators.adversarial_config import load_config_from_db
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
@@ -267,6 +268,22 @@ async def run_batch_evaluation(
         llm.set_timeouts(timeouts)
     llm.set_context(str(run_id))
 
+    batch_correctness_rules = None
+    batch_efficiency_rules = None
+    if app_id == "kaira-bot" and (evaluate_correctness or evaluate_efficiency):
+        try:
+            contracts = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
+            if evaluate_correctness:
+                batch_correctness_rules = contracts.prompt_rules_for_scope("correctness")
+            if evaluate_efficiency:
+                batch_efficiency_rules = contracts.prompt_rules_for_scope("efficiency")
+        except Exception as config_error:
+            logger.warning(
+                "Failed to load contract-backed batch rules for run %s: %s",
+                run_id,
+                safe_error_message(config_error),
+            )
+
     # Track which evaluators are disabled so UI can show "Skipped"
     skipped_evaluators = [
         name
@@ -334,10 +351,14 @@ async def run_batch_evaluation(
                 else None
             )
             w_correctness_eval = (
-                CorrectnessEvaluator(worker_llm) if evaluate_correctness else None
+                CorrectnessEvaluator(worker_llm, rules=batch_correctness_rules)
+                if evaluate_correctness
+                else None
             )
             w_efficiency_eval = (
-                EfficiencyEvaluator(worker_llm) if evaluate_efficiency else None
+                EfficiencyEvaluator(worker_llm, rules=batch_efficiency_rules)
+                if evaluate_efficiency
+                else None
             )
 
             try:

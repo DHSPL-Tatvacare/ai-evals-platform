@@ -205,13 +205,17 @@ EFFICIENCY_JSON_SCHEMA = {
 class EfficiencyEvaluator:
     """Evaluates conversation efficiency and recovery (async)."""
 
-    def __init__(self, llm_provider: BaseLLMProvider):
+    def __init__(
+        self,
+        llm_provider: BaseLLMProvider,
+        rules: Optional[List[PromptRule]] = None,
+    ):
         self.llm = llm_provider
+        self.rules = rules or get_rules_for_efficiency()
 
     async def evaluate_thread(self, thread: ConversationThread, thinking: str = "low", truncate_responses: bool = False) -> EfficiencyEvaluation:
         transcript = self._format_transcript(thread, truncate_responses=truncate_responses)
-        rules = get_rules_for_efficiency()
-        rules_block = self._format_rules(rules)
+        rules_block = self._format_rules(self.rules)
 
         eval_prompt = (
             f"CONVERSATION THREAD: {thread.message_count} turns, {thread.duration_seconds:.0f} seconds\n\n"
@@ -227,7 +231,7 @@ class EfficiencyEvaluator:
             json_schema=EFFICIENCY_JSON_SCHEMA,
             thinking=thinking,
         )
-        return self._parse_result(thread, result, rules)
+        return self._parse_result(thread, result, self.rules)
 
     @staticmethod
     def _format_transcript(thread: ConversationThread, truncate_responses: bool = False) -> str:

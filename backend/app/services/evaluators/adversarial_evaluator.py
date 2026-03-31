@@ -395,6 +395,17 @@ class AdversarialEvaluator:
             )]
         return goals
 
+    def get_trait_hints_for_test_case(self, test_case: AdversarialTestCase) -> dict[str, str]:
+        """Resolve trait behavior hints from config for the active traits on a test case."""
+        hints: dict[str, str] = {}
+        config_traits = {trait.id: trait for trait in self.config.traits}
+        for trait_id in test_case.active_traits:
+            trait = config_traits.get(trait_id)
+            if not trait:
+                continue
+            hints[trait_id] = trait.behavior_hint or trait.description
+        return hints
+
     async def evaluate_transcript(
         self,
         test_case: AdversarialTestCase,

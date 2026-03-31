@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { usePoll } from "@/hooks";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText } from "lucide-react";
-import { EmptyState, ConfirmDialog } from "@/components/ui";
+import { EmptyState, ConfirmDialog, Button } from "@/components/ui";
+import { PermissionGate } from "@/components/auth/PermissionGate";
 import { RunHeaderActions } from "../components/RunHeaderActions";
 import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
 import {
@@ -24,13 +25,17 @@ import {
   RunProgressBar,
 } from "../components";
 import AdversarialTable from "../components/AdversarialTable";
+import { AdversarialComparisonPanel } from "../components/AdversarialComparisonPanel";
 import { useElapsedTime } from "../hooks";
 import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from "@/utils/evalColors";
 import { getLabelDefinition } from "@/config/labelDefinitions";
 import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
-import { formatTimestamp, formatDuration, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
+import { formatTimestamp, formatDuration, humanize, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
 import { AppReportTab } from '@/features/analytics/AppReportTab';
+import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
+import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
+import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
 
 function SuccessBanner({ durationSeconds }: { durationSeconds: number }) {
   return (
@@ -97,6 +102,8 @@ function AdversarialErrorBanner({ errors, total }: { errors: number; total: numb
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
+  const kairaSettings = useAppSettingsStore((s) => s.settings['kaira-bot']);
+  const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const [run, setRun] = useState<Run | null>(null);
   const [threadEvals, setThreadEvals] = useState<ThreadEvalRow[]>([]);
   const [adversarialEvals, setAdversarialEvals] = useState<AdversarialEvalRow[]>([]);
@@ -112,6 +119,13 @@ export default function RunDetail() {
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const lastProgressRef = useRef(-1);
+  const { submit: submitAdversarialRetry, isSubmitting: retryingFailedCases } = useSubmitAndRedirect({
+    appId: 'kaira-bot',
+    label: 'Adversarial Retry',
+    successMessage: 'Adversarial retry submitted. It will appear in the runs list shortly.',
+    fallbackRoute: routes.kaira.runs,
+    onClose: () => {},
+  });
 
   const isRunActive = run != null && isActiveStatus(run.status);
   const elapsed = useElapsedTime(activeJob?.startedAt ?? run?.timestamp ?? null, isRunActive);
@@ -120,6 +134,13 @@ export default function RunDetail() {
   const summaryCompleted = (run?.summary?.completed as number) ?? 0;
   const summaryTotal = (run?.summary?.total_threads as number) ?? 0;
   const summarySkipped = (run?.summary?.skipped_previously_processed as number) ?? 0;
+  const retryableAdversarialEvalIds = useMemo(
+    () =>
+      adversarialEvals
+        .filter((evaluation) => evaluation.verdict == null && Boolean(evaluation.error))
+        .map((evaluation) => evaluation.id),
+    [adversarialEvals],
+  );
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!runId || !run) return;
@@ -147,6 +168,39 @@ export default function RunDetail() {
       setCancelling(false);
     }
   }, [activeJob]);
+
+  const handleRetryFailedCases = useCallback(async () => {
+    if (!run) return;
+    if (!canSubmitAdversarialRun(kairaSettings)) {
+      notificationService.error(
+        'Configure the Kaira API URL and chat user ID before retrying adversarial cases.',
+        'Missing Kaira settings',
+      );
+      return;
+    }
+    if (retryableAdversarialEvalIds.length === 0) {
+      notificationService.info('There are no failed adversarial cases to retry in this run.');
+      return;
+    }
+
+    await submitAdversarialRetry(
+      'evaluate-adversarial',
+      buildAdversarialRetryParams({
+        run,
+        kairaSettings,
+        timeouts,
+        retryEvalIds: retryableAdversarialEvalIds,
+        sourceRunId: run.run_id,
+        nameSuffix: ' Failed Case Retry',
+      }),
+    );
+  }, [
+    kairaSettings,
+    retryableAdversarialEvalIds,
+    run,
+    submitAdversarialRetry,
+    timeouts,
+  ]);
 
   useEffect(() => {
     if (!runId) return;
@@ -605,7 +659,17 @@ export default function RunDetail() {
           </>
         )}
 
-        {activeTab === 'results' && adversarialEvals.length > 0 && <AdversarialSection evals={adversarialEvals} adversarialDist={adversarialDist} runId={run.run_id} isRunActive={isRunActive} />}
+        {activeTab === 'results' && adversarialEvals.length > 0 && (
+          <AdversarialSection
+            evals={adversarialEvals}
+            adversarialDist={adversarialDist}
+            run={run}
+            isRunActive={isRunActive}
+            onRetryFailedCases={handleRetryFailedCases}
+            retryingFailedCases={retryingFailedCases}
+            retryableCaseCount={retryableAdversarialEvalIds.length}
+          />
+        )}
 
         {activeTab === 'results' && threadEvals.length === 0 && adversarialEvals.length === 0 && (
           isRunActive ? (
@@ -636,15 +700,47 @@ export default function RunDetail() {
   );
 }
 
-function AdversarialSection({ evals, adversarialDist, runId, isRunActive }: {
+function describeAdversarialCaseSources(batchMetadata?: Record<string, unknown>): string[] {
+  const sourceSummary = batchMetadata?.case_source_summary as Record<string, unknown> | undefined;
+  if (!sourceSummary) return [];
+
+  const items: string[] = [];
+  if (typeof sourceSummary.case_mode === 'string') {
+    items.push(`Mode: ${humanize(sourceSummary.case_mode)}`);
+  }
+  if (typeof sourceSummary.generated_count === 'number' && sourceSummary.generated_count > 0) {
+    items.push(`${sourceSummary.generated_count} generated`);
+  }
+  if (typeof sourceSummary.saved_count === 'number' && sourceSummary.saved_count > 0) {
+    items.push(`${sourceSummary.saved_count} saved`);
+  }
+  if (typeof sourceSummary.manual_count === 'number' && sourceSummary.manual_count > 0) {
+    items.push(`${sourceSummary.manual_count} run-only`);
+  }
+  if (typeof sourceSummary.retry_count === 'number' && sourceSummary.retry_count > 0) {
+    items.push(`${sourceSummary.retry_count} retried`);
+  }
+  if (typeof sourceSummary.pinned_count === 'number' && sourceSummary.pinned_count > 0) {
+    items.push(`${sourceSummary.pinned_count} pinned`);
+  }
+  return items;
+}
+
+function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryFailedCases, retryingFailedCases, retryableCaseCount }: {
   evals: AdversarialEvalRow[];
   adversarialDist: Record<string, number>;
-  runId: string;
+  run: Run;
   isRunActive: boolean;
+  onRetryFailedCases: () => Promise<void>;
+  retryingFailedCases: boolean;
+  retryableCaseCount: number;
 }) {
   const failedCount = evals.filter((e) => e.verdict == null).length;
   const successfulEvals = evals.filter((e) => e.verdict != null);
   const successfulCount = successfulEvals.length;
+  const sourceSummaryItems = describeAdversarialCaseSources(run.batch_metadata);
+  const canCompare = !isRunActive && successfulCount > 0;
+  const canRetryFailures = !isRunActive && retryableCaseCount > 0;
 
   return (
     <>
@@ -660,6 +756,60 @@ function AdversarialSection({ evals, adversarialDist, runId, isRunActive }: {
         )}
       </div>
 
+      {(sourceSummaryItems.length > 0 || !isRunActive) && (
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+            <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+              Case Sources
+            </p>
+            {sourceSummaryItems.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {sourceSummaryItems.map((item) => (
+                  <span
+                    key={item}
+                    className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-[var(--text-muted)]">
+                This run predates case-source tracking, so only the executed results are available here.
+              </p>
+            )}
+          </div>
+
+          {!isRunActive && (
+            <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+                  Recovery
+                </p>
+                <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                  Retry infrastructure failures without re-running the full batch.
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                  {retryableCaseCount > 0
+                    ? `${retryableCaseCount} case${retryableCaseCount === 1 ? '' : 's'} can be retried from this run snapshot.`
+                    : 'No retryable infrastructure failures were found in this run.'}
+                </p>
+              </div>
+              <PermissionGate action="eval:run">
+                <Button
+                  variant="secondary"
+                  onClick={() => { void onRetryFailedCases(); }}
+                  disabled={!canRetryFailures}
+                  isLoading={retryingFailedCases}
+                >
+                  Retry Failed Cases
+                </Button>
+              </PermissionGate>
+            </div>
+          )}
+        </div>
+      )}
+
       {Object.keys(adversarialDist).length > 0 && (
         <div>
           <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Verdicts</h3>
@@ -667,7 +817,16 @@ function AdversarialSection({ evals, adversarialDist, runId, isRunActive }: {
         </div>
       )}
 
-      <AdversarialTable evaluations={evals} runId={runId} />
+      {canCompare && (
+        <AdversarialComparisonPanel
+          currentRunId={run.run_id}
+          currentRunName={run.name || 'Current adversarial run'}
+          currentRunCreatedAt={run.timestamp}
+          currentEvaluations={evals}
+        />
+      )}
+
+      <AdversarialTable evaluations={evals} runId={run.run_id} />
     </>
   );
 }
