@@ -2,13 +2,18 @@
 
 Ported from kaira-evals/src/evaluators/correctness_evaluator.py.
 """
+import logging
 from typing import List, Optional
 
 from app.services.evaluators.llm_base import BaseLLMProvider
 from app.services.evaluators.models import (
+    RULE_OUTCOME_STATUSES,
     ChatMessage, ConversationThread, CorrectnessEvaluation, RuleCompliance,
+    build_rule_compliance,
 )
 from app.services.evaluators.rule_catalog import get_rules_for_correctness, PromptRule, normalize_rule_id
+
+logger = logging.getLogger(__name__)
 
 CORRECTNESS_JUDGE_PROMPT = """You are a nutritional-accuracy auditor for a health-assistant chatbot that logs meals.
 
@@ -52,6 +57,16 @@ Apply exactly one verdict. Do not interpolate between levels.
 RULE COMPLIANCE
 
 Evaluate whether the bot response follows each production prompt rule provided in the evaluation prompt. Include one rule_compliance entry per rule. Do not omit any rule. Do not invent rules not listed.
+For EACH rule_compliance entry, return:
+- rule_id: the exact rule_id from the prompt
+- status: one of FOLLOWED, VIOLATED, NOT_APPLICABLE, NOT_EVALUATED
+- evidence: one sentence that matches the chosen status
+
+Status meanings:
+- FOLLOWED: the response demonstrably followed the rule
+- VIOLATED: the response demonstrably violated the rule
+- NOT_APPLICABLE: the rule did not apply to this message
+- NOT_EVALUATED: the message did not provide enough evidence to conclude pass/fail
 
 OUTPUT FORMAT
 
@@ -112,10 +127,14 @@ CORRECTNESS_JSON_SCHEMA = {
                 "description": "Compliance check for a single production rule.",
                 "properties": {
                     "rule_id": {"type": "string", "description": "The exact rule_id as provided in the rules list."},
-                    "followed": {"type": "boolean", "description": "True if the bot followed this rule. False if it violated the rule."},
+                    "status": {
+                        "type": "string",
+                        "enum": list(RULE_OUTCOME_STATUSES),
+                        "description": "Canonical rule outcome status. FOLLOWED means the bot followed the rule, VIOLATED means it broke the rule, NOT_APPLICABLE means the rule did not apply, and NOT_EVALUATED means there was not enough evidence to conclude.",
+                    },
                     "evidence": {"type": "string", "description": "One sentence citing specific content as evidence."},
                 },
-                "required": ["rule_id", "followed", "evidence"],
+                "required": ["rule_id", "status", "evidence"],
             },
         },
     },
@@ -236,22 +255,32 @@ class CorrectnessEvaluator:
 
     @staticmethod
     def _parse_rule_compliance(raw_compliance: list, rules: List[PromptRule]) -> List[RuleCompliance]:
-        section_map = {r.rule_id: r.section for r in rules}
+        rule_map = {normalize_rule_id(r.rule_id): r for r in rules}
         compliance = []
         for item in raw_compliance:
             if not isinstance(item, dict):
                 continue
             rid = normalize_rule_id(item.get("rule_id", ""))
-            compliance.append(RuleCompliance(
-                rule_id=rid, section=section_map.get(rid, ""),
-                followed=bool(item.get("followed", True)), evidence=item.get("evidence", ""),
+            rule = rule_map.get(rid)
+            if rule is None:
+                logger.warning("Dropping unknown correctness rule outcome: %s", rid or "<empty>")
+                continue
+            compliance.append(build_rule_compliance(
+                rule_id=rid,
+                section=rule.section,
+                status=item.get("status"),
+                followed=item.get("followed"),
+                evidence=item.get("evidence", ""),
             ))
         returned_ids = {c.rule_id for c in compliance}
         for r in rules:
             if r.rule_id not in returned_ids:
-                compliance.append(RuleCompliance(
-                    rule_id=r.rule_id, section=r.section,
-                    followed=None, evidence="Not evaluated by judge",
+                compliance.append(build_rule_compliance(
+                    rule_id=r.rule_id,
+                    section=r.section,
+                    status="NOT_EVALUATED",
+                    followed=None,
+                    evidence="Not evaluated by judge",
                 ))
         return compliance
 

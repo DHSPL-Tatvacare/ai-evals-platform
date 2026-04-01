@@ -1,4 +1,4 @@
-"""Production prompt rule catalog for adversarial evaluation.
+"""Production prompt rule catalog shared by adversarial and batch evaluators.
 
 Ported from kaira-evals/src/data/rule_catalog.py.
 """
@@ -39,7 +39,6 @@ class PromptRule:
 
 
 # Default rules — used by get_default_config() in adversarial_config.py.
-# All 13 current rules apply to meal_logged only.
 _DEFAULT_RULES: List[PromptRule] = [
     PromptRule(
         rule_id="ask_time_if_missing",
@@ -50,6 +49,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "It must never assume a time."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="reject_future_meal",
@@ -60,6 +60,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "summary or log the meal. It must ask for a valid past/present time."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="ask_quantity_if_ambiguous",
@@ -70,6 +71,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "It must never guess or assume a default quantity."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="exact_calorie_values",
@@ -80,6 +82,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "The exact values listed must appear in the meal summary."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_CORRECTNESS],
     ),
     PromptRule(
         rule_id="ignore_prev_logged_meal",
@@ -90,6 +93,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "history. Each meal is isolated."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="apply_user_corrections",
@@ -101,6 +105,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "a user correction."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="allow_edit_after_log",
@@ -111,6 +116,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "requests it. It should regenerate an updated summary."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="no_assumption_without_context",
@@ -121,6 +127,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "they are referring to. It must NOT assume or guess a food item."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
     ),
     PromptRule(
         rule_id="composite_dish_single_item",
@@ -132,6 +139,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "separate food items. It should only ask for the main dish quantity."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_CORRECTNESS],
     ),
     PromptRule(
         rule_id="single_item_one_table",
@@ -142,6 +150,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "or duplicate table."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_CORRECTNESS],
     ),
     PromptRule(
         rule_id="multi_food_multi_tables",
@@ -152,6 +161,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "nutrition tables for each food."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_CORRECTNESS],
     ),
     PromptRule(
         rule_id="require_xml_chips",
@@ -162,6 +172,7 @@ _DEFAULT_RULES: List[PromptRule] = [
             "buttons are forbidden."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_CORRECTNESS],
     ),
     PromptRule(
         rule_id="separate_multiple_meals",
@@ -172,29 +183,105 @@ _DEFAULT_RULES: List[PromptRule] = [
             "each meal separately. It must NOT merge them into one entry."
         ),
         goal_ids=["meal_logged"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL, EVALUATION_SCOPE_EFFICIENCY],
+    ),
+    PromptRule(
+        rule_id="answer_relevant_to_question",
+        section="Food QnA Instructions",
+        rule_text=(
+            "When the user asks a food or nutrition question, the system MUST provide "
+            "an answer that is directly relevant to that question. It must not pivot "
+            "into unrelated meal-logging guidance."
+        ),
+        goal_ids=["question_answered"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="answer_substantive_not_deflective",
+        section="Food QnA Instructions",
+        rule_text=(
+            "The system MUST provide a substantive answer to the user's question. "
+            "It must not deflect with vague capability statements or ask the user to "
+            "repeat the same question without progress."
+        ),
+        goal_ids=["question_answered"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="no_capability_loop",
+        section="Food QnA Instructions",
+        rule_text=(
+            "The system MUST NOT loop on generic capability statements such as "
+            "'I can help with meal logging' when the user is clearly asking a question."
+        ),
+        goal_ids=["question_answered"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="acknowledge_user_question",
+        section="Food QnA Instructions",
+        rule_text=(
+            "The system MUST acknowledge the substance of the user's question before "
+            "answering or clarifying. It must show it understood what was asked."
+        ),
+        goal_ids=["question_answered"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="no_user_visible_internal_error",
+        section="Food QnA Instructions",
+        rule_text=(
+            "The system MUST NOT expose internal tool, routing, or exception details "
+            "to the user while answering a question."
+        ),
+        goal_ids=["question_answered"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="no_hallucinated_system_state",
+        section="Cross-Goal Conversation State",
+        rule_text=(
+            "The system MUST NOT hallucinate internal system state, nonexistent actions, "
+            "or made-up backend outcomes during the conversation."
+        ),
+        goal_ids=["meal_logged", "question_answered", "cgm_insight"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="no_stale_context_replay",
+        section="Cross-Goal Conversation State",
+        rule_text=(
+            "The system MUST NOT replay stale context from an earlier goal after the "
+            "user has transitioned to a new goal."
+        ),
+        goal_ids=["meal_logged", "question_answered", "cgm_insight"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="no_internal_error_leak",
+        section="Cross-Goal Conversation State",
+        rule_text=(
+            "The system MUST NOT leak internal errors, stack traces, agent names, or "
+            "debug information to the user in any goal flow."
+        ),
+        goal_ids=["meal_logged", "question_answered", "cgm_insight"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
+    ),
+    PromptRule(
+        rule_id="maintain_conversational_state_across_goal_transitions",
+        section="Cross-Goal Conversation State",
+        rule_text=(
+            "Across goal transitions, the system MUST maintain coherent conversational "
+            "state and respond to the user's new goal instead of replaying the prior one."
+        ),
+        goal_ids=["meal_logged", "question_answered", "cgm_insight"],
+        evaluation_scopes=[EVALUATION_SCOPE_ADVERSARIAL],
     ),
 ]
 
 
 # Backward compat alias
 RULES = _DEFAULT_RULES
-
-# ─── Correctness rules ──────────────────────────────────────────
-_CORRECTNESS_RULE_IDS = {
-    "exact_calorie_values", "single_item_one_table",
-    "multi_food_multi_tables", "require_xml_chips",
-    "composite_dish_single_item",
-}
-
-# ─── Efficiency rules ───────────────────────────────────────────
-_EFFICIENCY_RULE_IDS = {
-    "ask_time_if_missing", "reject_future_meal",
-    "ask_quantity_if_ambiguous",
-    "apply_user_corrections", "ignore_prev_logged_meal",
-    "no_assumption_without_context", "allow_edit_after_log",
-    "separate_multiple_meals",
-}
-
 
 def get_rules_for_goals(goal_ids: List[str], rules: List[PromptRule] | None = None) -> List[PromptRule]:
     """Return rules whose goal_ids overlap with the given goal IDs (union)."""
@@ -204,12 +291,10 @@ def get_rules_for_goals(goal_ids: List[str], rules: List[PromptRule] | None = No
 
 
 def default_evaluation_scopes_for_rule(rule_id: str) -> List[str]:
-    scopes = [EVALUATION_SCOPE_ADVERSARIAL]
-    if rule_id in _CORRECTNESS_RULE_IDS:
-        scopes.append(EVALUATION_SCOPE_CORRECTNESS)
-    if rule_id in _EFFICIENCY_RULE_IDS:
-        scopes.append(EVALUATION_SCOPE_EFFICIENCY)
-    return scopes
+    for rule in _DEFAULT_RULES:
+        if rule.rule_id == rule_id and rule.evaluation_scopes:
+            return list(rule.evaluation_scopes)
+    return [EVALUATION_SCOPE_ADVERSARIAL]
 
 
 def get_rules_for_scope(scope: str, rules: List[PromptRule] | None = None) -> List[PromptRule]:

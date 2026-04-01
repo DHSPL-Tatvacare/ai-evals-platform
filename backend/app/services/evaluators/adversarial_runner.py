@@ -26,6 +26,7 @@ from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
 )
 from app.services.evaluators.adversarial_evaluator import AdversarialEvaluator
+from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
 from app.services.evaluators.adversarial_config import (
     load_config_from_db, get_default_config,
 )
@@ -426,26 +427,39 @@ async def run_adversarial_evaluation(
                 )
 
                 evaluation = await worker_evaluator.evaluate_transcript(tc, transcript, thinking=thinking)
+                result_data = serialize(evaluation)
+                result_data["canonical_case"] = build_canonical_adversarial_case(
+                    result_data,
+                    row_verdict=evaluation.verdict,
+                    row_goal_achieved=evaluation.goal_achieved,
+                    row_goal_flow=tc.goal_flow,
+                    row_active_traits=tc.active_traits,
+                    row_total_turns=evaluation.transcript.total_turns,
+                    contract_snapshot=config_snapshot,
+                )
+                canonical_case = result_data["canonical_case"]
 
                 async with async_session() as db:
                     db.add(DBAdversarialEval(
                         run_id=run_id,
                         difficulty=tc.difficulty,
-                        verdict=evaluation.verdict,
-                        goal_achieved=evaluation.goal_achieved,
+                        verdict=canonical_case["judge"]["verdict"],
+                        goal_achieved=canonical_case["judge"]["goalAchieved"],
                         total_turns=evaluation.transcript.total_turns,
                         goal_flow=tc.goal_flow,
                         active_traits=tc.active_traits,
-                        result=serialize(evaluation),
+                        result=result_data,
                     ))
                     await db.commit()
 
-                logger.info(f"  -> {evaluation.verdict} (Goal: {evaluation.goal_achieved})")
+                logger.info(
+                    f"  -> {canonical_case['judge']['verdict']} (Goal: {canonical_case['judge']['goalAchieved']})"
+                )
                 return {
-                    "verdict": evaluation.verdict,
+                    "verdict": canonical_case["judge"]["verdict"],
                     "goal_flow": tc.goal_flow,
-                    "goal_achieved": evaluation.goal_achieved,
-                    "is_error": False,
+                    "goal_achieved": canonical_case["judge"]["goalAchieved"],
+                    "canonical_case": canonical_case,
                 }
 
             except JobCancelledError:
@@ -460,6 +474,16 @@ async def run_adversarial_evaluation(
                 }
                 if transcript:
                     result_data["transcript"] = serialize(transcript)
+                result_data["canonical_case"] = build_canonical_adversarial_case(
+                    result_data,
+                    row_verdict=None,
+                    row_goal_achieved=False,
+                    row_goal_flow=tc.goal_flow,
+                    row_active_traits=tc.active_traits,
+                    row_total_turns=transcript.total_turns if transcript else 0,
+                    contract_snapshot=config_snapshot,
+                )
+                canonical_case = result_data["canonical_case"]
 
                 try:
                     async with async_session() as db:
@@ -481,7 +505,7 @@ async def run_adversarial_evaluation(
                     "verdict": None,
                     "goal_flow": tc.goal_flow,
                     "goal_achieved": False,
-                    "is_error": True,
+                    "canonical_case": canonical_case,
                 }
 
         async def _progress_bridge(current: int, total_count: int, message: str):
@@ -504,22 +528,22 @@ async def run_adversarial_evaluation(
         # Aggregate results from worker return values
         verdicts: dict[str, int] = {}
         goal_counts: dict[str, int] = {}
-        error_count = 0
+        infra_error_count = 0
         goal_achieved_count = 0
         for r in case_results:
             if isinstance(r, BaseException):
-                error_count += 1
+                infra_error_count += 1
                 continue
-            # Count by primary goal (first in flow)
-            primary_goal = r["goal_flow"][0] if r.get("goal_flow") else "unknown"
-            goal_counts[primary_goal] = goal_counts.get(primary_goal, 0) + 1
-            if r["is_error"]:
-                error_count += 1
-            else:
-                if r["verdict"]:
-                    verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1
-                if r["goal_achieved"]:
-                    goal_achieved_count += 1
+            canonical_case = r.get("canonical_case") or {}
+            for goal_verdict in canonical_case.get("judge", {}).get("goalVerdicts", []):
+                goal_id = goal_verdict.get("goalId", "unknown")
+                goal_counts[goal_id] = goal_counts.get(goal_id, 0) + 1
+            if canonical_case.get("derived", {}).get("isInfraFailure"):
+                infra_error_count += 1
+            if r.get("verdict"):
+                verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1
+            if canonical_case.get("judge", {}).get("goalAchieved"):
+                goal_achieved_count += 1
 
         # Finalize
         duration = time.monotonic() - start_time
@@ -529,15 +553,16 @@ async def run_adversarial_evaluation(
             "verdict_distribution": verdicts,
             "goal_distribution": goal_counts,
             "goal_achieved_count": goal_achieved_count,
-            "errors": error_count,
+            "errors": infra_error_count,
+            "infra_error_count": infra_error_count,
             "flow_mode": flow_mode,
             "case_mode": case_mode,
             "case_sources": case_source_summary,
         }
 
-        if error_count == total_cases:
+        if infra_error_count == total_cases:
             final_status = "failed"
-        elif error_count > 0:
+        elif infra_error_count > 0:
             final_status = "completed_with_errors"
         else:
             final_status = "completed"

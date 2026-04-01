@@ -7,6 +7,7 @@ Takes pre-extracted summary values, returns a HealthScore model.
 from __future__ import annotations
 
 from app.models.eval_run import AdversarialEvaluation
+from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
 
 from .schemas import HealthScore, HealthScoreBreakdown, HealthScoreBreakdownItem
 
@@ -109,39 +110,53 @@ def compute_adversarial_health_score(
       efficiency_rate  → Rule Compliance (avg % rules followed per test)
       task_completion  → Difficulty-Weighted Score (pass rate weighted by difficulty)
     """
+    canonical_cases = [
+        (
+            ae,
+            build_canonical_adversarial_case(
+                getattr(ae, "result", {}) or {},
+                row_verdict=getattr(ae, "verdict", None),
+                row_goal_achieved=getattr(ae, "goal_achieved", None),
+                row_goal_flow=getattr(ae, "goal_flow", []) or [],
+                row_active_traits=getattr(ae, "active_traits", []) or [],
+                row_total_turns=getattr(ae, "total_turns", 0),
+            ),
+        )
+        for ae in adversarial
+    ]
     total = max(len(adversarial), 1)
 
     # Pass rate
-    pass_count = sum(1 for ae in adversarial if ae.verdict == "PASS")
+    pass_count = sum(1 for ae, case in canonical_cases if case.get("judge", {}).get("verdict") == "PASS")
     pass_rate = (pass_count / total) * 100
 
     # Goal achievement
     goal_count = sum(
-        1 for ae in adversarial
-        if (ae.result or {}).get("goal_achieved") is True
+        1 for _ae, case in canonical_cases
+        if case.get("judge", {}).get("goalAchieved") is True
     )
     goal_rate = (goal_count / total) * 100
 
     # Rule compliance — average compliance rate across all test cases
     compliance_rates: list[float] = []
-    for ae in adversarial:
-        rc_list = (ae.result or {}).get("rule_compliance", [])
+    for _ae, case in canonical_cases:
+        rc_list = case.get("judge", {}).get("ruleOutcomes", [])
         if not rc_list:
             continue
-        evaluated = [rc for rc in rc_list if rc.get("followed") is not None]
+        evaluated = [rc for rc in rc_list if rc.get("status") in ("FOLLOWED", "VIOLATED")]
         if not evaluated:
             continue
-        followed = sum(1 for rc in evaluated if rc.get("followed"))
+        followed = sum(1 for rc in evaluated if rc.get("status") == "FOLLOWED")
         compliance_rates.append(followed / len(evaluated))
     rule_compliance = (sum(compliance_rates) / len(compliance_rates) * 100) if compliance_rates else 100.0
 
     # Difficulty-weighted pass rate
     diff_weighted_num = 0.0
     diff_weighted_den = 0.0
-    for ae in adversarial:
+    for ae, case in canonical_cases:
         w = _DIFFICULTY_WEIGHT.get(ae.difficulty or "", 0.7)
         diff_weighted_den += w
-        if ae.verdict == "PASS":
+        if case.get("judge", {}).get("verdict") == "PASS":
             diff_weighted_num += w
     difficulty_score = (diff_weighted_num / max(diff_weighted_den, 0.01)) * 100
 

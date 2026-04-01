@@ -55,7 +55,7 @@ async def recover_stale_jobs(stale_minutes: int = 15):
         for job in stale_jobs:
             job.status = "failed"
             job.error_message = (
-                f"Recovered on startup: job was running for >{stale_minutes} minutes"
+                f"Run was recovered after being unresponsive for >{stale_minutes} minutes."
             )
             job.completed_at = datetime.now(timezone.utc)
             logger.warning(
@@ -90,7 +90,7 @@ async def recover_stale_eval_runs():
         for run in stale_runs:
             job = await db.get(Job, run.job_id)
             run.status = "cancelled" if job.status == "cancelled" else "failed"
-            run.error_message = f"Recovered on startup: job was {job.status}"
+            run.error_message = "Run was recovered after a server restart."
             run.completed_at = datetime.now(timezone.utc)
             logger.warning(
                 f"Recovered stale eval_run {run.id} (job {run.job_id} was {job.status})"

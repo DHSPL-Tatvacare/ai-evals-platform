@@ -96,7 +96,8 @@ export type EfficiencyVerdict =
   | "ACCEPTABLE"
   | "INCOMPLETE"
   | "FRICTION"
-  | "BROKEN";
+  | "BROKEN"
+  | "NOT APPLICABLE";
 
 export type AdversarialVerdict =
   | "PASS"
@@ -111,6 +112,7 @@ export type Difficulty = "EASY" | "MEDIUM" | "HARD";
 export type RecoveryQuality = "GOOD" | "PARTIAL" | "FAILED" | "NOT NEEDED";
 
 export type FrictionCause = "USER" | "BOT";
+export type RuleOutcomeStatus = 'FOLLOWED' | 'VIOLATED' | 'NOT_APPLICABLE' | 'NOT_EVALUATED';
 
 export interface Run {
   run_id: string;
@@ -155,6 +157,7 @@ export interface ThreadEvalRow {
   efficiency_verdict: EfficiencyVerdict | null;
   success_status: number;
   result: ThreadEvalResult;
+  canonical_thread?: CanonicalThreadEvaluation;
   created_at: string;
 }
 
@@ -185,6 +188,7 @@ export interface ThreadEvalResult {
   success_status: boolean;
   correctness_summary: Record<string, number>;
   custom_evaluations?: Record<string, CustomEvaluationResult>;
+  canonical_thread?: CanonicalThreadEvaluation;
   /** Map of evaluator name → error message for evaluators that threw during execution. */
   failed_evaluators?: Record<string, string>;
   /** List of evaluator names that were disabled in the run config (e.g. ["intent", "efficiency"]). */
@@ -246,6 +250,172 @@ export interface RuleCompliance {
   section: string;
   followed: boolean | null;
   evidence: string;
+  status?: RuleOutcomeStatus;
+}
+
+export interface CanonicalGoalVerdict {
+  goalId: string;
+  achieved: boolean;
+  reasoning?: string;
+}
+
+export interface CanonicalRuleOutcome {
+  ruleId: string;
+  status: RuleOutcomeStatus;
+  evidence: string;
+  section?: string;
+}
+
+export type CanonicalEfficiencyVerdict =
+  | 'EFFICIENT'
+  | 'ACCEPTABLE'
+  | 'INCOMPLETE'
+  | 'FRICTION'
+  | 'BROKEN'
+  | 'NOT_APPLICABLE';
+
+export type CanonicalCorrectnessVerdict =
+  | 'PASS'
+  | 'SOFT_FAIL'
+  | 'HARD_FAIL'
+  | 'CRITICAL'
+  | 'NOT_APPLICABLE';
+
+export interface CanonicalThreadRuleSource {
+  sourceType: 'efficiency' | 'correctness';
+  sourceLabel: string;
+  ruleId: string;
+  status: RuleOutcomeStatus;
+  followed: boolean | null;
+  evidence: string;
+  section?: string;
+}
+
+export interface CanonicalThreadRuleOutcome {
+  ruleId: string;
+  status: RuleOutcomeStatus;
+  followed: boolean | null;
+  evidence: string;
+  section?: string;
+  sources: CanonicalThreadRuleSource[];
+}
+
+export interface CanonicalCorrectnessThreadEvaluation {
+  message: ChatMessage;
+  verdict: CanonicalCorrectnessVerdict | null;
+  reasoning: string;
+  hasImageContext: boolean;
+  calorieSanity: Record<string, unknown>;
+  arithmeticConsistency: Record<string, unknown>;
+  quantityCoherence: Record<string, unknown>;
+  ruleOutcomes: CanonicalThreadRuleSource[];
+}
+
+export interface CanonicalThreadEvaluation {
+  version?: number;
+  facts: {
+    thread: {
+      threadId: string;
+      userId: string;
+      messageCount: number;
+      durationSeconds: number;
+      hasImage: boolean;
+    };
+    execution: {
+      failedEvaluators: Record<string, string>;
+      skippedEvaluators: string[];
+      hadEvaluationError: boolean;
+    };
+  };
+  evaluators: {
+    intent: {
+      accuracy: number | null;
+      evaluations: IntentEvaluation[];
+    };
+    efficiency: {
+      verdict: CanonicalEfficiencyVerdict | null;
+      taskCompleted: boolean;
+      frictionTurns: FrictionTurn[];
+      recoveryQuality: string | null;
+      failureReason: string;
+      reasoning: string;
+      ruleOutcomes: CanonicalThreadRuleSource[];
+    };
+    correctness: {
+      worstVerdict: CanonicalCorrectnessVerdict | null;
+      evaluations: CanonicalCorrectnessThreadEvaluation[];
+    };
+    custom: Record<string, CustomEvaluationResult>;
+  };
+  derived: {
+    successStatus: boolean;
+    worstCorrectnessVerdict: CanonicalCorrectnessVerdict | null;
+    efficiencyVerdict: CanonicalEfficiencyVerdict | null;
+    canonicalRuleOutcomes: CanonicalThreadRuleOutcome[];
+    ruleComplianceSummary: {
+      followed: number;
+      violated: number;
+      notApplicable: number;
+      notEvaluated: number;
+      evaluatedCount: number;
+    };
+  };
+}
+
+export interface CanonicalAdversarialCase {
+  facts: {
+    testCase: {
+      goalFlow: string[];
+      difficulty?: Difficulty;
+      activeTraits: string[];
+      syntheticInput: string;
+      expectedChallenges: string[];
+    };
+    transcript: {
+      turns: TranscriptTurn[];
+      turnCount: number;
+    };
+    transport: {
+      hadHttpError: boolean;
+      hadStreamError: boolean;
+      hadTimeout?: boolean;
+      hadEmptyFinalAssistantMessage?: boolean;
+      hadPartialResponse?: boolean;
+      httpErrors: string[];
+      streamErrors: string[];
+    };
+    simulator: {
+      goalAchieved: boolean;
+      goalAbandoned: boolean;
+      goalsAttempted: string[];
+      goalsCompleted: string[];
+      goalsAbandoned: string[];
+      goalTransitions: { goal_id?: string; goalId?: string; event: string; at_turn?: number; atTurn?: number }[];
+      stopReason: string;
+      failureReason: string;
+    };
+  };
+  judge: {
+    verdict: AdversarialVerdict | null;
+    goalAchieved: boolean;
+    goalVerdicts: CanonicalGoalVerdict[];
+    ruleOutcomes: CanonicalRuleOutcome[];
+    failureModes: string[];
+    reasoning?: string;
+  };
+  derived: {
+    hasContradiction: boolean;
+    contradictionTypes: string[];
+    isInfraFailure: boolean;
+    isRetryable?: boolean;
+  };
+  contract?: {
+    version?: number;
+    flowMode?: string;
+    goalIds?: string[];
+    traitIds?: string[];
+    ruleIds?: string[];
+  };
 }
 
 export interface AdversarialEvalRow {
@@ -255,9 +425,14 @@ export interface AdversarialEvalRow {
   active_traits: string[];
   difficulty: Difficulty;
   verdict: AdversarialVerdict | null;  // null = infra failure (rate limit, timeout, etc.)
-  goal_achieved: number;
+  goal_achieved: boolean;
   total_turns: number;
   result: AdversarialResult;
+  canonical_case?: CanonicalAdversarialCase;
+  has_contradiction?: boolean;
+  contradiction_types?: string[];
+  is_infra_failure?: boolean;
+  is_retryable?: boolean;
   error: string | null;               // set when verdict is null
   created_at: string;
 }
@@ -289,6 +464,7 @@ export interface AdversarialResult {
   goal_achieved?: boolean;
   goal_verdicts?: { goal_id: string; achieved: boolean; reasoning?: string }[];
   rule_compliance?: RuleCompliance[];
+  canonical_case?: CanonicalAdversarialCase;
   error?: string;  // set on infra failure (verdict=null)
 }
 

@@ -5,6 +5,7 @@ import VerdictBadge from '../VerdictBadge';
 import RuleComplianceInline from '../RuleComplianceInline';
 import { cn } from '@/utils';
 import { normalizeLabel, truncate } from '@/utils/evalFormatters';
+import { getRuleOutcomeStatus } from '../../utils/ruleCompliance';
 
 type Filter = 'ALL' | CorrectnessVerdict;
 
@@ -123,7 +124,7 @@ export default function CorrectnessTab({ evaluations, activeTurnIndex, onRowClic
               const origIdx = evaluations.indexOf(ce);
               const isActive = activeTurnIndex === origIdx;
               const isExpanded = expandedIdx === origIdx;
-              const violations = ce.rule_compliance?.filter(r => !r.followed) ?? [];
+              const violations = ce.rule_compliance?.filter((rule) => getRuleOutcomeStatus(rule) === 'VIOLATED') ?? [];
 
               return (
                 <CorrectnessRow

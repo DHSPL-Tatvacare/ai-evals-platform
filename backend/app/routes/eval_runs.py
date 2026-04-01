@@ -15,6 +15,8 @@ from app.models.listing import Listing
 from app.models.job import Job
 from app.schemas.base import CamelModel
 from app.schemas.eval_run import HumanReviewUpsert
+from app.services.evaluators.adversarial_canonical import enrich_adversarial_result_for_api
+from app.services.evaluators.thread_canonical import enrich_thread_result_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -819,6 +821,14 @@ def _run_to_dict(r: EvalRun) -> dict:
 
 
 def _thread_to_dict(e: ThreadEvaluation) -> dict:
+    result = enrich_thread_result_for_api(
+        e.result if isinstance(e.result, dict) else {},
+        row_intent_accuracy=e.intent_accuracy,
+        row_worst_correctness=e.worst_correctness,
+        row_efficiency_verdict=e.efficiency_verdict,
+        row_success_status=e.success_status,
+    )
+    canonical_thread = result.get("canonical_thread", {})
     return {
         "id": e.id,
         "run_id": str(e.run_id),
@@ -828,23 +838,38 @@ def _thread_to_dict(e: ThreadEvaluation) -> dict:
         "worst_correctness": e.worst_correctness,
         "efficiency_verdict": e.efficiency_verdict,
         "success_status": e.success_status,
-        "result": e.result,
+        "result": result,
+        "canonical_thread": canonical_thread,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
 
 def _adv_to_dict(e: AdversarialEvaluation) -> dict:
+    result = enrich_adversarial_result_for_api(
+        e.result if isinstance(e.result, dict) else {},
+        row_verdict=e.verdict,
+        row_goal_achieved=e.goal_achieved,
+        row_goal_flow=e.goal_flow or [],
+        row_active_traits=e.active_traits or [],
+        row_total_turns=e.total_turns,
+    )
+    canonical_case = result.get("canonical_case", {})
     return {
         "id": e.id,
         "run_id": str(e.run_id),
         "goal_flow": e.goal_flow or [],
         "active_traits": e.active_traits or [],
         "difficulty": e.difficulty,
-        "verdict": e.verdict,
-        "goal_achieved": e.goal_achieved,
+        "verdict": canonical_case.get("judge", {}).get("verdict"),
+        "goal_achieved": canonical_case.get("judge", {}).get("goalAchieved", False),
         "total_turns": e.total_turns,
-        "result": e.result,
-        "error": e.result.get("error") if isinstance(e.result, dict) else None,
+        "result": result,
+        "canonical_case": canonical_case,
+        "has_contradiction": canonical_case.get("derived", {}).get("hasContradiction", False),
+        "contradiction_types": canonical_case.get("derived", {}).get("contradictionTypes", []),
+        "is_infra_failure": canonical_case.get("derived", {}).get("isInfraFailure", False),
+        "is_retryable": canonical_case.get("derived", {}).get("isRetryable", False),
+        "error": result.get("error") if isinstance(result, dict) else None,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 

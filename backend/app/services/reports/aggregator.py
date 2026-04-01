@@ -10,6 +10,8 @@ import re
 from itertools import combinations
 
 from app.models.eval_run import AdversarialEvaluation, ThreadEvaluation
+from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
+from app.services.evaluators.thread_canonical import build_canonical_thread_evaluation
 
 from .schemas import (
     AdversarialBreakdown,
@@ -55,6 +57,45 @@ EFFICIENCY_ORDINAL: dict[str, float] = {
 DIFFICULTY_ORDER = ["EASY", "MEDIUM", "HARD"]
 
 MAX_TRANSCRIPT_CHARS = 500
+
+
+def _canonical_adversarial_case(ae: AdversarialEvaluation) -> dict:
+    return build_canonical_adversarial_case(
+        getattr(ae, "result", {}) or {},
+        row_verdict=getattr(ae, "verdict", None),
+        row_goal_achieved=getattr(ae, "goal_achieved", None),
+        row_goal_flow=getattr(ae, "goal_flow", []) or [],
+        row_active_traits=getattr(ae, "active_traits", []) or [],
+        row_total_turns=getattr(ae, "total_turns", 0),
+    )
+
+
+def _canonical_rule_compliance(case: dict) -> list[dict]:
+    return [
+        {
+            "rule_id": outcome.get("ruleId", ""),
+            "section": outcome.get("section", ""),
+            "followed": True if outcome.get("status") == "FOLLOWED" else False if outcome.get("status") == "VIOLATED" else None,
+            "status": outcome.get("status"),
+            "evidence": outcome.get("evidence", ""),
+        }
+        for outcome in case.get("judge", {}).get("ruleOutcomes", [])
+    ]
+
+
+def _canonical_thread_evaluation(thread: ThreadEvaluation) -> dict:
+    return build_canonical_thread_evaluation(
+        getattr(thread, "result", {}) or {},
+        row_intent_accuracy=getattr(thread, "intent_accuracy", None),
+        row_worst_correctness=getattr(thread, "worst_correctness", None),
+        row_efficiency_verdict=getattr(thread, "efficiency_verdict", None),
+        row_success_status=getattr(thread, "success_status", None),
+    )
+
+
+def _canonical_thread_rule_outcomes(thread: ThreadEvaluation) -> list[dict]:
+    canonical = _canonical_thread_evaluation(thread)
+    return list(canonical.get("derived", {}).get("canonicalRuleOutcomes", []))
 
 
 class ReportAggregator:
@@ -124,19 +165,9 @@ class ReportAggregator:
         co_failure_tracker: dict[frozenset[str], int] = {}
 
         for thread in self.threads:
-            result = thread.result or {}
             thread_failures: set[str] = set()
-
-            # Correctness rules (per-message evaluations)
-            for ce in result.get("correctness_evaluations", []):
-                self._tally_rule_compliance(
-                    ce.get("rule_compliance", []), rule_stats, thread_failures,
-                )
-
-            # Efficiency rules (single evaluation per thread)
-            eff = result.get("efficiency_evaluation") or {}
             self._tally_rule_compliance(
-                eff.get("rule_compliance", []), rule_stats, thread_failures,
+                _canonical_thread_rule_outcomes(thread), rule_stats, thread_failures,
             )
 
             # Track co-failures
@@ -187,19 +218,19 @@ class ReportAggregator:
         thread_failures: set[str],
     ) -> None:
         for rc in rc_list:
-            rule_id = rc.get("rule_id", "")
+            rule_id = rc.get("rule_id") or rc.get("ruleId") or ""
             if not rule_id:
                 continue
-            followed = rc.get("followed")
-            if followed is None:
-                continue  # Not evaluated — exclude from counts
+            status = rc.get("status")
+            if status not in ("FOLLOWED", "VIOLATED"):
+                continue
             if rule_id not in rule_stats:
                 rule_stats[rule_id] = {
                     "passed": 0,
                     "failed": 0,
                     "section": rc.get("section", ""),
                 }
-            if followed:
+            if status == "FOLLOWED":
                 rule_stats[rule_id]["passed"] += 1
             else:
                 rule_stats[rule_id]["failed"] += 1
@@ -317,6 +348,7 @@ class ReportAggregator:
 
     def _build_exemplar(self, score: float, thread: ThreadEvaluation) -> ExemplarThread:
         result = thread.result or {}
+        canonical = _canonical_thread_evaluation(thread)
 
         # Extract transcript — ChatMessage objects have query_text / final_response_message
         messages = result.get("thread", {}).get("messages", [])
@@ -339,14 +371,14 @@ class ReportAggregator:
         violations = self._extract_violations(result)
 
         # Extract friction turns
-        eff = result.get("efficiency_evaluation") or {}
+        eff = canonical.get("evaluators", {}).get("efficiency", {})
         friction_turns = [
             FrictionTurn(
                 turn=ft.get("turn", 0),
                 cause=ft.get("cause", "bot"),
                 description=ft.get("description", ""),
             )
-            for ft in eff.get("friction_turns", [])
+            for ft in eff.get("frictionTurns", [])
         ]
 
         return ExemplarThread(
@@ -365,23 +397,17 @@ class ReportAggregator:
     def _extract_violations(result: dict) -> list[RuleViolation]:
         violations: list[RuleViolation] = []
         seen: set[str] = set()
-
-        def _collect(rc_list: list[dict]) -> None:
-            for rc in rc_list:
-                if rc.get("followed", True):
-                    continue
-                rule_id = rc.get("rule_id", "")
-                if rule_id and rule_id not in seen:
-                    seen.add(rule_id)
-                    violations.append(RuleViolation(
-                        rule_id=rule_id,
-                        evidence=rc.get("evidence", ""),
-                    ))
-
-        for ce in result.get("correctness_evaluations", []):
-            _collect(ce.get("rule_compliance", []))
-        eff = result.get("efficiency_evaluation") or {}
-        _collect(eff.get("rule_compliance", []))
+        canonical = build_canonical_thread_evaluation(result or {})
+        for rc in canonical.get("derived", {}).get("canonicalRuleOutcomes", []):
+            if rc.get("status") != "VIOLATED":
+                continue
+            rule_id = rc.get("ruleId", "")
+            if rule_id and rule_id not in seen:
+                seen.add(rule_id)
+                violations.append(RuleViolation(
+                    rule_id=rule_id,
+                    evidence=rc.get("evidence", ""),
+                ))
 
         return violations
 
@@ -465,9 +491,18 @@ class AdversarialAggregator:
         adversarial: list[AdversarialEvaluation],
         run_summary: dict,
     ):
-        # Split into evaluated vs error cases — errors excluded from metrics
-        self.adversarial = [ae for ae in adversarial if not (ae.result or {}).get("error")]
-        self.error_count = sum(1 for ae in adversarial if (ae.result or {}).get("error"))
+        self.case_records = [
+            (ae, _canonical_adversarial_case(ae))
+            for ae in adversarial
+        ]
+        self.adversarial = [
+            ae for ae, case in self.case_records
+            if not case.get("derived", {}).get("isInfraFailure")
+        ]
+        self.error_count = sum(
+            1 for _ae, case in self.case_records
+            if case.get("derived", {}).get("isInfraFailure")
+        )
         self.summary = run_summary or {}
 
     # ------------------------------------------------------------------
@@ -476,8 +511,10 @@ class AdversarialAggregator:
 
     def compute_distributions(self) -> VerdictDistributions:
         adv_dist: dict[str, int] = {}
-        for ae in self.adversarial:
-            v = ae.verdict or "UNKNOWN"
+        for ae, case in self.case_records:
+            if case.get("derived", {}).get("isInfraFailure"):
+                continue
+            v = case.get("judge", {}).get("verdict") or ae.verdict or "UNKNOWN"
             adv_dist[v] = adv_dist.get(v, 0) + 1
 
         # Surface error count as a separate segment
@@ -500,11 +537,10 @@ class AdversarialAggregator:
         rule_stats: dict[str, dict] = {}
         co_failure_tracker: dict[frozenset[str], int] = {}
 
-        for ae in self.adversarial:
-            result = ae.result or {}
+        for ae, case in self.case_records:
             test_failures: set[str] = set()
 
-            rc_list = result.get("rule_compliance", [])
+            rc_list = _canonical_rule_compliance(case)
             ReportAggregator._tally_rule_compliance(rc_list, rule_stats, test_failures)
 
             if len(test_failures) >= 2:
@@ -581,14 +617,15 @@ class AdversarialAggregator:
 
     @staticmethod
     def _compute_adversarial_score(ae: AdversarialEvaluation) -> float:
-        verdict_score = ADVERSARIAL_VERDICT_ORDINAL.get(ae.verdict or "", 0.5)
-        result = ae.result or {}
-        goal_score = 1.0 if result.get("goal_achieved") else 0.0
+        case = _canonical_adversarial_case(ae)
+        verdict_score = ADVERSARIAL_VERDICT_ORDINAL.get(case.get("judge", {}).get("verdict") or ae.verdict or "", 0.5)
+        goal_score = 1.0 if case.get("judge", {}).get("goalAchieved") else 0.0
 
-        rc_list = result.get("rule_compliance", [])
-        if rc_list:
-            followed = sum(1 for rc in rc_list if rc.get("followed", True))
-            rc_score = followed / len(rc_list)
+        rc_list = _canonical_rule_compliance(case)
+        evaluated = [rc for rc in rc_list if rc.get("followed") is not None]
+        if evaluated:
+            followed = sum(1 for rc in evaluated if rc.get("followed"))
+            rc_score = followed / len(evaluated)
         else:
             rc_score = 0.5
 
@@ -597,11 +634,11 @@ class AdversarialAggregator:
     def _build_adversarial_exemplar(
         self, score: float, ae: AdversarialEvaluation,
     ) -> ExemplarThread:
-        result = ae.result or {}
+        case = _canonical_adversarial_case(ae)
 
         # Extract transcript from adversarial result
         transcript: list[TranscriptMessage] = []
-        turns = result.get("transcript", {}).get("turns", [])
+        turns = case.get("facts", {}).get("transcript", {}).get("turns", [])
         for turn in turns:
             user_msg = turn.get("user_message", "")
             if user_msg:
@@ -618,7 +655,7 @@ class AdversarialAggregator:
 
         # Extract rule violations
         violations: list[RuleViolation] = []
-        for rc in result.get("rule_compliance", []):
+        for rc in _canonical_rule_compliance(case):
             if not rc.get("followed", True):
                 rule_id = rc.get("rule_id", "")
                 if rule_id:
@@ -631,18 +668,18 @@ class AdversarialAggregator:
             thread_id=str(ae.id),
             composite_score=round(score, 3),
             intent_accuracy=None,
-            correctness_verdict=ae.verdict,
+            correctness_verdict=case.get("judge", {}).get("verdict") or ae.verdict,
             efficiency_verdict=None,
-            task_completed=bool(result.get("goal_achieved")),
+            task_completed=bool(case.get("judge", {}).get("goalAchieved")),
             transcript=transcript,
             rule_violations=violations,
             friction_turns=[],
             goal_flow=ae.goal_flow or [],
             active_traits=ae.active_traits or [],
             difficulty=ae.difficulty,
-            failure_modes=result.get("failure_modes", []),
-            reasoning=result.get("reasoning"),
-            goal_achieved=result.get("goal_achieved"),
+            failure_modes=case.get("judge", {}).get("failureModes", []),
+            reasoning=case.get("judge", {}).get("reasoning"),
+            goal_achieved=case.get("judge", {}).get("goalAchieved"),
         )
 
     # ------------------------------------------------------------------
@@ -656,17 +693,21 @@ class AdversarialAggregator:
         goal_stats: dict[str, dict[str, int]] = {}
         difficulty_stats: dict[str, dict[str, int]] = {}
 
-        for ae in self.adversarial:
-            goal_flow = ae.goal_flow or []
-            if not goal_flow:
-                goal_flow = ["unknown"]
+        for ae, case in self.case_records:
+            goal_verdicts = case.get("judge", {}).get("goalVerdicts", [])
+            if not goal_verdicts:
+                goal_verdicts = [
+                    {"goalId": goal_id, "achieved": False}
+                    for goal_id in (ae.goal_flow or ["unknown"])
+                ]
             diff = ae.difficulty or "UNKNOWN"
-            is_pass = ae.verdict == "PASS"
+            is_pass = case.get("judge", {}).get("verdict") == "PASS"
 
-            for goal_id in goal_flow:
+            for goal_verdict in goal_verdicts:
+                goal_id = goal_verdict.get("goalId", "unknown")
                 gs = goal_stats.setdefault(goal_id, {"passed": 0, "total": 0})
                 gs["total"] += 1
-                if is_pass:
+                if goal_verdict.get("achieved"):
                     gs["passed"] += 1
 
             ds = difficulty_stats.setdefault(diff, {"passed": 0, "total": 0})

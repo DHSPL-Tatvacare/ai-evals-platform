@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertTriangle, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
 import { EmptyState } from '@/components/ui';
 import type { AdversarialEvalRow } from '@/types';
 import VerdictBadge from './VerdictBadge';
 import { routes } from '@/config/routes';
 import { humanize, normalizeLabel } from '@/utils/evalFormatters';
+import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 
 interface Props {
   evaluations: AdversarialEvalRow[];
@@ -62,7 +63,7 @@ export default function AdversarialTable({ evaluations, runId }: Props) {
           cmp = a.total_turns - b.total_turns;
           break;
         case 'goal_achieved':
-          cmp = Number(a.goal_achieved) - Number(b.goal_achieved);
+          cmp = Number(getCanonicalAdversarialCase(a.result, a).judge.goalAchieved) - Number(getCanonicalAdversarialCase(b.result, b).judge.goalAchieved);
           break;
         case 'verdict': {
           const ra = a.verdict ? (VERDICT_RANK[normalizeLabel(a.verdict)] ?? 5) : 99;
@@ -105,7 +106,9 @@ export default function AdversarialTable({ evaluations, runId }: Props) {
             </tr>
           </thead>
           <tbody>
-            {paged.map((ae) => (
+            {paged.map((ae) => {
+              const canonical = getCanonicalAdversarialCase(ae.result, ae);
+              return (
               <tr
                 key={ae.id}
                 className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] transition-colors"
@@ -117,34 +120,43 @@ export default function AdversarialTable({ evaluations, runId }: Props) {
                   >
                     {(ae.goal_flow || []).map(humanize).join(' → ')}
                   </Link>
+                  {canonical.derived.hasContradiction && (
+                    <span
+                      className="ml-2 inline-flex align-middle text-[var(--color-warning)]"
+                      title={canonical.derived.contradictionTypes.map(humanize).join(', ')}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    </span>
+                  )}
                 </td>
                 <td className="px-2.5 py-2">
                   <VerdictBadge verdict={ae.difficulty} category="difficulty" />
                 </td>
                 <td className="px-2.5 py-2 text-sm text-[var(--text-secondary)]">
-                  {ae.total_turns}
+                  {canonical.facts.transcript.turnCount || ae.total_turns}
                 </td>
                 <td className="px-2.5 py-2 text-center text-sm">
-                  {ae.goal_achieved ? (
+                  {canonical.judge.goalAchieved ? (
                     <span className="text-[var(--color-success)]">{'\u2713'}</span>
                   ) : (
                     <span className="text-[var(--color-error)]">{'\u2717'}</span>
                   )}
                 </td>
                 <td className="px-2.5 py-2">
-                  {ae.verdict != null ? (
-                    <VerdictBadge verdict={ae.verdict} category="adversarial" />
+                  {canonical.judge.verdict != null ? (
+                    <VerdictBadge verdict={canonical.judge.verdict} category="adversarial" />
                   ) : (
                     <span
                       className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-white"
                       style={{ backgroundColor: 'var(--color-error)' }}
                     >
-                      Failed
+                      Infra Error
                     </span>
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={5} className="p-3">

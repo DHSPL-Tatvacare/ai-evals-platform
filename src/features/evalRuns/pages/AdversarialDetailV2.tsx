@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import type { AdversarialEvalRow, AdversarialResult, ChatMessage, Run } from '@/types';
@@ -20,6 +20,7 @@ import {
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
+import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 
 /** Normalize adversarial TranscriptTurns into ChatMessage[] so LinkedChatViewer works unmodified. */
 function transcriptToMessages(result: AdversarialResult): ChatMessage[] {
@@ -93,16 +94,20 @@ export default function AdversarialDetailV2() {
     () => result ? transcriptToMessages(result) : [],
     [result],
   );
+  const canonicalCase = useMemo(
+    () => result ? getCanonicalAdversarialCase(result, evalItem ?? undefined) : null,
+    [evalItem, result],
+  );
 
   // Empty maps — adversarial has no per-turn correctness/intent/friction
   const emptyCorrectnessMap = useMemo(() => new Map(), []);
   const emptyIntentMap = useMemo(() => new Map(), []);
   const emptyFrictionSet = useMemo(() => new Set<number>(), []);
 
-  const verdict = evalItem?.verdict ?? null;
+  const verdict = canonicalCase?.judge.verdict ?? evalItem?.verdict ?? null;
   const infraError = evalItem?.error ?? result?.error ?? null;
   const hasRules = (result?.rule_compliance?.length ?? 0) > 0;
-  const canRetryCase = Boolean(run && evalItem);
+  const canRetryCase = Boolean(run && evalItem && canonicalCase?.derived.isRetryable);
 
   const handleRetryCase = useCallback(async () => {
     if (!run || !evalItem) return;
@@ -165,6 +170,7 @@ export default function AdversarialDetailV2() {
         content: (
           <AdversarialOverviewTab
             result={result}
+            canonicalCase={canonicalCase}
             verdict={verdict}
             infraError={infraError}
           />
@@ -201,7 +207,11 @@ export default function AdversarialDetailV2() {
   }
 
   const tc = result.test_case;
-  const turnCount = result.transcript?.total_turns ?? messages.length;
+  const turnCount = canonicalCase?.facts.transcript.turnCount ?? result.transcript?.total_turns ?? messages.length;
+  const judgeGoalAchieved = canonicalCase?.judge.goalAchieved ?? false;
+  const contradictionTypes = canonicalCase?.derived.contradictionTypes ?? [];
+  const failureModes = canonicalCase?.judge.failureModes ?? result.failure_modes ?? [];
+  const goalVerdicts = canonicalCase?.judge.goalVerdicts ?? [];
 
   return (
     <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
@@ -266,18 +276,22 @@ export default function AdversarialDetailV2() {
               <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Turns</span>
               <span className="font-medium text-[var(--text-primary)] leading-none">{turnCount}</span>
             </div>
-            {result.transcript && (
-              <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
-                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Goal</span>
-                <span className="font-semibold leading-none" style={{ color: result.transcript.goal_achieved ? 'var(--color-success)' : 'var(--color-error)' }}>
-                  {result.transcript.goal_achieved ? '\u2713 Achieved' : '\u2717 Not Achieved'}
+            <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Judge Goal</span>
+              <span className="font-semibold leading-none" style={{ color: judgeGoalAchieved ? 'var(--color-success)' : 'var(--color-error)' }}>
+                  {judgeGoalAchieved ? '\u2713 Achieved' : '\u2717 Not Achieved'}
                 </span>
               </div>
-            )}
-            {(result.failure_modes?.length ?? 0) > 0 && (
+            {failureModes.length > 0 && (
               <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
                 <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Failures</span>
-                <span className="font-semibold leading-none text-[var(--color-error)]">{result.failure_modes!.length}</span>
+                <span className="font-semibold leading-none text-[var(--color-error)]">{failureModes.length}</span>
+              </div>
+            )}
+            {canonicalCase?.derived.hasContradiction && (
+              <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)]">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">Warnings</span>
+                <span className="font-semibold leading-none text-[var(--color-warning)]">{contradictionTypes.length}</span>
               </div>
             )}
           </div>
@@ -306,6 +320,40 @@ export default function AdversarialDetailV2() {
             </PermissionGate>
           </div>
         </div>
+
+        {(goalVerdicts.length > 0 || failureModes.length > 0 || contradictionTypes.length > 0) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {goalVerdicts.map((goal) => (
+              <span
+                key={goal.goalId}
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                  goal.achieved
+                    ? 'border-[var(--border-success)] bg-[var(--surface-success)] text-[var(--color-success)]'
+                    : 'border-[var(--border-error)] bg-[var(--surface-error)] text-[var(--color-error)]'
+                }`}
+              >
+                {humanize(goal.goalId)}: {goal.achieved ? 'Achieved' : 'Failed'}
+              </span>
+            ))}
+            {failureModes.map((failureMode) => (
+              <span
+                key={failureMode}
+                className="inline-flex items-center rounded-full border border-[var(--border-error)] bg-[var(--surface-error)] px-2.5 py-1 text-xs font-medium text-[var(--color-error)]"
+              >
+                {humanize(failureMode)}
+              </span>
+            ))}
+            {contradictionTypes.map((contradictionType) => (
+              <span
+                key={contradictionType}
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--border-warning)] bg-[var(--surface-warning)] px-2.5 py-1 text-xs font-medium text-[var(--color-warning)]"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {humanize(contradictionType)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Body — split pane */}

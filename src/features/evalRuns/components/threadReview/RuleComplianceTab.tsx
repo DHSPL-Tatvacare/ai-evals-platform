@@ -1,66 +1,143 @@
 import { useState } from 'react';
-import type { RuleCompliance, CorrectnessEvaluation, EfficiencyEvaluation } from '@/types/evalRuns';
+import type {
+  CanonicalThreadEvaluation,
+  RuleCompliance,
+  RuleOutcomeStatus,
+  CorrectnessEvaluation,
+  EfficiencyEvaluation,
+} from '@/types/evalRuns';
 import { cn } from '@/utils';
+import {
+  getRuleOutcomeMeta,
+  getRuleOutcomeStatus,
+  sortRuleOutcomes,
+  summarizeRuleOutcomes,
+} from '../../utils/ruleCompliance';
 
-type Filter = 'ALL' | 'VIOLATIONS' | 'PASSED' | 'NOT_EVALUATED';
+type Filter = 'ALL' | RuleOutcomeStatus;
 
-interface AggregatedRule extends RuleCompliance {
+interface AggregatedRule {
+  ruleId: string;
+  section: string;
+  evidence: string;
+  status: RuleOutcomeStatus;
+  followed: boolean | null;
   source: string;
 }
 
 interface Props {
   efficiencyEvaluation?: EfficiencyEvaluation | null;
   correctnessEvaluations?: CorrectnessEvaluation[];
-  /** Pass rules directly (e.g. from adversarial results) — skips aggregation */
+  canonicalThread?: CanonicalThreadEvaluation | null;
   rules?: RuleCompliance[];
-  /** Label for the source column when using direct rules */
   sourceLabel?: string;
 }
 
-function aggregateRules(
+const STATUS_PRIORITY: Record<RuleOutcomeStatus, number> = {
+  VIOLATED: 0,
+  FOLLOWED: 1,
+  NOT_APPLICABLE: 2,
+  NOT_EVALUATED: 3,
+};
+
+function normalizeLegacyRule(rule: RuleCompliance, source: string): AggregatedRule {
+  const status = getRuleOutcomeStatus(rule);
+  return {
+    ruleId: rule.rule_id,
+    section: rule.section,
+    evidence: rule.evidence,
+    status,
+    followed: status === 'FOLLOWED' ? true : status === 'VIOLATED' ? false : null,
+    source,
+  };
+}
+
+function aggregateLegacyRules(
   efficiencyEvaluation?: EfficiencyEvaluation | null,
   correctnessEvaluations?: CorrectnessEvaluation[],
 ): AggregatedRule[] {
   const ruleMap = new Map<string, AggregatedRule>();
 
-  // Efficiency rules
   if (efficiencyEvaluation?.rule_compliance) {
     for (const rule of efficiencyEvaluation.rule_compliance) {
-      const existing = ruleMap.get(rule.rule_id);
-      // Keep violations over passes; null (not evaluated) has lowest priority
-      if (!existing || (rule.followed === false && existing.followed !== false)) {
-        ruleMap.set(rule.rule_id, { ...rule, source: 'Efficiency' });
+      const normalized = normalizeLegacyRule(rule, 'Efficiency');
+      const existing = ruleMap.get(normalized.ruleId);
+      if (!existing || STATUS_PRIORITY[normalized.status] < STATUS_PRIORITY[existing.status]) {
+        ruleMap.set(normalized.ruleId, normalized);
       }
     }
   }
 
-  // Correctness rules (per-message)
-  if (correctnessEvaluations) {
-    for (let i = 0; i < correctnessEvaluations.length; i++) {
-      const ce = correctnessEvaluations[i];
-      if (!ce.rule_compliance) continue;
-      for (const rule of ce.rule_compliance) {
-        const existing = ruleMap.get(rule.rule_id);
-        if (!existing || (rule.followed === false && existing.followed !== false)) {
-          ruleMap.set(rule.rule_id, {
-            ...rule,
-            source: `Correctness #${i + 1}`,
-          });
-        }
+  for (let index = 0; index < (correctnessEvaluations?.length ?? 0); index += 1) {
+    const evaluation = correctnessEvaluations?.[index];
+    if (!evaluation?.rule_compliance) {
+      continue;
+    }
+    for (const rule of evaluation.rule_compliance) {
+      const normalized = normalizeLegacyRule(rule, `Correctness #${index + 1}`);
+      const existing = ruleMap.get(normalized.ruleId);
+      if (!existing || STATUS_PRIORITY[normalized.status] < STATUS_PRIORITY[existing.status]) {
+        ruleMap.set(normalized.ruleId, normalized);
       }
     }
   }
 
-  return Array.from(ruleMap.values());
+  return sortRuleOutcomes(
+    Array.from(ruleMap.values()).map((rule) => ({
+      rule_id: rule.ruleId,
+      section: rule.section,
+      evidence: rule.evidence,
+      status: rule.status,
+      followed: rule.followed,
+      source: rule.source,
+    })),
+  ).map((rule) => ({
+    ruleId: rule.rule_id,
+    section: rule.section,
+    evidence: rule.evidence,
+    status: rule.status,
+    followed: rule.followed,
+    source: (rule as typeof rule & { source: string }).source,
+  }));
 }
 
-export default function RuleComplianceTab({ efficiencyEvaluation, correctnessEvaluations, rules, sourceLabel = 'Overall' }: Props) {
+function rulesFromCanonical(canonicalThread: CanonicalThreadEvaluation): AggregatedRule[] {
+  return canonicalThread.derived.canonicalRuleOutcomes.map((rule) => ({
+    ruleId: rule.ruleId,
+    section: rule.section ?? '',
+    evidence: rule.evidence,
+    status: rule.status,
+    followed: rule.followed,
+    source: rule.sources.length > 0
+      ? rule.sources.map((source) => source.sourceLabel).join(', ')
+      : 'Overall',
+  }));
+}
+
+export default function RuleComplianceTab({
+  efficiencyEvaluation,
+  correctnessEvaluations,
+  canonicalThread,
+  rules,
+  sourceLabel = 'Overall',
+}: Props) {
   const [filter, setFilter] = useState<Filter>('ALL');
 
-  // Use direct rules if provided, otherwise aggregate from evaluations
   const allRules: AggregatedRule[] = rules
-    ? rules.map(r => ({ ...r, source: sourceLabel }))
-    : aggregateRules(efficiencyEvaluation, correctnessEvaluations);
+    ? sortRuleOutcomes(rules).map((rule) => {
+      const status = getRuleOutcomeStatus(rule);
+      return {
+        ruleId: rule.rule_id,
+        section: rule.section,
+        evidence: rule.evidence,
+        status,
+        followed: status === 'FOLLOWED' ? true : status === 'VIOLATED' ? false : null,
+        source: sourceLabel,
+      };
+    })
+    : canonicalThread
+      ? rulesFromCanonical(canonicalThread)
+      : aggregateLegacyRules(efficiencyEvaluation, correctnessEvaluations);
 
   if (allRules.length === 0) {
     return (
@@ -70,91 +147,89 @@ export default function RuleComplianceTab({ efficiencyEvaluation, correctnessEva
     );
   }
 
-  const violations = allRules.filter(r => r.followed === false);
-  const passed = allRules.filter(r => r.followed === true);
-  const notEvaluated = allRules.filter(r => r.followed === null);
-
   const filtered = filter === 'ALL'
-    ? [...violations, ...passed, ...notEvaluated]
-    : filter === 'VIOLATIONS'
-      ? violations
-      : filter === 'PASSED'
-        ? passed
-        : notEvaluated;
+    ? allRules
+    : allRules.filter((rule) => rule.status === filter);
+
+  const counts = {
+    FOLLOWED: allRules.filter((rule) => rule.status === 'FOLLOWED').length,
+    VIOLATED: allRules.filter((rule) => rule.status === 'VIOLATED').length,
+    NOT_APPLICABLE: allRules.filter((rule) => rule.status === 'NOT_APPLICABLE').length,
+    NOT_EVALUATED: allRules.filter((rule) => rule.status === 'NOT_EVALUATED').length,
+  };
 
   return (
     <div className="flex flex-col h-full min-h-0 px-4">
-      {/* Filter pills */}
-      <div className="flex flex-wrap gap-1 pb-3 shrink-0">
+      <div className="flex flex-wrap gap-1 pb-2 shrink-0">
         {([
           { key: 'ALL' as Filter, label: 'All', count: allRules.length },
-          { key: 'VIOLATIONS' as Filter, label: 'Violations', count: violations.length },
-          { key: 'PASSED' as Filter, label: 'Passed', count: passed.length },
-          { key: 'NOT_EVALUATED' as Filter, label: 'Not Evaluated', count: notEvaluated.length },
-        ]).map(f => (
-          f.count === 0 && f.key !== 'ALL' ? null : (
+          { key: 'VIOLATED' as Filter, label: 'Violations', count: counts.VIOLATED },
+          { key: 'FOLLOWED' as Filter, label: 'Followed', count: counts.FOLLOWED },
+          { key: 'NOT_APPLICABLE' as Filter, label: 'Not Applicable', count: counts.NOT_APPLICABLE },
+          { key: 'NOT_EVALUATED' as Filter, label: 'Not Evaluated', count: counts.NOT_EVALUATED },
+        ]).map((item) => (
+          item.count === 0 && item.key !== 'ALL' ? null : (
             <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
+              key={item.key}
+              onClick={() => setFilter(item.key)}
               className={cn(
                 'px-2 py-0.5 text-xs rounded-full border transition-colors',
-                filter === f.key
+                filter === item.key
                   ? 'border-[var(--border-brand)] bg-[var(--surface-info)] text-[var(--text-brand)]'
                   : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]',
               )}
             >
-              {f.label} ({f.count})
+              {item.label} ({item.count})
             </button>
           )
         ))}
       </div>
 
-      {/* Table */}
+      <p className="text-xs text-[var(--text-muted)] pb-3 shrink-0">
+        {summarizeRuleOutcomes(allRules.map((rule) => ({ status: rule.status, followed: rule.followed })))}
+      </p>
+
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm" style={{ minWidth: 650 }}>
-          <thead className="sticky top-0 bg-[var(--bg-primary)] z-10">
-            <tr className="border-b border-[var(--border-subtle)]">
-              <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-12">Status</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Rule ID</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Section in Kaira Prompt</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-28">Source</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Evidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((rule, i) => (
-              <tr key={`${rule.rule_id}-${i}`} className="border-b border-[var(--border-subtle)]">
-                <td className="py-1.5 px-2 text-center">
-                  <span
-                    className={`inline-block w-4 h-4 rounded-full text-[0.6rem] font-bold text-white leading-none ${
-                      rule.followed === null ? 'bg-[var(--text-muted)]' : rule.followed ? 'bg-[var(--color-success)]' : 'bg-[var(--color-error)]'
-                    }`}
-                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    {rule.followed === null ? '?' : rule.followed ? '\u2713' : '\u2717'}
-                  </span>
-                </td>
-                <td className={`py-1.5 px-2 font-semibold ${rule.followed === null ? 'text-[var(--text-muted)]' : rule.followed ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
-                  {rule.rule_id}
-                </td>
-                <td className="py-1.5 px-2 text-[var(--text-secondary)] max-w-[160px]">
-                  {rule.section && (
-                    <span className="block text-xs bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-1.5 py-px rounded-full truncate" title={rule.section}>
-                      {rule.section}
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 px-2 text-[var(--text-muted)] text-xs">
-                  {rule.source}
-                </td>
-                <td className="py-1.5 px-2 text-[var(--text-secondary)] text-xs">
-                  {rule.evidence || '\u2014'}
-                </td>
+          <table className="w-full text-sm" style={{ minWidth: 720 }}>
+            <thead className="sticky top-0 bg-[var(--bg-primary)] z-10">
+              <tr className="border-b border-[var(--border-subtle)]">
+                <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-16">Status</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Rule ID</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Section in Kaira Prompt</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-36">Source</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Evidence</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((rule) => {
+                const meta = getRuleOutcomeMeta(rule.status);
+                return (
+                  <tr key={rule.ruleId} className="border-b border-[var(--border-subtle)]">
+                    <td className="py-1.5 px-2 text-center">
+                      <span className={`inline-flex items-center justify-center min-w-[96px] px-2 py-0.5 rounded-full text-[0.65rem] font-semibold ${meta.badgeClass}`}>
+                        {meta.label}
+                      </span>
+                    </td>
+                    <td className={`py-1.5 px-2 font-semibold ${meta.textClass}`}>
+                      {rule.ruleId}
+                    </td>
+                    <td className="py-1.5 px-2 text-[var(--text-secondary)] max-w-[180px]">
+                      <span className="block text-xs bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-1.5 py-px rounded-full truncate" title={rule.section || ''}>
+                        {rule.section || '\u2014'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-[var(--text-muted)] text-xs">
+                      {rule.source}
+                    </td>
+                    <td className="py-1.5 px-2 text-[var(--text-secondary)] text-xs">
+                      {rule.evidence || '\u2014'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

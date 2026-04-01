@@ -2,6 +2,12 @@ import { AlertTriangle } from 'lucide-react';
 import type { EfficiencyEvaluation, RuleCompliance } from '@/types/evalRuns';
 import VerdictBadge from '../VerdictBadge';
 import { STATUS_COLORS } from '@/utils/statusColors';
+import {
+  getRuleOutcomeMeta,
+  getRuleOutcomeStatus,
+  sortRuleOutcomes,
+  summarizeRuleOutcomes,
+} from '../../utils/ruleCompliance';
 
 interface Props {
   evaluation: EfficiencyEvaluation | null;
@@ -31,9 +37,8 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
   }
 
   const ee = evaluation;
-  const violations = ee.rule_compliance?.filter(r => !r.followed) ?? [];
-  const passes = ee.rule_compliance?.filter(r => r.followed) ?? [];
-  const allRules = [...violations, ...passes];
+  const allRules = sortRuleOutcomes(ee.rule_compliance ?? []);
+  const summary = summarizeRuleOutcomes(allRules);
 
   return (
     <div className="space-y-4 overflow-y-auto h-full px-4 pb-4">
@@ -123,9 +128,7 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
           <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
             Rule Compliance
             <span className="ml-1.5 normal-case tracking-normal font-normal">
-              {violations.length === 0
-                ? `\u2014 All ${allRules.length} rules followed`
-                : `\u2014 ${violations.length} of ${allRules.length} violated`}
+              {`\u2014 ${summary}`}
             </span>
           </p>
           <div className="overflow-x-auto">
@@ -152,18 +155,16 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
 }
 
 function RuleRow({ rule }: { rule: RuleCompliance }) {
+  const status = getRuleOutcomeStatus(rule);
+  const meta = getRuleOutcomeMeta(status);
   return (
     <tr className="border-b border-[var(--border-subtle)]">
       <td className="py-1.5 px-2 text-center">
-        <span
-          className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[0.6rem] font-bold text-white ${
-            rule.followed ? 'bg-[var(--color-success)]' : 'bg-[var(--color-error)]'
-          }`}
-        >
-          {rule.followed ? '\u2713' : '\u2717'}
+        <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[0.6rem] font-bold ${meta.badgeClass}`}>
+          {meta.icon}
         </span>
       </td>
-      <td className={`py-1.5 px-2 font-semibold whitespace-nowrap ${rule.followed ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
+      <td className={`py-1.5 px-2 font-semibold whitespace-nowrap ${meta.textClass}`}>
         {rule.rule_id}
       </td>
       <td className="py-1.5 px-2 text-[var(--text-secondary)] max-w-[160px]">

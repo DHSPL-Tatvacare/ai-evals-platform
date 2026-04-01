@@ -36,6 +36,7 @@ import { AppReportTab } from '@/features/analytics/AppReportTab';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
+import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 
 function SuccessBanner({ durationSeconds }: { durationSeconds: number }) {
   return (
@@ -137,7 +138,7 @@ export default function RunDetail() {
   const retryableAdversarialEvalIds = useMemo(
     () =>
       adversarialEvals
-        .filter((evaluation) => evaluation.verdict == null && Boolean(evaluation.error))
+        .filter((evaluation) => Boolean(getCanonicalAdversarialCase(evaluation.result, evaluation).derived.isRetryable))
         .map((evaluation) => evaluation.id),
     [adversarialEvals],
   );
@@ -485,7 +486,7 @@ export default function RunDetail() {
                 {run.data_path}
               </span>
             )}
-            {run.error_message && (
+            {run.error_message && run.status.toLowerCase() === 'failed' && (
               <span className="text-[var(--color-error)]">{run.error_message}</span>
             )}
           </div>
@@ -735,30 +736,40 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
   retryingFailedCases: boolean;
   retryableCaseCount: number;
 }) {
-  const failedCount = evals.filter((e) => e.verdict == null).length;
-  const successfulEvals = evals.filter((e) => e.verdict != null);
-  const successfulCount = successfulEvals.length;
+  const canonicalCases = evals.map((evaluation) => ({
+    evaluation,
+    canonical: getCanonicalAdversarialCase(evaluation.result, evaluation),
+  }));
+  const infraCount = canonicalCases.filter(({ canonical }) => canonical.derived.isInfraFailure).length;
+  const evaluatedCases = canonicalCases.filter(({ canonical }) => !canonical.derived.isInfraFailure);
+  const successfulCount = evaluatedCases.length;
+  const passRate = successfulCount > 0
+    ? evaluatedCases.filter(({ canonical }) => canonical.judge.verdict === 'PASS').length / successfulCount
+    : null;
+  const goalRate = successfulCount > 0
+    ? evaluatedCases.filter(({ canonical }) => canonical.judge.goalAchieved).length / successfulCount
+    : null;
+  const avgTurns = evals.length > 0
+    ? canonicalCases.reduce((sum, { canonical, evaluation }) => sum + (canonical.facts.transcript.turnCount || evaluation.total_turns), 0) / evals.length
+    : null;
   const sourceSummaryItems = describeAdversarialCaseSources(run.batch_metadata);
   const canCompare = !isRunActive && successfulCount > 0;
   const canRetryFailures = !isRunActive && retryableCaseCount > 0;
 
   return (
     <>
-      {failedCount > 0 && !isRunActive && <AdversarialErrorBanner errors={failedCount} total={evals.length} />}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {infraCount > 0 && !isRunActive && <AdversarialErrorBanner errors={infraCount} total={evals.length} />}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatPill label="Tests" metricKey="total_tests" value={evals.length} />
-        <StatPill label="Pass Rate" metricKey="pass_rate" value={successfulCount > 0 ? pct(successfulEvals.filter((e) => normalizeLabel(e.verdict!) === "PASS").length / successfulCount) : "N/A"} />
-        <StatPill label="Goal Achievement" metricKey="goal_achievement" value={successfulCount > 0 ? pct(successfulEvals.filter((e) => e.goal_achieved).length / successfulCount) : "N/A"} />
-        {failedCount > 0 ? (
-          <StatPill label="Errors" value={`${failedCount} / ${evals.length}`} color="var(--color-error)" />
-        ) : (
-          <StatPill label="Avg Turns" metricKey="avg_turns" value={(evals.reduce((s, e) => s + e.total_turns, 0) / evals.length).toFixed(1)} />
-        )}
+        <StatPill label="Pass Rate" metricKey="pass_rate" value={passRate != null ? pct(passRate) : "N/A"} />
+        <StatPill label="Goal Achievement" metricKey="goal_achievement" value={goalRate != null ? pct(goalRate) : "N/A"} />
+        <StatPill label="Infra Error Rate" value={pct(evals.length > 0 ? infraCount / evals.length : 0)} color={infraCount > 0 ? "var(--color-error)" : undefined} />
+        <StatPill label="Avg Turns" metricKey="avg_turns" value={avgTurns != null ? avgTurns.toFixed(1) : 'N/A'} />
       </div>
 
       {(sourceSummaryItems.length > 0 || !isRunActive) && (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3">
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3 flex flex-col">
             <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
               Case Sources
             </p>
@@ -781,30 +792,30 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
           </div>
 
           {!isRunActive && (
-            <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
-                  Recovery
-                </p>
-                <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                  Retry infrastructure failures without re-running the full batch.
-                </p>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  {retryableCaseCount > 0
-                    ? `${retryableCaseCount} case${retryableCaseCount === 1 ? '' : 's'} can be retried from this run snapshot.`
-                    : 'No retryable infrastructure failures were found in this run.'}
-                </p>
+            <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-3 flex flex-col">
+              <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+                Retry Errored Cases
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Re-run cases that failed due to API errors (timeouts, rate limits) without repeating the entire test.
+              </p>
+              <p className="mt-1.5 text-xs text-[var(--text-secondary)]">
+                {retryableCaseCount > 0
+                  ? `${retryableCaseCount} case${retryableCaseCount === 1 ? '' : 's'} can be retried from this run snapshot.`
+                  : 'No retryable errored cases were found in this run snapshot.'}
+              </p>
+              <div className="mt-auto pt-2">
+                <PermissionGate action="eval:run">
+                  <Button
+                    variant="secondary"
+                    onClick={() => { void onRetryFailedCases(); }}
+                    disabled={!canRetryFailures}
+                    isLoading={retryingFailedCases}
+                  >
+                    Retry Failed Cases
+                  </Button>
+                </PermissionGate>
               </div>
-              <PermissionGate action="eval:run">
-                <Button
-                  variant="secondary"
-                  onClick={() => { void onRetryFailedCases(); }}
-                  disabled={!canRetryFailures}
-                  isLoading={retryingFailedCases}
-                >
-                  Retry Failed Cases
-                </Button>
-              </PermissionGate>
             </div>
           )}
         </div>

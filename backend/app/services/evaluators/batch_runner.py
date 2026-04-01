@@ -45,6 +45,7 @@ from app.services.evaluators.correctness_evaluator import CorrectnessEvaluator
 from app.services.evaluators.efficiency_evaluator import EfficiencyEvaluator
 from app.services.evaluators.models import RunMetadata, serialize
 from app.services.evaluators.adversarial_config import load_config_from_db
+from app.services.evaluators.thread_canonical import build_canonical_thread_evaluation
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
@@ -548,6 +549,14 @@ async def run_batch_evaluation(
                 }
                 if eval_errors:
                     result_data["error"] = "; ".join(eval_errors)
+                canonical_thread = build_canonical_thread_evaluation(
+                    result_data,
+                    row_intent_accuracy=intent_accuracy,
+                    row_worst_correctness=worst_correctness,
+                    row_efficiency_verdict=eff_verdict,
+                    row_success_status=is_success,
+                )
+                result_data["canonical_thread"] = canonical_thread
 
                 # --- Save to DB (always, with full partial results) ---
                 async with async_session() as db:

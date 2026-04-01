@@ -2,11 +2,20 @@
 
 Ported from kaira-evals/src/evaluators/efficiency_evaluator.py.
 """
+import logging
 from typing import List, Optional
 
 from app.services.evaluators.llm_base import BaseLLMProvider
-from app.services.evaluators.models import ConversationThread, EfficiencyEvaluation, RuleCompliance
+from app.services.evaluators.models import (
+    RULE_OUTCOME_STATUSES,
+    ConversationThread,
+    EfficiencyEvaluation,
+    RuleCompliance,
+    build_rule_compliance,
+)
 from app.services.evaluators.rule_catalog import get_rules_for_efficiency, PromptRule, normalize_rule_id
+
+logger = logging.getLogger(__name__)
 
 EFFICIENCY_JUDGE_SYSTEM_PROMPT = """You are a conversation-quality auditor for a health assistant that handles multiple interaction types.
 
@@ -109,6 +118,19 @@ VERDICT DECISION TREE
    YES → ≤2 turns? → EFFICIENT. >2 turns, all extra turns user-caused? → ACCEPTABLE
    NO → INCOMPLETE (set incomplete_reason)
 
+RULE COMPLIANCE
+
+For EACH production rule, return exactly one rule_compliance entry with:
+- rule_id: the exact rule_id from the provided rules list
+- status: one of FOLLOWED, VIOLATED, NOT_APPLICABLE, NOT_EVALUATED
+- evidence: one sentence that agrees with the chosen status
+
+Status semantics:
+- FOLLOWED: the bot demonstrably followed the rule
+- VIOLATED: the bot demonstrably violated the rule
+- NOT_APPLICABLE: the rule did not apply to this thread or thread type
+- NOT_EVALUATED: the transcript does not provide enough evidence to conclude pass/fail
+
 OUTPUT FORMAT
 
 Return strictly valid JSON with no surrounding text, no markdown fencing, no commentary. Every field is required."""
@@ -185,16 +207,17 @@ EFFICIENCY_JSON_SCHEMA = {
                         "type": "string",
                         "description": "The exact rule_id as provided in the rules list.",
                     },
-                    "followed": {
-                        "type": "boolean",
-                        "description": "True if the bot followed this rule throughout the conversation. False if it violated the rule at any point.",
+                    "status": {
+                        "type": "string",
+                        "enum": list(RULE_OUTCOME_STATUSES),
+                        "description": "Canonical rule outcome status. FOLLOWED means the bot followed the rule, VIOLATED means it broke the rule, NOT_APPLICABLE means the rule did not apply, and NOT_EVALUATED means there was not enough evidence to conclude.",
                     },
                     "evidence": {
                         "type": "string",
                         "description": "One sentence citing specific turn(s) or bot behavior as evidence.",
                     },
                 },
-                "required": ["rule_id", "followed", "evidence"],
+                "required": ["rule_id", "status", "evidence"],
             },
         },
     },
@@ -264,22 +287,32 @@ class EfficiencyEvaluator:
 
     @staticmethod
     def _parse_rule_compliance(raw_compliance: list, rules: List[PromptRule]) -> List[RuleCompliance]:
-        section_map = {r.rule_id: r.section for r in rules}
+        rule_map = {normalize_rule_id(r.rule_id): r for r in rules}
         compliance = []
         for item in raw_compliance:
             if not isinstance(item, dict):
                 continue
             rid = normalize_rule_id(item.get("rule_id", ""))
-            compliance.append(RuleCompliance(
-                rule_id=rid, section=section_map.get(rid, ""),
-                followed=bool(item.get("followed", True)), evidence=item.get("evidence", ""),
+            rule = rule_map.get(rid)
+            if rule is None:
+                logger.warning("Dropping unknown efficiency rule outcome: %s", rid or "<empty>")
+                continue
+            compliance.append(build_rule_compliance(
+                rule_id=rid,
+                section=rule.section,
+                status=item.get("status"),
+                followed=item.get("followed"),
+                evidence=item.get("evidence", ""),
             ))
         returned_ids = {c.rule_id for c in compliance}
         for r in rules:
             if r.rule_id not in returned_ids:
-                compliance.append(RuleCompliance(
-                    rule_id=r.rule_id, section=r.section,
-                    followed=None, evidence="Not evaluated by judge",
+                compliance.append(build_rule_compliance(
+                    rule_id=r.rule_id,
+                    section=r.section,
+                    status="NOT_EVALUATED",
+                    followed=None,
+                    evidence="Not evaluated by judge",
                 ))
         return compliance
 

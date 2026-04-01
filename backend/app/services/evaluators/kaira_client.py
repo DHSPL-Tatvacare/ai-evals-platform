@@ -20,10 +20,11 @@ logger = logging.getLogger(__name__)
 class KairaAPIError(Exception):
     """Rich error from Kaira API calls — carries status, message, and URL."""
 
-    def __init__(self, status: int, message: str, url: str):
+    def __init__(self, status: int, message: str, url: str, kind: str = "http"):
         self.status = status
         self.message = message
         self.url = url
+        self.kind = kind
         super().__init__(str(self))
 
     def __str__(self) -> str:
@@ -41,6 +42,11 @@ class KairaStreamResponse:
     detected_intents: List[Dict] = field(default_factory=list)
     agent_responses: List[Dict] = field(default_factory=list)
     is_multi_intent: bool = False
+    stream_errors: List[str] = field(default_factory=list)
+    saw_summary_chunk: bool = False
+    saw_agent_message: bool = False
+    had_partial_response: bool = False
+    had_empty_final_assistant_message: bool = False
 
     @property
     def agent_success(self) -> bool:
@@ -141,6 +147,12 @@ class KairaClient:
             result.thread_id = session_state.thread_id
             result.session_id = session_state.session_id
             result.response_id = session_state.response_id
+            result.had_partial_response = bool(
+                result.agent_responses and not result.saw_summary_chunk
+            )
+            result.had_empty_final_assistant_message = not bool(
+                (result.full_message or "").strip()
+            )
 
             response_summary = (
                 f"[{len(result.agent_responses)} agents] {result.full_message[:200]}"
@@ -199,6 +211,7 @@ class KairaClient:
                         status=resp.status,
                         message=body[:500] or resp.reason or "No response body",
                         url=url,
+                        kind="http",
                     )
                 async for line in resp.content:
                     decoded = line.decode("utf-8").strip()
@@ -223,12 +236,14 @@ class KairaClient:
                 status=0,
                 message="Request timed out — Kaira API did not respond in time",
                 url=url,
+                kind="timeout",
             ) from e
         except aiohttp.ClientError as e:
             raise KairaAPIError(
                 status=0,
                 message=str(e) or type(e).__name__,
                 url=url,
+                kind="client",
             ) from e
 
     @staticmethod
@@ -249,9 +264,13 @@ class KairaClient:
                 }
             )
             if chunk.get("success") and chunk.get("message"):
+                result.saw_agent_message = True
                 result.full_message = chunk.get("message")
         elif chunk_type == "summary":
             if chunk.get("message"):
+                result.saw_summary_chunk = True
                 result.full_message = chunk.get("message")
         elif chunk_type == "error":
-            logger.error(f"Stream error: {chunk.get('error')}")
+            error_message = str(chunk.get("error") or "Unknown stream error")
+            result.stream_errors.append(error_message)
+            logger.error(f"Stream error: {error_message}")

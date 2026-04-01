@@ -8,6 +8,7 @@ Final results get persisted to PostgreSQL via SQLAlchemy models.
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Optional, List, Dict, Literal, Any
+import re
 import uuid
 
 
@@ -71,6 +72,104 @@ class SerializableMixin:
         if "__type__" not in data:
             data = {**data, "__type__": cls.__name__}
         return deserialize(data)
+
+
+RULE_OUTCOME_STATUSES = (
+    "FOLLOWED",
+    "VIOLATED",
+    "NOT_APPLICABLE",
+    "NOT_EVALUATED",
+)
+
+ADVERSARIAL_RULE_OUTCOME_STATUSES = RULE_OUTCOME_STATUSES
+
+ADVERSARIAL_FAILURE_MODE_ENUM = {
+    "ASSUMED_DETAILS",
+    "REPETITIVE_LOOP",
+    "CONTEXT_LOSS",
+    "CONFUSED_STATE",
+    "HALLUCINATED_SYSTEM_STATE",
+    "USER_VISIBLE_INTERNAL_ERROR",
+    "DID_NOT_ANSWER_QUESTION",
+    "BROKEN_SUMMARY_FLOW",
+    "MISSING_CONFIRMATION_OPTIONS",
+    "INCORRECT_INFORMATION",
+    "BOT_CRASHED",
+    "EMPTY_RESPONSE",
+    "TECHNICAL_ERROR",
+    "POOR_EDIT_HANDLING",
+}
+
+_FAILURE_MODE_ALIASES = {
+    "ASSUMED_DETAIL": "ASSUMED_DETAILS",
+    "ASSUMED_INFORMATION": "ASSUMED_DETAILS",
+    "DETAILS_ASSUMED": "ASSUMED_DETAILS",
+    "REPETITIVE": "REPETITIVE_LOOP",
+    "LOOPING": "REPETITIVE_LOOP",
+    "LOOP": "REPETITIVE_LOOP",
+    "STATE_CONFUSION": "CONFUSED_STATE",
+    "CONFUSION": "CONFUSED_STATE",
+    "SYSTEM_STATE_HALLUCINATION": "HALLUCINATED_SYSTEM_STATE",
+    "HALLUCINATED_STATE": "HALLUCINATED_SYSTEM_STATE",
+    "INTERNAL_ERROR_LEAK": "USER_VISIBLE_INTERNAL_ERROR",
+    "USER_VISIBLE_ERROR": "USER_VISIBLE_INTERNAL_ERROR",
+    "USER_VISIBLE_INTERNAL_ERRORS": "USER_VISIBLE_INTERNAL_ERROR",
+    "FAILED_TO_ANSWER_QUESTION": "DID_NOT_ANSWER_QUESTION",
+    "DIDNT_ANSWER_QUESTION": "DID_NOT_ANSWER_QUESTION",
+    "NO_ANSWER": "DID_NOT_ANSWER_QUESTION",
+    "QUESTION_NOT_ANSWERED": "DID_NOT_ANSWER_QUESTION",
+    "BROKEN_SUMMARY": "BROKEN_SUMMARY_FLOW",
+    "SUMMARY_FLOW_BROKEN": "BROKEN_SUMMARY_FLOW",
+    "MISSING_CONFIRMATION_OPTION": "MISSING_CONFIRMATION_OPTIONS",
+    "MISSING_CONFIRM_OPTIONS": "MISSING_CONFIRMATION_OPTIONS",
+    "INCORRECT_INFO": "INCORRECT_INFORMATION",
+    "WRONG_INFORMATION": "INCORRECT_INFORMATION",
+    "BOT_CRASH": "BOT_CRASHED",
+    "BOT_CRASHES": "BOT_CRASHED",
+    "EMPTY_ASSISTANT_MESSAGE": "EMPTY_RESPONSE",
+    "NO_RESPONSE": "EMPTY_RESPONSE",
+    "TECH_ERROR": "TECHNICAL_ERROR",
+    "TECHNICAL_ISSUE": "TECHNICAL_ERROR",
+    "POOR_EDITS": "POOR_EDIT_HANDLING",
+    "BAD_EDIT_HANDLING": "POOR_EDIT_HANDLING",
+}
+
+
+def normalize_rule_outcome_status(
+    raw_status: str | None,
+    followed: Optional[bool] = None,
+) -> str:
+    if raw_status:
+        normalized = re.sub(r"[^A-Za-z0-9]+", "_", str(raw_status)).strip("_").upper()
+        if normalized in RULE_OUTCOME_STATUSES:
+            return normalized
+    if followed is True:
+        return "FOLLOWED"
+    if followed is False:
+        return "VIOLATED"
+    return "NOT_EVALUATED"
+
+
+def normalize_rule_outcome(
+    raw_status: str | None,
+    followed: Optional[bool] = None,
+) -> tuple[str, Optional[bool]]:
+    status = normalize_rule_outcome_status(raw_status, followed)
+    if status == "FOLLOWED":
+        return status, True
+    if status == "VIOLATED":
+        return status, False
+    return status, None
+
+
+def normalize_adversarial_failure_mode(raw_mode: str | None) -> str | None:
+    if not raw_mode:
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", str(raw_mode)).strip("_").upper()
+    normalized = _FAILURE_MODE_ALIASES.get(normalized, normalized)
+    if normalized in ADVERSARIAL_FAILURE_MODE_ENUM:
+        return normalized
+    return None
 
 
 # ─── Timestamp Parsing ─────────────────────────────────────────────
@@ -209,6 +308,27 @@ class RuleCompliance(SerializableMixin):
     section: str
     followed: Optional[bool]
     evidence: str = ""
+    status: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.status, self.followed = normalize_rule_outcome(self.status, self.followed)
+
+
+def build_rule_compliance(
+    *,
+    rule_id: str,
+    section: str,
+    evidence: str = "",
+    status: str | None = None,
+    followed: Optional[bool] = None,
+) -> RuleCompliance:
+    return RuleCompliance(
+        rule_id=rule_id,
+        section=section,
+        evidence=evidence,
+        status=status,
+        followed=followed,
+    )
 
 
 @_register
@@ -273,29 +393,106 @@ class GoalVerdict(SerializableMixin):
 
 @_register
 @dataclass
-class ConversationTranscript(SerializableMixin):
-    turns: List[ConversationTurn] = field(default_factory=list)
-    goal_achieved: bool = False  # rollup: True if ALL goals completed
-    goal_abandoned: bool = False  # any goal abandoned
-    total_turns: int = 0
-    failure_reason: str = ""
-    stop_reason: str = ""  # "goal_complete", "goal_abandoned", "max_turns", "error"
-    # Multi-goal tracking
+class TransportFacts(SerializableMixin):
+    had_http_error: bool = False
+    had_stream_error: bool = False
+    had_timeout: bool = False
+    had_empty_final_assistant_message: bool = False
+    had_partial_response: bool = False
+    http_errors: List[str] = field(default_factory=list)
+    stream_errors: List[str] = field(default_factory=list)
+
+
+@_register
+@dataclass
+class SimulatorState(SerializableMixin):
+    goal_achieved: bool = False
+    goal_abandoned: bool = False
     goals_attempted: List[str] = field(default_factory=list)
     goals_completed: List[str] = field(default_factory=list)
     goals_abandoned: List[str] = field(default_factory=list)
     goal_transitions: List[GoalTransition] = field(default_factory=list)
+    stop_reason: str = ""
+    failure_reason: str = ""
+
+
+@_register
+@dataclass
+class ConversationTranscript(SerializableMixin):
+    turns: List[ConversationTurn] = field(default_factory=list)
+    goal_achieved: bool = False  # legacy mirror of simulator.goal_achieved
+    goal_abandoned: bool = False  # legacy mirror of simulator.goal_abandoned
+    total_turns: int = 0
+    failure_reason: str = ""  # legacy mirror of simulator.failure_reason
+    stop_reason: str = ""  # legacy mirror of simulator.stop_reason
+    goals_attempted: List[str] = field(default_factory=list)  # legacy mirror
+    goals_completed: List[str] = field(default_factory=list)  # legacy mirror
+    goals_abandoned: List[str] = field(default_factory=list)  # legacy mirror
+    goal_transitions: List[GoalTransition] = field(default_factory=list)  # legacy mirror
+    transport: TransportFacts = field(default_factory=TransportFacts)
+    simulator: SimulatorState = field(default_factory=SimulatorState)
+
+    def __post_init__(self) -> None:
+        if not self.simulator.goals_attempted and self.goals_attempted:
+            self.simulator.goals_attempted = list(self.goals_attempted)
+        if not self.simulator.goals_completed and self.goals_completed:
+            self.simulator.goals_completed = list(self.goals_completed)
+        if not self.simulator.goals_abandoned and self.goals_abandoned:
+            self.simulator.goals_abandoned = list(self.goals_abandoned)
+        if not self.simulator.goal_transitions and self.goal_transitions:
+            self.simulator.goal_transitions = list(self.goal_transitions)
+        if not self.simulator.stop_reason and self.stop_reason:
+            self.simulator.stop_reason = self.stop_reason
+        if not self.simulator.failure_reason and self.failure_reason:
+            self.simulator.failure_reason = self.failure_reason
+        if not self.simulator.goal_achieved and self.goal_achieved:
+            self.simulator.goal_achieved = self.goal_achieved
+        if not self.simulator.goal_abandoned and self.goal_abandoned:
+            self.simulator.goal_abandoned = self.goal_abandoned
+        self.sync_legacy_fields()
 
     def add_turn(self, turn: ConversationTurn):
         self.turns.append(turn)
         self.total_turns = len(self.turns)
 
-    def to_text(self) -> str:
+    def sync_legacy_fields(self) -> None:
+        self.goal_achieved = self.simulator.goal_achieved
+        self.goal_abandoned = self.simulator.goal_abandoned
+        self.failure_reason = self.simulator.failure_reason
+        self.stop_reason = self.simulator.stop_reason
+        self.goals_attempted = list(self.simulator.goals_attempted)
+        self.goals_completed = list(self.simulator.goals_completed)
+        self.goals_abandoned = list(self.simulator.goals_abandoned)
+        self.goal_transitions = list(self.simulator.goal_transitions)
+
+    def record_transport_response(self, response: Any) -> None:
+        stream_errors = list(getattr(response, "stream_errors", []) or [])
+        if stream_errors:
+            self.transport.had_stream_error = True
+        for error in stream_errors:
+            if error not in self.transport.stream_errors:
+                self.transport.stream_errors.append(error)
+        if getattr(response, "had_partial_response", False):
+            self.transport.had_partial_response = True
+        if getattr(response, "had_empty_final_assistant_message", False):
+            self.transport.had_empty_final_assistant_message = True
+
+    def record_transport_error(self, error: Any) -> None:
+        kind = getattr(error, "kind", "")
+        message = str(error)
+        if kind == "timeout":
+            self.transport.had_timeout = True
+        else:
+            self.transport.had_http_error = True
+        if message and message not in self.transport.http_errors:
+            self.transport.http_errors.append(message)
+
+    def to_text(self, include_goal_transitions: bool = True) -> str:
         lines = []
-        # Build transition lookup: turn_number → list of transitions
         transitions_at: Dict[int, List[GoalTransition]] = {}
-        for gt in self.goal_transitions:
-            transitions_at.setdefault(gt.at_turn, []).append(gt)
+        if include_goal_transitions:
+            for gt in self.simulator.goal_transitions:
+                transitions_at.setdefault(gt.at_turn, []).append(gt)
 
         for turn in self.turns:
             lines.append(f"Turn {turn.turn_number}:")
@@ -303,7 +500,6 @@ class ConversationTranscript(SerializableMixin):
             lines.append(f"  Bot: {turn.bot_response}")
             if turn.detected_intent:
                 lines.append(f"  Intent: {turn.detected_intent}")
-            # Insert goal transition markers after this turn
             for gt in transitions_at.get(turn.turn_number, []):
                 lines.append(f"  ── {gt.event.upper()}: {gt.goal_id} (turn {gt.at_turn}) ──")
         return "\n".join(lines)
@@ -331,6 +527,7 @@ class AdversarialEvaluation(SerializableMixin):
     goal_achieved: bool = False  # rollup: ALL goals completed
     goal_verdicts: List[GoalVerdict] = field(default_factory=list)
     rule_compliance: List[RuleCompliance] = field(default_factory=list)
+    raw_judge_output: Dict[str, Any] = field(default_factory=dict)
 
 
 # ─── Composite Thread Evaluation ──────────────────────────────────

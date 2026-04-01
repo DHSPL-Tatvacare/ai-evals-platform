@@ -14,13 +14,18 @@ import re
 from typing import Optional, List
 
 from app.services.evaluators.llm_base import BaseLLMProvider
-from app.services.evaluators.kaira_client import KairaClient, KairaStreamResponse
+from app.services.evaluators.kaira_client import (
+    KairaAPIError,
+    KairaClient,
+    KairaStreamResponse,
+)
 from app.services.evaluators.models import (
     AdversarialTestCase,
     ConversationTranscript,
     ConversationTurn,
     GoalTransition,
     KairaSessionState,
+    SimulatorState,
 )
 from app.services.evaluators.adversarial_config import AdversarialGoal
 
@@ -214,6 +219,7 @@ class ConversationAgent:
 
         transcript = ConversationTranscript(
             goals_attempted=[g.id for g in goals],
+            simulator=SimulatorState(goals_attempted=[g.id for g in goals]),
         )
         current_message = test_case.synthetic_input
         session_state = KairaSessionState(user_id=user_id, is_first_message=True)
@@ -228,9 +234,10 @@ class ConversationAgent:
 
         # Mark first goal as started
         if pending_goals:
-            transcript.goal_transitions.append(GoalTransition(
+            transcript.simulator.goal_transitions.append(GoalTransition(
                 goal_id=pending_goals[0].id, event="started", at_turn=1,
             ))
+            transcript.sync_legacy_fields()
 
         # Build system prompt with all goals
         system_prompt = build_multi_goal_system_prompt(
@@ -249,11 +256,21 @@ class ConversationAgent:
                     session_state=session_state,
                     test_case_label=test_case_label,
                 )
+                transcript.record_transport_response(response)
+            except KairaAPIError as e:
+                transcript.record_transport_error(e)
+                logger.error(f"API error on turn {turn_num}: {e}")
+                transcript.simulator.failure_reason = f"API error: {e}"
+                transcript.simulator.goal_achieved = False
+                transcript.simulator.stop_reason = "error"
+                transcript.sync_legacy_fields()
+                break
             except Exception as e:
                 logger.error(f"API error on turn {turn_num}: {e}")
-                transcript.failure_reason = f"API error: {e}"
-                transcript.goal_achieved = False
-                transcript.stop_reason = "error"
+                transcript.simulator.failure_reason = f"API error: {e}"
+                transcript.simulator.goal_achieved = False
+                transcript.simulator.stop_reason = "error"
+                transcript.sync_legacy_fields()
                 break
 
             # --- Annotate goal signals ---
@@ -294,9 +311,10 @@ class ConversationAgent:
             # --- Exit conditions ---
             if next_message is None:
                 logger.warning(f"LLM agent failed on turn {turn_num}, stopping")
-                transcript.failure_reason = "LLM agent error"
-                transcript.goal_achieved = False
-                transcript.stop_reason = "error"
+                transcript.simulator.failure_reason = "LLM agent error"
+                transcript.simulator.goal_achieved = False
+                transcript.simulator.stop_reason = "error"
+                transcript.sync_legacy_fields()
                 break
 
             next_message = next_message.strip()
@@ -306,12 +324,13 @@ class ConversationAgent:
                 # Mark any remaining pending goals as completed
                 for g in pending_goals:
                     completed_goals.append(g.id)
-                    transcript.goal_transitions.append(GoalTransition(
+                    transcript.simulator.goal_transitions.append(GoalTransition(
                         goal_id=g.id, event="completed", at_turn=turn_num,
                     ))
                 pending_goals.clear()
-                transcript.goal_achieved = True
-                transcript.stop_reason = "goal_complete"
+                transcript.simulator.goal_achieved = True
+                transcript.simulator.stop_reason = "goal_complete"
+                transcript.sync_legacy_fields()
                 break
 
             # Check for GOAL_COMPLETE:<goal_id>
@@ -319,20 +338,32 @@ class ConversationAgent:
             if gc_match:
                 goal_id = gc_match.group(1)
                 completed_goals.append(goal_id)
-                transcript.goal_transitions.append(GoalTransition(
+                transcript.simulator.goal_transitions.append(GoalTransition(
                     goal_id=goal_id, event="completed", at_turn=turn_num,
                 ))
                 pending_goals = [g for g in pending_goals if g.id != goal_id]
 
                 if not pending_goals:
-                    transcript.goal_achieved = True
-                    transcript.stop_reason = "goal_complete"
+                    transcript.simulator.goal_achieved = True
+                    transcript.simulator.stop_reason = "goal_complete"
+                    transcript.sync_legacy_fields()
                     break
                 else:
-                    # Start next goal
-                    transcript.goal_transitions.append(GoalTransition(
-                        goal_id=pending_goals[0].id, event="started", at_turn=turn_num + 1,
-                    ))
+                    next_message = await self._prepare_next_goal_message(
+                        test_case=test_case,
+                        goals=goals,
+                        completed_goals=completed_goals,
+                        pending_goals=pending_goals,
+                        transcript=transcript,
+                        system_prompt=system_prompt,
+                        remaining_turns=remaining,
+                        max_turns=effective_max_turns,
+                        thinking=thinking,
+                        at_turn=turn_num + 1,
+                    )
+                    if next_message is None:
+                        break
+                    current_message = next_message
                     continue
 
             # Check for GOAL_ABANDONED:<goal_id>
@@ -340,21 +371,34 @@ class ConversationAgent:
             if ga_match:
                 goal_id = ga_match.group(1)
                 abandoned_goals.append(goal_id)
-                transcript.goal_transitions.append(GoalTransition(
+                transcript.simulator.goal_transitions.append(GoalTransition(
                     goal_id=goal_id, event="abandoned", at_turn=turn_num,
                 ))
                 pending_goals = [g for g in pending_goals if g.id != goal_id]
 
                 if not pending_goals:
-                    transcript.goal_achieved = False
-                    transcript.goal_abandoned = True
-                    transcript.stop_reason = "goal_abandoned"
-                    transcript.failure_reason = "All goals abandoned"
+                    transcript.simulator.goal_achieved = False
+                    transcript.simulator.goal_abandoned = True
+                    transcript.simulator.stop_reason = "goal_abandoned"
+                    transcript.simulator.failure_reason = "All goals abandoned"
+                    transcript.sync_legacy_fields()
                     break
                 else:
-                    transcript.goal_transitions.append(GoalTransition(
-                        goal_id=pending_goals[0].id, event="started", at_turn=turn_num + 1,
-                    ))
+                    next_message = await self._prepare_next_goal_message(
+                        test_case=test_case,
+                        goals=goals,
+                        completed_goals=completed_goals,
+                        pending_goals=pending_goals,
+                        transcript=transcript,
+                        system_prompt=system_prompt,
+                        remaining_turns=remaining,
+                        max_turns=effective_max_turns,
+                        thinking=thinking,
+                        at_turn=turn_num + 1,
+                    )
+                    if next_message is None:
+                        break
+                    current_message = next_message
                     continue
 
             # Legacy single-goal signals
@@ -362,59 +406,88 @@ class ConversationAgent:
                 if pending_goals:
                     gid = pending_goals[0].id
                     completed_goals.append(gid)
-                    transcript.goal_transitions.append(GoalTransition(
+                    transcript.simulator.goal_transitions.append(GoalTransition(
                         goal_id=gid, event="completed", at_turn=turn_num,
                     ))
                     pending_goals.pop(0)
                 if not pending_goals:
-                    transcript.goal_achieved = True
-                    transcript.stop_reason = "goal_complete"
+                    transcript.simulator.goal_achieved = True
+                    transcript.simulator.stop_reason = "goal_complete"
+                    transcript.sync_legacy_fields()
                     break
                 else:
-                    transcript.goal_transitions.append(GoalTransition(
-                        goal_id=pending_goals[0].id, event="started", at_turn=turn_num + 1,
-                    ))
+                    next_message = await self._prepare_next_goal_message(
+                        test_case=test_case,
+                        goals=goals,
+                        completed_goals=completed_goals,
+                        pending_goals=pending_goals,
+                        transcript=transcript,
+                        system_prompt=system_prompt,
+                        remaining_turns=remaining,
+                        max_turns=effective_max_turns,
+                        thinking=thinking,
+                        at_turn=turn_num + 1,
+                    )
+                    if next_message is None:
+                        break
+                    current_message = next_message
                     continue
 
             if next_message == "GOAL_ABANDONED":
                 if pending_goals:
                     gid = pending_goals[0].id
                     abandoned_goals.append(gid)
-                    transcript.goal_transitions.append(GoalTransition(
+                    transcript.simulator.goal_transitions.append(GoalTransition(
                         goal_id=gid, event="abandoned", at_turn=turn_num,
                     ))
                     pending_goals.pop(0)
                 if not pending_goals:
-                    transcript.goal_achieved = False
-                    transcript.goal_abandoned = True
-                    transcript.stop_reason = "goal_abandoned"
-                    transcript.failure_reason = "All goals abandoned"
+                    transcript.simulator.goal_achieved = False
+                    transcript.simulator.goal_abandoned = True
+                    transcript.simulator.stop_reason = "goal_abandoned"
+                    transcript.simulator.failure_reason = "All goals abandoned"
+                    transcript.sync_legacy_fields()
                     break
                 else:
-                    transcript.goal_transitions.append(GoalTransition(
-                        goal_id=pending_goals[0].id, event="started", at_turn=turn_num + 1,
-                    ))
+                    next_message = await self._prepare_next_goal_message(
+                        test_case=test_case,
+                        goals=goals,
+                        completed_goals=completed_goals,
+                        pending_goals=pending_goals,
+                        transcript=transcript,
+                        system_prompt=system_prompt,
+                        remaining_turns=remaining,
+                        max_turns=effective_max_turns,
+                        thinking=thinking,
+                        at_turn=turn_num + 1,
+                    )
+                    if next_message is None:
+                        break
+                    current_message = next_message
                     continue
 
             if not next_message:
                 logger.warning(f"LLM agent returned empty on turn {turn_num}, stopping")
-                transcript.failure_reason = "LLM agent returned empty response"
-                transcript.goal_achieved = False
-                transcript.stop_reason = "error"
+                transcript.simulator.failure_reason = "LLM agent returned empty response"
+                transcript.simulator.goal_achieved = False
+                transcript.simulator.stop_reason = "error"
+                transcript.sync_legacy_fields()
                 break
 
             current_message = next_message
 
         # Max turns exhausted
         if transcript.total_turns >= effective_max_turns and not transcript.stop_reason:
-            transcript.failure_reason = f"Max turns ({effective_max_turns}) reached"
-            transcript.stop_reason = "max_turns"
+            transcript.simulator.failure_reason = f"Max turns ({effective_max_turns}) reached"
+            transcript.simulator.stop_reason = "max_turns"
 
         # Finalize transcript goal tracking
-        transcript.goals_completed = completed_goals
-        transcript.goals_abandoned = abandoned_goals
-        if not transcript.stop_reason:
-            transcript.goal_achieved = len(completed_goals) == len(goals)
+        transcript.simulator.goals_completed = completed_goals
+        transcript.simulator.goals_abandoned = abandoned_goals
+        transcript.simulator.goal_abandoned = bool(abandoned_goals)
+        if not transcript.simulator.stop_reason:
+            transcript.simulator.goal_achieved = len(completed_goals) == len(goals)
+        transcript.sync_legacy_fields()
 
         return transcript
 
@@ -488,3 +561,59 @@ class ConversationAgent:
         except Exception as e:
             logger.error(f"LLM conversation agent failed: {e}")
             return None
+
+    async def _prepare_next_goal_message(
+        self,
+        test_case: AdversarialTestCase,
+        goals: List[AdversarialGoal],
+        completed_goals: List[str],
+        pending_goals: List[AdversarialGoal],
+        transcript: ConversationTranscript,
+        system_prompt: str,
+        remaining_turns: int,
+        max_turns: int,
+        thinking: str,
+        at_turn: int,
+    ) -> Optional[str]:
+        next_goal = pending_goals[0]
+        transcript.simulator.goal_transitions.append(
+            GoalTransition(goal_id=next_goal.id, event="started", at_turn=at_turn)
+        )
+        transcript.sync_legacy_fields()
+
+        next_message = await self._decide_next_turn(
+            test_case=test_case,
+            goals=goals,
+            current_goal=next_goal,
+            completed_goals=completed_goals,
+            pending_goals=pending_goals,
+            transcript=transcript,
+            system_prompt=system_prompt,
+            remaining_turns=remaining_turns,
+            max_turns=max_turns,
+            thinking=thinking,
+        )
+        if next_message is None:
+            logger.warning("LLM agent failed while opening the next goal, stopping")
+            transcript.simulator.failure_reason = "LLM agent error"
+            transcript.simulator.goal_achieved = False
+            transcript.simulator.stop_reason = "error"
+            transcript.sync_legacy_fields()
+            return None
+
+        next_message = next_message.strip()
+        if (
+            not next_message
+            or next_message == "ALL_GOALS_COMPLETE"
+            or _GOAL_COMPLETE_RE.search(next_message)
+            or _GOAL_ABANDONED_RE.search(next_message)
+            or next_message in {"GOAL_COMPLETE", "GOAL_ABANDONED"}
+        ):
+            logger.warning("LLM agent returned no usable opener for next goal: %s", next_message)
+            transcript.simulator.failure_reason = "LLM agent returned invalid next-goal opener"
+            transcript.simulator.goal_achieved = False
+            transcript.simulator.stop_reason = "error"
+            transcript.sync_legacy_fields()
+            return None
+
+        return next_message

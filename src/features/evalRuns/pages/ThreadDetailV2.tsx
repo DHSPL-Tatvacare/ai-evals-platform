@@ -23,6 +23,7 @@ import {
   RuleComplianceTab,
 } from '../components/threadReview';
 import type { EvalTab } from '../components/threadReview';
+import { getCanonicalThreadEvaluation } from '../utils/threadCanonical';
 
 export default function ThreadDetailV2() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -45,6 +46,10 @@ export default function ThreadDetailV2() {
   const result = useMemo(
     () => current?.result ? unwrapSerializedDates(current.result) as ThreadEvalResult : undefined,
     [current?.result],
+  );
+  const canonicalThread = useMemo(
+    () => (result ? getCanonicalThreadEvaluation(result, current) : null),
+    [current, result],
   );
 
   useEffect(() => {
@@ -115,8 +120,9 @@ export default function ThreadDetailV2() {
   }, [result?.efficiency_evaluation?.friction_turns]);
 
   const hasCustomEvals = result?.custom_evaluations && Object.keys(result.custom_evaluations).length > 0;
-  const hasRules = (result?.efficiency_evaluation?.rule_compliance?.length ?? 0) > 0 ||
-    (result?.correctness_evaluations ?? []).some(ce => (ce.rule_compliance?.length ?? 0) > 0);
+  const hasRules = (canonicalThread?.derived.canonicalRuleOutcomes.length ?? 0) > 0
+    || (result?.efficiency_evaluation?.rule_compliance?.length ?? 0) > 0
+    || (result?.correctness_evaluations ?? []).some(ce => (ce.rule_compliance?.length ?? 0) > 0);
 
   const linking = useEvalLinking('efficiency');
 
@@ -192,6 +198,7 @@ export default function ThreadDetailV2() {
           <RuleComplianceTab
             efficiencyEvaluation={result?.efficiency_evaluation}
             correctnessEvaluations={result?.correctness_evaluations}
+            canonicalThread={canonicalThread}
           />
         ),
       });
@@ -199,7 +206,7 @@ export default function ThreadDetailV2() {
 
     return tabList;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, linking.activeTab, linking.activeTurnIndex, evaluatorDescriptors, hasCustomEvals, hasRules]);
+  }, [result, canonicalThread, linking.activeTab, linking.activeTurnIndex, evaluatorDescriptors, hasCustomEvals, hasRules]);
 
   if (error) {
     return (

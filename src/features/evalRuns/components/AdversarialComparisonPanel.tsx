@@ -5,6 +5,7 @@ import { Card, SearchableSelect } from '@/components/ui';
 import type { AdversarialEvalRow, EvalRun } from '@/types';
 import { fetchEvalRuns, fetchRunAdversarial } from '@/services/api/evalRunsApi';
 import { humanize, pct } from '@/utils/evalFormatters';
+import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 
 interface Props {
   currentRunId: string;
@@ -21,21 +22,22 @@ interface MetricSnapshot {
 }
 
 function computeMetrics(evaluations: AdversarialEvalRow[]): MetricSnapshot {
-  const successful = evaluations.filter((evaluation) => evaluation.verdict != null);
-  const errors = evaluations.filter((evaluation) => evaluation.verdict == null).length;
+  const canonical = evaluations.map((evaluation) => getCanonicalAdversarialCase(evaluation.result, evaluation));
+  const successful = canonical.filter((caseRecord) => !caseRecord.derived.isInfraFailure);
+  const errors = canonical.filter((caseRecord) => caseRecord.derived.isInfraFailure).length;
   return {
     passRate:
       successful.length > 0
-        ? successful.filter((evaluation) => evaluation.verdict === 'PASS').length / successful.length
+        ? successful.filter((caseRecord) => caseRecord.judge.verdict === 'PASS').length / successful.length
         : null,
     goalRate:
       successful.length > 0
-        ? successful.filter((evaluation) => Boolean(evaluation.goal_achieved)).length / successful.length
+        ? successful.filter((caseRecord) => caseRecord.judge.goalAchieved).length / successful.length
         : null,
     errorRate: evaluations.length > 0 ? errors / evaluations.length : 0,
     avgTurns:
       evaluations.length > 0
-        ? evaluations.reduce((sum, evaluation) => sum + evaluation.total_turns, 0) / evaluations.length
+        ? canonical.reduce((sum, caseRecord) => sum + caseRecord.facts.transcript.turnCount, 0) / evaluations.length
         : null,
   };
 }
@@ -43,12 +45,15 @@ function computeMetrics(evaluations: AdversarialEvalRow[]): MetricSnapshot {
 function computeGoalPassRates(evaluations: AdversarialEvalRow[]): Record<string, number> {
   const grouped: Record<string, { total: number; passed: number }> = {};
   evaluations.forEach((evaluation) => {
-    const primaryGoal = evaluation.goal_flow?.[0] || 'unknown';
-    grouped[primaryGoal] = grouped[primaryGoal] || { total: 0, passed: 0 };
-    grouped[primaryGoal].total += 1;
-    if (evaluation.verdict === 'PASS') {
-      grouped[primaryGoal].passed += 1;
-    }
+    const canonical = getCanonicalAdversarialCase(evaluation.result, evaluation);
+    canonical.judge.goalVerdicts.forEach((goalVerdict) => {
+      const goalId = goalVerdict.goalId || 'unknown';
+      grouped[goalId] = grouped[goalId] || { total: 0, passed: 0 };
+      grouped[goalId].total += 1;
+      if (goalVerdict.achieved) {
+        grouped[goalId].passed += 1;
+      }
+    });
   });
   return Object.fromEntries(
     Object.entries(grouped).map(([goal, values]) => [
@@ -189,20 +194,24 @@ export function AdversarialComparisonPanel({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <CompareRunBlock
-          label="Current Run"
-          title={currentRunName || 'Current adversarial run'}
-          subtitle={currentRunCreatedAt ? new Date(currentRunCreatedAt).toLocaleDateString() : undefined}
-        />
-        <div className="space-y-1.5">
+        <div className="flex flex-col gap-1.5">
+          <p className="text-[12px] font-medium text-[var(--text-primary)]">Current Run</p>
+          <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+            <div>
+              <p className="text-[12px] font-semibold text-[var(--text-primary)]">{currentRunName || 'Current adversarial run'}</p>
+              {currentRunCreatedAt && <p className="text-[11px] text-[var(--text-muted)]">{new Date(currentRunCreatedAt).toLocaleDateString()}</p>}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
           <p className="text-[12px] font-medium text-[var(--text-primary)]">Baseline Run</p>
           {loadingRuns ? (
-            <div className="flex items-center gap-2 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+            <div className="flex-1 flex items-center gap-2 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Loading past runs...
             </div>
           ) : baselineOptions.length === 0 ? (
-            <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+            <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
               No other adversarial runs available yet.
             </div>
           ) : (
@@ -244,7 +253,7 @@ export function AdversarialComparisonPanel({
               improveWhenPositive
             />
             <DeltaMetric
-              label="Error Rate"
+              label="Infra Error Rate"
               mode="percent"
               current={formatMetricValue(currentMetrics.errorRate, 'percent')}
               baseline={formatMetricValue(baselineMetrics.errorRate, 'percent')}
@@ -316,25 +325,6 @@ export function AdversarialComparisonPanel({
   );
 }
 
-function CompareRunBlock({
-  label,
-  title,
-  subtitle,
-}: {
-  label: string;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[12px] font-medium text-[var(--text-primary)]">{label}</p>
-      <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-        <p className="text-[12px] font-semibold text-[var(--text-primary)]">{title}</p>
-        {subtitle && <p className="text-[11px] text-[var(--text-muted)]">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
 
 function DeltaMetric({
   label,
