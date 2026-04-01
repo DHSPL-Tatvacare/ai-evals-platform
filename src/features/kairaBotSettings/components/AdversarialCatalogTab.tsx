@@ -22,6 +22,7 @@ import {
   Input,
   MultiSelect,
   type MultiSelectOption,
+  Tabs,
 } from '@/components/ui';
 import { notificationService } from '@/services/notifications';
 import {
@@ -106,6 +107,8 @@ function buildCopiedId(value: string): string {
   return value ? `${value}_copy` : '';
 }
 
+// ─── Reusable presentational components ─────────────────────────
+
 function SummaryCard({
   label,
   value,
@@ -189,6 +192,354 @@ function EmptyContractsState({
   );
 }
 
+// ─── Sub-tab content components ─────────────────────────────────
+
+function GoalsSubTab({
+  config,
+  onAdd,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  config: AdversarialConfig;
+  onAdd: () => void;
+  onEdit: (index: number) => void;
+  onDuplicate: (goal: AdversarialGoal) => void;
+  onDelete: (index: number, label: string) => void;
+}) {
+  const activeCount = config.goals.filter((g) => g.enabled).length;
+  return (
+    <SectionCard
+      title="Goals"
+      subtitle="Define the user outcome the simulated conversation is trying to achieve."
+      countLabel={`${activeCount}/${config.goals.length} enabled`}
+      addLabel="Add Goal"
+      onAdd={onAdd}
+    >
+      {config.goals.length === 0 ? (
+        <EmptyContractsState
+          title="No goals configured"
+          description="Add a goal contract to define how an evaluation should know the conversation succeeded."
+        />
+      ) : (
+        config.goals.map((goal, index) => (
+          <div
+            key={goal.id}
+            className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                    {goal.label || humanize(goal.id)}
+                  </p>
+                  <Badge variant="neutral">{goal.id}</Badge>
+                  <Badge variant={goal.enabled ? 'success' : 'warning'}>
+                    {goal.enabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                  {goal.description}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant="neutral">{goal.completionCriteria.length} completion checks</Badge>
+                  <Badge variant="neutral">{goal.notCompletion.length} stop conditions</Badge>
+                  <Badge variant="neutral">{goal.signalPatterns.length} signal patterns</Badge>
+                </div>
+              </div>
+              <PermissionGate action="settings:edit">
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton icon={Pencil} label="Edit goal" onClick={() => onEdit(index)} />
+                  <IconButton icon={Copy} label="Duplicate goal" onClick={() => onDuplicate(goal)} />
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete goal"
+                    variant="danger"
+                    onClick={() => onDelete(index, goal.label || goal.id)}
+                  />
+                </div>
+              </PermissionGate>
+            </div>
+          </div>
+        ))
+      )}
+    </SectionCard>
+  );
+}
+
+function TraitsSubTab({
+  config,
+  onAdd,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  config: AdversarialConfig;
+  onAdd: () => void;
+  onEdit: (index: number) => void;
+  onDuplicate: (trait: AdversarialTrait) => void;
+  onDelete: (index: number, label: string) => void;
+}) {
+  const activeCount = config.traits.filter((t) => t.enabled).length;
+  return (
+    <SectionCard
+      title="Traits"
+      subtitle="Describe how the simulated user behaves while pursuing a goal."
+      countLabel={`${activeCount}/${config.traits.length} enabled`}
+      addLabel="Add Trait"
+      onAdd={onAdd}
+    >
+      {config.traits.length === 0 ? (
+        <EmptyContractsState
+          title="No traits configured"
+          description="Add traits to shape user behavior, ambiguity, stubbornness, or corrections."
+        />
+      ) : (
+        config.traits.map((trait, index) => (
+          <div
+            key={trait.id}
+            className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                    {trait.label || humanize(trait.id)}
+                  </p>
+                  <Badge variant="neutral">{trait.id}</Badge>
+                  <Badge variant={trait.enabled ? 'success' : 'warning'}>
+                    {trait.enabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                  {trait.description}
+                </p>
+                {trait.behaviorHint && (
+                  <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-muted)]">
+                    Behavior hint: {trait.behaviorHint}
+                  </p>
+                )}
+              </div>
+              <PermissionGate action="settings:edit">
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton icon={Pencil} label="Edit trait" onClick={() => onEdit(index)} />
+                  <IconButton icon={Copy} label="Duplicate trait" onClick={() => onDuplicate(trait)} />
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete trait"
+                    variant="danger"
+                    onClick={() => onDelete(index, trait.label || trait.id)}
+                  />
+                </div>
+              </PermissionGate>
+            </div>
+          </div>
+        ))
+      )}
+    </SectionCard>
+  );
+}
+
+/** Groups rules by their `section` field and renders each group as a collapsible block. */
+function RulesSubTab({
+  config,
+  onAdd,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  config: AdversarialConfig;
+  onAdd: () => void;
+  onEdit: (index: number) => void;
+  onDuplicate: (rule: AdversarialRule) => void;
+  onDelete: (index: number, label: string) => void;
+}) {
+  const groupedRules = useMemo(() => {
+    const groups: { section: string; rules: { rule: AdversarialRule; globalIndex: number }[] }[] = [];
+    const sectionMap = new Map<string, number>();
+
+    config.rules.forEach((rule, globalIndex) => {
+      const section = rule.section || 'Uncategorized';
+      let groupIdx = sectionMap.get(section);
+      if (groupIdx === undefined) {
+        groupIdx = groups.length;
+        sectionMap.set(section, groupIdx);
+        groups.push({ section, rules: [] });
+      }
+      groups[groupIdx].rules.push({ rule, globalIndex });
+    });
+
+    return groups;
+  }, [config.rules]);
+
+  return (
+    <div className="space-y-4">
+      <Card hoverable={false} className="space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">Rules</h3>
+              <Badge variant="neutral" size="sm">{config.rules.length} total</Badge>
+              <Badge variant="neutral" size="sm">{groupedRules.length} sections</Badge>
+            </div>
+            <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+              Track the prompt or product rules that the evaluator must explicitly verify.
+            </p>
+          </div>
+          <PermissionGate action="settings:edit">
+            <Button variant="secondary" size="sm" icon={Plus} onClick={onAdd}>
+              Add Rule
+            </Button>
+          </PermissionGate>
+        </div>
+      </Card>
+
+      {config.rules.length === 0 ? (
+        <EmptyContractsState
+          title="No rules configured"
+          description="Add rules to define what behavior the evaluation judge must confirm or flag."
+        />
+      ) : (
+        groupedRules.map(({ section, rules }) => (
+          <CollapsibleSection
+            key={section}
+            title={section}
+            subtitle={`${rules.length} rule${rules.length === 1 ? '' : 's'}`}
+            defaultOpen={false}
+          >
+            <div className="space-y-2">
+              {rules.map(({ rule, globalIndex }) => (
+                <div
+                  key={rule.ruleId}
+                  className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                          {rule.ruleId}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                        {rule.ruleText}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {rule.goalIds.map((goalId) => (
+                          <Badge key={goalId} variant="primary">
+                            {goalId}
+                          </Badge>
+                        ))}
+                        {rule.evaluationScopes.map((scope) => (
+                          <Badge key={`${rule.ruleId}-${scope}`} variant="neutral">
+                            {scope === 'adversarial'
+                              ? 'Adversarial'
+                              : scope === 'correctness'
+                                ? 'Correctness'
+                                : 'Efficiency'}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <PermissionGate action="settings:edit">
+                      <div className="flex items-center gap-1 shrink-0">
+                        <IconButton icon={Pencil} label="Edit rule" onClick={() => onEdit(globalIndex)} />
+                        <IconButton icon={Copy} label="Duplicate rule" onClick={() => onDuplicate(rule)} />
+                        <IconButton
+                          icon={Trash2}
+                          label="Delete rule"
+                          variant="danger"
+                          onClick={() => onDelete(globalIndex, rule.ruleId)}
+                        />
+                      </div>
+                    </PermissionGate>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CollapsibleSection>
+        ))
+      )}
+    </div>
+  );
+}
+
+function AdvancedToolsSubTab({
+  config,
+  rawJson,
+  saving,
+  importInputRef,
+  onImportFile,
+  onExport,
+  onReset,
+}: {
+  config: AdversarialConfig;
+  rawJson: string;
+  saving: boolean;
+  importInputRef: React.RefObject<HTMLInputElement | null>;
+  onImportFile: (file: File) => void;
+  onExport: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <Card hoverable={false} className="space-y-4">
+      <div>
+        <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
+          Advanced Tools
+        </h3>
+        <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+          Import, export, inspect, or reset the full contract payload.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <PermissionGate action="settings:edit">
+          <Button variant="secondary" icon={Upload} onClick={() => importInputRef.current?.click()} disabled={saving}>
+            Import
+          </Button>
+        </PermissionGate>
+        <Button variant="secondary" icon={Download} onClick={onExport}>
+          Export
+        </Button>
+        <PermissionGate action="settings:edit">
+          <Button variant="warning" icon={RotateCcw} onClick={onReset} disabled={saving}>
+            Reset To Defaults
+          </Button>
+        </PermissionGate>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              onImportFile(file);
+            }
+          }}
+        />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[12px] font-medium text-[var(--text-primary)]">
+            Current payload
+          </p>
+          <Badge variant="neutral" size="sm">v{config.version}</Badge>
+        </div>
+        <textarea
+          value={rawJson}
+          readOnly
+          rows={16}
+          className={`${TEXTAREA_CLASSNAME} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}
+          spellCheck={false}
+        />
+      </div>
+    </Card>
+  );
+}
+
+// ─── Main component ─────────────────────────────────────────────
+
 export function EvaluationContractsTab() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [config, setConfig] = useState<AdversarialConfig | null>(null);
@@ -252,6 +603,8 @@ export function EvaluationContractsTab() {
     [],
   );
 
+  // ─── Editor open helpers ────────────────────────────────────
+
   const openGoalEditor = useCallback((mode: 'create' | 'edit', index?: number) => {
     if (!config) return;
     const draft =
@@ -300,6 +653,8 @@ export function EvaluationContractsTab() {
       initialDraft: draft,
     });
   }, [config]);
+
+  // ─── Duplicate helpers ──────────────────────────────────────
 
   const handleDuplicateGoal = useCallback((goal: AdversarialGoal) => {
     setEditorError('');
@@ -356,6 +711,8 @@ export function EvaluationContractsTab() {
     });
   }, []);
 
+  // ─── Draft updaters ─────────────────────────────────────────
+
   const updateGoalDraft = useCallback((updates: Partial<AdversarialGoal>) => {
     setEditorState((current) => {
       if (!current || current.kind !== 'goal') return current;
@@ -379,6 +736,8 @@ export function EvaluationContractsTab() {
     });
     setEditorError('');
   }, []);
+
+  // ─── Save / delete / reset / import / export ───────────────
 
   const handleSaveEditor = useCallback(async () => {
     if (!config || !editorState) return;
@@ -577,12 +936,83 @@ export function EvaluationContractsTab() {
     }
   }, []);
 
+  // ─── Derived values ─────────────────────────────────────────
+
   const activeGoalCount = config?.goals.filter((goal) => goal.enabled).length ?? 0;
   const activeTraitCount = config?.traits.filter((trait) => trait.enabled).length ?? 0;
   const rawJson = useMemo(
     () => (config ? JSON.stringify(config, null, 2) : ''),
     [config],
   );
+
+  // ─── Sub-tab registry (data-driven) ─────────────────────────
+
+  const subTabs = useMemo(() => {
+    if (!config) return [];
+    return [
+      {
+        id: 'goals',
+        label: `Goals (${config.goals.length})`,
+        content: (
+          <GoalsSubTab
+            config={config}
+            onAdd={() => openGoalEditor('create')}
+            onEdit={(index) => openGoalEditor('edit', index)}
+            onDuplicate={handleDuplicateGoal}
+            onDelete={(index, label) => setDeleteTarget({ kind: 'goal', index, label })}
+          />
+        ),
+      },
+      {
+        id: 'traits',
+        label: `Traits (${config.traits.length})`,
+        content: (
+          <TraitsSubTab
+            config={config}
+            onAdd={() => openTraitEditor('create')}
+            onEdit={(index) => openTraitEditor('edit', index)}
+            onDuplicate={handleDuplicateTrait}
+            onDelete={(index, label) => setDeleteTarget({ kind: 'trait', index, label })}
+          />
+        ),
+      },
+      {
+        id: 'rules',
+        label: `Rules (${config.rules.length})`,
+        content: (
+          <RulesSubTab
+            config={config}
+            onAdd={() => openRuleEditor('create')}
+            onEdit={(index) => openRuleEditor('edit', index)}
+            onDuplicate={handleDuplicateRule}
+            onDelete={(index, label) => setDeleteTarget({ kind: 'rule', index, label })}
+          />
+        ),
+      },
+      {
+        id: 'advanced',
+        label: 'Advanced Tools',
+        content: (
+          <AdvancedToolsSubTab
+            config={config}
+            rawJson={rawJson}
+            saving={saving}
+            importInputRef={importInputRef}
+            onImportFile={(file) => { void handleImportFile(file); }}
+            onExport={handleExport}
+            onReset={() => setShowResetConfirm(true)}
+          />
+        ),
+      },
+    ];
+  }, [
+    config, rawJson, saving,
+    openGoalEditor, openTraitEditor, openRuleEditor,
+    handleDuplicateGoal, handleDuplicateTrait, handleDuplicateRule,
+    handleExport, handleImportFile,
+  ]);
+
+  // ─── Loading / error states ─────────────────────────────────
 
   if (loading) {
     return (
@@ -600,9 +1030,12 @@ export function EvaluationContractsTab() {
     );
   }
 
+  // ─── Render ─────────────────────────────────────────────────
+
   return (
     <>
       <div className="space-y-4">
+        {/* Persistent summary header */}
         <Card hoverable={false} className="space-y-3">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -639,232 +1072,11 @@ export function EvaluationContractsTab() {
           </div>
         </Card>
 
-        <SectionCard
-          title="Goals"
-          subtitle="Define the user outcome the simulated conversation is trying to achieve."
-          countLabel={`${activeGoalCount}/${config.goals.length} enabled`}
-          addLabel="Add Goal"
-          onAdd={() => openGoalEditor('create')}
-        >
-          {config.goals.length === 0 ? (
-            <EmptyContractsState
-              title="No goals configured"
-              description="Add a goal contract to define how an evaluation should know the conversation succeeded."
-            />
-          ) : (
-            config.goals.map((goal, index) => (
-              <div
-                key={goal.id}
-                className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-[13px] font-semibold text-[var(--text-primary)]">
-                        {goal.label || humanize(goal.id)}
-                      </p>
-                      <Badge variant="neutral">{goal.id}</Badge>
-                      <Badge variant={goal.enabled ? 'success' : 'warning'}>
-                        {goal.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                      {goal.description}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Badge variant="neutral">{goal.completionCriteria.length} completion checks</Badge>
-                      <Badge variant="neutral">{goal.notCompletion.length} stop conditions</Badge>
-                      <Badge variant="neutral">{goal.signalPatterns.length} signal patterns</Badge>
-                    </div>
-                  </div>
-                  <PermissionGate action="settings:edit">
-                    <div className="flex items-center gap-1 shrink-0">
-                      <IconButton icon={Pencil} label="Edit goal" onClick={() => openGoalEditor('edit', index)} />
-                      <IconButton icon={Copy} label="Duplicate goal" onClick={() => handleDuplicateGoal(goal)} />
-                      <IconButton
-                        icon={Trash2}
-                        label="Delete goal"
-                        variant="danger"
-                        onClick={() => setDeleteTarget({ kind: 'goal', index, label: goal.label || goal.id })}
-                      />
-                    </div>
-                  </PermissionGate>
-                </div>
-              </div>
-            ))
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Traits"
-          subtitle="Describe how the simulated user behaves while pursuing a goal."
-          countLabel={`${activeTraitCount}/${config.traits.length} enabled`}
-          addLabel="Add Trait"
-          onAdd={() => openTraitEditor('create')}
-        >
-          {config.traits.length === 0 ? (
-            <EmptyContractsState
-              title="No traits configured"
-              description="Add traits to shape user behavior, ambiguity, stubbornness, or corrections."
-            />
-          ) : (
-            config.traits.map((trait, index) => (
-              <div
-                key={trait.id}
-                className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-[13px] font-semibold text-[var(--text-primary)]">
-                        {trait.label || humanize(trait.id)}
-                      </p>
-                      <Badge variant="neutral">{trait.id}</Badge>
-                      <Badge variant={trait.enabled ? 'success' : 'warning'}>
-                        {trait.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                      {trait.description}
-                    </p>
-                    {trait.behaviorHint && (
-                      <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-muted)]">
-                        Behavior hint: {trait.behaviorHint}
-                      </p>
-                    )}
-                  </div>
-                  <PermissionGate action="settings:edit">
-                    <div className="flex items-center gap-1 shrink-0">
-                      <IconButton icon={Pencil} label="Edit trait" onClick={() => openTraitEditor('edit', index)} />
-                      <IconButton icon={Copy} label="Duplicate trait" onClick={() => handleDuplicateTrait(trait)} />
-                      <IconButton
-                        icon={Trash2}
-                        label="Delete trait"
-                        variant="danger"
-                        onClick={() => setDeleteTarget({ kind: 'trait', index, label: trait.label || trait.id })}
-                      />
-                    </div>
-                  </PermissionGate>
-                </div>
-              </div>
-            ))
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Rules"
-          subtitle="Track the prompt or product rules that the evaluator must explicitly verify."
-          countLabel={`${config.rules.length} total`}
-          addLabel="Add Rule"
-          onAdd={() => openRuleEditor('create')}
-        >
-          {config.rules.length === 0 ? (
-            <EmptyContractsState
-              title="No rules configured"
-              description="Add rules to define what behavior the evaluation judge must confirm or flag."
-            />
-          ) : (
-            config.rules.map((rule, index) => (
-              <div
-                key={rule.ruleId}
-                className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-3"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-[13px] font-semibold text-[var(--text-primary)]">
-                        {rule.ruleId}
-                      </p>
-                      <Badge variant="neutral">{rule.section}</Badge>
-                    </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                      {rule.ruleText}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {rule.goalIds.map((goalId) => (
-                        <Badge key={goalId} variant="primary">
-                          {goalId}
-                        </Badge>
-                      ))}
-                      {rule.evaluationScopes.map((scope) => (
-                        <Badge key={`${rule.ruleId}-${scope}`} variant="neutral">
-                          {scope === 'adversarial'
-                            ? 'Adversarial'
-                            : scope === 'correctness'
-                              ? 'Correctness'
-                              : 'Efficiency'}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <PermissionGate action="settings:edit">
-                    <div className="flex items-center gap-1 shrink-0">
-                      <IconButton icon={Pencil} label="Edit rule" onClick={() => openRuleEditor('edit', index)} />
-                      <IconButton icon={Copy} label="Duplicate rule" onClick={() => handleDuplicateRule(rule)} />
-                      <IconButton
-                        icon={Trash2}
-                        label="Delete rule"
-                        variant="danger"
-                        onClick={() => setDeleteTarget({ kind: 'rule', index, label: rule.ruleId })}
-                      />
-                    </div>
-                  </PermissionGate>
-                </div>
-              </div>
-            ))
-          )}
-        </SectionCard>
-
-        <CollapsibleSection
-          title="Advanced Tools"
-          subtitle="Import, export, inspect, or reset the full contract payload."
-          defaultOpen={false}
-        >
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <PermissionGate action="settings:edit">
-                <Button variant="secondary" icon={Upload} onClick={() => importInputRef.current?.click()} disabled={saving}>
-                  Import
-                </Button>
-              </PermissionGate>
-              <Button variant="secondary" icon={Download} onClick={handleExport}>
-                Export
-              </Button>
-              <PermissionGate action="settings:edit">
-                <Button variant="warning" icon={RotateCcw} onClick={() => setShowResetConfirm(true)} disabled={saving}>
-                  Reset To Defaults
-                </Button>
-              </PermissionGate>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    void handleImportFile(file);
-                  }
-                }}
-              />
-            </div>
-
-            <div>
-              <p className="mb-2 text-[12px] font-medium text-[var(--text-primary)]">
-                Current payload
-              </p>
-              <textarea
-                value={rawJson}
-                readOnly
-                rows={16}
-                className={`${TEXTAREA_CLASSNAME} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}
-                spellCheck={false}
-              />
-            </div>
-          </div>
-        </CollapsibleSection>
+        {/* Data-driven sub-tabs */}
+        <Tabs tabs={subTabs} defaultTab="goals" />
       </div>
 
+      {/* Slide-over editor (shared across all sub-tabs) */}
       <SettingsSlideOver
         isOpen={editorState != null}
         onClose={() => {
