@@ -16,7 +16,9 @@ class ThresholdPassRates(CamelModel):
 class FieldAggregation(CamelModel):
     key: str
     field_type: str  # "number" | "boolean" | "enum" | "text" | "array"
-    display_mode: str  # "header" | "card"
+    display_mode: str  # "header" | "card" — kept for v1 compatibility
+    role: str = "detail"  # "metric" | "detail" | "reasoning" — v2 semantic
+    is_main_metric: bool = False
     label: str
     sample_count: int = 0
     # Number fields

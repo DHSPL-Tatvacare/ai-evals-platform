@@ -28,6 +28,12 @@ class SchemaUpdate(CamelModel):
     is_default: Optional[bool] = None
     source_type: Optional[str] = None
 
+    def requires_new_version(self) -> bool:
+        return any(
+            getattr(self, field) is not None
+            for field in ("schema_data", "source_type", "is_default")
+        )
+
 
 class SchemaResponse(CamelORMModel):
     id: int

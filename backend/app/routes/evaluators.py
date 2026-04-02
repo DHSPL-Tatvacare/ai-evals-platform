@@ -11,7 +11,9 @@ from app.database import get_db
 from app.models.evaluator import Evaluator
 from app.models.mixins.shareable import Visibility
 from app.models.listing import Listing
-from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorSetGlobal, EvaluatorSetBuiltIn, EvaluatorResponse
+from app.models.user import User
+from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorResponse
+from app.services.access_control import readable_scope_clause
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 
@@ -35,55 +37,65 @@ def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
     return paths
 
 
+def _owner_name_for_row(evaluator: Evaluator, owner_name: str | None) -> str:
+    if evaluator.tenant_id == SYSTEM_TENANT_ID:
+        return "System"
+    return owner_name or str(evaluator.user_id)
+
+
+def _annotate_owner_metadata(evaluator: Evaluator, owner_name: str | None) -> Evaluator:
+    evaluator.owner_id = evaluator.user_id
+    evaluator.owner_name = _owner_name_for_row(evaluator, owner_name)
+    return evaluator
+
+
 @router.get("", response_model=list[EvaluatorResponse])
 async def list_evaluators(
     app_id: str = Query(...),
     listing_id: str = Query(None),
+    filter: str = Query("all"),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """List evaluators for an app — own + app-shared + seeded system defaults."""
-    query = select(Evaluator).where(
-        or_(
-            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
-            and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
-        ),
-        Evaluator.app_id == app_id,
-    )
-    if listing_id:
-        query = query.where(Evaluator.listing_id == UUID(listing_id))
-    elif app_id == "kaira-bot":
-        # For kaira-bot without listing_id, return app-level evaluators only
-        query = query.where(Evaluator.listing_id == None)
-    query = query.order_by(desc(Evaluator.created_at))
-
-    result = await db.execute(query)
-    return result.scalars().all()
-
-
-@router.get("/registry", response_model=list[EvaluatorResponse])
-async def list_registry(
-    app_id: str = Query(...),
-    auth: AuthContext = require_app_access(),
-    db: AsyncSession = Depends(get_db),
-):
-    """List app-visible evaluators for an app registry view."""
-    query = (
-        select(Evaluator)
-        .where(
+    if filter == "mine":
+        query = select(Evaluator, User.display_name).outerjoin(
+            User,
+            and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
+        ).where(
+            Evaluator.tenant_id == auth.tenant_id,
+            Evaluator.user_id == auth.user_id,
+            Evaluator.app_id == app_id,
+        )
+    elif filter == "shared":
+        query = select(Evaluator, User.display_name).outerjoin(
+            User,
+            and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
+        ).where(
             or_(
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
                 and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
             ),
             Evaluator.app_id == app_id,
-            Evaluator.visibility == Visibility.APP,
         )
-        .order_by(desc(Evaluator.created_at))
-    )
+    else:  # "all"
+        query = select(Evaluator, User.display_name).outerjoin(
+            User,
+            and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
+        ).where(
+            readable_scope_clause(Evaluator, auth),
+            Evaluator.app_id == app_id,
+        )
+
+    if listing_id:
+        query = query.where(Evaluator.listing_id == UUID(listing_id))
+    query = query.order_by(desc(Evaluator.created_at))
+
     result = await db.execute(query)
-    return result.scalars().all()
+    return [
+        _annotate_owner_metadata(evaluator, owner_name)
+        for evaluator, owner_name in result.all()
+    ]
 
 
 
@@ -336,19 +348,19 @@ async def get_evaluator(
 ):
     """Get a single evaluator by ID."""
     result = await db.execute(
-        select(Evaluator).where(
+        select(Evaluator, User.display_name).outerjoin(
+            User,
+            and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
+        ).where(
             Evaluator.id == evaluator_id,
-            or_(
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
-                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
-            ),
+            readable_scope_clause(Evaluator, auth),
         )
     )
-    evaluator = result.scalar_one_or_none()
-    if not evaluator:
+    row = result.one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="Evaluator not found")
-    return evaluator
+    evaluator, owner_name = row
+    return _annotate_owner_metadata(evaluator, owner_name)
 
 
 @router.post("", response_model=EvaluatorResponse, status_code=201)
@@ -465,15 +477,17 @@ async def fork_evaluator(
     return forked
 
 
-@router.put("/{evaluator_id}/global", response_model=EvaluatorResponse)
-async def set_global(
+@router.patch("/{evaluator_id}/visibility", response_model=EvaluatorResponse)
+async def patch_evaluator_visibility(
     evaluator_id: UUID,
-    body: EvaluatorSetGlobal,
+    body: dict,
     auth: AuthContext = require_permission('resource:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deprecated compatibility endpoint that maps legacy global state to visibility."""
+    """Change visibility on an evaluator. Only the owner can change visibility."""
+    from sqlalchemy import func as sqlfunc
+
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
@@ -483,33 +497,17 @@ async def set_global(
     )
     evaluator = result.scalar_one_or_none()
     if not evaluator:
-        raise HTTPException(status_code=404, detail="Evaluator not found")
+        raise HTTPException(status_code=404, detail="Evaluator not found or not owned by you")
 
-    evaluator.visibility = Visibility.APP if body.is_global else Visibility.PRIVATE
-    await db.commit()
-    await db.refresh(evaluator)
-    return evaluator
+    new_visibility = body.get("visibility")
+    if new_visibility not in ("private", "app"):
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'app'")
 
+    evaluator.visibility = Visibility(new_visibility)
+    if new_visibility == "app":
+        evaluator.shared_by = auth.user_id
+        evaluator.shared_at = sqlfunc.now()
 
-@router.put("/{evaluator_id}/built-in", response_model=EvaluatorResponse)
-async def toggle_built_in(
-    evaluator_id: UUID,
-    body: EvaluatorSetBuiltIn,
-    auth: AuthContext = require_permission("evaluator:promote"),
-    _app_check: AuthContext = require_app_access(),
-    db: AsyncSession = Depends(get_db),
-):
-    """Deprecated compatibility endpoint that maps built-in state to visibility."""
-    evaluator = (await db.execute(
-        select(Evaluator).where(
-            Evaluator.id == evaluator_id,
-            Evaluator.tenant_id == auth.tenant_id,
-        )
-    )).scalar_one_or_none()
-    if not evaluator:
-        raise HTTPException(status_code=404, detail="Evaluator not found")
-
-    evaluator.visibility = Visibility.APP if body.is_built_in else Visibility.PRIVATE
     await db.commit()
     await db.refresh(evaluator)
     return evaluator

@@ -32,7 +32,6 @@ interface KairaBotEvaluatorsViewProps {
 
 export function KairaBotEvaluatorsView({
   session,
-  messages: _messages,
 }: KairaBotEvaluatorsViewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<
@@ -66,7 +65,6 @@ export function KairaBotEvaluatorsView({
     updateEvaluator,
     deleteEvaluator,
     setGlobal,
-    setBuiltIn,
     forkEvaluator,
     seedAppDefaults,
   } = useEvaluatorsStore();
@@ -172,15 +170,6 @@ export function KairaBotEvaluatorsView({
       isGlobal
         ? "Evaluator added to Registry"
         : "Evaluator removed from Registry",
-    );
-  };
-
-  const handleToggleBuiltIn = async (evaluatorId: string, isBuiltIn: boolean) => {
-    await setBuiltIn(evaluatorId, isBuiltIn);
-    notificationService.success(
-      isBuiltIn
-        ? "Evaluator promoted to built-in"
-        : "Evaluator demoted from built-in",
     );
   };
 
@@ -338,7 +327,6 @@ export function KairaBotEvaluatorsView({
                 onDelete={handleDelete}
                 onToggleHeader={handleToggleHeader}
                 onToggleGlobal={handleToggleGlobal}
-                onToggleBuiltIn={handleToggleBuiltIn}
               />
             ))}
           </div>

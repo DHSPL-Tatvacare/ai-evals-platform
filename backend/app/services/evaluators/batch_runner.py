@@ -46,6 +46,7 @@ from app.services.evaluators.efficiency_evaluator import EfficiencyEvaluator
 from app.services.evaluators.models import RunMetadata, serialize
 from app.services.evaluators.adversarial_config import load_config_from_db
 from app.services.evaluators.thread_canonical import build_canonical_thread_evaluation
+from app.services.evaluators.output_schema_utils import find_primary_field
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
@@ -54,7 +55,6 @@ from app.services.evaluators.runner_utils import (
     save_api_log,
     create_eval_run,
     finalize_eval_run,
-    find_primary_field,
 )
 from app.services.job_worker import (
     JobCancelledError,

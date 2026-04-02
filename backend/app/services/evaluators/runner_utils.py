@@ -15,6 +15,7 @@ from sqlalchemy import update
 
 from app.database import async_session
 from app.models.eval_run import EvalRun, ApiLog
+from app.services.evaluators.output_schema_utils import find_primary_field
 
 logger = logging.getLogger(__name__)
 
@@ -137,31 +138,3 @@ async def finalize_eval_run(
 
 
 # ── Schema Utilities ─────────────────────────────────────────────────
-
-
-def find_primary_field(output_schema: list[dict]) -> dict | None:
-    """Find the primary field for summary aggregation.
-
-    Priority: isMainMetric=True → first number field → first text field → first field.
-    Used by custom_evaluator_runner._extract_scores() and batch_runner aggregation.
-    """
-    if not output_schema:
-        return None
-
-    # 1. Explicit main metric
-    for f in output_schema:
-        if f.get("isMainMetric"):
-            return {"key": f["key"], "type": f.get("type", "text"), "thresholds": f.get("thresholds")}
-
-    # 2. First number field (likely a score)
-    for f in output_schema:
-        if f.get("type") == "number":
-            return {"key": f["key"], "type": "number", "thresholds": f.get("thresholds")}
-
-    # 3. First text field (likely a verdict)
-    for f in output_schema:
-        if f.get("type") == "text":
-            return {"key": f["key"], "type": "text"}
-
-    # 4. First field regardless
-    return {"key": output_schema[0]["key"], "type": output_schema[0].get("type", "text")}

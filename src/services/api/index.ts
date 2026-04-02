@@ -3,6 +3,7 @@
  * All repositories now use HTTP calls to the FastAPI backend.
  */
 export { listingsRepository } from './listingsApi';
+export { appsRepository } from './appsApi';
 export { filesRepository } from './filesApi';
 export { promptsRepository } from './promptsApi';
 export { schemasRepository } from './schemasApi';
@@ -18,3 +19,4 @@ export * from './evalRunsApi';
 export { reportsApi } from './reportsApi';
 export { authApi } from './authApi';
 export { adversarialTestCasesApi } from './adversarialTestCasesApi';
+export { rulesRepository } from './rulesApi';

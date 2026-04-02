@@ -6,12 +6,14 @@ export { useKeyboardShortcuts, SHORTCUT_DISPLAY, type KeyboardShortcut } from '.
 export { useUnsavedChanges } from './useUnsavedChanges';
 export { useSegmentAudio } from './useSegmentAudio';
 export {
+  useAppConfig,
   useCurrentListings,
   useCurrentListingsActions,
   useCurrentSchemas,
   useCurrentSchemasActions,
   useCurrentPrompts,
   useCurrentPromptsActions,
+  useCurrentAppConfig,
   useCurrentAppMetadata,
   useCurrentAppId,
 } from './useCurrentAppData';

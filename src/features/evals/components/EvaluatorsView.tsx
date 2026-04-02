@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button, ConfirmDialog, EmptyState, Skeleton } from "@/components/ui";
 import { PermissionGate } from '@/components/auth/PermissionGate';
+import { useAppConfig } from "@/hooks";
 import { CreateEvaluatorOverlay } from "./CreateEvaluatorOverlay";
 import { EvaluatorCard } from "./EvaluatorCard";
 import { EvaluatorRegistryPicker } from "./EvaluatorRegistryPicker";
@@ -28,8 +29,8 @@ interface EvaluatorsViewProps {
 
 export function EvaluatorsView({
   listing,
-  onUpdate: _onUpdate,
 }: EvaluatorsViewProps) {
+  const appConfig = useAppConfig(listing.appId);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<
     EvaluatorDefinition | undefined
@@ -48,6 +49,7 @@ export function EvaluatorsView({
     LLM_PROVIDERS[0].value,
   );
   const [selectedModel, setSelectedModel] = useState("");
+  const supportsListingSeedDefaults = appConfig.features.hasHumanReview;
 
   // Keep provider/model in a ref so the execute closure always sees the latest
   // values without needing to be recreated on every render.
@@ -226,7 +228,7 @@ export function EvaluatorsView({
             description="Add an evaluator to measure specific dimensions of quality like recall, factual integrity, or custom metrics."
             className="w-full max-w-md"
           >
-            {listing.appId === "voice-rx" && (
+            {supportsListingSeedDefaults && (
               <PermissionGate action="resource:create">
                 <Button
                   variant="secondary"

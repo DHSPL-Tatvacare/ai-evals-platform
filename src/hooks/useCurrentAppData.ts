@@ -8,8 +8,8 @@ import { useAppStore } from '@/stores/appStore';
 import { useListingsStore } from '@/stores/listingsStore';
 import { useSchemasStore } from '@/stores/schemasStore';
 import { usePromptsStore } from '@/stores/promptsStore';
-import { APPS } from '@/types';
-import type { Listing, SchemaDefinition, PromptDefinition, AppId } from '@/types';
+import { getAppMetadataFromConfig } from '@/types';
+import type { AppConfig, Listing, SchemaDefinition, PromptDefinition, AppId } from '@/types';
 
 /**
  * Get listings for the current app
@@ -97,11 +97,27 @@ export function useCurrentPromptsActions() {
 }
 
 /**
+ * Get config for a specific app.
+ */
+export function useAppConfig(appId: AppId): AppConfig {
+  return useAppStore((state) => state.getAppConfig(appId));
+}
+
+/**
+ * Get config for the current app
+ */
+export function useCurrentAppConfig(): AppConfig {
+  const appId = useAppStore((state) => state.currentApp);
+  return useAppConfig(appId);
+}
+
+/**
  * Get current app metadata
  */
 export function useCurrentAppMetadata() {
   const appId = useAppStore((state) => state.currentApp);
-  return APPS[appId];
+  const config = useCurrentAppConfig();
+  return getAppMetadataFromConfig(appId, config);
 }
 
 /**

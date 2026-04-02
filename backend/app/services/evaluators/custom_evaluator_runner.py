@@ -29,8 +29,12 @@ from app.services.evaluators.llm_base import (
 from app.services.evaluators.prompt_resolver import resolve_prompt
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json
+from app.services.evaluators.output_schema_utils import (
+    find_primary_field,
+    build_visible_breakdown,
+)
 from app.services.evaluators.runner_utils import (
-    save_api_log, create_eval_run, finalize_eval_run, find_primary_field,
+    save_api_log, create_eval_run, finalize_eval_run,
 )
 from app.services.job_worker import (
     is_job_cancelled, JobCancelledError, safe_error_message, update_job_progress,
@@ -77,11 +81,7 @@ def _extract_scores(output: dict, output_schema: list[dict]) -> Optional[dict]:
     overall_score = output.get(main_field["key"])
 
     # ── Breakdown: all visible fields ─────────────────────────────
-    breakdown = {
-        f["key"]: output[f["key"]]
-        for f in output_schema
-        if f.get("displayMode") != "hidden" and f["key"] in output
-    }
+    breakdown = build_visible_breakdown(output, output_schema)
 
     # ── max_score: derive from thresholds only ────────────────────
     max_score = None
@@ -154,15 +154,15 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
     mime_type = "audio/mpeg"
 
     async with async_session() as db:
-        from sqlalchemy import or_, and_
-        from app.constants import SYSTEM_TENANT_ID
+        from types import SimpleNamespace
+        from app.services.access_control import readable_scope_clause
 
         evaluator = await db.scalar(
             select(Evaluator).where(
                 Evaluator.id == evaluator_id,
-                or_(
-                    and_(Evaluator.tenant_id == tenant_id, Evaluator.user_id == user_id),
-                    Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                readable_scope_clause(
+                    Evaluator,
+                    SimpleNamespace(tenant_id=tenant_id, user_id=user_id, app_access=frozenset()),
                 ),
             )
         )

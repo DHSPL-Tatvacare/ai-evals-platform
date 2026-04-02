@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { EvaluatorDefinition } from '@/types';
+import type { AssetVisibility, EvaluatorDefinition, EvaluatorVisibilityFilter } from '@/types';
 import { evaluatorsRepository } from '@/services/storage';
+import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 
 interface EvaluatorsStore {
   evaluators: EvaluatorDefinition[];
@@ -8,17 +9,25 @@ interface EvaluatorsStore {
   currentListingId: string | null;
   currentAppId: string | null;
 
-  // Registry state (for picker overlay)
+  sharedEvaluators: EvaluatorDefinition[];
+  isSharedLoaded: boolean;
+  currentSharedAppId: string | null;
+
+  // Legacy alias for shared-evaluator state until Phase 6 UI cutover
   registry: EvaluatorDefinition[];
   isRegistryLoaded: boolean;
   currentRegistryAppId: string | null;
 
   loadEvaluators: (appId: string, listingId: string) => Promise<void>;
   loadAppEvaluators: (appId: string) => Promise<void>;
+  loadSharedEvaluators: (appId: string) => Promise<void>;
   loadRegistry: (appId: string) => Promise<void>;
+  getEvaluatorsByVisibility: (visibility: AssetVisibility) => EvaluatorDefinition[];
+  getEvaluatorsByFilter: (filter: EvaluatorVisibilityFilter) => EvaluatorDefinition[];
   addEvaluator: (evaluator: EvaluatorDefinition) => Promise<void>;
   updateEvaluator: (evaluator: EvaluatorDefinition) => Promise<void>;
   deleteEvaluator: (id: string) => Promise<void>;
+  setVisibility: (id: string, visibility: AssetVisibility) => Promise<void>;
   setGlobal: (id: string, isGlobal: boolean) => Promise<void>;
   setBuiltIn: (id: string, isBuiltIn: boolean) => Promise<void>;
   forkEvaluator: (sourceId: string, targetListingId?: string) => Promise<EvaluatorDefinition>;
@@ -30,11 +39,42 @@ interface EvaluatorsStore {
 // Track in-flight fetch to deduplicate parallel calls
 let _loadingListingId: string | null = null;
 
+function replaceById<T extends { id: string }>(items: T[], item: T): T[] {
+  const index = items.findIndex((entry) => entry.id === item.id);
+  if (index === -1) {
+    return [...items, item];
+  }
+  return items.map((entry) => (entry.id === item.id ? item : entry));
+}
+
+function removeById<T extends { id: string }>(items: T[], id: string): T[] {
+  return items.filter((item) => item.id !== id);
+}
+
+function upsertEvaluatorState(
+  state: Pick<EvaluatorsStore, 'evaluators' | 'sharedEvaluators' | 'registry'>,
+  evaluator: EvaluatorDefinition,
+) {
+  const nextEvaluators = replaceById(state.evaluators, evaluator);
+  const nextShared = (evaluator.visibility ?? 'private') === 'app'
+    ? replaceById(state.sharedEvaluators, evaluator)
+    : removeById(state.sharedEvaluators, evaluator.id);
+
+  return {
+    evaluators: nextEvaluators,
+    sharedEvaluators: nextShared,
+    registry: nextShared,
+  };
+}
+
 export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   evaluators: [],
   isLoaded: false,
   currentListingId: null,
   currentAppId: null,
+  sharedEvaluators: [],
+  isSharedLoaded: false,
+  currentSharedAppId: null,
   registry: [],
   isRegistryLoaded: false,
   currentRegistryAppId: null,
@@ -61,7 +101,6 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   },
 
   loadAppEvaluators: async (appId: string) => {
-    // Load app-level evaluators (no listing_id) — for kaira-bot
     const { currentAppId, currentListingId } = get();
     if (currentAppId !== appId || currentListingId !== null) {
       set({ isLoaded: false });
@@ -70,70 +109,97 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
     const evaluators = await evaluatorsRepository.getByAppId(appId);
     set({ evaluators, isLoaded: true, currentListingId: null, currentAppId: appId });
   },
-  
+
+  loadSharedEvaluators: async (appId: string) => {
+    const sharedEvaluators = await evaluatorsRepository.getShared(appId);
+    set({
+      sharedEvaluators,
+      isSharedLoaded: true,
+      currentSharedAppId: appId,
+      registry: sharedEvaluators,
+      isRegistryLoaded: true,
+      currentRegistryAppId: appId,
+    });
+  },
+
   loadRegistry: async (appId: string) => {
-    const registry = await evaluatorsRepository.getRegistry(appId);
-    set({ registry, isRegistryLoaded: true, currentRegistryAppId: appId });
+    await get().loadSharedEvaluators(appId);
+  },
+
+  getEvaluatorsByVisibility: (visibility: AssetVisibility) => {
+    return get().evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === visibility);
+  },
+
+  getEvaluatorsByFilter: (filter: EvaluatorVisibilityFilter) => {
+    return filterEvaluatorsByVisibility(get().evaluators, filter);
   },
   
   addEvaluator: async (evaluator: EvaluatorDefinition) => {
     const saved = await evaluatorsRepository.save(evaluator);
-    set(state => ({ evaluators: [...state.evaluators, saved] }));
+    set((state) => upsertEvaluatorState(state, saved));
   },
 
   updateEvaluator: async (evaluator: EvaluatorDefinition) => {
     const saved = await evaluatorsRepository.save(evaluator);
-    set(state => ({
-      evaluators: state.evaluators.map(e => e.id === evaluator.id ? saved : e)
-    }));
+    set((state) => upsertEvaluatorState(state, saved));
   },
   
   deleteEvaluator: async (id: string) => {
     await evaluatorsRepository.delete(id);
-    set(state => ({
-      evaluators: state.evaluators.filter(e => e.id !== id),
-      registry: state.registry.filter(e => e.id !== id),
+    set((state) => ({
+      evaluators: removeById(state.evaluators, id),
+      sharedEvaluators: removeById(state.sharedEvaluators, id),
+      registry: removeById(state.registry, id),
     }));
   },
-  
+
+  setVisibility: async (id: string, visibility: AssetVisibility) => {
+    const updated = await evaluatorsRepository.setVisibility(id, visibility);
+    set((state) => ({
+      evaluators: replaceById(state.evaluators, updated),
+      sharedEvaluators: visibility === 'app'
+        ? replaceById(state.sharedEvaluators, updated)
+        : removeById(state.sharedEvaluators, id),
+      registry: visibility === 'app'
+        ? replaceById(state.registry, updated)
+        : removeById(state.registry, id),
+    }));
+  },
+
   setGlobal: async (id: string, isGlobal: boolean) => {
-    await evaluatorsRepository.setGlobal(id, isGlobal);
-    set(state => {
-      const updatedEvaluator = state.evaluators.find(e => e.id === id);
-      if (!updatedEvaluator) return state;
-
-      const updated = { ...updatedEvaluator, isGlobal, updatedAt: new Date() };
-
-      return {
-        evaluators: state.evaluators.map(e => e.id === id ? updated : e),
-        // Update registry: add if now global, remove if no longer global
-        registry: isGlobal
-          ? [...state.registry.filter(e => e.id !== id), updated]
-          : state.registry.filter(e => e.id !== id),
-      };
-    });
+    await get().setVisibility(id, isGlobal ? 'app' : 'private');
   },
 
-  setBuiltIn: async (id: string, isBuiltIn: boolean) => {
-    const result = await evaluatorsRepository.setBuiltIn(id, isBuiltIn);
-    set(state => ({
-      evaluators: state.evaluators.map(e => e.id === id ? result : e),
-      registry: isBuiltIn
-        ? [...state.registry.filter(e => e.id !== id), result]
-        : state.registry.filter(e => e.id !== id),
-    }));
+  setBuiltIn: async () => {
+    throw new Error('Built-in status is managed by system defaults and cannot be changed');
   },
   
   forkEvaluator: async (sourceId: string, targetListingId?: string) => {
     const forked = await evaluatorsRepository.fork(sourceId, targetListingId);
-    set(state => ({ evaluators: [...state.evaluators, forked] }));
+    set((state) => upsertEvaluatorState(state, forked));
     return forked;
   },
 
   seedDefaults: async (listingId: string) => {
     const seeded = await evaluatorsRepository.seedDefaults(listingId);
     set((state) => ({
-      evaluators: [...state.evaluators, ...seeded],
+      evaluators: seeded.reduce((items, item) => replaceById(items, item), state.evaluators),
+      sharedEvaluators: seeded.reduce(
+        (items, item) => (
+          (item.visibility ?? 'private') === 'app'
+            ? replaceById(items, item)
+            : removeById(items, item.id)
+        ),
+        state.sharedEvaluators,
+      ),
+      registry: seeded.reduce(
+        (items, item) => (
+          (item.visibility ?? 'private') === 'app'
+            ? replaceById(items, item)
+            : removeById(items, item.id)
+        ),
+        state.registry,
+      ),
     }));
     return seeded;
   },
@@ -141,7 +207,23 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   seedAppDefaults: async (appId: string) => {
     const seeded = await evaluatorsRepository.seedAppDefaults(appId);
     set((state) => ({
-      evaluators: [...state.evaluators, ...seeded],
+      evaluators: seeded.reduce((items, item) => replaceById(items, item), state.evaluators),
+      sharedEvaluators: seeded.reduce(
+        (items, item) => (
+          (item.visibility ?? 'private') === 'app'
+            ? replaceById(items, item)
+            : removeById(items, item.id)
+        ),
+        state.sharedEvaluators,
+      ),
+      registry: seeded.reduce(
+        (items, item) => (
+          (item.visibility ?? 'private') === 'app'
+            ? replaceById(items, item)
+            : removeById(items, item.id)
+        ),
+        state.registry,
+      ),
     }));
     return seeded;
   },
@@ -153,6 +235,9 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
       isLoaded: false,
       currentListingId: null,
       currentAppId: null,
+      sharedEvaluators: [],
+      isSharedLoaded: false,
+      currentSharedAppId: null,
       registry: [],
       isRegistryLoaded: false,
       currentRegistryAppId: null,

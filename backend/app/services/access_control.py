@@ -2,6 +2,8 @@
 
 from typing import Literal, Protocol, runtime_checkable
 
+from sqlalchemy import and_, or_
+
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.mixins.shareable import Visibility
 
@@ -89,3 +91,17 @@ def can_access(user: AccessUser, asset: ShareableAsset, action: AccessAction) ->
         return _is_owner(user, asset) and _has_app_access(user, asset)
 
     return False
+
+
+def readable_scope_clause(model, user: AccessUser):
+    """SQLAlchemy clause for rows the user may read under the harmonized model."""
+
+    return or_(
+        and_(model.tenant_id == user.tenant_id, model.user_id == user.user_id),
+        and_(model.tenant_id == user.tenant_id, model.visibility == Visibility.APP),
+        and_(
+            model.tenant_id == SYSTEM_TENANT_ID,
+            model.user_id == SYSTEM_USER_ID,
+            model.visibility == Visibility.APP,
+        ),
+    )

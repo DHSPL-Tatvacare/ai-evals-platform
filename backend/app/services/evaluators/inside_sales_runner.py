@@ -20,6 +20,7 @@ from app.database import async_session
 from app.models.eval_run import EvalRun, ThreadEvaluation
 from app.models.evaluator import Evaluator
 from app.constants import SYSTEM_TENANT_ID
+from app.services.evaluators.output_schema_utils import find_primary_field
 from app.services.evaluators.llm_base import (
     LoggingLLMWrapper,
     create_llm_provider,
@@ -28,7 +29,6 @@ from app.services.evaluators.runner_utils import (
     save_api_log,
     create_eval_run,
     finalize_eval_run,
-    find_primary_field,
 )
 from app.services.evaluators.schema_generator import generate_json_schema
 from app.services.evaluators.response_parser import _safe_parse_json

@@ -139,17 +139,25 @@ function toSnake(config: AdversarialConfig): SnakeConfig {
 // ─── API Client ──────────────────────────────────────────────────
 
 export const adversarialConfigApi = {
-    async get(): Promise<AdversarialConfig> {
+    async getShared(): Promise<AdversarialConfig> {
         const raw = await apiRequest<SnakeConfig>('/api/adversarial-config');
         return fromSnake(raw);
     },
 
-    async save(config: AdversarialConfig): Promise<AdversarialConfig> {
+    async saveShared(config: AdversarialConfig): Promise<AdversarialConfig> {
         const raw = await apiRequest<SnakeConfig>('/api/adversarial-config', {
             method: 'PUT',
             body: JSON.stringify(toSnake(config)),
         });
         return fromSnake(raw);
+    },
+
+    async get(): Promise<AdversarialConfig> {
+        return adversarialConfigApi.getShared();
+    },
+
+    async save(config: AdversarialConfig): Promise<AdversarialConfig> {
+        return adversarialConfigApi.saveShared(config);
     },
 
     async reset(): Promise<AdversarialConfig> {

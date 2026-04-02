@@ -1,8 +1,22 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type LLMProvider = 'gemini' | 'openai' | 'azure_openai' | 'anthropic';
 export type GeminiAuthMethod = 'api_key' | 'service_account';
+export type AssetVisibility = 'private' | 'app';
 export type SettingCategory = 'appearance' | 'llm' | 'storage' | 'advanced' | 'prompts' | 'ai' | 'chat' | 'timeouts' | 'api';
 export type SettingType = 'text' | 'password' | 'select' | 'toggle' | 'number' | 'textarea' | 'file';
+
+export interface SettingRecord<TValue = unknown> {
+  id: number;
+  appId: string | null;
+  key: string;
+  value: TValue;
+  visibility: AssetVisibility;
+  forkedFrom?: number | null;
+  updatedAt: Date;
+  userId: string;
+  sharedBy?: string | null;
+  sharedAt?: Date | null;
+}
 
 export interface SettingOption {
   value: string | number;

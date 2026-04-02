@@ -1,7 +1,11 @@
+import type { AppId } from './app.types';
+import type { AssetVisibility } from './settings.types';
+
 export type EvaluatorFieldType = 'number' | 'text' | 'boolean' | 'array' | 'enum';
 export type EvaluatorDisplayMode = 'header' | 'card' | 'hidden';
 export type ArrayItemType = 'string' | 'number' | 'boolean' | 'object';
 export type FieldRole = 'metric' | 'reasoning' | 'detail';
+export type EvaluatorVisibilityFilter = 'all' | 'mine' | 'shared' | 'registry';
 
 export interface EvaluatorThresholds {
   green: number;  // Value >= green is good (green)
@@ -36,15 +40,21 @@ export interface EvaluatorDefinition {
   id: string;                     // UUID
   userId?: string;
   tenantId?: string;
+  ownerId?: string;
+  ownerName?: string;
   name: string;                   // User-defined name
   prompt: string;                 // Prompt template with variables
   modelId: string;                // LLM model to use
   outputSchema: EvaluatorOutputField[]; // Define output structure
   appId: string;                  // 'voice-rx' | 'kaira-bot'
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
-  isGlobal: boolean;              // If true, visible in Registry for forking
-  isBuiltIn?: boolean;            // If true, promoted as a tenant-level built-in evaluator
+  visibility?: AssetVisibility;   // Sharing scope
+  isGlobal?: boolean;             // Legacy compatibility field, derived from visibility
+  isBuiltIn?: boolean;            // Legacy compatibility field for system defaults
   forkedFrom?: string;            // Source evaluator ID if forked (lineage tracking)
+  sharedBy?: string | null;
+  sharedAt?: string | null;
+  linkedRuleIds?: string[];
   showInHeader?: boolean;         // Whether to display main metric in page header
   createdAt: Date;
   updatedAt: Date;
@@ -52,7 +62,7 @@ export interface EvaluatorDefinition {
 
 /** App-generic evaluator context for shared components */
 export interface EvaluatorContext {
-  appId: string;
+  appId: AppId;
   entityId?: string;      // listing.id for voice-rx, undefined for kaira-bot
 }
 

@@ -3,35 +3,19 @@ import { BarChart3, ChevronDown, Library, Plus, Star } from 'lucide-react';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { Button, ConfirmDialog, EmptyState, Skeleton } from '@/components/ui';
 import { CreateEvaluatorOverlay, EvaluatorCard, EvaluatorRegistryPicker } from '@/features/evals/components';
-import { useCurrentAppId, useCurrentAppMetadata } from '@/hooks';
+import { useCurrentAppConfig, useCurrentAppId, useCurrentAppMetadata } from '@/hooks';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore } from '@/stores';
 import { cn } from '@/utils';
-import type { AppId, EvaluatorDefinition, EvaluatorContext } from '@/types';
+import type { EvaluatorDefinition, EvaluatorContext } from '@/types';
 
 type EvaluatorCatalogFilter = 'registry' | 'all';
-
-interface AppEvaluatorsConfig {
-  supportsAppLevelSeedDefaults: boolean;
-}
 
 interface AppEvaluatorsPageProps {
   extraHeaderActions?: ReactNode;
   extraEmptyStateActions?: ReactNode;
   onOpenEvaluator?: (evaluator: EvaluatorDefinition) => void;
 }
-
-const APP_EVALUATORS_CONFIG: Record<AppId, AppEvaluatorsConfig> = {
-  'voice-rx': {
-    supportsAppLevelSeedDefaults: false,
-  },
-  'kaira-bot': {
-    supportsAppLevelSeedDefaults: true,
-  },
-  'inside-sales': {
-    supportsAppLevelSeedDefaults: true,
-  },
-};
 
 function isRegistryEvaluator(evaluator: EvaluatorDefinition): boolean {
   return Boolean(evaluator.isGlobal || evaluator.isBuiltIn);
@@ -47,6 +31,7 @@ export function AppEvaluatorsPage({
   onOpenEvaluator,
 }: AppEvaluatorsPageProps) {
   const appId = useCurrentAppId();
+  const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
   const [filter, setFilter] = useState<EvaluatorCatalogFilter>('registry');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -67,12 +52,11 @@ export function AppEvaluatorsPage({
     updateEvaluator,
     deleteEvaluator,
     setGlobal,
-    setBuiltIn,
     forkEvaluator,
     seedAppDefaults,
   } = useEvaluatorsStore();
-
-  const config = APP_EVALUATORS_CONFIG[appId];
+  const supportsAppLevelSeedDefaults =
+    appConfig.features.hasAdversarial || appConfig.features.hasRubricMode;
 
   useEffect(() => {
     if (!isLoaded || currentAppId !== appId || currentListingId !== null) {
@@ -160,22 +144,13 @@ export function AppEvaluatorsPage({
     );
   };
 
-  const handleToggleBuiltIn = async (evaluatorId: string, isBuiltIn: boolean) => {
-    await setBuiltIn(evaluatorId, isBuiltIn);
-    notificationService.success(
-      isBuiltIn
-        ? 'Evaluator promoted to built-in'
-        : 'Evaluator demoted from built-in',
-    );
-  };
-
   const handleFork = async (sourceId: string) => {
     const forked = await forkEvaluator(sourceId);
     notificationService.success(`Forked evaluator: ${forked.name}`);
   };
 
   const handleSeedDefaults = async () => {
-    if (!config.supportsAppLevelSeedDefaults) {
+    if (!supportsAppLevelSeedDefaults) {
       return;
     }
 
@@ -215,7 +190,7 @@ export function AppEvaluatorsPage({
 
         <div className="flex items-center gap-2 self-start">
           {extraHeaderActions}
-          {config.supportsAppLevelSeedDefaults && (
+          {supportsAppLevelSeedDefaults && (
             <PermissionGate action="resource:create">
               <Button
                 variant="secondary"
@@ -309,7 +284,7 @@ export function AppEvaluatorsPage({
                 <Button variant="secondary" onClick={openRegistryPicker}>
                   Browse Registry
                 </Button>
-                {config.supportsAppLevelSeedDefaults && (
+                {supportsAppLevelSeedDefaults && (
                   <Button
                     variant="secondary"
                     onClick={handleSeedDefaults}
@@ -334,7 +309,6 @@ export function AppEvaluatorsPage({
               onDelete={handleDelete}
               onToggleHeader={handleToggleHeader}
               onToggleGlobal={handleToggleGlobal}
-              onToggleBuiltIn={handleToggleBuiltIn}
             />
           ))}
         </div>

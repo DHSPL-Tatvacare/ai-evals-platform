@@ -3,6 +3,7 @@
  * All repositories delegate to HTTP API (src/services/api/).
  */
 export {
+  appsRepository,
   listingsRepository,
   filesRepository,
   promptsRepository,
@@ -13,6 +14,7 @@ export {
   historyRepository,
   settingsRepository,
   tagRegistryRepository,
+  rulesRepository,
 } from '@/services/api';
 
 export type { TagRegistryItem, TagRegistryData } from '@/services/api';

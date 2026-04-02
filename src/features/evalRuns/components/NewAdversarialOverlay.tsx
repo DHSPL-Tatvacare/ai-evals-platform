@@ -204,7 +204,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     await submitJob('evaluate-adversarial', {
       name: runName.trim(),
       description: runDescription.trim() || null,
-      user_id: userId,
+      kaira_chat_user_id: userId,
       kaira_api_url: kairaApiUrl.trim(),
       kaira_auth_token: kairaAuthToken || null,
       kaira_timeout: kairaTimeout,

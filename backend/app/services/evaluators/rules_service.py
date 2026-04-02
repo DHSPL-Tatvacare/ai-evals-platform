@@ -1,0 +1,79 @@
+"""Rules catalog service — load/save the published rule catalog from settings."""
+import logging
+from typing import Any
+
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.constants import SYSTEM_TENANT_ID
+from app.models.setting import Setting
+from app.models.mixins.shareable import Visibility
+from app.services.settings_upsert import build_setting_upsert_stmt
+
+logger = logging.getLogger(__name__)
+
+RULES_KEY = "rule-catalog"
+
+
+async def load_rules(
+    db: AsyncSession,
+    *,
+    app_id: str,
+    tenant_id,
+) -> list[dict[str, Any]]:
+    """Load published rule catalog using settings resolution:
+    1. App-shared setting in the current tenant
+    2. System default
+    3. Empty list
+    """
+    # Step 1: App-shared in current tenant
+    result = await db.execute(
+        select(Setting).where(
+            Setting.tenant_id == tenant_id,
+            Setting.app_id == app_id,
+            Setting.key == RULES_KEY,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    setting = result.scalar_one_or_none()
+    if setting and isinstance(setting.value, list):
+        return setting.value
+
+    # Step 2: System default
+    result = await db.execute(
+        select(Setting).where(
+            Setting.tenant_id == SYSTEM_TENANT_ID,
+            Setting.app_id == app_id,
+            Setting.key == RULES_KEY,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    setting = result.scalar_one_or_none()
+    if setting and isinstance(setting.value, list):
+        return setting.value
+
+    return []
+
+
+async def save_rules(
+    db: AsyncSession,
+    *,
+    app_id: str,
+    tenant_id,
+    user_id,
+    rules: list[dict[str, Any]],
+) -> None:
+    """Save the published rule catalog as an app-shared setting."""
+    stmt = build_setting_upsert_stmt(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=RULES_KEY,
+        value=rules,
+        visibility=Visibility.APP,
+        updated_by=user_id,
+        forked_from=None,
+        shared_by=user_id,
+    )
+    await db.execute(stmt)
+    await db.commit()

@@ -431,7 +431,7 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
         job_id=job_id,
         tenant_id=tenant_id,
         user_id=user_id,
-        kaira_test_user_id=params.get("user_id", ""),
+        kaira_test_user_id=params.get("kaira_chat_user_id", ""),
         kaira_api_url=params.get("kaira_api_url", ""),
         kaira_auth_token=params.get("kaira_auth_token", ""),
         test_count=params.get("test_count", 15),
@@ -560,6 +560,39 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
         "has_narrative": has_narrative,
         "health_grade": health_grade,
     }
+
+
+@register_job_handler("generate-evaluator-draft")
+async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Generate evaluator output-field draft from a prompt via LLM."""
+    from app.services.evaluators.evaluator_draft_service import generate_evaluator_draft
+
+    prompt = params.get("prompt", "")
+    if not prompt:
+        raise ValueError("prompt is required")
+
+    app_id = params.get("app_id", "")
+
+    # Optionally load rule catalog for auto-matching
+    rule_catalog = None
+    try:
+        from app.services.evaluators.rules_service import load_rules
+        async with async_session() as db:
+            rule_catalog = await load_rules(db, app_id=app_id, tenant_id=tenant_id)
+    except Exception:
+        pass  # Rules may not be configured for this app
+
+    await update_job_progress(job_id, 0, 1, "Generating evaluator draft…")
+
+    result = await generate_evaluator_draft(
+        prompt=prompt,
+        app_id=app_id,
+        tenant_id=str(tenant_id),
+        user_id=str(user_id),
+        rule_catalog=rule_catalog,
+    )
+
+    return result
 
 
 @register_job_handler("generate-cross-run-report")

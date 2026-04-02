@@ -22,7 +22,7 @@ export function buildAdversarialRetryParams(args: {
   return {
     name: `${run.name || 'Adversarial Stress Test'}${nameSuffix ? ` ${nameSuffix}` : ' Retry'}`,
     description: run.description || null,
-    user_id: kairaSettings.kairaChatUserId,
+    kaira_chat_user_id: kairaSettings.kairaChatUserId,
     kaira_api_url: kairaSettings.kairaApiUrl,
     kaira_auth_token: kairaSettings.kairaAuthToken || null,
     kaira_timeout: (batchMetadata.kaira_timeout as number | undefined) ?? 120,

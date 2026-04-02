@@ -33,18 +33,6 @@ class EvaluatorUpdate(CamelModel):
     forked_from: Optional[str] = None
 
 
-class EvaluatorSetGlobal(CamelModel):
-    """Deprecated compatibility body for pre-harmonization clients."""
-
-    is_global: bool
-
-
-class EvaluatorSetBuiltIn(CamelModel):
-    """Deprecated compatibility body for pre-harmonization clients."""
-
-    is_built_in: bool
-
-
 class EvaluatorResponse(CamelORMModel):
     id: uuid.UUID
     app_id: str
@@ -55,6 +43,8 @@ class EvaluatorResponse(CamelORMModel):
     output_schema: list = Field(default_factory=list)
     visibility: Visibility
     linked_rule_ids: list[str] = Field(default_factory=list)
+    owner_id: Optional[str] = None
+    owner_name: Optional[str] = None
     shared_by: Optional[uuid.UUID] = None
     shared_at: Optional[datetime] = None
     # Transitional response-only fields. Remove after frontend harmonization.
@@ -67,7 +57,7 @@ class EvaluatorResponse(CamelORMModel):
     tenant_id: uuid.UUID
     user_id: uuid.UUID
 
-    @field_validator('listing_id', 'forked_from', mode='before')
+    @field_validator('listing_id', 'forked_from', 'owner_id', mode='before')
     @classmethod
     def uuid_to_str(cls, v):
         return str(v) if v is not None else None

@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Code, Search } from 'lucide-react';
 import { Button, Popover, PopoverTrigger, PopoverContent, Tooltip } from '@/components/ui';
+import { useAppConfig } from '@/hooks';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
+import { useAppStore } from '@/stores';
 import { cn } from '@/utils';
-import type { Listing, PromptType, VariableInfo } from '@/types';
+import type { AppId, Listing, PromptType, VariableInfo } from '@/types';
 
 interface VariablePickerPopoverProps {
   listing?: Listing;
-  appId?: string;
+  appId?: AppId;
   onInsert: (variable: string) => void;
   promptType?: PromptType;
   buttonLabel?: string;
@@ -18,7 +20,6 @@ export function VariablePickerPopover({
   listing,
   appId,
   onInsert,
-  promptType: _promptType,
   buttonLabel = 'Variables',
   className,
 }: VariablePickerPopoverProps) {
@@ -28,8 +29,10 @@ export function VariablePickerPopover({
   const [apiPaths, setApiPaths] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const currentAppId = useAppStore((state) => state.currentApp);
 
-  const effectiveAppId = appId || listing?.appId || 'voice-rx';
+  const effectiveAppId = appId || listing?.appId || currentAppId;
+  const appConfig = useAppConfig(effectiveAppId);
   const sourceType = listing?.sourceType;
   const listingId = listing?.id;
 
@@ -43,8 +46,7 @@ export function VariablePickerPopover({
       try {
         const [vars, paths] = await Promise.all([
           evaluatorsRepository.getVariables(effectiveAppId, sourceType),
-          // Only fetch API paths for voice-rx API listings with a listing ID
-          listingId && sourceType === 'api'
+          listingId && sourceType === 'api' && appConfig.evaluator.dynamicVariableSources.listingApiPaths
             ? evaluatorsRepository.getApiPaths(listingId)
             : Promise.resolve([]),
         ]);
@@ -60,7 +62,7 @@ export function VariablePickerPopover({
     })();
 
     return () => { cancelled = true; };
-  }, [isOpen, effectiveAppId, sourceType, listingId]);
+  }, [appConfig.evaluator.dynamicVariableSources.listingApiPaths, effectiveAppId, isOpen, listingId, sourceType]);
 
   // Group variables by category for display
   const groupedVariables = useMemo(() => {
