@@ -9,7 +9,7 @@ import { InsideSalesCrossRunDashboard } from './InsideSalesCrossRunDashboard';
 
 interface ReportConfig<TReport = unknown> {
   supportsPdf: boolean;
-  render: (report: TReport, context: { runId: string; appId: AppId }) => ReactNode;
+  render: (report: TReport, context: { runId: string; appId: AppId; actions: ReactNode }) => ReactNode;
 }
 
 interface CrossRunConfig {
@@ -30,7 +30,7 @@ const analyticsRegistry: Partial<Record<AppId, AnalyticsAppConfig>> = {
     report: {
       supportsPdf: true,
       render: (report, context) => (
-        <KairaReportView report={report as ReportPayload} runId={context.runId} />
+        <KairaReportView report={report as ReportPayload} runId={context.runId} actions={context.actions} />
       ),
     },
     crossRun: {
@@ -41,7 +41,7 @@ const analyticsRegistry: Partial<Record<AppId, AnalyticsAppConfig>> = {
   'inside-sales': {
     report: {
       supportsPdf: true,
-      render: (report) => <InsideSalesReportView report={report as InsideSalesReportPayload} />,
+      render: (report, context) => <InsideSalesReportView report={report as InsideSalesReportPayload} actions={context.actions} />,
     },
     crossRun: {
       supportsCrossRun: true,

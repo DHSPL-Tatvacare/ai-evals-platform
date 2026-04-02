@@ -198,7 +198,7 @@ export function PopoverContent({
         top: coords.y,
         zIndex: 9999,
       }}
-      className={`bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-md shadow-lg ${className}`}
+      className={`flex flex-col w-max bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-md shadow-lg ${className}`}
       {...props}
     >
       {children}

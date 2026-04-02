@@ -3,15 +3,18 @@ import { Sparkles } from 'lucide-react';
 import {
   Button,
   Input,
-  StarToggle,
+  LLMConfigSection,
   VariablePickerPopover,
   VisibilityToggle,
 } from '@/components/ui';
+import { cn } from '@/utils';
 import { useAppConfig } from '@/hooks';
+import { useLLMSettingsStore } from '@/stores';
 import { submitAndPollJob } from '@/services/api/jobPolling';
 import { rulesRepository } from '@/services/api';
 import { notificationService } from '@/services/notifications';
 import { WizardOverlay, type WizardStep } from '@/features/evalRuns/components/WizardOverlay';
+import { detectProvider } from '@/components/ui/ModelBadge/providers';
 import { RubricBuilder } from '@/features/insideSales/components/RubricBuilder';
 import { BuildModeToggle, type EvaluatorBuildMode } from './BuildModeToggle';
 import { RulePicker } from './RulePicker';
@@ -99,6 +102,7 @@ export function CreateEvaluatorWizard({
   listing,
 }: CreateEvaluatorWizardProps) {
   const appConfig = useAppConfig(context.appId);
+  const llmProvider = useLLMSettingsStore((s) => s.provider);
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
@@ -107,6 +111,7 @@ export function CreateEvaluatorWizard({
   const [fields, setFields] = useState<EvaluatorOutputField[]>([]);
   const [visibility, setVisibility] = useState<'private' | 'app'>('private');
   const [showInHeader, setShowInHeader] = useState(false);
+  const [provider, setProvider] = useState(llmProvider);
   const [modelId, setModelId] = useState('');
   const [linkedRuleIds, setLinkedRuleIds] = useState<string[]>([]);
   const [buildMode, setBuildMode] = useState<EvaluatorBuildMode>('prompt');
@@ -124,7 +129,10 @@ export function CreateEvaluatorWizard({
     setFields(normalizeDraftFields(editEvaluator?.outputSchema ?? []));
     setVisibility(editEvaluator?.visibility ?? appConfig.evaluator.defaultVisibility);
     setShowInHeader(editEvaluator?.showInHeader ?? false);
-    setModelId(editEvaluator?.modelId ?? appConfig.evaluator.defaultModel);
+    const initialModel = editEvaluator?.modelId ?? appConfig.evaluator.defaultModel;
+    setModelId(initialModel);
+    const detected = initialModel ? detectProvider(initialModel) : null;
+    setProvider(detected && detected !== 'unknown' ? detected : llmProvider);
     setLinkedRuleIds(editEvaluator?.linkedRuleIds ?? []);
     setBuildMode(inferBuildMode(editEvaluator, appConfig.features.hasRubricMode));
   }, [
@@ -133,6 +141,7 @@ export function CreateEvaluatorWizard({
     appConfig.features.hasRubricMode,
     editEvaluator,
     isOpen,
+    llmProvider,
   ]);
 
   useEffect(() => {
@@ -278,61 +287,73 @@ export function CreateEvaluatorWizard({
     >
       {activeStep === 'setup' ? (
         <div className="space-y-6">
-          <section className="space-y-3">
+          <section className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">Evaluator Basics</h3>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Set ownership and authoring mode before defining the evaluator contract.
               </p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Name</label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Safety Escalation Check"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Model</label>
-                <Input
-                  value={modelId}
-                  onChange={(e) => setModelId(e.target.value)}
-                  placeholder="Optional override"
-                />
-              </div>
+            <div className="space-y-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Name</label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Safety Escalation Check"
+              />
             </div>
           </section>
 
-          <section className="space-y-3">
-            <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Visibility</label>
+          <fieldset className="flex flex-col items-start gap-2">
+            <legend className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Visibility</legend>
             <VisibilityToggle value={visibility} onChange={setVisibility} />
-          </section>
+          </fieldset>
 
-          <section className="space-y-3">
-            <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Build Mode</label>
-            <BuildModeToggle
-              value={buildMode}
-              onChange={setBuildMode}
-              allowRubric={appConfig.features.hasRubricMode}
-            />
-          </section>
+          {appConfig.features.hasRubricMode ? (
+            <fieldset className="flex flex-col items-start gap-2">
+              <legend className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Build Mode</legend>
+              <BuildModeToggle
+                value={buildMode}
+                onChange={setBuildMode}
+                allowRubric={appConfig.features.hasRubricMode}
+              />
+            </fieldset>
+          ) : null}
 
-          <section className="space-y-3">
-            <label className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Header Metric</label>
-            <div className="flex items-center gap-3">
-              <StarToggle checked={showInHeader} onChange={setShowInHeader} />
-              <p className="text-sm text-[var(--text-secondary)]">
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Header Metric</legend>
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={showInHeader}
+                onChange={(e) => setShowInHeader(e.target.checked)}
+                className="peer sr-only"
+              />
+              <span className={cn(
+                'relative h-5 w-9 shrink-0 rounded-full transition-colors after:absolute after:left-[3px] after:top-[3px] after:h-3.5 after:w-3.5 after:rounded-full after:bg-white after:shadow after:transition-transform',
+                'bg-[var(--border-default)] peer-checked:bg-[var(--interactive-primary)] peer-checked:after:translate-x-3.5',
+                'peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--interactive-primary)]/50',
+              )} />
+              <span className="text-xs text-[var(--text-secondary)]">
                 Show the main evaluator metric in the page header after runs complete.
-              </p>
-            </div>
-          </section>
+              </span>
+            </label>
+          </fieldset>
         </div>
       ) : null}
 
       {activeStep === 'prompt' ? (
         <div className="space-y-4">
+          <LLMConfigSection
+            provider={provider}
+            onProviderChange={(p) => {
+              setProvider(p);
+              setModelId('');
+            }}
+            model={modelId}
+            onModelChange={setModelId}
+          />
+
           {buildMode === 'rubric' ? (
             <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-4 text-sm text-[var(--text-secondary)]">
               Rubric mode generates and maintains the prompt from the rubric definition.

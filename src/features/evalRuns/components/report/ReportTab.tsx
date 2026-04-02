@@ -21,8 +21,8 @@ interface Props<TReport> {
   appId: AppId;
   runId: string;
   supportsPdf?: boolean;
-  /** Renderer for the report content. Receives the raw report payload (any shape). */
-  renderReport: (report: TReport) => React.ReactNode;
+  /** Renderer for the report content. Receives the raw report payload and action buttons. */
+  renderReport: (report: TReport, actions: React.ReactNode) => React.ReactNode;
 }
 
 type Status = 'loading' | 'idle' | 'generating' | 'ready' | 'error';
@@ -368,9 +368,9 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
 
   if (!report) return null;
 
-  // ── Generic action bar: refresh + PDF export (shared by all report views) ──
-  const actionBar = (
-    <div className="report-actions flex items-center justify-end gap-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-2 mb-4">
+  // ── Action buttons: refresh + PDF export (passed to renderReport for layout) ──
+  const actionButtons = (
+    <div className="report-actions flex items-center gap-2">
       {supportsPdf && (
         <button
           onClick={handleExportPdf}
@@ -436,16 +436,15 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
     </div>
   );
 
-  // ── Ready state: action bar + custom content ──
+  // ── Ready state: action buttons passed to renderReport for inline layout ──
   return (
     <div className="max-w-[900px] mx-auto pb-8">
-      {actionBar}
       {refreshing ? (
         <div className="flex items-center justify-center py-20">
           {inProgressCard('Regenerating report...')}
         </div>
       ) : (
-        renderReport(report)
+        renderReport(report, actionButtons)
       )}
     </div>
   );

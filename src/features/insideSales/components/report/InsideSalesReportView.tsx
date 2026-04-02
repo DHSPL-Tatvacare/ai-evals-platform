@@ -8,6 +8,7 @@ import { AgentHeatmapTable } from './AgentHeatmapTable';
 
 interface Props {
   report: InsideSalesReportPayload;
+  actions?: React.ReactNode;
 }
 
 function verdictColor(score: number): string {
@@ -16,7 +17,7 @@ function verdictColor(score: number): string {
   return 'text-[var(--color-error)]';
 }
 
-export function InsideSalesReportView({ report }: Props) {
+export function InsideSalesReportView({ report, actions }: Props) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const activeSlice = selectedAgentId ? report.agentSlices[selectedAgentId] : null;
@@ -58,6 +59,8 @@ export function InsideSalesReportView({ report }: Props) {
 
   return (
     <div className="space-y-8">
+      {/* Action buttons (Export PDF / Refresh) */}
+      {actions && <div className="flex justify-end">{actions}</div>}
       {/* Section 1: Executive Summary */}
       <section>
         <div className="grid grid-cols-3 gap-4 mb-4">

@@ -33,8 +33,10 @@ import { AppReportTab } from '@/features/analytics/AppReportTab';
 function getRunName(run: EvalRun): string {
   const config = run.config as Record<string, unknown> | undefined;
   const summary = run.summary as Record<string, unknown> | undefined;
+  const meta = run.batchMetadata as Record<string, unknown> | undefined;
   return (
     (config?.run_name as string) ??
+    (meta?.run_name as string) ??
     (summary?.evaluator_name as string) ??
     (config?.evaluator_name as string) ??
     'Call Quality Evaluation'

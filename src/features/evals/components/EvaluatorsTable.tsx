@@ -1,6 +1,7 @@
 import { type ReactNode, Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, MoreVertical, PlayCircle, Square, Trash2 } from 'lucide-react';
 import { Button, EmptyState, RoleBadge, VisibilityBadge } from '@/components/ui';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
 import { EvaluatorExpandRow } from './EvaluatorExpandRow';
@@ -124,16 +125,18 @@ export function EvaluatorsTable({
       </div>
 
       {sortedEvaluators.length === 0 ? (
-        <EmptyState
-          icon={PlayCircle}
-          title="No evaluators"
-          description={emptyDescription}
-        >
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {emptyStateActions}
-            {canCreate ? <Button size="sm" onClick={onCreate}>Create Evaluator</Button> : null}
-          </div>
-        </EmptyState>
+        <div className="flex min-h-[calc(100vh-280px)] items-center justify-center">
+          <EmptyState
+            icon={PlayCircle}
+            title="No evaluators"
+            description={emptyDescription}
+          >
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {emptyStateActions}
+              {canCreate ? <Button size="sm" onClick={onCreate}>Create Evaluator</Button> : null}
+            </div>
+          </EmptyState>
+        </div>
       ) : (
         <div className="overflow-x-auto rounded-[10px] border border-[var(--border-default)]">
           <table className="w-full min-w-[980px] border-collapse">
@@ -230,77 +233,79 @@ export function EvaluatorsTable({
                               </Button>
                             )
                           ) : null}
-                          <div className="relative">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              icon={MoreVertical}
-                              onClick={() => setMenuOpenId((current) => current === evaluator.id ? null : evaluator.id)}
-                            />
-                            {menuOpenId === evaluator.id ? (
-                              <div className="absolute right-0 z-20 mt-1 min-w-[180px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-lg">
-                                {isOwned ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onEdit(evaluator);
-                                      setMenuOpenId(null);
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
-                                  >
-                                    Edit
-                                  </button>
-                                ) : null}
+                          <Popover
+                            open={menuOpenId === evaluator.id}
+                            onOpenChange={(open) => setMenuOpenId(open ? evaluator.id : null)}
+                          >
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="sm" icon={MoreVertical} />
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="end"
+                              side="bottom"
+                              className="w-fit min-w-[140px] rounded-[8px] bg-[var(--bg-elevated)] py-1"
+                            >
+                              {isOwned ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onFork(evaluator);
+                                    onEdit(evaluator);
                                     setMenuOpenId(null);
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
                                 >
-                                  Fork
+                                  Edit
                                 </button>
-                                {onVisibilityChange && isOwned ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onVisibilityChange(evaluator);
-                                      setMenuOpenId(null);
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
-                                  >
-                                    {evaluator.visibility === 'app' ? 'Make Private' : 'Share with App'}
-                                  </button>
-                                ) : null}
-                                {onToggleHeader && isOwned ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onToggleHeader(evaluator);
-                                      setMenuOpenId(null);
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
-                                  >
-                                    {evaluator.showInHeader ? 'Remove from Header' : 'Show in Header'}
-                                  </button>
-                                ) : null}
-                                {isOwned ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onDelete(evaluator);
-                                      setMenuOpenId(null);
-                                    }}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)]"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                    Delete
-                                  </button>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onFork(evaluator);
+                                  setMenuOpenId(null);
+                                }}
+                                className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
+                              >
+                                Fork
+                              </button>
+                              {onVisibilityChange && isOwned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onVisibilityChange(evaluator);
+                                    setMenuOpenId(null);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
+                                >
+                                  {evaluator.visibility === 'app' ? 'Make Private' : 'Share with App'}
+                                </button>
+                              ) : null}
+                              {onToggleHeader && isOwned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onToggleHeader(evaluator);
+                                    setMenuOpenId(null);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
+                                >
+                                  {evaluator.showInHeader ? 'Remove from Header' : 'Show in Header'}
+                                </button>
+                              ) : null}
+                              {isOwned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onDelete(evaluator);
+                                    setMenuOpenId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)]"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
+                                </button>
+                              ) : null}
+                            </PopoverContent>
+                          </Popover>
                         </div>
                       </td>
                     </tr>

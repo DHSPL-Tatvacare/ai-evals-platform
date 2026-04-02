@@ -182,49 +182,20 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
 
   seedDefaults: async (listingId: string) => {
     const seeded = await evaluatorsRepository.seedDefaults(listingId);
-    set((state) => ({
-      evaluators: seeded.reduce((items, item) => replaceById(items, item), state.evaluators),
-      sharedEvaluators: seeded.reduce(
-        (items, item) => (
-          (item.visibility ?? 'private') === 'app'
-            ? replaceById(items, item)
-            : removeById(items, item.id)
-        ),
-        state.sharedEvaluators,
-      ),
-      registry: seeded.reduce(
-        (items, item) => (
-          (item.visibility ?? 'private') === 'app'
-            ? replaceById(items, item)
-            : removeById(items, item.id)
-        ),
-        state.registry,
-      ),
-    }));
+    // Reload from list endpoint to get properly annotated data (owner names)
+    const { currentAppId } = get();
+    if (currentAppId) {
+      const evaluators = await evaluatorsRepository.getForListing(currentAppId, listingId);
+      set({ evaluators, isLoaded: true, currentListingId: listingId, currentAppId });
+    }
     return seeded;
   },
 
   seedAppDefaults: async (appId: string) => {
     const seeded = await evaluatorsRepository.seedAppDefaults(appId);
-    set((state) => ({
-      evaluators: seeded.reduce((items, item) => replaceById(items, item), state.evaluators),
-      sharedEvaluators: seeded.reduce(
-        (items, item) => (
-          (item.visibility ?? 'private') === 'app'
-            ? replaceById(items, item)
-            : removeById(items, item.id)
-        ),
-        state.sharedEvaluators,
-      ),
-      registry: seeded.reduce(
-        (items, item) => (
-          (item.visibility ?? 'private') === 'app'
-            ? replaceById(items, item)
-            : removeById(items, item.id)
-        ),
-        state.registry,
-      ),
-    }));
+    // Reload from list endpoint to get properly annotated data (owner names)
+    const evaluators = await evaluatorsRepository.getByAppId(appId);
+    set({ evaluators, isLoaded: true, currentListingId: null, currentAppId: appId });
     return seeded;
   },
 

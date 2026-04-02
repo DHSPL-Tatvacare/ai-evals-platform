@@ -28,7 +28,7 @@ export function AppReportTab({ appId, runId }: Props) {
       appId={appId}
       runId={runId}
       supportsPdf={config.report.supportsPdf}
-      renderReport={(report) => config.report?.render(report, { appId, runId }) ?? null}
+      renderReport={(report, actions) => config.report?.render(report, { appId, runId, actions }) ?? null}
     />
   );
 }

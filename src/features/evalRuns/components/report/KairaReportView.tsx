@@ -17,6 +17,7 @@ import './report-print.css';
 interface Props {
   report: ReportPayload;
   runId: string;
+  actions?: React.ReactNode;
 }
 
 function gradeHex(grade: string): string {
@@ -27,7 +28,7 @@ function gradeHex(grade: string): string {
   return '#ef4444';
 }
 
-export function KairaReportView({ report, runId }: Props) {
+export function KairaReportView({ report, runId, actions }: Props) {
   const [activeTab, setActiveTab] = useState('summary');
 
   const { healthScore, narrative, metadata } = report;
@@ -170,6 +171,8 @@ export function KairaReportView({ report, runId }: Props) {
             <span>&middot;</span>
             <span>{formattedDate}</span>
           </div>
+          {/* Action buttons (Export PDF / Refresh) */}
+          {actions && <div className="ml-auto shrink-0">{actions}</div>}
         </div>
 
         {/* Tab layout */}
