@@ -71,6 +71,7 @@ async def create_eval_run(
     evaluator_id: Optional[uuid.UUID] = None,
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
+    config: Optional[dict] = None,
     batch_metadata: Optional[dict] = None,
 ) -> None:
     """Create an EvalRun in 'running' state.
@@ -92,6 +93,7 @@ async def create_eval_run(
             started_at=datetime.now(timezone.utc),
             llm_provider=llm_provider,
             llm_model=llm_model,
+            config=config or {},
             batch_metadata=batch_metadata,
         ))
         await db.commit()

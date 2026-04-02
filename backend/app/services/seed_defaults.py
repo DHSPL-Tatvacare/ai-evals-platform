@@ -1823,22 +1823,62 @@ APP_SEEDS = [
             "analytics": {
                 "profile": "voice_rx_v1",
                 "capabilities": {
-                    "singleRunReport": False,
-                    "crossRunAnalytics": False,
-                    "crossRunAiSummary": False,
-                    "pdfExport": False,
+                    "singleRunReport": True,
+                    "crossRunAnalytics": True,
+                    "crossRunAiSummary": True,
+                    "pdfExport": True,
                 },
                 "singleRun": {
-                    "sections": [],
-                    "export": {"enabled": False, "format": "pdf", "documentVariant": "voice-rx-v1", "sectionIds": []},
-                    "aiSummary": {"enabled": False, "sectionIds": []},
+                    "sections": [
+                        {"id": "voice-rx-summary", "type": "summary_cards", "title": "Accuracy Summary", "variant": "voice_rx_overview"},
+                        {"id": "voice-rx-overview", "type": "callout", "title": "Run Overview", "variant": "voice_rx_callout"},
+                        {"id": "voice-rx-metrics", "type": "metric_breakdown", "title": "Accuracy Metrics", "variant": "voice_rx_metrics"},
+                        {"id": "voice-rx-severity", "type": "distribution_chart", "title": "Severity Distribution", "variant": "voice_rx_severity"},
+                        {"id": "voice-rx-exemplars", "type": "exemplars", "title": "Discrepancy Examples", "variant": "voice_rx_examples"},
+                        {"id": "voice-rx-issues", "type": "issues_recommendations", "title": "Issues and Recommendations", "variant": "voice_rx_actions"},
+                    ],
+                    "export": {
+                        "enabled": True,
+                        "format": "pdf",
+                        "documentVariant": "voice-rx-run-v1",
+                        "sectionIds": [
+                            "voice-rx-summary",
+                            "voice-rx-overview",
+                            "voice-rx-metrics",
+                            "voice-rx-severity",
+                            "voice-rx-exemplars",
+                            "voice-rx-issues",
+                        ],
+                    },
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "voice-rx-overview",
+                            "voice-rx-exemplars",
+                            "voice-rx-issues",
+                        ],
+                    },
                 },
                 "crossRun": {
-                    "sections": [],
+                    "sections": [
+                        {"id": "voice-rx-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "voice_rx_cross_run"},
+                        {"id": "voice-rx-cross-metrics", "type": "metric_breakdown", "title": "Accuracy Trends", "variant": "voice_rx_trends"},
+                        {"id": "voice-rx-cross-severity", "type": "heatmap", "title": "Severity Heatmap", "variant": "voice_rx_heatmap"},
+                        {"id": "voice-rx-cross-issues", "type": "issues_recommendations", "title": "Recurring Issues", "variant": "voice_rx_recurring"},
+                    ],
                     "export": {"enabled": False, "format": "pdf", "documentVariant": "voice-rx-cross-run-v1", "sectionIds": []},
-                    "aiSummary": {"enabled": False, "sectionIds": []},
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "voice-rx-cross-summary",
+                            "voice-rx-cross-severity",
+                            "voice-rx-cross-issues",
+                        ],
+                    },
                 },
-                "assets": {},
+                "assets": {
+                    "glossaryKey": "voice-rx-report-glossary",
+                },
             },
         },
     },

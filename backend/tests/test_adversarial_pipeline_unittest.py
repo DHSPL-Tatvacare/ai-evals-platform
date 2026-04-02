@@ -1,9 +1,12 @@
 """Focused backend coverage for adversarial pipeline canonicalization phases 1-3."""
 
+import asyncio
 import os
 import sys
+import uuid
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -29,6 +32,7 @@ from app.services.evaluators.models import (  # noqa: E402
     SimulatorState,
     TransportFacts,
 )
+from app.services.evaluators import credential_lane_scheduler as credential_lane_scheduler_module  # noqa: E402
 from app.services.reports.aggregator import AdversarialAggregator  # noqa: E402
 
 
@@ -577,6 +581,98 @@ class AnalyticsPhaseFourTests(unittest.TestCase):
         self.assertEqual(by_goal['question_answered'].total, 2)
         self.assertEqual(by_goal['question_answered'].passed, 1)
         self.assertEqual(distributions.adversarial['ERROR'], 1)
+
+
+class CredentialLaneSchedulerTests(unittest.IsolatedAsyncioTestCase):
+    def test_normalize_kaira_credential_pool_dedupes_and_falls_back(self):
+        normalized = credential_lane_scheduler_module.normalize_kaira_credential_pool(
+            [
+                {'userId': ' user-1 ', 'authToken': ' token-1 '},
+                {'user_id': 'USER-1', 'auth_token': 'ignored-duplicate'},
+                {'user_id': 'user-2', 'auth_token': 'token-2'},
+                {'user_id': '', 'auth_token': 'missing-user'},
+            ],
+            fallback_user_id='user-3',
+            fallback_auth_token='token-3',
+        )
+
+        self.assertEqual(
+            normalized,
+            [
+                {'user_id': 'user-1', 'auth_token': 'token-1'},
+                {'user_id': 'user-2', 'auth_token': 'token-2'},
+                {'user_id': 'user-3', 'auth_token': 'token-3'},
+            ],
+        )
+
+    async def test_run_cases_with_credential_lanes_never_overlaps_same_user(self):
+        class FakeLaneKairaClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.opened = False
+                self.closed = False
+
+            async def open(self):
+                self.opened = True
+
+            async def close(self):
+                self.closed = True
+
+        active_by_user: dict[str, int] = {}
+        max_active_by_user: dict[str, int] = {}
+        handled_by_case: dict[int, str] = {}
+        progress_events: list[tuple[int, int, str]] = []
+        state_lock = asyncio.Lock()
+
+        async def worker(index, case, credential, client, lane_index):
+            user_id = credential['user_id']
+            self.assertTrue(client.opened)
+            self.assertFalse(client.closed)
+            async with state_lock:
+                active_by_user[user_id] = active_by_user.get(user_id, 0) + 1
+                max_active_by_user[user_id] = max(
+                    max_active_by_user.get(user_id, 0),
+                    active_by_user[user_id],
+                )
+                handled_by_case[case] = user_id
+
+            await asyncio.sleep(0.01)
+
+            async with state_lock:
+                active_by_user[user_id] -= 1
+
+            return {
+                'case': case,
+                'credential_user_id': user_id,
+                'lane_index': lane_index,
+            }
+
+        async def progress_callback(current, total, message):
+            progress_events.append((current, total, message))
+
+        results = await credential_lane_scheduler_module.run_cases_with_credential_lanes(
+            cases=[0, 1, 2, 3],
+            credentials=[
+                {'user_id': 'user-1', 'auth_token': 'token-1'},
+                {'user_id': 'user-2', 'auth_token': 'token-2'},
+            ],
+            worker=worker,
+            concurrency=2,
+            job_id='job-1',
+            tenant_id=uuid.uuid4(),
+            progress_callback=progress_callback,
+            progress_message=lambda ok, err, current, total: f'{current}/{total} ok={ok} err={err}',
+            inter_item_delay=0,
+            client_factory=lambda credential: FakeLaneKairaClient(credential=credential),
+            is_job_cancelled=AsyncMock(return_value=False),
+            cancelled_error_cls=RuntimeError,
+        )
+
+        self.assertEqual([result['case'] for result in results], [0, 1, 2, 3])
+        self.assertEqual(set(handled_by_case.keys()), {0, 1, 2, 3})
+        self.assertEqual(max_active_by_user, {'user-1': 1, 'user-2': 1})
+        self.assertEqual([event[0] for event in progress_events], [1, 2, 3, 4])
+        self.assertTrue(all(event[1] == 4 for event in progress_events))
 
 
 

@@ -1,99 +1,88 @@
-import { useState, useCallback } from 'react';
-import { CheckCircle2, AlertCircle, Wifi } from 'lucide-react';
-import { Input, Button, Alert } from '@/components/ui';
+import { useCallback, type Dispatch, type SetStateAction } from 'react';
+
+import { Input } from '@/components/ui';
+import { CredentialPoolManager } from '@/features/credentialPool/CredentialPoolManager';
+import { kairaCredentialPoolConfig } from '@/features/credentialPool/kairaCredentialPoolConfig';
+import type { CredentialPoolEntry } from '@/features/credentialPool/types';
 
 interface KairaApiConfigStepProps {
-  userId: string;
   kairaApiUrl: string;
-  kairaAuthToken: string;
   kairaTimeout: number;
-  onUserIdChange: (userId: string) => void;
+  credentialEntries: CredentialPoolEntry[];
   onApiUrlChange: (url: string) => void;
-  onAuthTokenChange: (token: string) => void;
   onTimeoutChange: (timeout: number) => void;
+  onCredentialEntriesChange: Dispatch<SetStateAction<CredentialPoolEntry[]>>;
 }
 
 export function KairaApiConfigStep({
-  userId,
   kairaApiUrl,
-  kairaAuthToken,
   kairaTimeout,
-  onUserIdChange,
+  credentialEntries,
   onApiUrlChange,
-  onAuthTokenChange,
   onTimeoutChange,
+  onCredentialEntriesChange,
 }: KairaApiConfigStepProps) {
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-  const [testError, setTestError] = useState<string | null>(null);
+  const handleTestEntry = useCallback(async (entryId: string) => {
+    const entry = credentialEntries.find((item) => item.id === entryId);
+    if (!entry) {
+      return;
+    }
 
-  const handleTestConnection = useCallback(async () => {
-    if (!kairaApiUrl) return;
+    const updateEntry = (testStatus: CredentialPoolEntry['testStatus'], testMessage: string | null) => {
+      onCredentialEntriesChange((currentEntries) => (
+        currentEntries.map((item) => (
+          item.id === entryId
+            ? { ...item, testStatus, testMessage }
+            : item
+        ))
+      ));
+    };
 
-    setTestStatus('testing');
-    setTestError(null);
+    if (!kairaApiUrl.trim()) {
+      updateEntry('error', 'API URL is required');
+      return;
+    }
+
+    if (!entry.values.userId?.trim()) {
+      updateEntry('error', 'User ID is required');
+      return;
+    }
+
+    if (!entry.values.authToken?.trim()) {
+      updateEntry('error', 'Auth token is required');
+      return;
+    }
+
+    updateEntry('testing', 'Testing...');
 
     try {
-      const url = kairaApiUrl.replace(/\/$/, '');
-      const response = await fetch(`${url}/health`, {
+      const response = await fetch(`${kairaApiUrl.replace(/\/$/, '')}/health`, {
         method: 'GET',
-        headers: kairaAuthToken ? { Authorization: `Bearer ${kairaAuthToken}` } : {},
+        headers: { Authorization: `Bearer ${entry.values.authToken.trim()}` },
         signal: AbortSignal.timeout(10000),
       });
 
-      if (response.ok) {
-        setTestStatus('success');
-      } else {
-        setTestStatus('error');
-        setTestError(`HTTP ${response.status}: ${response.statusText}`);
+      if (!response.ok) {
+        updateEntry('error', `HTTP ${response.status}: ${response.statusText}`);
+        return;
       }
-    } catch (err) {
-      setTestStatus('error');
-      setTestError(err instanceof Error ? err.message : 'Connection failed');
+
+      updateEntry('success', 'Connected');
+    } catch (error) {
+      updateEntry('error', error instanceof Error ? error.message : 'Connection failed');
     }
-  }, [kairaApiUrl, kairaAuthToken]);
+  }, [credentialEntries, kairaApiUrl, onCredentialEntriesChange]);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          User ID
-        </label>
-        <Input
-          value={userId}
-          onChange={(e) => onUserIdChange(e.target.value)}
-          placeholder="MyTatva user ID"
-        />
-        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-          The MyTatva user ID for Kaira conversations.
-        </p>
-      </div>
-
+    <div className="space-y-5">
       <div>
         <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
           Kaira API URL <span className="text-[var(--color-error)]">*</span>
         </label>
         <Input
           value={kairaApiUrl}
-          onChange={(e) => {
-            onApiUrlChange(e.target.value);
-            setTestStatus('idle');
-          }}
+          onChange={(e) => onApiUrlChange(e.target.value)}
           placeholder="https://kaira-api.example.com"
-        />
-      </div>
-
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          Auth Token
-        </label>
-        <Input
-          type="password"
-          value={kairaAuthToken}
-          onChange={(e) => {
-            onAuthTokenChange(e.target.value);
-            setTestStatus('idle');
-          }}
-          placeholder="Bearer token for API authentication"
         />
       </div>
 
@@ -113,39 +102,12 @@ export function KairaApiConfigStep({
         </p>
       </div>
 
-      {/* Test connection */}
-      <div className="flex items-center gap-3">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleTestConnection}
-          disabled={!kairaApiUrl || testStatus === 'testing'}
-          isLoading={testStatus === 'testing'}
-          icon={Wifi}
-        >
-          Test Connection
-        </Button>
-
-        {testStatus === 'success' && (
-          <span className="flex items-center gap-1.5 text-[13px] text-[var(--color-success)]">
-            <CheckCircle2 className="h-4 w-4" />
-            Connected
-          </span>
-        )}
-
-        {testStatus === 'error' && (
-          <span className="flex items-center gap-1.5 text-[13px] text-[var(--color-error)]">
-            <AlertCircle className="h-4 w-4" />
-            {testError || 'Failed'}
-          </span>
-        )}
-      </div>
-
-      {testStatus === 'error' && (
-        <Alert variant="warning">
-          Connection test failed, but you can still submit. The API may be intermittently unavailable.
-        </Alert>
-      )}
+      <CredentialPoolManager
+        config={kairaCredentialPoolConfig}
+        entries={credentialEntries}
+        onEntriesChange={onCredentialEntriesChange}
+        onTestEntry={handleTestEntry}
+      />
     </div>
   );
 }

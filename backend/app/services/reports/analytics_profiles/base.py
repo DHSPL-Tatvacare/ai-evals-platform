@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.schemas.base import CamelModel
 
 
@@ -18,6 +19,8 @@ class CrossRunAdapter:
         self,
         runs_data: list[tuple[dict, dict]],
         all_runs_count: int,
+        analytics_config: AppAnalyticsConfig | None = None,
+        app_id: str | None = None,
     ) -> CamelModel:
         raise NotImplementedError
 

@@ -432,6 +432,7 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
         tenant_id=tenant_id,
         user_id=user_id,
         kaira_test_user_id=params.get("kaira_chat_user_id", ""),
+        kaira_credential_pool=params.get("kaira_credential_pool"),
         kaira_api_url=params.get("kaira_api_url", ""),
         kaira_auth_token=params.get("kaira_auth_token", ""),
         test_count=params.get("test_count", 15),

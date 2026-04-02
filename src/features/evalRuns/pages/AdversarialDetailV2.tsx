@@ -111,9 +111,9 @@ export default function AdversarialDetailV2() {
 
   const handleRetryCase = useCallback(async () => {
     if (!run || !evalItem) return;
-    if (!canSubmitAdversarialRun(kairaSettings)) {
+    if (!canSubmitAdversarialRun(kairaSettings, run)) {
       notificationService.error(
-        'Configure the Kaira API URL and chat user ID before retrying adversarial cases.',
+        'Configure a Kaira API URL and at least one credential row before retrying adversarial cases.',
         'Missing Kaira settings',
       );
       return;

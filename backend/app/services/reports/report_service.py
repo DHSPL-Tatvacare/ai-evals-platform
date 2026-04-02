@@ -10,11 +10,16 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import load_only
 
+from app.models.app import App
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
 from app.models.evaluator import Evaluator
+from app.schemas.app_config import AppConfig as AppConfigSchema
+from app.schemas.app_analytics_config import AppAnalyticsConfig
 
 from .aggregator import AdversarialAggregator, ReportAggregator
 from .base_report_service import BaseReportService
+from .canonical_adapters import adapt_kaira_run_report
+from .contracts.run_report import PlatformRunReportPayload
 from .custom_evaluations.aggregator import CustomEvaluationsAggregator
 from .custom_evaluations.narrator import CustomEvalNarrator
 from .custom_evaluations.schemas import CustomEvaluationsReport
@@ -33,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportService(BaseReportService):
-    payload_model = ReportPayload
+    payload_model = PlatformRunReportPayload
 
     """Stateless per-request report generator.
 
@@ -145,7 +150,8 @@ class ReportService(BaseReportService):
             narrative=narrative,
             custom_evaluations_report=custom_eval_report,
         )
-        return payload
+        analytics_config = await self._load_analytics_config(run.app_id)
+        return adapt_kaira_run_report(payload, analytics_config)
 
     # --- AI Narrative ---
 
@@ -367,3 +373,15 @@ class ReportService(BaseReportService):
             logger.warning("Custom eval narrative generation skipped: %s", e)
 
         return report
+
+    async def _load_analytics_config(self, app_id: str) -> AppAnalyticsConfig:
+        app_row = await self.db.scalar(
+            select(App).where(
+                App.slug == app_id,
+                App.is_active == True,
+            )
+        )
+        if not app_row:
+            raise ValueError(f"App not found: {app_id}")
+        app_config = AppConfigSchema.model_validate(app_row.config or {})
+        return app_config.analytics

@@ -1,0 +1,165 @@
+"""Resolve report-side assets from analytics config keys and settings rows."""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from app.models.mixins.shareable import Visibility
+from app.models.setting import Setting
+from app.schemas.app_analytics_config import AnalyticsAssetKeys
+from app.services.reports.prompts.inside_sales_narrative_prompt import (
+    INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
+)
+from app.services.reports.prompts.narrative_prompt import (
+    ADVERSARIAL_NARRATIVE_SYSTEM_PROMPT,
+    NARRATIVE_SYSTEM_PROMPT,
+)
+from app.services.reports.prompts.production_prompts import get_production_prompts
+
+
+@dataclass
+class ResolvedReportAssets:
+    prompt_references: dict[str, str | None] = field(default_factory=dict)
+    narrative_template: str | None = None
+    glossary: str | None = None
+    adversarial_narrative_template: str | None = None
+
+
+async def _resolve_setting_value(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    key: str | None,
+) -> dict[str, Any] | None:
+    if not key:
+        return None
+
+    private_row = await db.scalar(
+        select(Setting).where(
+            Setting.tenant_id == tenant_id,
+            Setting.user_id == user_id,
+            Setting.app_id == app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.PRIVATE,
+        )
+    )
+    if private_row:
+        return private_row.value or {}
+
+    tenant_shared = await db.scalar(
+        select(Setting).where(
+            Setting.tenant_id == tenant_id,
+            Setting.app_id == app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    if tenant_shared:
+        return tenant_shared.value or {}
+
+    system_shared = await db.scalar(
+        select(Setting).where(
+            Setting.tenant_id == SYSTEM_TENANT_ID,
+            Setting.user_id == SYSTEM_USER_ID,
+            Setting.app_id == app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    if system_shared:
+        return system_shared.value or {}
+
+    return None
+
+
+def _extract_content(value: dict[str, Any] | None) -> str | None:
+    if not value:
+        return None
+    raw = value.get('content')
+    if isinstance(raw, str):
+        return raw
+    template = value.get('template')
+    if isinstance(template, str):
+        return template
+    system_prompt = value.get('systemPrompt') or value.get('system_prompt')
+    if isinstance(system_prompt, str):
+        return system_prompt
+    return None
+
+
+def _extract_prompt_references(value: dict[str, Any] | None) -> dict[str, str | None]:
+    if not value:
+        return {}
+    prompt_refs = value.get('promptReferences') or value.get('prompt_references')
+    if isinstance(prompt_refs, dict):
+        return {
+            str(key): item if isinstance(item, str) or item is None else str(item)
+            for key, item in prompt_refs.items()
+        }
+    return {
+        str(key): item if isinstance(item, str) or item is None else str(item)
+        for key, item in value.items()
+    }
+
+
+async def resolve_report_assets(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    asset_keys: AnalyticsAssetKeys,
+) -> ResolvedReportAssets:
+    prompt_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.prompt_references_key,
+    )
+    narrative_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.narrative_template_key,
+    )
+    glossary_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.glossary_key,
+    )
+
+    defaults = get_production_prompts(app_id)
+    narrative_defaults = {
+        'kaira-bot': NARRATIVE_SYSTEM_PROMPT,
+        'inside-sales': INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
+        'voice-rx': (
+            'You are a clinical transcription QA analyst. Summarize the evaluation accurately, '
+            'using only the evidence and counts provided in the analytics payload.'
+        ),
+    }
+
+    prompt_references = _extract_prompt_references(prompt_value)
+    if not prompt_references:
+        prompt_references = defaults
+
+    narrative_template = _extract_content(narrative_value) or narrative_defaults.get(app_id)
+    glossary = _extract_content(glossary_value)
+
+    return ResolvedReportAssets(
+        prompt_references=prompt_references,
+        narrative_template=narrative_template,
+        glossary=glossary,
+        adversarial_narrative_template=ADVERSARIAL_NARRATIVE_SYSTEM_PROMPT,
+    )

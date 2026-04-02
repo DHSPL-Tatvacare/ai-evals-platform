@@ -30,14 +30,17 @@ from app.services.evaluators.adversarial_canonical import build_canonical_advers
 from app.services.evaluators.adversarial_config import (
     load_config_from_db, get_default_config,
 )
+from app.services.evaluators.credential_lane_scheduler import (
+    normalize_kaira_credential_pool,
+    run_cases_with_credential_lanes,
+)
 from app.services.evaluators.kaira_client import KairaClient
 from app.services.evaluators.models import serialize
-from app.services.evaluators.parallel_engine import run_parallel
 from app.services.evaluators.runner_utils import (
     save_api_log, create_eval_run, finalize_eval_run,
 )
 from app.services.job_worker import (
-    JobCancelledError, safe_error_message, update_job_progress,
+    JobCancelledError, is_job_cancelled, safe_error_message, update_job_progress,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,6 +192,7 @@ async def run_adversarial_evaluation(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     kaira_test_user_id: str = "",
+    kaira_credential_pool: Optional[list[dict]] = None,
     kaira_api_url: str = "",
     kaira_auth_token: str = "",
     test_count: int = 15,
@@ -221,6 +225,13 @@ async def run_adversarial_evaluation(
     """Run adversarial stress test against live Kaira API."""
     start_time = time.monotonic()
     run_id = uuid.uuid4()
+    resolved_credentials = normalize_kaira_credential_pool(
+        kaira_credential_pool,
+        fallback_user_id=kaira_test_user_id,
+        fallback_auth_token=kaira_auth_token,
+    )
+    if not resolved_credentials:
+        raise RuntimeError("At least one Kaira credential pair is required")
     saved_case_uuid_ids = [uuid.UUID(str(case_id)) for case_id in (saved_case_ids or [])]
     retry_case_ids = [int(case_id) for case_id in (retry_eval_ids or [])]
     source_run_uuid = uuid.UUID(str(source_run_id)) if source_run_id else None
@@ -260,6 +271,10 @@ async def run_adversarial_evaluation(
         job_id=job_id,
         llm_provider=llm_provider or "gemini",
         llm_model=llm_model or "",
+        config={
+            "kaira_api_url": kaira_api_url,
+            "kaira_credential_pool": resolved_credentials,
+        },
         batch_metadata={
             "name": name,
             "description": description,
@@ -274,7 +289,10 @@ async def run_adversarial_evaluation(
             "case_delay": case_delay,
             "parallel_cases": parallel_cases,
             "case_workers": case_workers,
+            "kaira_api_url": kaira_api_url,
             "kaira_timeout": kaira_timeout,
+            "credential_pool_size": len(resolved_credentials),
+            "credential_user_ids": [credential["user_id"] for credential in resolved_credentials],
             "case_mode": case_mode,
             "saved_case_ids": [str(case_id) for case_id in saved_case_uuid_ids],
             "manual_case_count": len(_normalize_manual_cases(manual_cases)),
@@ -327,19 +345,17 @@ async def run_adversarial_evaluation(
         await db.execute(
             update(EvalRun).where(EvalRun.id == run_id, EvalRun.tenant_id == tenant_id).values(
                 llm_provider=llm_provider, llm_model=inner_llm.model_name,
-                config={"auth_method": auth_method},
+                config={
+                    "auth_method": auth_method,
+                    "kaira_api_url": kaira_api_url,
+                    "kaira_credential_pool": resolved_credentials,
+                },
             )
         )
         await db.commit()
 
-    # Create adversarial evaluator (with resolved config) and Kaira client
+    # Create adversarial evaluator
     evaluator = AdversarialEvaluator(llm, config=config)
-    client = KairaClient(
-        auth_token=kaira_auth_token, base_url=kaira_api_url,
-        log_callback=save_api_log, run_id=str(run_id),
-        timeout=kaira_timeout,
-    )
-    await client.open()
 
     async def report_progress(current: int, total: int, message: str, **extra):
         await update_job_progress(
@@ -347,7 +363,10 @@ async def run_adversarial_evaluation(
         )
 
     # Determine effective concurrency
-    effective_concurrency = case_workers if parallel_cases else 1
+    effective_concurrency = min(
+        case_workers if parallel_cases else 1,
+        len(resolved_credentials),
+    )
 
     try:
         # Phase 1: Resolve requested test cases
@@ -402,17 +421,17 @@ async def run_adversarial_evaluation(
 
         # Phase 2: Run each test case with per-case error boundary.
 
-        async def _evaluate_one_case(_index: int, tc) -> dict:
-            """Evaluate a single adversarial test case — called by run_parallel()."""
+        async def _evaluate_one_case(_index: int, tc, credential: dict, client: KairaClient, _lane_index: int) -> dict:
+            """Evaluate a single adversarial test case on an assigned credential lane."""
             goals_label = "+".join(tc.goal_flow)
-            case_label = f"Case {_index + 1}: {goals_label}"
+            case_label = f"Case {_index + 1}: {goals_label} [{credential['user_id']}]"
 
             worker_llm = llm.clone_for_thread(f"adversarial-{_index}") if effective_concurrency > 1 else llm
             worker_llm.set_test_case_label(case_label)
             worker_evaluator = AdversarialEvaluator(worker_llm, config=config) if effective_concurrency > 1 else evaluator
 
             i = _index + 1
-            logger.info(f"Running live test {i}/{len(cases)}: {goals_label}")
+            logger.info(f"Running live test {i}/{len(cases)}: {goals_label} on {credential['user_id']}")
 
             # Resolve goals for this test case's flow
             tc_goals = worker_evaluator.get_goals_for_test_case(tc)
@@ -421,13 +440,14 @@ async def run_adversarial_evaluation(
             transcript = None
             try:
                 transcript = await worker_evaluator.conversation_agent.run_conversation(
-                    test_case=tc, goals=tc_goals, client=client, user_id=kaira_test_user_id,
+                    test_case=tc, goals=tc_goals, client=client, user_id=credential["user_id"],
                     turn_delay=turn_delay, thinking=thinking, test_case_label=case_label,
                     trait_hints_by_id=trait_hints_by_id,
                 )
 
                 evaluation = await worker_evaluator.evaluate_transcript(tc, transcript, thinking=thinking)
                 result_data = serialize(evaluation)
+                result_data["execution_context"] = {"credential_user_id": credential["user_id"]}
                 result_data["canonical_case"] = build_canonical_adversarial_case(
                     result_data,
                     row_verdict=evaluation.verdict,
@@ -460,6 +480,7 @@ async def run_adversarial_evaluation(
                     "goal_flow": tc.goal_flow,
                     "goal_achieved": canonical_case["judge"]["goalAchieved"],
                     "canonical_case": canonical_case,
+                    "credential_user_id": credential["user_id"],
                 }
 
             except JobCancelledError:
@@ -471,6 +492,7 @@ async def run_adversarial_evaluation(
                 result_data = {
                     "test_case": serialize(tc),
                     "error": safe_error_message(e),
+                    "execution_context": {"credential_user_id": credential["user_id"]},
                 }
                 if transcript:
                     result_data["transcript"] = serialize(transcript)
@@ -506,6 +528,7 @@ async def run_adversarial_evaluation(
                     "goal_flow": tc.goal_flow,
                     "goal_achieved": False,
                     "canonical_case": canonical_case,
+                    "credential_user_id": credential["user_id"],
                 }
 
         async def _progress_bridge(current: int, total_count: int, message: str):
@@ -514,8 +537,9 @@ async def run_adversarial_evaluation(
         def _progress_message(ok: int, err: int, current: int, tot: int) -> str:
             return f"Test case {current}/{tot} ({ok} ok, {err} errors)"
 
-        case_results = await run_parallel(
-            items=cases,
+        case_results = await run_cases_with_credential_lanes(
+            cases=cases,
+            credentials=resolved_credentials,
             worker=_evaluate_one_case,
             concurrency=effective_concurrency,
             job_id=job_id,
@@ -523,6 +547,15 @@ async def run_adversarial_evaluation(
             progress_callback=_progress_bridge,
             progress_message=_progress_message,
             inter_item_delay=case_delay,
+            client_factory=lambda credential: KairaClient(
+                auth_token=credential["auth_token"],
+                base_url=kaira_api_url,
+                log_callback=save_api_log,
+                run_id=str(run_id),
+                timeout=kaira_timeout,
+            ),
+            is_job_cancelled=is_job_cancelled,
+            cancelled_error_cls=JobCancelledError,
         )
 
         # Aggregate results from worker return values
@@ -599,6 +632,3 @@ async def run_adversarial_evaluation(
             error_message=safe_error_message(e),
         )
         raise
-
-    finally:
-        await client.close()

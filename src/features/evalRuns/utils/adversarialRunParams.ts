@@ -18,13 +18,19 @@ export function buildAdversarialRetryParams(args: {
 }): Record<string, unknown> {
   const { run, kairaSettings, timeouts, retryEvalIds, sourceRunId, nameSuffix } = args;
   const batchMetadata = run.batch_metadata ?? {};
+  const credentialPool = resolveAdversarialCredentialPool(run, kairaSettings);
+  const primaryCredential = credentialPool[0];
 
   return {
     name: `${run.name || 'Adversarial Stress Test'}${nameSuffix ? ` ${nameSuffix}` : ' Retry'}`,
     description: run.description || null,
-    kaira_chat_user_id: kairaSettings.kairaChatUserId,
-    kaira_api_url: kairaSettings.kairaApiUrl,
-    kaira_auth_token: kairaSettings.kairaAuthToken || null,
+    kaira_chat_user_id: primaryCredential?.userId ?? '',
+    kaira_api_url: (batchMetadata.kaira_api_url as string | undefined) ?? kairaSettings.kairaApiUrl,
+    kaira_auth_token: primaryCredential?.authToken || null,
+    kaira_credential_pool: credentialPool.map((credential) => ({
+      user_id: credential.userId,
+      auth_token: credential.authToken,
+    })),
     kaira_timeout: (batchMetadata.kaira_timeout as number | undefined) ?? 120,
     test_count: 0,
     turn_delay: (batchMetadata.turn_delay as number | undefined) ?? 1.5,
@@ -48,9 +54,52 @@ export function buildAdversarialRetryParams(args: {
   };
 }
 
-export function canSubmitAdversarialRun(kairaSettings: KairaBotSettings): boolean {
+function normalizeCredentialPool(value: unknown): Array<{ userId: string; authToken: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const row = item as Record<string, unknown>;
+      const userId = String(row.user_id ?? row.userId ?? '').trim();
+      const authToken = String(row.auth_token ?? row.authToken ?? '').trim();
+      if (!userId || !authToken) {
+        return null;
+      }
+      return { userId, authToken };
+    })
+    .filter((item): item is { userId: string; authToken: string } => item != null);
+}
+
+export function resolveAdversarialCredentialPool(
+  run: Run | null | undefined,
+  kairaSettings: KairaBotSettings,
+): Array<{ userId: string; authToken: string }> {
+  const runConfig = (run?.config as Record<string, unknown> | undefined) ?? {};
+  const runPool = normalizeCredentialPool(runConfig.kaira_credential_pool);
+  if (runPool.length > 0) {
+    return runPool;
+  }
+
+  if (kairaSettings.kairaChatUserId.trim() && kairaSettings.kairaAuthToken.trim()) {
+    return [{
+      userId: kairaSettings.kairaChatUserId.trim(),
+      authToken: kairaSettings.kairaAuthToken.trim(),
+    }];
+  }
+
+  return [];
+}
+
+export function canSubmitAdversarialRun(kairaSettings: KairaBotSettings, run?: Run | null): boolean {
+  const batchMetadata = run?.batch_metadata ?? {};
+  const apiUrl = ((batchMetadata.kaira_api_url as string | undefined) ?? kairaSettings.kairaApiUrl).trim();
   return Boolean(
-    kairaSettings.kairaApiUrl.trim() &&
-      kairaSettings.kairaChatUserId.trim(),
+    apiUrl &&
+      resolveAdversarialCredentialPool(run, kairaSettings).length > 0,
   );
 }

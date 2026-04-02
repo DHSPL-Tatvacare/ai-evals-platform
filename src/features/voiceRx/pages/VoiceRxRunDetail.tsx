@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
+import { AppReportTab } from '@/features/analytics/AppReportTab';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import { fetchEvalRun, deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
@@ -143,6 +144,8 @@ export function VoiceRxRunDetail() {
           Unknown evaluation type: {run.evalType}
         </p>
       )}
+
+      {run.evalType === 'full_evaluation' && runId && <AppReportTab appId="voice-rx" runId={runId} />}
 
       <ConfirmDialog
         isOpen={deleteOpen}

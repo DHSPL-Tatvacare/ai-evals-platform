@@ -14,6 +14,13 @@ import { useLLMSettingsStore, useAppSettingsStore, useGlobalSettingsStore, hasPr
 import type { LLMProvider } from '@/types';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { routes } from '@/config/routes';
+import { kairaCredentialPoolConfig } from '@/features/credentialPool/kairaCredentialPoolConfig';
+import type { CredentialPoolEntry } from '@/features/credentialPool/types';
+import {
+  buildCredentialPoolReviewSummary,
+  createCredentialPoolEntry,
+  getResolvedCredentialRows,
+} from '@/features/credentialPool/utils';
 
 const STEPS: WizardStep[] = [
   { key: 'info', label: 'Run Info' },
@@ -45,9 +52,15 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   // Form state
   const [runName, setRunName] = useState('');
   const [runDescription, setRunDescription] = useState('');
-  const [userId, setUserId] = useState(kairaSettings.kairaChatUserId);
   const [kairaApiUrl, setKairaApiUrl] = useState(kairaSettings.kairaApiUrl);
-  const [kairaAuthToken, setKairaAuthToken] = useState(kairaSettings.kairaAuthToken);
+  const [credentialEntries, setCredentialEntries] = useState<CredentialPoolEntry[]>(() => {
+    const seededUserId = kairaSettings.kairaChatUserId.trim();
+    const seededToken = kairaSettings.kairaAuthToken.trim();
+    if (seededUserId || seededToken) {
+      return [createCredentialPoolEntry({ userId: seededUserId, authToken: seededToken }, 'seed')];
+    }
+    return [createCredentialPoolEntry({ userId: '', authToken: '' }, 'manual')];
+  });
   const [kairaTimeout, setKairaTimeout] = useState(120);
   const [testCount, setTestCount] = useState(15);
   const [turnDelay, setTurnDelay] = useState(1.5);
@@ -69,16 +82,31 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     thinking: 'low',
   });
 
-  const isDirty = Boolean(runName || runDescription || kairaApiUrl);
+  const resolvedCredentialRows = useMemo(
+    () => getResolvedCredentialRows(credentialEntries, kairaCredentialPoolConfig.fields),
+    [credentialEntries],
+  );
+  const credentialSummary = useMemo(
+    () => buildCredentialPoolReviewSummary(credentialEntries, kairaCredentialPoolConfig),
+    [credentialEntries],
+  );
+
+  const isDirty = Boolean(
+    runName
+      || runDescription
+      || kairaApiUrl
+      || credentialEntries.some((entry) => Object.values(entry.values).some(Boolean)),
+  );
 
   // Validation per step
   const canGoNext = useMemo(() => {
     const generatedConfigured = testCount >= 5 && testCount <= 50;
     const savedConfigured =
       selectedSavedCaseIds.length > 0 || includePinnedCases || manualCases.length > 0;
+    const hasCredentialPool = resolvedCredentialRows.length > 0;
     switch (currentStep) {
       case 0: return runName.trim().length > 0;
-      case 1: return kairaApiUrl.trim().length > 0;
+      case 1: return kairaApiUrl.trim().length > 0 && hasCredentialPool;
       case 2:
         if (caseMode === 'generate') return generatedConfigured;
         if (caseMode === 'saved') return savedConfigured;
@@ -91,6 +119,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     currentStep,
     runName,
     kairaApiUrl,
+    resolvedCredentialRows.length,
     testCount,
     llmConfig,
     modelsLoading,
@@ -125,6 +154,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         },
         { label: 'Parallel', value: parallelCases ? `${caseWorkers} workers` : 'Off' },
         { label: 'Timeout', value: `${kairaTimeout}s` },
+        { label: 'Users', value: String(credentialSummary.readyCount) },
       ],
     };
   }, [
@@ -135,6 +165,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     kairaTimeout,
+    credentialSummary.readyCount,
     caseMode,
     selectedSavedCaseIds.length,
     manualCases.length,
@@ -147,9 +178,14 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       {
         label: 'Kaira API',
         items: [
-          { key: 'User ID', value: userId },
           { key: 'API URL', value: kairaApiUrl },
-          { key: 'Auth Token', value: kairaAuthToken ? '(configured)' : '(none)' },
+          { key: 'Credential Rows', value: String(credentialSummary.readyCount) },
+          {
+            key: 'User IDs',
+            value: credentialSummary.primaryValues.length > 5
+              ? `${credentialSummary.primaryValues.slice(0, 5).join(', ')} +${credentialSummary.primaryValues.length - 5} more`
+              : credentialSummary.primaryValues.join(', ') || '(none)',
+          },
           { key: 'Request Timeout', value: `${kairaTimeout}s` },
         ],
       },
@@ -179,10 +215,10 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       },
     ];
   }, [
-    userId,
     kairaApiUrl,
-    kairaAuthToken,
     kairaTimeout,
+    credentialSummary.primaryValues,
+    credentialSummary.readyCount,
     testCount,
     turnDelay,
     caseDelay,
@@ -200,13 +236,18 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
 
   const handleSubmit = useCallback(async () => {
     const { timeouts } = useGlobalSettingsStore.getState();
+    const primaryCredential = resolvedCredentialRows[0];
 
     await submitJob('evaluate-adversarial', {
       name: runName.trim(),
       description: runDescription.trim() || null,
-      kaira_chat_user_id: userId,
+      kaira_chat_user_id: primaryCredential?.userId ?? '',
       kaira_api_url: kairaApiUrl.trim(),
-      kaira_auth_token: kairaAuthToken || null,
+      kaira_auth_token: primaryCredential?.authToken || null,
+      kaira_credential_pool: resolvedCredentialRows.map((row) => ({
+        user_id: row.userId,
+        auth_token: row.authToken,
+      })),
       kaira_timeout: kairaTimeout,
       test_count: caseMode === 'saved' ? 0 : testCount,
       turn_delay: turnDelay,
@@ -242,10 +283,9 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   }, [
     runName,
     runDescription,
-    userId,
     kairaApiUrl,
-    kairaAuthToken,
     kairaTimeout,
+    resolvedCredentialRows,
     testCount,
     turnDelay,
     caseDelay,
@@ -278,14 +318,12 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       case 1:
         return (
           <KairaApiConfigStep
-            userId={userId}
             kairaApiUrl={kairaApiUrl}
-            kairaAuthToken={kairaAuthToken}
             kairaTimeout={kairaTimeout}
-            onUserIdChange={setUserId}
+            credentialEntries={credentialEntries}
             onApiUrlChange={setKairaApiUrl}
-            onAuthTokenChange={setKairaAuthToken}
             onTimeoutChange={setKairaTimeout}
+            onCredentialEntriesChange={setCredentialEntries}
           />
         );
       case 2:
@@ -336,10 +374,9 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     currentStep,
     runName,
     runDescription,
-    userId,
     kairaApiUrl,
-    kairaAuthToken,
     kairaTimeout,
+    credentialEntries,
     testCount,
     turnDelay,
     caseDelay,

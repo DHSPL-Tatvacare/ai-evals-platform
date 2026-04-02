@@ -23,6 +23,7 @@ class SummaryCard(CamelModel):
     label: str
     value: str
     tone: str = "neutral"
+    subtitle: str | None = None
 
 
 class SummaryCardsSection(ReportSectionBase):
@@ -41,6 +42,7 @@ class MetricBar(CamelModel):
     value: float
     max_value: float = 100
     unit: str | None = None
+    tone: str = "neutral"
 
 
 class MetricBreakdownSection(ReportSectionBase):
@@ -66,6 +68,7 @@ class ComplianceRow(CamelModel):
     failed: int
     rate: float
     severity: str | None = None
+    total: int | None = None
 
 
 class ComplianceTableSection(ReportSectionBase):
@@ -77,6 +80,7 @@ class HeatmapPoint(CamelModel):
     label: str
     value: float | None = None
     tone: str = "neutral"
+    subtitle: str | None = None
 
 
 class HeatmapRow(CamelModel):
@@ -99,6 +103,7 @@ class EntitySlice(CamelModel):
     entity_id: str
     label: str
     summary: dict[str, str | int | float]
+    details: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class EntitySlicesSection(ReportSectionBase):
@@ -111,6 +116,8 @@ class FlagItem(CamelModel):
     label: str
     relevant: int
     present: int
+    not_relevant: int | None = None
+    attempted: int | None = None
     accepted: int | None = None
 
 
@@ -148,6 +155,7 @@ class ExemplarItem(CamelModel):
     label: str
     score: float | None = None
     summary: str
+    details: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class ExemplarsSection(ReportSectionBase):
@@ -160,6 +168,7 @@ class PromptGapItem(CamelModel):
     prompt_section: str
     evaluation_rule: str
     summary: str
+    suggested_fix: str | None = None
 
 
 class PromptGapAnalysisSection(ReportSectionBase):

@@ -187,6 +187,7 @@ export interface SummaryCard {
   label: string;
   value: string;
   tone: string;
+  subtitle?: string | null;
 }
 
 export interface SummaryCardsSection extends PlatformReportSectionBase {
@@ -205,6 +206,7 @@ export interface MetricBar {
   value: number;
   maxValue: number;
   unit?: string | null;
+  tone: string;
 }
 
 export interface MetricBreakdownSection extends PlatformReportSectionBase {
@@ -230,6 +232,7 @@ export interface ComplianceRow {
   failed: number;
   rate: number;
   severity?: string | null;
+  total?: number | null;
 }
 
 export interface ComplianceTableSection extends PlatformReportSectionBase {
@@ -241,6 +244,7 @@ export interface HeatmapPoint {
   label: string;
   value: number | null;
   tone: string;
+  subtitle?: string | null;
 }
 
 export interface HeatmapRow {
@@ -261,6 +265,7 @@ export interface EntitySlice {
   entityId: string;
   label: string;
   summary: Record<string, string | number>;
+  details?: Record<string, string | number | boolean | null>;
 }
 
 export interface EntitySlicesSection extends PlatformReportSectionBase {
@@ -273,6 +278,8 @@ export interface FlagItem {
   label: string;
   relevant: number;
   present: number;
+  notRelevant?: number | null;
+  attempted?: number | null;
   accepted?: number | null;
 }
 
@@ -292,7 +299,7 @@ export interface RecommendationItem {
   priority: string;
   title: string;
   action: string;
-  expectedImpact: string;
+  expectedImpact?: string;
 }
 
 export interface IssuesRecommendationsSection extends PlatformReportSectionBase {
@@ -308,6 +315,7 @@ export interface ExemplarItem {
   label: string;
   score?: number | null;
   summary: string;
+  details?: Record<string, string | number | boolean | null>;
 }
 
 export interface ExemplarsSection extends PlatformReportSectionBase {
@@ -320,6 +328,7 @@ export interface PromptGapItem {
   promptSection: string;
   evaluationRule: string;
   summary: string;
+  suggestedFix?: string | null;
 }
 
 export interface PromptGapAnalysisSection extends PlatformReportSectionBase {

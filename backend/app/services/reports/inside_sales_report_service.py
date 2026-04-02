@@ -10,11 +10,16 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import load_only
 
+from app.models.app import App
 from app.models.eval_run import EvalRun
 from app.models.evaluator import Evaluator
 from app.models.external_agent import ExternalAgent
+from app.schemas.app_config import AppConfig as AppConfigSchema
+from app.schemas.app_analytics_config import AppAnalyticsConfig
 
 from .base_report_service import BaseReportService
+from .canonical_adapters import adapt_inside_sales_run_report
+from .contracts.run_report import PlatformRunReportPayload
 from .inside_sales_aggregator import InsideSalesAggregator
 from .inside_sales_narrator import InsideSalesNarrator
 from .inside_sales_schemas import (
@@ -26,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class InsideSalesReportService(BaseReportService):
-    payload_model = InsideSalesReportPayload
+    payload_model = PlatformRunReportPayload
 
     async def _load_source_data(self, run_id: str) -> dict[str, list[dict]]:
         threads = await self._load_threads(run_id)
@@ -47,7 +52,7 @@ class InsideSalesReportService(BaseReportService):
         source_data: dict[str, list[dict]],
         llm_provider: str | None = None,
         llm_model: str | None = None,
-    ) -> InsideSalesReportPayload:
+    ) -> PlatformRunReportPayload:
         thread_dicts = source_data["threads"]
 
         output_schema = await self._load_evaluator_schema(run, thread_dicts)
@@ -94,7 +99,8 @@ class InsideSalesReportService(BaseReportService):
             agent_slices=aggregate_data["agentSlices"],
             narrative=narrative,
         )
-        return payload
+        analytics_config = await self._load_analytics_config(run.app_id)
+        return adapt_inside_sales_run_report(payload, analytics_config)
 
     async def _load_evaluator_schema(self, run: EvalRun, threads: list[dict] | None = None) -> list[dict]:
         """Load evaluator output_schema for dimension discovery.
@@ -166,3 +172,15 @@ class InsideSalesReportService(BaseReportService):
                 if aid and aid not in names:
                     names[aid] = meta.get("agent", aid)
             return names
+
+    async def _load_analytics_config(self, app_id: str) -> AppAnalyticsConfig:
+        app_row = await self.db.scalar(
+            select(App).where(
+                App.slug == app_id,
+                App.is_active == True,
+            )
+        )
+        if not app_row:
+            raise ValueError(f"App not found: {app_id}")
+        app_config = AppConfigSchema.model_validate(app_row.config or {})
+        return app_config.analytics

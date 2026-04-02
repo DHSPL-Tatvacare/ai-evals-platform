@@ -20,10 +20,13 @@ from app.models.evaluation_analytics import EvaluationAnalytics
 from app.schemas.app_config import AppConfig as AppConfigSchema
 from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.schemas.base import CamelModel
+from app.services.reports.canonical_adapters import adapt_cross_run_summary
 from app.services.reports.analytics_profiles.base import AnalyticsProfile
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
 from app.services.reports.cross_run_aggregator import CrossRunAISummary
 from app.services.reports.cross_run_narrator import CrossRunNarrator
+from app.services.reports.contracts.cross_run_narrative import PlatformCrossRunNarrative
+from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,49 @@ class CrossRunAnalyticsResponse(CamelModel):
     is_stale: bool
     new_runs_since: int
     source_run_count: int
+
+
+def _extract_cross_run_summary_inputs(
+    payload: PlatformCrossRunPayload,
+    analytics_config: AppAnalyticsConfig,
+) -> tuple[dict, list[dict], list[dict], list[dict]]:
+    allowed_section_ids = set(analytics_config.cross_run.ai_summary.section_ids)
+    sections = [
+        section for section in payload.sections
+        if not allowed_section_ids or section.id in allowed_section_ids
+    ]
+    summary_cards = next((section for section in sections if section.type == 'summary_cards'), None)
+    metric_section = next((section for section in sections if section.type == 'metric_breakdown'), None)
+    issues_section = next((section for section in sections if section.type == 'issues_recommendations'), None)
+
+    stats = {
+        'totalRuns': payload.metadata.source_run_count,
+        'allRuns': payload.metadata.total_runs_available,
+    }
+    if summary_cards:
+        for item in summary_cards.data:
+            stats[item.key] = item.value
+
+    health_trend = []
+    if metric_section:
+        health_trend = [
+            {
+                'runName': item.label,
+                'healthScore': item.value,
+            }
+            for item in metric_section.data
+        ]
+
+    top_issues = []
+    top_recommendations = []
+    if issues_section:
+        top_issues = [item.model_dump(by_alias=True) for item in issues_section.data.issues]
+        top_recommendations = [
+            item.model_dump(by_alias=True)
+            for item in issues_section.data.recommendations
+        ]
+
+    return stats, health_trend, top_issues, top_recommendations
 
 
 async def _load_app_analytics_config(
@@ -206,7 +252,12 @@ async def refresh_cross_run_analytics(
             detail="No completed runs with generated reports found.",
         )
 
-    analytics = profile.cross_run_adapter.aggregate(runs_data, all_runs_count)
+    analytics = profile.cross_run_adapter.aggregate(
+        runs_data,
+        all_runs_count,
+        analytics_config=analytics_config,
+        app_id=app_id,
+    )
 
     now = datetime.now(timezone.utc)
 
@@ -402,15 +453,11 @@ async def get_report(
 
 class CrossRunSummaryRequest(CamelModel):
     app_id: str
-    stats: dict
-    health_trend: list[dict]
-    top_issues: list[dict]
-    top_recommendations: list[dict]
     provider: str | None = None
     model: str | None = None
 
 
-@router.post("/cross-run-ai-summary", response_model=CrossRunAISummary)
+@router.post("/cross-run-ai-summary", response_model=PlatformCrossRunNarrative)
 async def generate_cross_run_ai_summary(
     request: CrossRunSummaryRequest,
     auth: AuthContext = require_permission('report:generate'),
@@ -425,6 +472,21 @@ async def generate_cross_run_ai_summary(
     from app.services.evaluators.llm_base import create_llm_provider, LoggingLLMWrapper
     from app.services.evaluators.runner_utils import save_api_log
     from app.services.evaluators.settings_helper import get_llm_settings_from_db
+
+    cached_result = await db.execute(
+        select(EvaluationAnalytics.analytics_data).where(
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
+            EvaluationAnalytics.app_id == request.app_id,
+            EvaluationAnalytics.scope == 'cross_run',
+            EvaluationAnalytics.run_id.is_(None),
+        )
+    )
+    cached_data = cached_result.scalar_one_or_none()
+    if not cached_data:
+        raise HTTPException(status_code=404, detail='No cached cross-run analytics. Refresh analytics first.')
+
+    payload = profile.cross_run_adapter.load_cached(cached_data)
+    stats, health_trend, top_issues, top_recommendations = _extract_cross_run_summary_inputs(payload, analytics_config)
 
     try:
         settings = await get_llm_settings_from_db(
@@ -456,10 +518,10 @@ async def generate_cross_run_ai_summary(
         narrator_cls = profile.cross_run_summary_narrator_cls or CrossRunNarrator
         narrator = narrator_cls(llm)
         result = await narrator.generate(
-            stats=request.stats,
-            health_trend=request.health_trend,
-            top_issues=request.top_issues,
-            top_recommendations=request.top_recommendations,
+            stats=stats,
+            health_trend=health_trend,
+            top_issues=top_issues,
+            top_recommendations=top_recommendations,
         )
 
         if not result:
@@ -468,7 +530,7 @@ async def generate_cross_run_ai_summary(
                 detail="AI summary generation failed. Check LLM configuration.",
             )
 
-        return result
+        return adapt_cross_run_summary(result)
 
     except HTTPException:
         raise

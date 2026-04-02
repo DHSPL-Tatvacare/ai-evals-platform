@@ -172,9 +172,9 @@ export default function RunDetail() {
 
   const handleRetryFailedCases = useCallback(async () => {
     if (!run) return;
-    if (!canSubmitAdversarialRun(kairaSettings)) {
+    if (!canSubmitAdversarialRun(kairaSettings, run)) {
       notificationService.error(
-        'Configure the Kaira API URL and chat user ID before retrying adversarial cases.',
+        'Configure a Kaira API URL and at least one credential row before retrying adversarial cases.',
         'Missing Kaira settings',
       );
       return;

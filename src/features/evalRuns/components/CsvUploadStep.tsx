@@ -1,16 +1,14 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { FileSpreadsheet, Upload, CheckCircle2, AlertCircle, BarChart3, Users, MessageSquare, Calendar, RotateCcw } from 'lucide-react';
+import { useState, useCallback, useRef, type ElementType } from 'react';
+import { FileSpreadsheet, AlertCircle, BarChart3, Users, MessageSquare, Calendar, RotateCcw, Upload } from 'lucide-react';
 import { cn } from '@/utils';
 import { Alert } from '@/components/ui';
 import { previewCsv } from '@/services/api/evalRunsApi';
 import type { PreviewResponse } from '@/types';
+import { CsvFileInfoBar } from '@/features/csvImport/components/CsvFileInfoBar';
+import { useCsvImportWorkflow } from '@/features/csvImport/useCsvImportWorkflow';
 import {
-  parseCsvPreview,
-  validateCsvHeaders,
-  remapCsvContent,
-  type CsvPreviewResult,
   type ColumnMapping,
-  type HeaderValidation,
+  CSV_FIELD_SCHEMA,
 } from '../utils/csvSchema';
 import { CsvFieldCallout } from './CsvFieldCallout';
 import { CsvDataPreview } from './CsvDataPreview';
@@ -34,21 +32,7 @@ export function CsvUploadStep({
   onColumnMappingChange,
 }: CsvUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [csvPreview, setCsvPreview] = useState<CsvPreviewResult | null>(null);
-  const [headerValidation, setHeaderValidation] = useState<HeaderValidation | null>(null);
-  const [rawCsvText, setRawCsvText] = useState<string | null>(null);
-
-  // When file is cleared externally, reset local state
-  useEffect(() => {
-    if (!file) {
-      setCsvPreview(null);
-      setHeaderValidation(null);
-      setRawCsvText(null);
-    }
-  }, [file]);
 
   /** Reset the native file input so re-selecting the same file fires onChange. */
   const resetFileInput = useCallback(() => {
@@ -57,90 +41,31 @@ export function CsvUploadStep({
     }
   }, []);
 
-  /** Read file, validate headers, then send to backend (with remapping if needed). */
-  const processFile = useCallback(async (selectedFile: File) => {
-    setError(null);
-    setCsvPreview(null);
-    setHeaderValidation(null);
-    onColumnMappingChange(new Map());
-
-    if (!selectedFile.name.endsWith('.csv')) {
-      setError('Please upload a CSV file.');
-      resetFileInput();
-      return;
-    }
-
-    if (selectedFile.size > 50 * 1024 * 1024) {
-      setError('File size exceeds 50MB limit.');
-      resetFileInput();
-      return;
-    }
-
-    // Read file text for client-side parsing
-    const text = await selectedFile.text();
-    setRawCsvText(text);
-
-    // Parse preview (first 10 rows)
-    const preview = parseCsvPreview(text, 10);
-    setCsvPreview(preview);
-
-    // Validate headers
-    const validation = validateCsvHeaders(preview.headers);
-    setHeaderValidation(validation);
-
-    onFileChange(selectedFile);
-
-    // If headers are valid, immediately send to backend for stats
-    if (validation.isValid) {
-      await sendToBackend(selectedFile, text);
-    }
-    // If headers are invalid, user needs to map columns first — don't auto-upload
-  }, [onFileChange, onColumnMappingChange, resetFileInput]);
-
-  /** Send CSV to backend for preview stats (possibly with remapped content). */
-  const sendToBackend = useCallback(async (originalFile: File, csvText: string) => {
-    setIsUploading(true);
-    setError(null);
-    try {
-      // Create a File with the (possibly remapped) content
-      const blob = new Blob([csvText], { type: 'text/csv' });
-      const fileToUpload = new File([blob], originalFile.name, { type: 'text/csv' });
-      const preview = await previewCsv(fileToUpload);
-      onPreviewData(preview);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to parse CSV file.';
-      setError(msg);
-      onPreviewData(null);
-    } finally {
-      setIsUploading(false);
-    }
-  }, [onPreviewData]);
-
-  /** Called when user completes field mapping and clicks "Apply Mapping". */
-  const handleApplyMapping = useCallback(async () => {
-    if (!rawCsvText || !file) return;
-
-    const remapped = remapCsvContent(rawCsvText, columnMapping);
-    setRawCsvText(remapped);
-
-    // Re-parse preview with remapped content
-    const preview = parseCsvPreview(remapped, 10);
-    setCsvPreview(preview);
-
-    // Re-validate
-    const validation = validateCsvHeaders(preview.headers);
-    setHeaderValidation(validation);
-
-    if (validation.isValid) {
-      await sendToBackend(file, remapped);
-    }
-  }, [rawCsvText, file, columnMapping, sendToBackend]);
-
-  /** Retry sending to backend (when previous attempt failed). */
-  const handleRetry = useCallback(async () => {
-    if (!file || !rawCsvText) return;
-    await sendToBackend(file, rawCsvText);
-  }, [file, rawCsvText, sendToBackend]);
+  const {
+    error,
+    csvPreview,
+    headerValidation,
+    isProcessing,
+    needsMapping,
+    mappingComplete,
+    processFile,
+    handleApplyMapping,
+    handleRetry,
+    handleReset,
+  } = useCsvImportWorkflow<PreviewResponse>({
+    schema: CSV_FIELD_SCHEMA,
+    file,
+    data: previewData,
+    columnMapping,
+    onFileChange,
+    onDataChange: onPreviewData,
+    onColumnMappingChange,
+    analyzeCsv: async ({ file: sourceFile, csvText }) => {
+      return previewCsv(
+        new File([new Blob([csvText], { type: 'text/csv' })], sourceFile.name, { type: 'text/csv' }),
+      );
+    },
+  });
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -164,19 +89,10 @@ export function CsvUploadStep({
     if (selectedFile) processFile(selectedFile);
   }, [processFile]);
 
-  const handleReset = useCallback(() => {
-    onFileChange(null);
-    onPreviewData(null);
-    onColumnMappingChange(new Map());
-    setError(null);
-    setCsvPreview(null);
-    setHeaderValidation(null);
-    setRawCsvText(null);
+  const handleResetWithInput = useCallback(() => {
+    handleReset();
     resetFileInput();
-  }, [onFileChange, onPreviewData, onColumnMappingChange, resetFileInput]);
-
-  const needsMapping = headerValidation != null && !headerValidation.isValid;
-  const mappingComplete = needsMapping && headerValidation.missing.every((f) => columnMapping.has(f));
+  }, [handleReset, resetFileInput]);
 
   return (
     <div className="space-y-4">
@@ -222,9 +138,9 @@ export function CsvUploadStep({
       )}
 
       {/* ── File selected: loading state ── */}
-      {file && isUploading && (
+      {file && isProcessing && (
         <div className="space-y-3">
-          <FileInfoBar file={file} variant="neutral" onReset={handleReset} />
+          <CsvFileInfoBar file={file} variant="neutral" onReset={handleResetWithInput} />
           <div className="flex items-center gap-3 px-4 py-3 rounded-[6px] bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
             <div className="h-4 w-4 border-2 border-[var(--interactive-primary)] border-t-transparent rounded-full animate-spin" />
             <span className="text-[13px] text-[var(--text-secondary)]">Analyzing CSV file...</span>
@@ -233,9 +149,9 @@ export function CsvUploadStep({
       )}
 
       {/* ── File selected: backend error ── */}
-      {file && error && !isUploading && (
+      {file && error && !isProcessing && (
         <div className="space-y-3">
-          <FileInfoBar file={file} variant="error" onReset={handleReset} />
+          <CsvFileInfoBar file={file} variant="error" onReset={handleResetWithInput} />
           <Alert variant="error">{error}</Alert>
           <button
             onClick={handleRetry}
@@ -248,15 +164,15 @@ export function CsvUploadStep({
       )}
 
       {/* ── File selected: needs column mapping ── */}
-      {file && needsMapping && !isUploading && !error && (
+      {file && needsMapping && !isProcessing && !error && (
         <div className="space-y-3">
-          <FileInfoBar file={file} variant="warning" onReset={handleReset} />
+          <CsvFileInfoBar file={file} variant="warning" onReset={handleResetWithInput} />
 
           <CsvFieldMapper
             csvHeaders={csvPreview?.headers ?? []}
             mapping={columnMapping}
             onMappingChange={onColumnMappingChange}
-            missingFields={headerValidation.missing}
+            missingFields={headerValidation?.missing ?? []}
           />
 
           {mappingComplete && (
@@ -273,9 +189,9 @@ export function CsvUploadStep({
       )}
 
       {/* ── File selected: success ── */}
-      {file && previewData && !isUploading && !error && !needsMapping && (
+      {file && previewData && !isProcessing && !error && !needsMapping && (
         <div className="space-y-3">
-          <FileInfoBar file={file} variant="success" onReset={handleReset} />
+          <CsvFileInfoBar file={file} variant="success" onReset={handleResetWithInput} />
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-2">
@@ -307,41 +223,7 @@ export function CsvUploadStep({
   );
 }
 
-/* ── File Info Bar (extracted to avoid 4x duplication) ── */
-
-type FileInfoVariant = 'success' | 'error' | 'warning' | 'neutral';
-
-const FILE_BAR_STYLES: Record<FileInfoVariant, { bg: string; border: string; icon: typeof CheckCircle2; iconColor: string }> = {
-  success:  { bg: 'bg-[var(--surface-success)]', border: 'border-[var(--border-success)]', icon: CheckCircle2, iconColor: 'text-[var(--color-success)]' },
-  error:    { bg: 'bg-[var(--surface-error)]',   border: 'border-[var(--border-error)]',   icon: AlertCircle,  iconColor: 'text-[var(--color-error)]' },
-  warning:  { bg: 'bg-[var(--color-warning-light)]', border: 'border-[var(--color-warning)]/30', icon: AlertCircle, iconColor: 'text-[var(--color-warning)]' },
-  neutral:  { bg: 'bg-[var(--bg-secondary)]',    border: 'border-[var(--border-subtle)]',  icon: FileSpreadsheet, iconColor: 'text-[var(--text-muted)]' },
-};
-
-function FileInfoBar({ file, variant, onReset }: { file: File; variant: FileInfoVariant; onReset: () => void }) {
-  const style = FILE_BAR_STYLES[variant];
-  const Icon = style.icon;
-
-  return (
-    <div className={cn('flex items-center justify-between px-4 py-3 rounded-[6px]', style.bg, 'border', style.border)}>
-      <div className="flex items-center gap-2">
-        <Icon className={cn('h-4 w-4', style.iconColor)} />
-        <span className="text-[13px] font-medium text-[var(--text-primary)]">{file.name}</span>
-        <span className="text-[11px] text-[var(--text-muted)]">
-          ({(file.size / 1024).toFixed(1)} KB)
-        </span>
-      </div>
-      <button
-        onClick={onReset}
-        className="text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors underline"
-      >
-        Change file
-      </button>
-    </div>
-  );
-}
-
-function StatItem({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+function StatItem({ icon: Icon, label, value }: { icon: ElementType; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-[6px] bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
       <Icon className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
