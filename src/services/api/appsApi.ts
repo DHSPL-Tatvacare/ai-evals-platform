@@ -30,6 +30,14 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     typeof config.assetDefaults === 'object' && config.assetDefaults !== null
       ? (config.assetDefaults as Record<string, unknown>)
       : {};
+  const rawAnalytics =
+    typeof config.analytics === 'object' && config.analytics !== null
+      ? (config.analytics as Record<string, unknown>)
+      : {};
+  const rawAnalyticsAssets =
+    typeof rawAnalytics.assets === 'object' && rawAnalytics.assets !== null
+      ? (rawAnalytics.assets as Record<string, unknown>)
+      : {};
 
   return {
     ...config,
@@ -49,6 +57,25 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
         rawAssetDefaults.llmSettings ?? rawAssetDefaults.llm_settings
       ) as AppConfig['assetDefaults']['llmSettings'] | undefined
         ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.llmSettings,
+    },
+    analytics: {
+      ...APP_CONFIG_FALLBACKS[appId].analytics,
+      ...(rawAnalytics as Partial<AppConfig['analytics']>),
+      assets: {
+        ...APP_CONFIG_FALLBACKS[appId].analytics.assets,
+        promptReferencesKey: (
+          rawAnalyticsAssets.promptReferencesKey ?? rawAnalyticsAssets.prompt_references_key
+        ) as string | null | undefined
+          ?? APP_CONFIG_FALLBACKS[appId].analytics.assets.promptReferencesKey,
+        narrativeTemplateKey: (
+          rawAnalyticsAssets.narrativeTemplateKey ?? rawAnalyticsAssets.narrative_template_key
+        ) as string | null | undefined
+          ?? APP_CONFIG_FALLBACKS[appId].analytics.assets.narrativeTemplateKey,
+        glossaryKey: (
+          rawAnalyticsAssets.glossaryKey ?? rawAnalyticsAssets.glossary_key
+        ) as string | null | undefined
+          ?? APP_CONFIG_FALLBACKS[appId].analytics.assets.glossaryKey,
+      },
     },
   };
 }

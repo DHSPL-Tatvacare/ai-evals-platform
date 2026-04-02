@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -51,6 +52,32 @@ def test_app_config_schema_matches_phase_one_shape():
             "llmSettings": "private",
         },
         evalRun={"supportedTypes": ["custom", "batch_thread"]},
+        analytics={
+            "profile": "kaira_v1",
+            "capabilities": {
+                "singleRunReport": True,
+                "crossRunAnalytics": True,
+                "crossRunAiSummary": True,
+                "pdfExport": True,
+            },
+            "singleRun": {
+                "sections": [
+                    {"id": "summary", "type": "summary_cards", "title": "Summary", "variant": "default"},
+                ],
+                "export": {"enabled": True, "format": "pdf", "documentVariant": "kaira-run-v1", "sectionIds": ["summary"]},
+                "aiSummary": {"enabled": True, "sectionIds": ["summary"]},
+            },
+            "crossRun": {
+                "sections": [],
+                "export": {"enabled": False, "format": "pdf", "documentVariant": "kaira-cross-run-v1", "sectionIds": []},
+                "aiSummary": {"enabled": True, "sectionIds": []},
+            },
+            "assets": {
+                "promptReferencesKey": "report-prompt-references",
+                "narrativeTemplateKey": "report-narrative-template",
+                "glossaryKey": "report-glossary",
+            },
+        },
     )
 
     dumped = payload.model_dump(by_alias=True)
@@ -61,11 +88,13 @@ def test_app_config_schema_matches_phase_one_shape():
     assert dumped["evaluator"]["dynamicVariableSources"]["registry"] is True
     assert dumped["assetDefaults"]["adversarialContract"] == "app"
     assert dumped["evalRun"]["supportedTypes"] == ["custom", "batch_thread"]
+    assert dumped["analytics"]["profile"] == "kaira_v1"
+    assert dumped["analytics"]["capabilities"]["pdfExport"] is True
 
 
 def test_app_config_validates_all_required_keys():
     """App config schema enforces all top-level keys for each app config."""
-    required_keys = {"displayName", "icon", "description", "features", "rules", "evaluator", "assetDefaults", "evalRun"}
+    required_keys = {"displayName", "icon", "description", "features", "rules", "evaluator", "assetDefaults", "evalRun", "analytics"}
 
     # Validate that a minimal valid config contains all required keys
     config = AppConfig(
@@ -82,6 +111,7 @@ def test_app_config_validates_all_required_keys():
         },
         assetDefaults={},
         evalRun={"supportedTypes": []},
+        analytics={"profile": "voice_rx_v1"},
     )
     dumped = config.model_dump(by_alias=True)
     assert required_keys.issubset(dumped.keys())
@@ -110,3 +140,20 @@ def test_inside_sales_style_config_enables_rubric_and_csv():
     features = AppFeaturesConfig(hasRubricMode=True, hasCsvImport=True)
     assert features.has_rubric_mode is True
     assert features.has_csv_import is True
+
+
+def test_seeded_apps_expose_explicit_analytics_contracts():
+    seed_defaults = Path(__file__).resolve().parents[1] / "app" / "services" / "seed_defaults.py"
+    text = seed_defaults.read_text()
+
+    assert '"slug": "voice-rx"' in text
+    assert '"profile": "voice_rx_v1"' in text
+    assert '"singleRunReport": False' in text
+
+    assert '"slug": "kaira-bot"' in text
+    assert '"profile": "kaira_v1"' in text
+    assert '"promptReferencesKey": "report-prompt-references"' in text
+
+    assert '"slug": "inside-sales"' in text
+    assert '"profile": "inside_sales_v1"' in text
+    assert '"documentVariant": "inside-sales-run-v1"' in text

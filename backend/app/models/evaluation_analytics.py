@@ -1,5 +1,6 @@
 """Evaluation analytics model — unified caching for single-run reports and cross-run aggregates."""
 import uuid
+from typing import ClassVar
 from datetime import datetime
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Index, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -9,6 +10,10 @@ from app.models.base import Base, TimestampMixin
 
 class EvaluationAnalytics(Base, TimestampMixin):
     __tablename__ = "evaluation_analytics"
+
+    CACHE_SCHEMA_VERSION: ClassVar[str] = "v1"
+    CACHE_KIND_RUN_REPORT: ClassVar[str] = "single_run"
+    CACHE_KIND_CROSS_RUN: ClassVar[str] = "cross_run"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(

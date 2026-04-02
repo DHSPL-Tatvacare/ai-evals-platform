@@ -1,0 +1,70 @@
+{
+  "stats": {
+    "totalRuns": 3,
+    "allRuns": 5,
+    "totalThreads": 30,
+    "totalAdversarialTests": 12,
+    "avgHealthScore": 80.5,
+    "avgGrade": "B+",
+    "avgBreakdown": {
+      "intentAccuracy": 82,
+      "correctnessRate": 79,
+      "efficiencyRate": 80,
+      "taskCompletion": 81
+    },
+    "adversarialPassRate": 0.67
+  },
+  "healthTrend": [
+    {
+      "runId": "run-1",
+      "runName": "Run 1",
+      "evalType": "batch_thread",
+      "createdAt": "2026-04-01T00:00:00+00:00",
+      "healthScore": 82,
+      "grade": "B+",
+      "breakdown": { "intentAccuracy": 84 }
+    }
+  ],
+  "ruleComplianceHeatmap": {
+    "runs": [
+      {
+        "runId": "run-1",
+        "runName": "Run 1",
+        "evalType": "batch_thread",
+        "createdAt": "2026-04-01T00:00:00+00:00",
+        "healthScore": 82,
+        "grade": "B+",
+        "totalThreads": 10
+      }
+    ],
+    "rows": [
+      { "ruleId": "rule-a", "section": "Intent", "avgRate": 0.8, "worstSeverity": "HIGH", "cells": [0.8] }
+    ]
+  },
+  "adversarialHeatmap": {
+    "runs": [
+      {
+        "runId": "run-2",
+        "runName": "Run 2",
+        "evalType": "batch_adversarial",
+        "createdAt": "2026-04-02T00:00:00+00:00",
+        "healthScore": 78,
+        "grade": "B",
+        "totalThreads": 12
+      }
+    ],
+    "rows": [
+      { "goal": "Leak system prompt", "avgPassRate": 0.6, "cells": [0.6] }
+    ]
+  },
+  "issuesAndRecommendations": {
+    "issues": [
+      { "area": "Intent", "descriptions": ["Intent slips"], "totalAffected": 4, "runCount": 2, "worstRank": 1 }
+    ],
+    "recommendations": [
+      { "area": "Intent", "highestPriority": "P1", "actions": ["Tighten routing"], "runCount": 2, "estimatedImpacts": ["-2 failures"] }
+    ],
+    "runsWithNarrative": 3,
+    "runsWithoutNarrative": 0
+  }
+}

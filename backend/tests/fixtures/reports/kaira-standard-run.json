@@ -1,0 +1,86 @@
+{
+  "metadata": {
+    "runId": "run-kaira-standard",
+    "runName": "Kaira Standard Run",
+    "appId": "kaira-bot",
+    "evalType": "batch_thread",
+    "createdAt": "2026-04-01T10:00:00+00:00",
+    "llmProvider": "gemini",
+    "llmModel": "gemini-2.5-flash",
+    "narrativeModel": "gemini-2.5-flash",
+    "totalThreads": 10,
+    "completedThreads": 10,
+    "errorThreads": 0,
+    "durationMs": 4210,
+    "dataPath": null
+  },
+  "healthScore": {
+    "grade": "B+",
+    "numeric": 82,
+    "breakdown": {
+      "intentAccuracy": { "value": 84, "weighted": 21 },
+      "correctnessRate": { "value": 81, "weighted": 20.25 },
+      "efficiencyRate": { "value": 80, "weighted": 20 },
+      "taskCompletion": { "value": 83, "weighted": 20.75 }
+    }
+  },
+  "distributions": {
+    "correctness": { "PASS": 7, "SOFT FAIL": 2, "HARD FAIL": 1 },
+    "efficiency": { "EFFICIENT": 6, "ACCEPTABLE": 3, "FRICTION": 1 },
+    "adversarial": null,
+    "intentHistogram": { "buckets": ["0-25", "26-50", "51-75", "76-100"], "counts": [0, 1, 3, 6] },
+    "customEvaluations": {}
+  },
+  "ruleCompliance": {
+    "rules": [
+      { "ruleId": "rule-a", "section": "Intent", "passed": 8, "failed": 2, "rate": 0.8, "severity": "HIGH" }
+    ],
+    "coFailures": []
+  },
+  "friction": {
+    "totalFrictionTurns": 4,
+    "byCause": { "bot": 3, "user": 1 },
+    "recoveryQuality": { "GOOD": 2, "PARTIAL": 1, "FAILED": 1 },
+    "avgTurnsByVerdict": { "PASS": 5.2, "SOFT FAIL": 6.4 },
+    "topPatterns": [
+      { "description": "Fallback after vague intent", "count": 2, "exampleThreadIds": ["thread-1"] }
+    ]
+  },
+  "adversarial": null,
+  "exemplars": {
+    "best": [
+      {
+        "threadId": "thread-1",
+        "compositeScore": 0.92,
+        "intentAccuracy": 95,
+        "correctnessVerdict": "PASS",
+        "efficiencyVerdict": "EFFICIENT",
+        "taskCompleted": true,
+        "transcript": [{ "role": "user", "content": "I need help booking a visit." }],
+        "ruleViolations": [],
+        "frictionTurns": []
+      }
+    ],
+    "worst": []
+  },
+  "productionPrompts": {
+    "intentClassification": "Prompt reference text",
+    "mealSummarySpec": null
+  },
+  "narrative": {
+    "executiveSummary": "Overall quality is solid with some recurring intent drift.",
+    "topIssues": [
+      { "rank": 1, "area": "Intent", "description": "Intent slips on pricing questions", "affectedCount": 2, "exampleThreadId": "thread-4" }
+    ],
+    "exemplarAnalysis": [
+      { "threadId": "thread-1", "type": "good", "whatHappened": "The bot recovered well.", "why": "It confirmed user goal first.", "promptGap": null }
+    ],
+    "promptGaps": [
+      { "promptSection": "Escalation", "evalRule": "rule-a", "gapType": "UNDERSPEC", "description": "Escalation threshold is unclear.", "suggestedFix": "Add explicit handoff criteria." }
+    ],
+    "recommendations": [
+      { "priority": "P1", "area": "Intent", "action": "Tighten pricing routing examples", "estimatedImpact": "-2 intent failures" }
+    ]
+  },
+  "customEvaluationsReport": null
+}

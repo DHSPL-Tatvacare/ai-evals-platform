@@ -14,12 +14,16 @@ from sqlalchemy.orm import load_only
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
+from app.models.app import App
 from app.models.eval_run import EvalRun
 from app.models.evaluation_analytics import EvaluationAnalytics
+from app.schemas.app_config import AppConfig as AppConfigSchema
+from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.schemas.base import CamelModel
+from app.services.reports.analytics_profiles.base import AnalyticsProfile
+from app.services.reports.analytics_profiles.registry import get_analytics_profile
 from app.services.reports.cross_run_aggregator import CrossRunAISummary
 from app.services.reports.cross_run_narrator import CrossRunNarrator
-from app.services.reports.registry import get_analytics_app_config
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,33 @@ class CrossRunAnalyticsResponse(CamelModel):
     source_run_count: int
 
 
+async def _load_app_analytics_config(
+    db: AsyncSession,
+    app_id: str,
+) -> AppAnalyticsConfig:
+    app_row = await db.scalar(
+        select(App).where(
+            App.slug == app_id,
+            App.is_active == True,
+        )
+    )
+    if not app_row:
+        raise HTTPException(status_code=404, detail=f"App not found: {app_id}")
+    app_config = AppConfigSchema.model_validate(app_row.config or {})
+    return app_config.analytics
+
+
+async def _load_analytics_profile(
+    db: AsyncSession,
+    app_id: str,
+) -> tuple[AppAnalyticsConfig, AnalyticsProfile]:
+    analytics_config = await _load_app_analytics_config(db, app_id)
+    profile = get_analytics_profile(analytics_config.profile)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Reporting profile is not enabled for app: {app_id}")
+    return analytics_config, profile
+
+
 # --- Cross-run analytics (cached) ---
 
 @router.get("/cross-run-analytics", response_model=CrossRunAnalyticsResponse)
@@ -46,8 +77,8 @@ async def get_cross_run_analytics(
     db: AsyncSession = Depends(get_db),
 ):
     """Return cached cross-run analytics scoped to tenant + app_id."""
-    app_config = get_analytics_app_config(app_id)
-    if not app_config or not app_config.capabilities.cross_run_analytics or not app_config.cross_run_adapter:
+    analytics_config, profile = await _load_analytics_profile(db, app_id)
+    if not analytics_config.capabilities.cross_run_analytics or not profile.cross_run_adapter:
         raise HTTPException(status_code=404, detail=f"Cross-run analytics is not enabled for app: {app_id}")
 
     result = await db.execute(
@@ -81,7 +112,7 @@ async def get_cross_run_analytics(
     stale_result = await db.execute(stale_stmt)
     new_runs_since = stale_result.scalar() or 0
 
-    analytics = app_config.cross_run_adapter.load_cached(cached.analytics_data)
+    analytics = profile.cross_run_adapter.load_cached(cached.analytics_data)
 
     return CrossRunAnalyticsResponse(
         analytics=analytics.model_dump(by_alias=True),
@@ -101,8 +132,8 @@ async def refresh_cross_run_analytics(
     db: AsyncSession = Depends(get_db),
 ):
     """Recompute cross-run analytics from single_run caches for user's runs within tenant."""
-    app_config = get_analytics_app_config(app_id)
-    if not app_config or not app_config.capabilities.cross_run_analytics or not app_config.cross_run_adapter:
+    analytics_config, profile = await _load_analytics_profile(db, app_id)
+    if not analytics_config.capabilities.cross_run_analytics or not profile.cross_run_adapter:
         raise HTTPException(status_code=404, detail=f"Cross-run analytics is not enabled for app: {app_id}")
 
     # Load single_run analytics rows scoped to tenant
@@ -175,7 +206,7 @@ async def refresh_cross_run_analytics(
             detail="No completed runs with generated reports found.",
         )
 
-    analytics = app_config.cross_run_adapter.aggregate(runs_data, all_runs_count)
+    analytics = profile.cross_run_adapter.aggregate(runs_data, all_runs_count)
 
     now = datetime.now(timezone.utc)
 
@@ -254,8 +285,8 @@ async def export_report_pdf(
             detail="Report has not been generated yet. Generate the report first.",
         )
 
-    app_config = get_analytics_app_config(run.app_id)
-    if not app_config or not app_config.capabilities.pdf_export or not app_config.pdf_renderer:
+    analytics_config, profile = await _load_analytics_profile(db, run.app_id)
+    if not analytics_config.capabilities.pdf_export or not profile.pdf_renderer or not profile.report_payload_model:
         raise HTTPException(
             status_code=400,
             detail=f"PDF export is not available for app: {run.app_id}",
@@ -263,13 +294,13 @@ async def export_report_pdf(
 
     # Validate into Pydantic model and re-dump with aliases.
     try:
-        payload = app_config.report_payload_model.model_validate(cached_data)
+        payload = profile.report_payload_model.model_validate(cached_data)
         camel_data = payload.model_dump(by_alias=True)
     except Exception:
         logger.warning("Report cache invalid for run %s", run_id)
         raise HTTPException(status_code=400, detail="Cached report data is corrupted.")
 
-    html_content = app_config.pdf_renderer(camel_data)
+    html_content = profile.pdf_renderer(camel_data)
 
     try:
         async with async_playwright() as p:
@@ -348,15 +379,15 @@ async def get_report(
         cached_data = cache_result.scalar_one_or_none()
         if not cached_data:
             raise HTTPException(status_code=404, detail="No cached report")
-        app_config = get_analytics_app_config(run.app_id)
-        if not app_config:
+        analytics_config, profile = await _load_analytics_profile(db, run.app_id)
+        if not analytics_config.capabilities.single_run_report or not profile.report_payload_model:
             raise HTTPException(status_code=404, detail=f"Reporting is not enabled for app: {run.app_id}")
-        return app_config.report_payload_model.model_validate(cached_data)
+        return profile.report_payload_model.model_validate(cached_data)
 
-    app_config = get_analytics_app_config(run.app_id)
-    if not app_config:
+    analytics_config, profile = await _load_analytics_profile(db, run.app_id)
+    if not analytics_config.capabilities.single_run_report or not profile.report_service_cls:
         raise HTTPException(status_code=404, detail=f"Reporting is not enabled for app: {run.app_id}")
-    service = app_config.report_service_cls(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
+    service = profile.report_service_cls(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
 
     try:
         return await service.generate(
@@ -384,11 +415,11 @@ async def generate_cross_run_ai_summary(
     request: CrossRunSummaryRequest,
     auth: AuthContext = require_permission('report:generate'),
     _app_check: AuthContext = require_app_access(),
-    _db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Generate AI summary of cross-run analytics."""
-    app_config = get_analytics_app_config(request.app_id)
-    if not app_config or not app_config.capabilities.cross_run_ai_summary:
+    analytics_config, profile = await _load_analytics_profile(db, request.app_id)
+    if not analytics_config.capabilities.cross_run_ai_summary:
         raise HTTPException(status_code=404, detail=f"Cross-run AI summary is not enabled for app: {request.app_id}")
 
     from app.services.evaluators.llm_base import create_llm_provider, LoggingLLMWrapper
@@ -422,7 +453,7 @@ async def generate_cross_run_ai_summary(
         llm = LoggingLLMWrapper(provider, log_callback=save_api_log)
         llm.set_context(run_id="cross_run_analytics", thread_id="cross_run_summary")
 
-        narrator_cls = app_config.cross_run_summary_narrator_cls or CrossRunNarrator
+        narrator_cls = profile.cross_run_summary_narrator_cls or CrossRunNarrator
         narrator = narrator_cls(llm)
         result = await narrator.generate(
             stats=request.stats,

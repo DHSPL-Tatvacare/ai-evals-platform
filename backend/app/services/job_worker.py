@@ -508,8 +508,10 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
     """
     import time as _time
     from app.database import async_session as _async_session
+    from app.models.app import App
     from app.models.eval_run import EvalRun
-    from app.services.reports.registry import get_analytics_app_config
+    from app.schemas.app_config import AppConfig as AppConfigSchema
+    from app.services.reports.analytics_profiles.registry import get_analytics_profile
     from sqlalchemy import select as _select
     from uuid import UUID as _UUID
 
@@ -530,10 +532,20 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
         if not run:
             raise ValueError(f"Eval run not found: {run_id}")
 
-        app_config = get_analytics_app_config(run.app_id)
-        if not app_config:
+        app_row = await db.scalar(
+            _select(App).where(
+                App.slug == run.app_id,
+                App.is_active == True,
+            )
+        )
+        if not app_row:
+            raise ValueError(f"App not found: {run.app_id}")
+
+        analytics_config = AppConfigSchema.model_validate(app_row.config or {}).analytics
+        profile = get_analytics_profile(analytics_config.profile)
+        if not analytics_config.capabilities.single_run_report or not profile or not profile.report_service_cls:
             raise ValueError(f"Reporting is not enabled for app: {run.app_id}")
-        service = app_config.report_service_cls(db, tenant_id=tenant_id, user_id=user_id)
+        service = profile.report_service_cls(db, tenant_id=tenant_id, user_id=user_id)
 
         await update_job_progress(
             job_id, 1, 2, "Generating AI narrative…", run_id=run_id

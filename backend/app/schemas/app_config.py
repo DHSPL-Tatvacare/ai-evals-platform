@@ -3,6 +3,7 @@
 from pydantic import Field
 
 from app.models.mixins.shareable import Visibility
+from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.schemas.base import CamelModel
 
 
@@ -64,3 +65,4 @@ class AppConfig(CamelModel):
     evaluator: AppEvaluatorConfig = Field(default_factory=AppEvaluatorConfig)
     asset_defaults: AppAssetDefaults = Field(default_factory=AppAssetDefaults)
     eval_run: AppEvalRunConfig = Field(default_factory=AppEvalRunConfig)
+    analytics: AppAnalyticsConfig = Field(default_factory=AppAnalyticsConfig)

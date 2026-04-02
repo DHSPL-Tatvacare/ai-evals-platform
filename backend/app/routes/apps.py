@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import get_auth_context, AuthContext
 from app.database import get_db
 from app.models.app import App
+from app.schemas.app_config import AppConfig
 
 router = APIRouter(prefix="/api/apps", tags=["apps"])
 
@@ -44,4 +45,4 @@ async def get_app_config(
     app = result.scalar_one_or_none()
     if not app:
         raise HTTPException(status_code=404, detail="App not found")
-    return app.config or {}
+    return AppConfig.model_validate(app.config or {}).model_dump(by_alias=True)

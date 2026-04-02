@@ -4,6 +4,10 @@
 **Status:** Proposed implementation direction
 **Scope:** Analytics/reporting rewrite across run-level reports, cross-run analytics, AI summaries, and Playwright-backed PDF export
 
+## Implementation Artifacts
+
+Phase 1 contract-freeze artifacts live in `docs/plans/reporting-normalization-v1/phase-1-inventory.md` and `backend/tests/fixtures/reports/`.
+
 ---
 
 ## 1. Problem Statement

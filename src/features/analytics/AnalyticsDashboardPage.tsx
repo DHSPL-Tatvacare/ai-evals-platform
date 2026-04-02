@@ -1,5 +1,6 @@
 import { BarChart3 } from 'lucide-react';
 import type { AppId } from '@/types';
+import { useAppConfig } from '@/hooks';
 import { EmptyState } from '@/components/ui';
 import { getAnalyticsConfig } from './registry';
 
@@ -8,9 +9,10 @@ interface Props {
 }
 
 export function AnalyticsDashboardPage({ appId }: Props) {
+  const appConfig = useAppConfig(appId);
   const config = getAnalyticsConfig(appId);
 
-  if (!config.crossRun?.supportsCrossRun) {
+  if (!appConfig.analytics.capabilities.crossRunAnalytics || !config.crossRun?.supportsCrossRun) {
     return (
       <div className="flex flex-col flex-1 min-h-0">
         <div className="shrink-0 pb-4">

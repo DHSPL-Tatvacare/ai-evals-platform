@@ -71,6 +71,68 @@ export interface AppEvalRunConfig {
   supportedTypes: string[];
 }
 
+export type AnalyticsSectionType =
+  | 'summary_cards'
+  | 'narrative'
+  | 'metric_breakdown'
+  | 'distribution_chart'
+  | 'compliance_table'
+  | 'heatmap'
+  | 'entity_slices'
+  | 'flags'
+  | 'issues_recommendations'
+  | 'exemplars'
+  | 'prompt_gap_analysis'
+  | 'callout';
+
+export interface AnalyticsSectionConfig {
+  id: string;
+  type: AnalyticsSectionType;
+  title: string | null;
+  description: string | null;
+  variant: string;
+  printable: boolean;
+}
+
+export interface AnalyticsExportConfig {
+  enabled: boolean;
+  format: 'pdf';
+  documentVariant: string;
+  sectionIds: string[];
+}
+
+export interface AnalyticsSummaryConfig {
+  enabled: boolean;
+  sectionIds: string[];
+}
+
+export interface AnalyticsCapabilities {
+  singleRunReport: boolean;
+  crossRunAnalytics: boolean;
+  crossRunAiSummary: boolean;
+  pdfExport: boolean;
+}
+
+export interface AnalyticsCompositionConfig {
+  sections: AnalyticsSectionConfig[];
+  export: AnalyticsExportConfig;
+  aiSummary: AnalyticsSummaryConfig;
+}
+
+export interface AnalyticsAssetKeys {
+  promptReferencesKey: string | null;
+  narrativeTemplateKey: string | null;
+  glossaryKey: string | null;
+}
+
+export interface AppAnalyticsConfig {
+  profile: string;
+  capabilities: AnalyticsCapabilities;
+  singleRun: AnalyticsCompositionConfig;
+  crossRun: AnalyticsCompositionConfig;
+  assets: AnalyticsAssetKeys;
+}
+
 export interface AppConfig {
   displayName: string;
   icon: string;
@@ -80,6 +142,7 @@ export interface AppConfig {
   evaluator: AppEvaluatorConfig;
   assetDefaults: AppAssetDefaults;
   evalRun: AppEvalRunConfig;
+  analytics: AppAnalyticsConfig;
 }
 
 export interface RuleCatalogEntry {
@@ -163,6 +226,46 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     evalRun: {
       supportedTypes: [],
     },
+    analytics: {
+      profile: 'voice_rx_v1',
+      capabilities: {
+        singleRunReport: false,
+        crossRunAnalytics: false,
+        crossRunAiSummary: false,
+        pdfExport: false,
+      },
+      singleRun: {
+        sections: [],
+        export: {
+          enabled: false,
+          format: 'pdf',
+          documentVariant: 'voice-rx-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: false,
+          sectionIds: [],
+        },
+      },
+      crossRun: {
+        sections: [],
+        export: {
+          enabled: false,
+          format: 'pdf',
+          documentVariant: 'voice-rx-cross-run-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: false,
+          sectionIds: [],
+        },
+      },
+      assets: {
+        promptReferencesKey: null,
+        narrativeTemplateKey: null,
+        glossaryKey: null,
+      },
+    },
   },
   'kaira-bot': {
     displayName: APPS['kaira-bot'].name,
@@ -201,6 +304,46 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     evalRun: {
       supportedTypes: [],
     },
+    analytics: {
+      profile: 'kaira_v1',
+      capabilities: {
+        singleRunReport: true,
+        crossRunAnalytics: true,
+        crossRunAiSummary: true,
+        pdfExport: true,
+      },
+      singleRun: {
+        sections: [],
+        export: {
+          enabled: true,
+          format: 'pdf',
+          documentVariant: 'kaira-run-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: true,
+          sectionIds: [],
+        },
+      },
+      crossRun: {
+        sections: [],
+        export: {
+          enabled: false,
+          format: 'pdf',
+          documentVariant: 'kaira-cross-run-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: true,
+          sectionIds: [],
+        },
+      },
+      assets: {
+        promptReferencesKey: 'report-prompt-references',
+        narrativeTemplateKey: 'report-narrative-template',
+        glossaryKey: 'report-glossary',
+      },
+    },
   },
   'inside-sales': {
     displayName: APPS['inside-sales'].name,
@@ -238,6 +381,46 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     },
     evalRun: {
       supportedTypes: [],
+    },
+    analytics: {
+      profile: 'inside_sales_v1',
+      capabilities: {
+        singleRunReport: true,
+        crossRunAnalytics: true,
+        crossRunAiSummary: true,
+        pdfExport: true,
+      },
+      singleRun: {
+        sections: [],
+        export: {
+          enabled: true,
+          format: 'pdf',
+          documentVariant: 'inside-sales-run-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: true,
+          sectionIds: [],
+        },
+      },
+      crossRun: {
+        sections: [],
+        export: {
+          enabled: false,
+          format: 'pdf',
+          documentVariant: 'inside-sales-cross-run-v1',
+          sectionIds: [],
+        },
+        aiSummary: {
+          enabled: true,
+          sectionIds: [],
+        },
+      },
+      assets: {
+        promptReferencesKey: null,
+        narrativeTemplateKey: 'inside-sales-report-narrative-template',
+        glossaryKey: 'inside-sales-report-glossary',
+      },
     },
   },
 };
@@ -287,6 +470,44 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
     evalRun: {
       ...fallback.evalRun,
       ...config.evalRun,
+    },
+    analytics: {
+      ...fallback.analytics,
+      ...config.analytics,
+      capabilities: {
+        ...fallback.analytics.capabilities,
+        ...config.analytics?.capabilities,
+      },
+      singleRun: {
+        ...fallback.analytics.singleRun,
+        ...config.analytics?.singleRun,
+        sections: config.analytics?.singleRun?.sections ?? fallback.analytics.singleRun.sections,
+        export: {
+          ...fallback.analytics.singleRun.export,
+          ...config.analytics?.singleRun?.export,
+        },
+        aiSummary: {
+          ...fallback.analytics.singleRun.aiSummary,
+          ...config.analytics?.singleRun?.aiSummary,
+        },
+      },
+      crossRun: {
+        ...fallback.analytics.crossRun,
+        ...config.analytics?.crossRun,
+        sections: config.analytics?.crossRun?.sections ?? fallback.analytics.crossRun.sections,
+        export: {
+          ...fallback.analytics.crossRun.export,
+          ...config.analytics?.crossRun?.export,
+        },
+        aiSummary: {
+          ...fallback.analytics.crossRun.aiSummary,
+          ...config.analytics?.crossRun?.aiSummary,
+        },
+      },
+      assets: {
+        ...fallback.analytics.assets,
+        ...config.analytics?.assets,
+      },
     },
   };
 }

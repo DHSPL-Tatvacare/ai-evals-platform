@@ -1820,6 +1820,26 @@ APP_SEEDS = [
                 "llm_settings": "private",
             },
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "human", "call_quality"]},
+            "analytics": {
+                "profile": "voice_rx_v1",
+                "capabilities": {
+                    "singleRunReport": False,
+                    "crossRunAnalytics": False,
+                    "crossRunAiSummary": False,
+                    "pdfExport": False,
+                },
+                "singleRun": {
+                    "sections": [],
+                    "export": {"enabled": False, "format": "pdf", "documentVariant": "voice-rx-v1", "sectionIds": []},
+                    "aiSummary": {"enabled": False, "sectionIds": []},
+                },
+                "crossRun": {
+                    "sections": [],
+                    "export": {"enabled": False, "format": "pdf", "documentVariant": "voice-rx-cross-run-v1", "sectionIds": []},
+                    "aiSummary": {"enabled": False, "sectionIds": []},
+                },
+                "assets": {},
+            },
         },
     },
     {
@@ -1858,6 +1878,80 @@ APP_SEEDS = [
                 "llm_settings": "private",
             },
             "evalRun": {"supportedTypes": ["custom", "batch_thread", "batch_adversarial"]},
+            "analytics": {
+                "profile": "kaira_v1",
+                "capabilities": {
+                    "singleRunReport": True,
+                    "crossRunAnalytics": True,
+                    "crossRunAiSummary": True,
+                    "pdfExport": True,
+                },
+                "singleRun": {
+                    "sections": [
+                        {"id": "kaira-summary", "type": "summary_cards", "title": "Executive Summary", "variant": "kaira_overview"},
+                        {"id": "kaira-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
+                        {"id": "kaira-metrics", "type": "metric_breakdown", "title": "Health Metrics", "variant": "health_score"},
+                        {"id": "kaira-distributions", "type": "distribution_chart", "title": "Verdict Distributions", "variant": "verdicts"},
+                        {"id": "kaira-compliance", "type": "compliance_table", "title": "Rule Compliance", "variant": "rule_matrix"},
+                        {"id": "kaira-friction", "type": "callout", "title": "Friction Analysis", "variant": "friction_analysis"},
+                        {"id": "kaira-exemplars", "type": "exemplars", "title": "Exemplar Threads", "variant": "thread_examples"},
+                        {"id": "kaira-prompt-gaps", "type": "prompt_gap_analysis", "title": "Prompt Gap Analysis", "variant": "prompt_gaps"},
+                        {"id": "kaira-recommendations", "type": "issues_recommendations", "title": "Issues and Recommendations", "variant": "narrative_actions"},
+                    ],
+                    "export": {
+                        "enabled": True,
+                        "format": "pdf",
+                        "documentVariant": "kaira-run-v1",
+                        "sectionIds": [
+                            "kaira-summary",
+                            "kaira-narrative",
+                            "kaira-metrics",
+                            "kaira-distributions",
+                            "kaira-compliance",
+                            "kaira-exemplars",
+                            "kaira-prompt-gaps",
+                            "kaira-recommendations",
+                        ],
+                    },
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "kaira-narrative",
+                            "kaira-exemplars",
+                            "kaira-prompt-gaps",
+                            "kaira-recommendations",
+                        ],
+                    },
+                },
+                "crossRun": {
+                    "sections": [
+                        {"id": "kaira-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "kaira_cross_run"},
+                        {"id": "kaira-cross-trend", "type": "metric_breakdown", "title": "Health Trends", "variant": "trend_line"},
+                        {"id": "kaira-cross-compliance", "type": "heatmap", "title": "Rule Compliance Heatmap", "variant": "rule_compliance"},
+                        {"id": "kaira-cross-adversarial", "type": "heatmap", "title": "Adversarial Heatmap", "variant": "adversarial_goals"},
+                        {"id": "kaira-cross-issues", "type": "issues_recommendations", "title": "Recurring Issues", "variant": "cross_run_narrative"},
+                    ],
+                    "export": {
+                        "enabled": False,
+                        "format": "pdf",
+                        "documentVariant": "kaira-cross-run-v1",
+                        "sectionIds": [],
+                    },
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "kaira-cross-summary",
+                            "kaira-cross-trend",
+                            "kaira-cross-issues",
+                        ],
+                    },
+                },
+                "assets": {
+                    "promptReferencesKey": "report-prompt-references",
+                    "narrativeTemplateKey": "report-narrative-template",
+                    "glossaryKey": "report-glossary",
+                },
+            },
         },
     },
     {
@@ -1897,6 +1991,75 @@ APP_SEEDS = [
                 "llm_settings": "private",
             },
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "call_quality"]},
+            "analytics": {
+                "profile": "inside_sales_v1",
+                "capabilities": {
+                    "singleRunReport": True,
+                    "crossRunAnalytics": True,
+                    "crossRunAiSummary": True,
+                    "pdfExport": True,
+                },
+                "singleRun": {
+                    "sections": [
+                        {"id": "inside-sales-summary", "type": "summary_cards", "title": "Call Quality Summary", "variant": "call_quality"},
+                        {"id": "inside-sales-narrative", "type": "narrative", "title": "Narrative Summary", "variant": "coaching_summary"},
+                        {"id": "inside-sales-dimensions", "type": "metric_breakdown", "title": "Dimension Breakdown", "variant": "dimension_scores"},
+                        {"id": "inside-sales-compliance", "type": "compliance_table", "title": "Compliance Gates", "variant": "gate_pass_rates"},
+                        {"id": "inside-sales-flags", "type": "flags", "title": "Behavioral Signals", "variant": "flag_rollups"},
+                        {"id": "inside-sales-agents", "type": "entity_slices", "title": "Agent Performance", "variant": "agent_slices"},
+                        {"id": "inside-sales-recommendations", "type": "issues_recommendations", "title": "Recommendations", "variant": "coaching_actions"},
+                    ],
+                    "export": {
+                        "enabled": True,
+                        "format": "pdf",
+                        "documentVariant": "inside-sales-run-v1",
+                        "sectionIds": [
+                            "inside-sales-summary",
+                            "inside-sales-narrative",
+                            "inside-sales-dimensions",
+                            "inside-sales-compliance",
+                            "inside-sales-flags",
+                            "inside-sales-agents",
+                            "inside-sales-recommendations",
+                        ],
+                    },
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "inside-sales-narrative",
+                            "inside-sales-agents",
+                            "inside-sales-recommendations",
+                        ],
+                    },
+                },
+                "crossRun": {
+                    "sections": [
+                        {"id": "inside-sales-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "inside_sales_cross_run"},
+                        {"id": "inside-sales-cross-dimensions", "type": "heatmap", "title": "Dimension Heatmap", "variant": "dimensions"},
+                        {"id": "inside-sales-cross-compliance", "type": "heatmap", "title": "Compliance Heatmap", "variant": "compliance"},
+                        {"id": "inside-sales-cross-flags", "type": "flags", "title": "Flag Rollups", "variant": "behavioral_outcomes"},
+                        {"id": "inside-sales-cross-issues", "type": "issues_recommendations", "title": "Recurring Themes", "variant": "cross_run_narrative"},
+                    ],
+                    "export": {
+                        "enabled": False,
+                        "format": "pdf",
+                        "documentVariant": "inside-sales-cross-run-v1",
+                        "sectionIds": [],
+                    },
+                    "aiSummary": {
+                        "enabled": True,
+                        "sectionIds": [
+                            "inside-sales-cross-summary",
+                            "inside-sales-cross-flags",
+                            "inside-sales-cross-issues",
+                        ],
+                    },
+                },
+                "assets": {
+                    "narrativeTemplateKey": "inside-sales-report-narrative-template",
+                    "glossaryKey": "inside-sales-report-glossary",
+                },
+            },
         },
     },
 ]

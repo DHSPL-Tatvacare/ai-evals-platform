@@ -1,0 +1,45 @@
+{
+  "stats": {
+    "totalRuns": 2,
+    "allRuns": 4,
+    "totalCalls": 38,
+    "avgQaScore": 79.5,
+    "avgCompliancePassRate": 84.2
+  },
+  "dimensionHeatmap": {
+    "runs": [
+      { "runId": "sales-1", "runName": "Sales Run 1", "createdAt": "2026-04-01T00:00:00+00:00", "avgQaScore": 81, "evaluatedCalls": 18 }
+    ],
+    "rows": [
+      { "key": "discovery", "label": "Discovery", "avg": 79, "cells": [79] }
+    ]
+  },
+  "complianceHeatmap": {
+    "runs": [
+      { "runId": "sales-1", "runName": "Sales Run 1", "createdAt": "2026-04-01T00:00:00+00:00", "avgQaScore": 81, "evaluatedCalls": 18 }
+    ],
+    "rows": [
+      { "key": "complianceDisclosure", "label": "Disclosure", "avg": 0.89, "cells": [0.89] }
+    ]
+  },
+  "flagRollups": {
+    "behavioral": {
+      "escalation": { "relevant": 7, "notRelevant": 31, "present": 3 },
+      "disagreement": { "relevant": 6, "notRelevant": 32, "present": 3 },
+      "tension": { "relevant": 5, "notRelevant": 33, "present": 2 }
+    },
+    "outcomes": {
+      "meetingSetup": { "relevant": 38, "notRelevant": 0, "attempted": 8, "accepted": 3 }
+    }
+  },
+  "issuesAndRecommendations": {
+    "issues": [
+      { "title": "Disclosure misses", "summary": "Disclosure is still missed in some calls.", "priority": "P1", "runCount": 2 }
+    ],
+    "recommendations": [
+      { "priority": "P0", "action": "Coach disclosure opener", "summary": "Reinforce compliance opening language.", "runCount": 2 }
+    ],
+    "runsWithNarrative": 2,
+    "runsWithoutNarrative": 0
+  }
+}

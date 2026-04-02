@@ -1,0 +1,22 @@
+{
+  "runSections": [
+    "summary_cards",
+    "narrative",
+    "metric_breakdown",
+    "distribution_chart",
+    "compliance_table",
+    "entity_slices",
+    "flags",
+    "issues_recommendations",
+    "exemplars",
+    "prompt_gap_analysis",
+    "callout"
+  ],
+  "crossRunSections": [
+    "summary_cards",
+    "metric_breakdown",
+    "heatmap",
+    "flags",
+    "issues_recommendations"
+  ]
+}

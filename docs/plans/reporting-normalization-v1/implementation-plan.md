@@ -8,6 +8,8 @@
 
 **Tech Stack:** FastAPI, SQLAlchemy, PostgreSQL JSONB, Pydantic/CamelModel, React, TypeScript, Zustand, Playwright PDF generation, background jobs via `job_worker.py`
 
+**Current execution note:** Phase 1 artifacts are tracked in `docs/plans/reporting-normalization-v1/phase-1-inventory.md` and `backend/tests/fixtures/reports/`.
+
 ---
 
 ## Guardrails

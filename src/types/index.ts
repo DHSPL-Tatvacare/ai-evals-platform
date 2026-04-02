@@ -18,3 +18,4 @@ export * from './evalRuns';
 export * from './reports';
 export * from './crossRunAnalytics';
 export * from './insideSalesCrossRun';
+export * from './platformReports';

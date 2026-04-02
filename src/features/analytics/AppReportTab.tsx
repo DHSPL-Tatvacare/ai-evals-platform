@@ -1,5 +1,6 @@
 import type { AppId } from '@/types';
 import { FileBarChart } from 'lucide-react';
+import { useAppConfig } from '@/hooks';
 import { EmptyState } from '@/components/ui';
 import ReportTab from '@/features/evalRuns/components/report/ReportTab';
 import { getAnalyticsConfig } from './registry';
@@ -10,9 +11,10 @@ interface Props {
 }
 
 export function AppReportTab({ appId, runId }: Props) {
+  const appConfig = useAppConfig(appId);
   const config = getAnalyticsConfig(appId);
 
-  if (!config.report) {
+  if (!appConfig.analytics.capabilities.singleRunReport || !config.report) {
     return (
       <EmptyState
         icon={FileBarChart}
@@ -27,7 +29,7 @@ export function AppReportTab({ appId, runId }: Props) {
     <ReportTab
       appId={appId}
       runId={runId}
-      supportsPdf={config.report.supportsPdf}
+      supportsPdf={appConfig.analytics.capabilities.pdfExport && config.report.supportsPdf}
       renderReport={(report, actions) => config.report?.render(report, { appId, runId, actions }) ?? null}
     />
   );

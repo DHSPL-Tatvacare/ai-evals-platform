@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "runId": "run-inside-sales",
+    "runName": "Inside Sales QA Batch",
+    "appId": "inside-sales",
+    "evalType": "call_quality",
+    "createdAt": "2026-04-01T09:00:00+00:00",
+    "llmProvider": "openai",
+    "llmModel": "gpt-5.4",
+    "narrativeModel": "gpt-5.4",
+    "totalCalls": 20,
+    "evaluatedCalls": 18,
+    "durationMs": 6100
+  },
+  "runSummary": {
+    "totalCalls": 20,
+    "evaluatedCalls": 18,
+    "avgQaScore": 81,
+    "verdictDistribution": { "strong": 7, "good": 8, "needsWork": 2, "poor": 1 },
+    "compliancePassRate": 89,
+    "complianceViolationCount": 3
+  },
+  "dimensionBreakdown": {
+    "discovery": {
+      "label": "Discovery",
+      "avg": 79,
+      "min": 58,
+      "max": 95,
+      "maxPossible": 100,
+      "greenThreshold": 80,
+      "yellowThreshold": 60,
+      "distribution": [1, 2, 5, 6, 4]
+    }
+  },
+  "complianceBreakdown": {
+    "complianceDisclosure": {
+      "label": "Disclosure",
+      "passed": 16,
+      "failed": 2,
+      "total": 18
+    }
+  },
+  "flagStats": {
+    "escalation": { "relevant": 5, "notRelevant": 13, "present": 2 },
+    "disagreement": { "relevant": 4, "notRelevant": 14, "present": 2 },
+    "tension": { "relevant": 3, "notRelevant": 15, "bySeverity": { "high": 1, "medium": 1 } },
+    "meetingSetup": { "relevant": 18, "notRelevant": 0, "attempted": 6, "accepted": 3 },
+    "purchaseMade": { "relevant": 18, "notRelevant": 0, "attempted": 2, "accepted": 1 },
+    "callbackScheduled": { "relevant": 18, "notRelevant": 0, "attempted": 4, "accepted": 2 },
+    "crossSell": { "relevant": 8, "notRelevant": 10, "attempted": 3, "accepted": 1 }
+  },
+  "agentSlices": {
+    "agent-a": {
+      "agentName": "Agent A",
+      "callCount": 8,
+      "avgQaScore": 84,
+      "dimensions": { "discovery": { "avg": 82 } },
+      "compliance": { "passed": 7, "failed": 1 },
+      "flags": {
+        "escalation": { "relevant": 2, "notRelevant": 6, "present": 1 },
+        "disagreement": { "relevant": 2, "notRelevant": 6, "present": 1 },
+        "tension": { "relevant": 1, "notRelevant": 7, "bySeverity": { "medium": 1 } },
+        "meetingSetup": { "relevant": 8, "notRelevant": 0, "attempted": 3, "accepted": 2 },
+        "purchaseMade": { "relevant": 8, "notRelevant": 0, "attempted": 1, "accepted": 1 },
+        "callbackScheduled": { "relevant": 8, "notRelevant": 0, "attempted": 2, "accepted": 1 },
+        "crossSell": { "relevant": 4, "notRelevant": 4, "attempted": 1, "accepted": 1 }
+      },
+      "verdictDistribution": { "strong": 4, "good": 3, "needsWork": 1, "poor": 0 }
+    }
+  },
+  "narrative": {
+    "executiveSummary": "Calls are generally strong, but disclosure misses still appear.",
+    "dimensionInsights": [
+      { "dimension": "Discovery", "insight": "Discovery quality is inconsistent in first five minutes.", "priority": "P1" }
+    ],
+    "agentCoachingNotes": { "Agent A": "Coach on earlier disclosure and tighter next-step confirmation." },
+    "flagPatterns": "Escalations spike when discovery is skipped.",
+    "complianceAlerts": ["Disclosure missed in two evaluated calls"],
+    "recommendations": [
+      { "priority": "P0", "action": "Reinforce disclosure opener in coaching." }
+    ]
+  }
+}
