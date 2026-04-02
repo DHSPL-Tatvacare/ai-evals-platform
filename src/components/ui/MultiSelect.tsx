@@ -92,16 +92,24 @@ export function MultiSelect({
         </span>
         <div className="flex items-center gap-1 shrink-0">
           {values.length > 0 && (
-            <button
-              type="button"
+            <span
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
                 onChange([]);
               }}
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onChange([]);
+                }
+              }}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
             >
               <X className="h-3 w-3" />
-            </button>
+            </span>
           )}
           <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />
         </div>

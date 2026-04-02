@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Code, Search } from 'lucide-react';
 import { Button, Popover, PopoverTrigger, PopoverContent, Tooltip } from '@/components/ui';
+import { useAppConfig } from '@/hooks';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
+import { useAppStore } from '@/stores';
 import { cn } from '@/utils';
-import type { Listing, PromptType, VariableInfo } from '@/types';
+import type { AppId, Listing, PromptType, VariableInfo } from '@/types';
 
 interface VariablePickerPopoverProps {
   listing?: Listing;
-  appId?: string;
+  appId?: AppId;
+  staticVariables?: VariableInfo[];
   onInsert: (variable: string) => void;
   promptType?: PromptType;
   buttonLabel?: string;
@@ -17,8 +20,8 @@ interface VariablePickerPopoverProps {
 export function VariablePickerPopover({
   listing,
   appId,
+  staticVariables = [],
   onInsert,
-  promptType: _promptType,
   buttonLabel = 'Variables',
   className,
 }: VariablePickerPopoverProps) {
@@ -28,8 +31,10 @@ export function VariablePickerPopover({
   const [apiPaths, setApiPaths] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const currentAppId = useAppStore((state) => state.currentApp);
 
-  const effectiveAppId = appId || listing?.appId || 'voice-rx';
+  const effectiveAppId = appId || listing?.appId || currentAppId;
+  const appConfig = useAppConfig(effectiveAppId);
   const sourceType = listing?.sourceType;
   const listingId = listing?.id;
 
@@ -42,25 +47,44 @@ export function VariablePickerPopover({
     (async () => {
       try {
         const [vars, paths] = await Promise.all([
-          evaluatorsRepository.getVariables(effectiveAppId, sourceType),
-          // Only fetch API paths for voice-rx API listings with a listing ID
-          listingId && sourceType === 'api'
+          appConfig.evaluator.dynamicVariableSources.registry
+            ? evaluatorsRepository.getVariables(effectiveAppId, sourceType)
+            : Promise.resolve([]),
+          listingId && sourceType === 'api' && appConfig.evaluator.dynamicVariableSources.listingApiPaths
             ? evaluatorsRepository.getApiPaths(listingId)
             : Promise.resolve([]),
         ]);
         if (!cancelled) {
-          setVariables(vars);
+          const mergedVariables = [...staticVariables, ...vars].reduce<VariableInfo[]>((items, variable) => {
+            if (items.some((existing) => existing.key === variable.key)) {
+              return items;
+            }
+            items.push(variable);
+            return items;
+          }, []);
+          setVariables(mergedVariables);
           setApiPaths(paths);
         }
-      } catch (err) {
-        console.error('Failed to fetch variables:', err);
+      } catch {
+        if (!cancelled) {
+          setVariables(staticVariables);
+          setApiPaths([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [isOpen, effectiveAppId, sourceType, listingId]);
+  }, [
+    appConfig.evaluator.dynamicVariableSources.listingApiPaths,
+    appConfig.evaluator.dynamicVariableSources.registry,
+    effectiveAppId,
+    isOpen,
+    listingId,
+    sourceType,
+    staticVariables,
+  ]);
 
   // Group variables by category for display
   const groupedVariables = useMemo(() => {

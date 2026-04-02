@@ -1,5 +1,6 @@
 """Schemas API routes."""
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +14,9 @@ from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.listing import Listing
 from app.models.schema import Schema
+from app.models.mixins.shareable import Visibility
 from app.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse
+from app.services.access_control import readable_scope_clause
 
 logger = logging.getLogger(__name__)
 
@@ -25,25 +28,44 @@ async def list_schemas(
     app_id: str = Query(...),
     prompt_type: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
+    branch_key: Optional[str] = Query(None),
+    latest_only: bool = Query(True),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List user's schemas + system defaults for an app."""
-    query = select(Schema).where(
-        or_(
-            and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
-            Schema.tenant_id == SYSTEM_TENANT_ID,
-        ),
-        Schema.app_id == app_id,
-    )
+    """List schemas visible to the current user for an app.
+
+    By default returns only the latest version per branch. Pass latest_only=false
+    with branch_key to get full version history for one branch.
+    """
+    # Visibility-aware: own rows + app-shared in tenant + system defaults
+    query = select(Schema).where(readable_scope_clause(Schema, auth), Schema.app_id == app_id)
     if prompt_type:
         query = query.where(Schema.prompt_type == prompt_type)
     if source_type:
         query = query.where(
             or_(Schema.source_type == source_type, Schema.source_type.is_(None))
         )
-    query = query.order_by(desc(Schema.created_at))
+    if branch_key:
+        query = query.where(Schema.branch_key == branch_key)
 
+    if latest_only and not branch_key:
+        # Subquery: max version per branch_key within the visible set
+        # Use a window function approach: order by version desc, pick first per branch
+        query = query.order_by(Schema.branch_key, desc(Schema.version))
+        result = await db.execute(query)
+        all_rows = result.scalars().all()
+        # Deduplicate: keep first (latest version) per branch_key
+        seen_branches: set[tuple[str, str, str | None]] = set()
+        latest: list[Schema] = []
+        for row in all_rows:
+            branch_identity = (row.branch_key, row.prompt_type, row.source_type)
+            if branch_identity not in seen_branches:
+                seen_branches.add(branch_identity)
+                latest.append(row)
+        return latest
+
+    query = query.order_by(desc(Schema.version))
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -54,14 +76,11 @@ async def get_schema(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single schema by ID (own or system)."""
+    """Get a single schema by ID if visible in the current library scope."""
     result = await db.execute(
         select(Schema).where(
             Schema.id == schema_id,
-            or_(
-                and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
-                Schema.tenant_id == SYSTEM_TENANT_ID,
-            ),
+            readable_scope_clause(Schema, auth),
         )
     )
     schema = result.scalar_one_or_none()
@@ -77,7 +96,12 @@ async def create_schema(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new schema with auto-incremented version."""
+    """Create a new schema with auto-incremented version within its branch."""
+    data = body.model_dump(exclude_none=True)
+    branch_key = data.get("branch_key") or str(uuid.uuid4())
+    data["branch_key"] = branch_key
+
+    # Version increment scoped by the branch identity
     result = await db.execute(
         select(func.max(Schema.version))
         .where(
@@ -85,17 +109,114 @@ async def create_schema(
             Schema.user_id == auth.user_id,
             Schema.app_id == body.app_id,
             Schema.prompt_type == body.prompt_type,
+            Schema.source_type == body.source_type,
+            Schema.branch_key == branch_key,
         )
     )
     max_version = result.scalar() or 0
 
     schema = Schema(
-        **body.model_dump(),
+        **data,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
         version=max_version + 1,
     )
     db.add(schema)
+    await db.commit()
+    await db.refresh(schema)
+    return schema
+
+
+@router.post("/{schema_id}/fork", response_model=SchemaResponse, status_code=201)
+async def fork_schema(
+    schema_id: int,
+    auth: AuthContext = require_permission('resource:create'),
+    _app_check: AuthContext = require_app_access(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fork a visible schema into a new private branch with version=1."""
+    # Can fork any visible schema (own, app-shared, system)
+    result = await db.execute(
+        select(Schema).where(
+            Schema.id == schema_id,
+            or_(
+                and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
+                and_(Schema.tenant_id == auth.tenant_id, Schema.visibility == Visibility.APP),
+                Schema.tenant_id == SYSTEM_TENANT_ID,
+            ),
+        )
+    )
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Schema not found")
+
+    forked = Schema(
+        app_id=source.app_id,
+        prompt_type=source.prompt_type,
+        branch_key=str(uuid.uuid4()),  # New branch
+        version=1,
+        name=source.name,
+        schema_data=source.schema_data,
+        description=source.description,
+        is_default=False,
+        source_type=source.source_type,
+        visibility=Visibility.PRIVATE,
+        forked_from=source.id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
+    db.add(forked)
+    await db.commit()
+    await db.refresh(forked)
+    return forked
+
+
+@router.patch("/{schema_id}/visibility", response_model=SchemaResponse)
+async def patch_schema_visibility(
+    schema_id: int,
+    body: dict,
+    auth: AuthContext = require_permission('resource:edit'),
+    _app_check: AuthContext = require_app_access(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change visibility on a schema. Only the owner can change visibility."""
+    result = await db.execute(
+        select(Schema).where(
+            Schema.id == schema_id,
+            Schema.tenant_id == auth.tenant_id,
+            Schema.user_id == auth.user_id,
+        )
+    )
+    schema = result.scalar_one_or_none()
+    if not schema:
+        raise HTTPException(status_code=404, detail="Schema not found or not owned by you")
+
+    if schema.is_default:
+        raise HTTPException(status_code=400, detail="Cannot change visibility of system defaults")
+
+    latest_version = await db.scalar(
+        select(func.max(Schema.version)).where(
+            Schema.tenant_id == schema.tenant_id,
+            Schema.user_id == schema.user_id,
+            Schema.app_id == schema.app_id,
+            Schema.prompt_type == schema.prompt_type,
+            Schema.source_type == schema.source_type,
+            Schema.branch_key == schema.branch_key,
+        )
+    )
+    if latest_version != schema.version:
+        raise HTTPException(status_code=409, detail="Visibility can only be changed on the latest schema version")
+
+    new_visibility = body.get("visibility")
+    if new_visibility not in ("private", "app"):
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'app'")
+
+    schema.visibility = Visibility(new_visibility)
+    if new_visibility == "app":
+        schema.shared_by = auth.user_id
+        from sqlalchemy import func as sqlfunc
+        schema.shared_at = sqlfunc.now()
+
     await db.commit()
     await db.refresh(schema)
     return schema
@@ -109,7 +230,7 @@ async def update_schema(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a schema. Cannot edit system schemas."""
+    """Metadata-only schema update. Content edits must create a new version."""
     result = await db.execute(
         select(Schema).where(
             Schema.id == schema_id,
@@ -122,6 +243,8 @@ async def update_schema(
         raise HTTPException(status_code=404, detail="Schema not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    if body.requires_new_version():
+        raise HTTPException(status_code=400, detail="Content edits must create a new schema version")
     for key, value in update_data.items():
         setattr(schema, key, value)
 

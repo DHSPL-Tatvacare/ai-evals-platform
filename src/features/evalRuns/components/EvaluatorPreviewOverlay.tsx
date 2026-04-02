@@ -428,7 +428,7 @@ export function EvaluatorPreviewOverlay({
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5">
                   <div className="text-[11px] text-[var(--text-muted)] mb-0.5">Registry</div>
                   <div className="text-[13px] font-medium text-[var(--text-primary)]">
-                    {evaluator.isGlobal ? 'Global' : 'Local'}
+                    {evaluator.visibility === 'app' ? 'Shared' : 'Private'}
                   </div>
                 </div>
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5">
@@ -490,7 +490,7 @@ export function EvaluatorPreviewOverlay({
                           )}
                         </td>
                         <td className="px-3 py-2 text-[var(--text-secondary)]">{field.type}</td>
-                        <td className="px-3 py-2 text-[var(--text-secondary)]">{field.displayMode}</td>
+                        <td className="px-3 py-2 text-[var(--text-secondary)]">{field.role || field.displayMode || '—'}</td>
                         <td className="px-3 py-2 text-[var(--text-secondary)]">
                           {field.thresholds ? (
                             <span className="text-[11px]">

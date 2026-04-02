@@ -3,7 +3,7 @@ import { ChevronDown, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
-import { APPS, type AppId } from '@/types';
+import { APP_IDS, getAppMetadataFromConfig, type AppId } from '@/types';
 import { cn } from '@/utils';
 import { routes } from '@/config/routes';
 
@@ -17,20 +17,20 @@ interface AppConfig {
 const apps: AppConfig[] = [
   {
     id: 'voice-rx',
-    name: APPS['voice-rx'].name,
-    icon: APPS['voice-rx'].icon,
+    name: '',
+    icon: '',
     route: routes.voiceRx.dashboard,
   },
   {
     id: 'kaira-bot',
-    name: APPS['kaira-bot'].name,
-    icon: APPS['kaira-bot'].icon,
+    name: '',
+    icon: '',
     route: routes.kaira.dashboard,
   },
   {
     id: 'inside-sales',
-    name: APPS['inside-sales'].name,
-    icon: APPS['inside-sales'].icon,
+    name: '',
+    icon: '',
     route: routes.insideSales.listing,
   },
 ];
@@ -39,10 +39,24 @@ export function AppSwitcher() {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const { currentApp, setCurrentApp } = useAppStore();
+  const currentApp = useAppStore((state) => state.currentApp);
+  const setCurrentApp = useAppStore((state) => state.setCurrentApp);
+  const getAppConfig = useAppStore((state) => state.getAppConfig);
   const user = useAuthStore((s) => s.user);
 
-  const accessibleApps = user?.isOwner ? apps : apps.filter((a) => user?.appAccess.includes(a.id) ?? false);
+  const appOptions = APP_IDS.map((appId, index) => {
+    const metadata = getAppMetadataFromConfig(appId, getAppConfig(appId));
+    return {
+      ...apps[index],
+      id: appId,
+      name: metadata.name,
+      icon: metadata.icon,
+    };
+  });
+
+  const accessibleApps = user?.isOwner
+    ? appOptions
+    : appOptions.filter((app) => user?.appAccess.includes(app.id) ?? false);
   const currentAppConfig = accessibleApps.find((app) => app.id === currentApp) ?? accessibleApps[0];
 
   // Close dropdown when clicking outside

@@ -64,6 +64,9 @@ function SchemaFieldRow({ field }: { field: EvaluatorSchemaField }) {
         )}
         {field.displayMode === "card" && <Badge color="blue">card</Badge>}
         {field.displayMode === "hidden" && <Badge color="purple">hidden</Badge>}
+        {field.role === 'metric' && <Badge color="green">metric</Badge>}
+        {field.role === 'detail' && <Badge color="blue">detail</Badge>}
+        {field.role === 'reasoning' && <Badge color="purple">reasoning</Badge>}
       </td>
       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)" }}>
         {field.thresholds && (
@@ -164,8 +167,8 @@ function EvaluatorDetail({ evaluator }: { evaluator: SeedEvaluator }) {
     <div className="space-y-5">
       {/* Meta row */}
       <div className="flex flex-wrap gap-2 items-center">
-        {evaluator.is_global && <Badge color="purple">global</Badge>}
-        {evaluator.show_in_header && <Badge color="green">header KPI</Badge>}
+        {(evaluator.visibility === 'app' || evaluator.is_global) && <Badge color="purple">shared</Badge>}
+        {evaluator.show_in_header && <Badge color="green">main metric</Badge>}
         {mainMetric && (
           <Badge color="blue">
             main: {mainMetric.key} ({mainMetric.type})

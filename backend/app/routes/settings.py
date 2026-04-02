@@ -1,38 +1,176 @@
 """Settings API routes."""
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission
+from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import get_db
+from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting
 from app.schemas.setting import SettingCreate, SettingResponse
+from app.services.settings_upsert import build_setting_upsert_stmt
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _resolved_settings(rows: list[Setting], auth: AuthContext) -> list[Setting]:
+    winners: dict[str, Setting] = {}
+    for row in rows:
+        current = winners.get(row.key)
+        if current is None:
+            winners[row.key] = row
+            continue
+
+        current_priority = _setting_priority(current, auth)
+        row_priority = _setting_priority(row, auth)
+        if row_priority < current_priority:
+            winners[row.key] = row
+    return list(winners.values())
+
+
+def _setting_priority(row: Setting, auth: AuthContext) -> int:
+    if row.tenant_id == auth.tenant_id and row.user_id == auth.user_id:
+        return 0
+    if row.tenant_id == auth.tenant_id and row.visibility == Visibility.APP:
+        return 1
+    if (
+        row.tenant_id == SYSTEM_TENANT_ID
+        and row.user_id == SYSTEM_USER_ID
+        and row.visibility == Visibility.APP
+    ):
+        return 2
+    return 3
 
 
 @router.get("", response_model=list[SettingResponse])
 async def list_settings(
     app_id: str = Query(None),
     key: str = Query(None),
+    include_all: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """List settings for the current user, optionally filtered by app_id and/or key."""
-    # Always filter by app_id — coerce None to empty string (global)
+    """List settings visible to the current user.
+
+    Default behavior returns resolved winners by key using: private -> app-shared -> system.
+    Pass include_all=true to return all visible rows for management views.
+    """
     resolved_app_id = app_id if app_id is not None else ""
-    query = select(Setting).where(
-        Setting.tenant_id == auth.tenant_id,
-        Setting.user_id == auth.user_id,
-        Setting.app_id == resolved_app_id,
-    )
+    if key == "llm-settings":
+        query = select(Setting).where(
+            Setting.tenant_id == auth.tenant_id,
+            Setting.user_id == auth.user_id,
+            Setting.app_id == "",
+            Setting.key == key,
+            Setting.visibility == Visibility.PRIVATE,
+        )
+    else:
+        priority = case(
+            (
+                (Setting.tenant_id == auth.tenant_id) & (Setting.user_id == auth.user_id),
+                0,
+            ),
+            (
+                (Setting.tenant_id == auth.tenant_id) & (Setting.visibility == Visibility.APP),
+                1,
+            ),
+            (
+                (Setting.tenant_id == SYSTEM_TENANT_ID)
+                & (Setting.user_id == SYSTEM_USER_ID)
+                & (Setting.visibility == Visibility.APP),
+                2,
+            ),
+            else_=3,
+        )
+        query = (
+            select(Setting)
+            .where(
+                Setting.app_id == resolved_app_id,
+                (
+                    ((Setting.tenant_id == auth.tenant_id) & (Setting.user_id == auth.user_id))
+                    | ((Setting.tenant_id == auth.tenant_id) & (Setting.visibility == Visibility.APP))
+                    | (
+                        (Setting.tenant_id == SYSTEM_TENANT_ID)
+                        & (Setting.user_id == SYSTEM_USER_ID)
+                        & (Setting.visibility == Visibility.APP)
+                    )
+                ),
+            )
+            .order_by(Setting.key, priority, Setting.updated_at.desc())
+        )
     if key:
         query = query.where(Setting.key == key)
 
     result = await db.execute(query)
-    return result.scalars().all()
+    rows = result.scalars().all()
+    if include_all or key == "llm-settings":
+        return rows
+    return _resolved_settings(rows, auth)
+
+
+@router.get("/resolve", response_model=Optional[SettingResponse])
+async def resolve_setting(
+    app_id: str = Query(...),
+    key: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve a single setting using the priority chain: private -> app-shared -> system default."""
+    resolved_app_id = app_id or ""
+
+    if key == "llm-settings":
+        result = await db.execute(
+            select(Setting).where(
+                Setting.tenant_id == auth.tenant_id,
+                Setting.user_id == auth.user_id,
+                Setting.app_id == "",
+                Setting.key == key,
+                Setting.visibility == Visibility.PRIVATE,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    # Step 1: User's private override
+    result = await db.execute(
+        select(Setting).where(
+            Setting.tenant_id == auth.tenant_id,
+            Setting.user_id == auth.user_id,
+            Setting.app_id == resolved_app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.PRIVATE,
+        )
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        return setting
+
+    # Step 2: App-shared in current tenant
+    result = await db.execute(
+        select(Setting).where(
+            Setting.tenant_id == auth.tenant_id,
+            Setting.app_id == resolved_app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        return setting
+
+    # Step 3: System default
+    result = await db.execute(
+        select(Setting).where(
+            Setting.tenant_id == SYSTEM_TENANT_ID,
+            Setting.app_id == resolved_app_id,
+            Setting.key == key,
+            Setting.visibility == Visibility.APP,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 @router.get("/{setting_id}", response_model=SettingResponse)
@@ -61,20 +199,18 @@ async def upsert_setting(
     auth: AuthContext = require_permission('settings:edit'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upsert a setting (insert or update if exists). Per-user scoped."""
-    # Coerce None to empty string — NULL breaks the unique constraint
-    app_id = body.app_id or ""
-
-    stmt = pg_insert(Setting).values(
-        app_id=app_id,
-        key=body.key,
-        value=body.value,
+    """Upsert a setting using the correct scope-aware uniqueness target."""
+    stmt = build_setting_upsert_stmt(
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
-    ).on_conflict_do_update(
-        constraint="uq_setting",
-        set_={"value": body.value, "updated_at": func.now()}
-    ).returning(Setting)
+        app_id=body.app_id,
+        key=body.key,
+        value=body.value,
+        visibility=body.visibility,
+        updated_by=auth.user_id,
+        forked_from=body.forked_from,
+        shared_by=auth.user_id if body.visibility == Visibility.APP else None,
+    )
 
     result = await db.execute(stmt)
     await db.commit()

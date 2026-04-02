@@ -47,6 +47,7 @@ class KairaStreamResponse:
     saw_agent_message: bool = False
     had_partial_response: bool = False
     had_empty_final_assistant_message: bool = False
+    stream_completed: bool = False
 
     @property
     def agent_success(self) -> bool:
@@ -148,7 +149,7 @@ class KairaClient:
             result.session_id = session_state.session_id
             result.response_id = session_state.response_id
             result.had_partial_response = bool(
-                result.agent_responses and not result.saw_summary_chunk
+                result.agent_responses and not result.stream_completed
             )
             result.had_empty_final_assistant_message = not bool(
                 (result.full_message or "").strip()
@@ -218,6 +219,7 @@ class KairaClient:
                     if not decoded:
                         continue
                     if decoded == "data: [DONE]":
+                        result.stream_completed = True
                         break
                     if decoded.startswith("data: "):
                         json_str = decoded[6:]

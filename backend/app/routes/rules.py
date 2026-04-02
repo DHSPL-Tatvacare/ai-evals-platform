@@ -1,0 +1,39 @@
+"""Rules catalog API — read/write the published rule catalog for an app."""
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.context import AuthContext, get_auth_context
+from app.auth.permissions import require_permission
+from app.database import get_db
+from app.schemas.rule_catalog import RuleCatalogResponse
+from app.services.evaluators.rules_service import load_rules, save_rules
+
+router = APIRouter(prefix="/api/rules", tags=["rules"])
+
+
+@router.get("", response_model=RuleCatalogResponse)
+async def get_rules(
+    app_id: str = Query(...),
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the published rule catalog for an app. Any user with app access can read."""
+    return RuleCatalogResponse(rules=await load_rules(db, app_id=app_id, tenant_id=auth.tenant_id))
+
+
+@router.put("", response_model=RuleCatalogResponse)
+async def update_rules(
+    body: RuleCatalogResponse,
+    app_id: str = Query(...),
+    auth: AuthContext = require_permission('settings:edit'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the published rule catalog for an app. Requires settings:edit."""
+    await save_rules(
+        db,
+        app_id=app_id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        rules=[rule.model_dump(by_alias=True) for rule in body.rules],
+    )
+    return RuleCatalogResponse(rules=await load_rules(db, app_id=app_id, tenant_id=auth.tenant_id))

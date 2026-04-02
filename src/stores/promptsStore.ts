@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { PromptDefinition, AppId, ListingSourceType } from "@/types";
+import type { AssetVisibility } from "@/types/settings.types";
 import { promptsRepository } from "@/services/storage";
 
 interface PromptsState {
@@ -11,13 +12,16 @@ interface PromptsState {
   loadPrompts: (
     appId: AppId,
     promptType?: PromptDefinition["promptType"],
+    opts?: { branchKey?: string; latestOnly?: boolean; visibility?: AssetVisibility },
   ) => Promise<void>;
   getPrompt: (appId: AppId, id: string) => PromptDefinition | undefined;
   getPromptsByType: (
     appId: AppId,
     promptType: PromptDefinition["promptType"],
     sourceType?: ListingSourceType,
+    visibility?: AssetVisibility,
   ) => PromptDefinition[];
+  getPromptsByVisibility: (appId: AppId, visibility: AssetVisibility) => PromptDefinition[];
   savePrompt: (
     appId: AppId,
     prompt: Partial<PromptDefinition> & {
@@ -29,6 +33,29 @@ interface PromptsState {
   reset: () => void;
 }
 
+function replaceById<T extends { id: string }>(items: T[], item: T): T[] {
+  const index = items.findIndex((entry) => entry.id === item.id);
+  if (index === -1) {
+    return [item, ...items];
+  }
+  return items.map((entry) => (entry.id === item.id ? item : entry));
+}
+
+function removeById<T extends { id: string }>(items: T[], id: string): T[] {
+  return items.filter((item) => item.id !== id);
+}
+
+function upsertPrompt(items: PromptDefinition[], prompt: PromptDefinition): PromptDefinition[] {
+  const sameId = items.some((entry) => entry.id === prompt.id);
+  if (sameId) {
+    return replaceById(items, prompt);
+  }
+  if (prompt.branchKey) {
+    return [prompt, ...items.filter((entry) => entry.branchKey !== prompt.branchKey)];
+  }
+  return [prompt, ...items];
+}
+
 export const usePromptsStore = create<PromptsState>((set, get) => ({
   prompts: {
     "voice-rx": [],
@@ -38,10 +65,10 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
   isLoading: false,
   error: null,
 
-  loadPrompts: async (appId, promptType) => {
+  loadPrompts: async (appId, promptType, opts) => {
     set({ isLoading: true, error: null });
     try {
-      const prompts = await promptsRepository.getAll(appId, promptType);
+      const prompts = await promptsRepository.getAll(appId, promptType, opts);
       set((state) => ({
         prompts: {
           ...state.prompts,
@@ -62,14 +89,19 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
     return (get().prompts[appId] || []).find((p) => p.id === id);
   },
 
-  getPromptsByType: (appId, promptType, sourceType) => {
+  getPromptsByType: (appId, promptType, sourceType, visibility) => {
     return (get().prompts[appId] || []).filter((p) => {
       if (p.promptType !== promptType) return false;
+      if (visibility && p.visibility !== visibility) return false;
       if (sourceType) {
         return p.sourceType === sourceType || !p.sourceType;
       }
       return true;
     });
+  },
+
+  getPromptsByVisibility: (appId, visibility) => {
+    return (get().prompts[appId] || []).filter((prompt) => prompt.visibility === visibility);
   },
 
   savePrompt: async (appId, promptData) => {
@@ -82,10 +114,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       set((state) => ({
         prompts: {
           ...state.prompts,
-          [appId]: [
-            saved,
-            ...(state.prompts[appId] || []).filter((p) => p.id !== saved.id),
-          ],
+          [appId]: upsertPrompt(state.prompts[appId] || [], saved),
         },
         isLoading: false,
       }));
@@ -106,7 +135,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       set((state) => ({
         prompts: {
           ...state.prompts,
-          [appId]: (state.prompts[appId] || []).filter((p) => p.id !== id),
+          [appId]: removeById(state.prompts[appId] || [], id),
         },
         isLoading: false,
       }));

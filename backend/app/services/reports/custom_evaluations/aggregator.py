@@ -8,7 +8,10 @@ from __future__ import annotations
 import logging
 
 from app.models.eval_run import ThreadEvaluation
-from app.services.evaluators.runner_utils import find_primary_field
+from app.services.evaluators.output_schema_utils import (
+    find_primary_field,
+    is_visible_output_field,
+)
 
 from .schemas import (
     CustomEvaluationsReport,
@@ -18,6 +21,11 @@ from .schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_visible_field(field: dict) -> bool:
+    """Check if a field should be visible in reports under output-schema v2."""
+    return is_visible_output_field(field)
 
 
 class CustomEvaluationsAggregator:
@@ -50,7 +58,7 @@ class CustomEvaluationsAggregator:
             output_schema = schema_info.get("output_schema", [])
             visible_fields = [
                 f for f in output_schema
-                if f.get("displayMode") in ("header", "card")
+                if _is_visible_field(f)
             ]
             if not visible_fields:
                 continue
@@ -219,7 +227,9 @@ class CustomEvaluationsAggregator:
     ) -> FieldAggregation | None:
         """Aggregate a single field's values based on its type."""
         field_type = field_def.get("type", "text")
-        display_mode = field_def.get("displayMode", "card")
+        role = field_def.get("role", "detail")
+        is_main_metric = field_def.get("isMainMetric", False)
+        display_mode = "header" if is_main_metric else ("card" if role in ("metric", "detail") else "hidden")
         label = field_def.get("description") or field_def.get("key", "")
         key = field_def["key"]
 
@@ -228,6 +238,8 @@ class CustomEvaluationsAggregator:
                 key=key,
                 field_type=field_type,
                 display_mode=display_mode,
+                role=role,
+                is_main_metric=is_main_metric,
                 label=label,
                 sample_count=0,
             )
@@ -237,6 +249,7 @@ class CustomEvaluationsAggregator:
             if not nums:
                 return FieldAggregation(
                     key=key, field_type=field_type, display_mode=display_mode,
+                    role=role, is_main_metric=is_main_metric,
                     label=label, sample_count=len(values),
                 )
 
@@ -250,6 +263,8 @@ class CustomEvaluationsAggregator:
                 key=key,
                 field_type=field_type,
                 display_mode=display_mode,
+                role=role,
+                is_main_metric=is_main_metric,
                 label=label,
                 sample_count=len(nums),
                 average=avg,
@@ -261,6 +276,7 @@ class CustomEvaluationsAggregator:
             if not bools:
                 return FieldAggregation(
                     key=key, field_type=field_type, display_mode=display_mode,
+                    role=role, is_main_metric=is_main_metric,
                     label=label, sample_count=len(values),
                 )
 
@@ -272,6 +288,8 @@ class CustomEvaluationsAggregator:
                 key=key,
                 field_type=field_type,
                 display_mode=display_mode,
+                role=role,
+                is_main_metric=is_main_metric,
                 label=label,
                 sample_count=len(bools),
                 pass_rate=pass_rate,
@@ -289,6 +307,8 @@ class CustomEvaluationsAggregator:
                 key=key,
                 field_type=field_type,
                 display_mode=display_mode,
+                role=role,
+                is_main_metric=is_main_metric,
                 label=label,
                 sample_count=len(values),
                 distribution=dist,
@@ -299,6 +319,8 @@ class CustomEvaluationsAggregator:
             key=key,
             field_type=field_type,
             display_mode=display_mode,
+            role=role,
+            is_main_metric=is_main_metric,
             label=label,
             sample_count=len(values),
         )

@@ -196,7 +196,9 @@ export interface ThresholdPassRates {
 export interface FieldAggregation {
   key: string;
   fieldType: 'number' | 'boolean' | 'enum' | 'text' | 'array';
-  displayMode: 'header' | 'card';
+  displayMode?: string;  // Legacy compat — was required 'header' | 'card'
+  role?: string;         // v2: 'metric' | 'detail' | 'reasoning'
+  isMainMetric?: boolean;
   label: string;
   sampleCount: number;
   // Number fields

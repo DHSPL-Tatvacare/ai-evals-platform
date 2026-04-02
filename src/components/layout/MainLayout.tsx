@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useListingsLoader, useKeyboardShortcuts } from '@/hooks';
 import { useAppStore, useMiniPlayerStore, useUIStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { OfflineBanner, ShortcutsHelpModal } from '@/components/feedback';
 import { MiniPlayerConnector } from '@/features/transcript';
 import { cn } from '@/utils';
@@ -10,6 +11,7 @@ import { routes } from '@/config/routes';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
 import { NewInsideSalesEvalOverlay } from '@/features/insideSales/components/NewInsideSalesEvalOverlay';
+import { APP_IDS } from '@/types';
 
 interface MainLayoutProps {
   children?: ReactNode;
@@ -19,6 +21,8 @@ export function MainLayout({ children }: MainLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const setCurrentApp = useAppStore((state) => state.setCurrentApp);
+  const loadAppConfigs = useAppStore((state) => state.loadAppConfigs);
+  const user = useAuthStore((state) => state.user);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const activeModal = useUIStore((s) => s.activeModal);
   const closeModal = useUIStore((s) => s.closeModal);
@@ -31,6 +35,18 @@ export function MainLayout({ children }: MainLayoutProps) {
     setCurrentApp(newApp);
     useMiniPlayerStore.getState().closeIfAppChanged(newApp);
   }, [location.pathname, setCurrentApp]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const accessibleApps = user.isOwner
+      ? APP_IDS
+      : APP_IDS.filter((appId) => user.appAccess.includes(appId));
+
+    void loadAppConfigs(accessibleApps);
+  }, [loadAppConfigs, user]);
 
   // Load listings on mount
   useListingsLoader();

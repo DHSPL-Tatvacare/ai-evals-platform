@@ -1,57 +1,47 @@
-/**
- * KairaBotEvaluatorsView — evaluators tab for kaira-bot.
- *
- * Same look/feel as the voice-rx EvaluatorsView but adapted for
- * kaira-bot app-level evaluators (no listing, uses chat sessions).
- */
-
-import { useState, useEffect, useRef } from "react";
-import { Plus, ChevronDown, BarChart3, Star, PlayCircle } from "lucide-react";
-import { Button, ConfirmDialog, EmptyState } from "@/components/ui";
-import { CreateEvaluatorOverlay } from "@/features/evals/components/CreateEvaluatorOverlay";
-import { EvaluatorCard } from "@/features/evals/components/EvaluatorCard";
-import { EvaluatorRegistryPicker } from "@/features/evals/components/EvaluatorRegistryPicker";
-import { RunAllOverlay } from "@/features/voiceRx/components/RunAllOverlay";
-import type { RunAllSelection } from "@/features/voiceRx/components/RunAllOverlay";
-import { useEvaluatorsStore, LLM_PROVIDERS } from "@/stores";
-import { useEvaluatorRunner } from "@/features/evals/hooks/useEvaluatorRunner";
-import { evaluatorExecutor } from "@/services/evaluators/evaluatorExecutor";
-import { notificationService } from "@/services/notifications";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { PlayCircle } from 'lucide-react';
+import { Alert, Button, ConfirmDialog, Skeleton } from '@/components/ui';
+import { useAppConfig } from '@/hooks';
+import { CreateEvaluatorWizard, EvaluatorsTable } from '@/features/evals/components';
+import { useEvaluatorRunner } from '@/features/evals/hooks/useEvaluatorRunner';
+import { RunAllOverlay, type RunAllSelection } from '@/features/voiceRx/components/RunAllOverlay';
+import { evaluatorExecutor } from '@/services/evaluators/evaluatorExecutor';
+import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
+import { rulesRepository } from '@/services/api';
+import { notificationService } from '@/services/notifications';
+import { useEvaluatorsStore, LLM_PROVIDERS } from '@/stores';
+import { usePermission } from '@/utils/permissions';
 import type {
-  KairaChatSession,
-  KairaChatMessage,
+  EvalRun,
   EvaluatorDefinition,
-  EvaluatorContext,
+  EvaluatorVisibilityFilter,
+  KairaChatMessage,
+  KairaChatSession,
   LLMProvider,
-} from "@/types";
+  RuleCatalogEntry,
+} from '@/types';
 
 interface KairaBotEvaluatorsViewProps {
   session: KairaChatSession | null;
   messages: KairaChatMessage[];
 }
 
-export function KairaBotEvaluatorsView({
-  session,
-  messages: _messages,
-}: KairaBotEvaluatorsViewProps) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingEvaluator, setEditingEvaluator] = useState<
-    EvaluatorDefinition | undefined
-  >();
-  const [showAddMenu, setShowAddMenu] = useState(false);
-  const [showRegistryPicker, setShowRegistryPicker] = useState(false);
+export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps) {
+  const appId = 'kaira-bot';
+  const appConfig = useAppConfig(appId);
+  const canCreate = usePermission('resource:create');
+  const canRun = usePermission('eval:run');
+  const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [evaluatorToDelete, setEvaluatorToDelete] = useState<string | null>(
-    null,
-  );
+  const [evaluatorToDelete, setEvaluatorToDelete] = useState<EvaluatorDefinition | undefined>();
   const [isSeeding, setIsSeeding] = useState(false);
   const [runAllOpen, setRunAllOpen] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(
-    LLM_PROVIDERS[0].value,
-  );
-  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(LLM_PROVIDERS[0].value);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [rules, setRules] = useState<RuleCatalogEntry[]>([]);
 
-  // Keep provider/model in refs so the execute closure always sees latest values.
   const providerRef = useRef(selectedProvider);
   const modelRef = useRef(selectedModel);
   providerRef.current = selectedProvider;
@@ -65,309 +55,220 @@ export function KairaBotEvaluatorsView({
     addEvaluator,
     updateEvaluator,
     deleteEvaluator,
-    setGlobal,
-    setBuiltIn,
+    setVisibility,
     forkEvaluator,
     seedAppDefaults,
   } = useEvaluatorsStore();
 
+  useEffect(() => {
+    if (!isLoaded || currentAppId !== appId) {
+      loadAppEvaluators(appId);
+    }
+  }, [appId, currentAppId, isLoaded, loadAppEvaluators]);
+
+  useEffect(() => {
+    if (!appConfig.features.hasRules) {
+      setRules([]);
+      return;
+    }
+
+    let cancelled = false;
+    rulesRepository.get(appId)
+      .then((response) => {
+        if (!cancelled) {
+          setRules(response.rules);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRules([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appConfig.features.hasRules, appId]);
+
   const runner = useEvaluatorRunner({
-    entityId: session?.id || "",
-    appId: "kaira-bot",
+    entityId: session?.id ?? '',
+    appId,
     sessionId: session?.id,
     provider: selectedProvider,
     execute: (evaluator, signal, onJobCreated) => {
-      if (!session) throw new Error("No session");
-      return evaluatorExecutor
-        .executeForSession(evaluator, session, {
-          abortSignal: signal,
-          onJobCreated,
-          provider: providerRef.current,
-          model: modelRef.current,
-        })
-        .then(() => {});
+      if (!session) {
+        throw new Error('No active session');
+      }
+      return evaluatorExecutor.executeForSession(evaluator, session, {
+        abortSignal: signal,
+        onJobCreated,
+        provider: providerRef.current,
+        model: modelRef.current,
+      }).then(() => {});
     },
   });
 
-  useEffect(() => {
-    if (!isLoaded || currentAppId !== "kaira-bot") {
-      loadAppEvaluators("kaira-bot");
-    }
-  }, [isLoaded, currentAppId, loadAppEvaluators]);
-
-  const context: EvaluatorContext = {
-    appId: "kaira-bot",
-    entityId: undefined,
-  };
+  const filteredEvaluators = useMemo(
+    () => filterEvaluatorsByVisibility(evaluators, filter),
+    [evaluators, filter],
+  );
+  const latestRunsByEvaluatorId = useMemo(
+    () => evaluators.reduce<Record<string, EvalRun | undefined>>((items, evaluator) => {
+      items[evaluator.id] = runner.getLatestRun(evaluator.id);
+      return items;
+    }, {}),
+    [evaluators, runner],
+  );
 
   const handleSave = async (evaluator: EvaluatorDefinition) => {
     if (editingEvaluator) {
       await updateEvaluator(evaluator);
-      notificationService.success("Evaluator updated");
+      notificationService.success('Evaluator updated');
     } else {
       await addEvaluator(evaluator);
-      notificationService.success("Evaluator created");
+      notificationService.success('Evaluator created');
     }
     setEditingEvaluator(undefined);
   };
 
-  const handleRunAll = ({ evaluatorIds, provider, model }: RunAllSelection) => {
-    if (!session) {
-      notificationService.error(
-        "No active chat session. Start a conversation first.",
-        "No Session",
-      );
+  const handleVisibilityChange = async (evaluator: EvaluatorDefinition) => {
+    const nextVisibility = evaluator.visibility === 'app' ? 'private' : 'app';
+    await setVisibility(evaluator.id, nextVisibility);
+    notificationService.success(
+      nextVisibility === 'app'
+        ? 'Evaluator shared with app'
+        : 'Evaluator moved to private library',
+    );
+  };
+
+  const handleToggleHeader = async (evaluator: EvaluatorDefinition) => {
+    await updateEvaluator({
+      ...evaluator,
+      showInHeader: !evaluator.showInHeader,
+      updatedAt: new Date(),
+    });
+    notificationService.success(
+      evaluator.showInHeader ? 'Evaluator removed from header' : 'Evaluator added to header',
+    );
+  };
+
+  const handleFork = async (evaluator: EvaluatorDefinition) => {
+    const forked = await forkEvaluator(evaluator.id);
+    notificationService.success(`Forked evaluator: ${forked.name}`);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!evaluatorToDelete) {
       return;
     }
+
+    await deleteEvaluator(evaluatorToDelete.id);
+    notificationService.success('Evaluator deleted');
+    setDeleteConfirmOpen(false);
+    setEvaluatorToDelete(undefined);
+  };
+
+  const handleRunAll = ({ evaluatorIds, provider, model }: RunAllSelection) => {
+    if (!session) {
+      notificationService.error('Start a chat session before running evaluators', 'No Session');
+      return;
+    }
+
     setSelectedProvider(provider);
     setSelectedModel(model);
     providerRef.current = provider;
     modelRef.current = model;
-    const evsToRun = evaluators.filter((e) => evaluatorIds.includes(e.id));
-    for (const ev of evsToRun) {
-      runner.handleRun(ev);
-    }
-  };
 
-  const handleEdit = (evaluator: EvaluatorDefinition) => {
-    setEditingEvaluator(evaluator);
-    setIsModalOpen(true);
-  };
-
-  const handleDelete = async (evaluatorId: string) => {
-    setEvaluatorToDelete(evaluatorId);
-    setDeleteConfirmOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (evaluatorToDelete) {
-      await deleteEvaluator(evaluatorToDelete);
-      notificationService.success("Evaluator deleted");
-      setDeleteConfirmOpen(false);
-      setEvaluatorToDelete(null);
-    }
-  };
-
-  const handleToggleHeader = async (
-    evaluatorId: string,
-    showInHeader: boolean,
-  ) => {
-    const evaluator = evaluators.find((e) => e.id === evaluatorId);
-    if (!evaluator) return;
-    await updateEvaluator({
-      ...evaluator,
-      showInHeader,
-      updatedAt: new Date(),
-    });
-    notificationService.success(
-      showInHeader
-        ? "Evaluator added to header"
-        : "Evaluator removed from header",
-    );
-  };
-
-  const handleToggleGlobal = async (evaluatorId: string, isGlobal: boolean) => {
-    await setGlobal(evaluatorId, isGlobal);
-    notificationService.success(
-      isGlobal
-        ? "Evaluator added to Registry"
-        : "Evaluator removed from Registry",
-    );
-  };
-
-  const handleToggleBuiltIn = async (evaluatorId: string, isBuiltIn: boolean) => {
-    await setBuiltIn(evaluatorId, isBuiltIn);
-    notificationService.success(
-      isBuiltIn
-        ? "Evaluator promoted to built-in"
-        : "Evaluator demoted from built-in",
-    );
-  };
-
-  const handleFork = async (sourceId: string) => {
-    const forked = await forkEvaluator(sourceId, undefined);
-    notificationService.success(`Forked evaluator: ${forked.name}`);
+    evaluators
+      .filter((evaluator) => evaluatorIds.includes(evaluator.id))
+      .forEach((evaluator) => {
+        void runner.handleRun(evaluator);
+      });
   };
 
   const handleSeedDefaults = async () => {
     setIsSeeding(true);
     try {
-      const seeded = await seedAppDefaults("kaira-bot");
-      notificationService.success(
-        `Added ${seeded.length} recommended evaluators`,
-      );
-    } catch (err) {
+      const seeded = await seedAppDefaults(appId);
+      notificationService.success(`Added ${seeded.length} recommended evaluators`);
+    } catch (error) {
       notificationService.error(
-        err instanceof Error
-          ? err.message
-          : "Failed to add recommended evaluators",
+        error instanceof Error ? error.message : 'Failed to add recommended evaluators',
       );
     } finally {
       setIsSeeding(false);
     }
   };
 
-  const noSession = !session;
+  const headerActions = canRun && session && evaluators.length > 0 ? (
+    <Button variant="secondary" onClick={() => setRunAllOpen(true)} icon={PlayCircle}>
+      Run All
+    </Button>
+  ) : null;
 
   return (
-    <div className="space-y-4 p-6 min-h-full flex flex-col">
-      {noSession && (
-        <div className="bg-[var(--surface-warning)] border border-[var(--border-warning)] rounded-md px-4 py-2.5 text-[13px] text-[var(--color-warning)]">
-          Start a chat session first, then run evaluators against the
-          conversation.
-        </div>
-      )}
+    <div className="flex min-h-full flex-col space-y-4 p-6">
+      {!session ? (
+        <Alert variant="warning">
+          Start a chat session first, then run evaluators against the conversation.
+        </Alert>
+      ) : null}
 
-      {evaluators.length === 0 ? (
-        <div className="flex-1 min-h-full flex items-center justify-center">
-          <EmptyState
-            icon={BarChart3}
-            title="No evaluators yet"
-            description="Create an evaluator to analyze chat conversations using custom prompts and LLM evaluation."
-            className="w-full max-w-md"
-          >
-            <Button
-              variant="secondary"
-              onClick={handleSeedDefaults}
-              disabled={isSeeding}
-              isLoading={isSeeding}
-              icon={Star}
-              className="mb-2"
-            >
-              Add Recommended Evaluators (4)
-            </Button>
-            <div className="relative mt-1">
-              <Button onClick={() => setShowAddMenu(!showAddMenu)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Evaluator
-                <ChevronDown className="h-4 w-4 ml-2" />
-              </Button>
-
-              {showAddMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => setShowAddMenu(false)}
-                  />
-                  <div className="absolute left-1/2 -translate-x-1/2 mt-1 w-48 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-lg shadow-lg z-20 py-1">
-                    <button
-                      onClick={() => {
-                        setIsModalOpen(true);
-                        setShowAddMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--interactive-secondary)] text-[var(--text-primary)]"
-                    >
-                      Create New
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowRegistryPicker(true);
-                        setShowAddMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--interactive-secondary)] text-[var(--text-primary)]"
-                    >
-                      Add from Registry
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </EmptyState>
+      {!isLoaded ? (
+        <div className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-40 w-full rounded-xl" />
+          ))}
         </div>
       ) : (
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              Evaluators ({evaluators.length})
-            </h3>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setRunAllOpen(true)}
-                icon={PlayCircle}
-              >
-                Run
-              </Button>
-              <div className="relative">
-                <Button onClick={() => setShowAddMenu(!showAddMenu)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Evaluator
-                  <ChevronDown className="h-4 w-4 ml-2" />
-                </Button>
-
-                {showAddMenu && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setShowAddMenu(false)}
-                    />
-                    <div className="absolute right-0 mt-1 w-48 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-lg shadow-lg z-20 py-1">
-                      <button
-                        onClick={() => {
-                          setIsModalOpen(true);
-                          setShowAddMenu(false);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--interactive-secondary)] text-[var(--text-primary)]"
-                      >
-                        Create New
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowRegistryPicker(true);
-                          setShowAddMenu(false);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--interactive-secondary)] text-[var(--text-primary)]"
-                      >
-                        Add from Registry
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {evaluators.map((evaluator) => (
-              <EvaluatorCard
-                key={evaluator.id}
-                evaluator={evaluator}
-                latestRun={runner.getLatestRun(evaluator.id)}
-                onCancel={runner.handleCancel}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onToggleHeader={handleToggleHeader}
-                onToggleGlobal={handleToggleGlobal}
-                onToggleBuiltIn={handleToggleBuiltIn}
-              />
-            ))}
-          </div>
-        </div>
+        <EvaluatorsTable
+          evaluators={filteredEvaluators}
+          rules={rules}
+          latestRunsByEvaluatorId={latestRunsByEvaluatorId}
+          filter={filter}
+          onFilterChange={setFilter}
+          onCreate={() => {
+            setEditingEvaluator(undefined);
+            setIsWizardOpen(true);
+          }}
+          onEdit={(evaluator) => {
+            setEditingEvaluator(evaluator);
+            setIsWizardOpen(true);
+          }}
+          onFork={handleFork}
+          onDelete={(evaluator) => {
+            setEvaluatorToDelete(evaluator);
+            setDeleteConfirmOpen(true);
+          }}
+          onVisibilityChange={handleVisibilityChange}
+          onRun={canRun && session ? runner.handleRun : undefined}
+          onCancelRun={canRun && session ? runner.handleCancel : undefined}
+          onSeedDefaults={canCreate ? handleSeedDefaults : undefined}
+          onToggleHeader={handleToggleHeader}
+          isSeeding={isSeeding}
+          title="Evaluators"
+          description="Manage the shared evaluator library for Kaira and run selected evaluators against the current session."
+          headerActions={headerActions}
+          canCreate={canCreate}
+        />
       )}
 
-      <CreateEvaluatorOverlay
-        isOpen={isModalOpen}
+      <CreateEvaluatorWizard
+        isOpen={isWizardOpen}
         onClose={() => {
-          setIsModalOpen(false);
+          setIsWizardOpen(false);
           setEditingEvaluator(undefined);
         }}
         onSave={handleSave}
-        context={context}
+        context={{ appId }}
         editEvaluator={editingEvaluator}
-      />
-
-      <EvaluatorRegistryPicker
-        isOpen={showRegistryPicker}
-        onClose={() => setShowRegistryPicker(false)}
-        appId="kaira-bot"
-        onFork={handleFork}
       />
 
       <ConfirmDialog
         isOpen={deleteConfirmOpen}
         onClose={() => {
           setDeleteConfirmOpen(false);
-          setEvaluatorToDelete(null);
+          setEvaluatorToDelete(undefined);
         }}
         onConfirm={handleConfirmDelete}
         title="Delete Evaluator"

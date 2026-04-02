@@ -14,9 +14,11 @@ import {
   VariablePickerPopover,
   EmptyState,
 } from "@/components/ui";
+import { useAppConfig } from "@/hooks";
 import { ArrayItemConfigModal } from "./ArrayItemConfigModal";
 import { RubricBuilder } from "@/features/insideSales/components/RubricBuilder";
 import { evaluatorsRepository } from "@/services/api/evaluatorsApi";
+import { useAppStore } from "@/stores";
 import { cn } from "@/utils";
 import type {
   Listing,
@@ -63,6 +65,7 @@ export function CreateEvaluatorOverlay({
     useState<PromptValidation | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentAppId = useAppStore((state) => state.currentApp);
 
   // Trigger slide-in animation after mount
   useEffect(() => {
@@ -158,9 +161,11 @@ export function CreateEvaluatorOverlay({
     }
   };
 
-  const effectiveAppId = listing?.appId || context?.appId || "voice-rx";
+  const effectiveAppId = listing?.appId || context?.appId || currentAppId;
+  const appConfig = useAppConfig(effectiveAppId);
   const effectiveEntityId = listing?.id || context?.entityId;
-  const isRubricMode = effectiveAppId === "inside-sales";
+  const isRubricMode = appConfig.features.hasRubricMode;
+  const primaryVariable = appConfig.evaluator.variables[0]?.key;
 
   const handleSave = async () => {
     // Non-blocking validation: warn about unknown variables but still allow save
@@ -186,6 +191,7 @@ export function CreateEvaluatorOverlay({
       outputSchema: outputFields,
       appId: effectiveAppId,
       listingId: editEvaluator?.listingId ?? effectiveEntityId,
+      visibility: editEvaluator?.visibility ?? (defaultIsGlobal ? 'app' : appConfig.evaluator.defaultVisibility),
       isGlobal: editEvaluator?.isGlobal ?? defaultIsGlobal,
       forkedFrom: editEvaluator?.forkedFrom,
       createdAt: editEvaluator?.createdAt || new Date(),
@@ -286,25 +292,18 @@ export function CreateEvaluatorOverlay({
                 />
               </div>
 
-              <p className="text-xs text-[var(--text-muted)] mt-2">
-                {effectiveAppId === "kaira-bot" ? (
-                  <>
-                    Use{" "}
-                    <code className="px-1 py-0.5 bg-[var(--bg-secondary)] rounded font-mono text-[10px]">
-                      {"{{chat_transcript}}"}
-                    </code>{" "}
-                    to reference the chat conversation.
-                  </>
-                ) : (
-                  <>
-                    Use variables like{" "}
-                    <code className="px-1 py-0.5 bg-[var(--bg-secondary)] rounded font-mono text-[10px]">
-                      {"{{transcript}}"}
-                    </code>{" "}
-                    to reference data from your listing.
-                  </>
-                )}
-              </p>
+	              <p className="text-xs text-[var(--text-muted)] mt-2">
+	                Use variables from the picker to reference runtime data
+	                {primaryVariable ? (
+	                  <>
+	                    , such as{" "}
+	                    <code className="px-1 py-0.5 bg-[var(--bg-secondary)] rounded font-mono text-[10px]">
+	                      {`{{${primaryVariable}}}`}
+	                    </code>
+	                  </>
+	                ) : null}
+	                .
+	              </p>
 
               {/* Prompt validation warning */}
               {validationResult &&

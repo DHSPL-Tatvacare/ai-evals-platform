@@ -24,6 +24,7 @@ from app.services.evaluators.rule_catalog import (
     default_evaluation_scopes_for_rule,
     PromptRule,
 )
+from app.services.settings_upsert import build_setting_upsert_stmt
 
 logger = logging.getLogger(__name__)
 
@@ -486,34 +487,38 @@ async def load_config_from_db(
 ) -> AdversarialConfig:
     """Load adversarial config from settings table, auto-migrating v1/v2→v3.
 
-    Scopes the query to the given tenant/user. Falls back to system default
-    if no user-specific config exists.
+    Resolution chain:
+      1. App-shared setting (tenant, app, key, visibility=APP)
+      2. System default (SYSTEM_TENANT_ID, app, key, visibility=APP)
+      3. Built-in default
     """
     from sqlalchemy import select
     from app.database import async_session
     from app.models.setting import Setting
     from app.constants import SYSTEM_TENANT_ID
+    from app.models.mixins.shareable import Visibility
 
     try:
         async with async_session() as db:
-            # Try user-specific config first
+            # Step 1: App-shared in current tenant
             result = await db.execute(
                 select(Setting).where(
                     Setting.tenant_id == tenant_id,
-                    Setting.user_id == user_id,
                     Setting.app_id == SETTINGS_APP_ID,
                     Setting.key == SETTINGS_KEY,
+                    Setting.visibility == Visibility.APP,
                 )
             )
             setting = result.scalar_one_or_none()
 
-            # Fall back to system default
+            # Step 2: System default
             if not setting:
                 result = await db.execute(
                     select(Setting).where(
                         Setting.tenant_id == SYSTEM_TENANT_ID,
                         Setting.app_id == SETTINGS_APP_ID,
                         Setting.key == SETTINGS_KEY,
+                        Setting.visibility == Visibility.APP,
                     )
                 )
                 setting = result.scalar_one_or_none()
@@ -555,29 +560,22 @@ async def save_config_to_db(
 
     Scopes the upsert to the given tenant/user.
     """
-    from sqlalchemy import func
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
     from app.database import async_session
-    from app.models.setting import Setting
 
     data = config.model_dump()
-
-    values = {
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-        "app_id": SETTINGS_APP_ID,
-        "key": SETTINGS_KEY,
-        "value": data,
-    }
+    from app.models.mixins.shareable import Visibility
 
     async with async_session() as db:
-        stmt = (
-            pg_insert(Setting)
-            .values(**values)
-            .on_conflict_do_update(
-                constraint="uq_setting",
-                set_={"value": data, "updated_at": func.now()},
-            )
+        stmt = build_setting_upsert_stmt(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            app_id=SETTINGS_APP_ID,
+            key=SETTINGS_KEY,
+            value=data,
+            visibility=Visibility.APP,
+            updated_by=user_id,
+            forked_from=None,
+            shared_by=user_id,
         )
         await db.execute(stmt)
         await db.commit()

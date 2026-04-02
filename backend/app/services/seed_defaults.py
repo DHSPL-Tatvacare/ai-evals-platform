@@ -21,6 +21,7 @@ from app.models.role import Role
 from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
+from app.models.mixins.shareable import Visibility
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,12 @@ def _slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     text = re.sub(r"[^\w\s-]", "", text.lower())
     return re.sub(r"[-\s]+", "-", text).strip("-")
+
+
+def _stable_branch_key(*parts: str) -> str:
+    """Generate deterministic branch keys for seeded immutable library rows."""
+
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "::".join(parts)))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VOICE-RX PROMPTS (5 rows)
@@ -530,25 +537,24 @@ VOICE_RX_SCHEMAS = [
 # ═══════════════════════════════════════════════════════════════════════════════
 
 GOODFLIP_QA_SCHEMA = [
-    {"key": "overall_score", "type": "number", "description": "Total score out of 100", "displayMode": "header", "isMainMetric": True, "thresholds": {"green": 80, "yellow": 65}},
-    {"key": "call_opening", "type": "number", "description": "Call Opening & Permission (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
-    {"key": "brand_positioning", "type": "number", "description": "Brand Positioning & Promise (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
-    {"key": "metabolism_explanation", "type": "number", "description": "Metabolism Explanation (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
-    {"key": "metabolic_score_explanation", "type": "number", "description": "Metabolic Score Explanation (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
-    {"key": "credibility_safety", "type": "number", "description": "Credibility, Boundaries & Safety (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
-    {"key": "transition_probing", "type": "number", "description": "Transition to Probing (max 5)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
-    {"key": "probing_quality", "type": "number", "description": "Probing Quality (max 15)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
-    {"key": "intent_decision_mapping", "type": "number", "description": "Intent & Decision Mapping (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
-    {"key": "program_mapping", "type": "number", "description": "Program Mapping & Next Step (max 10)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
-    {"key": "closing_impression", "type": "number", "description": "Closing & Brand Impression (max 5)", "displayMode": "card", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
-    {"key": "compliance_no_misinformation", "type": "boolean", "description": "No medical misinformation", "displayMode": "card", "isMainMetric": False},
-    {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "displayMode": "card", "isMainMetric": False},
-    {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "displayMode": "card", "isMainMetric": False},
+    {"key": "overall_score", "type": "number", "description": "Total score out of 100", "role": "metric", "isMainMetric": True, "thresholds": {"green": 80, "yellow": 65}},
+    {"key": "call_opening", "type": "number", "description": "Call Opening & Permission (max 10)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "brand_positioning", "type": "number", "description": "Brand Positioning & Promise (max 15)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "metabolism_explanation", "type": "number", "description": "Metabolism Explanation (max 15)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "metabolic_score_explanation", "type": "number", "description": "Metabolic Score Explanation (max 10)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "credibility_safety", "type": "number", "description": "Credibility, Boundaries & Safety (max 10)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "transition_probing", "type": "number", "description": "Transition to Probing (max 5)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
+    {"key": "probing_quality", "type": "number", "description": "Probing Quality (max 15)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 12, "yellow": 8}},
+    {"key": "intent_decision_mapping", "type": "number", "description": "Intent & Decision Mapping (max 10)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "program_mapping", "type": "number", "description": "Program Mapping & Next Step (max 10)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 8, "yellow": 5}},
+    {"key": "closing_impression", "type": "number", "description": "Closing & Brand Impression (max 5)", "role": "detail", "isMainMetric": False, "thresholds": {"green": 4, "yellow": 3}},
+    {"key": "compliance_no_misinformation", "type": "boolean", "description": "No medical misinformation", "role": "detail", "isMainMetric": False},
+    {"key": "compliance_no_stop_medicines", "type": "boolean", "description": "No advice to stop prescribed medicines", "role": "detail", "isMainMetric": False},
+    {"key": "compliance_no_guarantees", "type": "boolean", "description": "No guaranteed or fear-based outcome claims", "role": "detail", "isMainMetric": False},
     {
         "key": "reasoning",
         "type": "array",
         "description": "Per-dimension critique with scores — one entry per scored dimension",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
         "arrayItemSchema": {
@@ -562,22 +568,22 @@ GOODFLIP_QA_SCHEMA = [
         },
     },
     # ── Behavioral flags (flat for schema enforcement) ──
-    {"key": "escalation_present", "type": "enum", "description": "Was there an escalation?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "escalation_evidence", "type": "text", "description": "Quote or explanation for escalation flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "disagreement_present", "type": "enum", "description": "Was there a disagreement?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "disagreement_evidence", "type": "text", "description": "Quote or explanation for disagreement flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "tension_moments", "type": "text", "description": "JSON array of {quote, severity} objects, or 'not_relevant' if no tension", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "escalation_present", "type": "enum", "description": "Was there an escalation?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "escalation_evidence", "type": "text", "description": "Quote or explanation for escalation flag", "isMainMetric": False, "role": "detail"},
+    {"key": "disagreement_present", "type": "enum", "description": "Was there a disagreement?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "disagreement_evidence", "type": "text", "description": "Quote or explanation for disagreement flag", "isMainMetric": False, "role": "detail"},
+    {"key": "tension_moments", "type": "text", "description": "JSON array of {quote, severity} objects, or 'not_relevant' if no tension", "isMainMetric": False, "role": "detail"},
     # ── Outcome flags (flat for schema enforcement) ──
-    {"key": "meeting_occurred", "type": "enum", "description": "Was a meeting/assessment set up?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "meeting_evidence", "type": "text", "description": "Quote or explanation for meeting flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "purchase_occurred", "type": "enum", "description": "Was a purchase made?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "purchase_evidence", "type": "text", "description": "Quote or explanation for purchase flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "callback_occurred", "type": "enum", "description": "Was a callback scheduled?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "callback_evidence", "type": "text", "description": "Quote or explanation for callback flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "crosssell_attempted", "type": "enum", "description": "Was cross-sell attempted?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "not_relevant"]},
-    {"key": "crosssell_accepted", "type": "enum", "description": "Was cross-sell accepted?", "displayMode": "hidden", "isMainMetric": False, "role": "flags", "allowed_values": ["true", "false", "null", "not_relevant"]},
-    {"key": "crosssell_products", "type": "text", "description": "Comma-separated product names mentioned for cross-sell, or empty", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
-    {"key": "crosssell_evidence", "type": "text", "description": "Quote or explanation for cross-sell flag", "displayMode": "hidden", "isMainMetric": False, "role": "flags"},
+    {"key": "meeting_occurred", "type": "enum", "description": "Was a meeting/assessment set up?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "meeting_evidence", "type": "text", "description": "Quote or explanation for meeting flag", "isMainMetric": False, "role": "detail"},
+    {"key": "purchase_occurred", "type": "enum", "description": "Was a purchase made?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "purchase_evidence", "type": "text", "description": "Quote or explanation for purchase flag", "isMainMetric": False, "role": "detail"},
+    {"key": "callback_occurred", "type": "enum", "description": "Was a callback scheduled?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "callback_evidence", "type": "text", "description": "Quote or explanation for callback flag", "isMainMetric": False, "role": "detail"},
+    {"key": "crosssell_attempted", "type": "enum", "description": "Was cross-sell attempted?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "not_relevant"]},
+    {"key": "crosssell_accepted", "type": "enum", "description": "Was cross-sell accepted?", "isMainMetric": False, "role": "detail", "allowed_values": ["true", "false", "null", "not_relevant"]},
+    {"key": "crosssell_products", "type": "text", "description": "Comma-separated product names mentioned for cross-sell, or empty", "isMainMetric": False, "role": "detail"},
+    {"key": "crosssell_evidence", "type": "text", "description": "Quote or explanation for cross-sell flag", "isMainMetric": False, "role": "detail"},
 ]
 
 INSIDE_SALES_EVALUATORS = [
@@ -781,7 +787,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "overall_score",
                 "type": "number",
                 "description": "Overall quality score (1-5)",
-                "displayMode": "header",
+                "role": "metric",
                 "isMainMetric": True,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -789,7 +795,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "response_quality",
                 "type": "number",
                 "description": "Score for response relevance, completeness, and clarity (1-5)",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -797,7 +803,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "accuracy",
                 "type": "number",
                 "description": "Score for medical information correctness (1-5)",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -805,14 +811,14 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "safety_compliance",
                 "type": "boolean",
                 "description": "Whether the response passes safety checks",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
             },
             {
                 "key": "summary",
                 "type": "text",
                 "description": "Brief summary of the evaluation",
-                "displayMode": "hidden",
+                "role": "reasoning",
                 "isMainMetric": False,
                 "role": "reasoning",
             },
@@ -866,7 +872,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "accuracy_score",
                 "type": "number",
                 "description": "Overall health accuracy score (0-10)",
-                "displayMode": "header",
+                "role": "metric",
                 "isMainMetric": True,
                 "thresholds": {"green": 8, "yellow": 6},
             },
@@ -874,21 +880,21 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "claims_checked",
                 "type": "number",
                 "description": "Number of health claims reviewed",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
             },
             {
                 "key": "issues_found",
                 "type": "number",
                 "description": "Number of accuracy issues identified",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
             },
             {
                 "key": "details",
                 "type": "text",
                 "description": "Per-claim accuracy assessment",
-                "displayMode": "hidden",
+                "role": "reasoning",
                 "isMainMetric": False,
                 "role": "reasoning",
             },
@@ -961,7 +967,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "empathy_score",
                 "type": "number",
                 "description": "Overall empathy rating (1-5)",
-                "displayMode": "header",
+                "role": "metric",
                 "isMainMetric": True,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -969,7 +975,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "emotional_recognition",
                 "type": "number",
                 "description": "Score for recognizing user emotions (1-5)",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -977,7 +983,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "supportive_language",
                 "type": "number",
                 "description": "Score for using supportive language (1-5)",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
                 "thresholds": {"green": 4, "yellow": 3},
             },
@@ -985,7 +991,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "assessment",
                 "type": "text",
                 "description": "Detailed empathy assessment",
-                "displayMode": "hidden",
+                "role": "reasoning",
                 "isMainMetric": False,
                 "role": "reasoning",
             },
@@ -1052,7 +1058,7 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "risk_level",
                 "type": "enum",
                 "description": "Overall risk level detected",
-                "displayMode": "header",
+                "role": "metric",
                 "isMainMetric": True,
                 "enumValues": ["none", "low", "medium", "high", "critical"],
             },
@@ -1060,21 +1066,21 @@ Output structure is controlled by the schema - just provide the data.""",
                 "key": "risks_found",
                 "type": "number",
                 "description": "Number of risks identified",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
             },
             {
                 "key": "safety_pass",
                 "type": "boolean",
                 "description": "Whether conversation passes safety audit",
-                "displayMode": "card",
+                "role": "detail",
                 "isMainMetric": False,
             },
             {
                 "key": "findings",
                 "type": "text",
                 "description": "Detailed risk findings and recommendations",
-                "displayMode": "hidden",
+                "role": "reasoning",
                 "isMainMetric": False,
                 "role": "reasoning",
             },
@@ -1096,7 +1102,7 @@ _MER_SCHEMA = [
         "key": "entity_recall_pct",
         "type": "number",
         "description": "Percentage of clinical entities from the audio captured in the output (0-100)",
-        "displayMode": "header",
+        "role": "metric",
         "isMainMetric": True,
         "thresholds": {"green": 90, "yellow": 70},
     },
@@ -1104,21 +1110,21 @@ _MER_SCHEMA = [
         "key": "total_entities",
         "type": "number",
         "description": "Total distinct clinical entities identified in the audio",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "entities_captured",
         "type": "number",
         "description": "Number of entities successfully captured in the output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "missed_entities",
         "type": "array",
         "description": "List of entities present in audio but missing from output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
         "arrayItemSchema": {
             "itemType": "object",
@@ -1133,7 +1139,6 @@ _MER_SCHEMA = [
         "key": "reasoning",
         "type": "text",
         "description": "Methodology and key findings summary",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
     },
@@ -1144,7 +1149,7 @@ _FACTUAL_INTEGRITY_SCHEMA = [
         "key": "factual_accuracy_pct",
         "type": "number",
         "description": "Percentage of extracted data points that are factually supported by the source (0-100)",
-        "displayMode": "header",
+        "role": "metric",
         "isMainMetric": True,
         "thresholds": {"green": 95, "yellow": 85},
     },
@@ -1152,21 +1157,21 @@ _FACTUAL_INTEGRITY_SCHEMA = [
         "key": "total_claims",
         "type": "number",
         "description": "Total data points/claims checked in the output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "unsupported_count",
         "type": "number",
         "description": "Number of claims not supported by the source",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "unsupported_claims",
         "type": "array",
         "description": "List of data points in the output that cannot be traced to the source",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
         "arrayItemSchema": {
             "itemType": "object",
@@ -1180,7 +1185,6 @@ _FACTUAL_INTEGRITY_SCHEMA = [
         "key": "reasoning",
         "type": "text",
         "description": "Assessment methodology and key findings",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
     },
@@ -1191,7 +1195,7 @@ _NEGATION_CONSISTENCY_SCHEMA = [
         "key": "negation_accuracy_pct",
         "type": "number",
         "description": "Percentage of negated/denied conditions correctly mapped in output (0-100)",
-        "displayMode": "header",
+        "role": "metric",
         "isMainMetric": True,
         "thresholds": {"green": 95, "yellow": 80},
     },
@@ -1199,21 +1203,21 @@ _NEGATION_CONSISTENCY_SCHEMA = [
         "key": "total_negations",
         "type": "number",
         "description": "Total negated/denied/excluded conditions found in source",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "correct_negations",
         "type": "number",
         "description": "Number of negations correctly represented in output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "errors",
         "type": "array",
         "description": "List of negation errors",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
         "arrayItemSchema": {
             "itemType": "object",
@@ -1228,7 +1232,6 @@ _NEGATION_CONSISTENCY_SCHEMA = [
         "key": "reasoning",
         "type": "text",
         "description": "Assessment methodology and key findings",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
     },
@@ -1239,7 +1242,7 @@ _TEMPORAL_PRECISION_SCHEMA = [
         "key": "temporal_accuracy_pct",
         "type": "number",
         "description": "Percentage of temporal references correctly linked to their entities (0-100)",
-        "displayMode": "header",
+        "role": "metric",
         "isMainMetric": True,
         "thresholds": {"green": 90, "yellow": 75},
     },
@@ -1247,21 +1250,21 @@ _TEMPORAL_PRECISION_SCHEMA = [
         "key": "total_temporal_refs",
         "type": "number",
         "description": "Total temporal references found in source (durations, frequencies, dates, timelines)",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "correct_refs",
         "type": "number",
         "description": "Number of temporal references correctly captured in output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "errors",
         "type": "array",
         "description": "List of temporal precision errors",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
         "arrayItemSchema": {
             "itemType": "object",
@@ -1276,7 +1279,6 @@ _TEMPORAL_PRECISION_SCHEMA = [
         "key": "reasoning",
         "type": "text",
         "description": "Assessment methodology and key findings",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
     },
@@ -1287,28 +1289,28 @@ _CRITICAL_SAFETY_SCHEMA = [
         "key": "safety_pass",
         "type": "boolean",
         "description": "Whether ALL critical red-flag symptoms from the audio were captured in the output",
-        "displayMode": "header",
+        "role": "metric",
         "isMainMetric": True,
     },
     {
         "key": "red_flags_in_source",
         "type": "number",
         "description": "Total critical/life-threatening symptoms identified in the audio",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "red_flags_captured",
         "type": "number",
         "description": "Number of red flags successfully captured in the output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
     },
     {
         "key": "missed_red_flags",
         "type": "array",
         "description": "Critical symptoms present in audio but missing from output",
-        "displayMode": "card",
+        "role": "detail",
         "isMainMetric": False,
         "arrayItemSchema": {
             "itemType": "object",
@@ -1322,7 +1324,6 @@ _CRITICAL_SAFETY_SCHEMA = [
         "key": "reasoning",
         "type": "text",
         "description": "Assessment methodology and key findings",
-        "displayMode": "hidden",
         "isMainMetric": False,
         "role": "reasoning",
     },
@@ -1783,9 +1784,121 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 # ═══════════════════════════════════════════════════════════════════════════════
 
 APP_SEEDS = [
-    {"slug": "voice-rx", "display_name": "Voice Rx", "description": "Audio file evaluation tool", "icon_url": "/voice-rx-icon.jpeg"},
-    {"slug": "kaira-bot", "display_name": "Kaira Bot", "description": "Health chat bot assistant", "icon_url": "/kaira-icon.svg"},
-    {"slug": "inside-sales", "display_name": "Inside Sales", "description": "Inside sales call quality evaluation", "icon_url": "/inside-sales-icon.svg"},
+    {
+        "slug": "voice-rx",
+        "display_name": "Voice Rx",
+        "description": "Audio file evaluation tool",
+        "icon_url": "/voice-rx-icon.jpeg",
+        "config": {
+            "displayName": "Voice Rx",
+            "icon": "/voice-rx-icon.jpeg",
+            "description": "Audio file evaluation tool",
+            "features": {
+                "hasRules": False,
+                "hasRubricMode": False,
+                "hasCsvImport": False,
+                "hasAdversarial": False,
+                "hasTranscription": True,
+                "hasBatchEval": True,
+                "hasHumanReview": True,
+            },
+            "rules": {"catalogSource": "settings", "catalogKey": "rule-catalog", "autoMatch": False},
+            "evaluator": {
+                "defaultVisibility": "private",
+                "defaultModel": "",
+                "variables": [
+                    {"key": "transcript", "displayName": "Transcript", "description": "Full audio transcript", "category": "Audio"},
+                    {"key": "sourceType", "displayName": "Source Type", "description": "Listing source type", "category": "Metadata"},
+                ],
+                "dynamicVariableSources": {"registry": True, "listingApiPaths": True},
+            },
+            "assetDefaults": {
+                "evaluator": "private",
+                "prompt": "private",
+                "schema": "private",
+                "adversarial_contract": "private",
+                "llm_settings": "private",
+            },
+            "evalRun": {"supportedTypes": ["custom", "full_evaluation", "human", "call_quality"]},
+        },
+    },
+    {
+        "slug": "kaira-bot",
+        "display_name": "Kaira Bot",
+        "description": "Health chat bot assistant",
+        "icon_url": "/kaira-icon.svg",
+        "config": {
+            "displayName": "Kaira Bot",
+            "icon": "/kaira-icon.svg",
+            "description": "Health chat bot assistant",
+            "features": {
+                "hasRules": True,
+                "hasRubricMode": False,
+                "hasCsvImport": False,
+                "hasAdversarial": True,
+                "hasTranscription": False,
+                "hasBatchEval": True,
+                "hasHumanReview": False,
+            },
+            "rules": {"catalogSource": "settings", "catalogKey": "rule-catalog", "autoMatch": True},
+            "evaluator": {
+                "defaultVisibility": "private",
+                "defaultModel": "",
+                "variables": [
+                    {"key": "chat_transcript", "displayName": "Chat Transcript", "description": "Full conversation history", "category": "Conversation"},
+                    {"key": "session_metadata", "displayName": "Session Metadata", "description": "Session context and metadata", "category": "Conversation"},
+                ],
+                "dynamicVariableSources": {"registry": True, "listingApiPaths": False},
+            },
+            "assetDefaults": {
+                "evaluator": "private",
+                "prompt": "private",
+                "schema": "private",
+                "adversarial_contract": "app",
+                "llm_settings": "private",
+            },
+            "evalRun": {"supportedTypes": ["custom", "batch_thread", "batch_adversarial"]},
+        },
+    },
+    {
+        "slug": "inside-sales",
+        "display_name": "Inside Sales",
+        "description": "Inside sales call quality evaluation",
+        "icon_url": "/inside-sales-icon.svg",
+        "config": {
+            "displayName": "Inside Sales",
+            "icon": "/inside-sales-icon.svg",
+            "description": "Inside sales call quality evaluation",
+            "features": {
+                "hasRules": False,
+                "hasRubricMode": True,
+                "hasCsvImport": True,
+                "hasAdversarial": False,
+                "hasTranscription": True,
+                "hasBatchEval": True,
+                "hasHumanReview": False,
+            },
+            "rules": {"catalogSource": "settings", "catalogKey": "rule-catalog", "autoMatch": False},
+            "evaluator": {
+                "defaultVisibility": "private",
+                "defaultModel": "",
+                "variables": [
+                    {"key": "transcript", "displayName": "Transcript", "description": "Call transcript text", "category": "Call"},
+                    {"key": "call_metadata", "displayName": "Call Metadata", "description": "Call context and metadata", "category": "Call"},
+                    {"key": "agent_name", "displayName": "Agent Name", "description": "Sales agent name", "category": "Agent"},
+                ],
+                "dynamicVariableSources": {"registry": True, "listingApiPaths": False},
+            },
+            "assetDefaults": {
+                "evaluator": "private",
+                "prompt": "private",
+                "schema": "private",
+                "adversarial_contract": "private",
+                "llm_settings": "private",
+            },
+            "evalRun": {"supportedTypes": ["custom", "full_evaluation", "call_quality"]},
+        },
+    },
 ]
 
 
@@ -1797,7 +1910,12 @@ async def seed_apps(session: AsyncSession) -> dict[str, uuid.UUID]:
             select(App).where(App.slug == app_data["slug"])
         )
         app = existing.scalar_one_or_none()
-        if not app:
+        if app:
+            # Update config if changed
+            if app.config != app_data.get("config", {}):
+                app.config = app_data.get("config", {})
+                logger.info(f"Updated app config: {app_data['slug']}")
+        else:
             app = App(**app_data)
             session.add(app)
             await session.flush()
@@ -1861,7 +1979,7 @@ async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
 
 
 async def _seed_prompts(session: AsyncSession) -> None:
-    """Seed default prompts for voice-rx — insert if missing, update text if changed."""
+    """Seed immutable system prompt defaults using app-shared visibility."""
     # Fetch all existing default prompts
     existing_result = await session.execute(
         select(Prompt).where(
@@ -1879,6 +1997,13 @@ async def _seed_prompts(session: AsyncSession) -> None:
             name = p_def["name"]
             if name in existing_prompts:
                 existing = existing_prompts[name]
+                expected_branch_key = _stable_branch_key(
+                    p_def["app_id"], p_def["prompt_type"], p_def["name"]
+                )
+                if existing.branch_key != expected_branch_key:
+                    existing.branch_key = expected_branch_key
+                if existing.visibility != Visibility.APP:
+                    existing.visibility = Visibility.APP
                 if existing.prompt != p_def["prompt"]:
                     existing.prompt = p_def["prompt"]
                     updated += 1
@@ -1918,6 +2043,8 @@ async def _seed_prompts(session: AsyncSession) -> None:
         row_data = {
             **p,
             "version": next_version[pt],
+            "branch_key": _stable_branch_key(p["app_id"], p["prompt_type"], p["name"]),
+            "visibility": Visibility.APP,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -1927,7 +2054,7 @@ async def _seed_prompts(session: AsyncSession) -> None:
 
 
 async def _seed_schemas(session: AsyncSession) -> None:
-    """Seed default schemas for voice-rx — insert missing, update existing schema_data and source_type."""
+    """Seed immutable system schemas using app-shared visibility."""
     # Fetch all existing voice-rx schemas owned by system tenant
     existing_result = await session.execute(
         select(Schema).where(
@@ -1942,6 +2069,13 @@ async def _seed_schemas(session: AsyncSession) -> None:
         name = s_def["name"]
         if name in existing_schemas:
             existing = existing_schemas[name]
+            expected_branch_key = _stable_branch_key(
+                s_def["app_id"], s_def["prompt_type"], s_def["name"]
+            )
+            if existing.branch_key != expected_branch_key:
+                existing.branch_key = expected_branch_key
+            if existing.visibility != Visibility.APP:
+                existing.visibility = Visibility.APP
             if existing.source_type != s_def.get("source_type"):
                 existing.source_type = s_def.get("source_type")
                 logger.info("Backfilled source_type='%s' on schema '%s'", s_def.get("source_type"), name)
@@ -1979,6 +2113,8 @@ async def _seed_schemas(session: AsyncSession) -> None:
         row_data = {
             **s,
             "version": next_version[pt],
+            "branch_key": _stable_branch_key(s["app_id"], s["prompt_type"], s["name"]),
+            "visibility": Visibility.APP,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -1988,11 +2124,11 @@ async def _seed_schemas(session: AsyncSession) -> None:
 
 
 async def _seed_evaluators(session: AsyncSession) -> None:
-    """Seed global evaluators for kaira-bot, or update existing ones."""
+    """Seed system evaluators as app-shared rows, or update existing ones."""
     result = await session.execute(
         select(Evaluator).where(
             Evaluator.app_id == "kaira-bot",
-            Evaluator.is_global == True,
+            Evaluator.visibility == Visibility.APP,
             Evaluator.listing_id == None,
             Evaluator.tenant_id == SYSTEM_TENANT_ID,
         )
@@ -2006,6 +2142,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             db_eval = existing.get(e_data["name"])
             if db_eval:
                 db_eval.output_schema = e_data["output_schema"]
+                db_eval.visibility = Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE
                 updated += 1
         await session.flush()
         logger.info("Updated output_schema for %d existing kaira-bot evaluators", updated)
@@ -2015,7 +2152,8 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         for e_data in KAIRA_BOT_EVALUATORS:
             if e_data["name"] in new_names:
                 session.add(Evaluator(**{
-                    **e_data,
+                    **{k: v for k, v in e_data.items() if k not in {"is_global", "show_in_header"}},
+                    "visibility": Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE,
                     "tenant_id": SYSTEM_TENANT_ID,
                     "user_id": SYSTEM_USER_ID,
                 }))
@@ -2026,12 +2164,13 @@ async def _seed_evaluators(session: AsyncSession) -> None:
 
     for e in KAIRA_BOT_EVALUATORS:
         session.add(Evaluator(**{
-            **e,
+            **{k: v for k, v in e.items() if k not in {"is_global", "show_in_header"}},
+            "visibility": Visibility.APP if e.get("is_global", True) else Visibility.PRIVATE,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }))
     await session.flush()
-    logger.info("Seeded %d global evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
+    logger.info("Seeded %d app-shared system evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
 
 
 async def seed_bootstrap_admin() -> None:

@@ -253,7 +253,7 @@ export default function PromptsSchemas() {
                   style={{ color: "var(--text-secondary)" }}
                 >
                   Array of field definitions with key, type, label, description,
-                  thresholds, isMainMetric, displayMode
+                  thresholds, isMainMetric, role
                 </td>
               </tr>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>

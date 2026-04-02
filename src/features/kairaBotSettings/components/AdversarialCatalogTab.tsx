@@ -25,6 +25,8 @@ import {
   Tabs,
 } from '@/components/ui';
 import { notificationService } from '@/services/notifications';
+import { OwnershipBanner } from '@/features/settings/components/OwnershipBanner';
+import { useAuthStore } from '@/stores/authStore';
 import {
   adversarialConfigApi,
   type AdversarialConfig,
@@ -549,6 +551,8 @@ export function EvaluationContractsTab() {
   const [editorError, setEditorError] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const hasSettingsEdit = user?.isOwner || user?.permissions.includes('settings:edit') || false;
 
   const editorIsDirty = useMemo(() => {
     if (!editorState) return false;
@@ -1035,6 +1039,17 @@ export function EvaluationContractsTab() {
   return (
     <>
       <div className="space-y-4">
+        {/* Shared contract ownership banner */}
+        <OwnershipBanner
+          title="Adversarial Evaluation Contract"
+          visibility="app"
+          ownerLabel="Shared with all app members"
+          mode={hasSettingsEdit ? 'editable' : 'read-only'}
+          helperText={hasSettingsEdit
+            ? 'You can edit this shared contract. Changes apply to all members.'
+            : 'This is a shared contract. You can view it but only editors can make changes.'}
+        />
+
         {/* Persistent summary header */}
         <Card hoverable={false} className="space-y-3">
           <div className="flex items-start justify-between gap-4">

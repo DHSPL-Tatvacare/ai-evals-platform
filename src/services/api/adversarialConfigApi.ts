@@ -5,6 +5,8 @@
  * The BE route returns raw snake_case JSON, so we convert both directions.
  */
 import { apiRequest } from './client';
+import { settingsRepository } from './settingsApi';
+import type { SettingRecord } from '@/types';
 
 export interface AdversarialGoal {
     id: string;
@@ -139,17 +141,29 @@ function toSnake(config: AdversarialConfig): SnakeConfig {
 // ─── API Client ──────────────────────────────────────────────────
 
 export const adversarialConfigApi = {
-    async get(): Promise<AdversarialConfig> {
+    async getShared(): Promise<AdversarialConfig> {
         const raw = await apiRequest<SnakeConfig>('/api/adversarial-config');
         return fromSnake(raw);
     },
 
-    async save(config: AdversarialConfig): Promise<AdversarialConfig> {
+    async saveShared(config: AdversarialConfig): Promise<AdversarialConfig> {
         const raw = await apiRequest<SnakeConfig>('/api/adversarial-config', {
             method: 'PUT',
             body: JSON.stringify(toSnake(config)),
         });
         return fromSnake(raw);
+    },
+
+    async get(): Promise<AdversarialConfig> {
+        return adversarialConfigApi.getShared();
+    },
+
+    async getRecord(): Promise<SettingRecord<AdversarialConfig> | undefined> {
+        return settingsRepository.getRecord<AdversarialConfig>('kaira-bot', 'adversarial-config');
+    },
+
+    async save(config: AdversarialConfig): Promise<AdversarialConfig> {
+        return adversarialConfigApi.saveShared(config);
     },
 
     async reset(): Promise<AdversarialConfig> {

@@ -1,25 +1,48 @@
 """Prompt model - versioned LLM prompt templates."""
-from sqlalchemy import String, Text, Integer, Boolean, Index, UniqueConstraint
+
+import uuid
+
+from sqlalchemy import Boolean, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, TimestampMixin, TenantUserMixin
+
+from app.models.base import Base, TenantUserMixin, TimestampMixin
+from app.models.mixins.shareable import ShareableMixin, shareable_int_forked_from
 
 
-class Prompt(Base, TimestampMixin, TenantUserMixin):
+class Prompt(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
     __tablename__ = "prompts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[str] = mapped_column(String(50), nullable=False)
     prompt_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    branch_key: Mapped[str] = mapped_column(String(64), nullable=False, default=lambda: str(uuid.uuid4()))
     version: Mapped[int] = mapped_column(Integer, default=1)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     source_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    forked_from: Mapped[int | None] = shareable_int_forked_from("prompts")
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "prompt_type", "version", "user_id", name="uq_prompt_version"),
+        UniqueConstraint(
+            "tenant_id",
+            "app_id",
+            "prompt_type",
+            "source_type",
+            "branch_key",
+            "version",
+            name="uq_prompt_branch_version",
+        ),
         Index("idx_prompts_tenant", "tenant_id"),
         Index("idx_prompts_tenant_user", "tenant_id", "user_id"),
         Index("idx_prompts_tenant_app", "tenant_id", "app_id"),
+        Index(
+            "idx_prompts_branch_latest",
+            "tenant_id",
+            "app_id",
+            "prompt_type",
+            "branch_key",
+            "version",
+        ),
     )
