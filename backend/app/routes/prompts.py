@@ -85,7 +85,7 @@ async def create_prompt(
     max_version = result.scalar() or 0
 
     prompt = Prompt(
-        **body.model_dump(),
+        **body.model_dump(exclude_none=True),
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
         version=max_version + 1,
@@ -150,5 +150,4 @@ async def delete_prompt(
     await db.delete(prompt)
     await db.commit()
     return {"deleted": True, "id": prompt_id}
-
 

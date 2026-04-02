@@ -90,7 +90,7 @@ async def create_schema(
     max_version = result.scalar() or 0
 
     schema = Schema(
-        **body.model_dump(),
+        **body.model_dump(exclude_none=True),
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
         version=max_version + 1,

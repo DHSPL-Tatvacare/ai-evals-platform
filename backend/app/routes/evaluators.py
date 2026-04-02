@@ -9,6 +9,7 @@ from app.auth.permissions import require_permission, require_app_access
 from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.evaluator import Evaluator
+from app.models.mixins.shareable import Visibility
 from app.models.listing import Listing
 from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorSetGlobal, EvaluatorSetBuiltIn, EvaluatorResponse
 
@@ -41,12 +42,12 @@ async def list_evaluators(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List evaluators for an app — user's own + tenant built-ins + system globals."""
+    """List evaluators for an app — own + app-shared + seeded system defaults."""
     query = select(Evaluator).where(
         or_(
             and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.is_built_in == True),
-            Evaluator.tenant_id == SYSTEM_TENANT_ID,
+            and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
+            and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
         ),
         Evaluator.app_id == app_id,
     )
@@ -67,17 +68,17 @@ async def list_registry(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all global evaluators (the registry) for an app — system + tenant built-ins + user's globals."""
+    """List app-visible evaluators for an app registry view."""
     query = (
         select(Evaluator)
         .where(
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.is_built_in == True),
-                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
+                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
             ),
             Evaluator.app_id == app_id,
-            Evaluator.is_global == True,
+            Evaluator.visibility == Visibility.APP,
         )
         .order_by(desc(Evaluator.created_at))
     )
@@ -207,8 +208,7 @@ async def _seed_voice_rx(listing_id: str | None, auth: AuthContext, db: AsyncSes
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            is_global=False,
-            show_in_header=seed["name"] == "Critical Safety Audit",
+            visibility=Visibility.PRIVATE,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -249,8 +249,7 @@ async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            is_global=seed.get("is_global", True),
-            show_in_header=seed.get("show_in_header", False),
+            visibility=Visibility.APP if seed.get("is_global", True) else Visibility.PRIVATE,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -293,8 +292,7 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            is_global=seed.get("is_global", True),
-            show_in_header=seed.get("show_in_header", False),
+            visibility=Visibility.APP if seed.get("is_global", True) else Visibility.PRIVATE,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -336,13 +334,14 @@ async def get_evaluator(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single evaluator by ID (own or system)."""
+    """Get a single evaluator by ID."""
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
+                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
             ),
         )
     )
@@ -432,13 +431,14 @@ async def fork_evaluator(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fork an evaluator. Source can be system or own; fork belongs to current user."""
+    """Fork an evaluator. Source can be own, tenant-shared, or system-shared."""
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
+                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
             ),
         )
     )
@@ -453,8 +453,8 @@ async def fork_evaluator(
         prompt=source.prompt,
         model_id=source.model_id,
         output_schema=source.output_schema,
-        is_global=False,
-        show_in_header=source.show_in_header,
+        linked_rule_ids=source.linked_rule_ids,
+        visibility=Visibility.PRIVATE,
         forked_from=source.id,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
@@ -473,7 +473,7 @@ async def set_global(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set the is_global flag on an evaluator (own only)."""
+    """Deprecated compatibility endpoint that maps legacy global state to visibility."""
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
@@ -485,7 +485,7 @@ async def set_global(
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found")
 
-    evaluator.is_global = body.is_global
+    evaluator.visibility = Visibility.APP if body.is_global else Visibility.PRIVATE
     await db.commit()
     await db.refresh(evaluator)
     return evaluator
@@ -499,11 +499,7 @@ async def toggle_built_in(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Promote or demote an evaluator to/from built-in status.
-
-    Built-in evaluators appear as recommended defaults for all tenant users.
-    Requires evaluator:promote permission.
-    """
+    """Deprecated compatibility endpoint that maps built-in state to visibility."""
     evaluator = (await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
@@ -513,9 +509,7 @@ async def toggle_built_in(
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found")
 
-    evaluator.is_built_in = body.is_built_in
-    if body.is_built_in:
-        evaluator.is_global = True  # built-in implies global
+    evaluator.visibility = Visibility.APP if body.is_built_in else Visibility.PRIVATE
     await db.commit()
     await db.refresh(evaluator)
     return evaluator

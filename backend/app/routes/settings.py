@@ -69,11 +69,20 @@ async def upsert_setting(
         app_id=app_id,
         key=body.key,
         value=body.value,
+        visibility=body.visibility,
+        updated_by=auth.user_id,
+        forked_from=body.forked_from,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
     ).on_conflict_do_update(
         constraint="uq_setting",
-        set_={"value": body.value, "updated_at": func.now()}
+        set_={
+            "value": body.value,
+            "updated_at": func.now(),
+            "updated_by": auth.user_id,
+            "visibility": body.visibility,
+            "forked_from": body.forked_from,
+        }
     ).returning(Setting)
 
     result = await db.execute(stmt)

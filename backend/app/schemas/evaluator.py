@@ -1,8 +1,12 @@
 """Evaluator request/response schemas."""
+
 import uuid
-from typing import Optional
 from datetime import datetime
-from pydantic import field_validator
+from typing import Optional
+
+from pydantic import Field, field_validator
+
+from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
 
 
@@ -12,9 +16,9 @@ class EvaluatorCreate(CamelModel):
     name: str
     prompt: str
     model_id: Optional[str] = None
-    output_schema: list = []
-    is_global: bool = False
-    show_in_header: bool = False
+    output_schema: list = Field(default_factory=list)
+    visibility: Visibility = Visibility.PRIVATE
+    linked_rule_ids: list[str] = Field(default_factory=list)
     forked_from: Optional[str] = None
 
 
@@ -24,16 +28,20 @@ class EvaluatorUpdate(CamelModel):
     prompt: Optional[str] = None
     model_id: Optional[str] = None
     output_schema: Optional[list] = None
-    is_global: Optional[bool] = None
-    show_in_header: Optional[bool] = None
+    visibility: Optional[Visibility] = None
+    linked_rule_ids: Optional[list[str]] = None
     forked_from: Optional[str] = None
 
 
 class EvaluatorSetGlobal(CamelModel):
+    """Deprecated compatibility body for pre-harmonization clients."""
+
     is_global: bool
 
 
 class EvaluatorSetBuiltIn(CamelModel):
+    """Deprecated compatibility body for pre-harmonization clients."""
+
     is_built_in: bool
 
 
@@ -44,7 +52,12 @@ class EvaluatorResponse(CamelORMModel):
     name: str
     prompt: str
     model_id: Optional[str] = None
-    output_schema: list = []
+    output_schema: list = Field(default_factory=list)
+    visibility: Visibility
+    linked_rule_ids: list[str] = Field(default_factory=list)
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
+    # Transitional response-only fields. Remove after frontend harmonization.
     is_global: bool
     is_built_in: bool = False
     show_in_header: bool
@@ -62,4 +75,9 @@ class EvaluatorResponse(CamelORMModel):
     @field_validator('output_schema', mode='before')
     @classmethod
     def none_to_list(cls, v):
+        return v if v is not None else []
+
+    @field_validator('linked_rule_ids', mode='before')
+    @classmethod
+    def none_to_rule_ids(cls, v):
         return v if v is not None else []

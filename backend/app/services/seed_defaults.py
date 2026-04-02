@@ -21,6 +21,7 @@ from app.models.role import Role
 from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
+from app.models.mixins.shareable import Visibility
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,12 @@ def _slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     text = re.sub(r"[^\w\s-]", "", text.lower())
     return re.sub(r"[-\s]+", "-", text).strip("-")
+
+
+def _stable_branch_key(*parts: str) -> str:
+    """Generate deterministic branch keys for seeded immutable library rows."""
+
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "::".join(parts)))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VOICE-RX PROMPTS (5 rows)
@@ -1861,7 +1868,7 @@ async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
 
 
 async def _seed_prompts(session: AsyncSession) -> None:
-    """Seed default prompts for voice-rx — insert if missing, update text if changed."""
+    """Seed immutable system prompt defaults using app-shared visibility."""
     # Fetch all existing default prompts
     existing_result = await session.execute(
         select(Prompt).where(
@@ -1879,6 +1886,13 @@ async def _seed_prompts(session: AsyncSession) -> None:
             name = p_def["name"]
             if name in existing_prompts:
                 existing = existing_prompts[name]
+                expected_branch_key = _stable_branch_key(
+                    p_def["app_id"], p_def["prompt_type"], p_def["name"]
+                )
+                if existing.branch_key != expected_branch_key:
+                    existing.branch_key = expected_branch_key
+                if existing.visibility != Visibility.APP:
+                    existing.visibility = Visibility.APP
                 if existing.prompt != p_def["prompt"]:
                     existing.prompt = p_def["prompt"]
                     updated += 1
@@ -1918,6 +1932,8 @@ async def _seed_prompts(session: AsyncSession) -> None:
         row_data = {
             **p,
             "version": next_version[pt],
+            "branch_key": _stable_branch_key(p["app_id"], p["prompt_type"], p["name"]),
+            "visibility": Visibility.APP,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -1927,7 +1943,7 @@ async def _seed_prompts(session: AsyncSession) -> None:
 
 
 async def _seed_schemas(session: AsyncSession) -> None:
-    """Seed default schemas for voice-rx — insert missing, update existing schema_data and source_type."""
+    """Seed immutable system schemas using app-shared visibility."""
     # Fetch all existing voice-rx schemas owned by system tenant
     existing_result = await session.execute(
         select(Schema).where(
@@ -1942,6 +1958,13 @@ async def _seed_schemas(session: AsyncSession) -> None:
         name = s_def["name"]
         if name in existing_schemas:
             existing = existing_schemas[name]
+            expected_branch_key = _stable_branch_key(
+                s_def["app_id"], s_def["prompt_type"], s_def["name"]
+            )
+            if existing.branch_key != expected_branch_key:
+                existing.branch_key = expected_branch_key
+            if existing.visibility != Visibility.APP:
+                existing.visibility = Visibility.APP
             if existing.source_type != s_def.get("source_type"):
                 existing.source_type = s_def.get("source_type")
                 logger.info("Backfilled source_type='%s' on schema '%s'", s_def.get("source_type"), name)
@@ -1979,6 +2002,8 @@ async def _seed_schemas(session: AsyncSession) -> None:
         row_data = {
             **s,
             "version": next_version[pt],
+            "branch_key": _stable_branch_key(s["app_id"], s["prompt_type"], s["name"]),
+            "visibility": Visibility.APP,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -1988,11 +2013,11 @@ async def _seed_schemas(session: AsyncSession) -> None:
 
 
 async def _seed_evaluators(session: AsyncSession) -> None:
-    """Seed global evaluators for kaira-bot, or update existing ones."""
+    """Seed system evaluators as app-shared rows, or update existing ones."""
     result = await session.execute(
         select(Evaluator).where(
             Evaluator.app_id == "kaira-bot",
-            Evaluator.is_global == True,
+            Evaluator.visibility == Visibility.APP,
             Evaluator.listing_id == None,
             Evaluator.tenant_id == SYSTEM_TENANT_ID,
         )
@@ -2006,6 +2031,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             db_eval = existing.get(e_data["name"])
             if db_eval:
                 db_eval.output_schema = e_data["output_schema"]
+                db_eval.visibility = Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE
                 updated += 1
         await session.flush()
         logger.info("Updated output_schema for %d existing kaira-bot evaluators", updated)
@@ -2015,7 +2041,8 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         for e_data in KAIRA_BOT_EVALUATORS:
             if e_data["name"] in new_names:
                 session.add(Evaluator(**{
-                    **e_data,
+                    **{k: v for k, v in e_data.items() if k not in {"is_global", "show_in_header"}},
+                    "visibility": Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE,
                     "tenant_id": SYSTEM_TENANT_ID,
                     "user_id": SYSTEM_USER_ID,
                 }))
@@ -2026,12 +2053,13 @@ async def _seed_evaluators(session: AsyncSession) -> None:
 
     for e in KAIRA_BOT_EVALUATORS:
         session.add(Evaluator(**{
-            **e,
+            **{k: v for k, v in e.items() if k not in {"is_global", "show_in_header"}},
+            "visibility": Visibility.APP if e.get("is_global", True) else Visibility.PRIVATE,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }))
     await session.flush()
-    logger.info("Seeded %d global evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
+    logger.info("Seeded %d app-shared system evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
 
 
 async def seed_bootstrap_admin() -> None:
