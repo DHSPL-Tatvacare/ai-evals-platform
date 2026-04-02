@@ -49,13 +49,16 @@ export interface EvaluatorDefinition {
   appId: string;                  // 'voice-rx' | 'kaira-bot'
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
   visibility?: AssetVisibility;   // Sharing scope
-  isGlobal?: boolean;             // Legacy compatibility field, derived from visibility
-  isBuiltIn?: boolean;            // Legacy compatibility field for system defaults
+  /** @deprecated Use visibility === 'app' instead */
+  isGlobal?: boolean;
+  /** @deprecated Derive from visibility + system ownership */
+  isBuiltIn?: boolean;
   forkedFrom?: string;            // Source evaluator ID if forked (lineage tracking)
   sharedBy?: string | null;
   sharedAt?: string | null;
   linkedRuleIds?: string[];
-  showInHeader?: boolean;         // Whether to display main metric in page header
+  /** @deprecated Derive from outputSchema isMainMetric field */
+  showInHeader?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

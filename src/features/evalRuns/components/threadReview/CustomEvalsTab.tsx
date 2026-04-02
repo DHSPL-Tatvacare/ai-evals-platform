@@ -64,7 +64,10 @@ export default function CustomEvalsTab({ customEvaluations, evaluatorDescriptors
 
         if (!ce.output) return null;
 
-        const schema = descriptor?.outputSchema?.filter(f => f.displayMode !== 'hidden');
+        const schema = descriptor?.outputSchema?.filter(f => {
+          if (f.role) return f.role !== 'reasoning';
+          return f.displayMode !== 'hidden';
+        });
         const hasDescriptions = schema?.some(f => f.description);
 
         return (

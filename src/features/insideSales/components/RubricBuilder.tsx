@@ -1,6 +1,6 @@
 /**
  * Rubric Builder for Inside Sales evaluators.
- * Replaces the standard output schema builder when appId is 'inside-sales'.
+ * Replaces the standard output schema builder for rubric-capable apps.
  * Manages dimensions with checks, compliance gates, and thresholds.
  * Serializes to standard EvaluatorOutputField[] format on change.
  */
@@ -43,9 +43,14 @@ function parseOutputToRubric(fields: EvaluatorOutputField[]): RubricData {
   let excellentThreshold = 80;
 
   for (const f of fields) {
+    const role = f.role ?? (f.isMainMetric ? 'metric' : 'detail');
+
     if (f.isMainMetric && f.type === 'number') {
       passThreshold = f.thresholds?.yellow ?? 65;
       excellentThreshold = f.thresholds?.green ?? 80;
+      continue;
+    }
+    if (role === 'reasoning') {
       continue;
     }
     if (f.type === 'number' && !f.isMainMetric) {
@@ -76,6 +81,7 @@ function rubricToOutputFields(rubric: RubricData): EvaluatorOutputField[] {
     description: 'Total score out of 100',
     displayMode: 'header',
     isMainMetric: true,
+    role: 'metric',
     thresholds: { green: rubric.excellentThreshold, yellow: rubric.passThreshold },
   });
 
@@ -90,6 +96,7 @@ function rubricToOutputFields(rubric: RubricData): EvaluatorOutputField[] {
       description: `${dim.name} (max ${dim.maxPoints})`,
       displayMode: 'card',
       isMainMetric: false,
+      role: 'detail',
       thresholds: { green: greenThreshold, yellow: yellowThreshold },
     });
   }
@@ -103,6 +110,7 @@ function rubricToOutputFields(rubric: RubricData): EvaluatorOutputField[] {
       description: gate,
       displayMode: 'card',
       isMainMetric: false,
+      role: 'detail',
     });
   }
 
@@ -200,15 +208,11 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
 
   useEffect(() => {
     syncToParent(rubric);
-  }, []); // Initial sync only
+  }, [rubric, syncToParent]);
 
   const updateRubric = useCallback((updater: (prev: RubricData) => RubricData) => {
-    setRubric((prev) => {
-      const next = updater(prev);
-      syncToParent(next);
-      return next;
-    });
-  }, [syncToParent]);
+    setRubric((prev) => updater(prev));
+  }, []);
 
   // Dimension handlers
   const addDimension = () => {

@@ -5,6 +5,8 @@
  * The BE route returns raw snake_case JSON, so we convert both directions.
  */
 import { apiRequest } from './client';
+import { settingsRepository } from './settingsApi';
+import type { SettingRecord } from '@/types';
 
 export interface AdversarialGoal {
     id: string;
@@ -154,6 +156,10 @@ export const adversarialConfigApi = {
 
     async get(): Promise<AdversarialConfig> {
         return adversarialConfigApi.getShared();
+    },
+
+    async getRecord(): Promise<SettingRecord<AdversarialConfig> | undefined> {
+        return settingsRepository.getRecord<AdversarialConfig>('kaira-bot', 'adversarial-config');
     },
 
     async save(config: AdversarialConfig): Promise<AdversarialConfig> {

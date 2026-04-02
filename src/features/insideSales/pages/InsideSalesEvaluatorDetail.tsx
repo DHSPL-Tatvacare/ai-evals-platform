@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, GitFork, Pencil, Shield, Star } from 'lucide-react';
 import { Button, EmptyState, Tabs } from '@/components/ui';
-import { CreateEvaluatorOverlay } from '@/features/evals/components/CreateEvaluatorOverlay';
+import { CreateEvaluatorWizard } from '@/features/evals/components/CreateEvaluatorWizard';
 import { routes } from '@/config/routes';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore } from '@/stores';
@@ -66,7 +66,7 @@ function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
 export function InsideSalesEvaluatorDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [showCreateOverlay, setShowCreateOverlay] = useState(false);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [editEvaluator, setEditEvaluator] = useState<EvaluatorDefinition | undefined>();
 
   const {
@@ -98,7 +98,7 @@ export function InsideSalesEvaluatorDetail() {
     const forked = await forkEvaluator(evaluator.id);
     notificationService.success(`Forked evaluator: ${forked.name}`);
     setEditEvaluator(forked);
-    setShowCreateOverlay(true);
+    setShowCreateWizard(true);
   };
 
   const handleSave = async (nextEvaluator: EvaluatorDefinition) => {
@@ -247,7 +247,7 @@ export function InsideSalesEvaluatorDetail() {
                 size="sm"
                 onClick={() => {
                   setEditEvaluator(evaluator);
-                  setShowCreateOverlay(true);
+                  setShowCreateWizard(true);
                 }}
               >
                 <Pencil className="h-3.5 w-3.5" />
@@ -268,10 +268,10 @@ export function InsideSalesEvaluatorDetail() {
         <Tabs tabs={[scoringTab, complianceTab]} defaultTab="scoring" fillHeight />
       </div>
 
-      <CreateEvaluatorOverlay
-        isOpen={showCreateOverlay}
+      <CreateEvaluatorWizard
+        isOpen={showCreateWizard}
         onClose={() => {
-          setShowCreateOverlay(false);
+          setShowCreateWizard(false);
           setEditEvaluator(undefined);
         }}
         onSave={handleSave}

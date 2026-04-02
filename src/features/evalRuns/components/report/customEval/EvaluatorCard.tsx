@@ -19,8 +19,12 @@ function scoreColor(
 }
 
 export default function EvaluatorCard({ section }: Props) {
-  const headerFields = section.fields.filter((f) => f.displayMode === 'header');
-  const cardFields = section.fields.filter((f) => f.displayMode === 'card');
+  const headerFields = section.fields.filter((f) => f.isMainMetric || f.displayMode === 'header');
+  const cardFields = section.fields.filter((f) => {
+    if (f.isMainMetric) return false; // already in header
+    if (f.role) return f.role !== 'reasoning';
+    return f.displayMode === 'card';
+  });
 
   return (
     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] overflow-hidden">

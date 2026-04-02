@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Check, FileText, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck } from 'lucide-react';
-import { Card, Button, EmptyState } from '@/components/ui';
+import { Plus, Trash2, Check, FileText, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck, GitFork, Share2, Lock } from 'lucide-react';
+import { Card, Button, EmptyState, VisibilityBadge } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useCurrentPrompts, useCurrentAppId } from '@/hooks';
 import { useLLMSettingsStore } from '@/stores';
@@ -9,6 +9,7 @@ import { promptsRepository } from '@/services/storage';
 import { PromptCreateOverlay } from './PromptCreateOverlay';
 import { ReadOnlyViewOverlay } from './ReadOnlyViewOverlay';
 import { DeletePromptModal } from './DeletePromptModal';
+import { useAuthStore } from '@/stores/authStore';
 import type { PromptDefinition } from '@/types';
 
 type PromptType = 'transcription' | 'evaluation' | 'extraction';
@@ -29,7 +30,8 @@ export function PromptsTab() {
   const activePromptIds = useLLMSettingsStore((state) => state.activePromptIds);
   const setActivePromptId = useLLMSettingsStore((state) => state.setActivePromptId);
   const save = useLLMSettingsStore((state) => state.save);
-  
+  const currentUserId = useAuthStore((s) => s.user?.id);
+
   // Unified modal state
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [promptModalType, setPromptModalType] = useState<PromptType>('transcription');
@@ -181,6 +183,25 @@ export function PromptsTab() {
     setShowPromptModal(true);
   }, []);
 
+  const handleForkPrompt = useCallback(async (prompt: PromptDefinition) => {
+    try {
+      await promptsRepository.fork(String(prompt.id));
+      loadPromptsAction(appId);
+    } catch (err) {
+      console.error('Failed to fork prompt:', err);
+    }
+  }, [appId, loadPromptsAction]);
+
+  const handleToggleVisibility = useCallback(async (prompt: PromptDefinition) => {
+    const newVisibility = prompt.visibility === 'app' ? 'private' : 'app';
+    try {
+      await promptsRepository.patchVisibility(String(prompt.id), newVisibility);
+      loadPromptsAction(appId);
+    } catch (err) {
+      console.error('Failed to change visibility:', err);
+    }
+  }, [appId, loadPromptsAction]);
+
   const toggleSection = useCallback((type: PromptType) => {
     setCollapsedSections(prev => ({ ...prev, [type]: !prev[type] }));
   }, []);
@@ -311,6 +332,9 @@ export function PromptsTab() {
                                         {prompt.sourceType === 'api' ? 'API' : 'Upload'}
                                       </span>
                                     )}
+                                    {prompt.visibility && (
+                                      <VisibilityBadge visibility={prompt.visibility} compact />
+                                    )}
                                     {isDefault && (
                                       <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/10 text-[var(--color-success)]">
                                         <Check className="h-3 w-3" />
@@ -326,6 +350,36 @@ export function PromptsTab() {
                                 </div>
                                 
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
+                                  {/* Fork — available for shared/system prompts the user doesn't own */}
+                                  {prompt.visibility === 'app' && currentUserId !== prompt.userId && (
+                                    <PermissionGate action="resource:create">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleForkPrompt(prompt)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title="Fork to my library"
+                                        icon={GitFork}
+                                        iconOnly
+                                      />
+                                    </PermissionGate>
+                                  )}
+
+                                  {/* Share/Make Private — only for own prompts that aren't system defaults */}
+                                  {!prompt.isDefault && currentUserId === prompt.userId && (
+                                    <PermissionGate action="resource:edit">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleToggleVisibility(prompt)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title={prompt.visibility === 'app' ? 'Make private' : 'Share with app'}
+                                        icon={prompt.visibility === 'app' ? Lock : Share2}
+                                        iconOnly
+                                      />
+                                    </PermissionGate>
+                                  )}
+
                                   {/* View */}
                                   <Button
                                     variant="ghost"
@@ -337,8 +391,8 @@ export function PromptsTab() {
                                     <Eye className="h-3.5 w-3.5" />
                                   </Button>
                                   
-                                  {/* Edit (custom prompts only — defaults are read-only) */}
-                                  {!prompt.isDefault && (
+                                  {/* Edit (own custom prompts only — defaults and others' are read-only) */}
+                                  {!prompt.isDefault && currentUserId === prompt.userId && (
                                     <PermissionGate action="resource:edit">
                                       <Button
                                         variant="ghost"
@@ -372,7 +426,7 @@ export function PromptsTab() {
                                   
                                   {/* Delete */}
                                   <div className="w-7 flex justify-center">
-                                    {!prompt.isDefault && (
+                                    {!prompt.isDefault && currentUserId === prompt.userId && (
                                       <PermissionGate action="resource:delete">
                                         <Button
                                           variant="ghost"

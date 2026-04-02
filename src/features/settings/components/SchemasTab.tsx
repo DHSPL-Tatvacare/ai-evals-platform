@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Check, FileJson, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck } from 'lucide-react';
-import { Card, Button, EmptyState } from '@/components/ui';
+import { Plus, Trash2, Check, FileJson, ChevronDown, ChevronRight, Eye, Pencil, CircleCheck, GitFork, Share2, Lock } from 'lucide-react';
+import { Card, Button, EmptyState, VisibilityBadge } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { useCurrentSchemas, useCurrentAppId } from '@/hooks';
 import { useLLMSettingsStore } from '@/stores';
@@ -10,6 +10,7 @@ import { SchemaCreateOverlay } from './SchemaCreateOverlay';
 import { ReadOnlyViewOverlay } from './ReadOnlyViewOverlay';
 import { DeleteSchemaModal } from './DeleteSchemaModal';
 import { JsonViewer } from '@/features/structured-outputs/components/JsonViewer';
+import { useAuthStore } from '@/stores/authStore';
 import type { SchemaDefinition } from '@/types';
 
 type PromptType = 'transcription' | 'evaluation' | 'extraction';
@@ -30,7 +31,8 @@ export function SchemasTab() {
   const activeSchemaIds = useLLMSettingsStore((state) => state.activeSchemaIds);
   const setActiveSchemaId = useLLMSettingsStore((state) => state.setActiveSchemaId);
   const save = useLLMSettingsStore((state) => state.save);
-  
+  const currentUserId = useAuthStore((s) => s.user?.id);
+
   // Unified modal state
   const [showSchemaModal, setShowSchemaModal] = useState(false);
   const [schemaModalType, setSchemaModalType] = useState<PromptType>('transcription');
@@ -177,6 +179,25 @@ export function SchemasTab() {
     setShowSchemaModal(true);
   }, []);
 
+  const handleForkSchema = useCallback(async (schema: SchemaDefinition) => {
+    try {
+      await schemasRepository.fork(String(schema.id));
+      loadSchemasAction(appId);
+    } catch (err) {
+      console.error('Failed to fork schema:', err);
+    }
+  }, [appId, loadSchemasAction]);
+
+  const handleToggleVisibility = useCallback(async (schema: SchemaDefinition) => {
+    const newVisibility = schema.visibility === 'app' ? 'private' : 'app';
+    try {
+      await schemasRepository.patchVisibility(String(schema.id), newVisibility);
+      loadSchemasAction(appId);
+    } catch (err) {
+      console.error('Failed to change visibility:', err);
+    }
+  }, [appId, loadSchemasAction]);
+
   const toggleSection = useCallback((type: PromptType) => {
     setCollapsedSections(prev => ({ ...prev, [type]: !prev[type] }));
   }, []);
@@ -306,6 +327,9 @@ export function SchemasTab() {
                                         {schema.sourceType === 'api' ? 'API' : 'Upload'}
                                       </span>
                                     )}
+                                    {schema.visibility && (
+                                      <VisibilityBadge visibility={schema.visibility} compact />
+                                    )}
                                     {isDefault && (
                                       <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/10 text-[var(--color-success)]">
                                         <Check className="h-3 w-3" />
@@ -321,6 +345,36 @@ export function SchemasTab() {
                                 </div>
                                 
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
+                                  {/* Fork — available for shared/system schemas the user doesn't own */}
+                                  {schema.visibility === 'app' && currentUserId !== schema.userId && (
+                                    <PermissionGate action="resource:create">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleForkSchema(schema)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title="Fork to my library"
+                                        icon={GitFork}
+                                        iconOnly
+                                      />
+                                    </PermissionGate>
+                                  )}
+
+                                  {/* Share/Make Private — only for own schemas that aren't system defaults */}
+                                  {!schema.isDefault && currentUserId === schema.userId && (
+                                    <PermissionGate action="resource:edit">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleToggleVisibility(schema)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title={schema.visibility === 'app' ? 'Make private' : 'Share with app'}
+                                        icon={schema.visibility === 'app' ? Lock : Share2}
+                                        iconOnly
+                                      />
+                                    </PermissionGate>
+                                  )}
+
                                   {/* View */}
                                   <Button
                                     variant="ghost"
@@ -331,20 +385,22 @@ export function SchemasTab() {
                                   >
                                     <Eye className="h-3.5 w-3.5" />
                                   </Button>
-                                  
-                                  {/* Edit */}
-                                  <PermissionGate action="resource:edit">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleEditSchema(schema)}
-                                      className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                      title="Edit schema"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </PermissionGate>
-                                  
+
+                                  {/* Edit — only for owned schemas */}
+                                  {currentUserId === schema.userId && (
+                                    <PermissionGate action="resource:edit">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleEditSchema(schema)}
+                                        className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                        title="Edit schema"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </PermissionGate>
+                                  )}
+
                                   {/* Set Active */}
                                   <div className="w-7 flex justify-center">
                                     {!isDefault && (
@@ -362,10 +418,10 @@ export function SchemasTab() {
                                       </PermissionGate>
                                     )}
                                   </div>
-                                  
-                                  {/* Delete */}
+
+                                  {/* Delete — only for owned, non-default schemas */}
                                   <div className="w-7 flex justify-center">
-                                    {!schema.isDefault && (
+                                    {!schema.isDefault && currentUserId === schema.userId && (
                                       <PermissionGate action="resource:delete">
                                         <Button
                                           variant="ghost"

@@ -20,7 +20,10 @@ interface OutputFieldRendererProps {
 export function OutputFieldRenderer({ schema, output, mode, fieldKey }: OutputFieldRendererProps) {
   const fields = fieldKey
     ? schema.filter(f => f.key === fieldKey)
-    : schema.filter(f => f.displayMode !== 'hidden');
+    : schema.filter(f => {
+      if (f.role) return f.role !== 'reasoning';
+      return f.displayMode !== 'hidden';
+    });
 
   if (mode === 'badge') {
     const field = fields[0];

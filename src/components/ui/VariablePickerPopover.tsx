@@ -10,6 +10,7 @@ import type { AppId, Listing, PromptType, VariableInfo } from '@/types';
 interface VariablePickerPopoverProps {
   listing?: Listing;
   appId?: AppId;
+  staticVariables?: VariableInfo[];
   onInsert: (variable: string) => void;
   promptType?: PromptType;
   buttonLabel?: string;
@@ -19,6 +20,7 @@ interface VariablePickerPopoverProps {
 export function VariablePickerPopover({
   listing,
   appId,
+  staticVariables = [],
   onInsert,
   buttonLabel = 'Variables',
   className,
@@ -45,24 +47,44 @@ export function VariablePickerPopover({
     (async () => {
       try {
         const [vars, paths] = await Promise.all([
-          evaluatorsRepository.getVariables(effectiveAppId, sourceType),
+          appConfig.evaluator.dynamicVariableSources.registry
+            ? evaluatorsRepository.getVariables(effectiveAppId, sourceType)
+            : Promise.resolve([]),
           listingId && sourceType === 'api' && appConfig.evaluator.dynamicVariableSources.listingApiPaths
             ? evaluatorsRepository.getApiPaths(listingId)
             : Promise.resolve([]),
         ]);
         if (!cancelled) {
-          setVariables(vars);
+          const mergedVariables = [...staticVariables, ...vars].reduce<VariableInfo[]>((items, variable) => {
+            if (items.some((existing) => existing.key === variable.key)) {
+              return items;
+            }
+            items.push(variable);
+            return items;
+          }, []);
+          setVariables(mergedVariables);
           setApiPaths(paths);
         }
-      } catch (err) {
-        console.error('Failed to fetch variables:', err);
+      } catch {
+        if (!cancelled) {
+          setVariables(staticVariables);
+          setApiPaths([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [appConfig.evaluator.dynamicVariableSources.listingApiPaths, effectiveAppId, isOpen, listingId, sourceType]);
+  }, [
+    appConfig.evaluator.dynamicVariableSources.listingApiPaths,
+    appConfig.evaluator.dynamicVariableSources.registry,
+    effectiveAppId,
+    isOpen,
+    listingId,
+    sourceType,
+    staticVariables,
+  ]);
 
   // Group variables by category for display
   const groupedVariables = useMemo(() => {

@@ -12,9 +12,9 @@ export interface OutputFieldDef {
   description?: string;
   isMainMetric?: boolean;
   thresholds?: { green: number; yellow?: number; red?: number };
-  displayMode?: 'badge' | 'bar' | 'hidden';
+  displayMode?: 'badge' | 'bar' | 'hidden' | 'header' | 'card';  // Legacy, prefer role
   enumValues?: string[];
-  role?: 'metric' | 'reasoning' | 'detail';
+  role?: 'metric' | 'detail' | 'reasoning';  // v2
 }
 
 /** Describes how to render an evaluator's results in the UI. */

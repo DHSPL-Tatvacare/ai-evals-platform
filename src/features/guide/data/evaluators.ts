@@ -23,6 +23,7 @@ export interface SeedEvaluator {
   app_id?: string;
   is_global?: boolean;
   show_in_header?: boolean;
+  visibility?: string;
 }
 
 export interface EvaluatorGroup {
@@ -93,6 +94,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
+        "visibility": "app",
         "show_in_header": true
       },
       {
@@ -135,6 +137,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
+        "visibility": "app",
         "show_in_header": false
       },
       {
@@ -185,6 +188,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
+        "visibility": "app",
         "show_in_header": false
       },
       {
@@ -230,6 +234,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
+        "visibility": "app",
         "show_in_header": true
       }
     ]
