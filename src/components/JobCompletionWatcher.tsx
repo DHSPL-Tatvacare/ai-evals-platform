@@ -56,6 +56,11 @@ export function JobCompletionWatcher() {
             `${tracked.label} is now running`,
             'Job Started',
           );
+        } else if (prevStatus === 'running' && job.status === 'retryable_failed') {
+          notificationService.warning(
+            `${tracked.label} hit a transient failure and will retry`,
+            'Job Retrying',
+          );
         }
 
         prevStatuses.current.set(tracked.jobId, job.status);

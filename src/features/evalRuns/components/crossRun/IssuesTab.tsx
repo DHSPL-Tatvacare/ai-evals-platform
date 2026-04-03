@@ -10,7 +10,7 @@ import type {
 import type { AppId, LLMProvider } from '@/types';
 import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
-import { poll } from '@/services/api/jobPolling';
+import { getAdaptiveJobPollBackoffMs, isTerminalJobStatus, poll } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { hasProviderCredentials, useLLMSettingsStore, LLM_PROVIDERS } from '@/stores';
 import SectionHeader from '../report/shared/SectionHeader';
@@ -65,21 +65,26 @@ export default function IssuesTab({ appId, data, stats, healthTrend }: Props) {
         model: model || undefined,
       });
 
+      let latestJob: Job | null = null;
       const finalJob = await poll<Job>({
         fn: async () => {
           const j = await jobsApi.get(job.id);
+          latestJob = j;
           if (j.status === 'queued') {
             const pos = j.queuePosition ?? 0;
             setProgressMsg(pos > 0 ? `Queued \u2014 ${pos} job${pos > 1 ? 's' : ''} ahead` : 'Queued \u2014 next in line');
+          } else if (j.status === 'retryable_failed') {
+            setProgressMsg(j.progress?.message || 'Retry scheduled...');
           } else if (j.status === 'running') {
             setProgressMsg(j.progress?.message || 'Generating...');
           }
-          if (['completed', 'failed', 'cancelled'].includes(j.status)) {
+          if (isTerminalJobStatus(j.status)) {
             return { done: true, data: j };
           }
           return { done: false };
         },
-        intervalMs: 5000,
+        intervalMs: 2000,
+        getBackoffMs: () => getAdaptiveJobPollBackoffMs(latestJob, 2000),
       });
 
       if (finalJob?.status === 'completed' && finalJob.result?.summary) {

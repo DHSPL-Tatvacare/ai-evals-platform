@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, case, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context, require_owner
@@ -176,6 +176,170 @@ async def get_stats(
     tables["settings"] = {"total": await count_table(Setting)}
 
     return {"tables": tables}
+
+
+@router.get("/job-queue")
+async def get_job_queue_summary(
+    app_id: Optional[str] = None,
+    auth: AuthContext = require_permission('analytics:view'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return queue health summary for the current tenant."""
+    from app.config import settings
+
+    now = datetime.now(timezone.utc)
+    filters = [Job.tenant_id == auth.tenant_id]
+    if app_id:
+        filters.append(Job.app_id == app_id)
+
+    status_rows = await db.execute(
+        select(Job.status, func.count())
+        .where(*filters)
+        .group_by(Job.status)
+    )
+    status_counts = {row[0]: row[1] for row in status_rows}
+
+    queue_class_rows = await db.execute(
+        select(
+            Job.queue_class,
+            func.count().label("total"),
+            func.sum(case((Job.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((Job.status == "running", 1), else_=0)).label("running"),
+            func.sum(case((Job.status == "retryable_failed", 1), else_=0)).label("retryable_failed"),
+        )
+        .where(*filters)
+        .group_by(Job.queue_class)
+        .order_by(Job.queue_class.asc())
+    )
+
+    app_rows = await db.execute(
+        select(
+            Job.app_id,
+            func.count().label("total"),
+            func.sum(case((Job.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((Job.status == "running", 1), else_=0)).label("running"),
+            func.sum(case((Job.status == "retryable_failed", 1), else_=0)).label("retryable_failed"),
+        )
+        .where(*filters)
+        .group_by(Job.app_id)
+        .order_by(desc("queued"), desc("running"), desc("total"))
+        .limit(10)
+    )
+
+    job_type_rows = await db.execute(
+        select(
+            Job.job_type,
+            func.count().label("total"),
+            func.sum(case((Job.status == "queued", 1), else_=0)).label("queued"),
+            func.sum(case((Job.status == "running", 1), else_=0)).label("running"),
+            func.sum(case((Job.status == "retryable_failed", 1), else_=0)).label("retryable_failed"),
+        )
+        .where(*filters)
+        .group_by(Job.job_type)
+        .order_by(desc("queued"), desc("running"), desc("total"))
+        .limit(10)
+    )
+
+    oldest_waiting_row = await db.execute(
+        select(Job.created_at)
+        .where(
+            *filters,
+            Job.status.in_(["queued", "retryable_failed"]),
+        )
+        .order_by(Job.created_at.asc())
+        .limit(1)
+    )
+    oldest_waiting_created_at = oldest_waiting_row.scalar_one_or_none()
+
+    retry_stats_row = await db.execute(
+        select(
+            func.sum(case((Job.status == "retryable_failed", 1), else_=0)).label("scheduled_retries"),
+            func.sum(case((Job.dead_lettered_at.is_not(None), 1), else_=0)).label("dead_lettered"),
+            func.coalesce(
+                func.sum(case((Job.attempt_count > 1, Job.attempt_count - 1), else_=0)),
+                0,
+            ).label("retry_attempts"),
+        )
+        .where(*filters)
+    )
+    retry_stats = retry_stats_row.one()
+
+    expired_lease_row = await db.execute(
+        select(func.count())
+        .where(
+            *filters,
+            Job.status == "running",
+            Job.lease_expires_at.is_not(None),
+            Job.lease_expires_at < now,
+        )
+        .select_from(Job)
+    )
+    expired_lease_count = expired_lease_row.scalar() or 0
+
+    running_count = status_counts.get("running", 0)
+    waiting_count = status_counts.get("queued", 0) + status_counts.get("retryable_failed", 0)
+
+    return {
+        "snapshotAt": now,
+        "scope": {"tenantId": str(auth.tenant_id), "appId": app_id or None},
+        "states": status_counts,
+        "capacity": {
+            "runningCount": running_count,
+            "waitingCount": waiting_count,
+            "maxConcurrentPerWorker": settings.JOB_MAX_CONCURRENT,
+            "tenantCapPerWorker": settings.JOB_TENANT_MAX_CONCURRENT,
+            "appCapPerWorker": settings.JOB_APP_MAX_CONCURRENT,
+            "userCapPerWorker": settings.JOB_USER_MAX_CONCURRENT,
+            "queueClassCapsPerWorker": {
+                "interactive": settings.JOB_INTERACTIVE_MAX_CONCURRENT or settings.JOB_MAX_CONCURRENT,
+                "standard": settings.JOB_STANDARD_MAX_CONCURRENT or settings.JOB_MAX_CONCURRENT,
+                "bulk": settings.JOB_BULK_MAX_CONCURRENT or settings.JOB_MAX_CONCURRENT,
+            },
+        },
+        "retries": {
+            "scheduled": retry_stats.scheduled_retries or 0,
+            "deadLettered": retry_stats.dead_lettered or 0,
+            "retryAttempts": retry_stats.retry_attempts or 0,
+        },
+        "leases": {
+            "expiredRunningCount": expired_lease_count,
+        },
+        "oldestWaitingAgeSeconds": (
+            max(int((now - oldest_waiting_created_at).total_seconds()), 0)
+            if oldest_waiting_created_at
+            else 0
+        ),
+        "queueClasses": [
+            {
+                "queueClass": row.queue_class,
+                "total": row.total,
+                "queued": row.queued or 0,
+                "running": row.running or 0,
+                "retryableFailed": row.retryable_failed or 0,
+            }
+            for row in queue_class_rows
+        ],
+        "hotApps": [
+            {
+                "appId": row.app_id,
+                "total": row.total,
+                "queued": row.queued or 0,
+                "running": row.running or 0,
+                "retryableFailed": row.retryable_failed or 0,
+            }
+            for row in app_rows
+        ],
+        "hotJobTypes": [
+            {
+                "jobType": row.job_type,
+                "total": row.total,
+                "queued": row.queued or 0,
+                "running": row.running or 0,
+                "retryableFailed": row.retryable_failed or 0,
+            }
+            for row in job_type_rows
+        ],
+    }
 
 
 # ── POST /api/admin/erase ────────────────────────────────────────────────────

@@ -75,31 +75,42 @@ export function KairaApiConfigStep({
 
   return (
     <div className="space-y-5">
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          Kaira API URL <span className="text-[var(--color-error)]">*</span>
-        </label>
-        <Input
-          value={kairaApiUrl}
-          onChange={(e) => onApiUrlChange(e.target.value)}
-          placeholder="https://kaira-api.example.com"
-        />
-      </div>
+      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Connection</h3>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Set the Kaira endpoint once, then add or import the credentials you want this run to use.
+          </p>
+        </div>
 
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          Request Timeout (seconds)
-        </label>
-        <Input
-          type="number"
-          value={kairaTimeout}
-          onChange={(e) => onTimeoutChange(Math.max(30, Math.min(300, Number(e.target.value) || 120)))}
-          min={30}
-          max={300}
-        />
-        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-          Max time to wait for each Kaira API response. Increase if you see frequent timeouts.
-        </p>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+          <div>
+            <label className="mb-1.5 block text-[13px] font-medium text-[var(--text-primary)]">
+              Kaira API URL <span className="text-[var(--color-error)]">*</span>
+            </label>
+            <Input
+              value={kairaApiUrl}
+              onChange={(e) => onApiUrlChange(e.target.value)}
+              placeholder="https://kaira-api.example.com"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[13px] font-medium text-[var(--text-primary)]">
+              Request Timeout (seconds)
+            </label>
+            <Input
+              type="number"
+              value={kairaTimeout}
+              onChange={(e) => onTimeoutChange(Math.max(30, Math.min(300, Number(e.target.value) || 120)))}
+              min={30}
+              max={300}
+            />
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Max time to wait for each Kaira API response.
+            </p>
+          </div>
+        </div>
       </div>
 
       <CredentialPoolManager

@@ -6,4 +6,8 @@ if [ -n "$GEMINI_SERVICE_ACCOUNT_JSON" ]; then
     export GEMINI_SERVICE_ACCOUNT_PATH=/app/service-account.json
 fi
 
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 exec uvicorn app.main:app --host 0.0.0.0 --port 8721

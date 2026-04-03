@@ -11,7 +11,7 @@ import { jobsApi } from '@/services/api/jobsApi';
 import { notificationService } from '@/services/notifications';
 import { useJobTrackerStore } from '@/stores';
 import { runDetailForApp } from '@/config/routes';
-import { poll } from '@/services/api/jobPolling';
+import { isTerminalJobStatus, poll } from '@/services/api/jobPolling';
 
 interface SubmitAndRedirectOptions {
   appId: string;
@@ -66,7 +66,7 @@ export function useSubmitAndRedirect(options: SubmitAndRedirectOptions) {
                 runId = rid;
                 return { done: true, data: rid };
               }
-              if (['completed', 'failed', 'cancelled'].includes(updated.status)) {
+              if (isTerminalJobStatus(updated.status)) {
                 return { done: true };
               }
               return { done: false };

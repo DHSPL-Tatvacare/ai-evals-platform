@@ -28,8 +28,13 @@ class JobUpdate(CamelModel):
 
 class JobResponse(CamelORMModel):
     id: uuid.UUID
+    app_id: str
     job_type: str
     status: str
+    priority: int
+    queue_class: str
+    attempt_count: int
+    max_attempts: int
     params: dict
     result: Optional[dict] = None
     progress: dict
@@ -37,6 +42,11 @@ class JobResponse(CamelORMModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
+    lease_expires_at: Optional[datetime] = None
+    next_retry_at: Optional[datetime] = None
+    dead_lettered_at: Optional[datetime] = None
+    dead_letter_reason: Optional[str] = None
     tenant_id: uuid.UUID
     user_id: uuid.UUID
     queue_position: Optional[int] = None

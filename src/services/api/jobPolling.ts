@@ -143,6 +143,35 @@ export interface PollOptions {
   signal?: AbortSignal;
 }
 
+export function isTerminalJobStatus(status: Job['status']): boolean {
+  return ['completed', 'failed', 'cancelled'].includes(status);
+}
+
+export function getAdaptiveJobPollBackoffMs(
+  job: Job | null,
+  baseIntervalMs: number,
+): number {
+  if (!job) return 0;
+
+  if (job.status === 'retryable_failed') {
+    const nextRetryMs = job.nextRetryAt ? new Date(job.nextRetryAt).getTime() - Date.now() : 0;
+    if (nextRetryMs <= baseIntervalMs) return 0;
+    return Math.max(Math.min(nextRetryMs - baseIntervalMs, 15000), 0);
+  }
+
+  if (job.status === 'queued') {
+    if ((job.queuePosition ?? 0) > 10 || job.queueClass === 'bulk') return 4000;
+    if ((job.queuePosition ?? 0) > 3) return 2000;
+    return 500;
+  }
+
+  if (job.status === 'running' && job.queueClass === 'bulk') {
+    return 2000;
+  }
+
+  return 0;
+}
+
 /**
  * Submit a job and poll until it reaches a terminal state.
  * Supports cooperative cancellation via AbortSignal.
@@ -152,7 +181,7 @@ export async function submitAndPollJob(
   params: Record<string, unknown>,
   options: PollOptions = {},
 ): Promise<Job> {
-  const { onProgress, onJobCreated, pollIntervalMs = 5000, signal } = options;
+  const { onProgress, onJobCreated, pollIntervalMs = 2000, signal } = options;
 
   // Submit the job (with retry for transient errors)
   const job = await fetchWithRetry(() => jobsApi.submit(jobType, params));
@@ -171,12 +200,14 @@ export async function pollJobUntilComplete(
   jobId: string,
   options: PollOptions = {},
 ): Promise<Job> {
-  const { onProgress, pollIntervalMs = 5000, signal } = options;
+  const { onProgress, pollIntervalMs = 2000, signal } = options;
+  let latestJob: Job | null = null;
 
   try {
     const job = await poll<Job>({
       fn: async () => {
         const job = await fetchWithRetry(() => jobsApi.get(jobId));
+        latestJob = job;
 
         if (onProgress && job.progress) {
           onProgress({
@@ -189,13 +220,14 @@ export async function pollJobUntilComplete(
           });
         }
 
-        if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+        if (isTerminalJobStatus(job.status)) {
           return { done: true, data: job };
         }
 
         return { done: false };
       },
       intervalMs: pollIntervalMs,
+      getBackoffMs: () => getAdaptiveJobPollBackoffMs(latestJob, pollIntervalMs),
       signal,
     });
 

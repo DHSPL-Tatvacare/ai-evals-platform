@@ -1,17 +1,15 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useRef, useState } from 'react';
 
+import { CredentialPoolManageOverlay, type CredentialPoolManageView } from './CredentialPoolManageOverlay';
+import { CredentialPoolEditor } from './CredentialPoolEditor';
 import { createSettingsCredentialGroupStorage } from './settingsCredentialGroupStorage';
 import type { CredentialPoolConfig, CredentialPoolEntry } from './types';
 import {
-  buildCredentialPoolReviewSummary,
   createCredentialPoolEntry,
   dedupeCredentialPoolEntries,
   getResolvedCredentialRows,
   mergeCredentialPoolEntries,
 } from './utils';
-import { CredentialCsvImport } from './CredentialCsvImport';
-import { CredentialGroupLibrary } from './CredentialGroupLibrary';
-import { CredentialPoolEditor } from './CredentialPoolEditor';
 
 interface CredentialPoolManagerProps {
   config: CredentialPoolConfig;
@@ -26,6 +24,10 @@ export function CredentialPoolManager({
   onEntriesChange,
   onTestEntry,
 }: CredentialPoolManagerProps) {
+  const [manageOverlayOpen, setManageOverlayOpen] = useState(false);
+  const [manageView, setManageView] = useState<CredentialPoolManageView>('groups');
+  const [queuedImportFile, setQueuedImportFile] = useState<File | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const storage = useMemo(
     () => createSettingsCredentialGroupStorage(config.storage),
     [config.storage],
@@ -64,6 +66,20 @@ export function CredentialPoolManager({
     onEntriesChange(mergeCredentialPoolEntries(entries, importedEntries, config.dedupeKeys));
   }, [config.dedupeKeys, entries, onEntriesChange]);
 
+  const handleUploadRequested = useCallback(() => {
+    uploadInputRef.current?.click();
+  }, []);
+
+  const handleUploadSelected = useCallback((file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    setQueuedImportFile(file);
+    setManageView('import');
+    setManageOverlayOpen(true);
+  }, []);
+
   const handleTestAll = useCallback(async () => {
     if (!onTestEntry) {
       return;
@@ -74,41 +90,48 @@ export function CredentialPoolManager({
     }
   }, [entries, onTestEntry]);
 
-  const summary = buildCredentialPoolReviewSummary(entries, config);
   const resolvedRows = getResolvedCredentialRows(entries, config.fields);
 
   return (
     <div className="space-y-4">
-      <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5">
-        <p className="text-[12px] font-medium text-[var(--text-primary)]">
-          {summary.readyCount} ready credential row{summary.readyCount === 1 ? '' : 's'}
-        </p>
-        <p className="text-[11px] text-[var(--text-muted)]">
-          Parallel execution can only use one active case per resolved {config.fields.find((field) => field.key === config.primaryFieldKey)?.label ?? 'identity'}.
-        </p>
-        {resolvedRows.length > 0 && (
-          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-            Active identities: {summary.primaryValues.join(', ')}
-          </p>
-        )}
-      </div>
-
-      <CredentialGroupLibrary
-        storage={storage}
-        currentEntries={resolvedRows}
-        onReplaceEntries={handleReplaceEntries}
-        onMergeEntries={handleMergeEntries}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={(event) => {
+          handleUploadSelected(event.target.files?.[0] ?? null);
+          event.target.value = '';
+        }}
       />
-
-      <CredentialCsvImport config={config} onImportEntries={handleImportEntries} />
 
       <CredentialPoolEditor
         config={config}
         entries={entries}
         onEntriesChange={onEntriesChange}
         onAddEntry={handleAddEntry}
+        onUploadCsv={handleUploadRequested}
+        onOpenManage={() => {
+          setManageView('groups');
+          setManageOverlayOpen(true);
+        }}
         onTestEntry={onTestEntry}
         onTestAll={onTestEntry ? handleTestAll : undefined}
+      />
+
+      <CredentialPoolManageOverlay
+        isOpen={manageOverlayOpen}
+        activeView={manageView}
+        onViewChange={setManageView}
+        onClose={() => setManageOverlayOpen(false)}
+        config={config}
+        storage={storage}
+        currentEntries={resolvedRows}
+        onReplaceEntries={handleReplaceEntries}
+        onMergeEntries={handleMergeEntries}
+        onImportEntries={handleImportEntries}
+        queuedImportFile={queuedImportFile}
+        onQueuedImportFileHandled={() => setQueuedImportFile(null)}
       />
     </div>
   );

@@ -8,7 +8,12 @@ import { apiRequest } from './client';
 export interface Job {
   id: string;
   jobType: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'retryable_failed' | 'completed' | 'failed' | 'cancelled';
+  appId?: string;
+  queueClass?: 'interactive' | 'standard' | 'bulk';
+  priority?: number;
+  attemptCount?: number;
+  maxAttempts?: number;
   params: Record<string, unknown>;
   result: Record<string, unknown> | null;
   progress: { current: number; total: number; message: string };
@@ -16,6 +21,11 @@ export interface Job {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  heartbeatAt?: string | null;
+  leaseExpiresAt?: string | null;
+  nextRetryAt?: string | null;
+  deadLetteredAt?: string | null;
+  deadLetterReason?: string | null;
   queuePosition?: number | null;
 }
 

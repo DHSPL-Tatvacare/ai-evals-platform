@@ -3,7 +3,7 @@ import { Loader2, RefreshCw, Download, FileBarChart, Sparkles, X, Clock } from '
 import type { AppId, LLMProvider } from '@/types';
 import { reportsApi } from '@/services/api/reportsApi';
 import { jobsApi, type Job } from '@/services/api/jobsApi';
-import { poll } from '@/services/api/jobPolling';
+import { getAdaptiveJobPollBackoffMs, isTerminalJobStatus, poll } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
 import { useLLMSettingsStore, hasProviderCredentials, LLM_PROVIDERS } from '@/stores';
@@ -84,27 +84,34 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
     abortRef.current = controller;
 
     try {
+      let latestJob: Job | null = null;
       const finalJob = await poll<Job>({
         fn: async () => {
           const job = await jobsApi.get(jobId);
+          latestJob = job;
 
           // Track queue vs running phase for UI differentiation
           if (job.status === 'queued') {
             setJobPhase('queued');
             setQueuePosition(job.queuePosition ?? null);
             setProgressMsg('');
+          } else if (job.status === 'retryable_failed') {
+            setJobPhase('queued');
+            setQueuePosition(null);
+            setProgressMsg(job.progress?.message || 'Retry scheduled...');
           } else if (job.status === 'running') {
             setJobPhase('running');
             setQueuePosition(null);
             setProgressMsg(job.progress?.message || '');
           }
 
-          if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+          if (isTerminalJobStatus(job.status)) {
             return { done: true, data: job };
           }
           return { done: false };
         },
-        intervalMs: 5000,
+        intervalMs: 2000,
+        getBackoffMs: () => getAdaptiveJobPollBackoffMs(latestJob, 2000),
         signal: controller.signal,
       });
 

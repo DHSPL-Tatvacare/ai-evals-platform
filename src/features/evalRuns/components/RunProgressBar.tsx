@@ -18,6 +18,7 @@ export function RunProgressBar({
 
   const isQueued = job.status === "queued";
   const isRunning = job.status === "running";
+  const isRetrying = job.status === "retryable_failed";
   const isCompleted = job.status === "completed";
   const isFailed = job.status === "failed";
   const isCancelled = job.status === "cancelled";
@@ -27,6 +28,8 @@ export function RunProgressBar({
     progress && progress.total > 0
       ? Math.round((progress.current / progress.total) * 100)
       : 0;
+
+  const retryAt = job.nextRetryAt ? new Date(job.nextRetryAt) : null;
 
   if (isCompleted || isFailed || isCancelled) return null;
 
@@ -53,6 +56,11 @@ export function RunProgressBar({
               </span>
             </>
           )}
+          {isRetrying && (
+            <span className="text-sm font-semibold text-[var(--color-warning)]">
+              Retrying
+            </span>
+          )}
           {progress?.message && (
             <span className="text-sm text-[var(--text-secondary)]">
               {progress.message}
@@ -61,7 +69,7 @@ export function RunProgressBar({
         </div>
         <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
           {elapsed && <span>{elapsed} elapsed</span>}
-          {isRunning && progress && progress.total > 0 && (
+          {(isRunning || isRetrying) && progress && progress.total > 0 && (
             <span>{progress.current}/{progress.total}</span>
           )}
         </div>
@@ -71,6 +79,9 @@ export function RunProgressBar({
       <div className="h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
         {isQueued && (
           <div className="h-full bg-[var(--color-warning)] rounded-full w-full animate-pulse opacity-30" />
+        )}
+        {isRetrying && (
+          <div className="h-full bg-[var(--color-warning)] rounded-full w-full animate-pulse opacity-40" />
         )}
         {isRunning && progress && progress.total > 0 && (
           <div
@@ -86,6 +97,11 @@ export function RunProgressBar({
       {isQueued && (
         <p className="text-xs text-[var(--text-muted)]">
           Waiting for worker to pick up this job...
+        </p>
+      )}
+      {isRetrying && retryAt && (
+        <p className="text-xs text-[var(--text-muted)]">
+          Next retry at {retryAt.toLocaleTimeString()}.
         </p>
       )}
     </div>

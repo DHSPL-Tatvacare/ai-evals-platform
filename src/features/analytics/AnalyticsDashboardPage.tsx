@@ -22,6 +22,7 @@ export function AnalyticsDashboardPage({ appId }: Props) {
             icon={BarChart3}
             title="Analytics not configured"
             description="This app does not have a cross-run analytics dashboard configured."
+            className="w-full max-w-md"
           />
         </div>
       </div>

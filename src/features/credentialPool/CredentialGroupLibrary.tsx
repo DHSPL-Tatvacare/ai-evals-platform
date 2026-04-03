@@ -11,6 +11,8 @@ interface CredentialGroupLibraryProps {
   currentEntries: Array<Record<string, string>>;
   onReplaceEntries: (entries: Array<Record<string, string>>) => void;
   onMergeEntries: (entries: Array<Record<string, string>>) => void;
+  variant?: 'card' | 'flat';
+  showHeader?: boolean;
 }
 
 export function CredentialGroupLibrary({
@@ -18,6 +20,8 @@ export function CredentialGroupLibrary({
   currentEntries,
   onReplaceEntries,
   onMergeEntries,
+  variant = 'card',
+  showHeader = true,
 }: CredentialGroupLibraryProps) {
   const [groups, setGroups] = useState<CredentialPoolGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -112,18 +116,35 @@ export function CredentialGroupLibrary({
   };
 
   return (
-    <div className="space-y-3 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h4 className="text-[13px] font-medium text-[var(--text-primary)]">Saved Credential Groups</h4>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Load a saved pool, merge it into the current run, or save the current pool for reuse.
-          </p>
+    <div
+      className={[
+        'space-y-3',
+        variant === 'card'
+          ? 'rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3'
+          : '',
+      ].join(' ').trim()}
+    >
+      {showHeader && (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-[13px] font-medium text-[var(--text-primary)]">Saved Credential Groups</h4>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Load a saved pool, merge it into the current run, or save the current pool for reuse.
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => { void loadGroups(); }} icon={RefreshCcw} isLoading={loading}>
+            Refresh
+          </Button>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => { void loadGroups(); }} icon={RefreshCcw} isLoading={loading}>
-          Refresh
-        </Button>
-      </div>
+      )}
+
+      {!showHeader && (
+        <div className="flex justify-end">
+          <Button variant="secondary" size="sm" onClick={() => { void loadGroups(); }} icon={RefreshCcw} isLoading={loading}>
+            Refresh
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
         <div>

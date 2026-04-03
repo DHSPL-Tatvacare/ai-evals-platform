@@ -515,11 +515,14 @@ export function PlatformCrossRunDashboard({ appId }: { appId: AppId }) {
 
   if (!analytics) {
     return (
-      <EmptyState
-        icon={BarChart3}
-        title="No analytics yet"
-        description="Generate at least one report, then refresh cross-run analytics."
-      />
+      <div className="flex min-h-[60vh] flex-1 items-center justify-center px-4">
+        <EmptyState
+          icon={BarChart3}
+          title="No analytics yet"
+          description="Generate at least one report, then refresh cross-run analytics."
+          className="w-full max-w-md"
+        />
+      </div>
     );
   }
 

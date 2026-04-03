@@ -23,6 +23,24 @@ def _validate_startup_config() -> None:
     """Fail fast if critical config is missing."""
     if not settings.JWT_SECRET:
         raise RuntimeError("JWT_SECRET environment variable is required. Set it in .env.backend.")
+    if settings.JOB_HEARTBEAT_INTERVAL_SECONDS >= settings.JOB_LEASE_SECONDS:
+        raise RuntimeError("JOB_HEARTBEAT_INTERVAL_SECONDS must be less than JOB_LEASE_SECONDS.")
+    if settings.JOB_MAX_ATTEMPTS < 1:
+        raise RuntimeError("JOB_MAX_ATTEMPTS must be at least 1.")
+    if settings.JOB_RETRY_BASE_DELAY_SECONDS < 1:
+        raise RuntimeError("JOB_RETRY_BASE_DELAY_SECONDS must be at least 1.")
+    if settings.JOB_RETRY_MAX_DELAY_SECONDS < settings.JOB_RETRY_BASE_DELAY_SECONDS:
+        raise RuntimeError("JOB_RETRY_MAX_DELAY_SECONDS must be greater than or equal to JOB_RETRY_BASE_DELAY_SECONDS.")
+    if settings.JOB_TENANT_MAX_CONCURRENT < 1:
+        raise RuntimeError("JOB_TENANT_MAX_CONCURRENT must be at least 1.")
+    if settings.JOB_APP_MAX_CONCURRENT < 1:
+        raise RuntimeError("JOB_APP_MAX_CONCURRENT must be at least 1.")
+    if settings.JOB_USER_MAX_CONCURRENT < 1:
+        raise RuntimeError("JOB_USER_MAX_CONCURRENT must be at least 1.")
+    if settings.JOB_CLAIM_WINDOW_MULTIPLIER < 1:
+        raise RuntimeError("JOB_CLAIM_WINDOW_MULTIPLIER must be at least 1.")
+    if settings.JOB_CLAIM_WINDOW_MAX < 1:
+        raise RuntimeError("JOB_CLAIM_WINDOW_MAX must be at least 1.")
 
 
 async def _cleanup_expired_refresh_tokens() -> None:
@@ -52,6 +70,64 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache"
         ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS app_id VARCHAR(50) NOT NULL DEFAULT ''"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS queue_class VARCHAR(20) NOT NULL DEFAULT 'standard'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 1"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(120)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_lettered_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_letter_reason TEXT"
+        ))
+        await conn.execute(text(
+            """
+            UPDATE jobs
+            SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')
+            WHERE app_id = ''
+            """
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status_priority_created ON jobs (status, priority, created_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status_lease_expires ON jobs (status, lease_expires_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status_next_retry ON jobs (status, next_retry_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status_created ON jobs (tenant_id, status, created_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_tenant_app_status_created ON jobs (tenant_id, app_id, status, created_at)"
+        ))
 
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin
     from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
@@ -62,21 +138,28 @@ async def lifespan(app: FastAPI):
     # Clean up any expired refresh tokens from previous run
     await _cleanup_expired_refresh_tokens()
 
-    # Recover any jobs stuck in "running" from a previous crash,
-    # then reconcile any eval_runs orphaned by the same crash
-    from app.services.job_worker import recover_stale_jobs, recover_stale_eval_runs, worker_loop, recovery_loop
-    await recover_stale_jobs()
-    await recover_stale_eval_runs()
+    worker_task = None
+    recovery_task = None
+    if settings.JOB_RUN_EMBEDDED_WORKER:
+        # Recover any jobs stuck in "running" from a previous crash,
+        # then reconcile any eval_runs orphaned by the same crash
+        from app.services.job_worker import recover_stale_jobs, recover_stale_eval_runs, worker_loop, recovery_loop
+        await recover_stale_jobs()
+        await recover_stale_eval_runs()
 
-    # Start background job worker and periodic recovery loop
-    worker_task = asyncio.create_task(worker_loop())
-    recovery_task = asyncio.create_task(recovery_loop())
+        # Start background job worker and periodic recovery loop
+        worker_task = asyncio.create_task(worker_loop())
+        recovery_task = asyncio.create_task(recovery_loop())
+    else:
+        logger.info("Embedded job worker disabled; expecting a separate worker process")
 
     yield
 
     # Cleanup
-    worker_task.cancel()
-    recovery_task.cancel()
+    if worker_task:
+        worker_task.cancel()
+    if recovery_task:
+        recovery_task.cancel()
     await engine.dispose()
 
 
