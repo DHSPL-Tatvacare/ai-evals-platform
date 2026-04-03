@@ -67,6 +67,15 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable  # async (job_id, current, total, message) -> None
 
 
+def _normalize_selected_rule_ids(selected_rule_ids: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for rule_id in selected_rule_ids or []:
+        candidate = str(rule_id).strip()
+        if candidate and candidate not in normalized:
+            normalized.append(candidate)
+    return normalized
+
+
 def _file_hash(path: str) -> str:
     """Compute MD5 hash of a file for deduplication."""
     try:
@@ -108,6 +117,7 @@ async def run_batch_evaluation(
     skip_previously_processed: bool = False,
     custom_only: bool = False,
     truncate_responses: bool = False,
+    selected_rule_ids: Optional[list[str]] = None,
     azure_endpoint: str = "",
     api_version: str = "",
 ) -> dict:
@@ -120,6 +130,7 @@ async def run_batch_evaluation(
         evaluate_intent = False
         evaluate_correctness = False
         evaluate_efficiency = False
+    resolved_selected_rule_ids = _normalize_selected_rule_ids(selected_rule_ids)
 
     # Create eval run record FIRST so failures are always visible in the UI
     data_hash = _file_hash(data_path) if data_path else ""
@@ -146,6 +157,7 @@ async def run_batch_evaluation(
             "custom_evaluator_ids": [str(eid) for eid in (custom_evaluator_ids or [])],
             "custom_only": custom_only,
             "truncate_responses": truncate_responses,
+            "selected_rule_ids": resolved_selected_rule_ids,
         },
     )
 
@@ -249,6 +261,7 @@ async def run_batch_evaluation(
                     "skipped_previously_processed_count": skipped_previously_processed_count,
                     "custom_only": custom_only,
                     "truncate_responses": truncate_responses,
+                    "selected_rule_ids": resolved_selected_rule_ids,
                 },
             )
         )
@@ -275,9 +288,15 @@ async def run_batch_evaluation(
         try:
             contracts = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
             if evaluate_correctness:
-                batch_correctness_rules = contracts.prompt_rules_for_scope("correctness")
+                batch_correctness_rules = contracts.prompt_rules_for_scope(
+                    "correctness",
+                    selected_rule_ids=resolved_selected_rule_ids,
+                )
             if evaluate_efficiency:
-                batch_efficiency_rules = contracts.prompt_rules_for_scope("efficiency")
+                batch_efficiency_rules = contracts.prompt_rules_for_scope(
+                    "efficiency",
+                    selected_rule_ids=resolved_selected_rule_ids,
+                )
         except Exception as config_error:
             logger.warning(
                 "Failed to load contract-backed batch rules for run %s: %s",

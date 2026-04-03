@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.mixins.shareable import Visibility
@@ -61,7 +61,7 @@ def build_setting_upsert_stmt(
                     Setting.key,
                     Setting.visibility,
                 ],
-                index_where=(Setting.visibility == Visibility.APP),
+                index_where=text("visibility = 'app'"),
                 set_=set_values,
             )
             .returning(Setting)
@@ -78,7 +78,7 @@ def build_setting_upsert_stmt(
                 Setting.user_id,
                 Setting.visibility,
             ],
-            index_where=(Setting.visibility == Visibility.PRIVATE),
+            index_where=text("visibility = 'private'"),
             set_=set_values,
         )
         .returning(Setting)

@@ -24,6 +24,10 @@ import {
   type MultiSelectOption,
   Tabs,
 } from '@/components/ui';
+import {
+  EVALUATION_SCOPE_OPTIONS,
+  getEvaluationScopeLabel,
+} from '@/features/evals/utils/contractRules';
 import { notificationService } from '@/services/notifications';
 import { OwnershipBanner } from '@/features/settings/components/OwnershipBanner';
 import { useAuthStore } from '@/stores/authStore';
@@ -50,12 +54,6 @@ type DeleteTarget =
 
 const TEXTAREA_CLASSNAME =
   'w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-colors focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50';
-
-const EVALUATION_SCOPE_OPTIONS: MultiSelectOption[] = [
-  { value: 'adversarial', label: 'Adversarial Runs' },
-  { value: 'correctness', label: 'Batch Correctness' },
-  { value: 'efficiency', label: 'Batch Efficiency' },
-];
 
 function splitLines(raw: string): string[] {
   return raw
@@ -102,6 +100,7 @@ function buildEmptyRule(goalIds: string[]): AdversarialRule {
     ruleText: '',
     goalIds,
     evaluationScopes: ['adversarial'],
+    enabled: true,
   };
 }
 
@@ -356,6 +355,7 @@ function RulesSubTab({
   onDuplicate: (rule: AdversarialRule) => void;
   onDelete: (index: number, label: string) => void;
 }) {
+  const activeCount = config.rules.filter((rule) => rule.enabled).length;
   const groupedRules = useMemo(() => {
     const groups: { section: string; rules: { rule: AdversarialRule; globalIndex: number }[] }[] = [];
     const sectionMap = new Map<string, number>();
@@ -381,7 +381,7 @@ function RulesSubTab({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">Rules</h3>
-              <Badge variant="neutral" size="sm">{config.rules.length} total</Badge>
+              <Badge variant="neutral" size="sm">{activeCount}/{config.rules.length} enabled</Badge>
               <Badge variant="neutral" size="sm">{groupedRules.length} sections</Badge>
             </div>
             <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
@@ -421,6 +421,9 @@ function RulesSubTab({
                         <p className="text-[13px] font-semibold text-[var(--text-primary)]">
                           {rule.ruleId}
                         </p>
+                        <Badge variant={rule.enabled ? 'success' : 'warning'}>
+                          {rule.enabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
                       </div>
                       <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)]">
                         {rule.ruleText}
@@ -433,11 +436,7 @@ function RulesSubTab({
                         ))}
                         {rule.evaluationScopes.map((scope) => (
                           <Badge key={`${rule.ruleId}-${scope}`} variant="neutral">
-                            {scope === 'adversarial'
-                              ? 'Adversarial'
-                              : scope === 'correctness'
-                                ? 'Correctness'
-                                : 'Efficiency'}
+                            {getEvaluationScopeLabel(scope)}
                           </Badge>
                         ))}
                       </div>
@@ -646,7 +645,11 @@ export function EvaluationContractsTab() {
     const defaultGoalIds = config.goals[0]?.id ? [config.goals[0].id] : [];
     const draft =
       mode === 'edit' && index != null
-        ? { ...config.rules[index], goalIds: [...config.rules[index].goalIds] }
+        ? {
+          ...config.rules[index],
+          goalIds: [...config.rules[index].goalIds],
+          evaluationScopes: [...config.rules[index].evaluationScopes],
+        }
         : buildEmptyRule(defaultGoalIds);
     setEditorError('');
     setEditorState({
@@ -828,6 +831,7 @@ export function EvaluationContractsTab() {
       ruleText: editorState.draft.ruleText.trim(),
       goalIds: editorState.draft.goalIds,
       evaluationScopes: Array.from(new Set(editorState.draft.evaluationScopes)),
+      enabled: editorState.draft.enabled,
     };
 
     if (!normalizedRule.ruleId || !isSnakeCaseId(normalizedRule.ruleId)) {
@@ -1312,6 +1316,15 @@ export function EvaluationContractsTab() {
                   onChange={(event) => updateRuleDraft({ ruleId: event.target.value })}
                   placeholder="ask_time_if_missing"
                 />
+                <label className="mt-3 flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]">
+                  <input
+                    type="checkbox"
+                    checked={editorState.draft.enabled}
+                    onChange={(event) => updateRuleDraft({ enabled: event.target.checked })}
+                    className="h-4 w-4 rounded border-[var(--border-default)] text-[var(--interactive-primary)] focus:ring-[var(--color-brand-accent)]"
+                  />
+                  Enabled for rule evaluation
+                </label>
               </div>
               <div>
                 <label className="mb-1.5 block text-[12px] font-medium text-[var(--text-primary)]">

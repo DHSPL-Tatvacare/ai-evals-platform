@@ -169,6 +169,8 @@
   --surface-warning: #fffbeb;
   --surface-info: #eef2ff;
   --surface-neutral: var(--bg-tertiary);
+  --surface-brand-subtle: color-mix(in srgb, var(--interactive-primary) 10%, var(--bg-primary));
+  --surface-brand-hover: color-mix(in srgb, var(--interactive-primary) 16%, var(--bg-primary));
 
   /* Status border tokens */
   --border-success: #bbf7d0;
@@ -289,6 +291,8 @@
   --surface-warning: rgba(245, 158, 11, 0.1);
   --surface-info: rgba(99, 102, 241, 0.1);
   --surface-neutral: var(--bg-tertiary);
+  --surface-brand-subtle: color-mix(in srgb, var(--interactive-primary) 18%, var(--bg-primary));
+  --surface-brand-hover: color-mix(in srgb, var(--interactive-primary) 26%, var(--bg-primary));
 
   --border-success: rgba(16, 185, 129, 0.3);
   --border-error: rgba(239, 68, 68, 0.3);

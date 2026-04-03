@@ -61,6 +61,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
   const [truncateResponses, setTruncateResponses] = useState(false);
   const [parallelThreads, setParallelThreads] = useState(false);
   const [threadWorkers, setThreadWorkers] = useState(3);
+  const [selectedRuleIds, setSelectedRuleIds] = useState<string[] | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
     provider: LLM_PROVIDERS[0].value,
@@ -164,6 +165,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
         label: 'Evaluators',
         items: [
           { key: 'Enabled', value: enabledEvaluators },
+          ...(selectedRuleIds != null ? [{ key: 'Rules', value: `${selectedRuleIds.length} selected` }] : []),
           { key: 'Truncation', value: truncateResponses ? 'Enabled — long responses will be shortened' : 'Off — full responses sent to LLM' },
           (() => {
             const est = estimateLLMCalls({
@@ -191,7 +193,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
         ],
       },
     ];
-  }, [uploadedFile, previewData, threadScope, sampleSize, selectedThreadIds, evaluators, customOnly, customEvaluatorIds, truncateResponses, llmConfig, hasColumnMapping, parallelThreads, threadWorkers, skipPreviouslyProcessed]);
+  }, [uploadedFile, previewData, threadScope, sampleSize, selectedThreadIds, evaluators, customOnly, customEvaluatorIds, selectedRuleIds, truncateResponses, llmConfig, hasColumnMapping, parallelThreads, threadWorkers, skipPreviouslyProcessed]);
 
   const handleSubmit = useCallback(async () => {
     // Build thread IDs based on scope
@@ -229,6 +231,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
       temperature: llmConfig.temperature,
       thinking: llmConfig.thinking,
       custom_evaluator_ids: customEvaluatorIds.length > 0 ? customEvaluatorIds : undefined,
+      selected_rule_ids: selectedRuleIds ?? undefined,
       skip_previously_processed: skipPreviouslyProcessed || undefined,
       custom_only: customOnly || undefined,
       truncate_responses: truncateResponses || undefined,
@@ -241,7 +244,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
         with_audio_and_schema: timeouts.withAudioAndSchema,
       },
     });
-  }, [runName, runDescription, uploadedFile, threadScope, sampleSize, selectedThreadIds, evaluators, intentSystemPrompt, llmConfig, customEvaluatorIds, customOnly, truncateResponses, skipPreviouslyProcessed, parallelThreads, threadWorkers, submitJob]);
+  }, [runName, runDescription, uploadedFile, threadScope, sampleSize, selectedThreadIds, evaluators, intentSystemPrompt, llmConfig, customEvaluatorIds, customOnly, selectedRuleIds, truncateResponses, skipPreviouslyProcessed, parallelThreads, threadWorkers, submitJob]);
 
   // Step content
   const stepContent = useMemo(() => {
@@ -293,6 +296,8 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
             onCustomOnlyChange={setCustomOnly}
             truncateResponses={truncateResponses}
             onTruncateResponsesChange={setTruncateResponses}
+            selectedRuleIds={selectedRuleIds}
+            onSelectedRuleIdsChange={setSelectedRuleIds}
           />
         );
       case 4:
@@ -314,7 +319,7 @@ export function NewBatchEvalOverlay({ onClose }: NewBatchEvalOverlayProps) {
       default:
         return null;
     }
-  }, [currentStep, runName, runDescription, uploadedFile, previewData, columnMapping, threadScope, sampleSize, selectedThreadIds, evaluators, intentSystemPrompt, customOnly, customEvaluatorIds, truncateResponses, skipPreviouslyProcessed, parallelThreads, threadWorkers, llmConfig, reviewSummary, reviewSections]);
+  }, [currentStep, runName, runDescription, uploadedFile, previewData, columnMapping, threadScope, sampleSize, selectedThreadIds, evaluators, intentSystemPrompt, customOnly, customEvaluatorIds, selectedRuleIds, truncateResponses, skipPreviouslyProcessed, parallelThreads, threadWorkers, llmConfig, reviewSummary, reviewSections]);
 
   return (
     <WizardOverlay

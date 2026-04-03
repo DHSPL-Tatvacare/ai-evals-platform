@@ -87,6 +87,7 @@ class AdversarialRule(BaseModel):
     rule_text: str
     goal_ids: List[str]  # which goals exercise this rule
     evaluation_scopes: List[str] = Field(default_factory=list)
+    enabled: bool = True
 
     @field_validator("rule_id")
     @classmethod
@@ -188,24 +189,33 @@ class AdversarialConfig(BaseModel):
 
     # ── Rule helpers ──
 
-    def rules_for_goals(self, goal_ids: List[str]) -> List[AdversarialRule]:
+    @property
+    def enabled_rules(self) -> List[AdversarialRule]:
+        return [rule for rule in self.rules if rule.enabled]
+
+    def rules_for_goals(
+        self,
+        goal_ids: List[str],
+        selected_rule_ids: Optional[List[str]] = None,
+    ) -> List[AdversarialRule]:
         """Return rules relevant to any of the given goal IDs (union)."""
         goal_set = set(goal_ids)
-        return [r for r in self.rules if goal_set & set(r.goal_ids)]
-
-    def prompt_rules_for_goals(self, goal_ids: List[str]) -> List[PromptRule]:
+        selected_rule_id_set = set(selected_rule_ids or [])
         return [
-            PromptRule(
-                rule_id=rule.rule_id,
-                section=rule.section,
-                rule_text=rule.rule_text,
-                goal_ids=list(rule.goal_ids),
-                evaluation_scopes=list(rule.evaluation_scopes),
+            rule
+            for rule in self.enabled_rules
+            if goal_set & set(rule.goal_ids)
+            and (
+                not selected_rule_id_set
+                or rule.rule_id in selected_rule_id_set
             )
-            for rule in self.rules_for_goals(goal_ids)
         ]
 
-    def prompt_rules_for_scope(self, scope: str) -> List[PromptRule]:
+    def prompt_rules_for_goals(
+        self,
+        goal_ids: List[str],
+        selected_rule_ids: Optional[List[str]] = None,
+    ) -> List[PromptRule]:
         return [
             PromptRule(
                 rule_id=rule.rule_id,
@@ -214,8 +224,29 @@ class AdversarialConfig(BaseModel):
                 goal_ids=list(rule.goal_ids),
                 evaluation_scopes=list(rule.evaluation_scopes),
             )
-            for rule in self.rules
+            for rule in self.rules_for_goals(goal_ids, selected_rule_ids)
+        ]
+
+    def prompt_rules_for_scope(
+        self,
+        scope: str,
+        selected_rule_ids: Optional[List[str]] = None,
+    ) -> List[PromptRule]:
+        selected_rule_id_set = set(selected_rule_ids or [])
+        return [
+            PromptRule(
+                rule_id=rule.rule_id,
+                section=rule.section,
+                rule_text=rule.rule_text,
+                goal_ids=list(rule.goal_ids),
+                evaluation_scopes=list(rule.evaluation_scopes),
+            )
+            for rule in self.enabled_rules
             if scope in rule.evaluation_scopes
+            and (
+                not selected_rule_id_set
+                or rule.rule_id in selected_rule_id_set
+            )
         ]
 
 

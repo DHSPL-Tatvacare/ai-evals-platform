@@ -23,14 +23,20 @@ export default function RuleComplianceInline({ rules }: Props) {
           {`\u2014 ${summary}`}
         </span>
       </p>
-      <div className="overflow-x-auto" style={{ minWidth: 500 }}>
-        <table className="w-full text-sm border-collapse">
+      <div className="overflow-x-auto pb-1">
+        <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
+          <colgroup>
+            <col style={{ width: '4rem' }} />
+            <col style={{ width: '16rem' }} />
+            <col style={{ width: '16rem' }} />
+            <col style={{ width: '24rem' }} />
+          </colgroup>
           <thead>
             <tr className="border-b border-[var(--border-subtle)]">
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-2 w-10">Status</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-2 w-24">Rule ID</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-2 w-28">Section</th>
-              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-2">Evidence</th>
+              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-3 whitespace-nowrap">Status</th>
+              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-3 whitespace-nowrap">Rule ID</th>
+              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-3 whitespace-nowrap">Section</th>
+              <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1 px-3 whitespace-nowrap">Evidence</th>
             </tr>
           </thead>
           <tbody>
@@ -43,16 +49,16 @@ export default function RuleComplianceInline({ rules }: Props) {
               const meta = getRuleOutcomeMeta(status);
               return (
                 <tr key={ruleId} className="border-b border-[var(--border-subtle)] last:border-b-0">
-                  <td className="py-1 px-2">
+                  <td className="py-2 px-3 align-top">
                     <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[0.6rem] font-bold ${meta.badgeClass}`}>
                       {meta.icon}
                     </span>
                   </td>
-                  <td className={`py-1 px-2 font-semibold ${meta.textClass}`}>
+                  <td className={`py-2 px-3 font-semibold whitespace-nowrap align-top ${meta.textClass}`}>
                     {ruleId}
                   </td>
-                  <td className="py-1 px-2 text-[var(--text-secondary)]">{rule.section || '\u2014'}</td>
-                  <td className="py-1 px-2 text-[var(--text-secondary)] break-words">{rule.evidence || '\u2014'}</td>
+                  <td className="py-2 px-3 text-[var(--text-secondary)] min-w-[14rem] align-top">{rule.section || '\u2014'}</td>
+                  <td className="py-2 px-3 text-[var(--text-secondary)] break-words leading-5 min-w-[22rem] align-top">{rule.evidence || '\u2014'}</td>
                 </tr>
               );
             })}

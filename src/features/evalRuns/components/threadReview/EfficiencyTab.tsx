@@ -131,14 +131,20 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
               {`\u2014 ${summary}`}
             </span>
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: 600 }}>
+          <div className="overflow-x-auto pb-1">
+            <table className="w-full text-sm" style={{ minWidth: 900 }}>
+              <colgroup>
+                <col style={{ width: '4rem' }} />
+                <col style={{ width: '16rem' }} />
+                <col style={{ width: '18rem' }} />
+                <col style={{ width: '24rem' }} />
+              </colgroup>
               <thead>
                 <tr className="border-b border-[var(--border-subtle)]">
-                  <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-12">Status</th>
-                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Rule ID</th>
-                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Section in Kaira Prompt</th>
-                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Evidence</th>
+                  <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-3 whitespace-nowrap">Status</th>
+                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-3 whitespace-nowrap">Rule ID</th>
+                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-3 whitespace-nowrap">Section in Kaira Prompt</th>
+                  <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-3 whitespace-nowrap">Evidence</th>
                 </tr>
               </thead>
               <tbody>
@@ -159,20 +165,20 @@ function RuleRow({ rule }: { rule: RuleCompliance }) {
   const meta = getRuleOutcomeMeta(status);
   return (
     <tr className="border-b border-[var(--border-subtle)]">
-      <td className="py-1.5 px-2 text-center">
+      <td className="py-2.5 px-3 text-center align-top">
         <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[0.6rem] font-bold ${meta.badgeClass}`}>
           {meta.icon}
         </span>
       </td>
-      <td className={`py-1.5 px-2 font-semibold whitespace-nowrap ${meta.textClass}`}>
+      <td className={`py-2.5 px-3 font-semibold whitespace-nowrap align-top ${meta.textClass}`}>
         {rule.rule_id}
       </td>
-      <td className="py-1.5 px-2 text-[var(--text-secondary)] max-w-[160px]">
+      <td className="py-2.5 px-3 text-[var(--text-secondary)] min-w-[16rem] align-top">
         <span className="block truncate" title={rule.section || ''}>
           {rule.section || '\u2014'}
         </span>
       </td>
-      <td className="py-1.5 px-2 text-[var(--text-secondary)] text-xs">
+      <td className="py-2.5 px-3 text-[var(--text-secondary)] text-xs leading-5 min-w-[22rem] break-words align-top">
         {rule.evidence || '\u2014'}
       </td>
     </tr>

@@ -190,15 +190,22 @@ export default function RuleComplianceTab({
       </p>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 720 }}>
+        <div className="overflow-x-auto pb-1">
+          <table className="w-full text-sm" style={{ minWidth: 1180 }}>
+            <colgroup>
+              <col style={{ width: '9rem' }} />
+              <col style={{ width: '18rem' }} />
+              <col style={{ width: '20rem' }} />
+              <col style={{ width: '9rem' }} />
+              <col style={{ width: '26rem' }} />
+            </colgroup>
             <thead className="sticky top-0 bg-[var(--bg-primary)] z-10">
               <tr className="border-b border-[var(--border-subtle)]">
-                <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-16">Status</th>
-                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Rule ID</th>
-                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 whitespace-nowrap">Section in Kaira Prompt</th>
-                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2 w-36">Source</th>
-                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-2">Evidence</th>
+                <th className="text-center text-xs text-[var(--text-muted)] font-semibold py-1.5 px-4 whitespace-nowrap">Status</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-4 whitespace-nowrap">Rule ID</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-4 whitespace-nowrap">Section in Kaira Prompt</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-4 whitespace-nowrap">Source</th>
+                <th className="text-left text-xs text-[var(--text-muted)] font-semibold py-1.5 px-4 whitespace-nowrap">Evidence</th>
               </tr>
             </thead>
             <tbody>
@@ -206,23 +213,23 @@ export default function RuleComplianceTab({
                 const meta = getRuleOutcomeMeta(rule.status);
                 return (
                   <tr key={rule.ruleId} className="border-b border-[var(--border-subtle)]">
-                    <td className="py-1.5 px-2 text-center">
+                    <td className="py-3 px-4 text-center align-top">
                       <span className={`inline-flex items-center justify-center min-w-[96px] px-2 py-0.5 rounded-full text-[0.65rem] font-semibold ${meta.badgeClass}`}>
                         {meta.label}
                       </span>
                     </td>
-                    <td className={`py-1.5 px-2 font-semibold ${meta.textClass}`}>
+                    <td className={`py-3 px-4 font-semibold whitespace-nowrap align-top ${meta.textClass}`}>
                       {rule.ruleId}
                     </td>
-                    <td className="py-1.5 px-2 text-[var(--text-secondary)] max-w-[180px]">
-                      <span className="block text-xs bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-1.5 py-px rounded-full truncate" title={rule.section || ''}>
+                    <td className="py-3 px-4 text-[var(--text-secondary)] min-w-[18rem] align-top">
+                      <span className="inline-flex max-w-full text-xs bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-2 py-0.5 rounded-full truncate" title={rule.section || ''}>
                         {rule.section || '\u2014'}
                       </span>
                     </td>
-                    <td className="py-1.5 px-2 text-[var(--text-muted)] text-xs">
+                    <td className="py-3 px-4 text-[var(--text-muted)] text-xs whitespace-nowrap align-top">
                       {rule.source}
                     </td>
-                    <td className="py-1.5 px-2 text-[var(--text-secondary)] text-xs">
+                    <td className="py-3 px-4 text-[var(--text-secondary)] text-xs leading-5 min-w-[24rem] break-words align-top">
                       {rule.evidence || '\u2014'}
                     </td>
                   </tr>

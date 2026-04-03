@@ -73,6 +73,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   const [caseWorkers, setCaseWorkers] = useState(3);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
+  const [selectedRuleIds, setSelectedRuleIds] = useState<string[] | null>(null);
   const [flowMode, setFlowMode] = useState<'single' | 'multi'>('single');
   const [extraInstructions, setExtraInstructions] = useState('');
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -195,6 +196,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
           { key: 'Case Mode', value: caseMode === 'generate' ? 'Generate Fresh' : caseMode === 'saved' ? 'Saved Cases' : 'Hybrid' },
           ...(caseMode !== 'saved' ? [{ key: 'Generated Cases', value: String(testCount) }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Goals', value: `${selectedGoals.length} selected` }] : []),
+          ...(selectedRuleIds != null ? [{ key: 'Rules', value: `${selectedRuleIds.length} selected` }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Flow Mode', value: flowMode === 'single' ? 'Single Goal' : 'Multi-Goal' }] : []),
           ...(caseMode !== 'generate' ? [{ key: 'Saved Cases', value: `${selectedSavedCaseIds.length} selected` }] : []),
           ...(caseMode !== 'generate' && includePinnedCases ? [{ key: 'Pinned Cases', value: 'Included automatically' }] : []),
@@ -226,6 +228,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
+    selectedRuleIds,
     flowMode,
     extraInstructions,
     caseMode,
@@ -259,6 +262,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       parallel_cases: parallelCases || undefined,
       case_workers: parallelCases ? caseWorkers : undefined,
       selected_goals: caseMode !== 'saved' && selectedGoals.length > 0 ? selectedGoals : undefined,
+      selected_rule_ids: selectedRuleIds ?? undefined,
       flow_mode: caseMode !== 'saved' ? flowMode : undefined,
       extra_instructions: caseMode !== 'saved' ? extraInstructions.trim() || undefined : undefined,
       case_mode: caseMode,
@@ -293,6 +297,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
+    selectedRuleIds,
     flowMode,
     extraInstructions,
     submitJob,
@@ -328,28 +333,32 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         );
       case 2:
         return (
-          <TestConfigStep
-            caseMode={caseMode}
-            testCount={testCount}
-            turnDelay={turnDelay}
-            caseDelay={caseDelay}
-            selectedGoals={selectedGoals}
-            flowMode={flowMode}
-            extraInstructions={extraInstructions}
-            selectedSavedCaseIds={selectedSavedCaseIds}
-            includePinnedCases={includePinnedCases}
-            manualCases={manualCases}
-            onCaseModeChange={setCaseMode}
-            onTestCountChange={setTestCount}
-            onTurnDelayChange={setTurnDelay}
-            onCaseDelayChange={setCaseDelay}
-            onGoalsChange={setSelectedGoals}
-            onFlowModeChange={setFlowMode}
-            onExtraInstructionsChange={setExtraInstructions}
-            onSavedCasesChange={setSelectedSavedCaseIds}
-            onIncludePinnedCasesChange={setIncludePinnedCases}
-            onManualCasesChange={setManualCases}
-          />
+          <div className="space-y-5">
+            <TestConfigStep
+              caseMode={caseMode}
+              testCount={testCount}
+              turnDelay={turnDelay}
+              caseDelay={caseDelay}
+              selectedGoals={selectedGoals}
+              flowMode={flowMode}
+              extraInstructions={extraInstructions}
+              selectedRuleIds={selectedRuleIds}
+              selectedSavedCaseIds={selectedSavedCaseIds}
+              includePinnedCases={includePinnedCases}
+              manualCases={manualCases}
+              onCaseModeChange={setCaseMode}
+              onTestCountChange={setTestCount}
+              onTurnDelayChange={setTurnDelay}
+              onCaseDelayChange={setCaseDelay}
+              onGoalsChange={setSelectedGoals}
+              onFlowModeChange={setFlowMode}
+              onExtraInstructionsChange={setExtraInstructions}
+              onRuleIdsChange={setSelectedRuleIds}
+              onSavedCasesChange={setSelectedSavedCaseIds}
+              onIncludePinnedCasesChange={setIncludePinnedCases}
+              onManualCasesChange={setManualCases}
+            />
+          </div>
         );
       case 3:
         return (
@@ -384,6 +393,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
+    selectedRuleIds,
     flowMode,
     extraInstructions,
     reviewSummary,

@@ -18,6 +18,7 @@ import {
   MultiSelect,
   type MultiSelectOption,
 } from '@/components/ui';
+import { ContractRuleSelectionPanel } from './ContractRuleSelectionPanel';
 import {
   adversarialConfigApi,
   type AdversarialGoal,
@@ -53,6 +54,7 @@ interface TestConfigStepProps {
   selectedGoals: string[];
   flowMode: FlowMode;
   extraInstructions: string;
+  selectedRuleIds: string[] | null;
   selectedSavedCaseIds: string[];
   includePinnedCases: boolean;
   manualCases: AdversarialManualCaseInput[];
@@ -63,6 +65,7 @@ interface TestConfigStepProps {
   onGoalsChange: (goals: string[]) => void;
   onFlowModeChange: (mode: FlowMode) => void;
   onExtraInstructionsChange: (instructions: string) => void;
+  onRuleIdsChange: (ruleIds: string[]) => void;
   onSavedCasesChange: (caseIds: string[]) => void;
   onIncludePinnedCasesChange: (enabled: boolean) => void;
   onManualCasesChange: (cases: AdversarialManualCaseInput[]) => void;
@@ -130,6 +133,7 @@ export function TestConfigStep({
   selectedGoals,
   flowMode,
   extraInstructions,
+  selectedRuleIds,
   selectedSavedCaseIds,
   includePinnedCases,
   manualCases,
@@ -140,6 +144,7 @@ export function TestConfigStep({
   onGoalsChange,
   onFlowModeChange,
   onExtraInstructionsChange,
+  onRuleIdsChange,
   onSavedCasesChange,
   onIncludePinnedCasesChange,
   onManualCasesChange,
@@ -468,31 +473,42 @@ export function TestConfigStep({
             </div>
 
             <div>
-              <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-                Flow Mode
-              </label>
-              <div className="flex gap-2">
-                {(['single', 'multi'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onFlowModeChange(mode)}
-                    className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
-                      flowMode === mode
-                        ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)] ring-1 ring-[var(--color-brand-accent)]/40'
-                        : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                    }`}
-                  >
-                    {mode === 'single' ? 'Single Goal' : 'Multi-Goal'}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                {flowMode === 'single'
-                  ? 'Each generated case focuses on one goal.'
-                  : 'Generated conversations can chain multiple goals in one session.'}
-              </p>
+              <ContractRuleSelectionPanel
+                scopes={['adversarial']}
+                selectedRuleIds={selectedRuleIds}
+                onChange={onRuleIdsChange}
+                title="Contract Rules"
+                description="Choose which enabled contract rules generated adversarial cases should be judged against."
+                placeholder="Select contract rules"
+              />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
+              Flow Mode
+            </label>
+            <div className="flex gap-2">
+              {(['single', 'multi'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onFlowModeChange(mode)}
+                  className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+                    flowMode === mode
+                      ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)] ring-1 ring-[var(--color-brand-accent)]/40'
+                      : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                  }`}
+                >
+                  {mode === 'single' ? 'Single Goal' : 'Multi-Goal'}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              {flowMode === 'single'
+                ? 'Each generated case focuses on one goal.'
+                : 'Generated conversations can chain multiple goals in one session.'}
+            </p>
           </div>
 
           <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

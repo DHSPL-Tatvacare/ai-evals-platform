@@ -52,6 +52,15 @@ def _should_generate_cases(case_mode: str) -> bool:
     return case_mode in {"generate", "hybrid"}
 
 
+def _normalize_selected_rule_ids(selected_rule_ids: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for rule_id in selected_rule_ids or []:
+        candidate = str(rule_id).strip()
+        if candidate and candidate not in normalized:
+            normalized.append(candidate)
+    return normalized
+
+
 def _normalize_manual_cases(raw_cases: list[dict] | None) -> list:
     cases = []
     for item in raw_cases or []:
@@ -210,6 +219,7 @@ async def run_adversarial_evaluation(
     case_workers: int = 1,
     thinking: str = "low",
     selected_goals: Optional[List[str]] = None,
+    selected_rule_ids: Optional[List[str]] = None,
     flow_mode: str = "single",
     extra_instructions: Optional[str] = None,
     case_mode: str = "generate",
@@ -244,6 +254,7 @@ async def run_adversarial_evaluation(
 
     # Resolve adversarial config (from DB or defaults)
     config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
+    resolved_selected_rule_ids = _normalize_selected_rule_ids(selected_rule_ids)
 
     # Filter to selected goals if specified
     if selected_goals:
@@ -252,11 +263,16 @@ async def run_adversarial_evaluation(
         if not any(g.enabled for g in config.goals):
             config = get_default_config()  # safety fallback
 
+    if resolved_selected_rule_ids:
+        config.rules = [
+            rule for rule in config.rules if rule.rule_id in resolved_selected_rule_ids
+        ]
+
     # Build snapshot of resolved config for audit
     config_snapshot = {
         "goals": [g.model_dump() for g in config.enabled_goals],
         "traits": [t.model_dump() for t in config.enabled_traits],
-        "rules": [r.model_dump() for r in config.rules],
+        "rules": [r.model_dump() for r in config.enabled_rules],
         "flow_mode": flow_mode,
         "version": config.version,
     }
@@ -298,6 +314,7 @@ async def run_adversarial_evaluation(
             "manual_case_count": len(_normalize_manual_cases(manual_cases)),
             "include_pinned_cases": include_pinned_cases,
             "retry_eval_ids": retry_case_ids,
+            "selected_rule_ids": resolved_selected_rule_ids,
             "source_run_id": str(source_run_uuid) if source_run_uuid else None,
         },
     )

@@ -897,6 +897,7 @@ async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
         skip_previously_processed=params.get("skip_previously_processed", False),
         custom_only=params.get("custom_only", False),
         truncate_responses=params.get("truncate_responses", False),
+        selected_rule_ids=params.get("selected_rule_ids"),
         azure_endpoint=params.get("azure_endpoint", ""),
         api_version=params.get("api_version", ""),
     )
@@ -931,6 +932,7 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
         case_workers=params.get("case_workers", 1),
         thinking=params.get("thinking", "low"),
         selected_goals=params.get("selected_goals"),
+        selected_rule_ids=params.get("selected_rule_ids"),
         flow_mode=params.get("flow_mode", "single"),
         extra_instructions=params.get("extra_instructions"),
         case_mode=params.get("case_mode", "generate"),

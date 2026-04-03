@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Plus, Eye } from 'lucide-react';
 import { cn } from '@/utils';
 import { BatchCustomEvaluatorPicker } from './BatchCustomEvaluatorPicker';
 import { EvaluatorPreviewOverlay } from './EvaluatorPreviewOverlay';
+import { ContractRuleSelectionPanel } from './ContractRuleSelectionPanel';
 
 export interface EvaluatorToggles {
   intent: boolean;
@@ -21,6 +22,8 @@ interface EvaluatorToggleStepProps {
   onCustomOnlyChange?: (value: boolean) => void;
   truncateResponses?: boolean;
   onTruncateResponsesChange?: (value: boolean) => void;
+  selectedRuleIds?: string[] | null;
+  onSelectedRuleIdsChange?: (ruleIds: string[]) => void;
 }
 
 const EVALUATOR_INFO: { key: keyof EvaluatorToggles; label: string; description: string }[] = [
@@ -40,11 +43,17 @@ export function EvaluatorToggleStep({
   onCustomOnlyChange,
   truncateResponses = false,
   onTruncateResponsesChange,
+  selectedRuleIds = null,
+  onSelectedRuleIdsChange,
 }: EvaluatorToggleStepProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [previewKey, setPreviewKey] = useState<keyof EvaluatorToggles | null>(null);
   const activeCount = Object.values(evaluators).filter(Boolean).length;
+  const activeRuleScopes = [
+    ...(!customOnly && evaluators.correctness ? ['correctness' as const] : []),
+    ...(!customOnly && evaluators.efficiency ? ['efficiency' as const] : []),
+  ];
 
   const handleToggle = (key: keyof EvaluatorToggles) => {
     if (customOnly) return; // Built-in toggles are locked in custom-only mode
@@ -124,6 +133,18 @@ export function EvaluatorToggleStep({
             );
           })}
         </div>
+        {onSelectedRuleIdsChange && activeRuleScopes.length > 0 ? (
+          <div className="mt-4">
+            <ContractRuleSelectionPanel
+              scopes={activeRuleScopes}
+              selectedRuleIds={selectedRuleIds}
+              onChange={onSelectedRuleIdsChange}
+              title="Contract Rules"
+              description="Choose which enabled contract rules the correctness and efficiency evaluators should use for this run."
+              placeholder="Select contract rules"
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Custom Evaluators */}

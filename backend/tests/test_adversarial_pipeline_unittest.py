@@ -396,6 +396,33 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
         self.assertIn('answer_relevant_to_question', migrated_rule_ids)
         self.assertIn('maintain_conversational_state_across_goal_transitions', migrated_rule_ids)
 
+    def test_disabled_rules_are_excluded_from_prompt_helpers(self):
+        config = get_default_config()
+        next(rule for rule in config.rules if rule.rule_id == 'ask_time_if_missing').enabled = False
+
+        meal_rule_ids = {
+            rule.rule_id for rule in config.prompt_rules_for_goals(['meal_logged'])
+        }
+        efficiency_rule_ids = {
+            rule.rule_id for rule in config.prompt_rules_for_scope('efficiency')
+        }
+
+        self.assertNotIn('ask_time_if_missing', meal_rule_ids)
+        self.assertNotIn('ask_time_if_missing', efficiency_rule_ids)
+
+    def test_selected_rule_ids_filter_scope_rules(self):
+        config = get_default_config()
+
+        scoped_rule_ids = {
+            rule.rule_id
+            for rule in config.prompt_rules_for_scope(
+                'efficiency',
+                selected_rule_ids=['reject_future_meal'],
+            )
+        }
+
+        self.assertEqual(scoped_rule_ids, {'reject_future_meal'})
+
 
 class CanonicalPersistencePhaseFourTests(unittest.TestCase):
     def test_canonical_case_prefers_judge_truth_and_flags_contradictions(self):

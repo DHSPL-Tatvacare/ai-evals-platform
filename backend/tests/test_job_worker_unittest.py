@@ -244,3 +244,49 @@ class JobWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transition['event'], 'dead_lettered')
         self.assertEqual(transition['dead_letter_reason'], 'retry_budget_exhausted')
         self.assertEqual(transition['dead_lettered_at'], now)
+
+
+class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_handler_forwards_selected_rule_ids(self):
+        params = {
+            'selected_rule_ids': ['rule-a', 'rule-b'],
+        }
+
+        with patch(
+            'app.services.evaluators.batch_runner.run_batch_evaluation',
+            return_value={'ok': True},
+        ) as mock_runner:
+            result = await job_worker.handle_evaluate_batch(
+                'job-1',
+                params,
+                tenant_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
+
+        self.assertEqual(result, {'ok': True})
+        self.assertEqual(
+            mock_runner.await_args.kwargs['selected_rule_ids'],
+            ['rule-a', 'rule-b'],
+        )
+
+    async def test_adversarial_handler_forwards_selected_rule_ids(self):
+        params = {
+            'selected_rule_ids': ['rule-a'],
+        }
+
+        with patch(
+            'app.services.evaluators.adversarial_runner.run_adversarial_evaluation',
+            return_value={'ok': True},
+        ) as mock_runner:
+            result = await job_worker.handle_evaluate_adversarial(
+                'job-2',
+                params,
+                tenant_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
+
+        self.assertEqual(result, {'ok': True})
+        self.assertEqual(
+            mock_runner.await_args.kwargs['selected_rule_ids'],
+            ['rule-a'],
+        )

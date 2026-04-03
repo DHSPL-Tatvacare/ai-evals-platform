@@ -33,6 +33,7 @@ export interface AdversarialRule {
     ruleText: string;
     goalIds: string[];
     evaluationScopes: string[];
+    enabled: boolean;
 }
 
 export interface AdversarialConfig {
@@ -61,6 +62,7 @@ interface SnakeRule {
     rule_text: string;
     goal_ids: string[];
     evaluation_scopes?: string[];
+    enabled?: boolean;
 }
 
 interface SnakeTrait {
@@ -104,6 +106,7 @@ function fromSnake(raw: SnakeConfig): AdversarialConfig {
             ruleText: r.rule_text,
             goalIds: r.goal_ids || [],
             evaluationScopes: r.evaluation_scopes || [],
+            enabled: r.enabled ?? true,
         })),
     };
 }
@@ -134,6 +137,7 @@ function toSnake(config: AdversarialConfig): SnakeConfig {
             rule_text: r.ruleText,
             goal_ids: r.goalIds,
             evaluation_scopes: r.evaluationScopes,
+            enabled: r.enabled,
         })),
     };
 }

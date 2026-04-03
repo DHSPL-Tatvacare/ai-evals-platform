@@ -8,6 +8,8 @@ interface RulePickerProps {
   selectedRuleIds: string[];
   onChange: (nextRuleIds: string[]) => void;
   disabled?: boolean;
+  title?: string;
+  description?: string;
 }
 
 export function RulePicker({
@@ -15,6 +17,8 @@ export function RulePicker({
   selectedRuleIds,
   onChange,
   disabled = false,
+  title = 'Rules',
+  description = 'Link published app rules to this evaluator so shared contracts stay explicit.',
 }: RulePickerProps) {
   const [search, setSearch] = useState('');
 
@@ -46,9 +50,9 @@ export function RulePicker({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Rules</h3>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
           <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            Link published app rules to this evaluator so shared contracts stay explicit.
+            {description}
           </p>
         </div>
         <Badge variant="info">{selectedRuleIds.length} selected</Badge>
