@@ -131,6 +131,8 @@ async def run_batch_evaluation(
         evaluate_correctness = False
         evaluate_efficiency = False
     resolved_selected_rule_ids = _normalize_selected_rule_ids(selected_rule_ids)
+    contract_config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id) if app_id == "kaira-bot" else None
+    contract_snapshot = contract_config.snapshot() if contract_config else None
 
     # Create eval run record FIRST so failures are always visible in the UI
     data_hash = _file_hash(data_path) if data_path else ""
@@ -158,6 +160,7 @@ async def run_batch_evaluation(
             "custom_only": custom_only,
             "truncate_responses": truncate_responses,
             "selected_rule_ids": resolved_selected_rule_ids,
+            "adversarial_config": contract_snapshot,
         },
     )
 
@@ -262,6 +265,7 @@ async def run_batch_evaluation(
                     "custom_only": custom_only,
                     "truncate_responses": truncate_responses,
                     "selected_rule_ids": resolved_selected_rule_ids,
+                    "adversarial_config": contract_snapshot,
                 },
             )
         )
@@ -284,24 +288,16 @@ async def run_batch_evaluation(
 
     batch_correctness_rules = None
     batch_efficiency_rules = None
-    if app_id == "kaira-bot" and (evaluate_correctness or evaluate_efficiency):
-        try:
-            contracts = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
-            if evaluate_correctness:
-                batch_correctness_rules = contracts.prompt_rules_for_scope(
-                    "correctness",
-                    selected_rule_ids=resolved_selected_rule_ids,
-                )
-            if evaluate_efficiency:
-                batch_efficiency_rules = contracts.prompt_rules_for_scope(
-                    "efficiency",
-                    selected_rule_ids=resolved_selected_rule_ids,
-                )
-        except Exception as config_error:
-            logger.warning(
-                "Failed to load contract-backed batch rules for run %s: %s",
-                run_id,
-                safe_error_message(config_error),
+    if contract_config and (evaluate_correctness or evaluate_efficiency):
+        if evaluate_correctness:
+            batch_correctness_rules = contract_config.prompt_rules_for_scope(
+                "correctness",
+                selected_rule_ids=resolved_selected_rule_ids,
+            )
+        if evaluate_efficiency:
+            batch_efficiency_rules = contract_config.prompt_rules_for_scope(
+                "efficiency",
+                selected_rule_ids=resolved_selected_rule_ids,
             )
 
     # Track which evaluators are disabled so UI can show "Skipped"

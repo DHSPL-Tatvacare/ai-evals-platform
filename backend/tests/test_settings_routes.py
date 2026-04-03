@@ -143,7 +143,7 @@ def test_app_shared_upsert_targets_shared_scope_not_owner_scope():
     sql = str(stmt.compile(dialect=postgresql.dialect()))
 
     assert 'ON CONFLICT (tenant_id, app_id, key, visibility)' in sql
-    assert "WHERE visibility = 'app'" in sql
+    assert "WHERE visibility = 'APP'" in sql
 
 
 def test_private_upsert_targets_private_scope_including_owner():
@@ -161,4 +161,4 @@ def test_private_upsert_targets_private_scope_including_owner():
     sql = str(stmt.compile(dialect=postgresql.dialect()))
 
     assert 'ON CONFLICT (tenant_id, app_id, key, user_id, visibility)' in sql
-    assert "WHERE visibility = 'private'" in sql
+    assert "WHERE visibility = 'PRIVATE'" in sql

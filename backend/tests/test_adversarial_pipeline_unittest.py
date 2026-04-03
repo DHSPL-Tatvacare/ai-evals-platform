@@ -423,6 +423,19 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
 
         self.assertEqual(scoped_rule_ids, {'reject_future_meal'})
 
+    def test_snapshot_only_includes_enabled_contract_entries(self):
+        config = get_default_config()
+        next(goal for goal in config.goals if goal.id == 'meal_logged').enabled = False
+        next(trait for trait in config.traits if trait.id == 'ambiguous_quantity').enabled = False
+        next(rule for rule in config.rules if rule.rule_id == 'ask_time_if_missing').enabled = False
+
+        snapshot = config.snapshot()
+
+        self.assertEqual(snapshot['version'], config.version)
+        self.assertNotIn('meal_logged', {goal['id'] for goal in snapshot['goals']})
+        self.assertNotIn('ambiguous_quantity', {trait['id'] for trait in snapshot['traits']})
+        self.assertNotIn('ask_time_if_missing', {rule['rule_id'] for rule in snapshot['rules']})
+
 
 class CanonicalPersistencePhaseFourTests(unittest.TestCase):
     def test_canonical_case_prefers_judge_truth_and_flags_contradictions(self):

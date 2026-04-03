@@ -9,8 +9,7 @@ from fastapi.responses import JSONResponse
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission
 from app.services.evaluators.adversarial_config import (
-    AdversarialConfig, get_default_config,
-    load_config_from_db, save_config_to_db,
+    AdversarialConfig, load_config_from_db, load_system_default_config, save_config_to_db,
 )
 
 router = APIRouter(prefix="/api/adversarial-config", tags=["adversarial-config"])
@@ -45,7 +44,7 @@ async def reset_config(
     auth: AuthContext = require_permission('settings:edit'),
 ):
     """Restore built-in default config for the tenant-shared contract."""
-    config = get_default_config()
+    config = await load_system_default_config()
     await save_config_to_db(config, tenant_id=auth.tenant_id, user_id=auth.user_id)
     return config.model_dump()
 

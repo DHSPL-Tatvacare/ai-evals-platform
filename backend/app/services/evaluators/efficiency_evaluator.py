@@ -234,7 +234,7 @@ class EfficiencyEvaluator:
         rules: Optional[List[PromptRule]] = None,
     ):
         self.llm = llm_provider
-        self.rules = rules or get_rules_for_efficiency()
+        self.rules = list(rules) if rules is not None else get_rules_for_efficiency()
 
     async def evaluate_thread(self, thread: ConversationThread, thinking: str = "low", truncate_responses: bool = False) -> EfficiencyEvaluation:
         transcript = self._format_transcript(thread, truncate_responses=truncate_responses)

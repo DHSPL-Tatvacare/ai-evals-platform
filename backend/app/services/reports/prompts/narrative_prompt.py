@@ -23,7 +23,7 @@ def build_narrative_user_prompt(
     friction: dict,
     adversarial: dict | None,
     exemplars: dict,
-    production_prompts: dict,
+    prompt_references: dict,
 ) -> str:
     """Build the user prompt for narrative generation.
 
@@ -109,17 +109,17 @@ def build_narrative_user_prompt(
     for ex in exemplars.get("worst", []):
         sections.append(_format_exemplar(ex, "BAD"))
 
-    # --- Section 7: Production Prompts (for gap analysis) ---
-    intent_prompt = production_prompts.get("intent_classification")
+    # --- Section 7: Prompt References (for gap analysis) ---
+    intent_prompt = prompt_references.get("intent_classification")
     if intent_prompt:
         sections.append(
-            f"## PRODUCTION PROMPT: INTENT CLASSIFICATION\n"
+            f"## PROMPT REFERENCE: INTENT CLASSIFICATION\n"
             f"{intent_prompt[:2000]}"
         )
-    meal_spec = production_prompts.get("meal_summary_spec")
+    meal_spec = prompt_references.get("meal_summary_spec")
     if meal_spec:
         sections.append(
-            f"## PRODUCTION PROMPT: MEAL SUMMARY SPEC (truncated)\n"
+            f"## PROMPT REFERENCE: MEAL SUMMARY SPEC (truncated)\n"
             f"{meal_spec[:3000]}"
         )
 

@@ -249,6 +249,14 @@ class AdversarialConfig(BaseModel):
             )
         ]
 
+    def snapshot(self) -> dict:
+        return {
+            "version": self.version,
+            "goals": [goal.model_dump() for goal in self.enabled_goals],
+            "traits": [trait.model_dump() for trait in self.enabled_traits],
+            "rules": [rule.model_dump() for rule in self.enabled_rules],
+        }
+
 
 # ─── Built-in Default ────────────────────────────────────────────
 
@@ -256,7 +264,7 @@ class AdversarialConfig(BaseModel):
 def get_default_config() -> AdversarialConfig:
     """Return the built-in adversarial contract registry."""
     return AdversarialConfig(
-        version=4,
+        version=CURRENT_VERSION,
         goals=[
             AdversarialGoal(
                 id="meal_logged",
@@ -578,6 +586,34 @@ async def load_config_from_db(
         logger.warning(
             f"Failed to load adversarial config from DB, using defaults: {e}"
         )
+
+    return get_default_config()
+
+
+async def load_system_default_config() -> AdversarialConfig:
+    """Load the system-shared adversarial contract, falling back to built-in defaults."""
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models.setting import Setting
+    from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+    from app.models.mixins.shareable import Visibility
+
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(Setting).where(
+                    Setting.tenant_id == SYSTEM_TENANT_ID,
+                    Setting.user_id == SYSTEM_USER_ID,
+                    Setting.app_id == SETTINGS_APP_ID,
+                    Setting.key == SETTINGS_KEY,
+                    Setting.visibility == Visibility.APP,
+                )
+            )
+            setting = result.scalar_one_or_none()
+            if setting and setting.value:
+                return AdversarialConfig.model_validate(setting.value)
+    except Exception as e:
+        logger.warning("Failed to load system adversarial config from DB, using defaults: %s", e)
 
     return get_default_config()
 

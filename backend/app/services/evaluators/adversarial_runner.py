@@ -28,7 +28,7 @@ from app.services.evaluators.llm_base import (
 from app.services.evaluators.adversarial_evaluator import AdversarialEvaluator
 from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
 from app.services.evaluators.adversarial_config import (
-    load_config_from_db, get_default_config,
+    load_config_from_db,
 )
 from app.services.evaluators.credential_lane_scheduler import (
     normalize_kaira_credential_pool,
@@ -253,15 +253,16 @@ async def run_adversarial_evaluation(
     requested_total = max(requested_total, test_count if _should_generate_cases(case_mode) else 0)
 
     # Resolve adversarial config (from DB or defaults)
-    config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id)
+    config = (await load_config_from_db(tenant_id=tenant_id, user_id=user_id)).model_copy(deep=True)
     resolved_selected_rule_ids = _normalize_selected_rule_ids(selected_rule_ids)
 
     # Filter to selected goals if specified
     if selected_goals:
+        selected_goal_set = {str(goal_id).strip() for goal_id in selected_goals if str(goal_id).strip()}
         for goal in config.goals:
-            goal.enabled = goal.id in selected_goals
+            goal.enabled = goal.enabled and goal.id in selected_goal_set
         if not any(g.enabled for g in config.goals):
-            config = get_default_config()  # safety fallback
+            raise RuntimeError("No enabled contract goals matched selected_goals")
 
     if resolved_selected_rule_ids:
         config.rules = [
@@ -270,11 +271,8 @@ async def run_adversarial_evaluation(
 
     # Build snapshot of resolved config for audit
     config_snapshot = {
-        "goals": [g.model_dump() for g in config.enabled_goals],
-        "traits": [t.model_dump() for t in config.enabled_traits],
-        "rules": [r.model_dump() for r in config.enabled_rules],
+        **config.snapshot(),
         "flow_mode": flow_mode,
-        "version": config.version,
     }
 
     # Create eval run record FIRST so failures are always visible in the UI

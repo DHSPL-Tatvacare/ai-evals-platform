@@ -61,7 +61,7 @@ def build_setting_upsert_stmt(
                     Setting.key,
                     Setting.visibility,
                 ],
-                index_where=text("visibility = 'app'"),
+                index_where=text("visibility = 'APP'"),
                 set_=set_values,
             )
             .returning(Setting)
@@ -71,15 +71,15 @@ def build_setting_upsert_stmt(
         pg_insert(Setting)
         .values(**values)
         .on_conflict_do_update(
-            index_elements=[
-                Setting.tenant_id,
-                Setting.app_id,
-                Setting.key,
-                Setting.user_id,
-                Setting.visibility,
-            ],
-            index_where=text("visibility = 'private'"),
-            set_=set_values,
-        )
-        .returning(Setting)
+                index_elements=[
+                    Setting.tenant_id,
+                    Setting.app_id,
+                    Setting.key,
+                    Setting.user_id,
+                    Setting.visibility,
+                ],
+                index_where=text("visibility = 'PRIVATE'"),
+                set_=set_values,
+            )
+            .returning(Setting)
     )

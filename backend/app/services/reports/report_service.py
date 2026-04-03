@@ -17,6 +17,7 @@ from app.schemas.app_config import AppConfig as AppConfigSchema
 from app.schemas.app_analytics_config import AppAnalyticsConfig
 
 from .aggregator import AdversarialAggregator, ReportAggregator
+from .asset_resolver import resolve_report_assets
 from .base_report_service import BaseReportService
 from .canonical_adapters import adapt_kaira_run_report
 from .contracts.run_report import PlatformRunReportPayload
@@ -25,11 +26,10 @@ from .custom_evaluations.narrator import CustomEvalNarrator
 from .custom_evaluations.schemas import CustomEvaluationsReport
 from .health_score import compute_adversarial_health_score, compute_health_score
 from .narrator import ReportNarrator
-from .prompts.production_prompts import get_production_prompts
 from .schemas import (
     Exemplars,
     NarrativeOutput,
-    ProductionPrompts,
+    PromptReferences,
     ReportMetadata,
     ReportPayload,
 )
@@ -95,10 +95,19 @@ class ReportService(BaseReportService):
 
         # Metadata
         metadata = self._build_metadata(run, threads, adversarial)
+        analytics_config = await self._load_analytics_config(run.app_id)
+        report_assets = await resolve_report_assets(
+            self.db,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            app_id=run.app_id,
+            asset_keys=analytics_config.assets,
+        )
 
-        # Production prompts (static constants for gap analysis)
-        prod_prompts = get_production_prompts(run.app_id)
-        production_prompts = ProductionPrompts(
+        # Legacy payload field retained for compatibility; values now come from
+        # settings-managed prompt references instead of a hard-coded module.
+        prod_prompts = report_assets.prompt_references
+        prompt_references = PromptReferences(
             intent_classification=prod_prompts.get("intent_classification"),
             meal_summary_spec=prod_prompts.get("meal_summary_spec"),
         )
@@ -146,11 +155,10 @@ class ReportService(BaseReportService):
             friction=friction,
             adversarial=adversarial_breakdown,
             exemplars=exemplars,
-            production_prompts=production_prompts,
+            prompt_references=prompt_references,
             narrative=narrative,
             custom_evaluations_report=custom_eval_report,
         )
-        analytics_config = await self._load_analytics_config(run.app_id)
         return adapt_kaira_run_report(payload, analytics_config)
 
     # --- AI Narrative ---
@@ -165,7 +173,7 @@ class ReportService(BaseReportService):
         friction,
         adversarial_breakdown,
         exemplars,
-        prod_prompts: dict,
+        prompt_references: dict,
         llm_provider: str | None = None,
         llm_model: str | None = None,
         is_adversarial: bool = False,
@@ -187,7 +195,7 @@ class ReportService(BaseReportService):
                 friction=friction.model_dump(),
                 adversarial=adversarial_breakdown.model_dump() if adversarial_breakdown else None,
                 exemplars=exemplars.model_dump(),
-                production_prompts=prod_prompts,
+                prompt_references=prompt_references,
                 is_adversarial=is_adversarial,
             )
             return result, effective_model

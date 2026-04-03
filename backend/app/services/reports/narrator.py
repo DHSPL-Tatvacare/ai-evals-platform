@@ -122,7 +122,7 @@ class ReportNarrator:
         friction: dict,
         adversarial: dict | None,
         exemplars: dict,
-        production_prompts: dict,
+        prompt_references: dict,
         is_adversarial: bool = False,
     ) -> NarrativeOutput | None:
         """Generate narrative. Returns None on failure (report still valid without it)."""
@@ -146,7 +146,7 @@ class ReportNarrator:
                     friction=friction,
                     adversarial=adversarial,
                     exemplars=exemplars,
-                    production_prompts=production_prompts,
+                    prompt_references=prompt_references,
                 )
                 system_prompt = NARRATIVE_SYSTEM_PROMPT
 

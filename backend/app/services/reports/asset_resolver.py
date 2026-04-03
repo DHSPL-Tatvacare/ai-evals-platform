@@ -20,7 +20,6 @@ from app.services.reports.prompts.narrative_prompt import (
     ADVERSARIAL_NARRATIVE_SYSTEM_PROMPT,
     NARRATIVE_SYSTEM_PROMPT,
 )
-from app.services.reports.prompts.production_prompts import get_production_prompts
 
 
 @dataclass
@@ -140,7 +139,6 @@ async def resolve_report_assets(
         key=asset_keys.glossary_key,
     )
 
-    defaults = get_production_prompts(app_id)
     narrative_defaults = {
         'kaira-bot': NARRATIVE_SYSTEM_PROMPT,
         'inside-sales': INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
@@ -151,8 +149,6 @@ async def resolve_report_assets(
     }
 
     prompt_references = _extract_prompt_references(prompt_value)
-    if not prompt_references:
-        prompt_references = defaults
 
     narrative_template = _extract_content(narrative_value) or narrative_defaults.get(app_id)
     glossary = _extract_content(glossary_value)

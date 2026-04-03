@@ -6,6 +6,8 @@ Fields are raw numeric values; frontend handles display formatting.
 
 from __future__ import annotations
 
+from pydantic import AliasChoices, Field
+
 from app.schemas.base import CamelModel
 from app.services.reports.custom_evaluations.schemas import CustomEvaluationsReport
 
@@ -145,9 +147,9 @@ class Exemplars(CamelModel):
     worst: list[ExemplarThread]
 
 
-# --- Production Prompts ---
+# --- Prompt References ---
 
-class ProductionPrompts(CamelModel):
+class PromptReferences(CamelModel):
     intent_classification: str | None = None
     meal_summary_spec: str | None = None
 
@@ -219,6 +221,14 @@ class ReportPayload(CamelModel):
     friction: FrictionAnalysis
     adversarial: AdversarialBreakdown | None = None
     exemplars: Exemplars
-    production_prompts: ProductionPrompts
+    prompt_references: PromptReferences = Field(
+        default_factory=PromptReferences,
+        validation_alias=AliasChoices(
+            'prompt_references',
+            'promptReferences',
+            'production_prompts',
+            'productionPrompts',
+        ),
+    )
     narrative: NarrativeOutput | None = None
     custom_evaluations_report: CustomEvaluationsReport | None = None

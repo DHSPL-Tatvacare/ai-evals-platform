@@ -135,9 +135,9 @@ export interface Exemplars {
   worst: ExemplarThread[];
 }
 
-// --- Production Prompts ---
+// --- Prompt References ---
 
-export interface ProductionPrompts {
+export interface PromptReferences {
   intentClassification: string | null;
   mealSummarySpec: string | null;
 }
@@ -266,7 +266,7 @@ export interface ReportPayload {
   friction: FrictionAnalysis;
   adversarial: AdversarialBreakdown | null;
   exemplars: Exemplars;
-  productionPrompts: ProductionPrompts;
+  promptReferences: PromptReferences;
   narrative: NarrativeOutput | null;
   customEvaluationsReport: CustomEvaluationsReport | null;
 }

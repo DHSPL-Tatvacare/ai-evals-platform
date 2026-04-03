@@ -76,7 +76,7 @@
       }
     ]
   },
-  "productionPrompts": {
+  "promptReferences": {
     "intentClassification": "Prompt reference text",
     "mealSummarySpec": null
   },

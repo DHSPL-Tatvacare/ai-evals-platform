@@ -151,7 +151,7 @@ class CorrectnessEvaluator:
         rules: Optional[List[PromptRule]] = None,
     ):
         self.llm = llm_provider
-        self.rules = rules or get_rules_for_correctness()
+        self.rules = list(rules) if rules is not None else get_rules_for_correctness()
 
     async def evaluate_message(
         self, message: ChatMessage,
