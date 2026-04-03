@@ -1,0 +1,49 @@
+name: Trigger auto deployment for ai-evals-fe-prod
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ prod ]
+    paths:
+    - '**'
+    - '.github/workflows/ai-evals-fe-prod-AutoDeployTrigger-ee8c7f6f-3830-4a42-ad9d-d16b9dae22bd.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:      
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions: 
+      id-token: write #This is required for requesting the OIDC JWT Token
+      contents: read #Required when GH token is used to authenticate with private repo
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AIEVALSFEPROD_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AIEVALSFEPROD_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AIEVALSFEPROD_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}
+          _dockerfilePathKey_: _dockerfilePath_
+          _targetLabelKey_: _targetLabel_
+          registryUrl: aiexperiment.azurecr.io
+          registryUsername: ${{ secrets.AIEVALSFEPROD_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.AIEVALSFEPROD_REGISTRY_PASSWORD }}
+          containerAppName: ai-evals-fe-prod
+          resourceGroup: product
+          imageToBuild: aiexperiment.azurecr.io/ai-evals-fe-prod:${{ github.sha }}
+          _buildArgumentsKey_: |
+            _buildArgumentsValues_
+
+
