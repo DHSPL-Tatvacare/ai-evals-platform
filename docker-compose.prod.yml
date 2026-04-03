@@ -12,102 +12,96 @@
 #   IMAGE_TAG          git tag, e.g. v1.2.0  (defaults to "latest")
 # ─────────────────────────────────────────────────────────────────────────────
 
+x-backend-runtime: &backend-runtime
+  image: ${ACR_LOGIN_SERVER}/evals-backend:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  environment:
+    # ── Database ─────────────────────────────────────────────────────────────
+    DATABASE_URL: ${DATABASE_URL}
+
+    # ── File storage ─────────────────────────────────────────────────────────
+    FILE_STORAGE_TYPE: ${FILE_STORAGE_TYPE:-azure_blob}
+    FILE_STORAGE_PATH: ${FILE_STORAGE_PATH:-/app/uploads}
+    AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+    AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-evals-files}
+    MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
+    ALLOWED_UPLOAD_MIMES: ${ALLOWED_UPLOAD_MIMES:-audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/x-wav,audio/x-m4a,audio/m4a,audio/mp4,audio/ogg,text/csv,text/plain,application/json,application/octet-stream}
+
+    # ── API and auth ─────────────────────────────────────────────────────────
+    API_PORT: ${API_PORT:-8721}
+    CORS_ORIGINS: ${CORS_ORIGINS}
+    APP_BASE_URL: ${APP_BASE_URL}
+    JWT_SECRET: ${JWT_SECRET}
+    JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ADMIN_TENANT_NAME: ${ADMIN_TENANT_NAME:-}
+    ADMIN_TENANT_ALLOWED_DOMAINS: ${ADMIN_TENANT_ALLOWED_DOMAINS:-}
+    AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10/minute}
+
+    # ── Gemini / Vertex AI ───────────────────────────────────────────────────
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    GEMINI_AUTH_METHOD: ${GEMINI_AUTH_METHOD:-service_account}
+    GEMINI_SERVICE_ACCOUNT_JSON: ${GEMINI_SERVICE_ACCOUNT_JSON:-}
+    GEMINI_MODEL: ${GEMINI_MODEL:-}
+
+    # ── Other LLM providers ──────────────────────────────────────────────────
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_MODEL: ${OPENAI_MODEL:-}
+    AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+    AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+    AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-03-01-preview}
+    AZURE_OPENAI_MODEL: ${AZURE_OPENAI_MODEL:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+    DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-gemini}
+    EVAL_TEMPERATURE: ${EVAL_TEMPERATURE:-0.1}
+
+    # ── Kaira adversarial testing ────────────────────────────────────────────
+    KAIRA_API_URL: ${KAIRA_API_URL:-}
+    KAIRA_AUTH_TOKEN: ${KAIRA_AUTH_TOKEN:-}
+    KAIRA_TEST_USER_ID: ${KAIRA_TEST_USER_ID:-}
+    ADVERSARIAL_MAX_TURNS: ${ADVERSARIAL_MAX_TURNS:-10}
+    ADVERSARIAL_TURN_DELAY: ${ADVERSARIAL_TURN_DELAY:-1.5}
+    ADVERSARIAL_CASE_DELAY: ${ADVERSARIAL_CASE_DELAY:-3.0}
+
+    # ── LeadSquared (Inside Sales) ───────────────────────────────────────────
+    LSQ_BASE_URL: ${LSQ_BASE_URL:-}
+    LSQ_ACCESS_KEY: ${LSQ_ACCESS_KEY:-}
+    LSQ_SECRET_KEY: ${LSQ_SECRET_KEY:-}
+
+    # ── Job worker controls ──────────────────────────────────────────────────
+    JOB_MAX_CONCURRENT: ${JOB_MAX_CONCURRENT:-3}
+    JOB_POLL_INTERVAL_SECONDS: ${JOB_POLL_INTERVAL_SECONDS:-1.0}
+    JOB_HEARTBEAT_INTERVAL_SECONDS: ${JOB_HEARTBEAT_INTERVAL_SECONDS:-15.0}
+    JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
+    JOB_STALE_TIMEOUT_MINUTES: ${JOB_STALE_TIMEOUT_MINUTES:-15}
+    JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+    JOB_RETRY_BASE_DELAY_SECONDS: ${JOB_RETRY_BASE_DELAY_SECONDS:-5}
+    JOB_RETRY_MAX_DELAY_SECONDS: ${JOB_RETRY_MAX_DELAY_SECONDS:-60}
+    JOB_TENANT_MAX_CONCURRENT: ${JOB_TENANT_MAX_CONCURRENT:-2}
+    JOB_APP_MAX_CONCURRENT: ${JOB_APP_MAX_CONCURRENT:-2}
+    JOB_USER_MAX_CONCURRENT: ${JOB_USER_MAX_CONCURRENT:-2}
+    JOB_INTERACTIVE_MAX_CONCURRENT: ${JOB_INTERACTIVE_MAX_CONCURRENT:-0}
+    JOB_STANDARD_MAX_CONCURRENT: ${JOB_STANDARD_MAX_CONCURRENT:-0}
+    JOB_BULK_MAX_CONCURRENT: ${JOB_BULK_MAX_CONCURRENT:-2}
+    JOB_CLAIM_WINDOW_MULTIPLIER: ${JOB_CLAIM_WINDOW_MULTIPLIER:-10}
+    JOB_CLAIM_WINDOW_MAX: ${JOB_CLAIM_WINDOW_MAX:-100}
+    JOB_RUN_EMBEDDED_WORKER: "false"
+
 services:
   backend:
-    image: ${ACR_LOGIN_SERVER}/evals-backend:${IMAGE_TAG:-latest}
+    <<: *backend-runtime
     container_name: evals-backend
-    restart: unless-stopped
     ports:
       - "8721:8721"
-    environment:
-      # ── Database ───────────────────────────────────────────────────────────
-      DATABASE_URL: ${DATABASE_URL}                  # Azure PostgreSQL connection string
-
-      # ── File storage ───────────────────────────────────────────────────────
-      FILE_STORAGE_TYPE: azure_blob
-      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
-      AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-evals-files}
-
-      # ── API ────────────────────────────────────────────────────────────────
-      API_PORT: 8721
-      CORS_ORIGINS: ${CORS_ORIGINS}                  # e.g. https://evals.tatvacare.in
-      APP_BASE_URL: ${APP_BASE_URL}                  # same as CORS_ORIGINS (used in invite links)
-      JOB_RUN_EMBEDDED_WORKER: "false"
-
-      # ── Auth ───────────────────────────────────────────────────────────────
-      JWT_SECRET: ${JWT_SECRET}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      ADMIN_TENANT_NAME: ${ADMIN_TENANT_NAME}
-      ADMIN_TENANT_ALLOWED_DOMAINS: ${ADMIN_TENANT_ALLOWED_DOMAINS:-}
-
-      # ── Gemini / Vertex AI ─────────────────────────────────────────────────
-      GEMINI_AUTH_METHOD: ${GEMINI_AUTH_METHOD:-service_account}
-      GEMINI_SERVICE_ACCOUNT_JSON: ${GEMINI_SERVICE_ACCOUNT_JSON}  # base64-encoded JSON
-      GEMINI_MODEL: ${GEMINI_MODEL:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}            # leave blank if using service account
-
-      # ── Other LLM providers (set only what you use) ────────────────────────
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
-      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
-      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
-      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-03-01-preview}
-      AZURE_OPENAI_MODEL: ${AZURE_OPENAI_MODEL:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
-      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-gemini}
-      EVAL_TEMPERATURE: ${EVAL_TEMPERATURE:-0.1}
-
-      # ── LeadSquared (Inside Sales) ─────────────────────────────────────────
-      LSQ_BASE_URL: ${LSQ_BASE_URL:-}
-      LSQ_ACCESS_KEY: ${LSQ_ACCESS_KEY:-}
-      LSQ_SECRET_KEY: ${LSQ_SECRET_KEY:-}
-
-      # ── Kaira adversarial testing ─────────────────────────────────────────
-      KAIRA_API_URL: ${KAIRA_API_URL:-}
-      KAIRA_AUTH_TOKEN: ${KAIRA_AUTH_TOKEN:-}
-      KAIRA_TEST_USER_ID: ${KAIRA_TEST_USER_ID:-}
 
   worker:
-    image: ${ACR_LOGIN_SERVER}/evals-backend:${IMAGE_TAG:-latest}
+    <<: *backend-runtime
     container_name: evals-worker
-    restart: unless-stopped
     command: ["python", "-m", "app.worker"]
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      FILE_STORAGE_TYPE: azure_blob
-      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
-      AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-evals-files}
-      API_PORT: 8721
-      CORS_ORIGINS: ${CORS_ORIGINS}
-      APP_BASE_URL: ${APP_BASE_URL}
-      JOB_RUN_EMBEDDED_WORKER: "false"
-      JWT_SECRET: ${JWT_SECRET}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      ADMIN_TENANT_NAME: ${ADMIN_TENANT_NAME}
-      ADMIN_TENANT_ALLOWED_DOMAINS: ${ADMIN_TENANT_ALLOWED_DOMAINS:-}
-      GEMINI_AUTH_METHOD: ${GEMINI_AUTH_METHOD:-service_account}
-      GEMINI_SERVICE_ACCOUNT_JSON: ${GEMINI_SERVICE_ACCOUNT_JSON}
-      GEMINI_MODEL: ${GEMINI_MODEL:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
-      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
-      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
-      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-03-01-preview}
-      AZURE_OPENAI_MODEL: ${AZURE_OPENAI_MODEL:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
-      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-gemini}
-      EVAL_TEMPERATURE: ${EVAL_TEMPERATURE:-0.1}
-      LSQ_BASE_URL: ${LSQ_BASE_URL:-}
-      LSQ_ACCESS_KEY: ${LSQ_ACCESS_KEY:-}
-      LSQ_SECRET_KEY: ${LSQ_SECRET_KEY:-}
-      KAIRA_API_URL: ${KAIRA_API_URL:-}
-      KAIRA_AUTH_TOKEN: ${KAIRA_AUTH_TOKEN:-}
-      KAIRA_TEST_USER_ID: ${KAIRA_TEST_USER_ID:-}
 
   frontend:
     image: ${ACR_LOGIN_SERVER}/evals-frontend:${IMAGE_TAG:-latest}

@@ -23,6 +23,10 @@ from app.schemas.base import CamelModel
 from app.services.reports.canonical_adapters import adapt_cross_run_summary
 from app.services.reports.analytics_profiles.base import AnalyticsProfile
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
+from app.services.reports.cache_validation import (
+    load_cached_payload_or_raise,
+    partition_valid_single_run_payloads,
+)
 from app.services.reports.cross_run_aggregator import CrossRunAISummary
 from app.services.reports.cross_run_narrator import CrossRunNarrator
 from app.services.reports.contracts.cross_run_narrative import PlatformCrossRunNarrative
@@ -158,7 +162,12 @@ async def get_cross_run_analytics(
     stale_result = await db.execute(stale_stmt)
     new_runs_since = stale_result.scalar() or 0
 
-    analytics = profile.cross_run_adapter.load_cached(cached.analytics_data)
+    analytics = load_cached_payload_or_raise(
+        profile.cross_run_adapter.load_cached,
+        cached.analytics_data,
+        detail='Cached cross-run analytics are outdated. Refresh analytics.',
+        log_message=f'Cross-run analytics cache invalid for app {app_id}',
+    )
 
     return CrossRunAnalyticsResponse(
         analytics=analytics.model_dump(by_alias=True),
@@ -179,7 +188,7 @@ async def refresh_cross_run_analytics(
 ):
     """Recompute cross-run analytics from single_run caches for user's runs within tenant."""
     analytics_config, profile = await _load_analytics_profile(db, app_id)
-    if not analytics_config.capabilities.cross_run_analytics or not profile.cross_run_adapter:
+    if not analytics_config.capabilities.cross_run_analytics or not profile.cross_run_adapter or not profile.report_payload_model:
         raise HTTPException(status_code=404, detail=f"Cross-run analytics is not enabled for app: {app_id}")
 
     # Load single_run analytics rows scoped to tenant
@@ -247,6 +256,22 @@ async def refresh_cross_run_analytics(
         ))
 
     if not runs_data:
+        raise HTTPException(
+            status_code=404,
+            detail="No completed runs with generated reports found.",
+        )
+
+    runs_data, invalid_cached_reports = partition_valid_single_run_payloads(
+        runs_data,
+        profile.report_payload_model,
+    )
+
+    if not runs_data:
+        if invalid_cached_reports:
+            raise HTTPException(
+                status_code=409,
+                detail='Cached reports are outdated. Regenerate single-run reports before refreshing cross-run analytics.',
+            )
         raise HTTPException(
             status_code=404,
             detail="No completed runs with generated reports found.",
@@ -327,6 +352,8 @@ async def export_report_pdf(
         .where(
             EvaluationAnalytics.scope == "single_run",
             EvaluationAnalytics.run_id == UUID(run_id),
+            EvaluationAnalytics.app_id == run.app_id,
+            EvaluationAnalytics.tenant_id == auth.tenant_id,
         )
     )
     cached_data = cache_result.scalar_one_or_none()
@@ -344,12 +371,13 @@ async def export_report_pdf(
         )
 
     # Validate into Pydantic model and re-dump with aliases.
-    try:
-        payload = profile.report_payload_model.model_validate(cached_data)
-        camel_data = payload.model_dump(by_alias=True)
-    except Exception:
-        logger.warning("Report cache invalid for run %s", run_id)
-        raise HTTPException(status_code=400, detail="Cached report data is corrupted.")
+    payload = load_cached_payload_or_raise(
+        profile.report_payload_model.model_validate,
+        cached_data,
+        detail='Cached report is outdated. Regenerate the report before exporting.',
+        log_message=f'Report cache invalid for run {run_id} during PDF export',
+    )
+    camel_data = payload.model_dump(by_alias=True)
 
     html_content = profile.pdf_renderer(camel_data)
 
@@ -425,6 +453,7 @@ async def get_report(
                 EvaluationAnalytics.scope == "single_run",
                 EvaluationAnalytics.run_id == UUID(run_id),
                 EvaluationAnalytics.tenant_id == auth.tenant_id,
+                EvaluationAnalytics.app_id == run.app_id,
             )
         )
         cached_data = cache_result.scalar_one_or_none()
@@ -433,7 +462,12 @@ async def get_report(
         analytics_config, profile = await _load_analytics_profile(db, run.app_id)
         if not analytics_config.capabilities.single_run_report or not profile.report_payload_model:
             raise HTTPException(status_code=404, detail=f"Reporting is not enabled for app: {run.app_id}")
-        return profile.report_payload_model.model_validate(cached_data)
+        return load_cached_payload_or_raise(
+            profile.report_payload_model.model_validate,
+            cached_data,
+            detail='Cached report is outdated. Regenerate the report.',
+            log_message=f'Report cache invalid for run {run_id} during cache-only fetch',
+        )
 
     analytics_config, profile = await _load_analytics_profile(db, run.app_id)
     if not analytics_config.capabilities.single_run_report or not profile.report_service_cls:

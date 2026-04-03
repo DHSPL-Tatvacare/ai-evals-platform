@@ -12,109 +12,94 @@ At session start, read `~/.claude` project memory for context from prior convers
 
 ## Architecture Mental Models
 
-1. Frontend is a thin client. All business logic, LLM calls, and persistence run on the backend. Frontend manages UI state and makes API calls.
-2. EvalRun is the central entity. Every evaluation outcome is one EvalRun record. `eval_type` determines its shape: `custom`, `full_evaluation`, `human`, `batch_thread`, `batch_adversarial`, `call_quality`.
-3. Jobs are the execution model. Operations longer than a few seconds run as background jobs: create → poll → get result. Never write custom polling loops in components.
-4. Stores are caches. Zustand stores cache server data. PostgreSQL is the source of truth. On page load, stores call their `load*()` methods.
-5. The provider abstraction protects runners. Runners never call Gemini/OpenAI/Anthropic SDKs directly. They go through `llm_base.py`, which handles auth, retries, timeouts, and logging.
+1. Frontend is a thin client. Business logic, LLM calls, and persistence live on the backend.
+2. `EvalRun` is the central entity. Every evaluation outcome is one row; `eval_type` defines its shape.
+3. Long-running work executes as background jobs. Submit a job, poll it, then load the result.
+4. Zustand stores are frontend caches. PostgreSQL is the source of truth.
+5. Evaluation runners call provider wrappers in `llm_base.py`, never provider SDKs directly.
 
-## Abstractions to Reuse — Never Bypass
+## Reuse These Abstractions
 
-- LLM calls → `backend/app/services/evaluators/llm_base.py` providers only. No direct SDK calls from runners.
-- Async evaluations → `submitAndPollJob()` from `src/services/api/jobPolling.ts`. No component-level polling loops.
-- HTTP → `apiRequest` / `apiUpload` / `apiDownload` from `src/services/api/client.ts`. No raw `fetch` in components.
-- Resource data → repository wrappers in `src/services/api/*.ts` and `src/services/storage/`.
-- Navigation → route constants from `src/config/routes.ts`. No hardcoded route strings.
-- User feedback → `notificationService.success/error/info/warning`. No `alert()`.
-- Diagnostics → `logger` / `evaluationLogger`. No `console.log` in production paths.
-- CSS merging → `cn()` from `src/utils/cn.ts`.
-- UI primitives → `src/components/ui/` before creating new variants.
+- LLM calls -> `backend/app/services/evaluators/llm_base.py`
+- Async evaluations -> `submitAndPollJob()` from `src/services/api/jobPolling.ts`
+- HTTP -> `apiRequest` / `apiUpload` / `apiDownload` from `src/services/api/client.ts`
+- Resource APIs -> `src/services/api/*.ts`
+- Navigation -> `src/config/routes.ts`
+- User feedback -> `notificationService.success/error/info/warning`
+- Diagnostics -> `logger` / `evaluationLogger`
+- CSS merging -> `cn()` from `src/utils/cn.ts`
+- UI primitives -> `src/components/ui/`
 
 ## Current Registry
 
-- Routers (20): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports, inside_sales, apps, roles
-- ORM tables (28): tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents, apps, tenant_configs, roles, role_permissions, role_app_access, invite_links, audit_log, lsq_lead_cache
+- Route groups (22): auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, adversarial_test_cases, admin, reports, inside_sales, apps, roles, rules
+- ORM tables (29): tenants, users, refresh_tokens, listings, eval_runs, thread_evaluations, adversarial_evaluations, api_logs, tags, prompts, lsq_lead_cache, jobs, schemas, chat_sessions, chat_messages, audit_log, evaluation_analytics, files, invite_links, external_agents, apps, tenant_configs, adversarial_test_cases, evaluators, history, settings, roles, role_app_access, role_permissions
 - Zustand stores (16): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore
-- LLM providers: Gemini (Vertex AI service account + API key), OpenAI, Azure OpenAI, Anthropic
-- Job handlers (8): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-cross-run-report
+- LLM providers: Gemini, OpenAI, Azure OpenAI, Anthropic
+- Job types (9): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-evaluator-draft, generate-cross-run-report
 - Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`
 
-## Invariants — Do Not Break
+## Invariants
 
-- EvalRun `eval_type` polymorphism must be preserved. FK/cascade chain `listings`/`chat_sessions` → `eval_runs` → `thread_evaluations`/`adversarial_evaluations`/`api_logs` must remain intact.
-- Voice Rx two-call order is fixed: transcription first (with audio), critique second (text-only `generate_json`). Never send audio on the critique call. Compute statistics server-side from records, not LLM self-reports.
-- Job safety: `is_job_cancelled()` checks must exist in all long-running flows. `recover_stale_jobs()` and `recover_stale_eval_runs()` startup paths must remain functional.
-- Every data row belongs to a tenant. Every query filters by `tenant_id` from `AuthContext`.
-- `SYSTEM_TENANT_ID` and `SYSTEM_USER_ID` are well-known UUIDs for seed data. System prompts/schemas/evaluators are read-only to all tenants.
-- `UserMixin` is replaced by `TenantUserMixin`. Both `tenant_id` and `user_id` are required FK references — no defaults.
-- LLM settings are per-user-per-tenant, stored at `(tenant_id, user_id, app_id="")`.
-- Auth routes (`/api/auth/*`) are the only public routes. All others require Bearer token.
-- Gemini on Vertex AI: use `Part.from_bytes()` for media — `client.files.upload()` is not available on Vertex. To disable thinking, omit `thinking_config` entirely — `thinking_budget=0` is rejected. Thinking params differ by model family: 2.5 uses `thinking_budget` (int), 3+ uses `thinking_level` (enum). Do not mix them.
-- Do not reintroduce `kaira-evals` as an appId in any frontend store or settings.
-- Do not create subdirectory agent rule files (`agents/`, `.cursor/`, etc.). This file is the source of truth for Claude. Creating duplicate rule files in subdirectories is redundant and causes drift.
+- Preserve `EvalRun` polymorphism and the cascade chain from listings/chat_sessions to eval_runs to dependent detail rows.
+- Voice Rx always runs transcription first with audio, then critique second with text only.
+- Compute Voice Rx statistics server-side from stored records, not model self-reports.
+- Every user-owned query must be tenant-scoped and auth-scoped.
+- `/api/auth/*` routes are the only public routes. All other routes require bearer auth.
+- LLM settings are global per tenant and user at `app_id=""`; do not pass an app ID for LLM settings lookup.
+- System library data belongs to `SYSTEM_TENANT_ID` and `SYSTEM_USER_ID`.
+- Gemini on Vertex AI uses `Part.from_bytes()` for media. To disable thinking, omit `thinking_config`. Use `thinking_budget` only for 2.5 models and `thinking_level` only for 3+ models.
+- Local and production compose stacks run a dedicated worker with `JOB_RUN_EMBEDDED_WORKER=false`.
+- Do not reintroduce `kaira-evals` as an app ID anywhere in the frontend or backend.
+- Do not create subdirectory agent rule files such as `agents/` or `.cursor/`. This file is the Claude-specific source of truth.
 
-## Coding Rules — Frontend
+## Frontend Rules
 
-- TypeScript strict. Avoid `any`; if unavoidable, localize it.
-- Single quotes, semicolons. Match local file style.
-- `@/` alias for internal imports. `import type` for type-only imports. External packages before `@/`.
-- Named exports for new feature files. Keep existing default exports.
-- Zustand in components: select slices — `useStore((s) => s.value)`. Never destructure the full store object.
-- Zustand in async callbacks: `useStore.getState()`.
-- Explicit interfaces/types for all API payloads and store state.
-- Date parsing: explicit `parseDates` at API boundaries, not inline.
+- TypeScript strict; avoid `any`.
+- Use single quotes and semicolons, matching local file style.
+- Use `@/` imports for internal modules and `import type` for type-only imports.
+- Keep new files on named exports unless the local pattern requires default exports.
+- In components, select Zustand slices instead of reading whole stores.
+- In async callbacks, use `useStore.getState()`.
+- Parse dates at API boundaries, not inline in components.
 
-## Coding Rules — Backend
+## Backend Rules
 
-- Python internals: snake_case. API JSON: camelCase via `CamelModel`/`CamelORMModel`.
-- Schema naming: `XxxCreate`, `XxxUpdate`, `XxxResponse`.
-- Routes: async sessions via `Depends(get_db)` and SQLAlchemy `select()`.
-- Auth context: `auth: AuthContext = Depends(get_auth_context)` on every route.
-- Never use `db.get(Model, id)` for user data — always `select().where()` with tenant/user filters.
-- Job params: `tenant_id` and `user_id` are injected by the job submission route. Runners read from params.
-- System data: Query with `tenant_id == SYSTEM_TENANT_ID`, not `is_default == True and user_id == "default"`.
-- Client errors: `HTTPException` with stable `detail` strings.
-- Model changes: update model + schema + `seed_defaults.py` + affected routes together.
-- Local Python: `pyenv activate venv-python-ai-evals-arize`. No global installs.
-
-## Anti-Overengineering
-
-- Fix callers passing wrong scope. Do not add fallback chains to lookup functions.
-- Do not add new schema fields + frontend sync for UI polish issues when the root bug can be fixed directly.
-- Do not add error-surfacing infrastructure when the fix eliminates the error.
-- Do not create helpers or abstractions for one-off operations.
-- Do not design for hypothetical future requirements. Three similar lines is better than a premature abstraction.
+- Python internals use `snake_case`; API JSON uses camelCase through `CamelModel` and `CamelORMModel`.
+- Route handlers use async sessions with `Depends(get_db)`.
+- Protected routes use `auth: AuthContext = Depends(get_auth_context)` or `require_permission(...)`.
+- Never use `db.get()` for tenant-owned user data; use filtered `select()` queries.
+- Job submission injects `tenant_id` and `user_id`; runners read them from params.
+- Update model, schema, `seed_defaults.py`, and affected routes together when changing persisted data.
+- Use stable `HTTPException.detail` strings for client-facing errors.
 
 ## Common Pitfalls
 
-- Most backend list/get endpoints require `app_id` as a query param. Do not omit it.
-- `settings` API: LLM settings scope is `(tenant_id, user_id, app_id="")`. Always pass tenant/user from auth context.
-- `listing` source_type rules: do not mix upload and API-flow data.
-- Model changes: update model + schema + seed + routes together, or the DB and API go out of sync.
+- Most backend list/get endpoints require `app_id`.
+- `settings` uses `app_id=""` for global LLM settings, not `null`.
+- `listing.source_type` matters; do not mix upload and API-flow assumptions.
+- `adversarial_test_cases` and `rules` are real backend surfaces now; do not document or code around older route counts.
 
 ## Build, Run, Lint
 
 ```bash
-# Full stack
 docker compose up --build
-docker compose down          # stop, keep DB data
-docker compose down -v       # stop, wipe DB volume
-docker compose logs -f backend
+docker compose down
+docker compose logs -f backend worker
 
-# Frontend
-npm run dev                  # :5173
 npm run build
 npm run lint
-npx tsc -b                   # typecheck only
+npx tsc -b
 
-# Backend (local, without Docker)
 pyenv activate venv-python-ai-evals-arize
 PYTHONPATH=backend python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8721
+PYTHONPATH=backend python -m app.worker
 ```
 
 ## References
 
-- Product overview, architecture, data flows: `docs/PROJECT 101.md`
-- Full setup (local + Azure): `docs/SETUP.md`
-- Agent guide (non-Claude agents): `AGENTS.md`
-- Copilot rules: `.github/copilot-instructions.md`
+- Product overview: `docs/PROJECT 101.md`
+- Setup and env vars: `docs/SETUP.md`
+- DevOps handover: `docs/devops-handover.md`
+- Agent guide: `AGENTS.md`
+- Copilot mirror: `.github/copilot-instructions.md`

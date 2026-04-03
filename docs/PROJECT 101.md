@@ -1,450 +1,438 @@
-# AI Evals Platform — Project 101
+# AI Evals Platform - Project 101
 
-Guided reference for this codebase. Covers what the platform is, why it exists, and how it works — following real user flows through all layers. Read this end to end for a faithful picture.
-
----
-
-## What Is This?
-
-AI Evals Platform is a full-stack evaluation system for AI outputs used in production clinical and conversational workflows. It gives QA teams a structured, reproducible way to measure, compare, and audit AI model performance — backed by a versioned prompt and schema system, a background job pipeline, and a unified result store.
-
-Three active workspaces:
-
-- **Voice Rx** (`voice-rx`): Evaluates medical transcription quality. Users upload audio files with reference transcripts and run a two-call LLM pipeline to assess accuracy at the segment level.
-- **Kaira Bot** (`kaira-bot`): Evaluates conversational AI quality. Users test chat sessions against custom or built-in evaluators, run bulk thread evaluations from CSV, and execute automated adversarial tests.
-- **Inside Sales** (`inside-sales`): Evaluates AI-assisted sales call quality. Pulls call recordings and transcripts from LeadSquared, runs structured scoring with a multi-agent reasoning pipeline, and generates per-agent scorecards.
+This is the primary product and architecture reference for the repository. Read it end to end if you are new to the codebase.
 
 ---
 
-## Why Does It Exist?
+## WHAT THE PRODUCT IS
 
-### Problems It Solves
+AI Evals Platform is a multi-tenant system for evaluating AI behavior in production workflows. It stores prompts, schemas, evaluators, runs, logs, and reports so teams can reproduce decisions instead of relying on one-off manual reviews.
 
-**Manual QA is inconsistent.** Human reviewers apply different standards session to session. Results cannot be reproduced, compared across runs, or shared as evidence.
+The platform currently serves three app surfaces:
 
-**AI outputs need structured evidence, not just scores.** A pass/fail score alone is not actionable. Teams need to know what failed, which segment caused it, and why — in a format that can be referenced and re-evaluated.
+| Workspace | App ID | What it evaluates | Primary inputs |
+| --- | --- | --- | --- |
+| Voice Rx | `voice-rx` | Medical transcription and structured extraction quality | Audio files, transcripts, upload and API-based comparison flows |
+| Kaira Bot | `kaira-bot` | Conversational AI quality | Chat sessions, CSV thread exports, adversarial cases |
+| Inside Sales | `inside-sales` | AI-assisted sales call quality | LeadSquared call data and transcripts |
 
-**Audit trails matter in clinical workflows.** Decisions backed by AI outputs must be traceable. Every evaluation run, LLM call, and prompt version is stored and queryable.
+Across those workspaces, the platform provides:
 
-**Scaling evaluation beyond human reviewers.** Batch thread evaluation and adversarial testing automate coverage that would otherwise take days of manual effort.
+- versioned prompts and schemas
+- reusable evaluators
+- background job execution with polling, cancellation, retries, and recovery
+- a single `EvalRun` record for every evaluation outcome
+- exported reports and cross-run analytics
+- tenant-aware RBAC, invite links, and app-scoped access
 
-### Core Philosophy
+---
 
-- Evidence over intuition: every evaluation is reproducible and auditable.
-- Structured by default: prompts, schemas, and versioning are first-class concerns.
-- Async by design: long-running evaluations execute as background jobs with progress tracking and cancellation support.
-- Actionable outcomes: results are designed to support QA decisions, not just model diagnostics.
+## WHY IT EXISTS
+
+### The problem
+
+Teams using AI in production need more than a score. They need a system that can answer:
+
+- What was evaluated?
+- Which prompt, schema, and model configuration produced the result?
+- Where exactly did the output fail?
+- Can the same run be reproduced later?
+- Can results be compared across time, evaluators, or workspaces?
+
+That need is especially strong in the workflows represented here:
+
+- clinical transcription, where segment-level mistakes matter
+- conversational AI, where safety, compliance, and intent handling matter
+- sales workflows, where teams need structured scorecards and trend reporting
+
+### Product principles
+
+1. Evidence beats intuition. Store the run, the configuration, and the logs.
+2. Long work runs asynchronously. The UI should not own custom polling logic.
+3. The frontend is a thin client. Business logic, persistence, and LLM calls live on the backend.
+4. Multi-tenant rules are non-negotiable. Every data row belongs to a tenant.
+5. Extensibility matters. New evaluators and reports should fit the same primitives.
 
 ---
 
-## How It Works
+## HOW THE PLATFORM WORKS
 
-### The Universal 4-Step Workflow
+### Shared workflow
 
-Every evaluation on this platform follows the same pattern regardless of workspace:
+Most flows in the platform follow the same shape:
 
-1. **Bring Assets** — upload audio, transcripts, or CSV data; or connect an API source.
-2. **Review Setup** — configure prompts, schemas, and LLM provider/model settings.
-3. **Run Evaluators** — execute standalone custom evaluators against a single session or listing.
-4. **Run Full Evals** — launch a complete multi-step evaluation pipeline as a background job.
+```text
+1. Bring data in
+   - upload a file
+   - import CSV
+   - pull from an external system
 
----
+2. Configure evaluation inputs
+   - prompts
+   - schemas
+   - evaluator selection
+   - LLM provider and model settings
+
+3. Submit a background job
+   - job row is created
+   - frontend polls through submitAndPollJob()
+   - worker claims and executes the job
+
+4. Persist and review results
+   - EvalRun is stored
+   - dependent rows are written as needed
+   - reports and analytics can be generated later
+```
 
 ### Workspace: Voice Rx
 
-Evaluates medical audio transcription quality against a reference transcript.
+Voice Rx evaluates medical transcription quality. It has two broad paths:
 
-**Two-call pipeline, always in this order:**
+- upload-based transcription and critique
+- API-oriented judge flows for structured extraction comparison
 
-1. **Transcription call** — LLM receives audio and generates a transcript. Supports multilingual input. Media is passed inline via `Part.from_bytes()` (Vertex AI does not support file upload).
-2. **Critique call** — LLM compares the AI-generated transcript against the reference transcript. This step is text-only (`generate_json`). No audio is sent on this call. Outputs segment-level findings and an aggregate critique.
+The core Voice Rx full evaluation pipeline is fixed:
 
-Statistics (word error rate, segment counts, etc.) are computed server-side from stored records. The LLM is never asked to self-report counts.
+```text
+1. Transcription call
+   - receives audio
+   - uses Gemini with inline media via Part.from_bytes()
+   - returns time-aligned transcript data
 
-**Job type:** `evaluate-voice-rx`
+2. Critique call
+   - text only
+   - compares generated transcript against reference data
+   - returns structured discrepancies via generate_json()
 
-**Eval type stored:** `full_evaluation`
+3. Server-side statistics
+   - counts and aggregates are computed from stored records
+   - the model is not trusted to self-report totals
+```
 
----
+That order is a hard invariant. Audio is never sent on the critique call.
 
 ### Workspace: Kaira Bot
 
-Evaluates conversational AI quality across live chat sessions, bulk thread exports, and automated adversarial probes.
+Kaira Bot covers three major modes:
 
-**Three evaluation modes:**
+| Mode | Job type | Stored outcome |
+| --- | --- | --- |
+| Custom evaluator run | `evaluate-custom` / `evaluate-custom-batch` | `EvalRun` with `eval_type=custom` |
+| Batch thread evaluation | `evaluate-batch` | aggregate `EvalRun` plus `thread_evaluations` rows |
+| Adversarial evaluation | `evaluate-adversarial` | aggregate `EvalRun` plus `adversarial_evaluations` rows |
 
-| Mode | Job type | Input | Output |
-|------|----------|-------|--------|
-| Custom evaluator run | `evaluate-custom` / `evaluate-custom-batch` | Single session or listing | EvalRun with structured JSON output |
-| Batch thread evaluation | `evaluate-batch` | CSV of conversation threads | ThreadEvaluation rows + aggregate EvalRun |
-| Adversarial evaluation | `evaluate-adversarial` | Target Kaira API + test config | AdversarialEvaluation rows + aggregate EvalRun |
+Kaira-specific supporting capabilities now also include:
 
-Adversarial evaluation hits the live Kaira API, generates adversarial probes, simulates conversations, and scores safety and compliance at the case level. Results are stored for replay and trend tracking.
+- a published per-app rules catalog via `/api/rules`
+- saved adversarial test cases via `/api/adversarial-test-cases`
+
+### Workspace: Inside Sales
+
+Inside Sales evaluates call quality using LeadSquared-backed data. The flow is:
+
+```text
+1. Pull or load call records
+2. Submit evaluate-inside-sales jobs
+3. Run the scoring pipeline on the backend
+4. Persist run-level and call-level outputs
+5. Review dashboards, scorecards, and reports
+```
+
+### Reports and analytics
+
+Reporting sits on top of completed runs. The platform supports:
+
+- per-run report generation with `generate-report`
+- cross-run analytics generation with `generate-cross-run-report`
+- evaluator drafting support with `generate-evaluator-draft`
+
+Generated report content is cached in `evaluation_analytics`.
 
 ---
 
-### Built-in Evaluators
+## CORE ABSTRACTIONS
 
-Three evaluators are available for each app:
+### EvalRun is the center of the system
 
-| Evaluator | Purpose |
-|-----------|---------|
-| Intent | Classifies whether the AI response addressed the user's stated intent |
-| Correctness | Assesses factual or clinical accuracy of the response |
-| Efficiency | Evaluates workflow efficiency and response conciseness |
+Every evaluation outcome lands in `eval_runs`. The `eval_type` field determines how to interpret the `result` payload.
 
-**Important:** Evaluators are NOT auto-seeded on startup (unlike prompts and schemas). They must be seeded once per app after first login via:
+```text
+custom             single evaluator output
+full_evaluation    Voice Rx full pipeline output
+human              manual review / human-authored result
+batch_thread       aggregate thread evaluation output
+batch_adversarial  aggregate adversarial evaluation output
+call_quality       inside-sales call evaluation output
 ```
-POST /api/evaluators/seed-defaults?appId=voice-rx
-POST /api/evaluators/seed-defaults?appId=kaira-bot
-POST /api/evaluators/seed-defaults?appId=inside-sales
+
+Dependent detail rows hang off that core record:
+
+```text
+listings / chat_sessions
+    -> eval_runs
+        -> thread_evaluations
+        -> adversarial_evaluations
+        -> api_logs
 ```
+
+### Jobs are the execution model
+
+Long-running work is submitted as a job row and executed by the worker. The registered job types are:
+
+| Job type | Purpose |
+| --- | --- |
+| `evaluate-voice-rx` | Voice Rx transcription and critique |
+| `evaluate-custom` | Single custom evaluator run |
+| `evaluate-custom-batch` | Batch custom evaluator execution |
+| `evaluate-batch` | Thread batch evaluation |
+| `evaluate-adversarial` | Adversarial testing |
+| `evaluate-inside-sales` | Inside Sales scoring |
+| `generate-report` | Single-run reporting |
+| `generate-evaluator-draft` | Draft evaluator generation |
+| `generate-cross-run-report` | Cross-run analytics reporting |
+
+The queue layer now supports more than simple FIFO processing. `job_worker.py` includes:
+
+- queue classes: `interactive`, `standard`, `bulk`
+- priorities
+- retry scheduling for retry-safe job types
+- leases and heartbeats
+- per-tenant, per-app, per-user concurrency controls
+- stale job and orphaned run recovery
+
+### Provider layer
+
+All model calls go through `backend/app/services/evaluators/llm_base.py`. Current providers:
+
+| Provider | Notes |
+| --- | --- |
+| Gemini | Supports API key and service-account auth; uses `Part.from_bytes()` for Vertex media |
+| OpenAI | API-key based |
+| Azure OpenAI | Endpoint plus deployment configuration |
+| Anthropic | API-key based |
+
+Important Gemini rules:
+
+- Vertex AI media uses `Part.from_bytes()`, not file uploads
+- disabling thinking means omitting `thinking_config`
+- model family 2.5 uses `thinking_budget`
+- model family 3+ uses `thinking_level`
+
+### Stores are frontend caches
+
+The React app uses 16 Zustand stores:
+
+`authStore`, `appStore`, `appSettingsStore`, `llmSettingsStore`, `globalSettingsStore`, `listingsStore`, `schemasStore`, `promptsStore`, `evaluatorsStore`, `chatStore`, `uiStore`, `miniPlayerStore`, `taskQueueStore`, `jobTrackerStore`, `crossRunStore`, `insideSalesStore`
+
+These stores cache backend state. PostgreSQL is the source of truth.
+
+### Tenant and RBAC model
+
+Every row belongs to a tenant. Access control is enforced through:
+
+- bearer-token auth on all non-auth routes
+- `AuthContext` on protected backend routes
+- roles, role permissions, and role app access
+- invite links instead of open signup
+
+System-owned library data is stored under the well-known system tenant and system user IDs.
 
 ---
 
-### Custom Evaluators
+## SYSTEM ARCHITECTURE
 
-Users define their own evaluators by writing a prompt and a JSON output schema. The platform executes the prompt against the target content (listing or chat session), calls the LLM, and validates the output against the schema. Results are stored as a `custom` EvalRun.
+```text
+Browser (React SPA)                      Backend (FastAPI)                      Data / Infra
++-----------------------------------+    +-----------------------------------+  +-----------------------------+
+| 18 feature areas                  |    | 22 route groups                   |  | PostgreSQL (29 tables)      |
+| 16 Zustand stores                 |    | provider layer                    |  | Azure Blob or local files   |
+| api client + jobPolling.ts        |<-->| job worker and recovery loops     |  | Azure App Service / Docker  |
+| route constants + UI primitives   |    | reports, evaluators, auth, RBAC   |  | ACR + GitHub Actions        |
++-----------------------------------+    +-----------------------------------+  +-----------------------------+
+            :5173 dev / :80 prod                      :8721
+```
 
-This is the primary extensibility mechanism. Any evaluation criterion — tone, compliance language, clinical accuracy, brand voice — can be codified as an evaluator and versioned.
+### Production service shape
+
+`docker-compose.prod.yml` runs:
+
+- `frontend`
+- `backend`
+- `worker`
+
+There is no `postgres` container in production. Production uses Azure Database for PostgreSQL instead.
+
+### Local development service shape
+
+`docker-compose.yml` runs:
+
+- `postgres`
+- `backend`
+- `worker`
+- `frontend`
+
+Both local and production container stacks use a dedicated worker process by setting `JOB_RUN_EMBEDDED_WORKER=false`.
+
+If you run the backend directly with Uvicorn outside Docker, the default config enables the embedded worker unless you disable it.
 
 ---
 
-### Report Generation
+## FRONTEND STRUCTURE
 
-After evaluation runs complete, a report pipeline can generate:
+Top-level feature areas under `src/features/`:
 
-- Per-run AI narrative summarizing findings
-- Health scores across evaluation dimensions
-- Cross-run analytics comparing trends across multiple runs
-
-Reports are cached in the `evaluation_analytics` table (scope: `single_run` per run, `cross_run` per app). Force regen with `?refresh=true` on the report endpoints.
-
-- Per-run report: `GET /api/reports/{run_id}`
-- Cross-run analytics: `GET /api/reports/cross-run-analytics` / `POST /api/reports/cross-run-analytics/refresh`
-
-Job types: `generate-report`, `generate-cross-run-report`
-
----
-
-## Key Abstractions
-
-### 1. LLM Provider Layer
-
-**Location:** `backend/app/services/evaluators/llm_base.py`
-
-All LLM calls go through provider wrappers. Evaluation runners never call SDKs directly. This is a hard rule — not a preference.
-
-**Four providers:**
-
-| Provider | Auth | Notes |
-|----------|------|-------|
-| `GeminiProvider` | Vertex AI service account (jobs) or API key (settings generation) | Model families 2.0, 2.5, 3+ have different thinking config params |
-| `OpenAIProvider` | API key | Async via `asyncio.to_thread()` |
-| `AzureOpenAIProvider` | Azure API key + endpoint | Inherits OpenAI provider |
-| `AnthropicProvider` | API key | Full retry and timeout support |
-
-**Gemini auth modes — critical distinction:**
-- Service account (Vertex AI): used for all backend evaluation jobs. Reliable for long-running tasks. Does not support `client.files.upload()` — use `Part.from_bytes()` for media.
-- API key (Developer API): used for frontend-triggered tasks (Settings prompt/schema generation). Supports file upload.
-
-**Gemini thinking config:**
-- Model family 2.5: use `thinking_budget` (integer)
-- Model family 3+: use `thinking_level` (enum string)
-- These are mutually exclusive. Wrong param = 400 error.
-- To disable thinking on Vertex AI: omit `thinking_config` entirely. `thinking_budget=0` is rejected by Vertex.
-
-**Timeout tiers:**
-
-| Tier | Timeout | Use case |
-|------|---------|----------|
-| `text_only` | 60s | Text generation |
-| `with_schema` | 90s | Structured JSON output |
-| `with_audio` | 180s | Audio transcription |
-| `with_audio_and_schema` | 240s | Audio + structured output |
-
-**Retry architecture:** Two-layer — SDK-native retries (4–5 attempts) plus app-level `_with_retry` safety net. Per-attempt timeout runs inside `_with_retry`, not wrapping it. This means a `retry-after: 45s` delay does not compete with a 60s timeout.
-
----
-
-### 2. Job Execution Pipeline
-
-**Location:** `backend/app/services/job_worker.py`
-
-Any operation taking more than a few seconds runs as a background job using a handler registry pattern:
-
-```python
-@register_job_handler("evaluate-voice-rx")
-async def handle_evaluate_voice_rx(job, session):
-    ...
-```
-
-**7 registered handlers:**
-
-1. `evaluate-voice-rx` — Voice Rx two-call transcription + critique pipeline
-2. `evaluate-batch` — Batch thread evaluation from CSV
-3. `evaluate-adversarial` — Adversarial test execution against live Kaira API
-4. `evaluate-custom` — Single custom evaluator run
-5. `evaluate-custom-batch` — Batch custom evaluator run
-6. `generate-report` — Per-run report generation
-7. `generate-cross-run-report` — Cross-run analytics generation
-
-**Safety features built into the worker:**
-- Cooperative cancellation via `is_job_cancelled()` checks at natural checkpoints in long-running flows.
-- Progress tracking via `update_job_progress()` for frontend polling feedback.
-- Stale job recovery on startup — jobs stuck longer than 15 minutes are recovered automatically.
-- Orphaned eval_run reconciliation on startup.
-
----
-
-### 3. Frontend Job Polling
-
-**Location:** `src/services/api/jobPolling.ts`
-
-`submitAndPollJob()` is the single abstraction for the entire async job lifecycle. It handles job creation, polling, cancellation, abort, and retry internally. Components call this and navigate to the result on completion.
-
-No component should implement its own polling loop. This is the primary pattern violation to watch for.
-
----
-
-### 4. EvalRun — Central Data Entity
-
-Every evaluation outcome, regardless of workspace or type, is one `EvalRun` record. The `eval_type` field determines the shape of the `result` JSON column:
-
-```
-eval_type: full_evaluation    → Voice Rx two-call result with segment findings
-eval_type: custom             → Single custom evaluator structured output
-eval_type: human              → Manual annotation/review
-eval_type: batch_thread       → Kaira batch thread aggregate summary
-eval_type: batch_adversarial  → Adversarial test aggregate summary
-```
-
-FK/cascade chain: `listings`/`chat_sessions` → `eval_runs` → `thread_evaluations`/`adversarial_evaluations`/`api_logs`
-
-This chain must not be broken. Deleting a listing or chat session cascades down. Deleting an eval_run cleans up its dependent records.
-
----
-
-## Architecture
-
-```
-Browser (React)                         Server (FastAPI)                    Database
-┌───────────────────────┐  HTTP/JSON   ┌──────────────────────────┐       ┌──────────┐
-│  UI Components         │────────────>│  API Routers (17)         │──────>│          │
-│  Zustand Stores (15)   │<────────────│  Services / Evaluators    │<──────│ Postgres │
-│  API Client Layer      │             │  Job Worker (7 handlers)  │       │  (JSONB) │
-└───────────────────────┘             │  LLM Providers (4)        │       └──────────┘
-   dev: :5173 / prod: :80             └──────────────────────────┘
-                                                :8721
-```
-
-The frontend never calls LLM APIs directly. All evaluation logic, LLM calls, and data persistence run through the FastAPI backend. The frontend is a thin client.
-
----
-
-## Frontend Structure (`src/`)
-
-```
-src/
-├── app/               <- App shell, routing, page components
-├── components/ui/     <- Generic UI primitives (Button, Modal, Badge, etc.)
-├── config/            <- Route constants, app configuration
-├── constants/         <- Hardcoded values, default configs
-├── features/          <- Domain-specific modules (see below)
-├── hooks/             <- Reusable React hooks
-├── services/
-│   ├── api/           <- HTTP client + per-resource API modules + jobPolling
-│   ├── storage/       <- Barrel re-export from api/ (backward compat)
-│   ├── notifications/ <- Toast notifications via notificationService
-│   └── logger/        <- Structured diagnostic logging
-├── stores/            <- Zustand stores (14 stores + index barrel)
-├── styles/            <- Tailwind v4 globals + CSS variables (design tokens)
-├── types/             <- TypeScript interfaces and type definitions
-└── utils/             <- Pure helpers (cn, date parsing, etc.)
-```
-
-**Feature modules (`src/features/`):**
-
-| Feature | Purpose |
-|---------|---------|
-| `voiceRx` | Voice Rx dashboard, run list, run detail, settings |
-| `evalRuns` | Shared evaluation dashboard, run list, run detail (used by kaira-bot) |
-| `kaira` | Chat interface, message tagging, trace analysis, action buttons |
+| Feature area | Responsibility |
+| --- | --- |
+| `admin` | Tenant, user, and operational admin surfaces |
+| `analytics` | Dashboards and summary views |
+| `auth` | Login and signup flow |
+| `credentialPool` | Credential management UI |
+| `csvImport` | CSV ingestion flows |
+| `evalRuns` | Run list and run-detail flows |
+| `evals` | Evaluation-centric shared UI |
+| `export` | Export actions and report outputs |
+| `guide` | In-app guide and reference views |
+| `insideSales` | Inside Sales workspace |
+| `kaira` | Kaira Bot workspace |
 | `kairaBotSettings` | Kaira-specific settings and tag management |
-| `settings` | LLM provider config, prompt/schema editors, model selection |
-| `upload` | File upload with drag-and-drop, CSV preview, validation |
-| `transcript` | Transcript viewer with segment-level display and audio alignment |
-| `structured-outputs` | JSON viewer, schema validator, structured output comparison |
-| `evals` | Metric displays, comparison cards, evaluation statistics |
-| `export` | PDF/CSV/JSON export with format selectors |
-| `listings` | Listing cards, list views, detail views |
-| `common` | Shared cross-feature UI components |
+| `listings` | Listing management |
+| `settings` | Global app settings, prompts, schemas, evaluators |
+| `structured-outputs` | Structured output viewers and helpers |
+| `transcript` | Transcript display and review |
+| `upload` | Upload and validation flows |
+| `voiceRx` | Voice Rx workspace |
 
-**Zustand stores (16):** authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, schemasStore, promptsStore, evaluatorsStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore
+Important shared frontend layers:
 
-**Critical Zustand pattern:**
-
-```typescript
-// Correct — re-renders only when this slice changes
-const prompts = usePromptsStore((s) => s.prompts['voice-rx']);
-
-// Wrong — re-renders on any store mutation
-const store = usePromptsStore();
-```
-
-**API client modules (`src/services/api/`):**
-
-| Module | Purpose |
-|--------|---------|
-| `client.ts` | Shared HTTP client (`apiRequest`, `apiUpload`, `apiDownload`) |
-| `jobPolling.ts` | `submitAndPollJob()` — async job lifecycle abstraction |
-| `listingsApi.ts`, `filesApi.ts`, `promptsApi.ts`, `schemasApi.ts` | Resource CRUD |
-| `evaluatorsApi.ts`, `evalRunsApi.ts`, `chatApi.ts`, `jobsApi.ts` | Domain resources |
-| `settingsApi.ts`, `tagsApi.ts`, `adversarialConfigApi.ts`, `historyApi.ts` | Supporting resources |
-| `reportsApi.ts` | Report fetching and refresh |
+- `src/services/api/client.ts` for HTTP
+- `src/services/api/jobPolling.ts` for async job lifecycle handling
+- `src/config/routes.ts` for route construction
+- `src/components/ui/` for primitives
+- `src/utils/cn.ts` for class merging
 
 ---
 
-## Backend Structure (`backend/`)
+## BACKEND STRUCTURE
 
-```
-backend/app/
-├── main.py                    <- FastAPI app, router registration (20 routers), lifespan hooks
-├── database.py                <- Async SQLAlchemy engine + session factory
-├── config.py                  <- All config from env vars (pydantic-settings)
-├── models/                    <- 28 ORM models (SQLAlchemy 2 Mapped[] style)
-├── schemas/                   <- Pydantic request/response schemas (CamelModel)
-├── routes/                    <- 20 API routers
-└── services/
-    ├── evaluators/            <- llm_base.py providers + evaluation runners
-    ├── reports/               <- Report aggregation, AI narrative, health scores
-    ├── job_worker.py          <- Background job dispatch + handler registry
-    ├── seed_defaults.py       <- Startup seeding (prompts, schemas, evaluators)
-    └── evaluation_constants.py <- System prompts, normalization templates
-```
+### Route groups
 
-**ORM tables (28):** tenants, users, refresh_tokens, eval_runs, jobs, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, tags, thread_evaluations, adversarial_evaluations, api_logs, evaluation_analytics, external_agents, apps, tenant_configs, roles, role_permissions, role_app_access, invite_links, audit_log, lsq_lead_cache
+The backend currently registers 22 route groups:
 
-**API routers (20):** auth, listings, files, prompts, schemas, evaluators, chat, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, admin, reports, inside_sales, apps, roles
+`auth`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat`, `history`, `settings`, `tags`, `jobs`, `eval_runs`, `threads`, `llm`, `adversarial_config`, `adversarial_test_cases`, `admin`, `reports`, `inside_sales`, `apps`, `roles`, `rules`
 
-**Evaluation runners (`backend/app/services/evaluators/`):**
+### ORM tables
 
-| Runner | Purpose |
-|--------|---------|
-| `voice_rx_runner.py` | Two-call transcription + critique pipeline |
-| `custom_evaluator_runner.py` | Execute user-defined evaluator prompt + schema |
-| `batch_runner.py` | CSV-based batch processing for threads and adversarial |
-| `intent_evaluator.py` | Intent classification |
-| `correctness_evaluator.py` | Correctness assessment |
-| `efficiency_evaluator.py` | Efficiency/workflow evaluation |
-| `adversarial_evaluator.py` | Adversarial probe execution |
-| `inside_sales_runner.py` | Inside Sales call quality pipeline (LeadSquared integration) |
+The SQLAlchemy model layer currently defines 29 tables:
 
-**Seed defaults (`seed_defaults.py`):**
+`tenants`, `users`, `refresh_tokens`, `listings`, `eval_runs`, `thread_evaluations`, `adversarial_evaluations`, `api_logs`, `tags`, `prompts`, `lsq_lead_cache`, `jobs`, `schemas`, `chat_sessions`, `chat_messages`, `audit_log`, `evaluation_analytics`, `files`, `invite_links`, `external_agents`, `apps`, `tenant_configs`, `adversarial_test_cases`, `evaluators`, `history`, `settings`, `roles`, `role_app_access`, `role_permissions`
 
-On startup the backend seeds prompts and schemas (NOT evaluators) if they don't exist:
-- Voice Rx: 5 prompts, 5 schemas
-- Kaira Bot: 2 prompts, 1 schema
-- Apps: 3 app records (voice-rx, kaira-bot, inside-sales)
+### Startup and seeding
 
-Evaluators must be seeded manually per app after first login (see `POST /api/evaluators/seed-defaults`).
+`backend/app/main.py` does several important things at startup:
+
+1. validates critical config
+2. creates tables
+3. applies safe one-time migrations
+4. seeds defaults
+5. bootstraps the first admin if needed
+6. starts recovery and worker loops when embedded execution is enabled
+
+### Seeded defaults
+
+`seed_defaults.py` seeds:
+
+- system tenant and system user
+- app records for `voice-rx`, `kaira-bot`, and `inside-sales`
+- default prompts and schemas
+
+Evaluators are not auto-seeded on startup. They must be seeded separately per app.
 
 ---
 
-## Data Flows
+## REPRESENTATIVE DATA FLOWS
 
-### Voice Rx Full Evaluation
+### Voice Rx upload evaluation
 
-```
-1. UPLOAD
-   FileDropZone component
-   └── filesApi.upload()
-       └── POST /api/files
-           └── FileRecord saved, file written to disk/blob
-
-2. CREATE LISTING
-   ListingCard component
-   └── listingsApi.create()
-       └── POST /api/listings
-           └── Listing row with file references
-
-3. RUN EVALUATION
-   RunAllOverlay component
-   └── submitAndPollJob("evaluate-voice-rx", params)
-       └── POST /api/jobs → Job created (status: queued)
-           job_worker picks up job:
-           ├── Call 1: GeminiProvider.generate() with audio (Part.from_bytes)
-           │         System prompt: multilingual, script-aware
-           ├── Call 2: GeminiProvider.generate_json() text-only
-           │         Compares AI transcript vs reference
-           ├── EvalRun saved (eval_type: full_evaluation)
-           ├── ApiLog entries saved (one per LLM call)
-           └── Job status: completed
-       Frontend polls GET /api/jobs/:id → navigates to /runs/:runId
-
-4. VIEW RESULTS
-   VoiceRxRunDetail page
-   └── evalRunsApi.getById()
-       └── GET /api/eval-runs/:id
-           └── Returns EvalRun with segment-level findings + aggregate stats
+```text
+file upload
+ -> POST /api/files
+ -> listing creation
+ -> POST /api/jobs (evaluate-voice-rx)
+ -> worker claims the job
+ -> transcription call with audio
+ -> critique call with text only
+ -> EvalRun + ApiLog rows persist
+ -> frontend polls job status and navigates to run detail
 ```
 
-### Kaira Batch Thread Evaluation
+### Kaira batch evaluation
 
+```text
+CSV import
+ -> listing or thread source creation
+ -> POST /api/jobs (evaluate-batch)
+ -> worker iterates rows and evaluators
+ -> thread_evaluations rows persist
+ -> aggregate EvalRun persists
+ -> reports can be generated later
 ```
-1. User uploads thread CSV via upload interface
-2. submitAndPollJob("evaluate-batch", { listingId, evaluatorIds, ... })
-3. POST /api/jobs → Job queued
-4. job_worker dispatches to batch_runner
-5. batch_runner iterates CSV rows:
-   └── Per thread: run each evaluator → save ThreadEvaluation row
-6. Aggregate EvalRun saved (eval_type: batch_thread) with summary stats
-7. Frontend polls completion → navigates to run detail
+
+### Kaira adversarial workflow
+
+```text
+configure adversarial settings and saved test cases
+ -> submit evaluate-adversarial
+ -> worker executes adversarial probe sequence
+ -> adversarial_evaluations rows persist
+ -> aggregate EvalRun persists
+```
+
+### Inside Sales workflow
+
+```text
+load LeadSquared data
+ -> submit evaluate-inside-sales
+ -> scoring pipeline runs
+ -> EvalRun and supporting outputs persist
+ -> dashboards and reports consume the stored results
 ```
 
 ---
 
-## Key Conventions
+## OPERATIONAL CONVENTIONS
 
-### API Contract: snake_case ↔ camelCase
+### API contract
 
-Python code uses `snake_case` internally. API JSON uses `camelCase`. Translation is automatic via Pydantic's `CamelModel`/`CamelORMModel`:
+Backend code uses `snake_case`. API JSON uses `camelCase` through the Pydantic schema layer.
 
-```python
-class EvalRunResponse(CamelORMModel):
-    eval_type: str        # serializes as "evalType" in JSON
-    created_at: datetime  # serializes as "createdAt" in JSON
-```
+### LLM settings scope
 
-### Versioned Resources
+LLM settings are global per tenant and user, stored with `app_id=""`. App-specific settings use the actual app ID.
 
-Prompts and schemas are versioned per `(app_id, type)`. The backend auto-increments version numbers when new rows are written. Always reference the latest version for a given type.
+### Frontend async rule
 
-### Settings Scope
+Components should not own their own job polling loops. They must use `submitAndPollJob()`.
 
-LLM settings are always global — stored at `app_id=""` (empty string, not `null`). Per-app settings use the actual app_id.
+### Backend auth rule
 
-```
-app_id=""         key="defaultProvider"   <- global LLM settings
-app_id="voice-rx" key="language"          <- per-app non-LLM setting
-```
+`/api/auth/*` routes are the only public routes. Everything else requires bearer auth and tenant-aware filtering.
 
-Never pass an app_id when reading LLM settings. Fix callers, not the lookup function.
+### File storage modes
+
+The backend supports:
+
+- `local`
+- `azure_blob`
 
 ---
 
-## Quick Reference
+## IF YOU ARE NEW TO THE REPO
 
-| Need to... | Use... |
-|------------|--------|
-| Make an HTTP request | `apiRequest`/`apiUpload` from `src/services/api/client.ts` |
-| Access resource data | Repository wrappers in `src/services/api/*.ts` |
-| Run a background evaluation | `submitAndPollJob()` from `src/services/api/jobPolling.ts` |
-| Read/write UI state | Zustand stores in `src/stores/` — select slices |
-| Navigate between pages | Route constants from `src/config/routes.ts` |
-| Show user feedback | `notificationService.success/error/info/warning` |
-| Log diagnostics | `logger` / `evaluationLogger` |
-| Merge CSS classes | `cn()` from `src/utils/cn.ts` |
-| Call an LLM | Provider wrappers in `backend/app/services/evaluators/llm_base.py` |
-| Add a new evaluation type | Handler in `job_worker.py` + runner in `evaluators/` + frontend polling |
-| Add a new API resource | Model + schema + route + frontend API module + store update |
+Start in this order:
+
+1. `README.md` for a quick orientation
+2. `docs/SETUP.md` for local or production setup
+3. `backend/app/main.py` for startup and route registration
+4. `backend/app/services/job_worker.py` for execution behavior
+5. `src/services/api/jobPolling.ts` for frontend async orchestration
+6. the workspace feature directory you are changing

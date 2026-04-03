@@ -4,7 +4,7 @@
 
 **Goal:** Rewrite the analytics/reporting layer into a config-driven, scalable backbone that supports single-run reports, cross-run analytics, AI summaries, and Playwright-backed PDF export without frontend app hardcoding.
 
-**Architecture:** Treat reporting as a platform contract, not a collection of app-specific pages. Backend analytics profiles compute domain metrics, shared composers assemble canonical section/document payloads, app config declares composition and capabilities, frontend composers render shared section components, and one shared HTML renderer produces print documents for Playwright export.
+**Architecture:** Treat reporting as a platform contract, not a collection of app-specific pages. Backend analytics profiles compute domain metrics, shared composers assemble canonical section/document payloads, app config declares tabs and semantic component bindings, a frontend interpreter resolves those bindings against a shared reporting component library, and one shared HTML renderer produces print documents for Playwright export.
 
 **Tech Stack:** FastAPI, SQLAlchemy, PostgreSQL JSONB, Pydantic/CamelModel, React, TypeScript, Zustand, Playwright PDF generation, background jobs via `job_worker.py`
 
@@ -15,9 +15,11 @@
 ## Guardrails
 
 - Keep long-running report generation job-backed. No component polling loops beyond existing job polling abstractions.
+- Treat reporting jobs as lease-backed worker tasks, not best-effort async helpers. Reporting work must respect heartbeat, retry, dead-letter, stale-recovery, and cooperative-cancellation semantics already present in the job system.
 - Keep frontend as a thin client. Analytics computation, report assembly, asset resolution, and export HTML generation stay on the backend.
 - Do not encode domain-specific analytics math in app config.
 - Do not preserve app-specific frontend registries as a permanent compatibility layer.
+- Do not collapse all report UIs into one visually-generic renderer.
 - Do not introduce new raw HTML template functions per app.
 - Preserve the current provider/model selector UX and metadata-sync behavior from `src/features/evalRuns/components/report/ReportTab.tsx`.
 - Normalize and harden narrative prompt/schema contracts; prompt text alone is not the contract.
@@ -25,6 +27,7 @@
 - Bring Voice Rx onto the canonical backbone even if its first normalized report has fewer sections than Kaira and Inside Sales.
 - Use app config for structure/capabilities and settings-backed assets for long-form report-side content.
 - Prefer atomic cache invalidation/regeneration over long compatibility shims.
+- Remove remaining inline report-generation paths from `backend/app/routes/reports.py` once the canonical job-backed flow is complete. `generate-report` and `generate-cross-run-report` should be the authoritative generation entry points.
 
 ---
 
@@ -86,10 +89,15 @@
 
 ### Jobs / caching
 
+- Modify: `backend/app/models/job.py`
+- Modify: `backend/app/schemas/job.py`
+- Modify: `backend/app/routes/jobs.py`
 - Modify: `backend/app/services/job_worker.py`
+- Modify: `backend/app/worker.py`
 - Modify: `backend/app/models/evaluation_analytics.py`
 - Modify: `backend/tests/test_analytics_registry_unittest.py`
 - Modify: `backend/tests/test_cross_run_aggregators_unittest.py`
+- Modify: `backend/tests/test_job_worker_unittest.py`
 - Create: `backend/tests/test_report_contracts.py`
 - Create: `backend/tests/test_report_composer.py`
 - Create: `backend/tests/test_print_document_renderer.py`
@@ -114,6 +122,9 @@
 
 - Create: `src/features/analytics/composers/RunReportComposer.tsx`
 - Create: `src/features/analytics/composers/CrossRunComposer.tsx`
+- Create: `src/features/analytics/interpreter/RunReportInterpreter.tsx`
+- Create: `src/features/analytics/interpreter/CrossRunInterpreter.tsx`
+- Create: `src/features/analytics/interpreter/componentRegistry.ts`
 - Create: `src/features/analytics/components/ReportGenerationShell.tsx`
 - Create: `src/features/analytics/sections/ReportSummaryCardsSection.tsx`
 - Create: `src/features/analytics/sections/ReportNarrativeSection.tsx`
@@ -126,13 +137,15 @@
 - Create: `src/features/analytics/sections/ReportIssuesSection.tsx`
 - Create: `src/features/analytics/sections/ReportExemplarsSection.tsx`
 - Create: `src/features/analytics/sections/ReportPromptGapSection.tsx`
+- Create: `src/features/analytics/sections/ReportAgentDimensionHeatmapSection.tsx`
+- Create: `src/features/analytics/sections/ReportRuleComplianceMatrixSection.tsx`
 - Modify: `src/features/analytics/AppReportTab.tsx`
 - Modify: `src/features/analytics/AnalyticsDashboardPage.tsx`
 - Retire/replace: `src/features/analytics/registry.tsx`
 - Retire/replace: `src/features/analytics/KairaCrossRunDashboard.tsx`
 - Retire/replace: `src/features/analytics/InsideSalesCrossRunDashboard.tsx`
-- Retire/replace: `src/features/evalRuns/components/report/KairaReportView.tsx`
-- Retire/replace: `src/features/insideSales/components/report/InsideSalesReportView.tsx`
+- Retire/replace after parity: `src/features/evalRuns/components/report/KairaReportView.tsx`
+- Retire/replace after parity: `src/features/insideSales/components/report/InsideSalesReportView.tsx`
 
 ### Shared widgets to preserve or fold into section library
 
@@ -309,6 +322,7 @@
 - Kaira and Inside Sales adapters emit canonical section input instead of app-specific payloads.
 - Prompt references and similar report-side assets resolve through settings-backed keys rather than static module constants.
 - Narrator services consume explicit prompt/schema contracts and resolved assets instead of ad hoc prompt modules.
+- Composition and cache writes must remain idempotent under worker retry and stale-job recovery.
 
 **Checklist:**
 
@@ -323,6 +337,8 @@
 - [ ] Ensure cross-run AI summary input is assembled server-side from canonical sections instead of trusting frontend-shaped payloads.
 - [ ] Remove assumptions that a given app owns a top-level payload family.
 - [ ] Keep existing domain math intact while changing assembly shape.
+- [ ] Make cache write/update paths safe under duplicate execution attempts for the same report job.
+- [ ] Ensure long-lived report generation steps can observe cancellation before final cache/state writes where practical.
 
 **Verification:**
 
@@ -376,7 +392,7 @@
 
 ## Phase 6: Frontend Shared Report Composers and Section Library
 
-**Objective:** Replace app-specific analytics pages with shared composers rendering canonical sections.
+**Objective:** Replace app-specific analytics pages with a shared interpreter rendering canonical sections through a shared semantic reporting library.
 
 **Primary files:**
 
@@ -395,20 +411,24 @@
 **Implementation scheme:**
 
 - Fetch canonical payloads.
-- Render sections through one composer per scope.
-- Reuse existing low-level report widgets where appropriate, but make section components the real public abstraction.
+- Render tabs and sections through one interpreter per scope.
+- Resolve section `component` keys through a semantic reporting-library registry.
+- Reuse existing low-level report widgets where appropriate, but make library section components the real public abstraction.
 - Preserve provider/model selection as a shared report-generation shell concern.
 
 **Checklist:**
 
-- [ ] Create section renderer lookup by canonical section type.
+- [ ] Add tab config to app analytics config and interpreter inputs.
+- [ ] Create component registry lookup by config `component` key.
 - [ ] Move loading/error/empty states into shared shells that read app config analytics capabilities.
 - [ ] Adapt `ReportTab` to render canonical payloads instead of app-specific payload generics.
 - [ ] Preserve the current provider/model selection UX and metadata sync behavior from `ReportTab`.
 - [ ] Keep credential gating behavior and notification flow intact during canonicalization.
 - [ ] Update cross-run store and API typing to use canonical payloads.
 - [ ] Reuse existing issue/recommendation, heatmap, compliance, and chart widgets under new section wrappers.
+- [ ] Add semantic library components for specialized sections such as exemplar threads and agent-dimension heatmaps.
 - [ ] Keep action controls such as refresh/export in shared shells, not in app-specific pages.
+- [ ] Preserve tab structure and specialized interactions when migrating Kaira and Inside Sales.
 
 **Verification:**
 
@@ -418,12 +438,13 @@
 **Exit gate:**
 
 - The frontend no longer needs app-specific analytics registries or app-specific run/cross-run pages to render normalized reporting.
+- Specialized report affordances are still preserved through semantic library components selected by config.
 
 ---
 
 ## Phase 7: Kaira and Inside Sales Migration
 
-**Objective:** Preserve current UX spirit while cutting Kaira and Inside Sales onto the new backbone.
+**Objective:** Preserve current UX spirit while cutting Kaira and Inside Sales onto the new backbone using config-driven tabs and semantic reporting-library components.
 
 **Primary files:**
 
@@ -438,8 +459,9 @@
 
 **Implementation scheme:**
 
-- Match current section coverage and meaning through canonical sections and configured composition.
-- Preserve app-specific visual emphasis through section variants and theme tokens, not through separate page implementations.
+- Match current tab structure, section coverage, and meaning through canonical sections and configured composition.
+- Preserve app-specific visual emphasis through section variants and theme tokens, not through app-bound page implementations.
+- Promote specialized sections into semantic reporting-library components rather than app-named views.
 
 **Checklist:**
 
@@ -447,6 +469,8 @@
 - [ ] Map current Kaira cross-run dashboard tabs to canonical sections.
 - [ ] Map current Inside Sales run sections to canonical sections.
 - [ ] Map current Inside Sales cross-run dashboard tabs to canonical sections.
+- [ ] Preserve the Inside Sales agent x dimension heatmap as a semantic library component, not as a generic entity card fallback.
+- [ ] Preserve Kaira exemplar threads as a semantic library component, not as an app-bound view.
 - [ ] Preserve Kaira prompt-gap analysis and adversarial reporting.
 - [ ] Preserve Inside Sales agent slices, compliance, and flag/coaching emphasis.
 - [ ] Verify report generation still supports provider/model overrides and correctly reflects the chosen model in cached metadata.
@@ -466,6 +490,7 @@
 **Exit gate:**
 
 - Kaira and Inside Sales run entirely on canonical report and export contracts with no app-specific frontend analytics pages remaining on the critical path.
+- Kaira and Inside Sales still retain their recognizable tab/section behavior through config-selected semantic library components.
 
 ---
 
@@ -516,6 +541,9 @@
 - Regressions in the provider/model picker UX while moving to a shared analytics shell
 - PDF regressions from page-break and table layout differences
 - Cache invalidation gaps when app config or report assets change
+- Worker retry or stale-recovery re-running report generation and overwriting newer cache state
+- Inline route-side generation drifting from job-worker generation semantics
+- Missing cancellation/lease-awareness in long-running reporting paths
 - Voice Rx analytics scope ambiguity if not explicitly defined before Phase 8
 
 ## Required Verification Matrix

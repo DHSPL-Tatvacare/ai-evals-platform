@@ -155,6 +155,27 @@ This means the rewrite must normalize both:
 - the user-facing LLM config shell
 - the backend prompt/schema contract layer
 
+### 2.7 Worker Contract Has Tightened Beyond What Reporting Documents Today
+
+The job system is no longer a simple queued/background convenience. It now has a DB-backed worker contract with:
+
+- queue metadata promoted to first-class columns
+- lease ownership and lease expiry
+- heartbeat refresh while a job is running
+- retry scheduling for retry-safe job types
+- dead-letter semantics when retry budget is exhausted
+- startup and periodic recovery of stale jobs and stale eval runs
+- cooperative cancellation semantics used by long-running execution paths
+
+Reporting already participates in this model through `generate-report` and `generate-cross-run-report`, but the reporting design has not yet spelled out the consequences:
+
+- report generation must be idempotent under retries
+- cache writes must tolerate duplicate execution attempts safely
+- routes must not keep a second inline generation path once cutover is complete
+- long-running report work must cooperate with cancellation and lease-loss semantics
+
+That mismatch is now a design risk. The normalized reporting backbone must be designed against the real worker contract, not the older "background job" abstraction.
+
 ---
 
 ## 3. Approaches Considered
@@ -226,7 +247,7 @@ The normalized reporting backbone will have five layers:
 1. **Analytics app config**
 2. **Backend analytics adapters**
 3. **Canonical report contracts**
-4. **Frontend composers on shared section components**
+4. **Frontend interpreter on shared reporting component library**
 5. **Canonical print document contract + shared HTML renderer**
 
 Only layer 2 remains app-specific in code, and even there the extension point is adapter registration by analytics profile, not frontend branching by app ID.
@@ -239,8 +260,9 @@ It will describe:
 
 - capabilities
 - adapter key
-- section composition for single-run reports
-- section composition for cross-run dashboards
+- tab composition for single-run reports
+- tab composition for cross-run dashboards
+- component selection for each section slot
 - export options
 - AI summary options
 - references to report-side assets such as prompt references or narrative assets
@@ -257,11 +279,11 @@ interface AppAnalyticsConfig {
     pdfExport: boolean;
   };
   singleRun: {
-    sections: AnalyticsSectionConfig[];
+    tabs: AnalyticsTabConfig[];
     export: AnalyticsExportConfig;
   };
   crossRun: {
-    sections: AnalyticsSectionConfig[];
+    tabs: AnalyticsTabConfig[];
     export?: AnalyticsExportConfig;
   };
   assets: {
@@ -272,9 +294,30 @@ interface AppAnalyticsConfig {
 }
 ```
 
+Where `AnalyticsTabConfig` is a declarative list of section/component bindings, for example:
+
+```ts
+interface AnalyticsTabConfig {
+  id: string;
+  label: string;
+  sections: AnalyticsSectionConfig[];
+}
+
+interface AnalyticsSectionConfig {
+  id: string;
+  type: string; // canonical semantic type
+  component: string; // semantic library component key
+  title?: string;
+  description?: string;
+  variant?: string;
+}
+```
+
 ### Decision
 
 Use app config for composition and capability wiring. Use shareable settings for longer-lived report assets and content references.
+
+The frontend must interpret config into tabs and semantic section components. It must not hardcode app-specific report pages, and it must not flatten all apps into one visually-generic renderer.
 
 ### Why this split
 
@@ -324,10 +367,28 @@ Each section has:
 
 - `id`
 - `type`
+- `component`
 - `title`
 - `description`
 - `variant`
 - `data`
+
+### Important constraint
+
+`type` identifies the semantic data family.
+
+`component` identifies which reporting-library component should render that section.
+
+These are related but not identical:
+
+- multiple components may render the same canonical `type`
+- a specialized component may still live in the common reporting library
+- component keys must be semantic, not app-branded
+
+Examples:
+
+- good: `agent_dimension_heatmap`, `exemplar_threads`, `rule_compliance_matrix`
+- bad: `kaira_report_view`, `inside_sales_agent_panel`
 
 ## 5.3 Canonical Cross-Run Contract
 
@@ -467,6 +528,32 @@ But route them through canonical composers and profile adapters.
 
 The cross-run AI summary job should stop accepting app-shaped payload assumptions from the frontend. It should operate on canonical issue/recommendation/trend sections or on a canonical summary input assembled server-side.
 
+### Required worker semantics
+
+- Reporting jobs must remain retry-safe and idempotent. A retry or worker recovery may execute the same report generation path more than once, and the resulting cache state must still be correct.
+- Reporting jobs must write progress in a way that remains meaningful across retries, queued retry delays, and resumed polling.
+- Reporting jobs must not assume uninterrupted ownership of a run. If lease ownership changes before completion, stale workers must not overwrite final state.
+- Reporting generation paths must cooperate with cancellation where the work is long-lived enough to matter, especially across narrative generation, multi-step composition, and future export-side jobs if added.
+- Reporting caches must be keyed and written so duplicate attempts converge on the same authoritative row rather than creating divergent report state.
+- The normalized system should have one job-backed generation path per reporting workflow. Inline route-side generation is a transitional state and should be removed from the critical path.
+
+### Upstream impact
+
+- `backend/app/services/job_worker.py`
+- `backend/app/worker.py`
+- `backend/app/models/job.py`
+- `backend/app/routes/jobs.py`
+- `backend/app/routes/reports.py`
+- `backend/app/models/evaluation_analytics.py`
+
+### Downstream impact
+
+- report generation submit/poll UX
+- cache invalidation and regeneration behavior
+- retry and dead-letter handling for reporting jobs
+- stale worker recovery without corrupted report caches
+- future onboarding of new analytics profiles without bypassing worker semantics
+
 ## 6.5 Narrative Prompt and Schema Contract Layer
 
 Narrative generation must become a first-class contract layer, not a collection of loosely related narrator modules.
@@ -515,7 +602,7 @@ The rewrite may move this into a more canonical shared shell, but the experience
 
 ## 7. Frontend Architecture
 
-## 7.1 Replace App Registries With Config-Driven Composers
+## 7.1 Replace App Registries With a Config-Driven Interpreter
 
 Remove the frontend analytics registry as the primary integration mechanism.
 
@@ -524,12 +611,23 @@ Instead:
 - `AppReportTab` loads a canonical payload
 - `AnalyticsDashboardPage` loads a canonical cross-run payload
 - `useAppStore().getAppConfig(appId).analytics` drives composition
-- a shared `RunReportComposer` renders sections in declared order
-- a shared `CrossRunComposer` renders sections in declared order
+- a shared `RunReportInterpreter` renders tabs and sections in declared order
+- a shared `CrossRunInterpreter` renders tabs and sections in declared order
+- the interpreter resolves section `component` keys against a reporting component library
 
-## 7.2 Shared Section Library
+The interpreter is not a generic visual renderer. Its job is:
 
-Standardize report UI into a section component library with a stable API.
+- read tab config
+- read section config
+- resolve the library component for each section
+- bind canonical section data into that component
+- preserve configured ordering and tab layout
+
+It must not own app-specific semantics directly, and it must not force all apps through one generic card/table treatment.
+
+## 7.2 Shared Reporting Component Library
+
+Standardize report UI into a reporting component library with a stable API.
 
 Examples:
 
@@ -544,8 +642,26 @@ Examples:
 - `ReportIssuesSection`
 - `ReportExemplarsSection`
 - `ReportPromptGapSection`
+- `ReportAgentDimensionHeatmapSection`
+- `ReportRuleComplianceMatrixSection`
+- `ReportAdversarialGoalHeatmapSection`
 
 Current low-level widgets should be preserved where useful, but promoted into a clearer shared section system.
+
+### Naming rule
+
+Specialized components are allowed, but they still belong to the shared reporting library and must use semantic names rather than app names.
+
+For example:
+
+- `ExemplarThreadsSection` may initially be used only by Kaira
+- `AgentDimensionHeatmapSection` may initially be used only by Inside Sales
+
+That is acceptable. What is not acceptable is binding those components to one app in their identity or path.
+
+### Reuse rule
+
+If a future app can benefit from a component first introduced for Kaira or Inside Sales, it should be able to select that component through config with no renaming or extraction step.
 
 ## 7.2.1 Shared LLM Config Shell
 
@@ -578,6 +694,17 @@ The rewrite must preserve the spirit of current analytics UX:
 - issues, trends, compliance, flags, agent slices, exemplars, and recommendations remain recognizable
 
 What changes is the composition mechanism, not the meaning of the product.
+
+### Explicit preservation rule
+
+The normalized frontend may replace app-specific page shells, but it must preserve:
+
+- major tab structure
+- recognizable section layout
+- specialized interaction patterns such as agent-by-dimension heatmaps
+- app-specific visual emphasis where it communicates product meaning
+
+Shared composition must not erase specialized report affordances.
 
 ---
 

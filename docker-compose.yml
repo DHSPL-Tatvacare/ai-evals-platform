@@ -1,3 +1,24 @@
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment:
+    DATABASE_URL: postgresql+asyncpg://evals_user:evals_pass@postgres:5432/ai_evals_platform
+    FILE_STORAGE_TYPE: local
+    FILE_STORAGE_PATH: /app/uploads
+    API_PORT: 8721
+    CORS_ORIGINS: http://localhost:5173
+    JOB_RUN_EMBEDDED_WORKER: "false"
+  env_file:
+    - .env.backend
+  volumes:
+    - ./backend/app:/app/app # hot-reload: Python source
+    - backend-uploads:/app/uploads # persist uploaded files
+    - ./service-account.json:/app/service-account.json:ro # Gemini service account
+  depends_on:
+    postgres:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,51 +38,15 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: evals-backend
     ports:
       - "8721:8721"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://evals_user:evals_pass@postgres:5432/ai_evals_platform
-      FILE_STORAGE_TYPE: local
-      FILE_STORAGE_PATH: /app/uploads
-      API_PORT: 8721
-      CORS_ORIGINS: http://localhost:5173
-      JOB_RUN_EMBEDDED_WORKER: "false"
-    env_file:
-      - .env.backend
-    volumes:
-      - ./backend/app:/app/app # hot-reload: Python source
-      - backend-uploads:/app/uploads # persist uploaded files
-      - ./service-account.json:/app/service-account.json:ro # Gemini service account
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: evals-worker
     command: ["python", "-m", "app.worker"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://evals_user:evals_pass@postgres:5432/ai_evals_platform
-      FILE_STORAGE_TYPE: local
-      FILE_STORAGE_PATH: /app/uploads
-      API_PORT: 8721
-      CORS_ORIGINS: http://localhost:5173
-      JOB_RUN_EMBEDDED_WORKER: "false"
-    env_file:
-      - .env.backend
-    volumes:
-      - ./backend/app:/app/app
-      - backend-uploads:/app/uploads
-      - ./service-account.json:/app/service-account.json:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   frontend:
     build:

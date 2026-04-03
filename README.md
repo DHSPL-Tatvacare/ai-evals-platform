@@ -1,109 +1,79 @@
 # AI Evals Platform
 
 ![React + TypeScript](https://img.shields.io/badge/React_19_+_TypeScript-61DAFB?logo=react&logoColor=white)
-![Vite + Tailwind](https://img.shields.io/badge/Vite_7_+_Tailwind_v4-646CFF?logo=vite&logoColor=white)
 ![FastAPI + Python](https://img.shields.io/badge/FastAPI_+_Python_3.12-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?logo=postgresql&logoColor=white)
 ![Docker + Azure](https://img.shields.io/badge/Docker_+_Azure_App_Service-2496ED?logo=docker&logoColor=white)
 
-Full-stack evaluation platform for AI outputs in production clinical and conversational workflows. Gives QA teams a structured, reproducible way to measure, compare, and audit AI model performance — backed by versioned prompts/schemas, a background job pipeline, and a unified result store.
-
----
+AI Evals Platform is a multi-tenant evaluation system for production AI workflows. It gives product, QA, and operations teams a repeatable way to score outputs, review evidence, compare runs, and audit how AI behavior changes over time across clinical transcription, conversational AI, and inside-sales use cases.
 
 ## Workspaces
 
-| App | What it evaluates | How |
-|-----|------------------|-----|
-| **Voice Rx** | Medical transcription quality | Upload audio + reference transcript, two-call LLM pipeline (transcribe → critique) |
-| **Kaira Bot** | Conversational AI quality | Bulk thread evaluation from CSV, custom evaluators, adversarial testing against live API |
-| **Inside Sales** | AI-assisted sales calls | Pull from LeadSquared, multi-agent structured scoring, per-agent scorecards |
+| Workspace | App ID | Primary use case |
+| --- | --- | --- |
+| Voice Rx | `voice-rx` | Medical transcription and structured extraction quality |
+| Kaira Bot | `kaira-bot` | Chat quality, custom evaluators, batch thread evaluation, and adversarial testing |
+| Inside Sales | `inside-sales` | LeadSquared-backed call quality evaluation and reporting |
 
-## Architecture
+## Stack
 
-```
-Browser (React SPA)              Server (FastAPI)                   Database
-┌────────────────────┐  /api   ┌──────────────────────────┐      ┌──────────┐
-│ Zustand (16 stores)│────────>│ 20 API routers            │─────>│          │
-│ API client layer   │<────────│ 8 job handlers            │<─────│ Postgres │
-│ cn() + Tailwind v4 │         │ 4 LLM providers           │      │ 28 tables│
-└────────────────────┘         │ Rate-limited auth          │      └──────────┘
-  dev :5173 / prod :80         └──────────────────────────┘
-                                         :8721
-```
+- Frontend: React 19, TypeScript, Vite 7, Tailwind CSS 4, Zustand
+- Backend: FastAPI, SQLAlchemy, PostgreSQL, background job worker
+- AI providers: Gemini, OpenAI, Azure OpenAI, Anthropic
+- Deployment: Docker, Azure App Service, Azure Container Registry, Azure Database for PostgreSQL, Azure Blob Storage
 
-**Key design decisions:**
-- Frontend is a thin client — all LLM calls, evaluation logic, and persistence run on the backend
-- Every long-running operation is a background job with polling, cancellation, and crash recovery
-- Multi-tenant with RBAC — invite-only signup, role-based permissions, per-role app access
-- LLM provider abstraction — runners never call SDKs directly
-
-## Quick Start (Local)
+## Quick start
 
 ```bash
-cp .env.backend.example .env.backend    # add at least one LLM API key + JWT_SECRET
-touch service-account.json              # placeholder if not using Vertex AI
+cp .env.backend.example .env.backend
+touch service-account.json
 docker compose up --build
 ```
 
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| Backend | http://localhost:8721/api/health |
-| PostgreSQL | localhost:5432 |
+Local services:
 
-First login uses `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env.backend` (bootstrap admin, created on first startup if no users exist).
+| Service | URL / Port | Notes |
+| --- | --- | --- |
+| Frontend | http://localhost:5173 | React development server |
+| Backend | http://localhost:8721/api/health | FastAPI API |
+| PostgreSQL | localhost:5432 | Local database |
+| Worker | no public port | Runs background jobs separately from the API container |
 
-## Production Deployment (Azure)
+If you are using Gemini on Vertex AI with the Docker stack, point `GEMINI_SERVICE_ACCOUNT_PATH` at `/app/service-account.json`. If you are running the backend directly outside Docker, use the local file path instead. Otherwise, the placeholder file is enough to satisfy the Docker mount.
 
-Deployed via **Azure App Service** running `docker-compose.prod.yml`. CI/CD is tag-triggered — no deploys on every push.
+## Deployment model
 
-```bash
-git tag v1.2.0
-git push origin v1.2.0
-# GitHub Actions builds images → pushes to ACR → deploys to App Service
-```
+Production deploys are tag-triggered through `.github/workflows/deploy.yml`. `docker-compose.prod.yml` runs three services on Azure App Service:
 
-| Azure Service | Purpose |
-|---------------|---------|
-| App Service (Linux, Containers) | Runs frontend (nginx) + backend (uvicorn) |
-| PostgreSQL Flexible Server | Application database |
-| Blob Storage | Uploaded audio, transcripts, files |
-| Container Registry (ACR) | Docker image storage |
-| Key Vault | Secrets (JWT, API keys, service account) |
+- `frontend` on port 80 behind nginx
+- `backend` on port 8721
+- `worker` as a dedicated background job process
 
-**Full setup guide for DevOps:** [`docs/devops-handover.md`](docs/devops-handover.md)
+Uploaded files are stored in Azure Blob Storage, and PostgreSQL runs outside the compose stack on Azure Database for PostgreSQL.
 
 ## Documentation
 
-| Doc | Purpose |
-|-----|---------|
-| [`docs/PROJECT 101.md`](docs/PROJECT%20101.md) | Product overview, architecture, data flows |
-| [`docs/SETUP.md`](docs/SETUP.md) | Local + Azure setup (step-by-step) |
-| [`docs/devops-handover.md`](docs/devops-handover.md) | DevOps deployment brief (Azure services, env vars, CI/CD) |
-| [`CLAUDE.md`](CLAUDE.md) | Claude agent coding guide |
-| [`AGENTS.md`](AGENTS.md) | General agent coding guide |
-| In-app guide (`/guide`) | Interactive architecture explorer (run `npm run sync:guide` to refresh) |
+| Document | Purpose |
+| --- | --- |
+| [`docs/PROJECT 101.md`](docs/PROJECT%20101.md) | Product, architecture, workflows, and core abstractions |
+| [`docs/SETUP.md`](docs/SETUP.md) | Local and production setup, environment variables, and operational commands |
+| [`docs/devops-handover.md`](docs/devops-handover.md) | Production deployment handover for DevOps and cloud operations |
+| [`AGENTS.md`](AGENTS.md) | Repository rules for coding agents |
+| [`CLAUDE.md`](CLAUDE.md) | Claude-specific agent guide |
+| [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | Copilot-facing mirror of the agent guide |
 
-## Project Structure
+## Repository layout
 
-```
-├── src/                        # React frontend
-│   ├── features/               # Domain modules (voiceRx, evalRuns, kaira, settings, admin, ...)
-│   ├── components/ui/          # Shared UI primitives
-│   ├── stores/                 # 16 Zustand stores
-│   ├── services/api/           # HTTP client, job polling, resource APIs
-│   └── services/logger/        # Structured logging (silent in production builds)
-├── backend/
-│   ├── app/main.py             # FastAPI app, router registration, lifespan
-│   ├── app/models/             # 28 SQLAlchemy ORM models
-│   ├── app/routes/             # 20 API routers
-│   ├── app/services/evaluators/# LLM providers + evaluation runners
-│   └── app/services/reports/   # Report aggregation, PDF generation
-├── docker-compose.yml          # Local dev (hot-reload, source mounts)
-├── docker-compose.prod.yml     # Production (baked images, no mounts)
-├── Dockerfile.frontend.prod    # Multi-stage: npm build → nginx
-├── backend/Dockerfile.prod     # Production uvicorn + Playwright
-└── .github/workflows/deploy.yml# CI/CD: tag → ACR → App Service
+```text
+backend/                  FastAPI app, ORM models, job worker, evaluators, and reports
+src/                      React application, feature modules, stores, and shared services
+docker-compose.yml        Local development stack
+docker-compose.prod.yml   Production multi-container deployment
+Dockerfile.frontend       Frontend development image
+Dockerfile.frontend.prod  Frontend production image
+backend/Dockerfile        Backend development image
+backend/Dockerfile.prod   Backend production image
+nginx.prod.conf           Production nginx config
 ```
 
 ## License

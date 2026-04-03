@@ -48,6 +48,7 @@ backend/.venv/
 service-account*.json
 
 # Docker
+.env.prod
 .env.production
 
 # Docs: ignore everything except key docs
@@ -55,13 +56,3 @@ service-account*.json
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
 !/docs/devops-handover.md
-!/docs/plans/
-/docs/plans/*
-!/docs/plans/platform-harmonization-v1/
-/docs/plans/platform-harmonization-v1/*
-!/docs/plans/platform-harmonization-v1/design-spec.md
-!/docs/plans/platform-harmonization-v1/implementation-plan.md
-!/docs/plans/reporting-normalization-v1/
-/docs/plans/reporting-normalization-v1/*
-!/docs/plans/reporting-normalization-v1/design-spec.md
-!/docs/plans/reporting-normalization-v1/implementation-plan.md
