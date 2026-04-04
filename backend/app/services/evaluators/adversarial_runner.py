@@ -2,8 +2,8 @@
 
 Goal-framework v3: uses goals + traits (no categories). Each test case has
 goal_flow and active_traits. Runner snapshots the full config, passes
-selected_goals and flow_mode to generation/conversation/judge, persists
-goal_flow and active_traits as JSONB on adversarial_evaluations rows.
+generation selections to test-case generation, and persists goal_flow and
+active_traits as JSONB on adversarial_evaluations rows.
 """
 import logging
 import time
@@ -52,10 +52,10 @@ def _should_generate_cases(case_mode: str) -> bool:
     return case_mode in {"generate", "hybrid"}
 
 
-def _normalize_selected_rule_ids(selected_rule_ids: list[str] | None) -> list[str]:
+def _normalize_identifier_list(values: list[str] | None) -> list[str]:
     normalized: list[str] = []
-    for rule_id in selected_rule_ids or []:
-        candidate = str(rule_id).strip()
+    for value in values or []:
+        candidate = str(value).strip()
         if candidate and candidate not in normalized:
             normalized.append(candidate)
     return normalized
@@ -135,6 +135,7 @@ async def _resolve_test_cases(
     thinking: str,
     extra_instructions: Optional[str],
     selected_goals: Optional[List[str]],
+    selected_traits: Optional[List[str]],
     flow_mode: str,
     saved_case_ids: list[uuid.UUID],
     include_pinned_cases: bool,
@@ -149,6 +150,7 @@ async def _resolve_test_cases(
             thinking=thinking,
             extra_instructions=extra_instructions,
             selected_goals=selected_goals,
+            selected_traits=selected_traits,
             flow_mode=flow_mode,
         )
 
@@ -219,7 +221,7 @@ async def run_adversarial_evaluation(
     case_workers: int = 1,
     thinking: str = "low",
     selected_goals: Optional[List[str]] = None,
-    selected_rule_ids: Optional[List[str]] = None,
+    selected_traits: Optional[List[str]] = None,
     flow_mode: str = "single",
     extra_instructions: Optional[str] = None,
     case_mode: str = "generate",
@@ -254,20 +256,26 @@ async def run_adversarial_evaluation(
 
     # Resolve adversarial config (from DB or defaults)
     config = (await load_config_from_db(tenant_id=tenant_id, user_id=user_id)).model_copy(deep=True)
-    resolved_selected_rule_ids = _normalize_selected_rule_ids(selected_rule_ids)
-
-    # Filter to selected goals if specified
-    if selected_goals:
-        selected_goal_set = {str(goal_id).strip() for goal_id in selected_goals if str(goal_id).strip()}
-        for goal in config.goals:
-            goal.enabled = goal.enabled and goal.id in selected_goal_set
-        if not any(g.enabled for g in config.goals):
-            raise RuntimeError("No enabled contract goals matched selected_goals")
-
-    if resolved_selected_rule_ids:
-        config.rules = [
-            rule for rule in config.rules if rule.rule_id in resolved_selected_rule_ids
+    resolved_selected_goal_ids: Optional[list[str]] = None
+    if selected_goals is not None:
+        resolved_selected_goal_ids = _normalize_identifier_list(selected_goals)
+        if not resolved_selected_goal_ids:
+            raise RuntimeError("At least one contract goal must be selected")
+        enabled_goal_ids = set(config.enabled_goal_ids)
+        resolved_selected_goal_ids = [
+            goal_id for goal_id in resolved_selected_goal_ids if goal_id in enabled_goal_ids
         ]
+        if not resolved_selected_goal_ids:
+            raise RuntimeError("No enabled contract goals matched selected_goals")
+    resolved_selected_trait_ids: Optional[list[str]] = None
+    if selected_traits is not None:
+        requested_trait_ids = _normalize_identifier_list(selected_traits)
+        enabled_trait_ids = set(config.enabled_trait_ids)
+        resolved_selected_trait_ids = [
+            trait_id for trait_id in requested_trait_ids if trait_id in enabled_trait_ids
+        ]
+        if requested_trait_ids and not resolved_selected_trait_ids:
+            raise RuntimeError("No enabled contract traits matched selected_traits")
 
     # Build snapshot of resolved config for audit
     config_snapshot = {
@@ -312,7 +320,8 @@ async def run_adversarial_evaluation(
             "manual_case_count": len(_normalize_manual_cases(manual_cases)),
             "include_pinned_cases": include_pinned_cases,
             "retry_eval_ids": retry_case_ids,
-            "selected_rule_ids": resolved_selected_rule_ids,
+            "selected_goals": resolved_selected_goal_ids,
+            "selected_traits": resolved_selected_trait_ids,
             "source_run_id": str(source_run_uuid) if source_run_uuid else None,
         },
     )
@@ -403,7 +412,8 @@ async def run_adversarial_evaluation(
             test_count=test_count,
             thinking=thinking,
             extra_instructions=extra_instructions,
-            selected_goals=selected_goals,
+            selected_goals=resolved_selected_goal_ids,
+            selected_traits=resolved_selected_trait_ids,
             flow_mode=flow_mode,
             saved_case_ids=saved_case_uuid_ids,
             include_pinned_cases=include_pinned_cases,

@@ -60,7 +60,8 @@ def build_generation_prompt(
     trait_lines = []
     for t in traits:
         trait_lines.append(f"- **{t.id}** ({t.label}): {t.description}")
-    trait_block = "\n".join(trait_lines) if trait_lines else "- (no traits defined)"
+    has_trait_catalog = len(traits) > 0
+    trait_block = "\n".join(trait_lines) if has_trait_catalog else "- No persona traits are selected for this run."
 
     # Flow mode instructions
     if flow_mode == "multi":
@@ -79,6 +80,24 @@ def build_generation_prompt(
     valid_trait_ids = [t.id for t in traits]
     goal_id_list = ", ".join(f'"{gid}"' for gid in valid_goal_ids)
     trait_id_list = ", ".join(f'"{tid}"' for tid in valid_trait_ids) if valid_trait_ids else "(none)"
+    if has_trait_catalog:
+        trait_instruction = "Assign zero or more traits from the catalog below to shape the simulated persona."
+        difficulty_guidance = """## Difficulty
+Assign each test case a difficulty (easy / medium / hard).
+Distribute roughly evenly. Harder = more traits active, more adversarial persona.
+- **easy**: 0-1 active traits, straightforward.
+- **medium**: 1-2 active traits, casual/tricky language.
+- **hard**: 2-3 active traits, genuinely adversarial, multiple ambiguities."""
+        active_traits_instruction = f"**active_traits** values must be from: [{trait_id_list}]"
+    else:
+        trait_instruction = "Generate clean baseline scenarios with no persona modifiers. active_traits must always be an empty array."
+        difficulty_guidance = """## Difficulty
+Assign each test case a difficulty (easy / medium / hard).
+Distribute roughly evenly. With no persona traits selected, vary difficulty through ambiguity, multi-goal coordination, or nuanced wording.
+- **easy**: direct baseline request with minimal ambiguity.
+- **medium**: some ambiguity, missing detail, or realistic conversational looseness.
+- **hard**: higher ambiguity, denser context, or harder multi-goal coordination without adversarial persona traits."""
+        active_traits_instruction = "**active_traits** must be [] for every test case."
 
     extra = ""
     if extra_instructions and extra_instructions.strip():
@@ -95,19 +114,16 @@ NEVER put multi-turn behavior into synthetic_input. It must be a single, self-co
 
 {goal_block}
 
-## Traits (adversarial persona behaviors — assign randomly per test case)
+## Traits (persona modifiers for the simulated user)
 
 {trait_block}
+
+{trait_instruction}
 
 ## Flow mode
 {flow_instruction}
 
-## Difficulty
-Assign each test case a difficulty (easy / medium / hard).
-Distribute roughly evenly. Harder = more traits active, more adversarial persona.
-- **easy**: 0-1 active traits, straightforward.
-- **medium**: 1-2 active traits, casual/tricky language.
-- **hard**: 2-3 active traits, genuinely adversarial, multiple ambiguities.
+{difficulty_guidance}
 
 ## Instructions
 - Generate exactly {count} test cases.
@@ -115,7 +131,7 @@ Distribute roughly evenly. Harder = more traits active, more adversarial persona
 {extra}
 ## VALID IDs — use ONLY these exact strings
 - **goal_flow** values must be from: [{goal_id_list}]
-- **active_traits** values must be from: [{trait_id_list}]
+- {active_traits_instruction}
 Do NOT invent, rephrase, or paraphrase IDs. Copy them exactly as listed above.
 
 ## JSON output
@@ -156,6 +172,8 @@ def build_gen_json_schema(
     }
     if trait_ids:
         active_traits_schema["items"] = {"type": "string", "enum": trait_ids}
+    else:
+        active_traits_schema["maxItems"] = 0
 
     return {
         "type": "object",
@@ -299,6 +317,7 @@ class AdversarialEvaluator:
         thinking: str = "low",
         extra_instructions: Optional[str] = None,
         selected_goals: Optional[List[str]] = None,
+        selected_traits: Optional[List[str]] = None,
         flow_mode: str = "single",
     ) -> List[AdversarialTestCase]:
         """Generate adversarial test cases for the configured goals and traits."""
@@ -310,6 +329,9 @@ class AdversarialEvaluator:
             goals = [g for g in goals if g.id in selected_goals]
             if not goals:
                 goals = self.config.enabled_goals  # safety fallback
+        if selected_traits is not None:
+            selected_trait_ids = set(selected_traits)
+            traits = [trait for trait in traits if trait.id in selected_trait_ids]
 
         gen_prompt = build_generation_prompt(
             goals, traits, count, flow_mode, extra_instructions

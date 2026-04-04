@@ -41,7 +41,6 @@ export function buildAdversarialRetryParams(args: {
     thinking: (batchMetadata.thinking as string | undefined) ?? 'low',
     parallel_cases: (batchMetadata.parallel_cases as boolean | undefined) || undefined,
     case_workers: (batchMetadata.case_workers as number | undefined) || undefined,
-    selected_rule_ids: resolveSelectedRuleIds(batchMetadata),
     flow_mode: (batchMetadata.flow_mode as string | undefined) || undefined,
     case_mode: 'saved',
     retry_eval_ids: retryEvalIds,
@@ -53,40 +52,6 @@ export function buildAdversarialRetryParams(args: {
       with_audio_and_schema: timeouts.withAudioAndSchema,
     },
   };
-}
-
-function resolveSelectedRuleIds(batchMetadata: Record<string, unknown>): string[] | undefined {
-  const explicitRuleIds = batchMetadata.selected_rule_ids;
-  if (Array.isArray(explicitRuleIds)) {
-    return explicitRuleIds
-      .map((ruleId) => String(ruleId).trim())
-      .filter(Boolean);
-  }
-
-  const adversarialConfig = batchMetadata.adversarial_config;
-  if (!adversarialConfig || typeof adversarialConfig !== 'object') {
-    return undefined;
-  }
-
-  const snapshotRules = (adversarialConfig as Record<string, unknown>).rules;
-  if (!Array.isArray(snapshotRules)) {
-    return undefined;
-  }
-
-  const ruleIds = snapshotRules
-    .map((rule) => {
-      if (!rule || typeof rule !== 'object') {
-        return '';
-      }
-      return String(
-        (rule as Record<string, unknown>).rule_id
-          ?? (rule as Record<string, unknown>).ruleId
-          ?? '',
-      ).trim();
-    })
-    .filter(Boolean);
-
-  return ruleIds.length > 0 ? ruleIds : undefined;
 }
 
 function normalizeCredentialPool(value: unknown): Array<{ userId: string; authToken: string }> {

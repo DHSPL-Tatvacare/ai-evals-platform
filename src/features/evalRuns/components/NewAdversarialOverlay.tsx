@@ -73,7 +73,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   const [caseWorkers, setCaseWorkers] = useState(3);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
-  const [selectedRuleIds, setSelectedRuleIds] = useState<string[] | null>(null);
+  const [selectedTraits, setSelectedTraits] = useState<string[] | null>(null);
   const [flowMode, setFlowMode] = useState<'single' | 'multi'>('single');
   const [extraInstructions, setExtraInstructions] = useState('');
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -101,7 +101,11 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
 
   // Validation per step
   const canGoNext = useMemo(() => {
-    const generatedConfigured = testCount >= 5 && testCount <= 50;
+    const generationConfigured =
+      testCount >= 5
+      && testCount <= 50
+      && selectedGoals.length > 0
+      && selectedTraits !== null;
     const savedConfigured =
       selectedSavedCaseIds.length > 0 || includePinnedCases || manualCases.length > 0;
     const hasCredentialPool = resolvedCredentialRows.length > 0;
@@ -109,9 +113,9 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       case 0: return runName.trim().length > 0;
       case 1: return kairaApiUrl.trim().length > 0 && hasCredentialPool;
       case 2:
-        if (caseMode === 'generate') return generatedConfigured;
+        if (caseMode === 'generate') return generationConfigured;
         if (caseMode === 'saved') return savedConfigured;
-        return generatedConfigured || savedConfigured;
+        return generationConfigured || savedConfigured;
       case 3: return Boolean(llmConfig.model) && !modelsLoading && hasProviderCredentials(llmConfig.provider as LLMProvider, useLLMSettingsStore.getState());
       case 4: return true;
       default: return false;
@@ -125,6 +129,8 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     llmConfig,
     modelsLoading,
     caseMode,
+    selectedGoals.length,
+    selectedTraits,
     selectedSavedCaseIds.length,
     includePinnedCases,
     manualCases.length,
@@ -196,7 +202,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
           { key: 'Case Mode', value: caseMode === 'generate' ? 'Generate Fresh' : caseMode === 'saved' ? 'Saved Cases' : 'Hybrid' },
           ...(caseMode !== 'saved' ? [{ key: 'Generated Cases', value: String(testCount) }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Goals', value: `${selectedGoals.length} selected` }] : []),
-          ...(selectedRuleIds != null ? [{ key: 'Rules', value: `${selectedRuleIds.length} selected` }] : []),
+          ...(caseMode !== 'saved' && selectedTraits != null ? [{ key: 'Traits', value: `${selectedTraits.length} selected` }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Flow Mode', value: flowMode === 'single' ? 'Single Goal' : 'Multi-Goal' }] : []),
           ...(caseMode !== 'generate' ? [{ key: 'Saved Cases', value: `${selectedSavedCaseIds.length} selected` }] : []),
           ...(caseMode !== 'generate' && includePinnedCases ? [{ key: 'Pinned Cases', value: 'Included automatically' }] : []),
@@ -228,7 +234,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
-    selectedRuleIds,
+    selectedTraits,
     flowMode,
     extraInstructions,
     caseMode,
@@ -262,7 +268,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       parallel_cases: parallelCases || undefined,
       case_workers: parallelCases ? caseWorkers : undefined,
       selected_goals: caseMode !== 'saved' && selectedGoals.length > 0 ? selectedGoals : undefined,
-      selected_rule_ids: selectedRuleIds ?? undefined,
+      selected_traits: caseMode !== 'saved' ? selectedTraits ?? undefined : undefined,
       flow_mode: caseMode !== 'saved' ? flowMode : undefined,
       extra_instructions: caseMode !== 'saved' ? extraInstructions.trim() || undefined : undefined,
       case_mode: caseMode,
@@ -297,7 +303,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
-    selectedRuleIds,
+    selectedTraits,
     flowMode,
     extraInstructions,
     submitJob,
@@ -340,9 +346,9 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
               turnDelay={turnDelay}
               caseDelay={caseDelay}
               selectedGoals={selectedGoals}
+              selectedTraits={selectedTraits}
               flowMode={flowMode}
               extraInstructions={extraInstructions}
-              selectedRuleIds={selectedRuleIds}
               selectedSavedCaseIds={selectedSavedCaseIds}
               includePinnedCases={includePinnedCases}
               manualCases={manualCases}
@@ -351,9 +357,9 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
               onTurnDelayChange={setTurnDelay}
               onCaseDelayChange={setCaseDelay}
               onGoalsChange={setSelectedGoals}
+              onTraitsChange={setSelectedTraits}
               onFlowModeChange={setFlowMode}
               onExtraInstructionsChange={setExtraInstructions}
-              onRuleIdsChange={setSelectedRuleIds}
               onSavedCasesChange={setSelectedSavedCaseIds}
               onIncludePinnedCasesChange={setIncludePinnedCases}
               onManualCasesChange={setManualCases}
@@ -393,7 +399,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     parallelCases,
     caseWorkers,
     selectedGoals,
-    selectedRuleIds,
+    selectedTraits,
     flowMode,
     extraInstructions,
     reviewSummary,

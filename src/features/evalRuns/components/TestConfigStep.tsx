@@ -18,7 +18,6 @@ import {
   MultiSelect,
   type MultiSelectOption,
 } from '@/components/ui';
-import { ContractRuleSelectionPanel } from './ContractRuleSelectionPanel';
 import {
   adversarialConfigApi,
   type AdversarialGoal,
@@ -52,9 +51,9 @@ interface TestConfigStepProps {
   turnDelay: number;
   caseDelay: number;
   selectedGoals: string[];
+  selectedTraits: string[] | null;
   flowMode: FlowMode;
   extraInstructions: string;
-  selectedRuleIds: string[] | null;
   selectedSavedCaseIds: string[];
   includePinnedCases: boolean;
   manualCases: AdversarialManualCaseInput[];
@@ -63,9 +62,9 @@ interface TestConfigStepProps {
   onTurnDelayChange: (delay: number) => void;
   onCaseDelayChange: (delay: number) => void;
   onGoalsChange: (goals: string[]) => void;
+  onTraitsChange: (traits: string[]) => void;
   onFlowModeChange: (mode: FlowMode) => void;
   onExtraInstructionsChange: (instructions: string) => void;
-  onRuleIdsChange: (ruleIds: string[]) => void;
   onSavedCasesChange: (caseIds: string[]) => void;
   onIncludePinnedCasesChange: (enabled: boolean) => void;
   onManualCasesChange: (cases: AdversarialManualCaseInput[]) => void;
@@ -85,7 +84,7 @@ const CASE_MODE_OPTIONS: Array<{
   {
     value: 'generate',
     label: 'Generate Fresh',
-    description: 'Create new exploratory cases from the goal catalog.',
+    description: 'Create new exploratory cases from the goal and trait catalog.',
   },
   {
     value: 'saved',
@@ -131,9 +130,9 @@ export function TestConfigStep({
   turnDelay,
   caseDelay,
   selectedGoals,
+  selectedTraits,
   flowMode,
   extraInstructions,
-  selectedRuleIds,
   selectedSavedCaseIds,
   includePinnedCases,
   manualCases,
@@ -142,9 +141,9 @@ export function TestConfigStep({
   onTurnDelayChange,
   onCaseDelayChange,
   onGoalsChange,
+  onTraitsChange,
   onFlowModeChange,
   onExtraInstructionsChange,
-  onRuleIdsChange,
   onSavedCasesChange,
   onIncludePinnedCasesChange,
   onManualCasesChange,
@@ -181,6 +180,9 @@ export function TestConfigStep({
         setSavedCases(cases);
         if (selectedGoals.length === 0 && enabledGoals.length > 0) {
           onGoalsChange(enabledGoals.map((goal) => goal.id));
+        }
+        if (selectedTraits == null) {
+          onTraitsChange(enabledTraits.map((trait) => trait.id));
         }
       })
       .catch((err) => {
@@ -473,14 +475,22 @@ export function TestConfigStep({
             </div>
 
             <div>
-              <ContractRuleSelectionPanel
-                scopes={['adversarial']}
-                selectedRuleIds={selectedRuleIds}
-                onChange={onRuleIdsChange}
-                title="Contract Rules"
-                description="Choose which enabled contract rules generated adversarial cases should be judged against."
-                placeholder="Select contract rules"
-              />
+              <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
+                Traits
+              </label>
+              {loading ? (
+                <LoadingRow label="Loading traits..." />
+              ) : (
+                <MultiSelect
+                  values={selectedTraits ?? []}
+                  onChange={onTraitsChange}
+                  options={traitOptions}
+                  placeholder="Select traits"
+                />
+              )}
+              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                Generated cases can use only these persona traits. Clear all traits to generate baseline scenarios.
+              </p>
             </div>
           </div>
 

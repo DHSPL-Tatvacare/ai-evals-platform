@@ -304,9 +304,9 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
             ['rule-a', 'rule-b'],
         )
 
-    async def test_adversarial_handler_forwards_selected_rule_ids(self):
+    async def test_adversarial_handler_forwards_selected_traits(self):
         params = {
-            'selected_rule_ids': ['rule-a'],
+            'selected_traits': ['trait-a'],
         }
 
         with patch(
@@ -322,6 +322,6 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {'ok': True})
         self.assertEqual(
-            mock_runner.await_args.kwargs['selected_rule_ids'],
-            ['rule-a'],
+            mock_runner.await_args.kwargs['selected_traits'],
+            ['trait-a'],
         )

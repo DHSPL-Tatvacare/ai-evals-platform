@@ -6,7 +6,7 @@ import sys
 import uuid
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -33,6 +33,7 @@ from app.services.evaluators.models import (  # noqa: E402
     TransportFacts,
 )
 from app.services.evaluators import credential_lane_scheduler as credential_lane_scheduler_module  # noqa: E402
+from app.services.evaluators import adversarial_runner as adversarial_runner_module  # noqa: E402
 from app.services.reports.aggregator import AdversarialAggregator  # noqa: E402
 
 
@@ -244,6 +245,83 @@ class ConversationAgentPhaseOneTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdversarialEvaluatorPhaseTwoTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_test_cases_filters_selected_traits_for_generation_only(self):
+        config = get_default_config()
+        selected_goal_id = config.enabled_goals[0].id
+        selected_trait_id = config.enabled_traits[0].id
+        excluded_trait_id = config.enabled_traits[1].id
+        llm = FakeLLMProvider(
+            json_responses=[
+                {
+                    'test_cases': [
+                        {
+                            'goal_flow': [selected_goal_id],
+                            'difficulty': 'medium',
+                            'active_traits': [selected_trait_id, excluded_trait_id],
+                            'synthetic_input': 'Log my lunch.',
+                            'expected_challenges': ['Missing portion details'],
+                        }
+                    ]
+                }
+            ]
+        )
+        evaluator = AdversarialEvaluator(llm_provider=llm, config=config)
+
+        cases = await evaluator.generate_test_cases(
+            count=1,
+            selected_goals=[selected_goal_id],
+            selected_traits=[selected_trait_id],
+        )
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].goal_flow, [selected_goal_id])
+        self.assertEqual(cases[0].active_traits, [selected_trait_id])
+        prompt = llm.generate_json_calls[0]['prompt']
+        self.assertIn(selected_trait_id, prompt)
+        self.assertNotIn(excluded_trait_id, prompt)
+        schema = llm.generate_json_calls[0]['json_schema']
+        self.assertEqual(
+            schema['properties']['test_cases']['items']['properties']['active_traits']['items']['enum'],
+            [selected_trait_id],
+        )
+
+    async def test_generate_test_cases_supports_zero_trait_baseline_mode(self):
+        config = get_default_config()
+        selected_goal_id = config.enabled_goals[0].id
+        llm = FakeLLMProvider(
+            json_responses=[
+                {
+                    'test_cases': [
+                        {
+                            'goal_flow': [selected_goal_id],
+                            'difficulty': 'hard',
+                            'active_traits': [],
+                            'synthetic_input': 'Help me log dinner.',
+                            'expected_challenges': ['Ambiguous serving size'],
+                        }
+                    ]
+                }
+            ]
+        )
+        evaluator = AdversarialEvaluator(llm_provider=llm, config=config)
+
+        cases = await evaluator.generate_test_cases(
+            count=1,
+            selected_goals=[selected_goal_id],
+            selected_traits=[],
+        )
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].active_traits, [])
+        prompt = llm.generate_json_calls[0]['prompt']
+        self.assertIn('Generate clean baseline scenarios', prompt)
+        self.assertIn('active_traits must always be an empty array', prompt)
+        schema = llm.generate_json_calls[0]['json_schema']
+        self.assertEqual(
+            schema['properties']['test_cases']['items']['properties']['active_traits']['maxItems'],
+            0,
+        )
+
     async def test_evaluate_transcript_normalizes_rules_failure_modes_and_goal_truth(self):
         llm = FakeLLMProvider(
             json_responses=[
@@ -435,6 +513,50 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
         self.assertNotIn('meal_logged', {goal['id'] for goal in snapshot['goals']})
         self.assertNotIn('ambiguous_quantity', {trait['id'] for trait in snapshot['traits']})
         self.assertNotIn('ask_time_if_missing', {rule['rule_id'] for rule in snapshot['rules']})
+
+
+class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runner_persists_selected_generation_filters_in_batch_metadata(self):
+        create_eval_run = AsyncMock()
+        finalize_eval_run = AsyncMock()
+        update_job_progress = AsyncMock(side_effect=RuntimeError('stop-after-create'))
+
+        with patch.object(
+            adversarial_runner_module,
+            'load_config_from_db',
+            new=AsyncMock(return_value=get_default_config()),
+        ), patch.object(
+            adversarial_runner_module,
+            'create_eval_run',
+            new=create_eval_run,
+        ), patch.object(
+            adversarial_runner_module,
+            'finalize_eval_run',
+            new=finalize_eval_run,
+        ), patch.object(
+            adversarial_runner_module,
+            'update_job_progress',
+            new=update_job_progress,
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'stop-after-create'):
+                await adversarial_runner_module.run_adversarial_evaluation(
+                    job_id='job-1',
+                    tenant_id=uuid.uuid4(),
+                    user_id=uuid.uuid4(),
+                    kaira_test_user_id='user-1',
+                    kaira_api_url='https://kaira.test',
+                    kaira_auth_token='token-1',
+                    test_count=5,
+                    llm_provider='openai',
+                    llm_model='gpt-test',
+                    selected_goals=['meal_logged'],
+                    selected_traits=[],
+                )
+
+        batch_metadata = create_eval_run.await_args.kwargs['batch_metadata']
+        self.assertEqual(batch_metadata['selected_goals'], ['meal_logged'])
+        self.assertEqual(batch_metadata['selected_traits'], [])
+        self.assertNotIn('selected_rule_ids', batch_metadata)
 
 
 class CanonicalPersistencePhaseFourTests(unittest.TestCase):
