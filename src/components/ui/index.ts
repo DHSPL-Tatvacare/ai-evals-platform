@@ -25,6 +25,7 @@ export { ScrollToBottom } from './ScrollToBottom';
 export { IconButton } from './IconButton';
 export { DebugFab } from './DebugFab';
 export { SearchableSelect, type SearchableSelectOption } from './SearchableSelect';
+export { SingleSelect, type SingleSelectOption } from './SingleSelect';
 export { MultiSelect, type MultiSelectOption } from './MultiSelect';
 export { ProviderToggle } from './ProviderToggle';
 export { LLMConfigSection } from './LLMConfigSection';

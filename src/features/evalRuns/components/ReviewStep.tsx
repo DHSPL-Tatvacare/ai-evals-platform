@@ -1,3 +1,5 @@
+import { WizardSection, WizardStepLayout } from './WizardStepLayout';
+
 export interface ReviewBadge {
   label: string;
   value: string;
@@ -21,23 +23,26 @@ interface ReviewStepProps {
 
 export function ReviewStep({ summary, sections }: ReviewStepProps) {
   return (
-    <div className="space-y-4">
-      {/* Zone 1 — Summary Banner */}
-      <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-        <h3 className="text-[14px] font-medium text-[var(--text-primary)]">
+    <WizardStepLayout
+      eyebrow="Review"
+      title="Final pass before launch"
+      description="Sanity-check the configuration so the stress test runs exactly as intended once you start it."
+    >
+      <WizardSection className="rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-4 py-4">
+        <h3 className="text-[18px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
           {summary.name}
         </h3>
         {summary.description && (
-          <p className="mt-0.5 text-[12px] text-[var(--text-secondary)] line-clamp-2">
+          <p className="mt-1 text-[13px] leading-6 text-[var(--text-secondary)]">
             {summary.description}
           </p>
         )}
         {summary.badges.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             {summary.badges.map((badge) => (
               <span
                 key={badge.label}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-2.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70 px-3 py-1 text-[11px] text-[var(--text-secondary)]"
               >
                 <span className="text-[var(--text-muted)]">{badge.label}:</span>
                 <span className="font-medium text-[var(--text-primary)]">{badge.value}</span>
@@ -45,33 +50,30 @@ export function ReviewStep({ summary, sections }: ReviewStepProps) {
             ))}
           </div>
         )}
-      </div>
+      </WizardSection>
 
-      {/* Zone 2 — Grouped Details */}
-      <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-        {sections.map((section, idx) => (
-          <div key={section.label}>
-            {idx > 0 && (
-              <div className="mx-4 border-t border-dashed border-[var(--border-subtle)]" />
-            )}
-            <div className="px-4 pt-3 pb-1">
-              <h4 className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                {section.label}
-              </h4>
-              <div className="space-y-1">
-                {section.items.map((item) => (
-                  <div key={item.key} className="flex items-start justify-between py-1.5 gap-4">
-                    <span className="text-[13px] text-[var(--text-secondary)] shrink-0">{item.key}</span>
-                    <span className="text-[13px] text-[var(--text-primary)] font-medium text-right break-words min-w-0">
-                      {item.value}
-                    </span>
-                  </div>
-                ))}
+      <div className="space-y-3">
+        {sections.map((section) => (
+          <WizardSection
+            key={section.label}
+            title={section.label}
+            className="rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/25 px-4 py-4"
+            contentClassName="space-y-0"
+          >
+            {section.items.map((item) => (
+              <div
+                key={item.key}
+                className="flex items-start justify-between gap-4 py-2.5"
+              >
+                <span className="shrink-0 text-[13px] text-[var(--text-secondary)]">{item.key}</span>
+                <span className="min-w-0 break-words text-right text-[13px] font-medium text-[var(--text-primary)]">
+                  {item.value}
+                </span>
               </div>
-            </div>
-          </div>
+            ))}
+          </WizardSection>
         ))}
       </div>
-    </div>
+    </WizardStepLayout>
   );
 }

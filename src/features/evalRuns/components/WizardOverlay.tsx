@@ -89,34 +89,38 @@ export function WizardOverlay({
       />
 
       {/* Slide-in panel from right */}
-      <div
-        className={cn(
-          'ml-auto relative z-10 h-full w-[900px] max-w-full bg-[var(--bg-elevated)] shadow-2xl overflow-hidden',
-          'flex flex-col',
-          'transform transition-transform duration-300 ease-out',
-          isVisible ? 'translate-x-0' : 'translate-x-full'
-        )}
-      >
-        {/* Header */}
-        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
-          <button
-            onClick={handleClose}
-            className="rounded-[6px] p-1 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        <div
+          className={cn(
+            'ml-auto relative z-10 h-full w-[860px] max-w-full overflow-hidden bg-[var(--bg-elevated)] shadow-2xl',
+            'flex flex-col',
+            'transform transition-transform duration-300 ease-out',
+            isVisible ? 'translate-x-0' : 'translate-x-full'
+          )}
+        >
+          {/* Header */}
+          <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-3">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
+                {title}
+              </h2>
+              <button
+                onClick={handleClose}
+                className="rounded-[8px] p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
 
         {/* Step navigation bar */}
-        <div className="shrink-0 border-b border-[var(--border-subtle)] px-6 py-3">
-          <div className="flex items-center gap-2">
+        <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/20 px-5 py-2">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {steps.map((step, i) => (
-              <div key={step.key} className="flex items-center">
+              <div key={step.key} className="flex items-center shrink-0">
                 {i > 0 && (
                   <div
                     className={cn(
-                      'w-8 h-px mr-2',
+                      'mr-2 h-px w-8',
                       i <= currentStep
                         ? 'bg-[var(--interactive-primary)]'
                         : 'bg-[var(--border-default)]'
@@ -126,7 +130,7 @@ export function WizardOverlay({
                 <div className="flex items-center gap-2">
                   <div
                     className={cn(
-                      'flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-semibold transition-colors',
+                      'flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-colors',
                       i === currentStep
                         ? 'bg-[var(--interactive-primary)] text-[var(--text-on-color)]'
                         : i < currentStep
@@ -138,7 +142,7 @@ export function WizardOverlay({
                   </div>
                   <span
                     className={cn(
-                      'text-[12px] font-medium whitespace-nowrap',
+                      'whitespace-nowrap text-[12px] font-medium',
                       i === currentStep
                         ? 'text-[var(--text-primary)]'
                         : i < currentStep
@@ -155,12 +159,14 @@ export function WizardOverlay({
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {children}
+        <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,var(--bg-elevated)_0%,var(--bg-secondary)_100%)] px-5 py-2.5">
+          <div>
+            {children}
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-t border-[var(--border-subtle)]">
+        <div className="shrink-0 flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]/95 px-5 py-2 backdrop-blur">
           <div className="text-[12px] text-[var(--text-muted)]">
             Step {currentStep + 1} of {steps.length}
           </div>

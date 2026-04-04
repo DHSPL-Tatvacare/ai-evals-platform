@@ -4,6 +4,7 @@ import { Input } from '@/components/ui';
 import { CredentialPoolManager } from '@/features/credentialPool/CredentialPoolManager';
 import { kairaCredentialPoolConfig } from '@/features/credentialPool/kairaCredentialPoolConfig';
 import type { CredentialPoolEntry } from '@/features/credentialPool/types';
+import { WizardSection, WizardStepLayout } from './WizardStepLayout';
 
 interface KairaApiConfigStepProps {
   kairaApiUrl: string;
@@ -74,15 +75,12 @@ export function KairaApiConfigStep({
   }, [credentialEntries, kairaApiUrl, onCredentialEntriesChange]);
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-        <div className="mb-4">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Connection</h3>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Set the Kaira endpoint once, then add or import the credentials you want this run to use.
-          </p>
-        </div>
-
+    <WizardStepLayout
+      eyebrow="Kaira Access"
+      title="Connect the target environment"
+      description="Point the run at the right Kaira endpoint, then choose the user identities you want the stress test to exercise."
+    >
+      <WizardSection title="Connection" description="These settings apply to every case in the run.">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
           <div>
             <label className="mb-1.5 block text-[13px] font-medium text-[var(--text-primary)]">
@@ -106,19 +104,24 @@ export function KairaApiConfigStep({
               min={30}
               max={300}
             />
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+            <p className="mt-1.5 text-[12px] text-[var(--text-muted)]">
               Max time to wait for each Kaira API response.
             </p>
           </div>
         </div>
-      </div>
+      </WizardSection>
 
-      <CredentialPoolManager
-        config={kairaCredentialPoolConfig}
-        entries={credentialEntries}
-        onEntriesChange={onCredentialEntriesChange}
-        onTestEntry={handleTestEntry}
-      />
-    </div>
+      <WizardSection
+        title={kairaCredentialPoolConfig.title}
+        description="Keep the entry editor inline, and use upload or saved groups only when you need bulk workflows."
+      >
+        <CredentialPoolManager
+          config={kairaCredentialPoolConfig}
+          entries={credentialEntries}
+          onEntriesChange={onCredentialEntriesChange}
+          onTestEntry={handleTestEntry}
+        />
+      </WizardSection>
+    </WizardStepLayout>
   );
 }

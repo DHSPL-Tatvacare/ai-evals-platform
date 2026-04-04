@@ -11,6 +11,7 @@ Goal-framework v3 rewrite:
 import logging
 from typing import List, Optional
 
+from app.config import settings
 from app.services.evaluators.llm_base import BaseLLMProvider
 from app.services.evaluators.models import (
     ADVERSARIAL_RULE_OUTCOME_STATUSES,
@@ -33,6 +34,63 @@ from app.services.evaluators.rule_catalog import PromptRule, normalize_rule_id
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PERSONA_LABELS = ["easy", "medium", "hard"]
+PERSONA_LABELS = DEFAULT_PERSONA_LABELS + ["crack"]
+PERSONA_SEVERITY = {label: index for index, label in enumerate(PERSONA_LABELS)}
+PERSONA_LABEL_HELPERS = {
+    "easy": "Cooperative, direct, and low-friction. The user is clear and goal-focused.",
+    "medium": "Casual and mildly messy. The user may omit details, rephrase loosely, or need a follow-up.",
+    "hard": "Difficult and adversarial. The user may be vague, stubborn, or repeatedly push back.",
+    "crack": (
+        "Abusive, profane, deviant, erratic, irrelevant, or incoherent. The user may curse, derail, "
+        "ask nonsense questions, or pressure the bot without expecting the bot to mirror that tone."
+    ),
+}
+
+
+def normalize_selected_personas(selected_personas: Optional[List[str]]) -> List[str]:
+    normalized: list[str] = []
+    for raw in selected_personas or DEFAULT_PERSONA_LABELS:
+        label = str(raw).strip().lower()
+        if label in PERSONA_SEVERITY and label not in normalized:
+            normalized.append(label)
+    return normalized or list(DEFAULT_PERSONA_LABELS)
+
+
+def normalize_persona_mixing_mode(persona_mixing_mode: Optional[str]) -> str:
+    return "mixed" if str(persona_mixing_mode or "").strip().lower() == "mixed" else "single"
+
+
+def canonical_difficulty_for_personas(persona_labels: List[str], fallback: str = "medium") -> str:
+    labels = [label for label in persona_labels if label in PERSONA_SEVERITY]
+    if not labels:
+        return fallback.upper()
+    hardest = max(labels, key=lambda label: PERSONA_SEVERITY[label])
+    return hardest.upper()
+
+
+def normalize_case_persona_labels(
+    raw_persona_labels,
+    *,
+    selected_personas: List[str],
+    raw_difficulty: str | None,
+    persona_mixing_mode: str,
+) -> List[str]:
+    labels: list[str] = []
+    for raw in raw_persona_labels or []:
+        label = str(raw).strip().lower()
+        if label in selected_personas and label not in labels:
+            labels.append(label)
+
+    fallback_label = str(raw_difficulty or "medium").strip().lower()
+    if fallback_label not in selected_personas:
+        fallback_label = selected_personas[0]
+    if not labels:
+        labels = [fallback_label]
+    if persona_mixing_mode == "single":
+        return [labels[0]]
+    return labels
+
 
 # ─── Dynamic Prompt Builders ─────────────────────────────────────
 
@@ -43,8 +101,13 @@ def build_generation_prompt(
     count: int,
     flow_mode: str = "single",
     extra_instructions: Optional[str] = None,
+    selected_personas: Optional[List[str]] = None,
+    persona_mixing_mode: str = "single",
 ) -> str:
     """Build the test case generation prompt from goals and traits."""
+    resolved_personas = normalize_selected_personas(selected_personas)
+    resolved_mixing_mode = normalize_persona_mixing_mode(persona_mixing_mode)
+
     # Build goal definitions block
     goal_sections = []
     for i, g in enumerate(goals, 1):
@@ -80,23 +143,44 @@ def build_generation_prompt(
     valid_trait_ids = [t.id for t in traits]
     goal_id_list = ", ".join(f'"{gid}"' for gid in valid_goal_ids)
     trait_id_list = ", ".join(f'"{tid}"' for tid in valid_trait_ids) if valid_trait_ids else "(none)"
+    persona_id_list = ", ".join(f'"{persona}"' for persona in resolved_personas)
+    persona_lines = [
+        f"- **{label}**: {PERSONA_LABEL_HELPERS[label]}"
+        for label in resolved_personas
+    ]
+    persona_block = "\n".join(persona_lines)
+    if resolved_mixing_mode == "mixed":
+        persona_instruction = (
+            "## Persona Mixing Rule\n"
+            "Mix and match personas on a case.\n"
+            "Each test case must include one or more persona labels from the selected set.\n"
+            "Set difficulty to the hardest persona label applied to that case."
+        )
+    else:
+        persona_instruction = (
+            "## Persona Mixing Rule\n"
+            "Single persona per test case.\n"
+            "Each test case must include exactly one persona label, and difficulty must match it."
+        )
     if has_trait_catalog:
         trait_instruction = "Assign zero or more traits from the catalog below to shape the simulated persona."
         difficulty_guidance = """## Difficulty
-Assign each test case a difficulty (easy / medium / hard).
-Distribute roughly evenly. Harder = more traits active, more adversarial persona.
+Assign each test case a difficulty using the selected persona labels.
+Distribute roughly evenly. Harder personas should feel more pressuring and unstable.
 - **easy**: 0-1 active traits, straightforward.
 - **medium**: 1-2 active traits, casual/tricky language.
-- **hard**: 2-3 active traits, genuinely adversarial, multiple ambiguities."""
+- **hard**: 2-3 active traits, genuinely adversarial, multiple ambiguities.
+- **crack**: may be abusive, profane, erratic, deviant, irrelevant, or incoherent while still being interpretable."""
         active_traits_instruction = f"**active_traits** values must be from: [{trait_id_list}]"
     else:
         trait_instruction = "Generate clean baseline scenarios with no persona modifiers. active_traits must always be an empty array."
         difficulty_guidance = """## Difficulty
-Assign each test case a difficulty (easy / medium / hard).
+Assign each test case a difficulty using the selected persona labels.
 Distribute roughly evenly. With no persona traits selected, vary difficulty through ambiguity, multi-goal coordination, or nuanced wording.
 - **easy**: direct baseline request with minimal ambiguity.
 - **medium**: some ambiguity, missing detail, or realistic conversational looseness.
-- **hard**: higher ambiguity, denser context, or harder multi-goal coordination without adversarial persona traits."""
+- **hard**: higher ambiguity, denser context, or harder multi-goal coordination without adversarial persona traits.
+- **crack**: the user may still be abusive, profane, erratic, deviant, irrelevant, or incoherent even without extra trait modifiers."""
         active_traits_instruction = "**active_traits** must be [] for every test case."
 
     extra = ""
@@ -120,6 +204,12 @@ NEVER put multi-turn behavior into synthetic_input. It must be a single, self-co
 
 {trait_instruction}
 
+## Persona labels (difficulty/persona palette for this run)
+
+{persona_block}
+
+{persona_instruction}
+
 ## Flow mode
 {flow_instruction}
 
@@ -131,6 +221,7 @@ NEVER put multi-turn behavior into synthetic_input. It must be a single, self-co
 {extra}
 ## VALID IDs — use ONLY these exact strings
 - **goal_flow** values must be from: [{goal_id_list}]
+- **persona_labels** values must be from: [{persona_id_list}]
 - {active_traits_instruction}
 Do NOT invent, rephrase, or paraphrase IDs. Copy them exactly as listed above.
 
@@ -140,7 +231,8 @@ Return ONLY valid JSON:
   "test_cases": [
     {{
       "goal_flow": ["<goal_id from list above>", ...],
-      "difficulty": "easy | medium | hard",
+      "difficulty": "<hardest persona label for this case>",
+      "persona_labels": ["<persona label from list above>", ...],
       "active_traits": ["<trait_id from list above>", ...],
       "synthetic_input": "<user's FIRST message only>",
       "expected_challenges": ["<challenge description>", ...]
@@ -153,10 +245,14 @@ def build_gen_json_schema(
     goals: List[AdversarialGoal],
     traits: List[AdversarialTrait],
     flow_mode: str = "single",
+    selected_personas: Optional[List[str]] = None,
+    persona_mixing_mode: str = "single",
 ) -> dict:
     """Build the JSON schema for generation output."""
     goal_ids = [g.id for g in goals] if goals else ["meal_logged"]
     trait_ids = [t.id for t in traits] if traits else []
+    persona_ids = normalize_selected_personas(selected_personas)
+    resolved_mixing_mode = normalize_persona_mixing_mode(persona_mixing_mode)
 
     goal_flow_schema: dict = {
         "type": "array",
@@ -175,6 +271,17 @@ def build_gen_json_schema(
     else:
         active_traits_schema["maxItems"] = 0
 
+    persona_labels_schema: dict = {
+        "type": "array",
+        "items": {"type": "string", "enum": persona_ids},
+        "minItems": 1,
+        "uniqueItems": True,
+    }
+    if resolved_mixing_mode == "single":
+        persona_labels_schema["maxItems"] = 1
+    else:
+        persona_labels_schema["maxItems"] = len(persona_ids)
+
     return {
         "type": "object",
         "properties": {
@@ -186,8 +293,9 @@ def build_gen_json_schema(
                         "goal_flow": goal_flow_schema,
                         "difficulty": {
                             "type": "string",
-                            "enum": ["easy", "medium", "hard"],
+                            "enum": persona_ids,
                         },
+                        "persona_labels": persona_labels_schema,
                         "active_traits": active_traits_schema,
                         "synthetic_input": {"type": "string"},
                         "expected_challenges": {
@@ -199,6 +307,7 @@ def build_gen_json_schema(
                         "goal_flow",
                         "synthetic_input",
                         "difficulty",
+                        "persona_labels",
                         "active_traits",
                         "expected_challenges",
                     ],
@@ -305,11 +414,14 @@ class AdversarialEvaluator:
     """
 
     def __init__(
-        self, llm_provider: BaseLLMProvider, config: Optional[AdversarialConfig] = None
+        self,
+        llm_provider: BaseLLMProvider,
+        config: Optional[AdversarialConfig] = None,
+        max_turns: int = settings.ADVERSARIAL_MAX_TURNS,
     ):
         self.llm = llm_provider
         self.config = config or get_default_config()
-        self.conversation_agent = ConversationAgent(llm_provider)
+        self.conversation_agent = ConversationAgent(llm_provider, max_turns=max_turns)
 
     async def generate_test_cases(
         self,
@@ -319,10 +431,14 @@ class AdversarialEvaluator:
         selected_goals: Optional[List[str]] = None,
         selected_traits: Optional[List[str]] = None,
         flow_mode: str = "single",
+        selected_personas: Optional[List[str]] = None,
+        persona_mixing_mode: str = "single",
     ) -> List[AdversarialTestCase]:
         """Generate adversarial test cases for the configured goals and traits."""
         goals = self.config.enabled_goals
         traits = self.config.enabled_traits
+        resolved_personas = normalize_selected_personas(selected_personas)
+        resolved_mixing_mode = normalize_persona_mixing_mode(persona_mixing_mode)
 
         # Filter to selected goals if specified
         if selected_goals:
@@ -334,9 +450,21 @@ class AdversarialEvaluator:
             traits = [trait for trait in traits if trait.id in selected_trait_ids]
 
         gen_prompt = build_generation_prompt(
-            goals, traits, count, flow_mode, extra_instructions
+            goals,
+            traits,
+            count,
+            flow_mode,
+            extra_instructions,
+            resolved_personas,
+            resolved_mixing_mode,
         )
-        gen_schema = build_gen_json_schema(goals, traits, flow_mode)
+        gen_schema = build_gen_json_schema(
+            goals,
+            traits,
+            flow_mode,
+            resolved_personas,
+            resolved_mixing_mode,
+        )
 
         try:
             raw = await self.llm.generate_json(
@@ -368,11 +496,23 @@ class AdversarialEvaluator:
                     active_traits = []
                 active_traits = [tid for tid in active_traits if tid in valid_trait_ids]
 
+                persona_labels = normalize_case_persona_labels(
+                    item.get("persona_labels"),
+                    selected_personas=resolved_personas,
+                    raw_difficulty=item.get("difficulty"),
+                    persona_mixing_mode=resolved_mixing_mode,
+                )
+                difficulty = canonical_difficulty_for_personas(
+                    persona_labels,
+                    fallback=str(item.get("difficulty", "medium")).strip().lower() or "medium",
+                )
+
                 cases.append(
                     AdversarialTestCase(
                         synthetic_input=item.get("synthetic_input", str(item)),
                         expected_behavior="",  # not used in v3 — challenges replaces this
-                        difficulty=item.get("difficulty", "medium").upper(),
+                        difficulty=difficulty,
+                        persona_labels=persona_labels,
                         goal_flow=goal_flow,
                         active_traits=active_traits,
                         expected_challenges=item.get("expected_challenges", []),
@@ -455,11 +595,13 @@ class AdversarialEvaluator:
 
         goals_summary = ", ".join(test_case.goal_flow)
         traits_summary = ", ".join(test_case.active_traits) if test_case.active_traits else "none"
+        persona_summary = ", ".join(test_case.persona_labels) if test_case.persona_labels else test_case.difficulty.lower()
 
         eval_prompt = (
             f"### Adversarial test case\n"
             f"**Goal flow:** {goals_summary}\n"
             f"**Difficulty:** {test_case.difficulty}\n"
+            f"**Persona labels:** {persona_summary}\n"
             f"**Active traits:** {traits_summary}\n"
             f"**Expected challenges:** {'; '.join(test_case.expected_challenges) if test_case.expected_challenges else 'N/A'}\n\n"
             f"{goal_criteria_section}\n"

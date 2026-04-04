@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Info,
   Library,
   Loader2,
   Pin,
@@ -13,9 +12,10 @@ import {
 
 import {
   Button,
-  Card,
   Input,
   MultiSelect,
+  SingleSelect,
+  type SingleSelectOption,
   type MultiSelectOption,
 } from '@/components/ui';
 import {
@@ -30,10 +30,18 @@ import {
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
 import { notificationService } from '@/services/notifications';
 import { humanize } from '@/utils/evalFormatters';
+import { cn } from '@/utils';
+import {
+  WizardFieldRow,
+  WizardMetric,
+  WizardSection,
+  WizardStepLayout,
+} from './WizardStepLayout';
 
 type FlowMode = 'single' | 'multi';
 export type AdversarialCaseMode = 'generate' | 'saved' | 'hybrid';
 export type ManualCaseDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
+export type PersonaMixingMode = 'single' | 'mixed';
 
 export interface AdversarialManualCaseInput {
   name?: string;
@@ -48,10 +56,10 @@ export interface AdversarialManualCaseInput {
 interface TestConfigStepProps {
   caseMode: AdversarialCaseMode;
   testCount: number;
-  turnDelay: number;
-  caseDelay: number;
   selectedGoals: string[];
   selectedTraits: string[] | null;
+  selectedPersonas: string[];
+  personaMixingMode: PersonaMixingMode;
   flowMode: FlowMode;
   extraInstructions: string;
   selectedSavedCaseIds: string[];
@@ -59,10 +67,10 @@ interface TestConfigStepProps {
   manualCases: AdversarialManualCaseInput[];
   onCaseModeChange: (mode: AdversarialCaseMode) => void;
   onTestCountChange: (count: number) => void;
-  onTurnDelayChange: (delay: number) => void;
-  onCaseDelayChange: (delay: number) => void;
   onGoalsChange: (goals: string[]) => void;
   onTraitsChange: (traits: string[]) => void;
+  onPersonasChange: (personas: string[]) => void;
+  onPersonaMixingModeChange: (mode: PersonaMixingMode) => void;
   onFlowModeChange: (mode: FlowMode) => void;
   onExtraInstructionsChange: (instructions: string) => void;
   onSavedCasesChange: (caseIds: string[]) => void;
@@ -75,6 +83,20 @@ const DIFFICULTY_LEVELS: Array<{ value: ManualCaseDifficulty; label: string }> =
   { value: 'MEDIUM', label: 'Medium' },
   { value: 'HARD', label: 'Hard' },
 ];
+
+const GENERATED_PERSONA_OPTIONS: MultiSelectOption[] = [
+  { value: 'easy', label: 'Easy' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'hard', label: 'Hard' },
+  { value: 'crack', label: 'Crack' },
+];
+
+const PERSONA_MIXING_OPTIONS: SingleSelectOption[] = [
+  { value: 'single', label: 'Single persona per test case' },
+  { value: 'mixed', label: 'Mix and match personas on a case' },
+];
+
+const DEFAULT_GENERATED_PERSONAS = ['easy', 'medium', 'hard'];
 
 const CASE_MODE_OPTIONS: Array<{
   value: AdversarialCaseMode;
@@ -127,10 +149,10 @@ function manualCaseKey(testCase: AdversarialManualCaseInput): string {
 export function TestConfigStep({
   caseMode,
   testCount,
-  turnDelay,
-  caseDelay,
   selectedGoals,
   selectedTraits,
+  selectedPersonas,
+  personaMixingMode,
   flowMode,
   extraInstructions,
   selectedSavedCaseIds,
@@ -138,10 +160,10 @@ export function TestConfigStep({
   manualCases,
   onCaseModeChange,
   onTestCountChange,
-  onTurnDelayChange,
-  onCaseDelayChange,
   onGoalsChange,
   onTraitsChange,
+  onPersonasChange,
+  onPersonaMixingModeChange,
   onFlowModeChange,
   onExtraInstructionsChange,
   onSavedCasesChange,
@@ -184,6 +206,9 @@ export function TestConfigStep({
         if (selectedTraits == null) {
           onTraitsChange(enabledTraits.map((trait) => trait.id));
         }
+        if (selectedPersonas.length === 0) {
+          onPersonasChange(DEFAULT_GENERATED_PERSONAS);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -199,7 +224,7 @@ export function TestConfigStep({
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onGoalsChange, onPersonasChange, onTraitsChange, selectedGoals.length, selectedPersonas.length, selectedTraits]);
 
   const goalOptions = useMemo<MultiSelectOption[]>(
     () => goals.map((goal) => ({ value: goal.id, label: goal.label || humanize(goal.id) })),
@@ -233,7 +258,6 @@ export function TestConfigStep({
     [savedCases, selectedSavedCaseIds],
   );
 
-  const manualCaseCount = manualCases.length;
   const selectedSavedCount = selectedSavedCaseIds.length;
   const pinnedAvailableCount = savedCases.filter((testCase) => testCase.isPinned).length;
 
@@ -351,21 +375,16 @@ export function TestConfigStep({
   };
 
   return (
-    <div className="space-y-5">
-      <Card className="space-y-4" hoverable={false}>
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-[var(--text-brand)]" />
-          <div>
-            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
-              Case Source
-            </h3>
-            <p className="text-[11px] text-[var(--text-muted)]">
-              Choose whether this run explores fresh cases, replays saved regressions, or mixes both.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-2 md:grid-cols-3">
+    <WizardStepLayout
+      eyebrow="Test Design"
+      title="Shape the adversarial coverage"
+      description="Keep the structure you already like, but tighten the hierarchy so decisions feel lighter, cleaner, and easier to scan."
+    >
+      <WizardSection
+        title="Case Source"
+        description="Choose whether this run explores fresh cases, replays saved regressions, or mixes both."
+      >
+        <div className="grid gap-3 md:grid-cols-3">
           {CASE_MODE_OPTIONS.map((option) => {
             const active = caseMode === option.value;
             return (
@@ -373,207 +392,184 @@ export function TestConfigStep({
                 key={option.value}
                 type="button"
                 onClick={() => onCaseModeChange(option.value)}
-                className={`rounded-[6px] border px-3 py-3 text-left transition-colors ${
+                className={cn(
+                  'rounded-[10px] border px-3.5 py-3 text-left transition-all',
                   active
                     ? 'border-[var(--border-brand)] bg-[var(--color-brand-accent)]/10'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)]'
-                }`}
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-primary)]/70 hover:border-[var(--border-default)] hover:bg-[var(--bg-primary)]',
+                )}
               >
-                <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+                <p className="text-[13px] font-semibold text-[var(--text-primary)]">
                   {option.label}
                 </p>
-                <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
                   {option.description}
                 </p>
               </button>
             );
           })}
         </div>
-
-        <div className="grid gap-2 md:grid-cols-4">
-          <SummaryPill label="Generated" value={generateEnabled ? `${testCount}` : 'Off'} />
-          <SummaryPill label="Saved Selected" value={selectedSavedCount} />
-          <SummaryPill label="Pinned Available" value={pinnedAvailableCount} />
-          <SummaryPill label="Run-Only Cases" value={manualCaseCount} />
-        </div>
-      </Card>
+      </WizardSection>
 
       {generateEnabled && (
-        <Card className="space-y-5" hoverable={false}>
-          <SectionHeader
-            title="Generated Cases"
-            description="Use the catalog to steer newly generated cases without hardcoding the test suite."
-          />
-
-          <div>
-            <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-              Number of Generated Cases
-            </label>
-            <Input
-              type="number"
-              min={5}
-              max={50}
-              value={testCountLocal ?? String(testCount)}
-              error={testCountError}
-              onFocus={() => setTestCountLocal(String(testCount))}
-              onChange={(e) => {
-                const raw = e.target.value;
-                setTestCountLocal(raw);
-                const parsed = parseInt(raw, 10);
-                if (raw === '' || Number.isNaN(parsed)) {
-                  setTestCountError('');
-                } else if (parsed < 5) {
-                  setTestCountError('Minimum is 5');
-                } else if (parsed > 50) {
-                  setTestCountError('Maximum is 50');
-                } else {
-                  setTestCountError('');
-                  onTestCountChange(parsed);
-                }
-              }}
-              onBlur={() => {
-                const parsed = parseInt(testCountLocal ?? '', 10);
-                if (Number.isNaN(parsed) || parsed < 5) {
+        <WizardSection
+          title="Generated Cases"
+          description="Use the goal and persona catalog to steer new cases without over-boxing the entire step."
+        >
+          <WizardFieldRow
+            title="Number of Generated Cases"
+            description="Generated cases stay capped at 50 for now. Saved and pinned cases can extend coverage beyond that."
+            control={(
+              <Input
+                type="number"
+                min={5}
+                max={50}
+                value={testCountLocal ?? String(testCount)}
+                error={testCountError}
+                onFocus={() => setTestCountLocal(String(testCount))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setTestCountLocal(raw);
+                  const parsed = parseInt(raw, 10);
+                  if (raw === '' || Number.isNaN(parsed)) {
+                    setTestCountError('');
+                  } else if (parsed < 5) {
+                    setTestCountError('Minimum is 5');
+                  } else if (parsed > 50) {
+                    setTestCountError('Maximum is 50');
+                  } else {
+                    setTestCountError('');
+                    onTestCountChange(parsed);
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = parseInt(testCountLocal ?? '', 10);
+                  if (Number.isNaN(parsed) || parsed < 5) {
+                    setTestCountLocal(null);
+                    setTestCountError('');
+                    return;
+                  }
+                  onTestCountChange(Math.min(parsed, 50));
                   setTestCountLocal(null);
                   setTestCountError('');
-                  return;
-                }
-                onTestCountChange(Math.min(parsed, 50));
-                setTestCountLocal(null);
-                setTestCountError('');
-              }}
-            />
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              Generated cases stay capped at 50 for now. Saved and pinned cases can extend coverage beyond that.
-            </p>
-          </div>
+                }}
+              />
+            )}
+          />
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-                Goals
-              </label>
-              {loading ? (
-                <LoadingRow label="Loading goals..." />
-              ) : (
-                <MultiSelect
-                  values={selectedGoals}
-                  onChange={(values) => {
-                    if (values.length === 0 && goals.length > 0) {
-                      onGoalsChange([goals[0].id]);
-                      return;
-                    }
-                    onGoalsChange(values);
-                  }}
-                  options={goalOptions}
-                  placeholder="Select goals"
-                />
-              )}
-              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                Generated cases will target these goals. At least one goal must stay selected.
-              </p>
-            </div>
+          <WizardFieldRow
+            title="Goals"
+            description="Generated cases will target these goals. At least one goal must stay selected."
+            control={loading ? (
+              <LoadingRow label="Loading goals..." />
+            ) : (
+              <MultiSelect
+                values={selectedGoals}
+                onChange={(values) => {
+                  if (values.length === 0 && goals.length > 0) {
+                    onGoalsChange([goals[0].id]);
+                    return;
+                  }
+                  onGoalsChange(values);
+                }}
+                options={goalOptions}
+                placeholder="Select goals"
+              />
+            )}
+          />
 
-            <div>
-              <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-                Traits
-              </label>
-              {loading ? (
-                <LoadingRow label="Loading traits..." />
-              ) : (
-                <MultiSelect
-                  values={selectedTraits ?? []}
-                  onChange={onTraitsChange}
-                  options={traitOptions}
-                  placeholder="Select traits"
-                />
-              )}
-              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                Generated cases can use only these persona traits. Clear all traits to generate baseline scenarios.
-              </p>
-            </div>
-          </div>
+          <WizardFieldRow
+            title="Traits"
+            description="Generated cases can use only these persona traits. Clear all traits to generate baseline scenarios."
+            control={loading ? (
+              <LoadingRow label="Loading traits..." />
+            ) : (
+              <MultiSelect
+                values={selectedTraits ?? []}
+                onChange={onTraitsChange}
+                options={traitOptions}
+                placeholder="Select traits"
+              />
+            )}
+          />
 
-          <div>
-            <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-              Flow Mode
-            </label>
-            <div className="flex gap-2">
-              {(['single', 'multi'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onFlowModeChange(mode)}
-                  className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
-                    flowMode === mode
-                      ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)] ring-1 ring-[var(--color-brand-accent)]/40'
-                      : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                  }`}
-                >
-                  {mode === 'single' ? 'Single Goal' : 'Multi-Goal'}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              {flowMode === 'single'
+          <WizardFieldRow
+            title="Flow Mode"
+            description={
+              flowMode === 'single'
                 ? 'Each generated case focuses on one goal.'
-                : 'Generated conversations can chain multiple goals in one session.'}
-            </p>
-          </div>
+                : 'Generated conversations can chain multiple goals in one session.'
+            }
+            control={(
+              <div className="flex flex-wrap gap-2">
+                {(['single', 'multi'] as const).map((mode) => (
+                  <ChoiceButton
+                    key={mode}
+                    active={flowMode === mode}
+                    onClick={() => onFlowModeChange(mode)}
+                    label={mode === 'single' ? 'Single Goal' : 'Multi-Goal'}
+                  />
+                ))}
+              </div>
+            )}
+            controlClassName="md:max-w-[360px]"
+          />
 
-          <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Info className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                Difficulty Distribution
-              </span>
-            </div>
-            <div className="flex gap-3">
-              {DIFFICULTY_LEVELS.map((level) => (
-                <span
-                  key={level.value}
-                  className="text-[12px] text-[var(--text-secondary)]"
-                >
-                  {level.label}
-                </span>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              Generated cases are distributed evenly across difficulty levels.
-            </p>
-          </div>
+          <WizardFieldRow
+            title="Persona Distribution"
+            description="Choose which persona bands generation can use. `Crack` adds abusive, profane, erratic pressure without expecting Kaira to mirror it."
+            control={(
+              <MultiSelect
+                values={selectedPersonas}
+                onChange={(values) => {
+                  if (values.length === 0) {
+                    onPersonasChange([DEFAULT_GENERATED_PERSONAS[0]]);
+                    return;
+                  }
+                  onPersonasChange(values);
+                }}
+                options={GENERATED_PERSONA_OPTIONS}
+                placeholder="Select persona bands"
+              />
+            )}
+          />
 
-          <div>
-            <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-              Additional Instructions <span className="text-[var(--text-muted)] font-normal">(optional)</span>
+          <WizardFieldRow
+            title="Persona Mixing Rule"
+            description="Choose whether each generated case gets one persona label or a blended set where `difficulty` reflects the hardest selected persona."
+            control={(
+              <SingleSelect
+                value={personaMixingMode}
+                onChange={(value) => onPersonaMixingModeChange(value as PersonaMixingMode)}
+                options={PERSONA_MIXING_OPTIONS}
+              />
+            )}
+            controlClassName="md:max-w-[360px]"
+          />
+
+          <div className="pt-1">
+            <label className="block text-[13px] font-medium text-[var(--text-primary)]">
+              Additional Instructions <span className="font-normal text-[var(--text-muted)]">(optional)</span>
             </label>
+            <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
+              These instructions are appended to the generation prompt for this run only.
+            </p>
             <textarea
               value={extraInstructions}
               onChange={(e) => onExtraInstructionsChange(e.target.value)}
               placeholder="e.g. Focus on Hindi food items, exercise correction flows, or stubborn users."
-              rows={3}
-              className="w-full rounded-[6px] border border-[var(--border-input)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--interactive-primary)] resize-y"
+              rows={4}
+              className="mt-2.5 w-full rounded-[10px] border border-[var(--border-input)] bg-[var(--bg-primary)] px-3 py-2.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--interactive-primary)] resize-y"
             />
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              These instructions are appended to the generation prompt for this run only.
-            </p>
           </div>
-        </Card>
+        </WizardSection>
       )}
 
       {libraryEnabled && (
-        <Card className="space-y-4" hoverable={false}>
-          <SectionHeader
-            title="Saved Case Library"
-            description="Select known regression cases, include pinned cases automatically, or curate the library as you build the run."
-          />
-
-          <div className="flex flex-col gap-3 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 md:flex-row md:items-center md:justify-between">
-            <div className="grid gap-2 md:grid-cols-3 md:gap-3">
-              <SummaryPill label="Selected Cases" value={selectedSavedCount} />
-              <SummaryPill label="Pinned Auto-Include" value={includePinnedCases ? 'On' : 'Off'} />
-              <SummaryPill label="Library Total" value={savedCases.length} />
-            </div>
+        <WizardSection
+          title="Saved Coverage"
+          description="Select known regression cases, include pinned coverage automatically, or curate the library as you build the run."
+          aside={(
             <Button
               variant="secondary"
               icon={Library}
@@ -581,12 +577,18 @@ export function TestConfigStep({
             >
               Manage Saved Cases
             </Button>
+          )}
+        >
+          <div className="grid gap-2 md:grid-cols-3">
+            <WizardMetric label="Selected Cases" value={selectedSavedCount} />
+            <WizardMetric label="Pinned Auto-Include" value={includePinnedCases ? 'On' : 'Off'} />
+            <WizardMetric label="Library Total" value={savedCases.length} />
           </div>
 
           {(selectedSavedCases.length > 0 || includePinnedCases) && (
-            <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <Library className="h-4 w-4 text-[var(--text-brand)]" />
+            <div className="mt-4 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70 p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--text-brand)]" />
                 <p className="text-[12px] font-semibold text-[var(--text-primary)]">
                   This Run Includes
                 </p>
@@ -595,13 +597,13 @@ export function TestConfigStep({
                 {selectedSavedCases.map((testCase) => (
                   <div
                     key={testCase.id}
-                    className="flex items-center justify-between gap-3 rounded-[6px] bg-[var(--bg-primary)] px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/55 px-3 py-2.5"
                   >
                     <div className="min-w-0">
-                      <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">
+                      <p className="truncate text-[12px] font-medium text-[var(--text-primary)]">
                         {testCase.name || truncateText(testCase.syntheticInput, 72)}
                       </p>
-                      <p className="text-[11px] text-[var(--text-muted)] truncate">
+                      <p className="truncate text-[11px] text-[var(--text-muted)]">
                         {(testCase.goalFlow || []).map(humanize).join(' → ')}
                       </p>
                     </div>
@@ -622,105 +624,59 @@ export function TestConfigStep({
               </div>
             </div>
           )}
-        </Card>
+        </WizardSection>
       )}
 
-      <Card className="space-y-4" hoverable={false}>
-        <SectionHeader
+      {libraryEnabled && (
+        <WizardSection
           title="Manual Case Builder"
           description="Write a regression case once, then either include it only for this run or save it to the library for reuse."
-        />
-
-        <div className="flex flex-col gap-3 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 md:flex-row md:items-center md:justify-between">
-          <div className="grid gap-2 md:grid-cols-2 md:gap-3">
-            <SummaryPill label="Run-Only Cases" value={manualCases.length} />
-            <SummaryPill label="Draft Status" value={manualDraftIsDirty ? 'In Progress' : 'Empty'} />
+          aside={(
+            <Button
+              variant="secondary"
+              icon={Plus}
+              onClick={() => setManualCaseOverlayOpen(true)}
+            >
+              Create Manual Case
+            </Button>
+          )}
+        >
+          <div className="grid gap-2 md:grid-cols-2">
+            <WizardMetric label="Run-Only Cases" value={manualCases.length} />
+            <WizardMetric label="Draft Status" value={manualDraftIsDirty ? 'In Progress' : 'Empty'} />
           </div>
-          <Button
-            variant="secondary"
-            icon={Plus}
-            onClick={() => setManualCaseOverlayOpen(true)}
-          >
-            Create Manual Case
-          </Button>
-        </div>
 
-        {manualCases.length > 0 && (
-          <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 space-y-2">
-            <p className="text-[12px] font-semibold text-[var(--text-primary)]">
-              Run-Only Manual Cases
-            </p>
-            {manualCases.map((testCase, index) => (
-              <div
-                key={`${manualCaseKey(testCase)}-${index}`}
-                className="flex items-center justify-between gap-3 rounded-[6px] bg-[var(--bg-primary)] px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">
-                    {testCase.name || truncateText(testCase.syntheticInput, 72)}
-                  </p>
-                  <p className="text-[11px] text-[var(--text-muted)] truncate">
-                    {(testCase.goalFlow || []).map(humanize).join(' → ')}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeManualCase(index)}
-                  className="text-[11px] text-[var(--text-brand)] hover:underline"
+          {manualCases.length > 0 && (
+            <div className="mt-4 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70 p-3 space-y-2">
+              <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+                Run-Only Manual Cases
+              </p>
+              {manualCases.map((testCase, index) => (
+                <div
+                  key={`${manualCaseKey(testCase)}-${index}`}
+                  className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/55 px-3 py-2.5"
                 >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          Turn Delay
-        </label>
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={0.5}
-            max={5}
-            step={0.5}
-            value={turnDelay}
-            onChange={(e) => onTurnDelayChange(parseFloat(e.target.value))}
-            className="flex-1"
-          />
-          <span className="w-12 text-right text-[12px] text-[var(--text-secondary)]">
-            {turnDelay.toFixed(1)}s
-          </span>
-        </div>
-        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-          Delay between user turns to avoid hammering the Kaira API.
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">
-          Case Delay
-        </label>
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={0}
-            max={10}
-            step={0.5}
-            value={caseDelay}
-            onChange={(e) => onCaseDelayChange(parseFloat(e.target.value))}
-            className="flex-1"
-          />
-          <span className="w-12 text-right text-[12px] text-[var(--text-secondary)]">
-            {caseDelay.toFixed(1)}s
-          </span>
-        </div>
-        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-          Delay between starting test cases. Useful when the bot has strict rate limits.
-        </p>
-      </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                      {testCase.name || truncateText(testCase.syntheticInput, 72)}
+                    </p>
+                    <p className="truncate text-[11px] text-[var(--text-muted)]">
+                      {(testCase.goalFlow || []).map(humanize).join(' → ')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeManualCase(index)}
+                    className="text-[11px] text-[var(--text-brand)] hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </WizardSection>
+      )}
 
       <SettingsSlideOver
         isOpen={libraryOverlayOpen}
@@ -736,9 +692,9 @@ export function TestConfigStep({
       >
         <div className="space-y-4">
           <div className="grid gap-3 md:grid-cols-3">
-            <SummaryPill label="Selected Cases" value={selectedSavedCount} />
-            <SummaryPill label="Pinned Auto-Include" value={includePinnedCases ? 'On' : 'Off'} />
-            <SummaryPill label="Visible Results" value={filteredLibraryCases.length} />
+            <WizardMetric label="Selected Cases" value={selectedSavedCount} />
+            <WizardMetric label="Pinned Auto-Include" value={includePinnedCases ? 'On' : 'Off'} />
+            <WizardMetric label="Visible Results" value={filteredLibraryCases.length} />
           </div>
 
           <div className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -1004,41 +960,41 @@ export function TestConfigStep({
           </div>
         </div>
       </SettingsSlideOver>
-    </div>
-  );
-}
-
-function SectionHeader({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="flex items-start gap-2">
-      <Info className="mt-0.5 h-4 w-4 text-[var(--text-muted)]" />
-      <div>
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">{title}</h3>
-        <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">{description}</p>
-      </div>
-    </div>
-  );
-}
-
-function SummaryPill({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-semibold">
-        {label}
-      </p>
-      <p className="mt-0.5 text-[16px] font-semibold text-[var(--text-primary)]">
-        {value}
-      </p>
-    </div>
+    </WizardStepLayout>
   );
 }
 
 function LoadingRow({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+    <div className="flex items-center gap-2 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70 px-3 py-2">
       <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />
-      <span className="text-[11px] text-[var(--text-muted)]">{label}</span>
+      <span className="text-[12px] text-[var(--text-muted)]">{label}</span>
     </div>
+  );
+}
+
+function ChoiceButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-[10px] border px-3 py-2 text-[12px] font-medium transition-colors',
+        active
+          ? 'border-[var(--border-brand)] bg-[var(--color-brand-accent)]/12 text-[var(--text-primary)]'
+          : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--text-muted)] hover:border-[var(--border-default)] hover:text-[var(--text-secondary)]',
+      )}
+    >
+      {label}
+    </button>
   );
 }
 

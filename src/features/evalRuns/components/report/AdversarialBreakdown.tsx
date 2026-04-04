@@ -10,7 +10,7 @@ interface Props {
 export default function AdversarialBreakdown({ adversarial }: Props) {
   const sortedGoals = [...adversarial.byGoal].sort((a, b) => a.passRate - b.passRate);
 
-  const difficultyOrder = ['EASY', 'MEDIUM', 'HARD'];
+  const difficultyOrder = ['EASY', 'MEDIUM', 'HARD', 'CRACK'];
   const sortedDifficulty = [...adversarial.byDifficulty].sort(
     (a, b) => difficultyOrder.indexOf(a.difficulty) - difficultyOrder.indexOf(b.difficulty),
   );

@@ -75,6 +75,7 @@ export const DIFFICULTY_COLORS: Record<string, string> = {
   EASY: '#10B981',
   MEDIUM: '#F59E0B',
   HARD: '#EF4444',
+  CRACK: '#7C3AED',
 };
 
 /** Priority → accent color for dot indicators and accent strips. */

@@ -4,11 +4,16 @@ import asyncio
 import os
 import sys
 import uuid
+from types import ModuleType
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+fake_database = ModuleType('app.database')
+fake_database.async_session = None
+sys.modules.setdefault('app.database', fake_database)
 
 from app.services.evaluators.adversarial_config import (  # noqa: E402
     AdversarialConfig,
@@ -118,6 +123,38 @@ def _test_case(goal_flow):
 
 
 class ConversationAgentPhaseOneTests(unittest.IsolatedAsyncioTestCase):
+    async def test_crack_persona_guidance_is_included_in_system_prompt(self):
+        llm = FakeLLMProvider(text_responses=['GOAL_COMPLETE'])
+        agent = ConversationAgent(llm_provider=llm, max_turns=1)
+        client = FakeKairaClient(
+            responses=[
+                KairaStreamResponse(full_message='Your meal has been logged.')
+            ]
+        )
+        test_case = AdversarialTestCase(
+            synthetic_input='Why are you being useless? Log this meal already.',
+            expected_behavior='',
+            difficulty='CRACK',
+            persona_labels=['hard', 'crack'],
+            goal_flow=['meal_logged'],
+            active_traits=[],
+            expected_challenges=[],
+        )
+
+        await agent.run_conversation(
+            test_case=test_case,
+            goals=[_goal('meal_logged', 'Meal Logging')],
+            client=client,
+            user_id='user-1',
+            turn_delay=0,
+        )
+
+        system_prompt = llm.generate_calls[0]['system_prompt']
+        self.assertIn('## Active persona labels', system_prompt)
+        self.assertIn('hard', system_prompt)
+        self.assertIn('crack', system_prompt)
+        self.assertIn('bot stays bounded', system_prompt.lower())
+
     async def test_goal_complete_transition_generates_fresh_next_goal_opener(self):
         llm = FakeLLMProvider(
             text_responses=[
@@ -245,6 +282,88 @@ class ConversationAgentPhaseOneTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdversarialEvaluatorPhaseTwoTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_test_cases_supports_crack_persona_in_single_mode(self):
+        config = get_default_config()
+        selected_goal_id = config.enabled_goals[0].id
+        selected_trait_id = config.enabled_traits[0].id
+        llm = FakeLLMProvider(
+            json_responses=[
+                {
+                    'test_cases': [
+                        {
+                            'goal_flow': [selected_goal_id],
+                            'difficulty': 'crack',
+                            'persona_labels': ['crack'],
+                            'active_traits': [selected_trait_id],
+                            'synthetic_input': 'What the hell is wrong with this app? Just log my lunch.',
+                            'expected_challenges': ['Profane opening', 'Abrupt tone shifts'],
+                        }
+                    ]
+                }
+            ]
+        )
+        evaluator = AdversarialEvaluator(llm_provider=llm, config=config)
+
+        cases = await evaluator.generate_test_cases(
+            count=1,
+            selected_goals=[selected_goal_id],
+            selected_traits=[selected_trait_id],
+            selected_personas=['hard', 'crack'],
+            persona_mixing_mode='single',
+        )
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].difficulty, 'CRACK')
+        self.assertEqual(cases[0].persona_labels, ['crack'])
+        prompt = llm.generate_json_calls[0]['prompt']
+        self.assertIn('**crack**', prompt)
+        self.assertIn('Single persona per test case', prompt)
+        schema = llm.generate_json_calls[0]['json_schema']
+        item_schema = schema['properties']['test_cases']['items']['properties']
+        self.assertEqual(item_schema['difficulty']['enum'], ['hard', 'crack'])
+        self.assertEqual(item_schema['persona_labels']['items']['enum'], ['hard', 'crack'])
+        self.assertEqual(item_schema['persona_labels']['maxItems'], 1)
+
+    async def test_generate_test_cases_supports_mixed_persona_mode(self):
+        config = get_default_config()
+        selected_goal_id = config.enabled_goals[0].id
+        llm = FakeLLMProvider(
+            json_responses=[
+                {
+                    'test_cases': [
+                        {
+                            'goal_flow': [selected_goal_id],
+                            'difficulty': 'crack',
+                            'persona_labels': ['hard', 'crack'],
+                            'active_traits': [],
+                            'synthetic_input': 'You keep missing the point. Log dinner and stop acting clueless.',
+                            'expected_challenges': ['Hostile corrections', 'Erratic follow-up pressure'],
+                        }
+                    ]
+                }
+            ]
+        )
+        evaluator = AdversarialEvaluator(llm_provider=llm, config=config)
+
+        cases = await evaluator.generate_test_cases(
+            count=1,
+            selected_goals=[selected_goal_id],
+            selected_traits=[],
+            selected_personas=['medium', 'hard', 'crack'],
+            persona_mixing_mode='mixed',
+        )
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].difficulty, 'CRACK')
+        self.assertEqual(cases[0].persona_labels, ['hard', 'crack'])
+        prompt = llm.generate_json_calls[0]['prompt']
+        self.assertIn('Mix and match personas on a case', prompt)
+        self.assertIn('one or more persona labels', prompt)
+        schema = llm.generate_json_calls[0]['json_schema']
+        item_schema = schema['properties']['test_cases']['items']['properties']
+        self.assertEqual(item_schema['persona_labels']['items']['enum'], ['medium', 'hard', 'crack'])
+        self.assertEqual(item_schema['persona_labels']['minItems'], 1)
+
     async def test_generate_test_cases_filters_selected_traits_for_generation_only(self):
         config = get_default_config()
         selected_goal_id = config.enabled_goals[0].id
@@ -276,6 +395,7 @@ class AdversarialEvaluatorPhaseTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cases), 1)
         self.assertEqual(cases[0].goal_flow, [selected_goal_id])
         self.assertEqual(cases[0].active_traits, [selected_trait_id])
+        self.assertEqual(cases[0].persona_labels, ['medium'])
         prompt = llm.generate_json_calls[0]['prompt']
         self.assertIn(selected_trait_id, prompt)
         self.assertNotIn(excluded_trait_id, prompt)
@@ -313,6 +433,7 @@ class AdversarialEvaluatorPhaseTwoTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(cases), 1)
         self.assertEqual(cases[0].active_traits, [])
+        self.assertEqual(cases[0].persona_labels, ['hard'])
         prompt = llm.generate_json_calls[0]['prompt']
         self.assertIn('Generate clean baseline scenarios', prompt)
         self.assertIn('active_traits must always be an empty array', prompt)
@@ -432,6 +553,7 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
         config = get_default_config()
         question_rule_ids = {rule.rule_id for rule in config.prompt_rules_for_goals(['question_answered'])}
         meal_rule_ids = {rule.rule_id for rule in config.prompt_rules_for_goals(['meal_logged'])}
+        trait_ids = {trait.id for trait in config.enabled_traits}
 
         self.assertTrue(
             {
@@ -444,17 +566,20 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
                 'no_stale_context_replay',
                 'no_internal_error_leak',
                 'maintain_conversational_state_across_goal_transitions',
+                'no_abusive_language_mirroring',
             }.issubset(question_rule_ids)
         )
         self.assertIn('ask_time_if_missing', meal_rule_ids)
         self.assertIn('maintain_conversational_state_across_goal_transitions', meal_rule_ids)
+        self.assertIn('no_abusive_language_mirroring', meal_rule_ids)
+        self.assertIn('crack', trait_ids)
 
-    def test_v4_to_v5_migration_backfills_new_phase_three_rules(self):
+    def test_v5_to_v6_migration_backfills_crack_trait_and_anti_mirroring_rule(self):
         from app.services.evaluators import adversarial_config as config_module
 
-        migrated = config_module._migrate_v4_to_v5(
+        migrated = config_module._migrate_v5_to_v6(
             {
-                'version': 4,
+                'version': 5,
                 'goals': [goal.model_dump() for goal in get_default_config().goals],
                 'traits': [],
                 'rules': [
@@ -469,10 +594,11 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
             }
         )
 
+        migrated_trait_ids = {trait['id'] for trait in migrated['traits']}
         migrated_rule_ids = {rule['rule_id'] for rule in migrated['rules']}
         self.assertEqual(migrated['version'], config_module.CURRENT_VERSION)
-        self.assertIn('answer_relevant_to_question', migrated_rule_ids)
-        self.assertIn('maintain_conversational_state_across_goal_transitions', migrated_rule_ids)
+        self.assertIn('crack', migrated_trait_ids)
+        self.assertIn('no_abusive_language_mirroring', migrated_rule_ids)
 
     def test_disabled_rules_are_excluded_from_prompt_helpers(self):
         config = get_default_config()
@@ -551,11 +677,17 @@ class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
                     llm_model='gpt-test',
                     selected_goals=['meal_logged'],
                     selected_traits=[],
+                    selected_personas=['easy', 'crack'],
+                    persona_mixing_mode='mixed',
+                    max_turns=14,
                 )
 
         batch_metadata = create_eval_run.await_args.kwargs['batch_metadata']
         self.assertEqual(batch_metadata['selected_goals'], ['meal_logged'])
         self.assertEqual(batch_metadata['selected_traits'], [])
+        self.assertEqual(batch_metadata['selected_personas'], ['easy', 'crack'])
+        self.assertEqual(batch_metadata['persona_mixing_mode'], 'mixed')
+        self.assertEqual(batch_metadata['max_turns'], 14)
         self.assertNotIn('selected_rule_ids', batch_metadata)
 
 

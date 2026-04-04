@@ -24,7 +24,7 @@ def normalize_case_difficulty(value: str | None) -> str:
     if not value:
         return "MEDIUM"
     upper = value.upper()
-    if upper in {"EASY", "MEDIUM", "HARD"}:
+    if upper in {"EASY", "MEDIUM", "HARD", "CRACK"}:
         return upper
     return "MEDIUM"
 
@@ -54,10 +54,12 @@ def dedupe_test_cases(test_cases: list[AdversarialTestCase]) -> list[Adversarial
 
 
 def model_to_runtime(record: AdversarialSavedTestCase) -> AdversarialTestCase:
+    difficulty = normalize_case_difficulty(record.difficulty)
     return AdversarialTestCase(
         synthetic_input=record.synthetic_input,
         expected_behavior=record.name or "",
-        difficulty=normalize_case_difficulty(record.difficulty),
+        difficulty=difficulty,
+        persona_labels=[difficulty.lower()],
         goal_flow=list(record.goal_flow or []),
         active_traits=list(record.active_traits or []),
         expected_challenges=list(record.expected_challenges or []),
@@ -65,10 +67,16 @@ def model_to_runtime(record: AdversarialSavedTestCase) -> AdversarialTestCase:
 
 
 def payload_to_runtime(payload: dict) -> AdversarialTestCase:
+    difficulty = normalize_case_difficulty(payload.get("difficulty"))
+    raw_persona_labels = payload.get("persona_labels") or payload.get("personaLabels") or []
+    persona_labels = [str(label).strip().lower() for label in raw_persona_labels if str(label).strip()]
+    if not persona_labels:
+        persona_labels = [difficulty.lower()]
     return AdversarialTestCase(
         synthetic_input=payload.get("synthetic_input", ""),
         expected_behavior=payload.get("expected_behavior", ""),
-        difficulty=normalize_case_difficulty(payload.get("difficulty")),
+        difficulty=difficulty,
+        persona_labels=persona_labels,
         goal_flow=list(payload.get("goal_flow", []) or ["meal_logged"]),
         active_traits=list(payload.get("active_traits", []) or []),
         expected_challenges=list(payload.get("expected_challenges", []) or []),

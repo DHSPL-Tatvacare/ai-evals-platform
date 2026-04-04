@@ -1,7 +1,7 @@
 import { apiRequest } from './client';
 import type { AdversarialResult } from '@/types';
 
-export type SavedCaseDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
+export type SavedCaseDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'CRACK';
 export type SavedCaseSourceKind = 'manual' | 'generated' | 'saved' | 'retry';
 
 export interface AdversarialSavedCase {

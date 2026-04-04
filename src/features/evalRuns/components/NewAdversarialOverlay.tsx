@@ -6,10 +6,10 @@ import {
   TestConfigStep,
   type AdversarialCaseMode,
   type AdversarialManualCaseInput,
+  type PersonaMixingMode,
 } from './TestConfigStep';
 import { LLMConfigStep, type LLMConfig } from './LLMConfigStep';
 import { ReviewStep, type ReviewSection, type ReviewSummary } from './ReviewStep';
-import { ParallelConfigSection } from './ParallelConfigSection';
 import { useLLMSettingsStore, useAppSettingsStore, useGlobalSettingsStore, hasProviderCredentials, LLM_PROVIDERS } from '@/stores';
 import type { LLMProvider } from '@/types';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
@@ -26,7 +26,7 @@ const STEPS: WizardStep[] = [
   { key: 'info', label: 'Run Info' },
   { key: 'api', label: 'Kaira API' },
   { key: 'test', label: 'Test Config' },
-  { key: 'llm', label: 'LLM Config' },
+  { key: 'llm', label: 'Execution Config' },
   { key: 'review', label: 'Review' },
 ];
 
@@ -65,6 +65,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   const [testCount, setTestCount] = useState(15);
   const [turnDelay, setTurnDelay] = useState(1.5);
   const [caseDelay, setCaseDelay] = useState(3.0);
+  const [maxTurns, setMaxTurns] = useState(10);
   const [caseMode, setCaseMode] = useState<AdversarialCaseMode>('generate');
   const [selectedSavedCaseIds, setSelectedSavedCaseIds] = useState<string[]>([]);
   const [includePinnedCases, setIncludePinnedCases] = useState(false);
@@ -74,6 +75,8 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
   const [selectedTraits, setSelectedTraits] = useState<string[] | null>(null);
+  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
+  const [personaMixingMode, setPersonaMixingMode] = useState<PersonaMixingMode>('single');
   const [flowMode, setFlowMode] = useState<'single' | 'multi'>('single');
   const [extraInstructions, setExtraInstructions] = useState('');
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
@@ -105,7 +108,8 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       testCount >= 5
       && testCount <= 50
       && selectedGoals.length > 0
-      && selectedTraits !== null;
+      && selectedTraits !== null
+      && selectedPersonas.length > 0;
     const savedConfigured =
       selectedSavedCaseIds.length > 0 || includePinnedCases || manualCases.length > 0;
     const hasCredentialPool = resolvedCredentialRows.length > 0;
@@ -131,6 +135,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     caseMode,
     selectedGoals.length,
     selectedTraits,
+    selectedPersonas.length,
     selectedSavedCaseIds.length,
     includePinnedCases,
     manualCases.length,
@@ -203,12 +208,12 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
           ...(caseMode !== 'saved' ? [{ key: 'Generated Cases', value: String(testCount) }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Goals', value: `${selectedGoals.length} selected` }] : []),
           ...(caseMode !== 'saved' && selectedTraits != null ? [{ key: 'Traits', value: `${selectedTraits.length} selected` }] : []),
+          ...(caseMode !== 'saved' ? [{ key: 'Persona Distribution', value: selectedPersonas.map((label) => label.charAt(0).toUpperCase() + label.slice(1)).join(', ') || '(none)' }] : []),
+          ...(caseMode !== 'saved' ? [{ key: 'Persona Mixing', value: personaMixingMode === 'single' ? 'Single persona per test case' : 'Mix and match personas on a case' }] : []),
           ...(caseMode !== 'saved' ? [{ key: 'Flow Mode', value: flowMode === 'single' ? 'Single Goal' : 'Multi-Goal' }] : []),
           ...(caseMode !== 'generate' ? [{ key: 'Saved Cases', value: `${selectedSavedCaseIds.length} selected` }] : []),
           ...(caseMode !== 'generate' && includePinnedCases ? [{ key: 'Pinned Cases', value: 'Included automatically' }] : []),
           ...(manualCases.length > 0 ? [{ key: 'Run-Only Cases', value: String(manualCases.length) }] : []),
-          { key: 'Turn Delay', value: `${turnDelay.toFixed(1)}s` },
-          { key: 'Case Delay', value: `${caseDelay.toFixed(1)}s` },
           ...(extraInstructions.trim() ? [{ key: 'Extra Instructions', value: extraInstructions.trim().slice(0, 80) + (extraInstructions.trim().length > 80 ? '...' : '') }] : []),
         ],
       },
@@ -217,7 +222,10 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         items: [
           { key: 'Model', value: llmConfig.model },
           { key: 'Temperature', value: llmConfig.temperature.toFixed(1) },
+          { key: 'Max Turns', value: String(maxTurns) },
           ...(llmConfig.provider === 'gemini' ? [{ key: 'Thinking', value: llmConfig.thinking.charAt(0).toUpperCase() + llmConfig.thinking.slice(1) }] : []),
+          { key: 'Turn Delay', value: `${turnDelay.toFixed(1)}s` },
+          { key: 'Case Delay', value: `${caseDelay.toFixed(1)}s` },
           { key: 'Case Parallelism', value: parallelCases ? `Yes (${caseWorkers} workers)` : 'Sequential' },
         ],
       },
@@ -230,11 +238,14 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     testCount,
     turnDelay,
     caseDelay,
+    maxTurns,
     llmConfig,
     parallelCases,
     caseWorkers,
     selectedGoals,
     selectedTraits,
+    selectedPersonas,
+    personaMixingMode,
     flowMode,
     extraInstructions,
     caseMode,
@@ -261,6 +272,7 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       test_count: caseMode === 'saved' ? 0 : testCount,
       turn_delay: turnDelay,
       case_delay: caseDelay,
+      max_turns: maxTurns,
       llm_provider: llmConfig.provider,
       llm_model: llmConfig.model,
       temperature: llmConfig.temperature,
@@ -269,6 +281,8 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
       case_workers: parallelCases ? caseWorkers : undefined,
       selected_goals: caseMode !== 'saved' && selectedGoals.length > 0 ? selectedGoals : undefined,
       selected_traits: caseMode !== 'saved' ? selectedTraits ?? undefined : undefined,
+      selected_personas: caseMode !== 'saved' && selectedPersonas.length > 0 ? selectedPersonas : undefined,
+      persona_mixing_mode: caseMode !== 'saved' ? personaMixingMode : undefined,
       flow_mode: caseMode !== 'saved' ? flowMode : undefined,
       extra_instructions: caseMode !== 'saved' ? extraInstructions.trim() || undefined : undefined,
       case_mode: caseMode,
@@ -299,11 +313,14 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     testCount,
     turnDelay,
     caseDelay,
+    maxTurns,
     llmConfig,
     parallelCases,
     caseWorkers,
     selectedGoals,
     selectedTraits,
+    selectedPersonas,
+    personaMixingMode,
     flowMode,
     extraInstructions,
     submitJob,
@@ -339,46 +356,48 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
         );
       case 2:
         return (
-          <div className="space-y-5">
-            <TestConfigStep
-              caseMode={caseMode}
-              testCount={testCount}
-              turnDelay={turnDelay}
-              caseDelay={caseDelay}
-              selectedGoals={selectedGoals}
-              selectedTraits={selectedTraits}
-              flowMode={flowMode}
-              extraInstructions={extraInstructions}
-              selectedSavedCaseIds={selectedSavedCaseIds}
-              includePinnedCases={includePinnedCases}
-              manualCases={manualCases}
-              onCaseModeChange={setCaseMode}
-              onTestCountChange={setTestCount}
-              onTurnDelayChange={setTurnDelay}
-              onCaseDelayChange={setCaseDelay}
-              onGoalsChange={setSelectedGoals}
-              onTraitsChange={setSelectedTraits}
-              onFlowModeChange={setFlowMode}
-              onExtraInstructionsChange={setExtraInstructions}
-              onSavedCasesChange={setSelectedSavedCaseIds}
-              onIncludePinnedCasesChange={setIncludePinnedCases}
-              onManualCasesChange={setManualCases}
-            />
-          </div>
+          <TestConfigStep
+            caseMode={caseMode}
+            testCount={testCount}
+            selectedGoals={selectedGoals}
+            selectedTraits={selectedTraits}
+            selectedPersonas={selectedPersonas}
+            personaMixingMode={personaMixingMode}
+            flowMode={flowMode}
+            extraInstructions={extraInstructions}
+            selectedSavedCaseIds={selectedSavedCaseIds}
+            includePinnedCases={includePinnedCases}
+            manualCases={manualCases}
+            onCaseModeChange={setCaseMode}
+            onTestCountChange={setTestCount}
+            onGoalsChange={setSelectedGoals}
+            onTraitsChange={setSelectedTraits}
+            onPersonasChange={setSelectedPersonas}
+            onPersonaMixingModeChange={setPersonaMixingMode}
+            onFlowModeChange={setFlowMode}
+            onExtraInstructionsChange={setExtraInstructions}
+            onSavedCasesChange={setSelectedSavedCaseIds}
+            onIncludePinnedCasesChange={setIncludePinnedCases}
+            onManualCasesChange={setManualCases}
+          />
         );
       case 3:
         return (
-          <div className="space-y-5">
-            <LLMConfigStep config={llmConfig} onChange={setLlmConfig} onModelsLoading={setModelsLoading} />
-            <ParallelConfigSection
-              parallel={parallelCases}
-              workers={caseWorkers}
-              onParallelChange={setParallelCases}
-              onWorkersChange={setCaseWorkers}
-              label="Test Case Parallelism"
-              description="Run multiple test cases concurrently. Case delay still applies between starts."
-            />
-          </div>
+          <LLMConfigStep
+            config={llmConfig}
+            onChange={setLlmConfig}
+            onModelsLoading={setModelsLoading}
+            parallelCases={parallelCases}
+            caseWorkers={caseWorkers}
+            maxTurns={maxTurns}
+            turnDelay={turnDelay}
+            caseDelay={caseDelay}
+            onParallelCasesChange={setParallelCases}
+            onCaseWorkersChange={setCaseWorkers}
+            onMaxTurnsChange={setMaxTurns}
+            onTurnDelayChange={setTurnDelay}
+            onCaseDelayChange={setCaseDelay}
+          />
         );
       case 4:
         return <ReviewStep summary={reviewSummary} sections={reviewSections} />;
@@ -400,6 +419,8 @@ export function NewAdversarialOverlay({ onClose }: NewAdversarialOverlayProps) {
     caseWorkers,
     selectedGoals,
     selectedTraits,
+    selectedPersonas,
+    personaMixingMode,
     flowMode,
     extraInstructions,
     reviewSummary,

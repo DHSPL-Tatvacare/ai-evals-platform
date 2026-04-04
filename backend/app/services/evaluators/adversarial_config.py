@@ -11,6 +11,7 @@ v3 → v4 migration: Rules gain explicit evaluation_scopes so batch built-ins an
                     adversarial flows can share the same contract source.
 v4 → v5 migration: Rule coverage is backfilled for question answering and
                     cross-goal conversation-state checks.
+v5 → v6 migration: Crack persona trait and anti-mirroring rule are backfilled.
 """
 
 import logging
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_APP_ID = "kaira-bot"
 SETTINGS_KEY = "adversarial-config"
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 
 # ─── Pydantic Config Models ─────────────────────────────────────
@@ -405,6 +406,12 @@ def get_default_config() -> AdversarialConfig:
                 description="User describes a composite dish with multiple ingredients as one item (e.g. 'porridge with almonds and honey').",
                 behavior_hint="Describe a dish with ingredients together as a single item, not as separate foods.",
             ),
+            AdversarialTrait(
+                id="crack",
+                label="Crack",
+                description="User is abusive, profane, deviant, erratic, irrelevant, or incoherent enough to pressure the bot.",
+                behavior_hint="Use profanity, derail the conversation, ask irrelevant or incoherent follow-ups, and pressure the bot without making the case unreadable.",
+            ),
         ],
         rules=[
             AdversarialRule(
@@ -517,6 +524,31 @@ def _migrate_v4_to_v5(raw: dict) -> dict:
     }
 
 
+def _migrate_v5_to_v6(raw: dict) -> dict:
+    """Migrate v5 config dict to v6 by backfilling Crack trait and anti-mirroring rule."""
+    default = get_default_config()
+    existing_traits = {trait.get("id"): trait for trait in raw.get("traits", [])}
+    merged_traits = list(raw.get("traits", []))
+    for trait in default.traits:
+        if trait.id in existing_traits:
+            continue
+        merged_traits.append(trait.model_dump())
+
+    existing_rules = {rule.get("rule_id"): rule for rule in raw.get("rules", [])}
+    merged_rules = list(raw.get("rules", []))
+    for rule in default.rules:
+        if rule.rule_id in existing_rules:
+            continue
+        merged_rules.append(rule.model_dump())
+
+    return {
+        "version": 6,
+        "goals": raw.get("goals", []),
+        "traits": merged_traits,
+        "rules": merged_rules,
+    }
+
+
 # ─── DB Load / Save ──────────────────────────────────────────────
 
 
@@ -579,6 +611,10 @@ async def load_config_from_db(
                     logger.info(f"Migrating adversarial config v{version} → v5")
                     raw = _migrate_v4_to_v5(raw)
                     version = 5
+                if version < 6:
+                    logger.info(f"Migrating adversarial config v{version} → v6")
+                    raw = _migrate_v5_to_v6(raw)
+                    version = 6
                 config = AdversarialConfig.model_validate(raw)
                 if original_version < CURRENT_VERSION:
                     await save_config_to_db(config, tenant_id=tenant_id, user_id=user_id)

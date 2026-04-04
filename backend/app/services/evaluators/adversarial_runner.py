@@ -12,6 +12,7 @@ from typing import Optional, Callable, List
 
 from sqlalchemy import update
 
+from app.config import settings
 from app.database import async_session
 from app.models.eval_run import AdversarialEvaluation as DBAdversarialEval, EvalRun
 from app.services.adversarial_test_case_service import (
@@ -26,6 +27,10 @@ from app.services.evaluators.llm_base import (
     BaseLLMProvider, LoggingLLMWrapper, create_llm_provider,
 )
 from app.services.evaluators.adversarial_evaluator import AdversarialEvaluator
+from app.services.evaluators.adversarial_evaluator import (
+    normalize_persona_mixing_mode,
+    normalize_selected_personas,
+)
 from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
 from app.services.evaluators.adversarial_config import (
     load_config_from_db,
@@ -136,6 +141,8 @@ async def _resolve_test_cases(
     extra_instructions: Optional[str],
     selected_goals: Optional[List[str]],
     selected_traits: Optional[List[str]],
+    selected_personas: Optional[List[str]],
+    persona_mixing_mode: str,
     flow_mode: str,
     saved_case_ids: list[uuid.UUID],
     include_pinned_cases: bool,
@@ -152,6 +159,8 @@ async def _resolve_test_cases(
             selected_goals=selected_goals,
             selected_traits=selected_traits,
             flow_mode=flow_mode,
+            selected_personas=selected_personas,
+            persona_mixing_mode=persona_mixing_mode,
         )
 
     saved_cases, used_saved_case_ids = await _load_saved_and_pinned_cases(
@@ -209,6 +218,7 @@ async def run_adversarial_evaluation(
     test_count: int = 15,
     turn_delay: float = 1.5,
     case_delay: float = 3.0,
+    max_turns: int = settings.ADVERSARIAL_MAX_TURNS,
     llm_provider: str = "gemini",
     llm_model: Optional[str] = None,
     api_key: str = "",
@@ -222,6 +232,8 @@ async def run_adversarial_evaluation(
     thinking: str = "low",
     selected_goals: Optional[List[str]] = None,
     selected_traits: Optional[List[str]] = None,
+    selected_personas: Optional[List[str]] = None,
+    persona_mixing_mode: str = "single",
     flow_mode: str = "single",
     extra_instructions: Optional[str] = None,
     case_mode: str = "generate",
@@ -276,11 +288,15 @@ async def run_adversarial_evaluation(
         ]
         if requested_trait_ids and not resolved_selected_trait_ids:
             raise RuntimeError("No enabled contract traits matched selected_traits")
+    resolved_selected_personas = normalize_selected_personas(selected_personas)
+    resolved_persona_mixing_mode = normalize_persona_mixing_mode(persona_mixing_mode)
 
     # Build snapshot of resolved config for audit
     config_snapshot = {
         **config.snapshot(),
         "flow_mode": flow_mode,
+        "selected_personas": resolved_selected_personas,
+        "persona_mixing_mode": resolved_persona_mixing_mode,
     }
 
     # Create eval run record FIRST so failures are always visible in the UI
@@ -309,6 +325,7 @@ async def run_adversarial_evaluation(
             "flow_mode": flow_mode,
             "turn_delay": turn_delay,
             "case_delay": case_delay,
+            "max_turns": max_turns,
             "parallel_cases": parallel_cases,
             "case_workers": case_workers,
             "kaira_api_url": kaira_api_url,
@@ -322,6 +339,8 @@ async def run_adversarial_evaluation(
             "retry_eval_ids": retry_case_ids,
             "selected_goals": resolved_selected_goal_ids,
             "selected_traits": resolved_selected_trait_ids,
+            "selected_personas": resolved_selected_personas,
+            "persona_mixing_mode": resolved_persona_mixing_mode,
             "source_run_id": str(source_run_uuid) if source_run_uuid else None,
         },
     )
@@ -379,7 +398,7 @@ async def run_adversarial_evaluation(
         await db.commit()
 
     # Create adversarial evaluator
-    evaluator = AdversarialEvaluator(llm, config=config)
+    evaluator = AdversarialEvaluator(llm, config=config, max_turns=max_turns)
 
     async def report_progress(current: int, total: int, message: str, **extra):
         await update_job_progress(
@@ -414,6 +433,8 @@ async def run_adversarial_evaluation(
             extra_instructions=extra_instructions,
             selected_goals=resolved_selected_goal_ids,
             selected_traits=resolved_selected_trait_ids,
+            selected_personas=resolved_selected_personas,
+            persona_mixing_mode=resolved_persona_mixing_mode,
             flow_mode=flow_mode,
             saved_case_ids=saved_case_uuid_ids,
             include_pinned_cases=include_pinned_cases,
@@ -453,7 +474,7 @@ async def run_adversarial_evaluation(
 
             worker_llm = llm.clone_for_thread(f"adversarial-{_index}") if effective_concurrency > 1 else llm
             worker_llm.set_test_case_label(case_label)
-            worker_evaluator = AdversarialEvaluator(worker_llm, config=config) if effective_concurrency > 1 else evaluator
+            worker_evaluator = AdversarialEvaluator(worker_llm, config=config, max_turns=max_turns) if effective_concurrency > 1 else evaluator
 
             i = _index + 1
             logger.info(f"Running live test {i}/{len(cases)}: {goals_label} on {credential['user_id']}")

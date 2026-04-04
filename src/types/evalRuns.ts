@@ -110,7 +110,7 @@ export type AdversarialVerdict =
 
 export type RunStatus = "RUNNING" | "COMPLETED" | "COMPLETED_WITH_ERRORS" | "FAILED" | "INTERRUPTED" | "CANCELLED";
 
-export type Difficulty = "EASY" | "MEDIUM" | "HARD";
+export type Difficulty = "EASY" | "MEDIUM" | "HARD" | "CRACK";
 
 export type RecoveryQuality = "GOOD" | "PARTIAL" | "FAILED" | "NOT NEEDED";
 
