@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.schemas.app_analytics_config import AnalyticsSectionConfig
+from app.services.reports.config_models import PresentationSectionConfig
 from app.services.reports.contracts.cross_run_report import (
     PlatformCrossRunMetadata,
     PlatformCrossRunPayload,
@@ -49,13 +50,15 @@ _SECTION_MODEL_BY_TYPE = {
 
 
 def build_section(
-    config: AnalyticsSectionConfig,
+    config: AnalyticsSectionConfig | PresentationSectionConfig,
     data: Any,
 ) -> PlatformReportSection:
-    model_cls = _SECTION_MODEL_BY_TYPE[config.type]
-    title = config.title or config.id.replace('-', ' ').replace('_', ' ').title()
+    component_id = getattr(config, 'component_id', None) or getattr(config, 'type')
+    section_id = getattr(config, 'section_id', None) or getattr(config, 'id')
+    model_cls = _SECTION_MODEL_BY_TYPE[component_id]
+    title = config.title or section_id.replace('-', ' ').replace('_', ' ').title()
     return model_cls(
-        id=config.id,
+        id=section_id,
         title=title,
         description=config.description,
         variant=config.variant,
@@ -64,14 +67,15 @@ def build_section(
 
 
 def compose_sections(
-    section_configs: list[AnalyticsSectionConfig],
+    section_configs: list[AnalyticsSectionConfig | PresentationSectionConfig],
     section_payloads: Mapping[str, Any],
 ) -> list[PlatformReportSection]:
     sections: list[PlatformReportSection] = []
     for config in section_configs:
-        if config.id not in section_payloads:
+        section_id = getattr(config, 'section_id', None) or getattr(config, 'id')
+        if section_id not in section_payloads:
             continue
-        payload = section_payloads[config.id]
+        payload = section_payloads[section_id]
         if payload is None:
             continue
         sections.append(build_section(config, payload))

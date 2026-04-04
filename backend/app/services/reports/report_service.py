@@ -53,6 +53,7 @@ class ReportService(BaseReportService):
         source_data: dict,
         llm_provider: str | None = None,
         llm_model: str | None = None,
+        include_narrative: bool = True,
     ) -> ReportPayload:
         """Full Kaira/adversarial report generation pipeline."""
         threads = source_data["threads"]
@@ -113,20 +114,23 @@ class ReportService(BaseReportService):
         )
 
         # AI Narrative (non-blocking — failure is OK)
-        narrative, narrative_model = await self._generate_narrative(
-            run=run,
-            metadata=metadata,
-            health_score=health_score,
-            distributions=distributions,
-            rule_compliance=rule_compliance,
-            friction=friction,
-            adversarial_breakdown=adversarial_breakdown,
-            exemplars=exemplars,
-            prod_prompts=prod_prompts,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            is_adversarial=is_adversarial,
-        )
+        narrative = None
+        narrative_model = None
+        if include_narrative:
+            narrative, narrative_model = await self._generate_narrative(
+                run=run,
+                metadata=metadata,
+                health_score=health_score,
+                distributions=distributions,
+                rule_compliance=rule_compliance,
+                friction=friction,
+                adversarial_breakdown=adversarial_breakdown,
+                exemplars=exemplars,
+                prod_prompts=prod_prompts,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                is_adversarial=is_adversarial,
+            )
 
         # Reconcile LLM-returned exemplar IDs with actual exemplar IDs.
         # The LLM may truncate or slightly mangle UUIDs; this fixes the lookup.
@@ -134,7 +138,7 @@ class ReportService(BaseReportService):
             self._reconcile_exemplar_ids(narrative, exemplars)
 
         # Custom eval narrative (separate LLM call — non-blocking)
-        if custom_eval_report and custom_eval_agg:
+        if include_narrative and custom_eval_report and custom_eval_agg:
             custom_eval_report = await self._generate_custom_eval_narrative(
                 run=run,
                 report=custom_eval_report,

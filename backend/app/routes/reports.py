@@ -17,9 +17,12 @@ from app.database import get_db
 from app.models.app import App
 from app.models.eval_run import EvalRun
 from app.models.evaluation_analytics import EvaluationAnalytics
+from app.models.report_artifact import ReportArtifact
+from app.models.report_run import ReportRun
 from app.schemas.app_config import AppConfig as AppConfigSchema
 from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.schemas.base import CamelModel
+from app.services.reports.contracts.run_report import PlatformRunReportPayload
 from app.services.reports.canonical_adapters import adapt_cross_run_summary
 from app.services.reports.analytics_profiles.base import AnalyticsProfile
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
@@ -31,6 +34,9 @@ from app.services.reports.cross_run_aggregator import CrossRunAISummary
 from app.services.reports.cross_run_narrator import CrossRunNarrator
 from app.services.reports.contracts.cross_run_narrative import PlatformCrossRunNarrative
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
+from app.services.reports.html_renderer import render_report_document
+from app.services.reports.report_config_resolver import resolve_report_config
+from app.services.reports.report_run_store import fetch_single_run_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -191,28 +197,47 @@ async def refresh_cross_run_analytics(
     if not analytics_config.capabilities.cross_run_analytics or not profile.cross_run_adapter or not profile.report_payload_model:
         raise HTTPException(status_code=404, detail=f"Cross-run analytics is not enabled for app: {app_id}")
 
-    # Load single_run analytics rows scoped to tenant
-    analytics_stmt = (
-        select(EvaluationAnalytics)
-        .where(
-            EvaluationAnalytics.tenant_id == auth.tenant_id,
-            EvaluationAnalytics.app_id == app_id,
-            EvaluationAnalytics.scope == "single_run",
-        )
-        .order_by(desc(EvaluationAnalytics.computed_at))
-        .limit(limit)
+    report_config = await resolve_report_config(
+        db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        app_id=app_id,
+        scope='single_run',
+        report_id=None,
     )
-    analytics_result = await db.execute(analytics_stmt)
-    analytics_rows = list(analytics_result.scalars().all())
+    artifact_rows_result = await db.execute(
+        select(ReportRun, ReportArtifact)
+        .join(ReportArtifact, ReportArtifact.report_run_id == ReportRun.id)
+        .where(
+            ReportRun.tenant_id == auth.tenant_id,
+            ReportRun.user_id == auth.user_id,
+            ReportRun.app_id == app_id,
+            ReportRun.scope == 'single_run',
+            ReportRun.report_id == report_config.report_id,
+            ReportRun.status == 'completed',
+            ReportRun.source_eval_run_id.is_not(None),
+        )
+        .order_by(desc(ReportRun.completed_at), desc(ReportArtifact.computed_at))
+    )
+    artifact_rows = list(artifact_rows_result.all())
 
-    if not analytics_rows:
+    latest_by_source: list[tuple[ReportRun, ReportArtifact]] = []
+    seen_run_ids: set[UUID] = set()
+    for report_run, artifact in artifact_rows:
+        if report_run.source_eval_run_id in seen_run_ids:
+            continue
+        seen_run_ids.add(report_run.source_eval_run_id)
+        latest_by_source.append((report_run, artifact))
+        if len(latest_by_source) >= limit:
+            break
+
+    if not latest_by_source:
         raise HTTPException(
             status_code=404,
             detail="No completed runs with generated reports found.",
         )
 
-    # Load associated EvalRuns for metadata
-    run_ids = [row.run_id for row in analytics_rows if row.run_id]
+    run_ids = [row.source_eval_run_id for row, _artifact in latest_by_source if row.source_eval_run_id]
     runs_by_id: dict[str, EvalRun] = {}
     if run_ids:
         runs_result = await db.execute(
@@ -240,8 +265,8 @@ async def refresh_cross_run_analytics(
 
     # Build runs_data tuples for CrossRunAggregator
     runs_data = []
-    for row in analytics_rows:
-        run_id_str = str(row.run_id) if row.run_id else ""
+    for row, artifact in latest_by_source:
+        run_id_str = str(row.source_eval_run_id) if row.source_eval_run_id else ""
         run = runs_by_id.get(run_id_str)
         if not run:
             continue
@@ -252,7 +277,7 @@ async def refresh_cross_run_analytics(
                 "created_at": run.created_at.isoformat() if run.created_at else "",
                 "batch_metadata": run.batch_metadata,
             },
-            row.analytics_data,
+            artifact.artifact_data,
         ))
 
     if not runs_data:
@@ -330,6 +355,7 @@ async def refresh_cross_run_analytics(
 @router.get("/{run_id}/export-pdf")
 async def export_report_pdf(
     run_id: str,
+    report_id: str | None = Query(None),
     auth: AuthContext = require_permission('eval:export'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
@@ -346,40 +372,34 @@ async def export_report_pdf(
     if not run:
         raise HTTPException(status_code=404, detail="Evaluation run not found")
 
-    # Load cached report from evaluation_analytics
-    cache_result = await db.execute(
-        select(EvaluationAnalytics.analytics_data)
-        .where(
-            EvaluationAnalytics.scope == "single_run",
-            EvaluationAnalytics.run_id == UUID(run_id),
-            EvaluationAnalytics.app_id == run.app_id,
-            EvaluationAnalytics.tenant_id == auth.tenant_id,
-        )
+    report_config = await resolve_report_config(
+        db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        app_id=run.app_id,
+        scope='single_run',
+        report_id=report_id,
     )
-    cached_data = cache_result.scalar_one_or_none()
-    if not cached_data:
+    artifact_data = await fetch_single_run_artifact(
+        db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        run_id=UUID(run_id),
+        app_id=run.app_id,
+        report_id=report_config.report_id,
+    )
+    if not artifact_data:
         raise HTTPException(
             status_code=400,
             detail="Report has not been generated yet. Generate the report first.",
         )
-
-    analytics_config, profile = await _load_analytics_profile(db, run.app_id)
-    if not analytics_config.capabilities.pdf_export or not profile.pdf_renderer or not profile.report_payload_model:
-        raise HTTPException(
-            status_code=400,
-            detail=f"PDF export is not available for app: {run.app_id}",
-        )
-
-    # Validate into Pydantic model and re-dump with aliases.
     payload = load_cached_payload_or_raise(
-        profile.report_payload_model.model_validate,
-        cached_data,
-        detail='Cached report is outdated. Regenerate the report before exporting.',
-        log_message=f'Report cache invalid for run {run_id} during PDF export',
+        PlatformRunReportPayload.model_validate,
+        artifact_data,
+        detail='Cached report artifact is outdated. Regenerate the report before exporting.',
+        log_message=f'Report artifact invalid for run {run_id} during PDF export',
     )
-    camel_data = payload.model_dump(by_alias=True)
-
-    html_content = profile.pdf_renderer(camel_data)
+    html_content = render_report_document(payload.export_document)
 
     try:
         async with async_playwright() as p:
@@ -421,6 +441,7 @@ async def export_report_pdf(
 @router.get("/{run_id}")
 async def get_report(
     run_id: str,
+    report_id: str | None = Query(None, description="Report config identifier"),
     refresh: bool = Query(False, description="Force regeneration, bypassing cache"),
     cache_only: bool = Query(False, description="Only return cached report; 404 if not cached"),
     provider: str | None = Query(None, description="LLM provider for narrative generation"),
@@ -429,12 +450,8 @@ async def get_report(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Generate an evaluation report for a completed run.
-
-    Returns the report payload (shape varies by app_id). Results are cached
-    after first generation; use ?refresh=true to force regeneration.
-    Use ?cache_only=true to check for cached data without triggering generation.
-    """
+    """Return the latest generated report artifact for a completed run."""
+    del refresh, provider, model
     # Verify run ownership
     run = await db.scalar(
         select(EvalRun).where(
@@ -446,43 +463,36 @@ async def get_report(
     if not run:
         raise HTTPException(status_code=404, detail="Evaluation run not found")
 
-    if cache_only:
-        cache_result = await db.execute(
-            select(EvaluationAnalytics.analytics_data)
-            .where(
-                EvaluationAnalytics.scope == "single_run",
-                EvaluationAnalytics.run_id == UUID(run_id),
-                EvaluationAnalytics.tenant_id == auth.tenant_id,
-                EvaluationAnalytics.app_id == run.app_id,
-            )
-        )
-        cached_data = cache_result.scalar_one_or_none()
-        if not cached_data:
-            raise HTTPException(status_code=404, detail="No cached report")
-        analytics_config, profile = await _load_analytics_profile(db, run.app_id)
-        if not analytics_config.capabilities.single_run_report or not profile.report_payload_model:
-            raise HTTPException(status_code=404, detail=f"Reporting is not enabled for app: {run.app_id}")
-        return load_cached_payload_or_raise(
-            profile.report_payload_model.model_validate,
-            cached_data,
-            detail='Cached report is outdated. Regenerate the report.',
-            log_message=f'Report cache invalid for run {run_id} during cache-only fetch',
-        )
-
-    analytics_config, profile = await _load_analytics_profile(db, run.app_id)
-    if not analytics_config.capabilities.single_run_report or not profile.report_service_cls:
-        raise HTTPException(status_code=404, detail=f"Reporting is not enabled for app: {run.app_id}")
-    service = profile.report_service_cls(db, tenant_id=auth.tenant_id, user_id=auth.user_id)
-
     try:
-        return await service.generate(
-            run_id,
-            force_refresh=refresh,
-            llm_provider=provider,
-            llm_model=model,
+        config = await resolve_report_config(
+            db,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
+            app_id=run.app_id,
+            scope='single_run',
+            report_id=report_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    artifact_data = await fetch_single_run_artifact(
+        db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        run_id=UUID(run_id),
+        app_id=run.app_id,
+        report_id=config.report_id,
+    )
+    if not artifact_data:
+        detail = "No cached report" if cache_only else "Report has not been generated yet. Submit a generate-report job first."
+        raise HTTPException(status_code=404, detail=detail)
+
+    return load_cached_payload_or_raise(
+        PlatformRunReportPayload.model_validate,
+        artifact_data,
+        detail='Cached report artifact is outdated. Regenerate the report.',
+        log_message=f'Report artifact invalid for run {run_id} during fetch',
+    )
 
 
 class CrossRunSummaryRequest(CamelModel):

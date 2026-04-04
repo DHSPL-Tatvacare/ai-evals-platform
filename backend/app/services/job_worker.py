@@ -982,80 +982,25 @@ async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.
 
 @register_job_handler("generate-report")
 async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
-    """Generate a single-run evaluation report (aggregation + AI narrative).
-
-    Params:
-        run_id (str): eval run UUID
-        refresh (bool): force regeneration, bypass cache
-        provider (str|None): LLM provider for narrative
-        model (str|None): LLM model for narrative
-    """
-    import time as _time
-    from app.database import async_session as _async_session
-    from app.models.app import App
-    from app.models.eval_run import EvalRun
-    from app.schemas.app_config import AppConfig as AppConfigSchema
-    from app.services.reports.analytics_profiles.registry import get_analytics_profile
-    from sqlalchemy import select as _select
-    from uuid import UUID as _UUID
+    """Generate and persist a single-run report artifact through the generic composer."""
+    from app.services.reports.report_generation_service import generate_single_run_report_artifact
 
     run_id = params.get("run_id")
     if not run_id:
         raise ValueError("run_id is required")
 
-    start = _time.monotonic()
-
     await update_job_progress(
-        job_id, 0, 2, "Aggregating evaluation data…", run_id=run_id
+        job_id, 0, 2, "Resolving report config…", run_id=run_id
     )
-
-    async with _async_session() as db:
-        run = await db.scalar(
-            _select(EvalRun).where(EvalRun.id == _UUID(run_id), EvalRun.tenant_id == tenant_id)
-        )
-        if not run:
-            raise ValueError(f"Eval run not found: {run_id}")
-
-        app_row = await db.scalar(
-            _select(App).where(
-                App.slug == run.app_id,
-                App.is_active == True,
-            )
-        )
-        if not app_row:
-            raise ValueError(f"App not found: {run.app_id}")
-
-        analytics_config = AppConfigSchema.model_validate(app_row.config or {}).analytics
-        profile = get_analytics_profile(analytics_config.profile)
-        if not analytics_config.capabilities.single_run_report or not profile or not profile.report_service_cls:
-            raise ValueError(f"Reporting is not enabled for app: {run.app_id}")
-        service = profile.report_service_cls(db, tenant_id=tenant_id, user_id=user_id)
-
-        await update_job_progress(
-            job_id, 1, 2, "Generating AI narrative…", run_id=run_id
-        )
-        payload = await service.generate(
-            run_id,
-            force_refresh=params.get("refresh", False),
-            llm_provider=params.get("provider"),
-            llm_model=params.get("model"),
-        )
-
-    duration = round(_time.monotonic() - start, 2)
-
-    has_narrative = False
-    health_grade = None
-    if hasattr(payload, "narrative"):
-        has_narrative = payload.narrative is not None
-    if hasattr(payload, "health_score") and payload.health_score:
-        health_grade = payload.health_score.grade
-
-    return {
-        "run_id": run_id,
-        "duration_seconds": duration,
-        "has_narrative": has_narrative,
-        "health_grade": health_grade,
-    }
+    await update_job_progress(
+        job_id, 1, 2, "Composing report artifact…", run_id=run_id
+    )
+    return await generate_single_run_report_artifact(
+        job_id,
+        params,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 @register_job_handler("generate-evaluator-draft")
@@ -1093,89 +1038,18 @@ async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uu
 
 @register_job_handler("generate-cross-run-report")
 async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
-    """Generate cross-run AI summary (LLM call on aggregated analytics).
-
-    Params:
-        app_id (str): application ID
-        stats (dict): cross-run stats payload
-        health_trend (list): trend data
-        top_issues (list): top issues data
-        provider (str|None): LLM provider
-        model (str|None): LLM model
-    """
-    import time as _time
-    from app.database import async_session as _async_session
-    from app.services.reports.cross_run_narrator import CrossRunNarrator
-    from app.services.evaluators.settings_helper import get_llm_settings_from_db
-    from app.services.evaluators.llm_base import create_llm_provider
+    """Generate and persist a cross-run report artifact through the generic composer."""
+    from app.services.reports.report_generation_service import generate_cross_run_report_artifact
 
     app_id = params.get("app_id", "")
-    start = _time.monotonic()
+    if not app_id:
+        raise ValueError("app_id is required")
 
-    await update_job_progress(job_id, 0, 1, "Generating cross-run AI summary…")
-
-    # Resolve LLM credentials — use provider from job params so the correct
-    # provider-specific API key is resolved from the DB settings.
-    job_provider = params.get("provider") or None
-    db_settings = await get_llm_settings_from_db(
-        tenant_id=tenant_id, user_id=user_id,
-        provider_override=job_provider, auth_intent="managed_job",
+    await update_job_progress(job_id, 0, 2, "Resolving report config…")
+    await update_job_progress(job_id, 1, 2, "Composing cross-run report artifact…")
+    return await generate_cross_run_report_artifact(
+        job_id,
+        params,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
-    provider_name = job_provider or db_settings.get("provider", "gemini")
-    model_name = params.get("model") or db_settings.get("selected_model", "")
-    api_key = db_settings.get("api_key", "")
-
-    provider = create_llm_provider(
-        provider=provider_name,
-        model_name=model_name,
-        api_key=api_key,
-        service_account_path=db_settings.get("service_account_path", ""),
-        azure_endpoint=db_settings.get("azure_endpoint", ""),
-        api_version=db_settings.get("api_version", ""),
-    )
-
-    narrator = CrossRunNarrator(provider)
-    summary = await narrator.generate(
-        stats=params.get("stats", {}),
-        health_trend=params.get("health_trend", []),
-        top_issues=params.get("top_issues", []),
-        top_recommendations=params.get("top_recommendations", []),
-    )
-
-    # Cache the summary in evaluation_analytics
-    async with _async_session() as db:
-        from app.models.evaluation_analytics import EvaluationAnalytics
-        from sqlalchemy import select as _select
-        from datetime import datetime as _dt, timezone as _tz
-
-        result = await db.execute(
-            _select(EvaluationAnalytics).where(
-                EvaluationAnalytics.tenant_id == tenant_id,
-                EvaluationAnalytics.scope == "cross_run_summary",
-                EvaluationAnalytics.app_id == app_id,
-            )
-        )
-        existing = result.scalar_one_or_none()
-        summary_data = (
-            summary.model_dump() if hasattr(summary, "model_dump") else summary
-        )
-        if existing:
-            existing.analytics_data = summary_data
-            existing.computed_at = _dt.now(_tz.utc)
-        else:
-            db.add(
-                EvaluationAnalytics(
-                    tenant_id=tenant_id,
-                    app_id=app_id,
-                    scope="cross_run_summary",
-                    analytics_data=summary_data,
-                )
-            )
-        await db.commit()
-
-    duration = round(_time.monotonic() - start, 2)
-    return {
-        "app_id": app_id,
-        "duration_seconds": duration,
-        "summary": summary_data,
-    }

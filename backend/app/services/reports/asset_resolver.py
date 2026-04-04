@@ -14,6 +14,7 @@ from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting
 from app.schemas.app_analytics_config import AnalyticsAssetKeys
 from app.services.access_control import shared_visibility_clause
+from app.services.reports.config_models import NarrativeAssetKeys
 from app.services.reports.prompts.inside_sales_narrative_prompt import (
     INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
 )
@@ -29,6 +30,13 @@ class ResolvedReportAssets:
     narrative_template: str | None = None
     glossary: str | None = None
     adversarial_narrative_template: str | None = None
+
+
+@dataclass
+class ResolvedNarrativeAssets:
+    prompt_references: dict[str, str | None] = field(default_factory=dict)
+    system_prompt: str | None = None
+    glossary: str | None = None
 
 
 async def _resolve_setting_value(
@@ -159,4 +167,41 @@ async def resolve_report_assets(
         narrative_template=narrative_template,
         glossary=glossary,
         adversarial_narrative_template=ADVERSARIAL_NARRATIVE_SYSTEM_PROMPT,
+    )
+
+
+async def resolve_report_config_assets(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    asset_keys: NarrativeAssetKeys,
+) -> ResolvedNarrativeAssets:
+    prompt_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.prompt_references_key,
+    )
+    system_prompt_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.system_prompt_key,
+    )
+    glossary_value = await _resolve_setting_value(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        key=asset_keys.glossary_key,
+    )
+
+    return ResolvedNarrativeAssets(
+        prompt_references=_extract_prompt_references(prompt_value),
+        system_prompt=_extract_content(system_prompt_value),
+        glossary=_extract_content(glossary_value),
     )

@@ -370,6 +370,7 @@ def compose_document(
     metadata: dict[str, str | None],
     sections: list[PlatformReportSection],
     export_config: AnalyticsExportConfig,
+    theme_tokens: dict[str, str] | None = None,
 ) -> PlatformReportDocument:
     section_by_id = {section.id: section for section in sections}
     selected_ids = export_config.section_ids or list(section_by_id.keys())
@@ -394,6 +395,8 @@ def compose_document(
     return PlatformReportDocument(
         title=title,
         subtitle=subtitle,
-        theme=_theme_for_variant(export_config.document_variant),
+        theme=_theme_for_variant(export_config.document_variant).model_copy(
+            update=theme_tokens or {},
+        ),
         blocks=blocks,
     )

@@ -52,6 +52,7 @@ class InsideSalesReportService(BaseReportService):
         source_data: dict[str, list[dict]],
         llm_provider: str | None = None,
         llm_model: str | None = None,
+        include_narrative: bool = True,
     ) -> PlatformRunReportPayload:
         thread_dicts = source_data["threads"]
 
@@ -77,16 +78,17 @@ class InsideSalesReportService(BaseReportService):
 
         narrative = None
         narrative_model = None
-        try:
-            llm, model_name = await self._create_llm_provider(
-                run, "inside_sales_narrative", llm_provider, llm_model,
-            )
-            if llm:
-                narrator = InsideSalesNarrator(llm)
-                narrative = await narrator.generate(aggregate_data)
-                narrative_model = model_name
-        except Exception as e:
-            logger.warning("Inside sales narrative skipped: %s", e)
+        if include_narrative:
+            try:
+                llm, model_name = await self._create_llm_provider(
+                    run, "inside_sales_narrative", llm_provider, llm_model,
+                )
+                if llm:
+                    narrator = InsideSalesNarrator(llm)
+                    narrative = await narrator.generate(aggregate_data)
+                    narrative_model = model_name
+            except Exception as e:
+                logger.warning("Inside sales narrative skipped: %s", e)
 
         metadata.narrative_model = narrative_model
 

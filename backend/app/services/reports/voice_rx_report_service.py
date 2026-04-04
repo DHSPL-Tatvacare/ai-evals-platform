@@ -30,8 +30,9 @@ class VoiceRxReportService(BaseReportService):
         source_data: dict,
         llm_provider: str | None = None,
         llm_model: str | None = None,
+        include_narrative: bool = True,
     ) -> PlatformRunReportPayload:
-        del source_data, llm_provider, llm_model
+        del source_data, llm_provider, llm_model, include_narrative
 
         analytics_config = await self._load_analytics_config(run.app_id)
         summary = run.summary or {}

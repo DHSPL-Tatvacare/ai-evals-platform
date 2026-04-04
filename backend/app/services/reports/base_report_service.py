@@ -56,9 +56,28 @@ class BaseReportService(ABC):
             source_data=source_data,
             llm_provider=llm_provider,
             llm_model=llm_model,
+            include_narrative=True,
         )
         await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
         return payload
+
+    async def build_payload_for_composer(
+        self,
+        run_id: str,
+        *,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+        include_narrative: bool = False,
+    ) -> CamelModel:
+        run = await self._load_run(run_id)
+        source_data = await self._load_source_data(run_id)
+        return await self._build_payload(
+            run=run,
+            source_data=source_data,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            include_narrative=include_narrative,
+        )
 
     def _validate_cached_payload(self, cached: dict, run_id: str) -> CamelModel | None:
         try:
@@ -108,6 +127,7 @@ class BaseReportService(ABC):
         source_data: dict[str, Any],
         llm_provider: str | None = None,
         llm_model: str | None = None,
+        include_narrative: bool = True,
     ) -> CamelModel:
         """Build the app-specific report payload from loaded source data."""
 

@@ -2303,14 +2303,29 @@ def _build_presentation_config(composition) -> dict:
     }
 
 
-def _build_narrative_config(composition, asset_keys) -> dict:
+def _build_narrative_config(scope: str, composition, asset_keys) -> dict:
+    input_section_ids = [
+        section.id
+        for section in composition.sections
+        if section.type not in {'narrative', 'issues_recommendations', 'prompt_gap_analysis', 'callout'}
+    ]
+    output_insertion_points = [
+        section.id
+        for section in composition.sections
+        if section.type in {'narrative', 'issues_recommendations', 'prompt_gap_analysis', 'callout'}
+    ]
     return {
         "enabled": composition.ai_summary.enabled,
+        "schemaKey": "platform_run_narrative_v1" if scope == "single_run" else "platform_cross_run_narrative_v1",
         "inputSelection": {
-            "sectionIds": list(composition.ai_summary.section_ids),
+            "sectionIds": input_section_ids,
         },
-        "outputInsertionPoints": list(composition.ai_summary.section_ids),
-        "assetKeys": asset_keys.model_dump(by_alias=True, exclude_none=True),
+        "outputInsertionPoints": output_insertion_points,
+        "assetKeys": {
+            "promptReferencesKey": asset_keys.prompt_references_key,
+            "systemPromptKey": asset_keys.narrative_template_key,
+            "glossaryKey": asset_keys.glossary_key,
+        },
         "providerPolicy": {
             "source": "llm-settings",
         },
@@ -2352,7 +2367,7 @@ def _build_default_report_config_seeds() -> list[dict]:
                     "visibility": Visibility.SHARED,
                     "shared_by": SYSTEM_USER_ID,
                     "presentation_config": _build_presentation_config(composition),
-                    "narrative_config": _build_narrative_config(composition, analytics.assets),
+                    "narrative_config": _build_narrative_config(scope, composition, analytics.assets),
                     "export_config": _build_export_config(composition),
                     "default_report_run_visibility": Visibility.PRIVATE,
                     "version": 1,

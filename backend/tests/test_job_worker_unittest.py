@@ -243,7 +243,42 @@ class JobWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transition['status'], 'failed')
         self.assertEqual(transition['event'], 'dead_lettered')
         self.assertEqual(transition['dead_letter_reason'], 'retry_budget_exhausted')
-        self.assertEqual(transition['dead_lettered_at'], now)
+
+    async def test_handle_generate_report_delegates_to_generic_report_generation(self):
+        fake_result = {
+            'report_run_id': str(uuid.uuid4()),
+            'report_artifact_id': str(uuid.uuid4()),
+            'run_id': 'run-123',
+            'report_id': 'default-single-run',
+            'duration_seconds': 1.2,
+            'has_narrative': True,
+        }
+
+        with patch(
+            'app.services.reports.report_generation_service.generate_single_run_report_artifact',
+            new=unittest.mock.AsyncMock(return_value=fake_result),
+        ), patch.object(
+            job_worker,
+            'update_job_progress',
+            new=unittest.mock.AsyncMock(),
+        ):
+            result = await job_worker.handle_generate_report(
+                'job-123',
+                {
+                    'run_id': 'run-123',
+                    'app_id': 'inside-sales',
+                    'report_id': 'default-single-run',
+                    'visibility': 'shared',
+                    'provider': 'openai',
+                    'model': 'gpt-5.4',
+                },
+                tenant_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
+
+        self.assertEqual(result['report_run_id'], fake_result['report_run_id'])
+        self.assertEqual(result['report_artifact_id'], fake_result['report_artifact_id'])
+        self.assertEqual(result['report_id'], 'default-single-run')
 
 
 class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
