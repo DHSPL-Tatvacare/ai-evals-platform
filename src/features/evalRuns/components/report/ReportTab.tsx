@@ -1,12 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Loader2, RefreshCw, Download, FileBarChart, Sparkles, X, Clock } from 'lucide-react';
-import type { AppId, LLMProvider } from '@/types';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Clock, Download, FileBarChart, Globe2, Loader2, Sparkles } from 'lucide-react';
+import type { AppId, AssetVisibility, LLMProvider, ReportConfigSummary, ReportRunSummary } from '@/types';
+import { Button, EmptyState, LLMConfigSection, Modal, VisibilityBadge, VisibilityToggle } from '@/components/ui';
 import { reportsApi } from '@/services/api/reportsApi';
-import { jobsApi, type Job } from '@/services/api/jobsApi';
-import { getAdaptiveJobPollBackoffMs, isTerminalJobStatus, poll } from '@/services/api/jobPolling';
+import { pollJobUntilComplete, submitAndPollJob, type JobProgress } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
-import { EmptyState, Button, LLMConfigSection } from '@/components/ui';
-import { useLLMSettingsStore, hasProviderCredentials, LLM_PROVIDERS } from '@/stores';
+import { hasProviderCredentials, LLM_PROVIDERS, useLLMSettingsStore } from '@/stores';
 
 interface ReportMetadataLike {
   llmProvider?: string | null;
@@ -21,8 +20,7 @@ interface Props<TReport> {
   appId: AppId;
   runId: string;
   supportsPdf?: boolean;
-  /** Renderer for the report content. Receives the raw report payload and action buttons. */
-  renderReport: (report: TReport, actions: React.ReactNode) => React.ReactNode;
+  renderReport: (report: TReport, actions: ReactNode) => ReactNode;
 }
 
 type Status = 'loading' | 'idle' | 'generating' | 'ready' | 'error';
@@ -31,428 +29,595 @@ function getReportMetadata<TReport extends ReportPayloadLike>(report: TReport | 
   return report?.metadata ?? null;
 }
 
+function formatRunLabel(run: ReportRunSummary): string {
+  const timestamp = run.completedAt ?? run.createdAt;
+  return new Date(timestamp).toLocaleString();
+}
+
+function ReportRunHistoryItem({
+  run,
+  selected,
+  onSelect,
+}: {
+  run: ReportRunSummary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
+        selected
+          ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10'
+          : 'border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--border-focus)]'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-[var(--text-primary)]">{formatRunLabel(run)}</div>
+          <div className="mt-1 text-xs text-[var(--text-secondary)]">
+            {run.llmProvider && run.llmModel ? `${run.llmProvider} · ${run.llmModel}` : 'No model snapshot'}
+          </div>
+        </div>
+        <VisibilityBadge visibility={run.visibility} compact />
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+        <span className="uppercase tracking-wide">{run.status.replaceAll('_', ' ')}</span>
+        <span className="font-mono">{run.id.slice(0, 8)}</span>
+      </div>
+    </button>
+  );
+}
+
 export default function ReportTab<TReport extends ReportPayloadLike>({
   appId,
   runId,
   supportsPdf = true,
   renderReport,
 }: Props<TReport>) {
+  const [configs, setConfigs] = useState<ReportConfigSummary[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [reportRuns, setReportRuns] = useState<ReportRunSummary[]>([]);
+  const [selectedReportRunId, setSelectedReportRunId] = useState<string | null>(null);
   const [report, setReport] = useState<TReport | null>(null);
   const [status, setStatus] = useState<Status>('loading');
-  const [refreshing, setRefreshing] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [savingVisibility, setSavingVisibility] = useState(false);
+  const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
-  const [showRefreshSelector, setShowRefreshSelector] = useState(false);
-  const refreshPopoverRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const [jobPhase, setJobPhase] = useState<'queued' | 'running' | null>(null);
+  const pollAbortRef = useRef<AbortController | null>(null);
 
-  // Close popover on outside click
-  useEffect(() => {
-    if (!showRefreshSelector) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (refreshPopoverRef.current && !refreshPopoverRef.current.contains(e.target as Node)) {
-        setShowRefreshSelector(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showRefreshSelector]);
-
-  // Model selection for narrative generation
-  const [reportProvider, setReportProvider] = useState<LLMProvider>('gemini');
+  const [reportProvider, setReportProvider] = useState<LLMProvider>(LLM_PROVIDERS[0].value);
   const [reportModel, setReportModel] = useState('');
+  const [newVisibility, setNewVisibility] = useState<AssetVisibility>('private');
 
-  // Credential check for generate button gating
   const geminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
   const openaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
   const azureApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
   const azureEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
   const anthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
-  const saConfigured = useLLMSettingsStore((s) => s._serviceAccountConfigured);
+  const serviceAccountConfigured = useLLMSettingsStore((s) => s._serviceAccountConfigured);
 
-  const storeSlice = { geminiApiKey, openaiApiKey, azureOpenaiApiKey: azureApiKey, azureOpenaiEndpoint: azureEndpoint, anthropicApiKey, _serviceAccountConfigured: saConfigured };
-  const credentialsReady = hasProviderCredentials(reportProvider, storeSlice);
+  const credentialsReady = hasProviderCredentials(reportProvider, {
+    geminiApiKey,
+    openaiApiKey,
+    azureOpenaiApiKey: azureApiKey,
+    azureOpenaiEndpoint: azureEndpoint,
+    anthropicApiKey,
+    _serviceAccountConfigured: serviceAccountConfigured,
+  });
 
-  const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const [jobPhase, setJobPhase] = useState<'queued' | 'running' | null>(null);
+  const selectedConfig = useMemo(
+    () => configs.find((config) => config.reportId === selectedReportId) ?? null,
+    [configs, selectedReportId],
+  );
+  const selectedReportRun = useMemo(
+    () => reportRuns.find((reportRun) => reportRun.id === selectedReportRunId) ?? null,
+    [reportRuns, selectedReportRunId],
+  );
 
-  // ── Poll a job until done, then load the cached report ──
-  const pollAndLoad = useCallback(async (jobId: string, isRefresh: boolean) => {
-    abortRef.current?.abort();
+  const loadConfigs = useCallback(async () => {
+    const nextConfigs = await reportsApi.listReportConfigs(appId, 'single_run');
+    setConfigs(nextConfigs);
+    setSelectedReportId((current) => {
+      if (current && nextConfigs.some((config) => config.reportId === current)) return current;
+      return nextConfigs.find((config) => config.isDefault)?.reportId ?? nextConfigs[0]?.reportId ?? null;
+    });
+    return nextConfigs;
+  }, [appId]);
+
+  const loadReportRuns = useCallback(async (reportId: string) => {
+    const nextRuns = await reportsApi.listReportRuns({
+      appId,
+      scope: 'single_run',
+      sourceEvalRunId: runId,
+      reportId,
+      limit: 20,
+    });
+    setReportRuns(nextRuns);
+    setSelectedReportRunId((current) => {
+      if (current && nextRuns.some((reportRun) => reportRun.id === current)) return current;
+      return nextRuns.find((reportRun) => reportRun.status === 'completed')?.id ?? nextRuns[0]?.id ?? null;
+    });
+    return nextRuns;
+  }, [appId, runId]);
+
+  const syncModelSelectionFromReport = useCallback((nextReport: TReport | null) => {
+    const metadata = getReportMetadata(nextReport);
+    if (metadata?.llmProvider) setReportProvider(metadata.llmProvider as LLMProvider);
+    if (metadata?.llmModel) setReportModel(metadata.llmModel);
+  }, []);
+
+  const loadSelectedArtifact = useCallback(async (reportRun: ReportRunSummary | null) => {
+    if (!reportRun) {
+      setReport(null);
+      setStatus('idle');
+      return;
+    }
+
+    if (reportRun.status !== 'completed') {
+      setReport(null);
+      setStatus('generating');
+      return;
+    }
+
+    const nextReport = await reportsApi.fetchReportRunArtifact(reportRun.id) as unknown as TReport;
+    setReport(nextReport);
+    syncModelSelectionFromReport(nextReport);
+    setStatus('ready');
+  }, [syncModelSelectionFromReport]);
+
+  const handleJobProgress = useCallback((progress: JobProgress & { queuePosition?: number | null; status?: string }) => {
+    const maybeStatus = progress.status;
+    if (maybeStatus === 'queued') {
+      setJobPhase('queued');
+      setQueuePosition(progress.queuePosition ?? null);
+      setProgressMsg('');
+      return;
+    }
+    setJobPhase('running');
+    setQueuePosition(null);
+    setProgressMsg(progress.message || '');
+  }, []);
+
+  const pollExistingJob = useCallback(async (reportRun: ReportRunSummary) => {
+    if (!reportRun.jobId) return;
+    pollAbortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    pollAbortRef.current = controller;
+    setStatus('generating');
 
     try {
-      let latestJob: Job | null = null;
-      const finalJob = await poll<Job>({
-        fn: async () => {
-          const job = await jobsApi.get(jobId);
-          latestJob = job;
-
-          // Track queue vs running phase for UI differentiation
-          if (job.status === 'queued') {
-            setJobPhase('queued');
-            setQueuePosition(job.queuePosition ?? null);
-            setProgressMsg('');
-          } else if (job.status === 'retryable_failed') {
-            setJobPhase('queued');
-            setQueuePosition(null);
-            setProgressMsg(job.progress?.message || 'Retry scheduled...');
-          } else if (job.status === 'running') {
-            setJobPhase('running');
-            setQueuePosition(null);
-            setProgressMsg(job.progress?.message || '');
-          }
-
-          if (isTerminalJobStatus(job.status)) {
-            return { done: true, data: job };
-          }
-          return { done: false };
-        },
-        intervalMs: 2000,
-        getBackoffMs: () => getAdaptiveJobPollBackoffMs(latestJob, 2000),
+      await pollJobUntilComplete(reportRun.jobId, {
+        pollIntervalMs: 2000,
         signal: controller.signal,
+        onProgress: (progress) => {
+          handleJobProgress(progress);
+        },
       });
-
-      if (finalJob?.status === 'completed') {
-        const data = await reportsApi.fetchReport<TReport>(runId, { cacheOnly: true });
-        setReport(data);
-        setStatus('ready');
-        const metadata = getReportMetadata(data);
-        // Sync the provider/model selectors to match the report that was just
-        // generated so the header bar and refresh popover show the correct values.
-        if (metadata?.llmProvider) {
-          setReportProvider(metadata.llmProvider as LLMProvider);
-        }
-        if (metadata?.llmModel) {
-          setReportModel(metadata.llmModel);
-        }
-        const hasNarrative = finalJob.result?.has_narrative !== false;
-        if (!hasNarrative) {
-          notificationService.warning('Report ready, but AI narrative could not be generated');
-        } else if (isRefresh) {
-          notificationService.success('Report regenerated');
-        }
-      } else if (finalJob?.status === 'failed') {
-        const msg = finalJob.errorMessage || 'Report generation failed';
-        setError(msg);
-        if (!isRefresh) setStatus('error');
-        else notificationService.error(msg);
-      } else if (finalJob?.status === 'cancelled') {
+      const refreshedRuns = await loadReportRuns(reportRun.reportId);
+      const completedRun = refreshedRuns.find((entry) => entry.id === reportRun.id && entry.status === 'completed')
+        ?? refreshedRuns.find((entry) => entry.status === 'completed');
+      if (completedRun) {
+        setSelectedReportRunId(completedRun.id);
+        await loadSelectedArtifact(completedRun);
+      } else {
         setStatus('idle');
-        notificationService.warning('Report generation was cancelled');
       }
-    } catch (e: unknown) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      const msg = e instanceof Error ? e.message : 'Report generation failed';
-      setError(msg);
-      if (!isRefresh) setStatus('error');
-      else notificationService.error(msg);
+    } catch (jobError) {
+      if (jobError instanceof DOMException && jobError.name === 'AbortError') return;
+      const message = jobError instanceof Error ? jobError.message : 'Report generation failed';
+      setError(message);
+      setStatus('error');
     } finally {
-      setRefreshing(false);
       setProgressMsg('');
       setQueuePosition(null);
       setJobPhase(null);
     }
-  }, [runId]);
+  }, [handleJobProgress, loadReportRuns, loadSelectedArtifact]);
 
-  // ── On mount: check running jobs first (survives refresh), then cache, then idle ──
   useEffect(() => {
-    setReportProvider(LLM_PROVIDERS[0].value);
-    setReportModel('');
-
     let cancelled = false;
+    setStatus('loading');
+    setError(null);
+    setReport(null);
+    setReportRuns([]);
+    setSelectedReportRunId(null);
 
-    (async () => {
-      // 1. Check for an in-progress generate-report job for this run FIRST.
-      //    This ensures a page refresh during generation resumes polling
-      //    instead of showing a stale cached report.
-      try {
-        const jobs = await jobsApi.list({ jobType: 'generate-report' });
-        const active = jobs.find(
-          (j) => ['queued', 'running'].includes(j.status) &&
-            (j.params as Record<string, unknown>)?.run_id === runId,
-        );
-        if (active && !cancelled) {
-          setStatus('generating');
-          pollAndLoad(active.id, false);
-          return;
+    void loadConfigs()
+      .then((nextConfigs) => {
+        if (cancelled) return;
+        if (nextConfigs.length === 0) {
+          setStatus('idle');
         }
-      } catch { /* ignore */ }
-
-      if (cancelled) return;
-
-      // 2. No active job — check for cached report
-      try {
-        const data = await reportsApi.fetchReport<TReport>(runId, { cacheOnly: true });
-        if (!cancelled) {
-          setReport(data);
-          setStatus('ready');
-          const metadata = getReportMetadata(data);
-          // Sync selectors to match the cached report's provider/model
-          if (metadata?.llmProvider) {
-            setReportProvider(metadata.llmProvider as LLMProvider);
-          }
-          if (metadata?.llmModel) {
-            setReportModel(metadata.llmModel);
-          }
-        }
-        return;
-      } catch { /* no cache */ }
-
-      if (!cancelled) setStatus('idle');
-    })();
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load report configs');
+        setStatus('error');
+      });
 
     return () => {
       cancelled = true;
-      abortRef.current?.abort();
+      pollAbortRef.current?.abort();
     };
-  }, [runId, pollAndLoad]);
+  }, [loadConfigs, runId]);
 
-  // ── Submit a generate-report job ──
-  const generateReport = useCallback(async (refresh = false) => {
-    if (refresh && report) {
-      setRefreshing(true);
-    } else {
-      setStatus('generating');
+  useEffect(() => {
+    if (!selectedReportId) return;
+    let cancelled = false;
+
+    void loadReportRuns(selectedReportId)
+      .then((nextRuns) => {
+        if (cancelled) return;
+        if (nextRuns.length === 0) {
+          setReport(null);
+          setStatus('idle');
+        }
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load report runs');
+        setStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+      pollAbortRef.current?.abort();
+    };
+  }, [loadReportRuns, selectedReportId]);
+
+  useEffect(() => {
+    if (!selectedReportRun) return;
+    void loadSelectedArtifact(selectedReportRun).catch((loadError) => {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load report';
+      setError(message);
+      setStatus('error');
+    });
+    if (selectedReportRun.status !== 'completed' && selectedReportRun.jobId) {
+      void pollExistingJob(selectedReportRun);
     }
+  }, [loadSelectedArtifact, pollExistingJob, selectedReportRun]);
+
+  useEffect(() => {
+    if (!selectedConfig) return;
+    setNewVisibility(selectedConfig.defaultReportRunVisibility);
+  }, [selectedConfig]);
+
+  const handleGenerate = useCallback(async () => {
+    if (!selectedConfig) return;
+    setShowGenerateOverlay(false);
+    setStatus('generating');
     setError(null);
     setProgressMsg('Submitting report job…');
 
     try {
-      const job = await jobsApi.submit('generate-report', {
-        run_id: runId,
-        app_id: appId,
-        refresh,
-        provider: reportProvider,
-        model: reportModel || undefined,
-      });
-      await pollAndLoad(job.id, refresh);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to submit report job';
-      setError(msg);
-      if (!report) setStatus('error');
-      else notificationService.error(msg);
-      setRefreshing(false);
+      const completedJob = await submitAndPollJob(
+        'generate-report',
+        {
+          run_id: runId,
+          app_id: appId,
+          report_id: selectedConfig.reportId,
+          provider: reportProvider,
+          model: reportModel || undefined,
+          visibility: newVisibility,
+        },
+        {
+          pollIntervalMs: 2000,
+          onProgress: (progress) => {
+            handleJobProgress(progress);
+          },
+        },
+      );
+
+      if (completedJob.status !== 'completed') {
+        throw new Error(completedJob.errorMessage || 'Report generation failed');
+      }
+
+      const jobResult = (completedJob.result ?? {}) as Record<string, unknown>;
+      const generatedReportRunId = typeof jobResult.report_run_id === 'string'
+        ? jobResult.report_run_id
+        : typeof jobResult.reportRunId === 'string'
+          ? jobResult.reportRunId
+          : null;
+
+      const nextRuns = await loadReportRuns(selectedConfig.reportId);
+      const nextReportRun = nextRuns.find((entry) => entry.id === generatedReportRunId)
+        ?? nextRuns.find((entry) => entry.status === 'completed');
+
+      if (!nextReportRun) {
+        setReport(null);
+        setStatus('idle');
+        return;
+      }
+
+      setSelectedReportRunId(nextReportRun.id);
+      await loadSelectedArtifact(nextReportRun);
+      notificationService.success('Report generated');
+    } catch (generateError) {
+      const message = generateError instanceof Error ? generateError.message : 'Report generation failed';
+      setError(message);
+      setStatus('error');
+      notificationService.error(message);
+    } finally {
+      setProgressMsg('');
+      setQueuePosition(null);
+      setJobPhase(null);
     }
-  }, [appId, runId, report, reportProvider, reportModel, pollAndLoad]);
+  }, [
+    appId,
+    handleJobProgress,
+    loadReportRuns,
+    loadSelectedArtifact,
+    newVisibility,
+    reportModel,
+    reportProvider,
+    runId,
+    selectedConfig,
+  ]);
 
   const handleExportPdf = useCallback(async () => {
-    if (exporting) return;
+    if (!selectedReportRun || exporting) return;
     setExporting(true);
     try {
-      const blob = await reportsApi.exportPdf(runId);
+      const blob = await reportsApi.exportReportRunPdf(selectedReportRun.id);
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `eval-report-${runId.slice(0, 8)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `eval-report-${selectedReportRun.id.slice(0, 8)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
       notificationService.success('PDF exported');
-    } catch (e: unknown) {
-      notificationService.error(e instanceof Error ? e.message : 'PDF export failed');
+    } catch (exportError) {
+      notificationService.error(exportError instanceof Error ? exportError.message : 'PDF export failed');
     } finally {
       setExporting(false);
     }
-  }, [runId, exporting]);
+  }, [exporting, selectedReportRun]);
 
-  // ── Shared in-progress card (matches RunDetail eval-in-progress pattern) ──
-  const inProgressCard = (label: string) => {
-    const isQueued = jobPhase === 'queued';
-    return (
-      <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
-        {isQueued ? (
-          <Clock className="h-6 w-6 text-[var(--text-muted)]" />
-        ) : (
-          <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
-        )}
-        <p className="text-sm font-semibold text-[var(--text-primary)]">
-          {isQueued ? 'Queued' : label}
-        </p>
-        <p className="text-sm text-[var(--text-secondary)]">
-          {isQueued
-            ? `${queuePosition != null && queuePosition > 0 ? `${queuePosition} job${queuePosition > 1 ? 's' : ''} ahead` : 'Next in queue'}`
-            : progressMsg || 'Aggregating evaluation data and generating AI narrative. This typically takes 10\u201330 seconds.'}
-        </p>
-      </div>
-    );
-  };
+  const handleReportRunVisibilityChange = useCallback(async (visibility: AssetVisibility) => {
+    if (!selectedReportRun) return;
+    setSavingVisibility(true);
+    try {
+      const updated = await reportsApi.updateReportRunVisibility(selectedReportRun.id, visibility);
+      setReportRuns((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+      notificationService.success('Visibility updated');
+    } catch (visibilityError) {
+      notificationService.error(visibilityError instanceof Error ? visibilityError.message : 'Failed to update visibility');
+    } finally {
+      setSavingVisibility(false);
+    }
+  }, [selectedReportRun]);
 
-  // ── Loading: checking for cached report ──
-  if (status === 'loading') {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <Loader2 className="h-5 w-5 text-[var(--text-muted)] animate-spin" />
-      </div>
-    );
-  }
-
-  // ── Idle: no report generated yet ──
-  if (status === 'idle') {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="max-w-[500px] w-full px-4">
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6 space-y-5">
-            {/* Header */}
-            <div className="text-center space-y-1.5">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--color-brand-accent)]/10 mb-1">
-                <FileBarChart className="h-5 w-5 text-[var(--text-brand)]" />
-              </div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Evaluation Report</h3>
-              <p className="text-sm text-[var(--text-secondary)]">
-                Generate an aggregate report with health scores, verdict distributions, rule compliance, exemplar threads, and AI-powered recommendations.
-              </p>
-            </div>
-
-            {/* Model selector */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">
-                <Sparkles className="h-3.5 w-3.5" />
-                Narrative Model
-              </div>
-
-              <LLMConfigSection
-                provider={reportProvider}
-                onProviderChange={(v) => { setReportProvider(v); setReportModel(''); }}
-                model={reportModel}
-                onModelChange={setReportModel}
-              />
-            </div>
-
-            {/* Generate button */}
-            <Button
-              variant="primary"
-              size="lg"
-              icon={FileBarChart}
-              onClick={() => generateReport()}
-              disabled={!credentialsReady || !reportModel}
-              className="w-full"
-            >
-              Generate Report
-            </Button>
-
-            {!credentialsReady && (
-              <p className="text-xs text-center text-[var(--color-warning)]">
-                Configure LLM credentials in Settings to generate reports.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Generating: first-time load ──
-  if (status === 'generating' && !report) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center px-4">
-        {inProgressCard('Generating report...')}
-      </div>
-    );
-  }
-
-  // ── Error: no report to show ──
-  if (status === 'error' && !report) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="max-w-[900px] w-full px-4">
-          <EmptyState
-            icon={FileBarChart}
-            title="Report generation failed"
-            description={error ?? 'Something went wrong. Try again.'}
-            action={{
-              label: 'Retry',
-              onClick: () => generateReport(),
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (!report) return null;
-
-  // ── Action buttons: refresh + PDF export (passed to renderReport for layout) ──
-  const actionButtons = (
-    <div className="report-actions flex items-center gap-2">
-      {supportsPdf && (
-        <button
-          onClick={handleExportPdf}
-          disabled={refreshing || exporting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[var(--interactive-primary)] rounded-md hover:opacity-90 transition-colors disabled:opacity-50"
-        >
-          {exporting ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Download className="h-3 w-3" />
-          )}
-          {exporting ? 'Exporting...' : 'Export PDF'}
-        </button>
+  const inProgressCard = (
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-[var(--border-default)] py-10 px-6">
+      {jobPhase === 'queued' ? (
+        <Clock className="h-6 w-6 text-[var(--text-muted)]" />
+      ) : (
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-info)]" />
       )}
-      <div className="relative" ref={refreshPopoverRef}>
-        <button
-          onClick={() => setShowRefreshSelector((v) => !v)}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-md hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
-          title="Regenerate report (bypasses cache)"
-        >
-          <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-
-        {showRefreshSelector && (
-          <div className="absolute right-0 top-full mt-2 w-72 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg z-20 p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
-                <Sparkles className="h-3 w-3" />
-                Narrative Model
-              </div>
-              <button
-                onClick={() => setShowRefreshSelector(false)}
-                className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)]"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            <LLMConfigSection
-              provider={reportProvider}
-              onProviderChange={(v) => { setReportProvider(v); setReportModel(''); }}
-              model={reportModel}
-              onModelChange={setReportModel}
-              compact
-            />
-
-            <button
-              onClick={() => {
-                setShowRefreshSelector(false);
-                generateReport(true);
-              }}
-              disabled={!credentialsReady || !reportModel}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-[var(--interactive-primary)] rounded-md hover:opacity-90 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Regenerate Report
-            </button>
-          </div>
-        )}
-      </div>
+      <p className="text-sm font-semibold text-[var(--text-primary)]">
+        {jobPhase === 'queued' ? 'Queued' : 'Generating report'}
+      </p>
+      <p className="text-sm text-[var(--text-secondary)]">
+        {jobPhase === 'queued'
+          ? queuePosition != null && queuePosition > 0
+            ? `${queuePosition} job${queuePosition > 1 ? 's' : ''} ahead`
+            : 'Next in queue'
+          : progressMsg || 'Composing the report and AI narrative.'}
+      </p>
     </div>
   );
 
-  // ── Ready state: action buttons passed to renderReport for inline layout ──
-  return (
-    <div className="max-w-[900px] mx-auto pb-8">
-      {refreshing ? (
-        <div className="flex items-center justify-center py-20">
-          {inProgressCard('Regenerating report...')}
-        </div>
-      ) : (
-        renderReport(report, actionButtons)
-      )}
+  if (status === 'loading') {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" />
+      </div>
+    );
+  }
+
+  if (status === 'error' && !selectedConfig) {
+    return (
+      <EmptyState
+        icon={FileBarChart}
+        title="Report loading failed"
+        description={error ?? 'Unable to load reporting surfaces.'}
+        compact
+      />
+    );
+  }
+
+  const actionButtons = (
+    <div className="flex items-center gap-2">
+      {supportsPdf && selectedReportRun?.status === 'completed' ? (
+        <Button size="sm" variant="secondary" onClick={() => void handleExportPdf()} disabled={exporting}>
+          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          {exporting ? 'Exporting…' : 'Export PDF'}
+        </Button>
+      ) : null}
+      <Button size="sm" onClick={() => setShowGenerateOverlay(true)}>
+        <Sparkles className="h-3.5 w-3.5" />
+        {selectedReportRun ? 'Generate new run' : 'Generate'}
+      </Button>
     </div>
+  );
+
+  return (
+    <>
+      <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Report Config</div>
+            <div className="mt-3 space-y-2">
+              {configs.map((config) => (
+                <button
+                  key={config.id}
+                  type="button"
+                  onClick={() => setSelectedReportId(config.reportId)}
+                  className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
+                    config.reportId === selectedReportId
+                      ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10'
+                      : 'border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--border-focus)]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-[var(--text-primary)]">{config.name}</div>
+                      {config.description ? (
+                        <div className="mt-1 text-xs text-[var(--text-secondary)]">{config.description}</div>
+                      ) : null}
+                    </div>
+                    <VisibilityBadge visibility={config.visibility} compact />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Report Runs</div>
+              {selectedReportRun ? (
+                <span className="text-[11px] text-[var(--text-muted)]">{reportRuns.length} total</span>
+              ) : null}
+            </div>
+            <div className="mt-3 space-y-2">
+              {reportRuns.length > 0 ? (
+                reportRuns.map((reportRun) => (
+                  <ReportRunHistoryItem
+                    key={reportRun.id}
+                    run={reportRun}
+                    selected={reportRun.id === selectedReportRunId}
+                    onSelect={() => setSelectedReportRunId(reportRun.id)}
+                  />
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-6 text-center text-sm text-[var(--text-secondary)]">
+                  No report runs yet.
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
+
+        <div className="space-y-4">
+          {selectedReportRun ? (
+            <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    {selectedConfig?.name ?? 'Report'}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {formatRunLabel(selectedReportRun)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <VisibilityBadge visibility={selectedReportRun.visibility} compact />
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-4">
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Visibility</div>
+                  <VisibilityToggle
+                    value={selectedReportRun.visibility}
+                    onChange={(value) => void handleReportRunVisibilityChange(value)}
+                    disabled={savingVisibility}
+                  />
+                </div>
+                {selectedReportRun.llmProvider && selectedReportRun.llmModel ? (
+                  <div className="text-xs text-[var(--text-secondary)]">
+                    Generated with <span className="font-medium text-[var(--text-primary)]">{selectedReportRun.llmProvider}</span> ·{' '}
+                    <span className="font-medium text-[var(--text-primary)]">{selectedReportRun.llmModel}</span>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : (
+            <div className="flex justify-end">{actionButtons}</div>
+          )}
+
+          {status === 'generating' && !report ? (
+            <div className="min-h-[50vh] flex items-center justify-center">{inProgressCard}</div>
+          ) : status === 'error' && !report ? (
+            <EmptyState
+              icon={FileBarChart}
+              title="Report unavailable"
+              description={error ?? 'Something went wrong while loading the selected report run.'}
+              action={{ label: 'Generate', onClick: () => setShowGenerateOverlay(true) }}
+            />
+          ) : report ? (
+            <div className="max-w-[980px]">{renderReport(report, actionButtons)}</div>
+          ) : (
+            <EmptyState
+              icon={FileBarChart}
+              title="No report generated yet"
+              description="Choose a report config and generate a report run to view the composed report."
+              action={{ label: 'Generate', onClick: () => setShowGenerateOverlay(true) }}
+            />
+          )}
+        </div>
+      </div>
+
+      <Modal
+        isOpen={showGenerateOverlay}
+        onClose={() => setShowGenerateOverlay(false)}
+        title="Generate Report"
+        className="max-w-2xl"
+      >
+        <div className="space-y-5">
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <div className="text-sm font-semibold text-[var(--text-primary)]">{selectedConfig?.name ?? 'Report'}</div>
+            {selectedConfig?.description ? (
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">{selectedConfig.description}</p>
+            ) : null}
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Provider and model</div>
+            <LLMConfigSection
+              provider={reportProvider}
+              onProviderChange={(value) => {
+                setReportProvider(value);
+                setReportModel('');
+              }}
+              model={reportModel}
+              onModelChange={setReportModel}
+            />
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              <Globe2 className="h-3.5 w-3.5" />
+              Visibility
+            </div>
+            <VisibilityToggle value={newVisibility} onChange={setNewVisibility} />
+          </div>
+
+          {!credentialsReady ? (
+            <p className="text-sm text-[var(--color-warning)]">
+              Configure provider credentials in Settings before generating a report.
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowGenerateOverlay(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleGenerate()} disabled={!selectedConfig || !credentialsReady || !reportModel}>
+              <Sparkles className="h-3.5 w-3.5" />
+              Generate
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }

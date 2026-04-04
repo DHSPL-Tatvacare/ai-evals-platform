@@ -23,6 +23,7 @@ import {
   EvalTable,
   DistributionBar,
   RunProgressBar,
+  EvalRunVisibilityPanel,
 } from "../components";
 import AdversarialTable from "../components/AdversarialTable";
 import { AdversarialComparisonPanel } from "../components/AdversarialComparisonPanel";
@@ -491,6 +492,17 @@ export default function RunDetail() {
             )}
           </div>
         </div>
+
+        <EvalRunVisibilityPanel
+          runId={run.run_id}
+          visibility={run.visibility ?? 'private'}
+          ownerId={run.userId}
+          onUpdated={(visibility) => setRun((current) => (
+            current
+              ? { ...current, visibility, shared_by: visibility === 'shared' ? current.shared_by : null, shared_at: visibility === 'shared' ? current.shared_at : null }
+              : current
+          ))}
+        />
       </div>
 
       {/* ── Tab bar (only when report tab is available) ──── */}

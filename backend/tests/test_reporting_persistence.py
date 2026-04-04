@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from app.models.eval_run import EvalRun
 from app.models.mixins.shareable import Visibility
 from app.models.report_artifact import ReportArtifact
 from app.models.report_config import ReportConfig
@@ -42,6 +43,14 @@ def test_report_artifact_inherits_visibility_from_report_run():
     assert "report_run_id" in report_artifact_columns
     assert "artifact_data" in report_artifact_columns
     assert "visibility" not in report_artifact_columns
+
+
+def test_eval_run_model_exposes_normalized_visibility_columns():
+    eval_run_columns = EvalRun.__table__.columns.keys()
+
+    assert "visibility" in eval_run_columns
+    assert "shared_by" in eval_run_columns
+    assert "shared_at" in eval_run_columns
 
 
 def test_default_report_config_seeds_are_system_owned_and_generic():

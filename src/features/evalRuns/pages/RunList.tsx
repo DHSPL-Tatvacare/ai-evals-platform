@@ -263,8 +263,8 @@ export default function RunList() {
     try {
       await deleteRun(runId);
       setRuns((prev) => prev.filter((r) => r.run_id !== runId));
-    } catch (e: any) {
-      notificationService.error(e.message, "Delete failed");
+    } catch (e: unknown) {
+      notificationService.error(e instanceof Error ? e.message : 'Delete failed', "Delete failed");
     }
   }, []);
 
@@ -308,6 +308,7 @@ export default function RunList() {
         runType={deriveCustomRunType(run.evalType)}
         modelName={run.llmModel || undefined}
         provider={run.llmProvider || undefined}
+        visibility={run.visibility}
       />
     );
   }

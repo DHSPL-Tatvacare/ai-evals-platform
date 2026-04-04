@@ -213,6 +213,7 @@ export function InsideSalesRunList() {
                 modelName={run.llmModel || undefined}
                 provider={run.llmProvider || undefined}
                 progress={getProgress(run)}
+                visibility={run.visibility}
                 metadata={[
                   ...(run.durationMs ? [{ text: formatDuration(Math.round(run.durationMs / 1000)) }] : []),
                 ]}

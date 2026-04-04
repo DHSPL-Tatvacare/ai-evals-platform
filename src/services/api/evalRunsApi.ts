@@ -4,6 +4,7 @@ import type {
   SummaryStats, TrendEntry, ApiLogEntry,
   PreviewResponse,
   HumanReview, HumanReviewResult, HumanReviewSummary, ReviewSchema,
+  AssetVisibility,
 } from '@/types';
 
 // --- Unified EvalRun queries ---
@@ -37,6 +38,13 @@ export async function fetchEvalRuns(params?: EvalRunQueryParams): Promise<EvalRu
 
 export async function fetchEvalRun(runId: string): Promise<EvalRun> {
   return apiRequest<EvalRun>(`/api/eval-runs/${runId}`);
+}
+
+export async function updateEvalRunVisibility(runId: string, visibility: AssetVisibility): Promise<EvalRun> {
+  return apiRequest<EvalRun>(`/api/eval-runs/${runId}/visibility`, {
+    method: 'PATCH',
+    body: JSON.stringify({ visibility }),
+  });
 }
 
 export async function deleteEvalRun(runId: string): Promise<{ deleted: boolean; run_id: string }> {

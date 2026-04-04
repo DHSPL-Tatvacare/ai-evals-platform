@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.mixins.shareable import Visibility
 from app.models.report_artifact import ReportArtifact
 from app.models.report_run import ReportRun
+from app.services.access_control import readable_scope_clause
 
 
 def _shared_metadata(
@@ -129,16 +130,25 @@ async def fetch_single_run_artifact(
     *,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
+    app_access: frozenset[str],
     run_id: uuid.UUID,
     app_id: str,
     report_id: str,
 ) -> dict | None:
+    access_user = type(
+        'AccessUser',
+        (),
+        {
+            'tenant_id': tenant_id,
+            'user_id': user_id,
+            'app_access': app_access,
+        },
+    )()
     stmt = (
         select(ReportArtifact.artifact_data)
         .join(ReportRun, ReportRun.id == ReportArtifact.report_run_id)
         .where(
-            ReportRun.tenant_id == tenant_id,
-            ReportRun.user_id == user_id,
+            readable_scope_clause(ReportRun, access_user),
             ReportRun.app_id == app_id,
             ReportRun.report_id == report_id,
             ReportRun.scope == 'single_run',
@@ -148,3 +158,31 @@ async def fetch_single_run_artifact(
         .order_by(desc(ReportRun.completed_at), desc(ReportArtifact.computed_at))
     )
     return await db.scalar(stmt)
+
+
+async def fetch_report_run_artifact(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_access: frozenset[str],
+    report_run_id: uuid.UUID,
+) -> tuple[ReportRun, ReportArtifact] | None:
+    access_user = type(
+        'AccessUser',
+        (),
+        {
+            'tenant_id': tenant_id,
+            'user_id': user_id,
+            'app_access': app_access,
+        },
+    )()
+    row = await db.execute(
+        select(ReportRun, ReportArtifact)
+        .join(ReportArtifact, ReportArtifact.report_run_id == ReportRun.id)
+        .where(
+            ReportRun.id == report_run_id,
+            readable_scope_clause(ReportRun, access_user),
+        )
+    )
+    return row.first()

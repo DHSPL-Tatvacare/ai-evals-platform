@@ -71,6 +71,15 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache"
         ))
         await conn.execute(text(
+            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'private'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS shared_by UUID"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS app_id VARCHAR(50) NOT NULL DEFAULT ''"
         ))
         await conn.execute(text(
@@ -122,6 +131,9 @@ async def lifespan(app: FastAPI):
             "UPDATE evaluators SET visibility = 'SHARED' WHERE visibility = 'APP'"
         ))
         await conn.execute(text(
+            "UPDATE eval_runs SET visibility = 'SHARED' WHERE visibility = 'APP'"
+        ))
+        await conn.execute(text(
             """
             UPDATE jobs
             SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')
@@ -142,6 +154,9 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_jobs_tenant_app_status_created ON jobs (tenant_id, app_id, status, created_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_eval_runs_tenant_visibility_created ON eval_runs (tenant_id, visibility, created_at)"
         ))
 
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin

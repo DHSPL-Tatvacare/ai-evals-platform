@@ -1,8 +1,37 @@
 import { apiRequest, apiDownload } from './client';
 import type { CrossRunAnalyticsResponse } from '@/types/crossRunAnalytics';
 import type { PlatformCrossRunNarrative, PlatformCrossRunPayload, PlatformRunReportPayload } from '@/types/platformReports';
+import type { AssetVisibility, ReportConfigSummary, ReportRunSummary } from '@/types';
 
 export const reportsApi = {
+  listReportConfigs: (appId: string, scope: string): Promise<ReportConfigSummary[]> => {
+    const params = new URLSearchParams({ app_id: appId, scope });
+    return apiRequest<ReportConfigSummary[]>(`/api/reports/report-configs?${params.toString()}`);
+  },
+
+  listReportRuns: (params: {
+    appId: string;
+    scope: string;
+    sourceEvalRunId?: string;
+    reportId?: string;
+    limit?: number;
+  }): Promise<ReportRunSummary[]> => {
+    const query = new URLSearchParams({ app_id: params.appId, scope: params.scope });
+    if (params.sourceEvalRunId) query.set('source_eval_run_id', params.sourceEvalRunId);
+    if (params.reportId) query.set('report_id', params.reportId);
+    if (params.limit) query.set('limit', String(params.limit));
+    return apiRequest<ReportRunSummary[]>(`/api/reports/report-runs?${query.toString()}`);
+  },
+
+  fetchReportRunArtifact: (reportRunId: string): Promise<PlatformRunReportPayload> =>
+    apiRequest<PlatformRunReportPayload>(`/api/reports/report-runs/${reportRunId}/artifact`),
+
+  updateReportRunVisibility: (reportRunId: string, visibility: AssetVisibility): Promise<ReportRunSummary> =>
+    apiRequest<ReportRunSummary>(`/api/reports/report-runs/${reportRunId}/visibility`, {
+      method: 'PATCH',
+      body: JSON.stringify({ visibility }),
+    }),
+
   /**
    * Fetch the full report for a completed eval run.
    * Cached after first generation; pass refresh=true to force regeneration.
@@ -23,6 +52,9 @@ export const reportsApi = {
   /** Export report as PDF via server-side headless browser rendering. */
   exportPdf: (runId: string): Promise<Blob> =>
     apiDownload(`/api/reports/${runId}/export-pdf`),
+
+  exportReportRunPdf: (reportRunId: string): Promise<Blob> =>
+    apiDownload(`/api/reports/report-runs/${reportRunId}/export-pdf`),
 
   /** Fetch cached cross-run analytics for an app. */
   fetchCrossRunAnalytics: <TAnalytics = PlatformCrossRunPayload>(appId: string): Promise<CrossRunAnalyticsResponse<TAnalytics>> => {

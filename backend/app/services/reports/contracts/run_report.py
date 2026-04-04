@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
+
+from pydantic import Field
 
 from app.schemas.base import CamelModel
 from app.services.reports.contracts.print_document import PlatformReportDocument
@@ -12,6 +14,10 @@ from app.services.reports.contracts.report_sections import PlatformReportSection
 class PlatformReportMetadata(CamelModel):
     app_id: str
     report_kind: Literal["single_run"] = "single_run"
+    report_id: str | None = None
+    report_name: str | None = None
+    report_run_id: str | None = None
+    report_visibility: Literal["private", "shared"] | None = None
     run_id: str
     run_name: str | None = None
     eval_type: str
@@ -24,8 +30,15 @@ class PlatformReportMetadata(CamelModel):
     cache_key: str | None = None
 
 
+class PlatformReportPresentation(CamelModel):
+    density: str = "default"
+    design_tokens: dict[str, Any] = Field(default_factory=dict)
+    theme_tokens: dict[str, Any] = Field(default_factory=dict)
+
+
 class PlatformRunReportPayload(CamelModel):
     schema_version: Literal["v1"] = "v1"
     metadata: PlatformReportMetadata
+    presentation: PlatformReportPresentation = Field(default_factory=PlatformReportPresentation)
     sections: list[PlatformReportSection]
     export_document: PlatformReportDocument

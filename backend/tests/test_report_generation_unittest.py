@@ -123,10 +123,10 @@ class ReportRunStoreTests(unittest.IsolatedAsyncioTestCase):
             db,
             tenant_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
+            app_access=frozenset({'inside-sales'}),
             run_id=uuid.uuid4(),
             app_id='inside-sales',
             report_id='default-single-run',
         )
 
         self.assertEqual(artifact, expected)
-

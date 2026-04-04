@@ -2,7 +2,9 @@
 import uuid
 from typing import Optional, Literal
 from datetime import datetime
+from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
+from app.schemas.visibility import VisibilityInputMixin, VisibilityOutputMixin
 
 
 EvalType = Literal["custom", "full_evaluation", "human", "batch_thread", "batch_adversarial"]
@@ -34,7 +36,11 @@ class EvalRunUpdate(CamelModel):
     summary: Optional[dict] = None
 
 
-class EvalRunResponse(CamelORMModel):
+class EvalRunVisibilityUpdate(VisibilityInputMixin, CamelModel):
+    visibility: Visibility
+
+
+class EvalRunResponse(VisibilityOutputMixin, CamelORMModel):
     id: uuid.UUID
     app_id: str
     eval_type: str
@@ -53,6 +59,9 @@ class EvalRunResponse(CamelORMModel):
     result: Optional[dict] = None
     summary: Optional[dict] = None
     batch_metadata: Optional[dict] = None
+    visibility: Visibility
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
     created_at: datetime
     tenant_id: uuid.UUID
     user_id: uuid.UUID
@@ -64,7 +73,7 @@ class HumanReviewUpsert(CamelModel):
     summary: dict       # { totalItems, accepted, rejected, corrected, adjustedMetrics }
 
 
-class EvalRunListResponse(CamelORMModel):
+class EvalRunListResponse(VisibilityOutputMixin, CamelORMModel):
     """Lightweight response for list views (omits full result/config)."""
     id: uuid.UUID
     app_id: str
@@ -82,6 +91,9 @@ class EvalRunListResponse(CamelORMModel):
     llm_model: Optional[str] = None
     summary: Optional[dict] = None
     batch_metadata: Optional[dict] = None
+    visibility: Visibility
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
     created_at: datetime
     tenant_id: uuid.UUID
     user_id: uuid.UUID

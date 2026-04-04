@@ -66,6 +66,9 @@ export interface EvalRun {
   createdAt: string;
   userId?: string;
   tenantId?: string;
+  visibility?: 'private' | 'shared';
+  sharedBy?: string | null;
+  sharedAt?: string | null;
   // Legacy compat fields from _run_to_dict
   run_id?: string;
   command?: string;
@@ -116,6 +119,7 @@ export type RuleOutcomeStatus = 'FOLLOWED' | 'VIOLATED' | 'NOT_APPLICABLE' | 'NO
 
 export interface Run {
   run_id: string;
+  id?: string;
   command: string;
   timestamp: string;
   llm_provider: string;
@@ -135,6 +139,11 @@ export interface Run {
   description: string | null;
   job_id: string | null;
   evaluator_descriptors?: EvaluatorDescriptor[];
+  visibility?: 'private' | 'shared';
+  shared_by?: string | null;
+  shared_at?: string | null;
+  userId?: string;
+  tenantId?: string;
 }
 
 export interface PreviewResponse {

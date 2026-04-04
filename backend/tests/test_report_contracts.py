@@ -43,12 +43,21 @@ def test_run_report_contract_supports_discriminated_sections_and_print_document(
         "schemaVersion": "v1",
         "metadata": {
             "appId": "kaira-bot",
+            "reportId": "default-single-run",
+            "reportName": "Default Single Run",
+            "reportRunId": "report-run-123",
+            "reportVisibility": "shared",
             "runId": "run-123",
             "runName": "Nightly Kaira Batch",
             "evalType": "batch_thread",
             "createdAt": "2026-04-01T10:00:00+00:00",
             "computedAt": "2026-04-01T10:05:00+00:00",
             "cacheKey": "single_run:kaira-bot:run-123:v1",
+        },
+        "presentation": {
+            "density": "default",
+            "designTokens": {"contentMaxWidth": 980},
+            "themeTokens": {"accent": "#0f766e"},
         },
         "sections": [
             {
@@ -95,6 +104,8 @@ def test_run_report_contract_supports_discriminated_sections_and_print_document(
     })
 
     assert payload.schema_version == "v1"
+    assert payload.metadata.report_run_id == "report-run-123"
+    assert payload.presentation.theme_tokens["accent"] == "#0f766e"
     assert payload.sections[0].type == "summary_cards"
     assert payload.export_document.blocks[0].type == "cover"
 

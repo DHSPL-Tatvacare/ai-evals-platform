@@ -29,6 +29,7 @@ from app.services.reports.contracts.report_sections import (
 )
 from app.services.reports.contracts.run_report import (
     PlatformReportMetadata,
+    PlatformReportPresentation,
     PlatformRunReportPayload,
 )
 
@@ -93,9 +94,11 @@ def compose_run_report(
     section_configs: list[AnalyticsSectionConfig],
     section_payloads: Mapping[str, Any],
     export_document: PlatformReportDocument,
+    presentation: PlatformReportPresentation | None = None,
 ) -> PlatformRunReportPayload:
     return PlatformRunReportPayload(
         metadata=metadata,
+        presentation=presentation or PlatformReportPresentation(),
         sections=compose_sections(section_configs, section_payloads),
         export_document=export_document,
     )

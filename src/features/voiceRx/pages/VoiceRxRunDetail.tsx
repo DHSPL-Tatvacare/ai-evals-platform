@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Loader2, AlertTriangle, Clock, Calendar, Cpu, ArrowLeft, Trash2, FileText, ChevronRight } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
+import { EvalRunVisibilityPanel, VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
 import { AppReportTab } from '@/features/analytics/AppReportTab';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
@@ -133,6 +133,13 @@ export function VoiceRxRunDetail() {
 
       {/* Progress bar for active runs */}
       {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
+
+      <EvalRunVisibilityPanel
+        runId={run.id}
+        visibility={run.visibility ?? 'private'}
+        ownerId={run.userId}
+        onUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
+      />
 
       {/* Route to correct detail renderer */}
       {run.evalType === 'full_evaluation' ? (

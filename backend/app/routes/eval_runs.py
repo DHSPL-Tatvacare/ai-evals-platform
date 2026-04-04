@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from sqlalchemy import select, desc, func, delete as sql_delete
+from sqlalchemy import select, desc, func, delete as sql_delete, true, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -14,14 +14,61 @@ from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
 from app.models.listing import Listing
 from app.models.job import Job
 from app.schemas.base import CamelModel
-from app.schemas.eval_run import HumanReviewUpsert
+from app.schemas.eval_run import EvalRunVisibilityUpdate, HumanReviewUpsert
 from app.services.evaluators.adversarial_canonical import enrich_adversarial_result_for_api
 from app.services.evaluators.thread_canonical import enrich_thread_result_for_api
+from app.services.access_control import readable_scope_clause
+from app.models.mixins.shareable import Visibility
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/eval-runs", tags=["eval-runs"])
 threads_router = APIRouter(prefix="/api/threads", tags=["threads"])
+
+
+def _app_access_clause(model, auth: AuthContext):
+    if auth.is_owner:
+        return true()
+    if not auth.app_access:
+        return false()
+    return model.app_id.in_(tuple(sorted(auth.app_access)))
+
+
+async def _get_readable_run(
+    db: AsyncSession,
+    *,
+    run_id: UUID,
+    auth: AuthContext,
+) -> EvalRun:
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
+        )
+    )
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return run
+
+
+async def _get_owned_run(
+    db: AsyncSession,
+    *,
+    run_id: UUID,
+    auth: AuthContext,
+) -> EvalRun:
+    run = await db.scalar(
+        select(EvalRun).where(
+            EvalRun.id == run_id,
+            EvalRun.tenant_id == auth.tenant_id,
+            EvalRun.user_id == auth.user_id,
+            _app_access_clause(EvalRun, auth),
+        )
+    )
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return run
 
 
 @router.get("")
@@ -35,15 +82,15 @@ async def list_eval_runs(
     command: Optional[str] = Query(None, description="Legacy filter — maps to eval_type"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unified list with filters, scoped to current user."""
+    """Unified list with filters, scoped to readable runs."""
     query = (
         select(EvalRun)
         .where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
         .order_by(desc(EvalRun.created_at))
         .limit(limit)
@@ -132,14 +179,13 @@ async def preview_csv(
 async def get_summary_stats(
     app_id: Optional[str] = Query(None),
     auth: AuthContext = require_permission('analytics:view'),
-    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stats across evaluation runs, scoped to current user."""
+    """Stats across readable evaluation runs."""
     # Total runs
     runs_q = select(func.count(EvalRun.id)).where(
-        EvalRun.tenant_id == auth.tenant_id,
-        EvalRun.user_id == auth.user_id,
+        readable_scope_clause(EvalRun, auth),
+        _app_access_clause(EvalRun, auth),
     )
     if app_id:
         runs_q = runs_q.where(EvalRun.app_id == app_id)
@@ -148,8 +194,8 @@ async def get_summary_stats(
     # Thread/adversarial queries need JOIN to EvalRun for ownership check
     def _thread_q(base_select):
         q = base_select.join(EvalRun, ThreadEvaluation.run_id == EvalRun.id).where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
         if app_id:
             q = q.where(EvalRun.app_id == app_id)
@@ -157,8 +203,8 @@ async def get_summary_stats(
 
     def _adv_q(base_select):
         q = base_select.join(EvalRun, AdversarialEvaluation.run_id == EvalRun.id).where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
         if app_id:
             q = q.where(EvalRun.app_id == app_id)
@@ -245,10 +291,9 @@ async def get_trends(
     days: int = Query(30, ge=1, le=365),
     app_id: Optional[str] = Query(None),
     auth: AuthContext = require_permission('analytics:view'),
-    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate correctness verdicts by day for trend charts, scoped to current user."""
+    """Aggregate correctness verdicts by day for readable runs."""
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -260,8 +305,8 @@ async def get_trends(
         )
         .join(EvalRun, ThreadEvaluation.run_id == EvalRun.id)
         .where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
             ThreadEvaluation.created_at >= cutoff,
             ThreadEvaluation.worst_correctness.isnot(None),
         )
@@ -289,17 +334,15 @@ async def list_all_logs(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     auth: AuthContext = require_permission('analytics:view'),
-    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List API logs scoped to current user's runs."""
-    # Base: logs from runs owned by this user
+    """List API logs scoped to readable runs."""
     query = (
         select(ApiLog)
         .join(EvalRun, ApiLog.run_id == EvalRun.id)
         .where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
         .order_by(desc(ApiLog.id))
         .limit(limit)
@@ -318,8 +361,8 @@ async def list_all_logs(
         select(func.count(ApiLog.id))
         .join(EvalRun, ApiLog.run_id == EvalRun.id)
         .where(
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
     )
     if run_id:
@@ -342,17 +385,16 @@ async def delete_logs(
     run_id: Optional[str] = Query(None),
     app_id: Optional[str] = Query(None),
     auth: AuthContext = require_permission('eval:delete'),
-    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete API logs scoped to current user's runs."""
-    # Build subquery of log IDs belonging to user's runs
+    """Delete API logs scoped to runs owned by the current user."""
     sub = (
         select(ApiLog.id)
         .join(EvalRun, ApiLog.run_id == EvalRun.id)
         .where(
             EvalRun.tenant_id == auth.tenant_id,
             EvalRun.user_id == auth.user_id,
+            _app_access_clause(EvalRun, auth),
         )
     )
     if run_id:
@@ -371,20 +413,11 @@ async def delete_logs(
 async def upsert_human_review(
     ai_run_id: UUID,
     req: HumanReviewUpsert,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert a human review linked to an AI evaluation run."""
-    # 1. Fetch AI eval run with ownership check
-    ai_run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == ai_run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not ai_run:
-        raise HTTPException(404, "AI evaluation run not found")
+    ai_run = await _get_owned_run(db, run_id=ai_run_id, auth=auth)
 
     # 2. Validate eval_type
     if ai_run.eval_type not in ("full_evaluation", "custom"):
@@ -425,6 +458,9 @@ async def upsert_human_review(
             app_id=ai_run.app_id,
             listing_id=ai_run.listing_id,
             status="completed",
+            visibility=Visibility.normalize(ai_run.visibility) or Visibility.PRIVATE,
+            shared_by=ai_run.shared_by,
+            shared_at=ai_run.shared_at,
             config={
                 "aiEvalRunId": str(ai_run_id),
                 "reviewSchema": req.review_schema,
@@ -456,27 +492,18 @@ async def upsert_human_review(
 @router.get("/{ai_run_id}/human-review")
 async def get_human_review(
     ai_run_id: UUID,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch the human review linked to an AI eval run. Returns null if none exists."""
-    # Verify ownership of the AI run
-    ai_run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == ai_run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not ai_run:
-        raise HTTPException(404, "AI evaluation run not found")
+    await _get_readable_run(db, run_id=ai_run_id, auth=auth)
 
     query = (
         select(EvalRun)
         .where(
             EvalRun.eval_type == "human",
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
             EvalRun.config["aiEvalRunId"].as_string() == str(ai_run_id),
         )
         .order_by(desc(EvalRun.created_at))
@@ -493,18 +520,30 @@ async def get_human_review(
 @router.get("/{run_id}")
 async def get_eval_run(
     run_id: UUID,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not run:
-        raise HTTPException(404, "Run not found")
+    run = await _get_readable_run(db, run_id=run_id, auth=auth)
+    return _run_to_dict(run)
+
+
+@router.patch("/{run_id}/visibility")
+async def patch_eval_run_visibility(
+    run_id: UUID,
+    req: EvalRunVisibilityUpdate,
+    auth: AuthContext = require_permission('resource:edit'),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await _get_owned_run(db, run_id=run_id, auth=auth)
+    run.visibility = req.visibility
+    if req.visibility == Visibility.SHARED:
+        run.shared_by = auth.user_id
+        run.shared_at = datetime.now(timezone.utc)
+    else:
+        run.shared_by = None
+        run.shared_at = None
+    await db.commit()
+    await db.refresh(run)
     return _run_to_dict(run)
 
 
@@ -512,19 +551,10 @@ async def get_eval_run(
 async def delete_eval_run(
     run_id: UUID,
     auth: AuthContext = require_permission('eval:delete'),
-    _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an eval run and all its cascaded data."""
-    run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not run:
-        raise HTTPException(404, "Run not found")
+    run = await _get_owned_run(db, run_id=run_id, auth=auth)
     if run.status == "running":
         raise HTTPException(400, "Cannot delete a running evaluation. Cancel it first.")
 
@@ -550,19 +580,10 @@ async def delete_eval_run(
 @router.get("/{run_id}/threads")
 async def get_run_threads(
     run_id: UUID,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify run ownership
-    run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not run:
-        raise HTTPException(404, "Run not found")
+    await _get_readable_run(db, run_id=run_id, auth=auth)
 
     result = await db.execute(
         select(ThreadEvaluation).where(ThreadEvaluation.run_id == run_id)
@@ -574,19 +595,10 @@ async def get_run_threads(
 @router.get("/{run_id}/adversarial")
 async def get_run_adversarial(
     run_id: UUID,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify run ownership
-    run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not run:
-        raise HTTPException(404, "Run not found")
+    await _get_readable_run(db, run_id=run_id, auth=auth)
 
     result = await db.execute(
         select(AdversarialEvaluation).where(AdversarialEvaluation.run_id == run_id)
@@ -600,19 +612,10 @@ async def get_run_logs(
     run_id: UUID,
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify run ownership
-    run = await db.scalar(
-        select(EvalRun).where(
-            EvalRun.id == run_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
-        )
-    )
-    if not run:
-        raise HTTPException(404, "Run not found")
+    await _get_readable_run(db, run_id=run_id, auth=auth)
 
     result = await db.execute(
         select(ApiLog).where(ApiLog.run_id == run_id)
@@ -626,17 +629,17 @@ async def get_run_logs(
 @threads_router.get("/{thread_id}/history")
 async def get_thread_history(
     thread_id: str,
-    auth: AuthContext = require_app_access(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all evaluation results for a specific thread across user's runs."""
+    """Get all evaluation results for a specific thread across readable runs."""
     result = await db.execute(
         select(ThreadEvaluation)
         .join(EvalRun, ThreadEvaluation.run_id == EvalRun.id)
         .where(
             ThreadEvaluation.thread_id == thread_id,
-            EvalRun.tenant_id == auth.tenant_id,
-            EvalRun.user_id == auth.user_id,
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause(EvalRun, auth),
         )
         .order_by(desc(ThreadEvaluation.id))
     )
@@ -760,6 +763,8 @@ def _run_to_dict(r: EvalRun) -> dict:
     started_at = r.started_at.isoformat() if r.started_at else None
     completed_at = r.completed_at.isoformat() if r.completed_at else None
     created_at = r.created_at.isoformat() if r.created_at else None
+    shared_at = r.shared_at.isoformat() if r.shared_at else None
+    visibility = (Visibility.normalize(r.visibility) or Visibility.PRIVATE).value
     descriptors = _build_evaluator_descriptors(r)
 
     return {
@@ -783,6 +788,9 @@ def _run_to_dict(r: EvalRun) -> dict:
         "llmProvider": r.llm_provider,
         "llmModel": r.llm_model,
         "batchMetadata": batch,
+        "visibility": visibility,
+        "sharedBy": str(r.shared_by) if r.shared_by else None,
+        "sharedAt": shared_at,
         "tenantId": str(r.tenant_id),
         "userId": str(r.user_id),
         # snake_case (legacy compat for batch/adversarial pages)
@@ -801,6 +809,9 @@ def _run_to_dict(r: EvalRun) -> dict:
         "llm_provider": r.llm_provider,
         "llm_model": r.llm_model,
         "batch_metadata": batch,
+        "visibility": visibility,
+        "shared_by": str(r.shared_by) if r.shared_by else None,
+        "shared_at": shared_at,
         # Legacy batch fields (from batch_metadata)
         "command": batch.get("command", r.eval_type),
         "name": batch.get("name"),

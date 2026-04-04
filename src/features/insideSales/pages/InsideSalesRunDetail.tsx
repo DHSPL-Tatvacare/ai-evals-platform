@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { Tabs, EmptyState } from '@/components/ui';
+import { EvalRunVisibilityPanel } from '@/features/evalRuns/components';
 import VerdictBadge from '@/features/evalRuns/components/VerdictBadge';
 import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
 import { RunHeaderActions } from '@/features/evalRuns/components/RunHeaderActions';
@@ -325,6 +326,13 @@ export function InsideSalesRunDetail() {
 
       {/* Progress bar */}
       {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
+
+      <EvalRunVisibilityPanel
+        runId={run.id}
+        visibility={run.visibility ?? 'private'}
+        ownerId={run.userId}
+        onUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
+      />
 
       {/* Tabs */}
       <Tabs

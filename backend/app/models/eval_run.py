@@ -9,9 +9,10 @@ from sqlalchemy import String, Text, Integer, Float, Boolean, JSON, ForeignKey, 
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TenantUserMixin
+from app.models.mixins.shareable import ShareableMixin
 
 
-class EvalRun(Base, TenantUserMixin):
+class EvalRun(Base, TenantUserMixin, ShareableMixin):
     __tablename__ = "eval_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -86,6 +87,7 @@ class EvalRun(Base, TenantUserMixin):
         Index("idx_eval_runs_tenant", "tenant_id"),
         Index("idx_eval_runs_tenant_app", "tenant_id", "app_id", "created_at"),
         Index("idx_eval_runs_tenant_user", "tenant_id", "user_id", "created_at"),
+        Index("idx_eval_runs_tenant_visibility_created", "tenant_id", "visibility", "created_at"),
     )
 
 

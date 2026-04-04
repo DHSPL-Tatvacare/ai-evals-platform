@@ -361,6 +361,10 @@ export type PlatformReportSection =
 export interface PlatformReportMetadata {
   appId: string;
   reportKind: 'single_run';
+  reportId?: string | null;
+  reportName?: string | null;
+  reportRunId?: string | null;
+  reportVisibility?: 'private' | 'shared' | null;
   runId: string;
   runName: string | null;
   evalType: string;
@@ -373,9 +377,16 @@ export interface PlatformReportMetadata {
   cacheKey: string | null;
 }
 
+export interface PlatformReportPresentation {
+  density: string;
+  designTokens: Record<string, unknown>;
+  themeTokens: Record<string, unknown>;
+}
+
 export interface PlatformRunReportPayload {
   schemaVersion: 'v1';
   metadata: PlatformReportMetadata;
+  presentation: PlatformReportPresentation;
   sections: PlatformReportSection[];
   exportDocument: PlatformReportDocument;
 }

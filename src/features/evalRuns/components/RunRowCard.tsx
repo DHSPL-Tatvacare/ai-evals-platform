@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Trash2, Square, Clock } from 'lucide-react';
-import { ModelBadge } from '@/components/ui';
+import { detectProvider, ModelBadge, VisibilityBadge } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
+import type { AssetVisibility } from '@/types';
 import type { RunType } from '../types';
 import { RUN_TYPE_CONFIG } from '../types';
 
@@ -29,6 +30,7 @@ export interface RunRowCardProps {
   modelName?: string;
   provider?: string;
   progress?: { current: number; total: number };
+  visibility?: AssetVisibility;
 }
 
 /* ── Inline sub-components ───────────────────────────────── */
@@ -109,6 +111,7 @@ export default function RunRowCard({
   modelName,
   provider,
   progress,
+  visibility,
 }: RunRowCardProps) {
   const accentColor = runType ? RUN_TYPE_CONFIG[runType].color : 'var(--border-subtle)';
 
@@ -181,10 +184,11 @@ export default function RunRowCard({
                     {item.text}
                   </span>
                 ))}
+                {visibility ? <VisibilityBadge visibility={visibility} compact /> : null}
                 {modelName && (
                   <ModelBadge
                     modelName={modelName}
-                    provider={provider as any}
+                    provider={provider ? detectProvider(provider) : undefined}
                     variant="inline"
                   />
                 )}

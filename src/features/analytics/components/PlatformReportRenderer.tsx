@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BarChart3, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import type { AppId, LLMProvider } from '@/types';
 import type {
@@ -16,6 +16,51 @@ import { useAppConfig } from '@/hooks';
 import SectionHeader from '@/features/evalRuns/components/report/shared/SectionHeader';
 import CalloutBox from '@/features/evalRuns/components/report/shared/CalloutBox';
 import { cn } from '@/utils/cn';
+
+function normalizeTokenKey(key: string): string {
+  return key.replace(/[_\s-]+/g, '').toLowerCase();
+}
+
+function buildReportPresentationStyle(report: PlatformRunReportPayload): CSSProperties {
+  const style: CSSProperties = {};
+  const cssVars = style as CSSProperties & Record<string, string>;
+  const themeTokens = report.presentation?.themeTokens ?? {};
+  const designTokens = report.presentation?.designTokens ?? {};
+  const tokenMap: Record<string, string> = {
+    accent: '--color-brand-accent',
+    accentmuted: '--surface-info',
+    background: '--bg-primary',
+    surface: '--bg-secondary',
+    surfacemuted: '--bg-tertiary',
+    border: '--border-default',
+    bordersubtle: '--border-subtle',
+    textprimary: '--text-primary',
+    textsecondary: '--text-secondary',
+    textmuted: '--text-muted',
+    interactiveprimary: '--interactive-primary',
+    textoncolor: '--text-on-color',
+    textbrand: '--text-brand',
+    info: '--color-info',
+  };
+
+  for (const [rawKey, value] of Object.entries(themeTokens)) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const normalized = normalizeTokenKey(rawKey);
+    const target = rawKey.startsWith('--') ? rawKey : tokenMap[normalized];
+    if (target) cssVars[target] = value;
+  }
+
+  for (const [rawKey, value] of Object.entries(designTokens)) {
+    if (value == null) continue;
+    cssVars[`--report-design-${rawKey}`] = String(value);
+  }
+
+  const maxWidth = designTokens.contentMaxWidth ?? designTokens.maxWidth;
+  if (typeof maxWidth === 'number') style.maxWidth = `${maxWidth}px`;
+  if (typeof maxWidth === 'string') style.maxWidth = maxWidth;
+
+  return style;
+}
 
 function toneClass(tone: string): string {
   if (tone === 'positive' || tone === 'success') return 'text-[var(--color-success)]';
@@ -361,11 +406,11 @@ function SectionContent({ section }: { section: PlatformReportSection }) {
 
 export function PlatformReportView({ report, actions }: { report: PlatformRunReportPayload; actions: ReactNode }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" style={buildReportPresentationStyle(report)}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            {report.metadata.runName || 'Evaluation Report'}
+            {report.metadata.reportName || report.metadata.runName || 'Evaluation Report'}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
             Generated {new Date(report.metadata.computedAt).toLocaleString()}

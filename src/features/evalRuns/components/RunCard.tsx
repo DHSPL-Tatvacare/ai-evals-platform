@@ -85,6 +85,7 @@ export default function RunCard({ run, onDelete, onStatusChange }: Props) {
         runType={deriveRunType(run.command)}
         modelName={run.llm_model || undefined}
         provider={run.llm_provider || undefined}
+        visibility={run.visibility}
       />
 
       <ConfirmDialog

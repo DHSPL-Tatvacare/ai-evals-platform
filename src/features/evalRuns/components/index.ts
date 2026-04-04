@@ -12,6 +12,7 @@ export { default as EvalTable } from './EvalTable';
 export { default as AdversarialTable } from './AdversarialTable';
 export { default as RuleComplianceInline } from './RuleComplianceInline';
 export { default as TranscriptViewer, ChatViewer, CompactTranscript } from './TranscriptViewer';
+export { EvalRunVisibilityPanel } from './EvalRunVisibilityPanel';
 
 // Shared field renderer
 export { OutputFieldRenderer } from './OutputFieldRenderer';

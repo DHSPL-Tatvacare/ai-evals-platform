@@ -25,6 +25,9 @@ from app.services.reports.report_config_resolver import resolve_report_config
 from app.services.reports.report_run_store import ensure_report_run, persist_report_artifact
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
 from app.services.reports.cache_validation import partition_valid_single_run_payloads
+from app.services.access_control import readable_scope_clause
+from app.models.mixins.shareable import Visibility
+from app.services.reports.contracts.run_report import PlatformReportPresentation
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log
 from app.services.evaluators.settings_helper import get_llm_settings_from_db
@@ -42,11 +45,19 @@ def _presentation_sections(presentation_config: PresentationConfig):
 
 
 async def _load_run_and_profile(db, *, tenant_id: uuid.UUID, user_id: uuid.UUID, run_id: str):
+    access_user = type(
+        'AccessUser',
+        (),
+        {
+            'tenant_id': tenant_id,
+            'user_id': user_id,
+            'app_access': frozenset(),
+        },
+    )()
     run = await db.scalar(
         select(EvalRun).where(
             EvalRun.id == uuid.UUID(run_id),
-            EvalRun.tenant_id == tenant_id,
-            EvalRun.user_id == user_id,
+            readable_scope_clause(EvalRun, access_user),
         )
     )
     if run is None:
@@ -107,6 +118,7 @@ async def _compose_single_run_payload(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     run: EvalRun,
+    report_run: ReportRun,
     report_config,
     llm_provider: str | None,
     llm_model: str | None,
@@ -126,7 +138,13 @@ async def _compose_single_run_payload(
         llm_model=llm_model,
         include_narrative=False,
     )
-    metadata = base_payload.metadata.model_copy(update={'computed_at': datetime.now(timezone.utc).isoformat()})
+    metadata = base_payload.metadata.model_copy(update={
+        'computed_at': datetime.now(timezone.utc).isoformat(),
+        'report_id': report_config.report_id,
+        'report_name': report_config.name,
+        'report_run_id': str(report_run.id),
+        'report_visibility': Visibility.normalize(report_run.visibility).value,
+    })
     section_payloads = _serialize_section_payloads(base_payload.sections)
 
     narrative_config = NarrativeConfig.model_validate(report_config.narrative_config or {})
@@ -175,6 +193,11 @@ async def _compose_single_run_payload(
     export_config = ExportConfig.model_validate(report_config.export_config or {})
     pre_sections = compose_run_report(
         metadata=metadata,
+        presentation=PlatformReportPresentation(
+            density=presentation_config.density,
+            design_tokens=presentation_config.design_tokens,
+            theme_tokens=presentation_config.theme_tokens,
+        ),
         section_configs=_presentation_sections(presentation_config),
         section_payloads=section_payloads,
         export_document=compose_document(
@@ -201,6 +224,11 @@ async def _compose_single_run_payload(
     )
     payload = compose_run_report(
         metadata=metadata,
+        presentation=PlatformReportPresentation(
+            density=presentation_config.density,
+            design_tokens=presentation_config.design_tokens,
+            theme_tokens=presentation_config.theme_tokens,
+        ),
         section_configs=_presentation_sections(presentation_config),
         section_payloads=section_payloads,
         export_document=export_document,
@@ -228,7 +256,18 @@ async def _load_latest_single_run_payloads(
         select(ReportRun, ReportArtifact)
         .join(ReportArtifact, ReportArtifact.report_run_id == ReportRun.id)
         .where(
-            ReportRun.tenant_id == tenant_id,
+            readable_scope_clause(
+                ReportRun,
+                type(
+                    'AccessUser',
+                    (),
+                    {
+                        'tenant_id': tenant_id,
+                        'user_id': user_id,
+                        'app_access': frozenset({app_id}),
+                    },
+                )(),
+            ),
             ReportRun.app_id == app_id,
             ReportRun.scope == 'single_run',
             ReportRun.report_id == single_run_config.report_id,
@@ -302,6 +341,7 @@ async def generate_single_run_report_artifact(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 run=run,
+                report_run=report_run,
                 report_config=report_config,
                 llm_provider=params.get('provider'),
                 llm_model=params.get('model'),

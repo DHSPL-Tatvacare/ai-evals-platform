@@ -339,6 +339,7 @@ export function VoiceRxRunList() {
                 runType={mapEvalTypeToRunType(run.evalType)}
                 modelName={run.llmModel || undefined}
                 provider={run.llmProvider || undefined}
+                visibility={run.visibility}
               />
             );
           })}
