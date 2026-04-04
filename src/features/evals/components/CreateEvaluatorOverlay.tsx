@@ -191,7 +191,7 @@ export function CreateEvaluatorOverlay({
       outputSchema: outputFields,
       appId: effectiveAppId,
       listingId: editEvaluator?.listingId ?? effectiveEntityId,
-      visibility: editEvaluator?.visibility ?? (defaultIsGlobal ? 'app' : appConfig.evaluator.defaultVisibility),
+      visibility: editEvaluator?.visibility ?? (defaultIsGlobal ? 'shared' : appConfig.evaluator.defaultVisibility),
       isGlobal: editEvaluator?.isGlobal ?? defaultIsGlobal,
       forkedFrom: editEvaluator?.forkedFrom,
       createdAt: editEvaluator?.createdAt || new Date(),

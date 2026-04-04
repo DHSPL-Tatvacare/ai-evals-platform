@@ -16,7 +16,7 @@ from app.models.listing import Listing
 from app.models.schema import Schema
 from app.models.mixins.shareable import Visibility
 from app.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse
-from app.services.access_control import readable_scope_clause
+from app.services.access_control import readable_scope_clause, shared_visibility_clause
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def list_schemas(
     By default returns only the latest version per branch. Pass latest_only=false
     with branch_key to get full version history for one branch.
     """
-    # Visibility-aware: own rows + app-shared in tenant + system defaults
+    # Visibility-aware: own rows + shared in tenant + system defaults
     query = select(Schema).where(readable_scope_clause(Schema, auth), Schema.app_id == app_id)
     if prompt_type:
         query = query.where(Schema.prompt_type == prompt_type)
@@ -135,13 +135,13 @@ async def fork_schema(
     db: AsyncSession = Depends(get_db),
 ):
     """Fork a visible schema into a new private branch with version=1."""
-    # Can fork any visible schema (own, app-shared, system)
+    # Can fork any visible schema (own, shared, system)
     result = await db.execute(
         select(Schema).where(
             Schema.id == schema_id,
             or_(
                 and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
-                and_(Schema.tenant_id == auth.tenant_id, Schema.visibility == Visibility.APP),
+                and_(Schema.tenant_id == auth.tenant_id, shared_visibility_clause(Schema.visibility)),
                 Schema.tenant_id == SYSTEM_TENANT_ID,
             ),
         )
@@ -207,12 +207,15 @@ async def patch_schema_visibility(
     if latest_version != schema.version:
         raise HTTPException(status_code=409, detail="Visibility can only be changed on the latest schema version")
 
-    new_visibility = body.get("visibility")
-    if new_visibility not in ("private", "app"):
-        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'app'")
+    try:
+        new_visibility = Visibility.normalize(body.get("visibility"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'") from exc
+    if new_visibility is None:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
 
-    schema.visibility = Visibility(new_visibility)
-    if new_visibility == "app":
+    schema.visibility = new_visibility
+    if new_visibility == Visibility.SHARED:
         schema.shared_by = auth.user_id
         from sqlalchemy import func as sqlfunc
         schema.shared_at = sqlfunc.now()

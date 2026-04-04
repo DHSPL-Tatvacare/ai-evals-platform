@@ -13,6 +13,7 @@ from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting
 from app.schemas.app_analytics_config import AnalyticsAssetKeys
+from app.services.access_control import shared_visibility_clause
 from app.services.reports.prompts.inside_sales_narrative_prompt import (
     INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
 )
@@ -58,7 +59,7 @@ async def _resolve_setting_value(
             Setting.tenant_id == tenant_id,
             Setting.app_id == app_id,
             Setting.key == key,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     if tenant_shared:
@@ -70,7 +71,7 @@ async def _resolve_setting_value(
             Setting.user_id == SYSTEM_USER_ID,
             Setting.app_id == app_id,
             Setting.key == key,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     if system_shared:

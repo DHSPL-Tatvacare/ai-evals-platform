@@ -13,7 +13,7 @@ from app.models.mixins.shareable import Visibility
 from app.models.listing import Listing
 from app.models.user import User
 from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorResponse
-from app.services.access_control import readable_scope_clause
+from app.services.access_control import readable_scope_clause, shared_visibility_clause
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 
@@ -57,7 +57,7 @@ async def list_evaluators(
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List evaluators for an app — own + app-shared + seeded system defaults."""
+    """List evaluators for an app — own + shared + seeded system defaults."""
     if filter == "mine":
         query = select(Evaluator, User.display_name).outerjoin(
             User,
@@ -70,11 +70,11 @@ async def list_evaluators(
     elif filter == "shared":
         query = select(Evaluator, User.display_name).outerjoin(
             User,
-            and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
+                and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
         ).where(
             or_(
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
-                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
+                and_(Evaluator.tenant_id == auth.tenant_id, shared_visibility_clause(Evaluator.visibility)),
+                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, shared_visibility_clause(Evaluator.visibility)),
             ),
             Evaluator.app_id == app_id,
         )
@@ -261,7 +261,7 @@ async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            visibility=Visibility.APP if seed.get("is_global", True) else Visibility.PRIVATE,
+            visibility=Visibility.SHARED if seed.get("is_global", True) else Visibility.PRIVATE,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -304,7 +304,7 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            visibility=Visibility.APP if seed.get("is_global", True) else Visibility.PRIVATE,
+            visibility=Visibility.SHARED if seed.get("is_global", True) else Visibility.PRIVATE,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -449,8 +449,8 @@ async def fork_evaluator(
             Evaluator.id == evaluator_id,
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.visibility == Visibility.APP),
-                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, Evaluator.visibility == Visibility.APP),
+                and_(Evaluator.tenant_id == auth.tenant_id, shared_visibility_clause(Evaluator.visibility)),
+                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, shared_visibility_clause(Evaluator.visibility)),
             ),
         )
     )
@@ -499,12 +499,15 @@ async def patch_evaluator_visibility(
     if not evaluator:
         raise HTTPException(status_code=404, detail="Evaluator not found or not owned by you")
 
-    new_visibility = body.get("visibility")
-    if new_visibility not in ("private", "app"):
-        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'app'")
+    try:
+        new_visibility = Visibility.normalize(body.get("visibility"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'") from exc
+    if new_visibility is None:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
 
-    evaluator.visibility = Visibility(new_visibility)
-    if new_visibility == "app":
+    evaluator.visibility = new_visibility
+    if new_visibility == Visibility.SHARED:
         evaluator.shared_by = auth.user_id
         evaluator.shared_at = sqlfunc.now()
 

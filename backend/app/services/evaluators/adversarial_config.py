@@ -527,8 +527,8 @@ async def load_config_from_db(
     """Load adversarial config from settings table, auto-migrating v1/v2→v3.
 
     Resolution chain:
-      1. App-shared setting (tenant, app, key, visibility=APP)
-      2. System default (SYSTEM_TENANT_ID, app, key, visibility=APP)
+      1. Shared setting (tenant, app, key, visibility=shared)
+      2. System default (SYSTEM_TENANT_ID, app, key, visibility=shared)
       3. Built-in default
     """
     from sqlalchemy import select
@@ -536,16 +536,17 @@ async def load_config_from_db(
     from app.models.setting import Setting
     from app.constants import SYSTEM_TENANT_ID
     from app.models.mixins.shareable import Visibility
+    from app.services.access_control import shared_visibility_clause
 
     try:
         async with async_session() as db:
-            # Step 1: App-shared in current tenant
+            # Step 1: Shared in current tenant
             result = await db.execute(
                 select(Setting).where(
                     Setting.tenant_id == tenant_id,
                     Setting.app_id == SETTINGS_APP_ID,
                     Setting.key == SETTINGS_KEY,
-                    Setting.visibility == Visibility.APP,
+                    shared_visibility_clause(Setting.visibility),
                 )
             )
             setting = result.scalar_one_or_none()
@@ -557,7 +558,7 @@ async def load_config_from_db(
                         Setting.tenant_id == SYSTEM_TENANT_ID,
                         Setting.app_id == SETTINGS_APP_ID,
                         Setting.key == SETTINGS_KEY,
-                        Setting.visibility == Visibility.APP,
+                        shared_visibility_clause(Setting.visibility),
                     )
                 )
                 setting = result.scalar_one_or_none()
@@ -596,7 +597,7 @@ async def load_system_default_config() -> AdversarialConfig:
     from app.database import async_session
     from app.models.setting import Setting
     from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
-    from app.models.mixins.shareable import Visibility
+    from app.services.access_control import shared_visibility_clause
 
     try:
         async with async_session() as db:
@@ -606,7 +607,7 @@ async def load_system_default_config() -> AdversarialConfig:
                     Setting.user_id == SYSTEM_USER_ID,
                     Setting.app_id == SETTINGS_APP_ID,
                     Setting.key == SETTINGS_KEY,
-                    Setting.visibility == Visibility.APP,
+                    shared_visibility_clause(Setting.visibility),
                 )
             )
             setting = result.scalar_one_or_none()
@@ -639,7 +640,7 @@ async def save_config_to_db(
             app_id=SETTINGS_APP_ID,
             key=SETTINGS_KEY,
             value=data,
-            visibility=Visibility.APP,
+            visibility=Visibility.SHARED,
             updated_by=user_id,
             forked_from=None,
             shared_by=user_id,

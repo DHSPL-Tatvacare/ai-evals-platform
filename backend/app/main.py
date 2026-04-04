@@ -107,6 +107,21 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_letter_reason TEXT"
         ))
         await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS uq_settings_shared_scope ON settings (tenant_id, app_id, key, visibility) WHERE visibility = 'SHARED'"
+        ))
+        await conn.execute(text(
+            "UPDATE settings SET visibility = 'SHARED' WHERE visibility = 'APP'"
+        ))
+        await conn.execute(text(
+            "UPDATE prompts SET visibility = 'SHARED' WHERE visibility = 'APP'"
+        ))
+        await conn.execute(text(
+            "UPDATE schemas SET visibility = 'SHARED' WHERE visibility = 'APP'"
+        ))
+        await conn.execute(text(
+            "UPDATE evaluators SET visibility = 'SHARED' WHERE visibility = 'APP'"
+        ))
+        await conn.execute(text(
             """
             UPDATE jobs
             SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')

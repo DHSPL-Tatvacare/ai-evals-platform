@@ -23,9 +23,13 @@ def build_setting_upsert_stmt(
 ):
     """Build a PostgreSQL upsert statement aligned with the setting scope.
 
-    Shared app rows conflict on `(tenant_id, app_id, key, visibility='app')`.
+    Shared rows conflict on `(tenant_id, app_id, key, visibility='shared')`.
     Private rows conflict on `(tenant_id, app_id, key, user_id, visibility='private')`.
     """
+
+    visibility = Visibility.normalize(visibility)
+    if visibility is None:
+        raise ValueError("visibility is required for setting upserts")
 
     resolved_app_id = app_id or ""
     values = {
@@ -45,7 +49,7 @@ def build_setting_upsert_stmt(
         "forked_from": forked_from,
     }
 
-    if visibility == Visibility.APP:
+    if visibility == Visibility.SHARED:
         effective_shared_by = shared_by or updated_by
         values["shared_by"] = effective_shared_by
         values["shared_at"] = func.now()
@@ -61,7 +65,7 @@ def build_setting_upsert_stmt(
                     Setting.key,
                     Setting.visibility,
                 ],
-                index_where=text("visibility = 'APP'"),
+                index_where=text("visibility = 'SHARED'"),
                 set_=set_values,
             )
             .returning(Setting)

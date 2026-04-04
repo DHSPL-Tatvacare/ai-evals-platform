@@ -1,7 +1,8 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type LLMProvider = 'gemini' | 'openai' | 'azure_openai' | 'anthropic';
 export type GeminiAuthMethod = 'api_key' | 'service_account';
-export type AssetVisibility = 'private' | 'app';
+export type AssetVisibility = 'private' | 'shared';
+export type LegacyAssetVisibility = AssetVisibility | 'app';
 export type SettingCategory = 'appearance' | 'llm' | 'storage' | 'advanced' | 'prompts' | 'ai' | 'chat' | 'timeouts' | 'api';
 export type SettingType = 'text' | 'password' | 'select' | 'toggle' | 'number' | 'textarea' | 'file';
 
@@ -77,4 +78,8 @@ export interface LLMSettings {
   };
   /** Gemini auth method: API key or service account */
   geminiAuthMethod: GeminiAuthMethod;
+}
+
+export function normalizeAssetVisibility(visibility: LegacyAssetVisibility | null | undefined): AssetVisibility {
+  return visibility === 'app' || visibility === 'shared' ? 'shared' : 'private';
 }

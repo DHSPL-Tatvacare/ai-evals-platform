@@ -1046,11 +1046,11 @@ export function EvaluationContractsTab() {
         {/* Shared contract ownership banner */}
         <OwnershipBanner
           title="Adversarial Evaluation Contract"
-          visibility="app"
-          ownerLabel="Shared with all app members"
+          visibility="shared"
+          ownerLabel="Shared with all workspace members who can access this app"
           mode={hasSettingsEdit ? 'editable' : 'read-only'}
           helperText={hasSettingsEdit
-            ? 'You can edit this shared contract. Changes apply to all members.'
+            ? 'You can edit this shared contract. Changes apply to all workspace members who can access this app.'
             : 'This is a shared contract. You can view it but only editors can make changes.'}
         />
 

@@ -167,7 +167,7 @@ function EvaluatorDetail({ evaluator }: { evaluator: SeedEvaluator }) {
     <div className="space-y-5">
       {/* Meta row */}
       <div className="flex flex-wrap gap-2 items-center">
-        {(evaluator.visibility === 'app' || evaluator.is_global) && <Badge color="purple">shared</Badge>}
+        {(evaluator.visibility === 'shared' || evaluator.is_global) && <Badge color="purple">shared</Badge>}
         {evaluator.show_in_header && <Badge color="green">main metric</Badge>}
         {mainMetric && (
           <Badge color="blue">

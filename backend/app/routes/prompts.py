@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.prompt import Prompt
 from app.models.mixins.shareable import Visibility
 from app.schemas.prompt import PromptCreate, PromptUpdate, PromptResponse
-from app.services.access_control import readable_scope_clause
+from app.services.access_control import readable_scope_clause, shared_visibility_clause
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
@@ -33,7 +33,7 @@ async def list_prompts(
     By default returns only the latest version per branch. Pass latest_only=false
     with branch_key to get full version history for one branch.
     """
-    # Visibility-aware: own rows + app-shared in tenant + system defaults
+    # Visibility-aware: own rows + shared in tenant + system defaults
     query = select(Prompt).where(readable_scope_clause(Prompt, auth), Prompt.app_id == app_id)
     if prompt_type:
         query = query.where(Prompt.prompt_type == prompt_type)
@@ -130,13 +130,13 @@ async def fork_prompt(
     db: AsyncSession = Depends(get_db),
 ):
     """Fork a visible prompt into a new private branch with version=1."""
-    # Can fork any visible prompt (own, app-shared, system)
+    # Can fork any visible prompt (own, shared, system)
     result = await db.execute(
         select(Prompt).where(
             Prompt.id == prompt_id,
             or_(
                 and_(Prompt.tenant_id == auth.tenant_id, Prompt.user_id == auth.user_id),
-                and_(Prompt.tenant_id == auth.tenant_id, Prompt.visibility == Visibility.APP),
+                and_(Prompt.tenant_id == auth.tenant_id, shared_visibility_clause(Prompt.visibility)),
                 Prompt.tenant_id == SYSTEM_TENANT_ID,
             ),
         )
@@ -202,12 +202,15 @@ async def patch_prompt_visibility(
     if latest_version != prompt.version:
         raise HTTPException(status_code=409, detail="Visibility can only be changed on the latest prompt version")
 
-    new_visibility = body.get("visibility")
-    if new_visibility not in ("private", "app"):
-        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'app'")
+    try:
+        new_visibility = Visibility.normalize(body.get("visibility"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'") from exc
+    if new_visibility is None:
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
 
-    prompt.visibility = Visibility(new_visibility)
-    if new_visibility == "app":
+    prompt.visibility = new_visibility
+    if new_visibility == Visibility.SHARED:
         prompt.shared_by = auth.user_id
         from sqlalchemy import func as sqlfunc
         prompt.shared_at = sqlfunc.now()

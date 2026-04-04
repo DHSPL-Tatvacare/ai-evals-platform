@@ -193,7 +193,7 @@ export function PromptsTab() {
   }, [appId, loadPromptsAction]);
 
   const handleToggleVisibility = useCallback(async (prompt: PromptDefinition) => {
-    const newVisibility = prompt.visibility === 'app' ? 'private' : 'app';
+    const newVisibility = prompt.visibility === 'shared' ? 'private' : 'shared';
     try {
       await promptsRepository.patchVisibility(String(prompt.id), newVisibility);
       loadPromptsAction(appId);
@@ -351,7 +351,7 @@ export function PromptsTab() {
                                 
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
                                   {/* Fork — available for shared/system prompts the user doesn't own */}
-                                  {prompt.visibility === 'app' && currentUserId !== prompt.userId && (
+                                  {prompt.visibility === 'shared' && currentUserId !== prompt.userId && (
                                     <PermissionGate action="resource:create">
                                       <Button
                                         variant="ghost"
@@ -373,8 +373,8 @@ export function PromptsTab() {
                                         size="sm"
                                         onClick={() => handleToggleVisibility(prompt)}
                                         className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                        title={prompt.visibility === 'app' ? 'Make private' : 'Share with app'}
-                                        icon={prompt.visibility === 'app' ? Lock : Share2}
+                                        title={prompt.visibility === 'shared' ? 'Make private' : 'Share'}
+                                        icon={prompt.visibility === 'shared' ? Lock : Share2}
                                         iconOnly
                                       />
                                     </PermissionGate>

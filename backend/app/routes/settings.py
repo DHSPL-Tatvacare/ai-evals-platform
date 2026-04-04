@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting
 from app.schemas.setting import SettingCreate, SettingResponse
+from app.services.access_control import is_shared_visibility, shared_visibility_clause
 from app.services.settings_upsert import build_setting_upsert_stmt
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -35,12 +36,12 @@ def _resolved_settings(rows: list[Setting], auth: AuthContext) -> list[Setting]:
 def _setting_priority(row: Setting, auth: AuthContext) -> int:
     if row.tenant_id == auth.tenant_id and row.user_id == auth.user_id:
         return 0
-    if row.tenant_id == auth.tenant_id and row.visibility == Visibility.APP:
+    if row.tenant_id == auth.tenant_id and is_shared_visibility(row.visibility):
         return 1
     if (
         row.tenant_id == SYSTEM_TENANT_ID
         and row.user_id == SYSTEM_USER_ID
-        and row.visibility == Visibility.APP
+        and is_shared_visibility(row.visibility)
     ):
         return 2
     return 3
@@ -56,7 +57,7 @@ async def list_settings(
 ):
     """List settings visible to the current user.
 
-    Default behavior returns resolved winners by key using: private -> app-shared -> system.
+    Default behavior returns resolved winners by key using: private -> shared -> system.
     Pass include_all=true to return all visible rows for management views.
     """
     resolved_app_id = app_id if app_id is not None else ""
@@ -75,13 +76,13 @@ async def list_settings(
                 0,
             ),
             (
-                (Setting.tenant_id == auth.tenant_id) & (Setting.visibility == Visibility.APP),
+                (Setting.tenant_id == auth.tenant_id) & shared_visibility_clause(Setting.visibility),
                 1,
             ),
             (
                 (Setting.tenant_id == SYSTEM_TENANT_ID)
                 & (Setting.user_id == SYSTEM_USER_ID)
-                & (Setting.visibility == Visibility.APP),
+                & shared_visibility_clause(Setting.visibility),
                 2,
             ),
             else_=3,
@@ -92,11 +93,11 @@ async def list_settings(
                 Setting.app_id == resolved_app_id,
                 (
                     ((Setting.tenant_id == auth.tenant_id) & (Setting.user_id == auth.user_id))
-                    | ((Setting.tenant_id == auth.tenant_id) & (Setting.visibility == Visibility.APP))
+                    | ((Setting.tenant_id == auth.tenant_id) & shared_visibility_clause(Setting.visibility))
                     | (
                         (Setting.tenant_id == SYSTEM_TENANT_ID)
                         & (Setting.user_id == SYSTEM_USER_ID)
-                        & (Setting.visibility == Visibility.APP)
+                        & shared_visibility_clause(Setting.visibility)
                     )
                 ),
             )
@@ -119,7 +120,7 @@ async def resolve_setting(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Resolve a single setting using the priority chain: private -> app-shared -> system default."""
+    """Resolve a single setting using the priority chain: private -> shared -> system default."""
     resolved_app_id = app_id or ""
 
     if key == "llm-settings":
@@ -148,13 +149,13 @@ async def resolve_setting(
     if setting:
         return setting
 
-    # Step 2: App-shared in current tenant
+    # Step 2: Shared in current tenant
     result = await db.execute(
         select(Setting).where(
             Setting.tenant_id == auth.tenant_id,
             Setting.app_id == resolved_app_id,
             Setting.key == key,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     setting = result.scalar_one_or_none()
@@ -167,7 +168,7 @@ async def resolve_setting(
             Setting.tenant_id == SYSTEM_TENANT_ID,
             Setting.app_id == resolved_app_id,
             Setting.key == key,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     return result.scalar_one_or_none()
@@ -209,7 +210,7 @@ async def upsert_setting(
         visibility=body.visibility,
         updated_by=auth.user_id,
         forked_from=body.forked_from,
-        shared_by=auth.user_id if body.visibility == Visibility.APP else None,
+        shared_by=auth.user_id if body.visibility == Visibility.SHARED else None,
     )
 
     result = await db.execute(stmt)

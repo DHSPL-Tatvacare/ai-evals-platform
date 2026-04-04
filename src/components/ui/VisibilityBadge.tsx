@@ -8,7 +8,7 @@ interface VisibilityBadgeProps {
 }
 
 export function VisibilityBadge({ visibility, compact = false }: VisibilityBadgeProps) {
-  if (visibility === 'app') {
+  if (visibility === 'shared') {
     return (
       <Badge variant="info" size={compact ? 'sm' : 'md'} icon={Globe2}>
         Shared

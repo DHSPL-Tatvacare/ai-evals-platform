@@ -6,9 +6,10 @@ from typing import Optional
 
 from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
+from app.schemas.visibility import VisibilityInputMixin, VisibilityOutputMixin
 
 
-class SchemaCreate(CamelModel):
+class SchemaCreate(VisibilityInputMixin, CamelModel):
     app_id: str
     prompt_type: str
     branch_key: Optional[str] = None
@@ -35,7 +36,7 @@ class SchemaUpdate(CamelModel):
         )
 
 
-class SchemaResponse(CamelORMModel):
+class SchemaResponse(VisibilityOutputMixin, CamelORMModel):
     id: int
     app_id: str
     prompt_type: str

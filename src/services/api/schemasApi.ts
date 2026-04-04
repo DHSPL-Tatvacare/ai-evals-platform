@@ -8,7 +8,8 @@
  * We map schemaData -> schema on reads and schema -> schemaData on writes.
  */
 import type { SchemaDefinition, AppId } from '@/types';
-import type { AssetVisibility } from '@/types/settings.types';
+import { normalizeAssetVisibility } from '@/types/settings.types';
+import type { AssetVisibility, LegacyAssetVisibility } from '@/types/settings.types';
 import { apiRequest } from './client';
 
 /** Shape returned by backend (camelCase, dates as strings) */
@@ -28,7 +29,7 @@ interface ApiSchema {
   description?: string;
   isDefault?: boolean;
   sourceType?: string | null;
-  visibility: AssetVisibility;
+  visibility: LegacyAssetVisibility;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,7 +50,7 @@ function toSchemaDefinition(s: ApiSchema): SchemaDefinition {
     name: s.name,
     version: s.version,
     branchKey: s.branchKey,
-    visibility: s.visibility,
+    visibility: normalizeAssetVisibility(s.visibility),
     forkedFrom: s.forkedFrom,
     sharedBy: s.sharedBy,
     sharedAt: s.sharedAt,

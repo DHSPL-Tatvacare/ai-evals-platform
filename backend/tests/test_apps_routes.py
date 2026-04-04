@@ -48,7 +48,7 @@ def test_app_config_schema_matches_phase_one_shape():
             "evaluator": "private",
             "prompt": "private",
             "schema": "private",
-            "adversarialContract": "app",
+            "adversarialContract": "shared",
             "llmSettings": "private",
         },
         evalRun={"supportedTypes": ["custom", "batch_thread"]},
@@ -86,7 +86,7 @@ def test_app_config_schema_matches_phase_one_shape():
     assert dumped["features"]["hasRules"] is True
     assert dumped["rules"]["catalogKey"] == "rule-catalog"
     assert dumped["evaluator"]["dynamicVariableSources"]["registry"] is True
-    assert dumped["assetDefaults"]["adversarialContract"] == "app"
+    assert dumped["assetDefaults"]["adversarialContract"] == "shared"
     assert dumped["evalRun"]["supportedTypes"] == ["custom", "batch_thread"]
     assert dumped["analytics"]["profile"] == "kaira_v1"
     assert dumped["analytics"]["capabilities"]["pdfExport"] is True
@@ -148,7 +148,7 @@ def test_seeded_apps_expose_explicit_analytics_contracts():
 
     assert '"slug": "voice-rx"' in text
     assert '"profile": "voice_rx_v1"' in text
-    assert '"singleRunReport": False' in text
+    assert '"singleRunReport": True' in text
 
     assert '"slug": "kaira-bot"' in text
     assert '"profile": "kaira_v1"' in text

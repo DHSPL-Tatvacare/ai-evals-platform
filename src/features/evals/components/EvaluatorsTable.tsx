@@ -64,7 +64,7 @@ export function EvaluatorsTable({
   const sortedEvaluators = useMemo(() => {
     return [...evaluators].sort((left, right) => {
       if (left.visibility !== right.visibility) {
-        return left.visibility === 'app' ? -1 : 1;
+        return left.visibility === 'shared' ? -1 : 1;
       }
       return right.updatedAt.getTime() - left.updatedAt.getTime();
     });
@@ -276,7 +276,7 @@ export function EvaluatorsTable({
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
                                 >
-                                  {evaluator.visibility === 'app' ? 'Make Private' : 'Share with App'}
+                                  {evaluator.visibility === 'shared' ? 'Make Private' : 'Share'}
                                 </button>
                               ) : null}
                               {onToggleHeader && isOwned ? (

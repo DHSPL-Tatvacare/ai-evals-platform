@@ -50,4 +50,13 @@ class Setting(Base, TenantUserMixin, ShareableMixin):
             unique=True,
             postgresql_where=text("visibility = 'APP'"),
         ),
+        Index(
+            "uq_settings_shared_scope",
+            "tenant_id",
+            "app_id",
+            "key",
+            "visibility",
+            unique=True,
+            postgresql_where=text("visibility = 'SHARED'"),
+        ),
     )

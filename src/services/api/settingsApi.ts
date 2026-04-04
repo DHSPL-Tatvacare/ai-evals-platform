@@ -7,7 +7,8 @@
  * Default reads return resolved winners by key. Management views can request
  * the full visible set with include_all=true.
  */
-import type { AssetVisibility, SettingRecord } from '@/types';
+import { normalizeAssetVisibility } from '@/types';
+import type { AssetVisibility, LegacyAssetVisibility, SettingRecord } from '@/types';
 import { apiRequest } from './client';
 
 interface ApiSettingRecord<TValue = unknown> {
@@ -15,7 +16,7 @@ interface ApiSettingRecord<TValue = unknown> {
   appId: string | null;
   key: string;
   value: TValue;
-  visibility: AssetVisibility;
+  visibility: LegacyAssetVisibility;
   forkedFrom?: number | null;
   updatedAt: string;
   userId: string;
@@ -39,7 +40,7 @@ function toSettingRecord<TValue>(record: ApiSettingRecord<TValue>): SettingRecor
     appId: record.appId,
     key: record.key,
     value: record.value,
-    visibility: record.visibility,
+    visibility: normalizeAssetVisibility(record.visibility),
     forkedFrom: record.forkedFrom,
     updatedAt: new Date(record.updatedAt),
     userId: record.userId,

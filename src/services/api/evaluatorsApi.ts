@@ -10,7 +10,8 @@ import type {
   PromptValidation,
   VariableInfo,
 } from '@/types';
-import type { AssetVisibility } from '@/types/settings.types';
+import { normalizeAssetVisibility } from '@/types/settings.types';
+import type { AssetVisibility, LegacyAssetVisibility } from '@/types/settings.types';
 import { apiRequest } from './client';
 
 /** Shape returned by backend (camelCase, dates as strings) */
@@ -26,7 +27,7 @@ interface ApiEvaluator {
   prompt: string;
   modelId: string;
   outputSchema: unknown;
-  visibility: AssetVisibility;
+  visibility: LegacyAssetVisibility;
   linkedRuleIds?: string[];
   sharedBy?: string | null;
   sharedAt?: string | null;
@@ -63,8 +64,8 @@ function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
     prompt: e.prompt,
     modelId: e.modelId,
     outputSchema: e.outputSchema as EvaluatorDefinition['outputSchema'],
-    visibility: e.visibility,
-    isGlobal: e.isGlobal ?? e.visibility === 'app',
+    visibility: normalizeAssetVisibility(e.visibility),
+    isGlobal: e.isGlobal ?? normalizeAssetVisibility(e.visibility) === 'shared',
     isBuiltIn: e.isBuiltIn,
     showInHeader: e.showInHeader,
     forkedFrom: e.forkedFrom,
@@ -87,7 +88,7 @@ export function filterEvaluatorsByVisibility(
     return evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === 'private');
   }
   if (filter === 'shared' || filter === 'registry') {
-    return evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === 'app');
+    return evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === 'shared');
   }
   return evaluators;
 }
@@ -181,10 +182,12 @@ export const evaluatorsRepository = {
   },
 
   async setGlobal(id: string, isGlobal: boolean): Promise<EvaluatorDefinition> {
-    return evaluatorsRepository.setVisibility(id, isGlobal ? 'app' : 'private');
+    return evaluatorsRepository.setVisibility(id, isGlobal ? 'shared' : 'private');
   },
 
   async setBuiltIn(_id: string, _isBuiltIn: boolean): Promise<EvaluatorDefinition> {
+    void _id;
+    void _isBuiltIn;
     throw new Error('Built-in status is managed by system defaults and cannot be changed');
   },
 

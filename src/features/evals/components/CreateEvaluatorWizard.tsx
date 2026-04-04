@@ -109,7 +109,7 @@ export function CreateEvaluatorWizard({
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [fields, setFields] = useState<EvaluatorOutputField[]>([]);
-  const [visibility, setVisibility] = useState<'private' | 'app'>('private');
+  const [visibility, setVisibility] = useState<'private' | 'shared'>('private');
   const [showInHeader, setShowInHeader] = useState(false);
   const [provider, setProvider] = useState(llmProvider);
   const [modelId, setModelId] = useState('');

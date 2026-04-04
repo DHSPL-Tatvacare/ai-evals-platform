@@ -56,7 +56,7 @@ function upsertEvaluatorState(
   evaluator: EvaluatorDefinition,
 ) {
   const nextEvaluators = replaceById(state.evaluators, evaluator);
-  const nextShared = (evaluator.visibility ?? 'private') === 'app'
+  const nextShared = (evaluator.visibility ?? 'private') === 'shared'
     ? replaceById(state.sharedEvaluators, evaluator)
     : removeById(state.sharedEvaluators, evaluator.id);
 
@@ -157,17 +157,17 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
     const updated = await evaluatorsRepository.setVisibility(id, visibility);
     set((state) => ({
       evaluators: replaceById(state.evaluators, updated),
-      sharedEvaluators: visibility === 'app'
+      sharedEvaluators: visibility === 'shared'
         ? replaceById(state.sharedEvaluators, updated)
         : removeById(state.sharedEvaluators, id),
-      registry: visibility === 'app'
+      registry: visibility === 'shared'
         ? replaceById(state.registry, updated)
         : removeById(state.registry, id),
     }));
   },
 
   setGlobal: async (id: string, isGlobal: boolean) => {
-    await get().setVisibility(id, isGlobal ? 'app' : 'private');
+    await get().setVisibility(id, isGlobal ? 'shared' : 'private');
   },
 
   setBuiltIn: async () => {

@@ -29,7 +29,7 @@ async def update_config(
     body: dict,
     auth: AuthContext = require_permission('settings:edit'),
 ):
-    """Validate and save adversarial config as the app-shared contract."""
+    """Validate and save adversarial config as the shared contract."""
     try:
         config = AdversarialConfig.model_validate(body)
     except Exception as e:

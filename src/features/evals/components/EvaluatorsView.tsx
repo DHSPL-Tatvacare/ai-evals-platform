@@ -101,11 +101,11 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
   };
 
   const handleVisibilityChange = async (evaluator: EvaluatorDefinition) => {
-    const nextVisibility = evaluator.visibility === 'app' ? 'private' : 'app';
+    const nextVisibility = evaluator.visibility === 'shared' ? 'private' : 'shared';
     await setVisibility(evaluator.id, nextVisibility);
     notificationService.success(
-      nextVisibility === 'app'
-        ? 'Evaluator shared with app'
+      nextVisibility === 'shared'
+        ? 'Evaluator shared'
         : 'Evaluator moved to private library',
     );
   };

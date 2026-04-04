@@ -36,13 +36,13 @@ class Evaluator(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
     def is_global(self) -> bool:
         """Deprecated frontend compatibility field until the harmonized UI lands."""
 
-        return self.visibility == Visibility.APP
+        return Visibility.normalize(self.visibility) == Visibility.SHARED
 
     @property
     def is_built_in(self) -> bool:
         """Deprecated frontend compatibility field until sharing UI is cut over."""
 
-        return self.visibility == Visibility.APP and (
+        return Visibility.normalize(self.visibility) == Visibility.SHARED and (
             self.tenant_id == SYSTEM_TENANT_ID or self.user_id == SYSTEM_USER_ID
         )
 

@@ -9,6 +9,7 @@ import { apiRequest } from './client';
 import {
   APP_CONFIG_FALLBACKS,
   mergeAppConfig,
+  normalizeAssetVisibility,
   type AppConfig,
   type AppId,
   type AppSummary,
@@ -25,6 +26,13 @@ interface ApiAppSummary {
 
 type ApiAppConfig = Partial<AppConfig>;
 
+function normalizeOptionalVisibility(
+  visibility: 'private' | 'shared' | 'app' | undefined,
+  fallback: 'private' | 'shared',
+): 'private' | 'shared' {
+  return visibility === undefined ? fallback : normalizeAssetVisibility(visibility);
+}
+
 function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Partial<AppConfig> {
   const rawAssetDefaults =
     typeof config.assetDefaults === 'object' && config.assetDefaults !== null
@@ -38,25 +46,43 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     typeof rawAnalytics.assets === 'object' && rawAnalytics.assets !== null
       ? (rawAnalytics.assets as Record<string, unknown>)
       : {};
+  const rawEvaluator =
+    typeof config.evaluator === 'object' && config.evaluator !== null
+      ? (config.evaluator as Record<string, unknown>)
+      : {};
 
   return {
     ...config,
+    evaluator: {
+      ...APP_CONFIG_FALLBACKS[appId].evaluator,
+      ...(rawEvaluator as Partial<AppConfig['evaluator']>),
+      defaultVisibility: normalizeOptionalVisibility(
+        rawEvaluator.defaultVisibility as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].evaluator.defaultVisibility,
+      ),
+    },
     assetDefaults: {
       ...APP_CONFIG_FALLBACKS[appId].assetDefaults,
-      evaluator: (rawAssetDefaults.evaluator as AppConfig['assetDefaults']['evaluator'] | undefined)
-        ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.evaluator,
-      prompt: (rawAssetDefaults.prompt as AppConfig['assetDefaults']['prompt'] | undefined)
-        ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.prompt,
-      schema: (rawAssetDefaults.schema as AppConfig['assetDefaults']['schema'] | undefined)
-        ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.schema,
-      adversarialContract: (
-        rawAssetDefaults.adversarialContract ?? rawAssetDefaults.adversarial_contract
-      ) as AppConfig['assetDefaults']['adversarialContract'] | undefined
-        ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.adversarialContract,
-      llmSettings: (
-        rawAssetDefaults.llmSettings ?? rawAssetDefaults.llm_settings
-      ) as AppConfig['assetDefaults']['llmSettings'] | undefined
-        ?? APP_CONFIG_FALLBACKS[appId].assetDefaults.llmSettings,
+      evaluator: normalizeOptionalVisibility(
+        rawAssetDefaults.evaluator as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].assetDefaults.evaluator,
+      ),
+      prompt: normalizeOptionalVisibility(
+        rawAssetDefaults.prompt as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].assetDefaults.prompt,
+      ),
+      schema: normalizeOptionalVisibility(
+        rawAssetDefaults.schema as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].assetDefaults.schema,
+      ),
+      adversarialContract: normalizeOptionalVisibility(
+        (rawAssetDefaults.adversarialContract ?? rawAssetDefaults.adversarial_contract) as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].assetDefaults.adversarialContract,
+      ),
+      llmSettings: normalizeOptionalVisibility(
+        (rawAssetDefaults.llmSettings ?? rawAssetDefaults.llm_settings) as 'private' | 'shared' | 'app' | undefined,
+        APP_CONFIG_FALLBACKS[appId].assetDefaults.llmSettings,
+      ),
     },
     analytics: {
       ...APP_CONFIG_FALLBACKS[appId].analytics,

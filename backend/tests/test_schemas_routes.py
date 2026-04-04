@@ -24,13 +24,25 @@ def test_schema_create_accepts_branch_key_and_visibility():
         branchKey="schema-branch",
         name="Transcript Schema",
         schemaData={"type": "object"},
-        visibility="app",
+        visibility="shared",
     )
 
     dumped = payload.model_dump(by_alias=True)
 
     assert dumped["branchKey"] == "schema-branch"
-    assert dumped["visibility"] == Visibility.APP
+    assert dumped["visibility"] == Visibility.SHARED
+
+
+def test_schema_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
+    payload = SchemaCreate(
+        appId="voice-rx",
+        promptType="transcription",
+        name="Transcript Schema",
+        schemaData={"type": "object"},
+        visibility="app",
+    )
+
+    assert payload.visibility == Visibility.SHARED
 
 
 def test_schema_response_serializes_branch_metadata():
@@ -55,7 +67,7 @@ def test_schema_response_serializes_branch_metadata():
     payload = SchemaResponse.model_validate(schema).model_dump(by_alias=True, mode="json")
 
     assert payload["branchKey"] == "schema-branch"
-    assert payload["visibility"] == "app"
+    assert payload["visibility"] == "shared"
     assert payload["forkedFrom"] == 2
 
 
@@ -91,12 +103,12 @@ def _schema(tenant_id, user_id, app_id="voice-rx", visibility=Visibility.PRIVATE
     )
 
 
-def test_fork_access_any_user_can_read_app_shared_schema():
+def test_fork_access_any_user_can_read_shared_schema():
     tid = uuid.uuid4()
     owner = uuid.uuid4()
     reader = uuid.uuid4()
     user = _user(tid, reader, app_access=("voice-rx",))
-    schema = _schema(tid, owner, visibility=Visibility.APP)
+    schema = _schema(tid, owner, visibility=Visibility.SHARED)
     assert can_access(user, schema, "fork") is True
 
 
@@ -135,7 +147,7 @@ def test_readable_scope_clause_includes_tenant_shared_and_system_schema_rows():
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
     assert "schemas.user_id" in sql
-    assert "schemas.visibility = 'APP'" in sql
+    assert "schemas.visibility IN ('SHARED', 'APP')" in sql
     assert "schemas.tenant_id" in sql
 
 

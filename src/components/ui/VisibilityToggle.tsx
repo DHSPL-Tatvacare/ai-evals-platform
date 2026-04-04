@@ -14,7 +14,7 @@ const OPTIONS: Array<{
   icon: typeof Lock;
 }> = [
   { value: 'private', label: 'Private', icon: Lock },
-  { value: 'app', label: 'Shared', icon: Globe2 },
+  { value: 'shared', label: 'Shared', icon: Globe2 },
 ];
 
 export function VisibilityToggle({ value, onChange, disabled = false }: VisibilityToggleProps) {

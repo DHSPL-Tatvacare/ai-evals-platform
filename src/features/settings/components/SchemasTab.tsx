@@ -189,7 +189,7 @@ export function SchemasTab() {
   }, [appId, loadSchemasAction]);
 
   const handleToggleVisibility = useCallback(async (schema: SchemaDefinition) => {
-    const newVisibility = schema.visibility === 'app' ? 'private' : 'app';
+    const newVisibility = schema.visibility === 'shared' ? 'private' : 'shared';
     try {
       await schemasRepository.patchVisibility(String(schema.id), newVisibility);
       loadSchemasAction(appId);
@@ -346,7 +346,7 @@ export function SchemasTab() {
                                 
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
                                   {/* Fork — available for shared/system schemas the user doesn't own */}
-                                  {schema.visibility === 'app' && currentUserId !== schema.userId && (
+                                  {schema.visibility === 'shared' && currentUserId !== schema.userId && (
                                     <PermissionGate action="resource:create">
                                       <Button
                                         variant="ghost"
@@ -368,8 +368,8 @@ export function SchemasTab() {
                                         size="sm"
                                         onClick={() => handleToggleVisibility(schema)}
                                         className="h-7 w-7 p-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                                        title={schema.visibility === 'app' ? 'Make private' : 'Share with app'}
-                                        icon={schema.visibility === 'app' ? Lock : Share2}
+                                        title={schema.visibility === 'shared' ? 'Make private' : 'Share'}
+                                        icon={schema.visibility === 'shared' ? Lock : Share2}
                                         iconOnly
                                       />
                                     </PermissionGate>

@@ -18,6 +18,9 @@ from app.models.tag import Tag
 from app.models.job import Job
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
 from app.models.evaluation_analytics import EvaluationAnalytics
+from app.models.report_config import ReportConfig
+from app.models.report_run import ReportRun
+from app.models.report_artifact import ReportArtifact
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
 from app.models.lsq_call_cache import LsqLeadCache
@@ -30,7 +33,7 @@ __all__ = [
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
     "ChatSession", "ChatMessage", "History", "Setting", "AdversarialSavedTestCase", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog",
-    "EvaluationAnalytics",
+    "EvaluationAnalytics", "ReportConfig", "ReportRun", "ReportArtifact",
     "LsqLeadCache",
     "ExternalAgent",
 ]

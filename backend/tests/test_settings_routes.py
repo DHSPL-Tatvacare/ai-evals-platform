@@ -21,11 +21,22 @@ def test_setting_create_accepts_visibility_for_shared_contract_rows():
         appId="kaira-bot",
         key="adversarial-config",
         value={"version": 1},
+        visibility="shared",
+    )
+
+    assert payload.visibility == Visibility.SHARED
+    assert payload.model_dump(by_alias=True)["visibility"] == Visibility.SHARED
+
+
+def test_setting_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
+    payload = SettingCreate(
+        appId="kaira-bot",
+        key="adversarial-config",
+        value={"version": 1},
         visibility="app",
     )
 
-    assert payload.visibility == Visibility.APP
-    assert payload.model_dump(by_alias=True)["visibility"] == Visibility.APP
+    assert payload.visibility == Visibility.SHARED
 
 
 def test_setting_response_serializes_share_metadata_in_camel_case():
@@ -45,17 +56,18 @@ def test_setting_response_serializes_share_metadata_in_camel_case():
 
     payload = SettingResponse.model_validate(row).model_dump(by_alias=True, mode="json")
 
-    assert payload["visibility"] == "app"
+    assert payload["visibility"] == "shared"
     assert "updatedBy" in payload
     assert "sharedBy" in payload
     assert "sharedAt" in payload
 
 
-def test_setting_model_exposes_private_and_app_unique_indexes():
+def test_setting_model_exposes_private_legacy_shared_and_canonical_shared_unique_indexes():
     index_names = {index.name for index in Setting.__table__.indexes}
 
     assert "uq_settings_private_scope" in index_names
     assert "uq_settings_app_scope" in index_names
+    assert "uq_settings_shared_scope" in index_names
 
 
 # ─── Phase 2: Settings resolution + access tests ────────────────
@@ -85,12 +97,12 @@ def _make_setting(tenant_id, user_id, app_id, key, visibility):
 
 
 def test_app_member_can_read_shared_setting():
-    """Any user with app access can read an app-shared setting."""
+    """Any user with app access can read a shared setting."""
     tid = uuid.uuid4()
     owner = uuid.uuid4()
     reader = uuid.uuid4()
     user = _make_user(tid, reader, app_access=frozenset({"kaira-bot"}))
-    asset = _make_setting(tid, owner, "kaira-bot", "adversarial-config", Visibility.APP)
+    asset = _make_setting(tid, owner, "kaira-bot", "adversarial-config", Visibility.SHARED)
 
     assert can_access(user, asset, "read") is True
 
@@ -117,24 +129,24 @@ def test_app_member_cannot_edit_shared_setting_unless_owner():
     assert can_access(user, asset, "edit") is False
 
 
-def test_llm_settings_cannot_be_created_as_app_visibility():
-    """Creating llm-settings with app visibility must be denied."""
+def test_llm_settings_cannot_be_created_as_shared_visibility():
+    """Creating llm-settings with shared visibility must be denied."""
     tid = uuid.uuid4()
     uid = uuid.uuid4()
     user = _make_user(tid, uid, app_access=frozenset({"voice-rx"}))
-    asset = _make_setting(tid, uid, "", "llm-settings", Visibility.APP)
+    asset = _make_setting(tid, uid, "", "llm-settings", Visibility.SHARED)
 
     assert can_access(user, asset, "create") is False
 
 
-def test_app_shared_upsert_targets_shared_scope_not_owner_scope():
+def test_shared_upsert_targets_canonical_shared_scope_not_owner_scope():
     stmt = build_setting_upsert_stmt(
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         app_id="kaira-bot",
         key="rule-catalog",
         value={"rules": []},
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         updated_by=uuid.uuid4(),
         forked_from=None,
         shared_by=uuid.uuid4(),
@@ -143,7 +155,7 @@ def test_app_shared_upsert_targets_shared_scope_not_owner_scope():
     sql = str(stmt.compile(dialect=postgresql.dialect()))
 
     assert 'ON CONFLICT (tenant_id, app_id, key, visibility)' in sql
-    assert "WHERE visibility = 'APP'" in sql
+    assert "WHERE visibility = 'SHARED'" in sql
 
 
 def test_private_upsert_targets_private_scope_including_owner():

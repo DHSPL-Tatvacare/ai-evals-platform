@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
-from app.database import async_session as get_async_session
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.models.user import User
@@ -21,7 +20,10 @@ from app.models.role import Role
 from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
+from app.models.report_config import ReportConfig
 from app.models.mixins.shareable import Visibility
+from app.schemas.app_config import AppConfig
+from app.services.access_control import shared_visibility_clause
 from app.services.settings_upsert import build_setting_upsert_stmt
 from app.services.evaluators.adversarial_config import get_default_config
 
@@ -2060,7 +2062,7 @@ APP_SEEDS = [
                 "evaluator": "private",
                 "prompt": "private",
                 "schema": "private",
-                "adversarial_contract": "app",
+                "adversarial_contract": "shared",
                 "llm_settings": "private",
             },
             "evalRun": {"supportedTypes": ["custom", "batch_thread", "batch_adversarial"]},
@@ -2273,6 +2275,92 @@ async def seed_apps(session: AsyncSession) -> dict[str, uuid.UUID]:
     return app_ids
 
 
+def _report_scope_seed_id(scope: str) -> str:
+    if scope == "single_run":
+        return "default-single-run"
+    if scope == "cross_run":
+        return "default-cross-run"
+    raise ValueError(f"Unsupported report scope: {scope}")
+
+
+def _build_presentation_config(composition) -> dict:
+    return {
+        "layoutGroups": [],
+        "density": "default",
+        "designTokens": {},
+        "themeTokens": {},
+        "sections": [
+            {
+                "sectionId": section.id,
+                "componentId": section.type,
+                "title": section.title,
+                "description": section.description,
+                "variant": section.variant,
+                "printable": section.printable,
+            }
+            for section in composition.sections
+        ],
+    }
+
+
+def _build_narrative_config(composition, asset_keys) -> dict:
+    return {
+        "enabled": composition.ai_summary.enabled,
+        "inputSelection": {
+            "sectionIds": list(composition.ai_summary.section_ids),
+        },
+        "outputInsertionPoints": list(composition.ai_summary.section_ids),
+        "assetKeys": asset_keys.model_dump(by_alias=True, exclude_none=True),
+        "providerPolicy": {
+            "source": "llm-settings",
+        },
+    }
+
+
+def _build_export_config(analytics) -> dict:
+    return analytics.export.model_dump(by_alias=True)
+
+
+def _build_default_report_config_seeds() -> list[dict]:
+    """Build generic system-owned default Report Config rows from app analytics config."""
+
+    seeds: list[dict] = []
+    for app_seed in APP_SEEDS:
+        app_config = AppConfig.model_validate(app_seed["config"])
+        analytics = app_config.analytics
+        scope_configs = (
+            ("single_run", analytics.single_run, analytics.capabilities.single_run_report),
+            ("cross_run", analytics.cross_run, analytics.capabilities.cross_run_analytics),
+        )
+
+        for scope, composition, enabled in scope_configs:
+            if not enabled:
+                continue
+
+            scope_label = "Single Run" if scope == "single_run" else "Cross Run"
+            seeds.append(
+                {
+                    "tenant_id": SYSTEM_TENANT_ID,
+                    "user_id": SYSTEM_USER_ID,
+                    "app_id": app_seed["slug"],
+                    "report_id": _report_scope_seed_id(scope),
+                    "scope": scope,
+                    "name": f"Default {scope_label} Report",
+                    "description": f"System default {scope_label.lower()} report config for {app_seed['display_name']}.",
+                    "status": "active",
+                    "is_default": True,
+                    "visibility": Visibility.SHARED,
+                    "shared_by": SYSTEM_USER_ID,
+                    "presentation_config": _build_presentation_config(composition),
+                    "narrative_config": _build_narrative_config(composition, analytics.assets),
+                    "export_config": _build_export_config(composition),
+                    "default_report_run_visibility": Visibility.PRIVATE,
+                    "version": 1,
+                }
+            )
+    return seeds
+
+
 async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.UUID:
     """Ensure Owner role exists for a tenant. Returns role_id."""
     existing = await session.execute(
@@ -2328,7 +2416,7 @@ async def _seed_system_tenant_and_user(session: AsyncSession) -> None:
 
 
 async def _seed_prompts(session: AsyncSession) -> None:
-    """Seed immutable system prompt defaults using app-shared visibility."""
+    """Seed immutable system prompt defaults using shared visibility."""
     # Fetch all existing default prompts
     existing_result = await session.execute(
         select(Prompt).where(
@@ -2351,8 +2439,8 @@ async def _seed_prompts(session: AsyncSession) -> None:
                 )
                 if existing.branch_key != expected_branch_key:
                     existing.branch_key = expected_branch_key
-                if existing.visibility != Visibility.APP:
-                    existing.visibility = Visibility.APP
+                if Visibility.normalize(existing.visibility) != Visibility.SHARED:
+                    existing.visibility = Visibility.SHARED
                 if existing.prompt != p_def["prompt"]:
                     existing.prompt = p_def["prompt"]
                     updated += 1
@@ -2393,7 +2481,7 @@ async def _seed_prompts(session: AsyncSession) -> None:
             **p,
             "version": next_version[pt],
             "branch_key": _stable_branch_key(p["app_id"], p["prompt_type"], p["name"]),
-            "visibility": Visibility.APP,
+            "visibility": Visibility.SHARED,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -2410,12 +2498,46 @@ async def _seed_report_prompt_references(session: AsyncSession) -> None:
         app_id="kaira-bot",
         key="report-prompt-references",
         value=KAIRA_REPORT_PROMPT_REFERENCES,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         updated_by=SYSTEM_USER_ID,
         forked_from=None,
         shared_by=SYSTEM_USER_ID,
     )
     await session.execute(stmt)
+    await session.flush()
+
+
+async def _seed_report_configs(session: AsyncSession) -> None:
+    """Seed default Report Config rows as persisted system-owned shared assets."""
+
+    for seed in _build_default_report_config_seeds():
+        existing = await session.scalar(
+            select(ReportConfig).where(
+                ReportConfig.tenant_id == seed["tenant_id"],
+                ReportConfig.user_id == seed["user_id"],
+                ReportConfig.app_id == seed["app_id"],
+                ReportConfig.report_id == seed["report_id"],
+            )
+        )
+
+        if existing:
+            existing.scope = seed["scope"]
+            existing.name = seed["name"]
+            existing.description = seed["description"]
+            existing.status = seed["status"]
+            existing.is_default = seed["is_default"]
+            existing.visibility = seed["visibility"]
+            existing.shared_by = seed["shared_by"]
+            existing.shared_at = func.now()
+            existing.presentation_config = seed["presentation_config"]
+            existing.narrative_config = seed["narrative_config"]
+            existing.export_config = seed["export_config"]
+            existing.default_report_run_visibility = seed["default_report_run_visibility"]
+            existing.version = seed["version"]
+            continue
+
+        session.add(ReportConfig(**seed))
+
     await session.flush()
 
 
@@ -2427,7 +2549,7 @@ async def _seed_adversarial_contract_defaults(session: AsyncSession) -> None:
         app_id="kaira-bot",
         key="adversarial-config",
         value=get_default_config().model_dump(),
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         updated_by=SYSTEM_USER_ID,
         forked_from=None,
         shared_by=SYSTEM_USER_ID,
@@ -2437,7 +2559,7 @@ async def _seed_adversarial_contract_defaults(session: AsyncSession) -> None:
 
 
 async def _seed_schemas(session: AsyncSession) -> None:
-    """Seed immutable system schemas using app-shared visibility."""
+    """Seed immutable system schemas using shared visibility."""
     # Fetch all existing voice-rx schemas owned by system tenant
     existing_result = await session.execute(
         select(Schema).where(
@@ -2457,8 +2579,8 @@ async def _seed_schemas(session: AsyncSession) -> None:
             )
             if existing.branch_key != expected_branch_key:
                 existing.branch_key = expected_branch_key
-            if existing.visibility != Visibility.APP:
-                existing.visibility = Visibility.APP
+            if Visibility.normalize(existing.visibility) != Visibility.SHARED:
+                existing.visibility = Visibility.SHARED
             if existing.source_type != s_def.get("source_type"):
                 existing.source_type = s_def.get("source_type")
                 logger.info("Backfilled source_type='%s' on schema '%s'", s_def.get("source_type"), name)
@@ -2497,7 +2619,7 @@ async def _seed_schemas(session: AsyncSession) -> None:
             **s,
             "version": next_version[pt],
             "branch_key": _stable_branch_key(s["app_id"], s["prompt_type"], s["name"]),
-            "visibility": Visibility.APP,
+            "visibility": Visibility.SHARED,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }
@@ -2507,11 +2629,11 @@ async def _seed_schemas(session: AsyncSession) -> None:
 
 
 async def _seed_evaluators(session: AsyncSession) -> None:
-    """Seed system evaluators as app-shared rows, or update existing ones."""
+    """Seed system evaluators as shared rows, or update existing ones."""
     result = await session.execute(
         select(Evaluator).where(
             Evaluator.app_id == "kaira-bot",
-            Evaluator.visibility == Visibility.APP,
+            shared_visibility_clause(Evaluator.visibility),
             Evaluator.listing_id == None,
             Evaluator.tenant_id == SYSTEM_TENANT_ID,
         )
@@ -2525,7 +2647,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             db_eval = existing.get(e_data["name"])
             if db_eval:
                 db_eval.output_schema = e_data["output_schema"]
-                db_eval.visibility = Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE
+                db_eval.visibility = Visibility.SHARED if e_data.get("is_global", True) else Visibility.PRIVATE
                 updated += 1
         await session.flush()
         logger.info("Updated output_schema for %d existing kaira-bot evaluators", updated)
@@ -2536,7 +2658,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             if e_data["name"] in new_names:
                 session.add(Evaluator(**{
                     **{k: v for k, v in e_data.items() if k not in {"is_global", "show_in_header"}},
-                    "visibility": Visibility.APP if e_data.get("is_global", True) else Visibility.PRIVATE,
+                    "visibility": Visibility.SHARED if e_data.get("is_global", True) else Visibility.PRIVATE,
                     "tenant_id": SYSTEM_TENANT_ID,
                     "user_id": SYSTEM_USER_ID,
                 }))
@@ -2548,12 +2670,12 @@ async def _seed_evaluators(session: AsyncSession) -> None:
     for e in KAIRA_BOT_EVALUATORS:
         session.add(Evaluator(**{
             **{k: v for k, v in e.items() if k not in {"is_global", "show_in_header"}},
-            "visibility": Visibility.APP if e.get("is_global", True) else Visibility.PRIVATE,
+            "visibility": Visibility.SHARED if e.get("is_global", True) else Visibility.PRIVATE,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }))
     await session.flush()
-    logger.info("Seeded %d app-shared system evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
+    logger.info("Seeded %d shared system evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
 
 
 async def seed_bootstrap_admin() -> None:
@@ -2563,6 +2685,7 @@ async def seed_bootstrap_admin() -> None:
     Called once on startup, after system tenant/user are seeded.
     """
     from app.auth.utils import hash_password
+    from app.database import async_session as get_async_session
 
     async with get_async_session() as db:
         # Count non-system users
@@ -2624,6 +2747,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await _seed_system_tenant_and_user(session)
     await _seed_adversarial_contract_defaults(session)
     await _seed_report_prompt_references(session)
+    await _seed_report_configs(session)
     await _seed_prompts(session)
     await _seed_schemas(session)
     # kaira-bot evaluators are NOT auto-seeded; they use the on-demand

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import SYSTEM_TENANT_ID
 from app.models.setting import Setting
 from app.models.mixins.shareable import Visibility
+from app.services.access_control import shared_visibility_clause
 from app.services.settings_upsert import build_setting_upsert_stmt
 
 logger = logging.getLogger(__name__)
@@ -22,17 +23,17 @@ async def load_rules(
     tenant_id,
 ) -> list[dict[str, Any]]:
     """Load published rule catalog using settings resolution:
-    1. App-shared setting in the current tenant
+    1. Shared setting in the current tenant
     2. System default
     3. Empty list
     """
-    # Step 1: App-shared in current tenant
+    # Step 1: Shared in current tenant
     result = await db.execute(
         select(Setting).where(
             Setting.tenant_id == tenant_id,
             Setting.app_id == app_id,
             Setting.key == RULES_KEY,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     setting = result.scalar_one_or_none()
@@ -45,7 +46,7 @@ async def load_rules(
             Setting.tenant_id == SYSTEM_TENANT_ID,
             Setting.app_id == app_id,
             Setting.key == RULES_KEY,
-            Setting.visibility == Visibility.APP,
+            shared_visibility_clause(Setting.visibility),
         )
     )
     setting = result.scalar_one_or_none()
@@ -63,14 +64,14 @@ async def save_rules(
     user_id,
     rules: list[dict[str, Any]],
 ) -> None:
-    """Save the published rule catalog as an app-shared setting."""
+    """Save the published rule catalog as a shared setting."""
     stmt = build_setting_upsert_stmt(
         tenant_id=tenant_id,
         user_id=user_id,
         app_id=app_id,
         key=RULES_KEY,
         value=rules,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         updated_by=user_id,
         forked_from=None,
         shared_by=user_id,

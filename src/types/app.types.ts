@@ -53,18 +53,18 @@ export interface AppRulesConfig {
 }
 
 export interface AppEvaluatorConfig {
-  defaultVisibility: 'private' | 'app';
+  defaultVisibility: 'private' | 'shared';
   defaultModel: string;
   variables: AppVariableConfig[];
   dynamicVariableSources: AppDynamicVariableSources;
 }
 
 export interface AppAssetDefaults {
-  evaluator: 'private' | 'app';
-  prompt: 'private' | 'app';
-  schema: 'private' | 'app';
-  adversarialContract: 'private' | 'app';
-  llmSettings: 'private' | 'app';
+  evaluator: 'private' | 'shared';
+  prompt: 'private' | 'shared';
+  schema: 'private' | 'shared';
+  adversarialContract: 'private' | 'shared';
+  llmSettings: 'private' | 'shared';
 }
 
 export interface AppEvalRunConfig {
@@ -317,7 +317,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       evaluator: 'private',
       prompt: 'private',
       schema: 'private',
-      adversarialContract: 'app',
+      adversarialContract: 'shared',
       llmSettings: 'private',
     },
     evalRun: {

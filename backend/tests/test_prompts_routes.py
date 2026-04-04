@@ -24,13 +24,25 @@ def test_prompt_create_accepts_branch_key_and_visibility():
         branchKey="branch-123",
         name="Transcript Prompt",
         prompt="Extract transcript",
-        visibility="app",
+        visibility="shared",
     )
 
     dumped = payload.model_dump(by_alias=True)
 
     assert dumped["branchKey"] == "branch-123"
-    assert dumped["visibility"] == Visibility.APP
+    assert dumped["visibility"] == Visibility.SHARED
+
+
+def test_prompt_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
+    payload = PromptCreate(
+        appId="voice-rx",
+        promptType="transcription",
+        name="Transcript Prompt",
+        prompt="Extract transcript",
+        visibility="app",
+    )
+
+    assert payload.visibility == Visibility.SHARED
 
 
 def test_prompt_response_serializes_branch_metadata():
@@ -55,7 +67,7 @@ def test_prompt_response_serializes_branch_metadata():
     payload = PromptResponse.model_validate(prompt).model_dump(by_alias=True, mode="json")
 
     assert payload["branchKey"] == "branch-123"
-    assert payload["visibility"] == "app"
+    assert payload["visibility"] == "shared"
     assert payload["forkedFrom"] == 7
 
 
@@ -91,13 +103,13 @@ def _prompt(tenant_id, user_id, app_id="voice-rx", visibility=Visibility.PRIVATE
     )
 
 
-def test_fork_access_any_user_can_read_app_shared_prompt():
-    """Any user with app access can fork (read) an app-shared prompt."""
+def test_fork_access_any_user_can_read_shared_prompt():
+    """Any user with app access can fork (read) a shared prompt."""
     tid = uuid.uuid4()
     owner = uuid.uuid4()
     reader = uuid.uuid4()
     user = _user(tid, reader, app_access=("voice-rx",))
-    prompt = _prompt(tid, owner, visibility=Visibility.APP)
+    prompt = _prompt(tid, owner, visibility=Visibility.SHARED)
     assert can_access(user, prompt, "fork") is True
 
 
@@ -115,13 +127,13 @@ def test_visibility_patch_denied_for_system_defaults():
     """System defaults cannot have visibility changed."""
     from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
     user = _user(SYSTEM_TENANT_ID, SYSTEM_USER_ID, app_access=("voice-rx",))
-    prompt = _prompt(SYSTEM_TENANT_ID, SYSTEM_USER_ID, visibility=Visibility.APP, is_default=True)
+    prompt = _prompt(SYSTEM_TENANT_ID, SYSTEM_USER_ID, visibility=Visibility.SHARED, is_default=True)
     # System assets are immutable — edit is denied
     assert can_access(user, prompt, "edit") is False
 
 
 def test_visibility_patch_owner_can_share_private_prompt():
-    """Owner can change visibility from private to app (share action)."""
+    """Owner can change visibility from private to shared (share action)."""
     tid = uuid.uuid4()
     uid = uuid.uuid4()
     user = _user(tid, uid, app_access=("voice-rx",))
@@ -159,7 +171,7 @@ def test_readable_scope_clause_includes_tenant_shared_and_system_prompt_rows():
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
     assert "prompts.user_id" in sql
-    assert "prompts.visibility = 'APP'" in sql
+    assert "prompts.visibility IN ('SHARED', 'APP')" in sql
     assert "prompts.tenant_id" in sql
 
 

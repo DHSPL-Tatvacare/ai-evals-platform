@@ -8,9 +8,10 @@ from pydantic import Field, field_validator
 
 from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
+from app.schemas.visibility import VisibilityInputMixin, VisibilityOutputMixin
 
 
-class EvaluatorCreate(CamelModel):
+class EvaluatorCreate(VisibilityInputMixin, CamelModel):
     app_id: str
     listing_id: Optional[str] = None
     name: str
@@ -22,7 +23,7 @@ class EvaluatorCreate(CamelModel):
     forked_from: Optional[str] = None
 
 
-class EvaluatorUpdate(CamelModel):
+class EvaluatorUpdate(VisibilityInputMixin, CamelModel):
     listing_id: Optional[str] = None
     name: Optional[str] = None
     prompt: Optional[str] = None
@@ -33,7 +34,7 @@ class EvaluatorUpdate(CamelModel):
     forked_from: Optional[str] = None
 
 
-class EvaluatorResponse(CamelORMModel):
+class EvaluatorResponse(VisibilityOutputMixin, CamelORMModel):
     id: uuid.UUID
     app_id: str
     listing_id: Optional[str] = None

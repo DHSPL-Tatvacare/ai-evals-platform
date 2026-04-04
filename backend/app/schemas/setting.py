@@ -8,9 +8,10 @@ from pydantic import Field
 
 from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
+from app.schemas.visibility import VisibilityInputMixin, VisibilityOutputMixin
 
 
-class SettingCreate(CamelModel):
+class SettingCreate(VisibilityInputMixin, CamelModel):
     app_id: Optional[str] = None
     key: str
     value: dict = Field(default_factory=dict)
@@ -18,13 +19,13 @@ class SettingCreate(CamelModel):
     forked_from: Optional[int] = None
 
 
-class SettingUpdate(CamelModel):
+class SettingUpdate(VisibilityInputMixin, CamelModel):
     value: Optional[dict] = None
     visibility: Optional[Visibility] = None
     forked_from: Optional[int] = None
 
 
-class SettingResponse(CamelORMModel):
+class SettingResponse(VisibilityOutputMixin, CamelORMModel):
     id: int
     app_id: Optional[str] = None
     key: str

@@ -5,7 +5,8 @@
  * Query params remain snake_case (FastAPI query params).
  */
 import type { PromptDefinition, AppId } from '@/types';
-import type { AssetVisibility } from '@/types/settings.types';
+import { normalizeAssetVisibility } from '@/types/settings.types';
+import type { AssetVisibility, LegacyAssetVisibility } from '@/types/settings.types';
 import { apiRequest } from './client';
 
 /** Shape returned by backend (camelCase, dates as strings) */
@@ -25,7 +26,7 @@ interface ApiPrompt {
   description?: string;
   isDefault?: boolean;
   sourceType?: string | null;
-  visibility: AssetVisibility;
+  visibility: LegacyAssetVisibility;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,7 +47,7 @@ function toPromptDefinition(p: ApiPrompt): PromptDefinition {
     name: p.name,
     version: p.version,
     branchKey: p.branchKey,
-    visibility: p.visibility,
+    visibility: normalizeAssetVisibility(p.visibility),
     forkedFrom: p.forkedFrom,
     sharedBy: p.sharedBy,
     sharedAt: p.sharedAt,

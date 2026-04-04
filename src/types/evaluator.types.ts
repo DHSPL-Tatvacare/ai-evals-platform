@@ -49,7 +49,7 @@ export interface EvaluatorDefinition {
   appId: string;                  // 'voice-rx' | 'kaira-bot'
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
   visibility?: AssetVisibility;   // Sharing scope
-  /** @deprecated Use visibility === 'app' instead */
+  /** @deprecated Use visibility === 'shared' instead */
   isGlobal?: boolean;
   /** @deprecated Derive from visibility + system ownership */
   isBuiltIn?: boolean;

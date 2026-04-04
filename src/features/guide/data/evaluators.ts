@@ -94,7 +94,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
-        "visibility": "app",
+        "visibility": "shared",
         "show_in_header": true
       },
       {
@@ -137,7 +137,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
-        "visibility": "app",
+        "visibility": "shared",
         "show_in_header": false
       },
       {
@@ -188,7 +188,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
-        "visibility": "app",
+        "visibility": "shared",
         "show_in_header": false
       },
       {
@@ -234,7 +234,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
         ],
         "app_id": "kaira-bot",
         "is_global": true,
-        "visibility": "app",
+        "visibility": "shared",
         "show_in_header": true
       }
     ]
