@@ -178,7 +178,7 @@ async def preview_csv(
 @router.get("/stats/summary")
 async def get_summary_stats(
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Stats across readable evaluation runs."""
@@ -290,7 +290,7 @@ async def get_summary_stats(
 async def get_trends(
     days: int = Query(30, ge=1, le=365),
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate correctness verdicts by day for readable runs."""
@@ -333,7 +333,7 @@ async def list_all_logs(
     app_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """List API logs scoped to readable runs."""
@@ -384,7 +384,7 @@ async def list_all_logs(
 async def delete_logs(
     run_id: Optional[str] = Query(None),
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = require_permission('eval:delete'),
+    auth: AuthContext = require_permission('evaluation:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete API logs scoped to runs owned by the current user."""
@@ -531,7 +531,7 @@ async def get_eval_run(
 async def patch_eval_run_visibility(
     run_id: UUID,
     req: EvalRunVisibilityUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:share'),
     db: AsyncSession = Depends(get_db),
 ):
     run = await _get_owned_run(db, run_id=run_id, auth=auth)
@@ -550,7 +550,7 @@ async def patch_eval_run_visibility(
 @router.delete("/{run_id}")
 async def delete_eval_run(
     run_id: UUID,
-    auth: AuthContext = require_permission('eval:delete'),
+    auth: AuthContext = require_permission('evaluation:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an eval run and all its cascaded data."""

@@ -165,7 +165,7 @@ function SectionCard({
             {subtitle}
           </p>
         </div>
-        <PermissionGate action="settings:edit">
+        <PermissionGate action="configuration:edit">
           <Button variant="secondary" size="sm" icon={Plus} onClick={onAdd}>
             {addLabel}
           </Button>
@@ -248,7 +248,7 @@ function GoalsSubTab({
                   <Badge variant="neutral">{goal.signalPatterns.length} signal patterns</Badge>
                 </div>
               </div>
-              <PermissionGate action="settings:edit">
+              <PermissionGate action="configuration:edit">
                 <div className="flex items-center gap-1 shrink-0">
                   <IconButton icon={Pencil} label="Edit goal" onClick={() => onEdit(index)} />
                   <IconButton icon={Copy} label="Duplicate goal" onClick={() => onDuplicate(goal)} />
@@ -321,7 +321,7 @@ function TraitsSubTab({
                   </p>
                 )}
               </div>
-              <PermissionGate action="settings:edit">
+              <PermissionGate action="configuration:edit">
                 <div className="flex items-center gap-1 shrink-0">
                   <IconButton icon={Pencil} label="Edit trait" onClick={() => onEdit(index)} />
                   <IconButton icon={Copy} label="Duplicate trait" onClick={() => onDuplicate(trait)} />
@@ -388,7 +388,7 @@ function RulesSubTab({
               Track the prompt or product rules that the evaluator must explicitly verify.
             </p>
           </div>
-          <PermissionGate action="settings:edit">
+          <PermissionGate action="configuration:edit">
             <Button variant="secondary" size="sm" icon={Plus} onClick={onAdd}>
               Add Rule
             </Button>
@@ -441,7 +441,7 @@ function RulesSubTab({
                         ))}
                       </div>
                     </div>
-                    <PermissionGate action="settings:edit">
+                    <PermissionGate action="configuration:edit">
                       <div className="flex items-center gap-1 shrink-0">
                         <IconButton icon={Pencil} label="Edit rule" onClick={() => onEdit(globalIndex)} />
                         <IconButton icon={Copy} label="Duplicate rule" onClick={() => onDuplicate(rule)} />
@@ -493,7 +493,7 @@ function AdvancedToolsSubTab({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <PermissionGate action="settings:edit">
+        <PermissionGate action="configuration:edit">
           <Button variant="secondary" icon={Upload} onClick={() => importInputRef.current?.click()} disabled={saving}>
             Import
           </Button>
@@ -501,7 +501,7 @@ function AdvancedToolsSubTab({
         <Button variant="secondary" icon={Download} onClick={onExport}>
           Export
         </Button>
-        <PermissionGate action="settings:edit">
+        <PermissionGate action="configuration:edit">
           <Button variant="warning" icon={RotateCcw} onClick={onReset} disabled={saving}>
             Reset To Defaults
           </Button>
@@ -551,7 +551,7 @@ export function EvaluationContractsTab() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const user = useAuthStore((s) => s.user);
-  const hasSettingsEdit = user?.isOwner || user?.permissions.includes('settings:edit') || false;
+  const hasSettingsEdit = user?.isOwner || user?.permissions.includes('configuration:edit') || false;
 
   const editorIsDirty = useMemo(() => {
     if (!editorState) return false;

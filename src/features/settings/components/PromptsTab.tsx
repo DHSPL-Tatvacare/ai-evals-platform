@@ -352,7 +352,7 @@ export function PromptsTab() {
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
                                   {/* Fork — available for shared/system prompts the user doesn't own */}
                                   {prompt.visibility === 'shared' && currentUserId !== prompt.userId && (
-                                    <PermissionGate action="resource:create">
+                                    <PermissionGate action="asset:create">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -367,7 +367,7 @@ export function PromptsTab() {
 
                                   {/* Share/Make Private — only for own prompts that aren't system defaults */}
                                   {!prompt.isDefault && currentUserId === prompt.userId && (
-                                    <PermissionGate action="resource:edit">
+                                    <PermissionGate action="asset:share">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -393,7 +393,7 @@ export function PromptsTab() {
                                   
                                   {/* Edit (own custom prompts only — defaults and others' are read-only) */}
                                   {!prompt.isDefault && currentUserId === prompt.userId && (
-                                    <PermissionGate action="resource:edit">
+                                    <PermissionGate action="asset:edit">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -409,7 +409,7 @@ export function PromptsTab() {
                                   {/* Set Active */}
                                   <div className="w-7 flex justify-center">
                                     {!isDefault && (
-                                      <PermissionGate action="resource:edit">
+                                      <PermissionGate action="asset:edit">
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -427,7 +427,7 @@ export function PromptsTab() {
                                   {/* Delete */}
                                   <div className="w-7 flex justify-center">
                                     {!prompt.isDefault && currentUserId === prompt.userId && (
-                                      <PermissionGate action="resource:delete">
+                                      <PermissionGate action="asset:delete">
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -461,7 +461,7 @@ export function PromptsTab() {
                   )}
                 </div>
                 <div className="px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30">
-                  <PermissionGate action="resource:create">
+                  <PermissionGate action="asset:create">
                     <Button
                       variant="ghost"
                       size="sm"

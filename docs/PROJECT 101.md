@@ -233,7 +233,11 @@ Every row belongs to a tenant. Access control is enforced through:
 - bearer-token auth on all non-auth routes
 - `AuthContext` on protected backend routes
 - roles, role permissions, and role app access
+- a backend-owned permission catalog exposed to admin role tooling via `/api/admin/permission-catalog`
+- owner-only surfaces that stay outside the grantable catalog, such as role lifecycle and tenant configuration
 - invite links instead of open signup
+
+Visibility is a separate layer from RBAC for shareable assets. The canonical visibility states are `private` and `shared`, and visibility-changing operations are guarded by `asset:share` rather than by generic edit permissions.
 
 System-owned library data is stored under the well-known system tenant and system user IDs.
 
@@ -332,7 +336,7 @@ The SQLAlchemy model layer currently defines 29 tables:
 
 1. validates critical config
 2. creates tables
-3. applies safe one-time migrations
+3. applies safe one-time migrations, including legacy visibility normalization and legacy `role_permissions` rewrites to canonical permission IDs
 4. seeds defaults
 5. bootstraps the first admin if needed
 6. starts recovery and worker loops when embedded execution is enabled
@@ -341,9 +345,11 @@ The SQLAlchemy model layer currently defines 29 tables:
 
 `seed_defaults.py` seeds:
 
-- system tenant and system user
+- system tenant, system user, and the Owner system role
 - app records for `voice-rx`, `kaira-bot`, and `inside-sales`
 - default prompts and schemas
+
+The Owner role is intentionally outside the grantable permission catalog. It retains full access through owner-only bypass semantics instead of through seeded grantable permissions.
 
 Evaluators are not auto-seeded on startup. They must be seeded separately per app.
 

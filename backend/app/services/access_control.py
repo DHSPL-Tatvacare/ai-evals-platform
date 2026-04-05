@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from sqlalchemy import and_, or_
 
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
-from app.models.mixins.shareable import Visibility, shared_visibility_values
+from app.models.mixins.shareable import Visibility
 from app.services.asset_policy import (
     get_asset_policy_for_asset,
     is_private_only_asset_key_for_asset,
@@ -43,9 +43,9 @@ def is_shared_visibility(value: Visibility | str | None) -> bool:
 
 
 def shared_visibility_clause(column):
-    """SQLAlchemy clause covering canonical and legacy shared rows."""
+    """SQLAlchemy clause covering canonical shared rows."""
 
-    return column.in_(shared_visibility_values())
+    return column == Visibility.SHARED
 
 
 def _is_system_asset(asset: ShareableAsset) -> bool:

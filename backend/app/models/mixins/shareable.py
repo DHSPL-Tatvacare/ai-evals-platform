@@ -10,36 +10,29 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 
 class Visibility(str, enum.Enum):
-    """Visibility values supported during the staged shared-visibility rollout."""
+    """Canonical visibility values for shareable assets."""
 
     PRIVATE = "private"
     SHARED = "shared"
-    APP = "app"
 
     @classmethod
     def normalize(cls, value: "Visibility | str | None") -> "Visibility | None":
-        """Return the canonical visibility for API and application logic."""
+        """Validate and return a canonical visibility value."""
 
         if value is None:
             return None
         if isinstance(value, cls):
-            return cls.SHARED if value in {cls.SHARED, cls.APP} else cls.PRIVATE
+            return value
 
         normalized = str(value).strip().lower()
         if normalized == cls.PRIVATE.value:
             return cls.PRIVATE
-        if normalized in {cls.SHARED.value, cls.APP.value}:
+        if normalized == cls.SHARED.value:
             return cls.SHARED
         raise ValueError(f"Unsupported visibility value: {value}")
 
     def is_shared(self) -> bool:
-        return self in {Visibility.SHARED, Visibility.APP}
-
-
-def shared_visibility_values() -> tuple[Visibility, Visibility]:
-    """Return both canonical and legacy shared enum members for staged queries."""
-
-    return (Visibility.SHARED, Visibility.APP)
+        return self == Visibility.SHARED
 
 
 class ShareableMixin:

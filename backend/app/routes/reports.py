@@ -214,7 +214,7 @@ def _extract_cross_run_summary_inputs(
 async def list_report_configs(
     app_id: str = Query(...),
     scope: str = Query(...),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -239,7 +239,7 @@ async def list_report_runs(
     source_eval_run_id: UUID | None = Query(None),
     report_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -264,7 +264,7 @@ async def list_report_runs(
 @router.get("/report-runs/{report_run_id}/artifact", response_model=PlatformRunReportPayload)
 async def get_report_run_artifact(
     report_run_id: UUID,
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     report_run, artifact = (await fetch_report_run_artifact(
@@ -296,7 +296,7 @@ async def get_report_run_artifact(
 async def patch_report_run_visibility(
     report_run_id: UUID,
     body: VisibilityPatchBody,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:share'),
     db: AsyncSession = Depends(get_db),
 ):
     report_run = await db.scalar(
@@ -330,7 +330,7 @@ async def patch_report_run_visibility(
 @router.get("/report-runs/{report_run_id}/export-pdf")
 async def export_report_run_pdf(
     report_run_id: UUID,
-    auth: AuthContext = require_permission('eval:export'),
+    auth: AuthContext = require_permission('evaluation:export'),
     db: AsyncSession = Depends(get_db),
 ):
     report_run, artifact = (await fetch_report_run_artifact(
@@ -439,7 +439,7 @@ async def _load_analytics_profile(
 @router.get("/cross-run-analytics", response_model=CrossRunAnalyticsResponse)
 async def get_cross_run_analytics(
     app_id: str = Query(...),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -668,7 +668,7 @@ async def refresh_cross_run_analytics(
 async def export_report_pdf(
     run_id: str,
     report_id: str | None = Query(None),
-    auth: AuthContext = require_permission('eval:export'),
+    auth: AuthContext = require_permission('evaluation:export'),
     db: AsyncSession = Depends(get_db),
 ):
     """Export report as PDF via headless browser rendering of self-contained HTML."""
@@ -773,7 +773,7 @@ async def get_report(
     cache_only: bool = Query(False, description="Only return cached report; 404 if not cached"),
     provider: str | None = Query(None, description="LLM provider for narrative generation"),
     model: str | None = Query(None, description="LLM model for narrative generation"),
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the latest generated report artifact for a completed run."""

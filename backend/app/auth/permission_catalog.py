@@ -50,21 +50,28 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Run, export, and manage evaluation jobs and runs.',
         permissions=(
             PermissionCatalogEntry(
-                id='eval:run',
+                id='evaluation:run',
                 label='Run evaluations',
                 description='Submit evaluation jobs and start evaluation workflows.',
                 group_id='evaluations',
                 group_label='Evaluations',
             ),
             PermissionCatalogEntry(
-                id='eval:delete',
-                label='Cancel or delete evaluations',
-                description='Cancel in-flight evaluation work and delete evaluation records.',
+                id='evaluation:cancel',
+                label='Cancel evaluations',
+                description='Cancel in-flight evaluation work without deleting completed records.',
                 group_id='evaluations',
                 group_label='Evaluations',
             ),
             PermissionCatalogEntry(
-                id='eval:export',
+                id='evaluation:delete',
+                label='Delete evaluations',
+                description='Delete evaluation records and related destructive evaluation artifacts.',
+                group_id='evaluations',
+                group_label='Evaluations',
+            ),
+            PermissionCatalogEntry(
+                id='evaluation:export',
                 label='Export evaluation results',
                 description='Download evaluation and reporting outputs.',
                 group_id='evaluations',
@@ -78,23 +85,30 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Manage shareable prompts, schemas, evaluators, chat artifacts, and tags.',
         permissions=(
             PermissionCatalogEntry(
-                id='resource:create',
+                id='asset:create',
                 label='Create assets',
                 description='Create prompts, schemas, evaluators, tags, and related assets.',
                 group_id='assets',
                 group_label='Assets',
             ),
             PermissionCatalogEntry(
-                id='resource:edit',
+                id='asset:edit',
                 label='Edit assets',
                 description='Edit prompts, schemas, evaluators, tags, and related assets.',
                 group_id='assets',
                 group_label='Assets',
             ),
             PermissionCatalogEntry(
-                id='resource:delete',
+                id='asset:delete',
                 label='Delete assets',
                 description='Delete prompts, schemas, evaluators, tags, and related assets.',
+                group_id='assets',
+                group_label='Assets',
+            ),
+            PermissionCatalogEntry(
+                id='asset:share',
+                label='Share assets',
+                description='Change visibility on owned shareable assets.',
                 group_id='assets',
                 group_label='Assets',
             ),
@@ -113,7 +127,7 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_label='Reports and insights',
             ),
             PermissionCatalogEntry(
-                id='analytics:view',
+                id='insights:view',
                 label='View analytics',
                 description='Access analytics dashboards, summaries, and reporting views.',
                 group_id='insights',
@@ -127,7 +141,7 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Manage tenant-scoped settings, rules, and app configuration assets.',
         permissions=(
             PermissionCatalogEntry(
-                id='settings:edit',
+                id='configuration:edit',
                 label='Edit configuration',
                 description='Edit app settings, rule catalogs, and other configuration assets.',
                 group_id='configuration',
@@ -148,7 +162,7 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_label='User management',
             ),
             PermissionCatalogEntry(
-                id='user:invite',
+                id='invite_link:manage',
                 label='Manage invite links',
                 description='Create, deactivate, and inspect invite links.',
                 group_id='users',

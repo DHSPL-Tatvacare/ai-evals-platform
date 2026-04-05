@@ -30,8 +30,11 @@ interface KairaBotEvaluatorsViewProps {
 export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps) {
   const appId = 'kaira-bot';
   const appConfig = useAppConfig(appId);
-  const canCreate = usePermission('resource:create');
-  const canRun = usePermission('eval:run');
+  const canCreate = usePermission('asset:create');
+  const canEdit = usePermission('asset:edit');
+  const canDelete = usePermission('asset:delete');
+  const canShare = usePermission('asset:share');
+  const canRun = usePermission('evaluation:run');
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
@@ -236,16 +239,16 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
             setEditingEvaluator(undefined);
             setIsWizardOpen(true);
           }}
-          onEdit={(evaluator) => {
+          onEdit={canEdit ? (evaluator) => {
             setEditingEvaluator(evaluator);
             setIsWizardOpen(true);
-          }}
-          onFork={handleFork}
-          onDelete={(evaluator) => {
+          } : undefined}
+          onFork={canCreate ? handleFork : undefined}
+          onDelete={canDelete ? (evaluator) => {
             setEvaluatorToDelete(evaluator);
             setDeleteConfirmOpen(true);
-          }}
-          onVisibilityChange={handleVisibilityChange}
+          } : undefined}
+          onVisibilityChange={canShare ? handleVisibilityChange : undefined}
           onRun={canRun && session ? runner.handleRun : undefined}
           onCancelRun={canRun && session ? runner.handleCancel : undefined}
           onSeedDefaults={canCreate ? handleSeedDefaults : undefined}

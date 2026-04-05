@@ -15,9 +15,9 @@ interface EvaluatorsTableProps {
   filter: EvaluatorVisibilityFilter;
   onFilterChange: (filter: EvaluatorVisibilityFilter) => void;
   onCreate: () => void;
-  onEdit: (evaluator: EvaluatorDefinition) => void;
-  onFork: (evaluator: EvaluatorDefinition) => void;
-  onDelete: (evaluator: EvaluatorDefinition) => void;
+  onEdit?: (evaluator: EvaluatorDefinition) => void;
+  onFork?: (evaluator: EvaluatorDefinition) => void;
+  onDelete?: (evaluator: EvaluatorDefinition) => void;
   onVisibilityChange?: (evaluator: EvaluatorDefinition) => void;
   onRun?: (evaluator: EvaluatorDefinition) => void;
   onCancelRun?: (evaluatorId: string) => void;
@@ -246,7 +246,7 @@ export function EvaluatorsTable({
                               side="bottom"
                               className="w-fit min-w-[140px] rounded-[8px] bg-[var(--bg-elevated)] py-1"
                             >
-                              {isOwned ? (
+                              {isOwned && onEdit ? (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -258,16 +258,18 @@ export function EvaluatorsTable({
                                   Edit
                                 </button>
                               ) : null}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onFork(evaluator);
-                                  setMenuOpenId(null);
-                                }}
-                                className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
-                              >
-                                Fork
-                              </button>
+                              {onFork ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onFork(evaluator);
+                                    setMenuOpenId(null);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
+                                >
+                                  Fork
+                                </button>
+                              ) : null}
                               {onVisibilityChange && isOwned ? (
                                 <button
                                   type="button"
@@ -292,7 +294,7 @@ export function EvaluatorsTable({
                                   {evaluatorShowsInHeader(evaluator) ? 'Remove from Header' : 'Show in Header'}
                                 </button>
                               ) : null}
-                              {isOwned ? (
+                              {isOwned && onDelete ? (
                                 <button
                                   type="button"
                                   onClick={() => {

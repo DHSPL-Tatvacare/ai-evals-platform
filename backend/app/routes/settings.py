@@ -198,7 +198,7 @@ async def get_setting(
 @router.put("", response_model=SettingResponse)
 async def upsert_setting(
     body: SettingCreate,
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert a setting using the correct scope-aware uniqueness target."""
@@ -224,7 +224,7 @@ async def upsert_setting(
 async def delete_setting_by_key(
     key: str = Query(...),
     app_id: str = Query(None),
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by key + app_id for the current user."""
@@ -250,7 +250,7 @@ async def delete_setting_by_key(
 @router.delete("/{setting_id}")
 async def delete_setting(
     setting_id: int,
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by ID."""

@@ -566,7 +566,7 @@ export function InsideSalesListing() {
           >
             Deselect all
           </button>
-          <PermissionGate action="eval:run">
+          <PermissionGate action="evaluation:run">
             <Button size="sm" className="ml-auto" onClick={() => openModal('insideSalesEval')}>
               Evaluate Selected
             </Button>

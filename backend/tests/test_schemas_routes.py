@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from pydantic import ValidationError
 
 from app.models.mixins.shareable import Visibility
 from app.models.schema import Schema
@@ -33,16 +34,19 @@ def test_schema_create_accepts_branch_key_and_visibility():
     assert dumped["visibility"] == Visibility.SHARED
 
 
-def test_schema_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
-    payload = SchemaCreate(
-        appId="voice-rx",
-        promptType="transcription",
-        name="Transcript Schema",
-        schemaData={"type": "object"},
-        visibility="app",
-    )
+def test_schema_create_rejects_legacy_app_visibility_input():
+    try:
+        SchemaCreate(
+            appId="voice-rx",
+            promptType="transcription",
+            name="Transcript Schema",
+            schemaData={"type": "object"},
+            visibility="app",
+        )
+    except ValidationError:
+        return
 
-    assert payload.visibility == Visibility.SHARED
+    raise AssertionError("SchemaCreate should reject legacy app visibility input")
 
 
 def test_schema_response_serializes_branch_metadata():
@@ -56,7 +60,7 @@ def test_schema_response_serializes_branch_metadata():
         schema_data={"type": "object"},
         description="",
         is_default=False,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         forked_from=2,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -147,7 +151,7 @@ def test_readable_scope_clause_includes_tenant_shared_and_system_schema_rows():
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
     assert "schemas.user_id" in sql
-    assert "schemas.visibility IN ('SHARED', 'APP')" in sql
+    assert "schemas.visibility = 'SHARED'" in sql
     assert "schemas.tenant_id" in sql
 
 

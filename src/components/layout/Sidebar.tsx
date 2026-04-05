@@ -32,6 +32,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
+import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from "@/utils/permissions";
 import { routes } from "@/config/routes";
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
@@ -69,7 +70,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   // Auth
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const isAdmin = !!(user?.isOwner || user?.permissions.some((p) => ['user:create', 'user:edit', 'user:invite'].includes(p)));
+  const isAdmin = userHasAnyPermission(user, ADMIN_ACCESS_PERMISSIONS);
   const isAdminActive = location.pathname.startsWith('/admin');
 
   // Modal management (for batch/adversarial wizards)

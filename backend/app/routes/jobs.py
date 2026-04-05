@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 @router.post("", response_model=JobResponse, status_code=201)
 async def submit_job(
     body: JobCreate,
-    auth: AuthContext = require_permission('eval:run'),
+    auth: AuthContext = require_permission('evaluation:run'),
     db: AsyncSession = Depends(get_db),
 ):
     """Submit a new background job. Injects auth context into params for downstream runners."""
@@ -127,7 +127,7 @@ async def get_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: UUID,
-    auth: AuthContext = require_permission('eval:delete'),
+    auth: AuthContext = require_permission('evaluation:cancel'),
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued or running job."""

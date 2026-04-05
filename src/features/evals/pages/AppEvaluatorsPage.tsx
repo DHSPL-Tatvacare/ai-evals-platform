@@ -29,7 +29,10 @@ export function AppEvaluatorsPage({
   const appId = useCurrentAppId();
   const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
-  const canCreate = usePermission('resource:create');
+  const canCreate = usePermission('asset:create');
+  const canEdit = usePermission('asset:edit');
+  const canDelete = usePermission('asset:delete');
+  const canShare = usePermission('asset:share');
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
@@ -179,16 +182,16 @@ export function AppEvaluatorsPage({
             setEditingEvaluator(undefined);
             setIsWizardOpen(true);
           }}
-          onEdit={(evaluator) => {
+          onEdit={canEdit ? (evaluator) => {
             setEditingEvaluator(evaluator);
             setIsWizardOpen(true);
-          }}
-          onFork={handleFork}
-          onDelete={(evaluator) => {
+          } : undefined}
+          onFork={canCreate ? handleFork : undefined}
+          onDelete={canDelete ? (evaluator) => {
             setEvaluatorToDelete(evaluator);
             setDeleteConfirmOpen(true);
-          }}
-          onVisibilityChange={handleVisibilityChange}
+          } : undefined}
+          onVisibilityChange={canShare ? handleVisibilityChange : undefined}
           onSeedDefaults={supportsAppLevelSeedDefaults && canCreate ? handleSeedDefaults : undefined}
           onToggleHeader={handleToggleHeader}
           isSeeding={isSeeding}

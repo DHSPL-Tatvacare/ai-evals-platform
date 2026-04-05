@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from pydantic import ValidationError
 
 from app.models.prompt import Prompt
 from app.models.mixins.shareable import Visibility
@@ -33,16 +34,19 @@ def test_prompt_create_accepts_branch_key_and_visibility():
     assert dumped["visibility"] == Visibility.SHARED
 
 
-def test_prompt_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
-    payload = PromptCreate(
-        appId="voice-rx",
-        promptType="transcription",
-        name="Transcript Prompt",
-        prompt="Extract transcript",
-        visibility="app",
-    )
+def test_prompt_create_rejects_legacy_app_visibility_input():
+    try:
+        PromptCreate(
+            appId="voice-rx",
+            promptType="transcription",
+            name="Transcript Prompt",
+            prompt="Extract transcript",
+            visibility="app",
+        )
+    except ValidationError:
+        return
 
-    assert payload.visibility == Visibility.SHARED
+    raise AssertionError("PromptCreate should reject legacy app visibility input")
 
 
 def test_prompt_response_serializes_branch_metadata():
@@ -56,7 +60,7 @@ def test_prompt_response_serializes_branch_metadata():
         prompt="Extract transcript",
         description="",
         is_default=False,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         forked_from=7,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -171,7 +175,7 @@ def test_readable_scope_clause_includes_tenant_shared_and_system_prompt_rows():
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
     assert "prompts.user_id" in sql
-    assert "prompts.visibility IN ('SHARED', 'APP')" in sql
+    assert "prompts.visibility = 'SHARED'" in sql
     assert "prompts.tenant_id" in sql
 
 

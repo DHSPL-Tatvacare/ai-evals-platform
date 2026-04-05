@@ -9,6 +9,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy.dialects import postgresql
+from pydantic import ValidationError
 
 from app.models.setting import Setting
 from app.models.mixins.shareable import Visibility
@@ -29,15 +30,18 @@ def test_setting_create_accepts_visibility_for_shared_contract_rows():
     assert payload.model_dump(by_alias=True)["visibility"] == Visibility.SHARED
 
 
-def test_setting_create_accepts_legacy_app_visibility_input_but_normalizes_to_shared():
-    payload = SettingCreate(
-        appId="kaira-bot",
-        key="adversarial-config",
-        value={"version": 1},
-        visibility="app",
-    )
+def test_setting_create_rejects_legacy_app_visibility_input():
+    try:
+        SettingCreate(
+            appId="kaira-bot",
+            key="adversarial-config",
+            value={"version": 1},
+            visibility="app",
+        )
+    except ValidationError:
+        return
 
-    assert payload.visibility == Visibility.SHARED
+    raise AssertionError("SettingCreate should reject legacy app visibility input")
 
 
 def test_setting_response_serializes_share_metadata_in_camel_case():
@@ -46,7 +50,7 @@ def test_setting_response_serializes_share_metadata_in_camel_case():
         app_id="kaira-bot",
         key="rule-catalog",
         value={"rules": []},
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         updated_by=uuid.uuid4(),
         shared_by=uuid.uuid4(),
         shared_at=datetime.now(timezone.utc),
@@ -63,11 +67,10 @@ def test_setting_response_serializes_share_metadata_in_camel_case():
     assert "sharedAt" in payload
 
 
-def test_setting_model_exposes_private_legacy_shared_and_canonical_shared_unique_indexes():
+def test_setting_model_exposes_private_and_shared_unique_indexes():
     index_names = {index.name for index in Setting.__table__.indexes}
 
     assert "uq_settings_private_scope" in index_names
-    assert "uq_settings_app_scope" in index_names
     assert "uq_settings_shared_scope" in index_names
 
 
@@ -130,7 +133,7 @@ def test_app_member_cannot_edit_shared_setting_unless_owner():
     owner = uuid.uuid4()
     other = uuid.uuid4()
     user = _make_user(tid, other, app_access=frozenset({"kaira-bot"}))
-    asset = _make_setting(tid, owner, "kaira-bot", "rule-catalog", Visibility.APP)
+    asset = _make_setting(tid, owner, "kaira-bot", "rule-catalog", Visibility.SHARED)
 
     assert can_access(user, asset, "edit") is False
 

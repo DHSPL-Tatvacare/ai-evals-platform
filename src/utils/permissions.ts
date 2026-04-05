@@ -1,55 +1,52 @@
 import { useAuthStore } from '@/stores/authStore';
+import type { User } from '@/types/auth.types';
 
-/** Check permission from outside React (callbacks, services) */
-export function hasPermission(permission: string): boolean {
-  const user = useAuthStore.getState().user;
+export const ADMIN_ACCESS_PERMISSIONS = [
+  'user:create',
+  'user:edit',
+  'user:deactivate',
+  'user:reset_password',
+  'invite_link:manage',
+  'role:assign',
+] as const;
+
+export function userHasPermission(user: User | null | undefined, permission: string): boolean {
   if (!user) return false;
   if (user.isOwner) return true;
   return user.permissions.includes(permission);
+}
+
+export function userHasAnyPermission(
+  user: User | null | undefined,
+  permissions: readonly string[],
+): boolean {
+  if (!user) return false;
+  if (user.isOwner) return true;
+  return permissions.some((permission) => user.permissions.includes(permission));
+}
+
+export function userHasAppAccess(user: User | null | undefined, appSlug: string): boolean {
+  if (!user) return false;
+  if (user.isOwner) return true;
+  return user.appAccess.includes(appSlug);
+}
+
+/** Check permission from outside React (callbacks, services) */
+export function hasPermission(permission: string): boolean {
+  return userHasPermission(useAuthStore.getState().user, permission);
 }
 
 /** Check app access from outside React */
 export function hasAppAccess(appSlug: string): boolean {
-  const user = useAuthStore.getState().user;
-  if (!user) return false;
-  if (user.isOwner) return true;
-  return user.appAccess.includes(appSlug);
+  return userHasAppAccess(useAuthStore.getState().user, appSlug);
 }
 
 /** React hook for permission check (reactive) */
 export function usePermission(permission: string): boolean {
-  const user = useAuthStore((s) => s.user);
-  if (!user) return false;
-  if (user.isOwner) return true;
-  return user.permissions.includes(permission);
+  return userHasPermission(useAuthStore((s) => s.user), permission);
 }
 
 /** React hook for app access check (reactive) */
 export function useAppAccess(appSlug: string): boolean {
-  const user = useAuthStore((s) => s.user);
-  if (!user) return false;
-  if (user.isOwner) return true;
-  return user.appAccess.includes(appSlug);
+  return userHasAppAccess(useAuthStore((s) => s.user), appSlug);
 }
-
-/** All grantable permission IDs — keep in sync with backend Permission enum */
-export const PERMISSIONS = {
-  LISTING_CREATE: 'listing:create',
-  LISTING_DELETE: 'listing:delete',
-  EVAL_RUN: 'eval:run',
-  EVAL_DELETE: 'eval:delete',
-  EVAL_EXPORT: 'eval:export',
-  RESOURCE_CREATE: 'resource:create',
-  RESOURCE_EDIT: 'resource:edit',
-  RESOURCE_DELETE: 'resource:delete',
-  REPORT_GENERATE: 'report:generate',
-  ANALYTICS_VIEW: 'analytics:view',
-  SETTINGS_EDIT: 'settings:edit',
-  USER_CREATE: 'user:create',
-  USER_INVITE: 'user:invite',
-  USER_EDIT: 'user:edit',
-  USER_DEACTIVATE: 'user:deactivate',
-  USER_RESET_PASSWORD: 'user:reset_password',
-  ROLE_ASSIGN: 'role:assign',
-  TENANT_SETTINGS: 'tenant:settings',
-} as const;

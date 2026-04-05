@@ -197,7 +197,7 @@ export default function RunRowCard({
               {/* Bottom-right actions: cancel + delete */}
               <div className="flex items-center gap-1 shrink-0">
                 {isRunning && onCancel && (
-                  <PermissionGate action="eval:delete">
+                  <PermissionGate action="evaluation:cancel">
                     <button
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
                       disabled={cancelDisabled}
@@ -209,7 +209,7 @@ export default function RunRowCard({
                   </PermissionGate>
                 )}
                 {onDelete && (
-                  <PermissionGate action="eval:delete">
+                  <PermissionGate action="evaluation:delete">
                     <button
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
                       disabled={deleteDisabled || isRunning}

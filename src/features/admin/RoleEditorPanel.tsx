@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 import { rolesApi } from '@/services/api/rolesApi';
-import type { RoleResponse, AppResponse, PermissionCatalogGroupResponse } from '@/services/api/rolesApi';
+import type {
+  RoleResponse,
+  AppResponse,
+  PermissionCatalogGroupResponse,
+  OwnerOnlySurfaceResponse,
+} from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
 
@@ -21,12 +26,18 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(new Set());
   const [apps, setApps] = useState<AppResponse[]>([]);
   const [permissionGroups, setPermissionGroups] = useState<PermissionCatalogGroupResponse[]>([]);
+  const [ownerOnlySurfaces, setOwnerOnlySurfaces] = useState<OwnerOnlySurfaceResponse[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     rolesApi.listApps().then(setApps).catch(() => {});
-    rolesApi.listPermissionCatalog().then((catalog) => setPermissionGroups(catalog.groups)).catch(() => {});
+    rolesApi.listPermissionCatalog()
+      .then((catalog) => {
+        setPermissionGroups(catalog.groups);
+        setOwnerOnlySurfaces(catalog.ownerOnlySurfaces);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -111,7 +122,7 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-5 py-4">
           <h2 className="text-base font-semibold text-[var(--text-primary)]">
-            {isEdit ? 'Edit Role' : 'Create Role'}
+            {isEdit ? 'Edit Custom Role' : 'Create Custom Role'}
           </h2>
           <button
             onClick={onClose}
@@ -196,7 +207,7 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
           {/* Permissions */}
           <div>
             <div className="mb-3 flex items-center justify-between">
-                <p className="text-[13px] font-medium text-[var(--text-secondary)]">Permissions</p>
+              <p className="text-[13px] font-medium text-[var(--text-secondary)]">Grantable Permissions</p>
               <button
                 type="button"
                 onClick={() => {
@@ -212,6 +223,9 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
                 <div key={group.label}>
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                     {group.label}
+                  </p>
+                  <p className="mb-2 px-2 text-[11px] text-[var(--text-muted)]">
+                    {group.description}
                   </p>
                   <div className="space-y-0.5">
                     {group.permissions.map((perm) => {
@@ -242,6 +256,20 @@ export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps
               )}
             </div>
           </div>
+
+          {ownerOnlySurfaces.length > 0 && (
+            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3">
+              <p className="text-[12px] font-medium text-[var(--text-primary)]">Owner-only surfaces</p>
+              <div className="mt-2 space-y-2">
+                {ownerOnlySurfaces.map((surface) => (
+                  <div key={surface.id}>
+                    <p className="text-[12px] font-medium text-[var(--text-secondary)]">{surface.label}</p>
+                    <p className="text-[11px] text-[var(--text-muted)]">{surface.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && <p className="text-[13px] text-[var(--color-error)]">{error}</p>}
         </form>

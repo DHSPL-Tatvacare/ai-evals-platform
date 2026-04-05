@@ -71,7 +71,7 @@ async def get_session(
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(
     body: SessionCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -91,7 +91,7 @@ async def create_session(
 async def update_session(
     session_id: UUID,
     body: SessionUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -119,7 +119,7 @@ async def update_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: UUID,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -145,7 +145,7 @@ async def delete_session(
 @router.put("/messages/tags/rename")
 async def rename_tag_in_all_messages(
     body: TagRenameRequest,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     db: AsyncSession = Depends(get_db),
 ):
     """Rename a tag across all messages owned by this user."""
@@ -171,7 +171,7 @@ async def rename_tag_in_all_messages(
 @router.post("/messages/tags/delete")
 async def delete_tag_from_all_messages(
     body: TagDeleteRequest,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a tag from all messages owned by this user."""
@@ -243,7 +243,7 @@ async def get_message(
 @router.post("/messages", response_model=MessageResponse, status_code=201)
 async def create_message(
     body: MessageCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -274,7 +274,7 @@ async def create_message(
 async def update_message(
     message_id: UUID,
     body: MessageUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -302,7 +302,7 @@ async def update_message(
 @router.delete("/messages/{message_id}")
 async def delete_message(
     message_id: UUID,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

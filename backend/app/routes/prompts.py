@@ -3,17 +3,16 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, desc, or_, and_
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
-from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.prompt import Prompt
 from app.models.mixins.shareable import Visibility
 from app.schemas.prompt import PromptCreate, PromptUpdate, PromptResponse
-from app.services.access_control import readable_scope_clause, shared_visibility_clause
+from app.services.access_control import readable_scope_clause
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
@@ -87,7 +86,7 @@ async def get_prompt(
 @router.post("", response_model=PromptResponse, status_code=201)
 async def create_prompt(
     body: PromptCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -125,7 +124,7 @@ async def create_prompt(
 @router.post("/{prompt_id}/fork", response_model=PromptResponse, status_code=201)
 async def fork_prompt(
     prompt_id: int,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -134,11 +133,7 @@ async def fork_prompt(
     result = await db.execute(
         select(Prompt).where(
             Prompt.id == prompt_id,
-            or_(
-                and_(Prompt.tenant_id == auth.tenant_id, Prompt.user_id == auth.user_id),
-                and_(Prompt.tenant_id == auth.tenant_id, shared_visibility_clause(Prompt.visibility)),
-                Prompt.tenant_id == SYSTEM_TENANT_ID,
-            ),
+            readable_scope_clause(Prompt, auth),
         )
     )
     source = result.scalar_one_or_none()
@@ -170,7 +165,7 @@ async def fork_prompt(
 async def patch_prompt_visibility(
     prompt_id: int,
     body: dict,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:share'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -224,7 +219,7 @@ async def patch_prompt_visibility(
 async def update_prompt(
     prompt_id: int,
     body: PromptUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -254,7 +249,7 @@ async def update_prompt(
 @router.delete("/{prompt_id}")
 async def delete_prompt(
     prompt_id: int,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

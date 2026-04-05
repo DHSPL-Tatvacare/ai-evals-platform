@@ -12,7 +12,7 @@ export function InsideSalesEvaluators() {
   const [showCSVImport, setShowCSVImport] = useState(false);
 
   const renderImportButton = () => (
-    <PermissionGate action="resource:create">
+    <PermissionGate action="asset:create">
       <Button
         variant="secondary"
         onClick={() => setShowCSVImport(true)}

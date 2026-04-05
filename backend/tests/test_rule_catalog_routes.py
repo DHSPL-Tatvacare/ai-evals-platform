@@ -29,7 +29,7 @@ def test_rule_catalog_shared_setting_can_be_created_for_app_scope():
         value={"rules": []},
         tenant_id=tenant_id,
         user_id=user_id,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
     )
     user = _user(tenant_id=tenant_id, user_id=user_id, app_access=("kaira-bot",))
 
@@ -45,7 +45,7 @@ def test_llm_settings_remain_private_only():
         value={"provider": "openai"},
         tenant_id=tenant_id,
         user_id=user_id,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
     )
     user = _user(tenant_id=tenant_id, user_id=user_id, app_access=())
 

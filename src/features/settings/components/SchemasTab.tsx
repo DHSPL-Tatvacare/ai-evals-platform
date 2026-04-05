@@ -347,7 +347,7 @@ export function SchemasTab() {
                                 <div className="flex items-center gap-1 shrink-0 justify-end">
                                   {/* Fork — available for shared/system schemas the user doesn't own */}
                                   {schema.visibility === 'shared' && currentUserId !== schema.userId && (
-                                    <PermissionGate action="resource:create">
+                                    <PermissionGate action="asset:create">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -362,7 +362,7 @@ export function SchemasTab() {
 
                                   {/* Share/Make Private — only for own schemas that aren't system defaults */}
                                   {!schema.isDefault && currentUserId === schema.userId && (
-                                    <PermissionGate action="resource:edit">
+                                    <PermissionGate action="asset:share">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -388,7 +388,7 @@ export function SchemasTab() {
 
                                   {/* Edit — only for owned schemas */}
                                   {currentUserId === schema.userId && (
-                                    <PermissionGate action="resource:edit">
+                                    <PermissionGate action="asset:edit">
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -404,7 +404,7 @@ export function SchemasTab() {
                                   {/* Set Active */}
                                   <div className="w-7 flex justify-center">
                                     {!isDefault && (
-                                      <PermissionGate action="resource:edit">
+                                      <PermissionGate action="asset:edit">
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -422,7 +422,7 @@ export function SchemasTab() {
                                   {/* Delete — only for owned, non-default schemas */}
                                   <div className="w-7 flex justify-center">
                                     {!schema.isDefault && currentUserId === schema.userId && (
-                                      <PermissionGate action="resource:delete">
+                                      <PermissionGate action="asset:delete">
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -454,7 +454,7 @@ export function SchemasTab() {
                   )}
                 </div>
                 <div className="px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30">
-                  <PermissionGate action="resource:create">
+                  <PermissionGate action="asset:create">
                     <Button
                       variant="ghost"
                       size="sm"

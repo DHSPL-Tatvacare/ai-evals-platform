@@ -6,7 +6,7 @@ from app.models.mixins.shareable import Visibility
 
 
 class VisibilityInputMixin:
-    """Normalize legacy visibility input to canonical request values."""
+    """Validate canonical visibility input values."""
 
     @field_validator("visibility", mode="before", check_fields=False)
     @classmethod

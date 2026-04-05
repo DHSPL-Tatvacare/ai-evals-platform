@@ -297,7 +297,7 @@ export default function AdversarialDetailV2() {
           </div>
 
           <div className="flex items-center gap-2">
-            <PermissionGate action="settings:edit">
+            <PermissionGate action="configuration:edit">
               <Button
                 variant="secondary"
                 icon={BookmarkPlus}
@@ -307,7 +307,7 @@ export default function AdversarialDetailV2() {
                 Save To Library
               </Button>
             </PermissionGate>
-            <PermissionGate action="eval:run">
+            <PermissionGate action="evaluation:run">
               <Button
                 variant="secondary"
                 icon={RotateCcw}

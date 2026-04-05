@@ -197,7 +197,7 @@ export function InviteLinksSection() {
             </div>
             <div className="border-t border-[var(--border-default)] px-5 py-3 flex justify-end gap-2">
               <Button type="button" variant="secondary" size="md" onClick={() => setShowCreateForm(false)}>Cancel</Button>
-              <Button size="md" onClick={handleCreate} isLoading={isCreating} icon={Link2}>Generate</Button>
+              <Button size="md" onClick={handleCreate} isLoading={isCreating} icon={Link2}>Generate Invite Link</Button>
             </div>
           </div>
         </div>
@@ -215,9 +215,9 @@ export function InviteLinksSection() {
             className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
           />
         </div>
-        <PermissionGate action="user:invite">
+        <PermissionGate action="invite_link:manage">
           <Button size="md" icon={Plus} onClick={() => { setShowCreateForm(true); setGeneratedUrl(null); }}>
-            Generate Link
+            Generate Invite Link
           </Button>
         </PermissionGate>
       </div>
@@ -258,7 +258,7 @@ export function InviteLinksSection() {
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {canRevoke && (
-                      <PermissionGate action="user:invite">
+                      <PermissionGate action="invite_link:manage">
                         <Button variant="ghost" size="sm" icon={Trash2} iconOnly title="Revoke" onClick={() => setRevokingLink(link)} />
                       </PermissionGate>
                     )}
@@ -273,10 +273,10 @@ export function InviteLinksSection() {
         <EmptyState
           icon={search ? SearchX : Link2}
           title={search ? 'No results found' : 'No invite links yet'}
-          description={search ? `No invite links match "${search}"` : 'Generate a link to let team members sign up'}
+          description={search ? `No invite links match "${search}"` : 'Generate an invite link to let team members sign up'}
           compact
           className="mt-4"
-          action={!search ? { label: 'Generate Link', onClick: () => { setShowCreateForm(true); setGeneratedUrl(null); } } : undefined}
+          action={!search ? { label: 'Generate Invite Link', onClick: () => { setShowCreateForm(true); setGeneratedUrl(null); } } : undefined}
         />
       )}
 

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
-from app.constants import SYSTEM_TENANT_ID
+from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import get_db
 from app.models.evaluator import Evaluator
 from app.models.mixins.shareable import Visibility
@@ -75,7 +75,11 @@ async def list_evaluators(
         ).where(
             or_(
                 and_(Evaluator.tenant_id == auth.tenant_id, shared_visibility_clause(Evaluator.visibility)),
-                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, shared_visibility_clause(Evaluator.visibility)),
+                and_(
+                    Evaluator.tenant_id == SYSTEM_TENANT_ID,
+                    Evaluator.user_id == SYSTEM_USER_ID,
+                    shared_visibility_clause(Evaluator.visibility),
+                ),
             ),
             Evaluator.app_id == app_id,
         )
@@ -149,7 +153,7 @@ async def validate_prompt(
 async def seed_defaults(
     app_id: str = Query(..., alias="appId"),
     listing_id: str | None = Query(None, alias="listingId"),
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -367,7 +371,7 @@ async def get_evaluator(
 @router.post("", response_model=EvaluatorResponse, status_code=201)
 async def create_evaluator(
     body: EvaluatorCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -387,7 +391,7 @@ async def create_evaluator(
 async def update_evaluator(
     evaluator_id: UUID,
     body: EvaluatorUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -415,7 +419,7 @@ async def update_evaluator(
 @router.delete("/{evaluator_id}")
 async def delete_evaluator(
     evaluator_id: UUID,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -440,7 +444,7 @@ async def delete_evaluator(
 async def fork_evaluator(
     evaluator_id: UUID,
     listing_id: str = Query(None),
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -448,11 +452,7 @@ async def fork_evaluator(
     result = await db.execute(
         select(Evaluator).where(
             Evaluator.id == evaluator_id,
-            or_(
-                and_(Evaluator.tenant_id == auth.tenant_id, Evaluator.user_id == auth.user_id),
-                and_(Evaluator.tenant_id == auth.tenant_id, shared_visibility_clause(Evaluator.visibility)),
-                and_(Evaluator.tenant_id == SYSTEM_TENANT_ID, shared_visibility_clause(Evaluator.visibility)),
-            ),
+            readable_scope_clause(Evaluator, auth),
         )
     )
     source = result.scalar_one_or_none()
@@ -482,7 +482,7 @@ async def fork_evaluator(
 async def patch_evaluator_visibility(
     evaluator_id: UUID,
     body: dict,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:share'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

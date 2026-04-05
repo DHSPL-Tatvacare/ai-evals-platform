@@ -25,10 +25,10 @@ async def get_rules(
 async def update_rules(
     body: RuleCatalogResponse,
     app_id: str = Query(...),
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Replace the published rule catalog for an app. Requires settings:edit."""
+    """Replace the published rule catalog for an app. Requires configuration:edit."""
     await save_rules(
         db,
         app_id=app_id,

@@ -77,7 +77,7 @@ async def get_history(
 @router.post("", response_model=HistoryResponse, status_code=201)
 async def create_history(
     body: HistoryCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -97,7 +97,7 @@ async def create_history(
 async def update_history(
     history_id: UUID,
     body: HistoryUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -125,7 +125,7 @@ async def update_history(
 @router.delete("/{history_id}")
 async def delete_history(
     history_id: UUID,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

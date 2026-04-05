@@ -9,7 +9,7 @@ from sqlalchemy import select, func, delete, case, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context, require_owner
-from app.auth.permissions import require_permission
+from app.auth.permissions import ensure_permissions, require_permission
 from app.auth.utils import create_refresh_token, hash_password, hash_refresh_token
 from app.database import get_db
 from app.models.invite_link import InviteLink
@@ -67,7 +67,7 @@ class UpdateTenantRequest(CamelModel):
 @router.get("/stats")
 async def get_stats(
     app_id: Optional[str] = None,
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-table record counts within tenant. Optionally filtered by app_id."""
@@ -182,7 +182,7 @@ async def get_stats(
 @router.get("/job-queue")
 async def get_job_queue_summary(
     app_id: Optional[str] = None,
-    auth: AuthContext = require_permission('analytics:view'),
+    auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return queue health summary for the current tenant."""
@@ -578,12 +578,17 @@ async def update_user(
     """Update a user (name, role_id, is_active) within the tenant."""
     if not auth.is_owner:
         # Check what fields are being changed
-        if body.role_id is not None and "role:assign" not in auth.permissions:
-            raise HTTPException(403, "Missing permission: role:assign")
-        needs_edit = (body.display_name is not None or body.is_active is not None)
-        if needs_edit and "user:edit" not in auth.permissions:
-            raise HTTPException(403, "Missing permission: user:edit")
-        if not body.role_id and not needs_edit:
+        permitted_change_requested = False
+        if body.role_id is not None:
+            ensure_permissions(auth, 'role:assign')
+            permitted_change_requested = True
+        if body.display_name is not None:
+            ensure_permissions(auth, 'user:edit')
+            permitted_change_requested = True
+        if body.is_active is not None:
+            ensure_permissions(auth, 'user:deactivate')
+            permitted_change_requested = True
+        if not permitted_change_requested:
             raise HTTPException(403, "No permitted changes in request")
 
     user = await db.scalar(
@@ -787,7 +792,7 @@ def _invite_response(invite: InviteLink, creator_email: str) -> dict:
 async def create_invite_link(
     body: CreateInviteLinkRequest,
     request: Request,
-    auth: AuthContext = require_permission('user:invite'),
+    auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an invite link for self-service signup (admin+)."""
@@ -836,7 +841,7 @@ async def create_invite_link(
 
 @router.get("/invite-links")
 async def list_invite_links(
-    auth: AuthContext = require_permission('user:invite'),
+    auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """List all invite links for the tenant (admin+)."""
@@ -853,7 +858,7 @@ async def list_invite_links(
 async def revoke_invite_link(
     link_id: str,
     request: Request,
-    auth: AuthContext = require_permission('user:invite'),
+    auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke an invite link (admin+)."""

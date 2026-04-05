@@ -5,6 +5,7 @@ import { updateEvalRunVisibility } from '@/services/api/evalRunsApi';
 import { notificationService } from '@/services/notifications';
 import { useAuthStore } from '@/stores';
 import type { AssetVisibility } from '@/types';
+import { usePermission } from '@/utils/permissions';
 
 interface EvalRunVisibilityPanelProps {
   runId: string;
@@ -21,7 +22,11 @@ export function EvalRunVisibilityPanel({
 }: EvalRunVisibilityPanelProps) {
   const [saving, setSaving] = useState(false);
   const currentUserId = useAuthStore((state) => state.user?.id ?? null);
-  const canEdit = useMemo(() => !ownerId || ownerId === currentUserId, [currentUserId, ownerId]);
+  const canShare = usePermission('asset:share');
+  const canEdit = useMemo(
+    () => canShare && (!ownerId || ownerId === currentUserId),
+    [canShare, currentUserId, ownerId],
+  );
 
   const handleChange = async (nextVisibility: AssetVisibility) => {
     if (!canEdit || nextVisibility === visibility) return;
@@ -48,7 +53,9 @@ export function EvalRunVisibilityPanel({
           <p className="mt-1 text-xs text-[var(--text-secondary)]">
             {canEdit
               ? 'Private runs are only visible to you. Shared runs are visible across your tenant.'
-              : 'Only the run owner can change visibility.'}
+              : canShare
+                ? 'Only the run owner can change visibility.'
+                : 'You need asset sharing access to change visibility.'}
           </p>
         </div>
         <div className="flex items-center gap-2">

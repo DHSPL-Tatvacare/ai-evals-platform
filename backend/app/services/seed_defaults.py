@@ -2376,7 +2376,11 @@ def _build_default_report_config_seeds() -> list[dict]:
 
 
 async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.UUID:
-    """Ensure Owner role exists for a tenant. Returns role_id."""
+    """Ensure the Owner system role exists for a tenant.
+
+    Owner remains outside the grantable permission catalog and keeps full access
+    through the owner-only bypass semantics used by AuthContext.
+    """
     existing = await session.execute(
         select(Role).where(
             Role.tenant_id == tenant_id,
@@ -2386,6 +2390,8 @@ async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.U
     )
     role = existing.scalar_one_or_none()
     if not role:
+        # Owner is the non-grantable, system-managed role; it is not seeded with
+        # catalog permissions because owner-only access bypasses grant checks.
         role = Role(tenant_id=tenant_id, name="Owner", description="Full access", is_system=True)
         session.add(role)
         await session.flush()

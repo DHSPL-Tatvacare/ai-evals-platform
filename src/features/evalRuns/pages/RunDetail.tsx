@@ -817,7 +817,7 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
                   : 'No retryable errored cases were found in this run snapshot.'}
               </p>
               <div className="mt-auto pt-2">
-                <PermissionGate action="eval:run">
+                <PermissionGate action="evaluation:run">
                   <Button
                     variant="secondary"
                     onClick={() => { void onRetryFailedCases(); }}

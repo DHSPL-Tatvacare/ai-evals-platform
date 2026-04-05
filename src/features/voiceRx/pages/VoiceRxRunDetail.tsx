@@ -199,7 +199,7 @@ function RunHeader({ run, onDelete, onCancel, cancelling, isActive }: {
             Logs
           </Link>
           {isActive && onCancel && (
-            <PermissionGate action="eval:delete">
+            <PermissionGate action="evaluation:cancel">
               <button
                 onClick={onCancel}
                 disabled={cancelling}
@@ -209,7 +209,7 @@ function RunHeader({ run, onDelete, onCancel, cancelling, isActive }: {
               </button>
             </PermissionGate>
           )}
-          <PermissionGate action="eval:delete">
+          <PermissionGate action="evaluation:delete">
             <button
               onClick={onDelete}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-error)] hover:bg-[var(--surface-error)] rounded transition-colors"

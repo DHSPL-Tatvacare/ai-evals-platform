@@ -5,18 +5,17 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, or_, and_
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
-from app.constants import SYSTEM_TENANT_ID
 from app.database import get_db
 from app.models.listing import Listing
 from app.models.schema import Schema
 from app.models.mixins.shareable import Visibility
 from app.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse
-from app.services.access_control import readable_scope_clause, shared_visibility_clause
+from app.services.access_control import readable_scope_clause
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ async def get_schema(
 @router.post("", response_model=SchemaResponse, status_code=201)
 async def create_schema(
     body: SchemaCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -130,7 +129,7 @@ async def create_schema(
 @router.post("/{schema_id}/fork", response_model=SchemaResponse, status_code=201)
 async def fork_schema(
     schema_id: int,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -139,11 +138,7 @@ async def fork_schema(
     result = await db.execute(
         select(Schema).where(
             Schema.id == schema_id,
-            or_(
-                and_(Schema.tenant_id == auth.tenant_id, Schema.user_id == auth.user_id),
-                and_(Schema.tenant_id == auth.tenant_id, shared_visibility_clause(Schema.visibility)),
-                Schema.tenant_id == SYSTEM_TENANT_ID,
-            ),
+            readable_scope_clause(Schema, auth),
         )
     )
     source = result.scalar_one_or_none()
@@ -175,7 +170,7 @@ async def fork_schema(
 async def patch_schema_visibility(
     schema_id: int,
     body: dict,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:share'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -229,7 +224,7 @@ async def patch_schema_visibility(
 async def update_schema(
     schema_id: int,
     body: SchemaUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -259,7 +254,7 @@ async def update_schema(
 @router.delete("/{schema_id}")
 async def delete_schema(
     schema_id: int,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -331,7 +326,7 @@ class SyncSchemaRequest(BaseModel):
 @router.post("/sync-from-listing")
 async def sync_schema_from_listing(
     body: SyncSchemaRequest,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

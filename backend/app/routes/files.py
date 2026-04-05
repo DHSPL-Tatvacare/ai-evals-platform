@@ -22,7 +22,7 @@ _ALLOWED_MIMES = set(m.strip() for m in settings.ALLOWED_UPLOAD_MIMES.split(",")
 @router.post("/upload", response_model=FileResponseSchema, status_code=201)
 async def upload_file(
     file: UploadFile = FastAPIFile(...),
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a file and create a file record."""
@@ -100,7 +100,7 @@ async def download_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: UUID,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a file and its record."""

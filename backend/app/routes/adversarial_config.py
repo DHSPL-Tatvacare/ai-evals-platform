@@ -27,7 +27,7 @@ async def get_config(
 @router.put("")
 async def update_config(
     body: dict,
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
 ):
     """Validate and save adversarial config as the shared contract."""
     try:
@@ -41,7 +41,7 @@ async def update_config(
 
 @router.post("/reset")
 async def reset_config(
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
 ):
     """Restore built-in default config for the tenant-shared contract."""
     config = await load_system_default_config()
@@ -64,7 +64,7 @@ async def export_config(
 @router.post("/import")
 async def import_config(
     body: dict,
-    auth: AuthContext = require_permission('settings:edit'),
+    auth: AuthContext = require_permission('configuration:edit'),
 ):
     """Validate and replace config from imported JSON."""
     try:

@@ -54,7 +54,7 @@ async def get_tag(
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     body: TagCreate,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -91,7 +91,7 @@ async def create_tag(
 async def update_tag(
     tag_id: int,
     body: TagUpdate,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -119,7 +119,7 @@ async def update_tag(
 @router.delete("/{tag_id}")
 async def delete_tag(
     tag_id: int,
-    auth: AuthContext = require_permission('resource:delete'),
+    auth: AuthContext = require_permission('asset:delete'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -143,7 +143,7 @@ async def delete_tag(
 @router.post("/{tag_id}/increment", response_model=TagResponse)
 async def increment_tag_count(
     tag_id: int,
-    auth: AuthContext = require_permission('resource:create'),
+    auth: AuthContext = require_permission('asset:create'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -169,7 +169,7 @@ async def increment_tag_count(
 @router.post("/{tag_id}/decrement", response_model=TagResponse)
 async def decrement_tag_count(
     tag_id: int,
-    auth: AuthContext = require_permission('resource:edit'),
+    auth: AuthContext = require_permission('asset:edit'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

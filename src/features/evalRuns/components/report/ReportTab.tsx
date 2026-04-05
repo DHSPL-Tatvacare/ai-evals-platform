@@ -6,6 +6,7 @@ import { reportsApi } from '@/services/api/reportsApi';
 import { pollJobUntilComplete, submitAndPollJob, type JobProgress } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { hasProviderCredentials, LLM_PROVIDERS, useLLMSettingsStore } from '@/stores';
+import { usePermission } from '@/utils/permissions';
 
 interface ReportMetadataLike {
   llmProvider?: string | null;
@@ -101,6 +102,9 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const azureEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
   const anthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
   const serviceAccountConfigured = useLLMSettingsStore((s) => s._serviceAccountConfigured);
+  const canGenerate = usePermission('report:generate');
+  const canExport = usePermission('evaluation:export');
+  const canShare = usePermission('asset:share');
 
   const credentialsReady = hasProviderCredentials(reportProvider, {
     geminiApiKey,
@@ -436,16 +440,18 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
 
   const actionButtons = (
     <div className="flex items-center gap-2">
-      {supportsPdf && selectedReportRun?.status === 'completed' ? (
+      {supportsPdf && canExport && selectedReportRun?.status === 'completed' ? (
         <Button size="sm" variant="secondary" onClick={() => void handleExportPdf()} disabled={exporting}>
           {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           {exporting ? 'Exporting…' : 'Export PDF'}
         </Button>
       ) : null}
-      <Button size="sm" onClick={() => setShowGenerateOverlay(true)}>
-        <Sparkles className="h-3.5 w-3.5" />
-        {selectedReportRun ? 'Generate new run' : 'Generate'}
-      </Button>
+      {canGenerate ? (
+        <Button size="sm" onClick={() => setShowGenerateOverlay(true)}>
+          <Sparkles className="h-3.5 w-3.5" />
+          {selectedReportRun ? 'Generate new run' : 'Generate'}
+        </Button>
+      ) : null}
     </div>
   );
 
@@ -529,7 +535,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
                   <VisibilityToggle
                     value={selectedReportRun.visibility}
                     onChange={(value) => void handleReportRunVisibilityChange(value)}
-                    disabled={savingVisibility}
+                    disabled={savingVisibility || !canShare}
                   />
                 </div>
                 {selectedReportRun.llmProvider && selectedReportRun.llmModel ? (
@@ -551,7 +557,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
               icon={FileBarChart}
               title="Report unavailable"
               description={error ?? 'Something went wrong while loading the selected report run.'}
-              action={{ label: 'Generate', onClick: () => setShowGenerateOverlay(true) }}
+              action={canGenerate ? { label: 'Generate', onClick: () => setShowGenerateOverlay(true) } : undefined}
             />
           ) : report ? (
             <div className="max-w-[980px]">{renderReport(report, actionButtons)}</div>
@@ -560,14 +566,14 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
               icon={FileBarChart}
               title="No report generated yet"
               description="Choose a report config and generate a report run to view the composed report."
-              action={{ label: 'Generate', onClick: () => setShowGenerateOverlay(true) }}
+              action={canGenerate ? { label: 'Generate', onClick: () => setShowGenerateOverlay(true) } : undefined}
             />
           )}
         </div>
       </div>
 
       <Modal
-        isOpen={showGenerateOverlay}
+        isOpen={showGenerateOverlay && canGenerate}
         onClose={() => setShowGenerateOverlay(false)}
         title="Generate Report"
         className="max-w-2xl"
@@ -598,7 +604,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
               <Globe2 className="h-3.5 w-3.5" />
               Visibility
             </div>
-            <VisibilityToggle value={newVisibility} onChange={setNewVisibility} />
+            <VisibilityToggle value={newVisibility} onChange={setNewVisibility} disabled={!canShare} />
           </div>
 
           {!credentialsReady ? (

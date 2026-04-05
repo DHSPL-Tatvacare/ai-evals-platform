@@ -102,7 +102,7 @@ def test_evaluator_response_emits_only_canonical_visibility_fields():
         prompt="prompt",
         tenant_id=SYSTEM_TENANT_ID,
         user_id=SYSTEM_USER_ID,
-        visibility=Visibility.APP,
+        visibility=Visibility.SHARED,
         output_schema=[{"key": "score", "displayMode": "header"}],
         linked_rule_ids=["rule-1"],
         created_at=datetime.now(timezone.utc),
@@ -116,23 +116,6 @@ def test_evaluator_response_emits_only_canonical_visibility_fields():
     assert "isGlobal" not in payload
     assert "isBuiltIn" not in payload
     assert "showInHeader" not in payload
-
-
-def test_can_access_legacy_app_visibility_during_rollout():
-    tenant_id = uuid.uuid4()
-    asset = Evaluator(
-        app_id="kaira-bot",
-        name="Legacy Shared Eval",
-        prompt="prompt",
-        tenant_id=tenant_id,
-        user_id=uuid.uuid4(),
-        visibility=Visibility.APP,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    reader = _user(tenant_id=tenant_id, user_id=uuid.uuid4(), app_access=("kaira-bot",))
-
-    assert can_access(reader, asset, "read") is True
 
 
 # ─── Phase 4: Aggregator role-based visibility ──────────────────

@@ -38,7 +38,7 @@ export function RunHeaderActions({
       </Link>
 
       {isActive && (
-        <PermissionGate action="eval:delete">
+        <PermissionGate action="evaluation:cancel">
           <button
             onClick={onCancel}
             disabled={cancelling}
@@ -50,7 +50,7 @@ export function RunHeaderActions({
         </PermissionGate>
       )}
 
-      <PermissionGate action="eval:delete">
+      <PermissionGate action="evaluation:delete">
         <button
           onClick={onDelete}
           disabled={deleting || isActive}
