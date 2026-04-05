@@ -6,10 +6,11 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.app_scope import load_active_app_map
 from app.auth.context import AuthContext, get_auth_context, require_owner
+from app.auth.permission_catalog import serialize_permission_catalog
 from app.auth.permissions import VALID_PERMISSIONS
 from app.database import get_db
-from app.models.app import App
 from app.models.role import Role, RoleAppAccess, RolePermission
 from app.models.user import User
 from app.models.invite_link import InviteLink
@@ -59,6 +60,14 @@ async def list_roles(
     result = await db.execute(stmt)
     rows = result.all()
     return [_role_response(role, count) for role, count in rows]
+
+
+@router.get("/permission-catalog")
+async def get_permission_catalog(
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Expose the backend-owned permission catalog for admin consumers."""
+    return serialize_permission_catalog()
 
 
 @router.post("/roles", status_code=201)
@@ -262,8 +271,7 @@ async def list_audit_log(
 
 async def _get_app_map(db: AsyncSession) -> dict[str, uuid.UUID]:
     """Get {slug: id} mapping for all active apps."""
-    result = await db.execute(select(App).where(App.is_active == True))
-    return {a.slug: a.id for a in result.scalars().all()}
+    return {slug: app.id for slug, app in (await load_active_app_map(db)).items()}
 
 
 async def _get_role_or_404(db: AsyncSession, role_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Role:

@@ -23,6 +23,7 @@ from app.models.evaluator import Evaluator
 from app.models.report_config import ReportConfig
 from app.models.mixins.shareable import Visibility
 from app.schemas.app_config import AppConfig
+from app.services.asset_policy import default_app_authorization_config
 from app.services.access_control import shared_visibility_clause
 from app.services.settings_upsert import build_setting_upsert_stmt
 from app.services.evaluators.adversarial_config import get_default_config
@@ -1962,6 +1963,7 @@ APP_SEEDS = [
                 "adversarial_contract": "private",
                 "llm_settings": "private",
             },
+            "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "human", "call_quality"]},
             "analytics": {
                 "profile": "voice_rx_v1",
@@ -2060,6 +2062,7 @@ APP_SEEDS = [
                 "adversarial_contract": "shared",
                 "llm_settings": "private",
             },
+            "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "batch_thread", "batch_adversarial"]},
             "analytics": {
                 "profile": "kaira_v1",
@@ -2173,6 +2176,7 @@ APP_SEEDS = [
                 "adversarial_contract": "private",
                 "llm_settings": "private",
             },
+            "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "call_quality"]},
             "analytics": {
                 "profile": "inside_sales_v1",

@@ -51,6 +51,13 @@ def test_app_config_schema_matches_phase_one_shape():
             "adversarialContract": "shared",
             "llmSettings": "private",
         },
+        authorization={
+            "assetPolicies": {
+                "settings": {
+                    "privateOnlyKeys": ["llm-settings"],
+                },
+            },
+        },
         evalRun={"supportedTypes": ["custom", "batch_thread"]},
         analytics={
             "profile": "kaira_v1",
@@ -87,6 +94,7 @@ def test_app_config_schema_matches_phase_one_shape():
     assert dumped["rules"]["catalogKey"] == "rule-catalog"
     assert dumped["evaluator"]["dynamicVariableSources"]["registry"] is True
     assert dumped["assetDefaults"]["adversarialContract"] == "shared"
+    assert dumped["authorization"]["assetPolicies"]["settings"]["privateOnlyKeys"] == ["llm-settings"]
     assert dumped["evalRun"]["supportedTypes"] == ["custom", "batch_thread"]
     assert dumped["analytics"]["profile"] == "kaira_v1"
     assert dumped["analytics"]["capabilities"]["pdfExport"] is True
@@ -94,7 +102,7 @@ def test_app_config_schema_matches_phase_one_shape():
 
 def test_app_config_validates_all_required_keys():
     """App config schema enforces all top-level keys for each app config."""
-    required_keys = {"displayName", "icon", "description", "features", "rules", "evaluator", "assetDefaults", "evalRun", "analytics"}
+    required_keys = {"displayName", "icon", "description", "features", "rules", "evaluator", "assetDefaults", "authorization", "evalRun", "analytics"}
 
     # Validate that a minimal valid config contains all required keys
     config = AppConfig(
@@ -110,6 +118,7 @@ def test_app_config_validates_all_required_keys():
             "dynamicVariableSources": {},
         },
         assetDefaults={},
+        authorization={},
         evalRun={"supportedTypes": []},
         analytics={"profile": "voice_rx_v1"},
     )
@@ -147,6 +156,7 @@ def test_seeded_apps_expose_explicit_analytics_contracts():
     text = seed_defaults.read_text()
 
     assert '"slug": "voice-rx"' in text
+    assert '"authorization": default_app_authorization_config()' in text
     assert '"profile": "voice_rx_v1"' in text
     assert '"singleRunReport": True' in text
 

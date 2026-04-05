@@ -1,35 +1,21 @@
 """Unit tests for RBAC permission logic."""
+import importlib.util
 import sys
 import os
-from enum import Enum
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Import just the Permission enum and VALID_PERMISSIONS without loading the full app
-# We need to define them locally to avoid database initialization
-class Permission(str, Enum):
-    """RBAC permission constants."""
-    LISTING_CREATE = "listing:create"
-    LISTING_DELETE = "listing:delete"
-    EVAL_RUN = "eval:run"
-    EVAL_DELETE = "eval:delete"
-    EVAL_EXPORT = "eval:export"
-    RESOURCE_CREATE = "resource:create"
-    RESOURCE_EDIT = "resource:edit"
-    RESOURCE_DELETE = "resource:delete"
-    REPORT_GENERATE = "report:generate"
-    ANALYTICS_VIEW = "analytics:view"
-    SETTINGS_EDIT = "settings:edit"
-    USER_CREATE = "user:create"
-    USER_INVITE = "user:invite"
-    USER_EDIT = "user:edit"
-    USER_DEACTIVATE = "user:deactivate"
-    USER_RESET_PASSWORD = "user:reset_password"
-    ROLE_ASSIGN = "role:assign"
-    TENANT_SETTINGS = "tenant:settings"
+_catalog_path = Path(__file__).resolve().parents[1] / "app" / "auth" / "permission_catalog.py"
+_catalog_spec = importlib.util.spec_from_file_location("permission_catalog", _catalog_path)
+assert _catalog_spec and _catalog_spec.loader
+_catalog_module = importlib.util.module_from_spec(_catalog_spec)
+sys.modules["permission_catalog"] = _catalog_module
+_catalog_spec.loader.exec_module(_catalog_module)
 
-
-VALID_PERMISSIONS = frozenset(p.value for p in Permission)
+PERMISSION_GROUPS = _catalog_module.PERMISSION_GROUPS
+VALID_PERMISSIONS = _catalog_module.VALID_PERMISSIONS
+serialize_permission_catalog = _catalog_module.serialize_permission_catalog
 
 
 def test_permission_enum_has_all_expected_values():
@@ -41,18 +27,40 @@ def test_permission_enum_has_all_expected_values():
         "settings:edit",
         "user:create", "user:invite", "user:edit",
         "user:deactivate", "user:reset_password", "role:assign",
-        "tenant:settings",
     }
     assert VALID_PERMISSIONS == expected
 
 
 def test_permission_enum_values_match_resource_action_format():
-    for p in Permission:
-        assert ":" in p.value, f"Permission {p.name} missing colon separator"
-        resource, action = p.value.split(":", 1)
+    for permission_id in VALID_PERMISSIONS:
+        assert ":" in permission_id, f"Permission {permission_id} missing colon separator"
+        resource, action = permission_id.split(":", 1)
         assert len(resource) > 0
         assert len(action) > 0
 
 
 def test_valid_permissions_is_frozenset():
     assert isinstance(VALID_PERMISSIONS, frozenset)
+
+
+def test_permission_catalog_groups_cover_every_grantable_permission_once():
+    catalog_ids = {
+        permission.id
+        for group in PERMISSION_GROUPS
+        for permission in group.permissions
+    }
+    assert catalog_ids == VALID_PERMISSIONS
+
+
+def test_permission_catalog_serialization_excludes_removed_permissions():
+    payload = serialize_permission_catalog()
+
+    serialized_ids = {
+        permission["id"]
+        for group in payload["groups"]
+        for permission in group["permissions"]
+    }
+
+    assert serialized_ids == VALID_PERMISSIONS
+    assert "tenant:settings" not in serialized_ids
+    assert "evaluator:promote" not in serialized_ids

@@ -13,6 +13,7 @@ from sqlalchemy.dialects import postgresql
 from app.models.setting import Setting
 from app.models.mixins.shareable import Visibility
 from app.schemas.setting import SettingCreate, SettingResponse
+from app.services.asset_policy import is_private_only_asset_key
 from app.services.settings_upsert import build_setting_upsert_stmt
 
 
@@ -68,6 +69,11 @@ def test_setting_model_exposes_private_legacy_shared_and_canonical_shared_unique
     assert "uq_settings_private_scope" in index_names
     assert "uq_settings_app_scope" in index_names
     assert "uq_settings_shared_scope" in index_names
+
+
+def test_settings_asset_policy_marks_llm_settings_private_only():
+    assert is_private_only_asset_key("settings", "llm-settings") is True
+    assert is_private_only_asset_key("settings", "rule-catalog") is False
 
 
 # ─── Phase 2: Settings resolution + access tests ────────────────

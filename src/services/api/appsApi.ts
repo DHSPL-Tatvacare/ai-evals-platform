@@ -10,6 +10,7 @@ import {
   APP_CONFIG_FALLBACKS,
   mergeAppConfig,
   normalizeAssetVisibility,
+  type AppAssetPolicyConfig,
   type AppConfig,
   type AppId,
   type AppSummary,
@@ -33,10 +34,31 @@ function normalizeOptionalVisibility(
   return visibility === undefined ? fallback : normalizeAssetVisibility(visibility);
 }
 
+function normalizeAssetPolicyConfig(
+  policy: Record<string, unknown> | undefined,
+  fallback: AppAssetPolicyConfig,
+): AppAssetPolicyConfig {
+  return {
+    ...fallback,
+    ...(policy as Partial<AppAssetPolicyConfig> | undefined),
+    privateOnlyKeys: Array.isArray(policy?.privateOnlyKeys)
+      ? policy.privateOnlyKeys.filter((value): value is string => typeof value === 'string')
+      : fallback.privateOnlyKeys,
+  };
+}
+
 function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Partial<AppConfig> {
   const rawAssetDefaults =
     typeof config.assetDefaults === 'object' && config.assetDefaults !== null
       ? (config.assetDefaults as Record<string, unknown>)
+      : {};
+  const rawAuthorization =
+    typeof config.authorization === 'object' && config.authorization !== null
+      ? (config.authorization as Record<string, unknown>)
+      : {};
+  const rawAssetPolicies =
+    typeof rawAuthorization.assetPolicies === 'object' && rawAuthorization.assetPolicies !== null
+      ? (rawAuthorization.assetPolicies as Record<string, unknown>)
       : {};
   const rawAnalytics =
     typeof config.analytics === 'object' && config.analytics !== null
@@ -83,6 +105,29 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
         (rawAssetDefaults.llmSettings ?? rawAssetDefaults.llm_settings) as 'private' | 'shared' | 'app' | undefined,
         APP_CONFIG_FALLBACKS[appId].assetDefaults.llmSettings,
       ),
+    },
+    authorization: {
+      ...APP_CONFIG_FALLBACKS[appId].authorization,
+      ...(rawAuthorization as Partial<AppConfig['authorization']>),
+      assetPolicies: {
+        ...APP_CONFIG_FALLBACKS[appId].authorization.assetPolicies,
+        evaluator: normalizeAssetPolicyConfig(
+          rawAssetPolicies.evaluator as Record<string, unknown> | undefined,
+          APP_CONFIG_FALLBACKS[appId].authorization.assetPolicies.evaluator,
+        ),
+        prompt: normalizeAssetPolicyConfig(
+          rawAssetPolicies.prompt as Record<string, unknown> | undefined,
+          APP_CONFIG_FALLBACKS[appId].authorization.assetPolicies.prompt,
+        ),
+        schema: normalizeAssetPolicyConfig(
+          (rawAssetPolicies.schema ?? rawAssetPolicies.schema_) as Record<string, unknown> | undefined,
+          APP_CONFIG_FALLBACKS[appId].authorization.assetPolicies.schema,
+        ),
+        settings: normalizeAssetPolicyConfig(
+          rawAssetPolicies.settings as Record<string, unknown> | undefined,
+          APP_CONFIG_FALLBACKS[appId].authorization.assetPolicies.settings,
+        ),
+      },
     },
     analytics: {
       ...APP_CONFIG_FALLBACKS[appId].analytics,

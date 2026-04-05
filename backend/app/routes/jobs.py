@@ -6,6 +6,7 @@ from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
+from app.auth.app_scope import ensure_registered_app_access
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission
 from app.database import get_db
@@ -14,18 +15,6 @@ from app.models.eval_run import EvalRun
 from app.schemas.job import JobCreate, JobResponse
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
-
-
-def _ensure_app_access(auth: AuthContext, app_id: str | None, *, required: bool) -> None:
-    app_slug = (app_id or "").strip()
-    if auth.is_owner:
-        return
-    if not app_slug:
-        if required:
-            raise HTTPException(400, "Missing required parameter: app_id")
-        return
-    if app_slug not in auth.app_access:
-        raise HTTPException(403, f"No access to app: {app_slug}")
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -45,7 +34,13 @@ async def submit_job(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
-    _ensure_app_access(auth, metadata["app_id"], required=True)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        metadata["app_id"],
+        required=True,
+        param_name="app_id",
+    )
 
     # Inject auth context into params — runners read this
     job_params["tenant_id"] = str(auth.tenant_id)
@@ -113,7 +108,13 @@ async def get_job(
     )
     if not job:
         raise HTTPException(404, "Job not found")
-    _ensure_app_access(auth, job.app_id, required=False)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        job.app_id,
+        required=False,
+        param_name="app_id",
+    )
 
     # Compute queue position for queued jobs
     if job.status in ("queued", "retryable_failed"):
@@ -139,7 +140,13 @@ async def cancel_job(
     )
     if not job:
         raise HTTPException(404, "Job not found")
-    _ensure_app_access(auth, job.app_id, required=False)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        job.app_id,
+        required=False,
+        param_name="app_id",
+    )
     if job.status in ("completed", "failed"):
         raise HTTPException(400, f"Cannot cancel job in '{job.status}' state")
     if job.status == "cancelled":

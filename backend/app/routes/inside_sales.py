@@ -8,7 +8,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.auth.context import AuthContext, get_auth_context
+from app.auth.app_scope import require_fixed_app_access
+from app.auth.context import AuthContext
 from app.models.eval_run import ThreadEvaluation, EvalRun
 from app.database import get_db
 from app.schemas.inside_sales import (
@@ -24,22 +25,11 @@ from app.services.lsq_client import (
 router = APIRouter(prefix="/api/inside-sales", tags=["inside-sales"])
 
 
-async def require_inside_sales_access(
-    auth: AuthContext = Depends(get_auth_context),
-) -> AuthContext:
-    """Require access to the inside-sales app."""
-    if auth.is_owner:
-        return auth
-    if "inside-sales" not in auth.app_access:
-        raise HTTPException(403, "No access to app: inside-sales")
-    return auth
-
-
 @router.get("/agents", response_model=AgentListResponse)
 async def list_agents(
     date_from: str = Query(..., description="Start date YYYY-MM-DD HH:MM:SS"),
     date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
-    auth: AuthContext = Depends(require_inside_sales_access),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
 ):
     """Return sorted unique agent names for the given date range (all pages)."""
     page = 1
@@ -77,7 +67,7 @@ async def list_calls(
     duration_max: int | None = Query(None, description="Max call duration in seconds (inclusive)"),
     has_recording: bool | None = Query(None, description="If true, only calls with a recording URL"),
     event_codes: str | None = Query(None, description="Comma-separated event codes"),
-    auth: AuthContext = Depends(require_inside_sales_access),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch call activities from LSQ. Activity-only — no lead hydration."""
@@ -167,7 +157,7 @@ async def list_calls(
 async def get_lead(
     prospect_id: str,
     refresh: bool = Query(False, description="Force re-fetch from LSQ"),
-    auth: AuthContext = Depends(require_inside_sales_access),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch lead details by prospect ID. Cached in DB after first fetch.
@@ -245,7 +235,7 @@ async def list_leads(
     condition: str | None = Query(None, description="Comma-separated condition values"),
     city: str | None = Query(None, description="City substring filter"),
     prospect_id: str | None = Query(None, description="Filter by exact prospect ID"),
-    auth: AuthContext = Depends(require_inside_sales_access),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch one page of leads from LSQ by CreatedOn range with MQL scoring.
@@ -341,7 +331,7 @@ async def list_leads(
 @router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)
 async def get_lead_detail(
     prospect_id: str,
-    auth: AuthContext = Depends(require_inside_sales_access),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
     """Full lead drilldown: profile + call history + eval history."""

@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting
 from app.schemas.setting import SettingCreate, SettingResponse
+from app.services.asset_policy import is_private_only_asset_key
 from app.services.access_control import is_shared_visibility, shared_visibility_clause
 from app.services.settings_upsert import build_setting_upsert_stmt
 
@@ -61,7 +62,7 @@ async def list_settings(
     Pass include_all=true to return all visible rows for management views.
     """
     resolved_app_id = app_id if app_id is not None else ""
-    if key == "llm-settings":
+    if is_private_only_asset_key('settings', key):
         query = select(Setting).where(
             Setting.tenant_id == auth.tenant_id,
             Setting.user_id == auth.user_id,
@@ -108,7 +109,7 @@ async def list_settings(
 
     result = await db.execute(query)
     rows = result.scalars().all()
-    if include_all or key == "llm-settings":
+    if include_all or is_private_only_asset_key('settings', key):
         return rows
     return _resolved_settings(rows, auth)
 
@@ -123,7 +124,7 @@ async def resolve_setting(
     """Resolve a single setting using the priority chain: private -> shared -> system default."""
     resolved_app_id = app_id or ""
 
-    if key == "llm-settings":
+    if is_private_only_asset_key('settings', key):
         result = await db.execute(
             select(Setting).where(
                 Setting.tenant_id == auth.tenant_id,

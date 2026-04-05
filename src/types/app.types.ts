@@ -67,6 +67,25 @@ export interface AppAssetDefaults {
   llmSettings: 'private' | 'shared';
 }
 
+export interface AppAssetPolicyConfig {
+  shareable: boolean;
+  sharingEnabled: boolean;
+  latestVersionOnly: boolean;
+  forkingEnabled: boolean;
+  privateOnlyKeys: string[];
+}
+
+export interface AppAuthorizationAssetPolicies {
+  evaluator: AppAssetPolicyConfig;
+  prompt: AppAssetPolicyConfig;
+  schema: AppAssetPolicyConfig;
+  settings: AppAssetPolicyConfig;
+}
+
+export interface AppAuthorizationConfig {
+  assetPolicies: AppAuthorizationAssetPolicies;
+}
+
 export interface AppEvalRunConfig {
   supportedTypes: string[];
 }
@@ -141,6 +160,7 @@ export interface AppConfig {
   rules: AppRulesConfig;
   evaluator: AppEvaluatorConfig;
   assetDefaults: AppAssetDefaults;
+  authorization: AppAuthorizationConfig;
   evalRun: AppEvalRunConfig;
   analytics: AppAnalyticsConfig;
 }
@@ -188,6 +208,26 @@ export const APPS: Record<AppId, AppMetadata> = {
 
 export const DEFAULT_APP: AppId = 'voice-rx';
 
+const DEFAULT_ASSET_POLICY_CONFIG: AppAssetPolicyConfig = {
+  shareable: true,
+  sharingEnabled: true,
+  latestVersionOnly: false,
+  forkingEnabled: true,
+  privateOnlyKeys: [],
+};
+
+const DEFAULT_APP_AUTHORIZATION_CONFIG: AppAuthorizationConfig = {
+  assetPolicies: {
+    evaluator: DEFAULT_ASSET_POLICY_CONFIG,
+    prompt: DEFAULT_ASSET_POLICY_CONFIG,
+    schema: DEFAULT_ASSET_POLICY_CONFIG,
+    settings: {
+      ...DEFAULT_ASSET_POLICY_CONFIG,
+      privateOnlyKeys: ['llm-settings'],
+    },
+  },
+};
+
 export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
   'voice-rx': {
     displayName: APPS['voice-rx'].name,
@@ -223,6 +263,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       adversarialContract: 'private',
       llmSettings: 'private',
     },
+    authorization: DEFAULT_APP_AUTHORIZATION_CONFIG,
     evalRun: {
       supportedTypes: [],
     },
@@ -320,6 +361,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       adversarialContract: 'shared',
       llmSettings: 'private',
     },
+    authorization: DEFAULT_APP_AUTHORIZATION_CONFIG,
     evalRun: {
       supportedTypes: [],
     },
@@ -398,6 +440,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       adversarialContract: 'private',
       llmSettings: 'private',
     },
+    authorization: DEFAULT_APP_AUTHORIZATION_CONFIG,
     evalRun: {
       supportedTypes: [],
     },
@@ -485,6 +528,34 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
     assetDefaults: {
       ...fallback.assetDefaults,
       ...config.assetDefaults,
+    },
+    authorization: {
+      ...fallback.authorization,
+      ...config.authorization,
+      assetPolicies: {
+        ...fallback.authorization.assetPolicies,
+        ...config.authorization?.assetPolicies,
+        evaluator: {
+          ...fallback.authorization.assetPolicies.evaluator,
+          ...config.authorization?.assetPolicies?.evaluator,
+          privateOnlyKeys: config.authorization?.assetPolicies?.evaluator?.privateOnlyKeys ?? fallback.authorization.assetPolicies.evaluator.privateOnlyKeys,
+        },
+        prompt: {
+          ...fallback.authorization.assetPolicies.prompt,
+          ...config.authorization?.assetPolicies?.prompt,
+          privateOnlyKeys: config.authorization?.assetPolicies?.prompt?.privateOnlyKeys ?? fallback.authorization.assetPolicies.prompt.privateOnlyKeys,
+        },
+        schema: {
+          ...fallback.authorization.assetPolicies.schema,
+          ...config.authorization?.assetPolicies?.schema,
+          privateOnlyKeys: config.authorization?.assetPolicies?.schema?.privateOnlyKeys ?? fallback.authorization.assetPolicies.schema.privateOnlyKeys,
+        },
+        settings: {
+          ...fallback.authorization.assetPolicies.settings,
+          ...config.authorization?.assetPolicies?.settings,
+          privateOnlyKeys: config.authorization?.assetPolicies?.settings?.privateOnlyKeys ?? fallback.authorization.assetPolicies.settings.privateOnlyKeys,
+        },
+      },
     },
     evalRun: {
       ...fallback.evalRun,

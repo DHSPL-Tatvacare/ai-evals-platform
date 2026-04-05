@@ -52,6 +52,25 @@ class AppAssetDefaults(CamelModel):
     llm_settings: Visibility = Visibility.PRIVATE
 
 
+class AppAssetPolicyConfig(CamelModel):
+    shareable: bool = True
+    sharing_enabled: bool = True
+    latest_version_only: bool = False
+    forking_enabled: bool = True
+    private_only_keys: list[str] = Field(default_factory=list)
+
+
+class AppAuthorizationAssetPolicies(CamelModel):
+    evaluator: AppAssetPolicyConfig = Field(default_factory=AppAssetPolicyConfig)
+    prompt: AppAssetPolicyConfig = Field(default_factory=AppAssetPolicyConfig)
+    schema_: AppAssetPolicyConfig = Field(default_factory=AppAssetPolicyConfig, alias="schema")
+    settings: AppAssetPolicyConfig = Field(default_factory=AppAssetPolicyConfig)
+
+
+class AppAuthorizationConfig(CamelModel):
+    asset_policies: AppAuthorizationAssetPolicies = Field(default_factory=AppAuthorizationAssetPolicies)
+
+
 class AppEvalRunConfig(CamelModel):
     supported_types: list[str] = Field(default_factory=list)
 
@@ -64,5 +83,6 @@ class AppConfig(CamelModel):
     rules: AppRulesConfig = Field(default_factory=AppRulesConfig)
     evaluator: AppEvaluatorConfig = Field(default_factory=AppEvaluatorConfig)
     asset_defaults: AppAssetDefaults = Field(default_factory=AppAssetDefaults)
+    authorization: AppAuthorizationConfig = Field(default_factory=AppAuthorizationConfig)
     eval_run: AppEvalRunConfig = Field(default_factory=AppEvalRunConfig)
     analytics: AppAnalyticsConfig = Field(default_factory=AppAnalyticsConfig)

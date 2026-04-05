@@ -6,6 +6,10 @@ from sqlalchemy import and_, or_
 
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.mixins.shareable import Visibility, shared_visibility_values
+from app.services.asset_policy import (
+    get_asset_policy_for_asset,
+    is_private_only_asset_key_for_asset,
+)
 
 AccessAction = Literal["read", "create", "edit", "delete", "share", "unshare", "fork"]
 
@@ -58,22 +62,22 @@ def _is_owner(user: AccessUser, asset: ShareableAsset) -> bool:
     return user.tenant_id == asset.tenant_id and user.user_id == asset.user_id
 
 
-def _is_private_only_setting(asset: ShareableAsset) -> bool:
-    return getattr(asset, "key", None) == "llm-settings"
-
-
 def can_access(user: AccessUser, asset: ShareableAsset, action: AccessAction) -> bool:
     """Answer ownership and visibility questions after route permission checks pass."""
 
     visibility = _normalized_visibility(asset)
+    policy = get_asset_policy_for_asset(asset)
 
-    if _is_private_only_setting(asset) and visibility != Visibility.PRIVATE.value:
+    if not policy.shareable and visibility != Visibility.PRIVATE.value:
+        return False
+
+    if is_private_only_asset_key_for_asset(asset) and visibility != Visibility.PRIVATE.value:
         return False
 
     if action == "create":
         if not _has_app_access(user, asset):
             return False
-        if _is_private_only_setting(asset):
+        if is_private_only_asset_key_for_asset(asset):
             return user.tenant_id == asset.tenant_id and visibility == Visibility.PRIVATE.value
         return user.tenant_id == asset.tenant_id and visibility in {
             Visibility.PRIVATE.value,
@@ -90,7 +94,12 @@ def can_access(user: AccessUser, asset: ShareableAsset, action: AccessAction) ->
         return False
 
     if action == "fork":
+        if not policy.forking_enabled:
+            return False
         return can_access(user, asset, "read")
+
+    if action in {"share", "unshare"} and not policy.sharing_enabled:
+        return False
 
     if _is_system_asset(asset):
         return False

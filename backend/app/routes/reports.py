@@ -11,6 +11,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
+from app.auth.app_scope import ensure_registered_app_access
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
@@ -64,13 +65,6 @@ class VisibilityPatchBody(VisibilityInputMixin, CamelModel):
     visibility: Visibility
 
 
-def _ensure_app_access(auth: AuthContext, app_id: str) -> None:
-    if auth.is_owner:
-        return
-    if app_id not in auth.app_access:
-        raise HTTPException(status_code=403, detail=f"No access to app: {app_id}")
-
-
 async def _get_visible_eval_run(
     db: AsyncSession,
     *,
@@ -85,7 +79,13 @@ async def _get_visible_eval_run(
     )
     if not run:
         raise HTTPException(status_code=404, detail="Evaluation run not found")
-    _ensure_app_access(auth, run.app_id)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        run.app_id,
+        required=True,
+        param_name='app_id',
+    )
     return run
 
 
@@ -103,7 +103,13 @@ async def _get_visible_report_run(
     )
     if not report_run:
         raise HTTPException(status_code=404, detail="Report run not found")
-    _ensure_app_access(auth, report_run.app_id)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        report_run.app_id,
+        required=True,
+        param_name='app_id',
+    )
     return report_run
 
 
@@ -270,7 +276,13 @@ async def get_report_run_artifact(
     )) or (None, None)
     if report_run is None or artifact is None:
         raise HTTPException(status_code=404, detail="Report artifact not found")
-    _ensure_app_access(auth, report_run.app_id)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        report_run.app_id,
+        required=True,
+        param_name='app_id',
+    )
     if report_run.status != 'completed':
         raise HTTPException(status_code=409, detail="Report run is not completed yet")
     return _load_report_payload(
@@ -296,7 +308,13 @@ async def patch_report_run_visibility(
     )
     if not report_run:
         raise HTTPException(status_code=404, detail="Report run not found or not owned by you")
-    _ensure_app_access(auth, report_run.app_id)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        report_run.app_id,
+        required=True,
+        param_name='app_id',
+    )
     report_run.visibility = body.visibility
     if body.visibility == Visibility.SHARED:
         report_run.shared_by = auth.user_id
@@ -324,7 +342,13 @@ async def export_report_run_pdf(
     )) or (None, None)
     if report_run is None or artifact is None:
         raise HTTPException(status_code=404, detail="Report artifact not found")
-    _ensure_app_access(auth, report_run.app_id)
+    await ensure_registered_app_access(
+        db,
+        auth,
+        report_run.app_id,
+        required=True,
+        param_name='app_id',
+    )
     if report_run.status != 'completed':
         raise HTTPException(status_code=409, detail="Report run is not completed yet")
     report_config = await resolve_report_config(

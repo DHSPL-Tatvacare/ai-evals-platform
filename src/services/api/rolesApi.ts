@@ -21,6 +21,34 @@ export interface AppResponse {
   isActive: boolean;
 }
 
+export interface PermissionCatalogEntryResponse {
+  id: string;
+  label: string;
+  description: string;
+  groupId: string;
+  groupLabel: string;
+  grantable: boolean;
+  ownerOnly: boolean;
+}
+
+export interface PermissionCatalogGroupResponse {
+  id: string;
+  label: string;
+  description: string;
+  permissions: PermissionCatalogEntryResponse[];
+}
+
+export interface OwnerOnlySurfaceResponse {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface PermissionCatalogResponse {
+  groups: PermissionCatalogGroupResponse[];
+  ownerOnlySurfaces: OwnerOnlySurfaceResponse[];
+}
+
 export interface CreateRoleRequest {
   name: string;
   description?: string;
@@ -57,6 +85,7 @@ export interface AuditLogResponse {
 
 export const rolesApi = {
   listApps: () => apiRequest<AppResponse[]>('/api/apps'),
+  listPermissionCatalog: () => apiRequest<PermissionCatalogResponse>('/api/admin/permission-catalog'),
   listRoles: () => apiRequest<RoleResponse[]>('/api/admin/roles'),
   getRole: (id: string) => apiRequest<RoleResponse>(`/api/admin/roles/${id}`),
   createRole: (data: CreateRoleRequest) =>

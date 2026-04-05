@@ -1,62 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Modal, Button, Input } from '@/components/ui';
 import { rolesApi } from '@/services/api/rolesApi';
-import type { RoleResponse, AppResponse } from '@/services/api/rolesApi';
+import type { RoleResponse, AppResponse, PermissionCatalogGroupResponse } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
-
-const PERMISSION_GROUPS = [
-  {
-    label: 'Listings',
-    permissions: [
-      { id: 'listing:create', label: 'Create listings' },
-      { id: 'listing:delete', label: 'Delete listings' },
-    ],
-  },
-  {
-    label: 'Evaluations',
-    permissions: [
-      { id: 'eval:run', label: 'Run evaluations' },
-      { id: 'eval:delete', label: 'Delete / cancel evaluations' },
-      { id: 'eval:export', label: 'Export results' },
-      { id: 'evaluator:promote', label: 'Promote evaluator to built-in' },
-    ],
-  },
-  {
-    label: 'Resources',
-    permissions: [
-      { id: 'resource:create', label: 'Create prompts, schemas, evaluators' },
-      { id: 'resource:edit', label: 'Edit prompts, schemas, evaluators' },
-      { id: 'resource:delete', label: 'Delete prompts, schemas, evaluators' },
-    ],
-  },
-  {
-    label: 'Reports & Analytics',
-    permissions: [
-      { id: 'report:generate', label: 'Generate reports' },
-      { id: 'analytics:view', label: 'View analytics dashboards' },
-    ],
-  },
-  {
-    label: 'Settings',
-    permissions: [{ id: 'settings:edit', label: 'Edit LLM & app settings' }],
-  },
-  {
-    label: 'User Management',
-    permissions: [
-      { id: 'user:create', label: 'Create users' },
-      { id: 'user:invite', label: 'Manage invite links' },
-      { id: 'user:edit', label: 'Edit users' },
-      { id: 'user:deactivate', label: 'Deactivate users' },
-      { id: 'user:reset_password', label: 'Reset passwords' },
-      { id: 'role:assign', label: 'Assign roles to users' },
-    ],
-  },
-  {
-    label: 'Tenant',
-    permissions: [{ id: 'tenant:settings', label: 'Manage tenant settings' }],
-  },
-];
 
 interface RoleEditorDialogProps {
   isOpen: boolean;
@@ -73,11 +20,13 @@ export function RoleEditorDialog({ isOpen, role, onClose, onSaved }: RoleEditorD
   const [selectedApps, setSelectedApps] = useState<Set<string>>(new Set());
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(new Set());
   const [apps, setApps] = useState<AppResponse[]>([]);
+  const [permissionGroups, setPermissionGroups] = useState<PermissionCatalogGroupResponse[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     rolesApi.listApps().then(setApps).catch(() => {});
+    rolesApi.listPermissionCatalog().then((catalog) => setPermissionGroups(catalog.groups)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -100,7 +49,11 @@ export function RoleEditorDialog({ isOpen, role, onClose, onSaved }: RoleEditorD
   const toggleApp = (slug: string) => {
     setSelectedApps((prev) => {
       const next = new Set(prev);
-      next.has(slug) ? next.delete(slug) : next.add(slug);
+      if (next.has(slug)) {
+        next.delete(slug);
+      } else {
+        next.add(slug);
+      }
       return next;
     });
   };
@@ -108,7 +61,11 @@ export function RoleEditorDialog({ isOpen, role, onClose, onSaved }: RoleEditorD
   const togglePerm = (id: string) => {
     setSelectedPerms((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
@@ -208,36 +165,42 @@ export function RoleEditorDialog({ isOpen, role, onClose, onSaved }: RoleEditorD
 
         {/* Permissions */}
         <div>
-          <p className="mb-3 text-[13px] font-medium text-[var(--text-secondary)]">Permissions</p>
-          <div className="space-y-4">
-            {PERMISSION_GROUPS.map((group) => (
-              <div key={group.label}>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                  {group.label}
-                </p>
-                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+            <p className="mb-3 text-[13px] font-medium text-[var(--text-secondary)]">Permissions</p>
+            <div className="space-y-4">
+              {permissionGroups.map((group) => (
+                <div key={group.label}>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    {group.label}
+                  </p>
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
                   {group.permissions.map((perm) => {
                     const checked = selectedPerms.has(perm.id);
                     return (
-                      <label
-                        key={perm.id}
-                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => togglePerm(perm.id)}
-                          className="h-3.5 w-3.5 rounded border-[var(--border-default)] accent-[var(--color-brand-accent)]"
-                        />
-                        {perm.label}
-                      </label>
-                    );
-                  })}
+                        <label
+                          key={perm.id}
+                          className="flex cursor-pointer items-start gap-2 rounded px-2 py-1 text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePerm(perm.id)}
+                            className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--border-default)] accent-[var(--color-brand-accent)]"
+                          />
+                          <span className="flex flex-col">
+                            <span>{perm.label}</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">{perm.description}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+              {permissionGroups.length === 0 && (
+                <p className="text-[12px] text-[var(--text-muted)]">Permission catalog unavailable.</p>
+              )}
+            </div>
           </div>
-        </div>
 
         {error && <p className="text-[13px] text-[var(--color-error)]">{error}</p>}
 
