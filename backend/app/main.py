@@ -13,8 +13,8 @@ from sqlalchemy import delete, text
 
 from app.config import settings
 from app.database import engine, get_db, async_session
-from app.models import Base
 from app.models.user import RefreshToken
+from app.startup_schema import bootstrap_database_schema
 
 logger = logging.getLogger(__name__)
 
@@ -148,65 +148,9 @@ async def lifespan(app: FastAPI):
     """Create tables on startup, start background worker."""
     _validate_startup_config()
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await bootstrap_database_schema()
 
-        # One-time migrations — safe to run repeatedly (IF NOT EXISTS / IF EXISTS guards)
-        await conn.execute(text("DROP TABLE IF EXISTS lsq_call_cache"))
-        await conn.execute(text(
-            "ALTER TABLE schemas ADD COLUMN IF NOT EXISTS source_type VARCHAR(20)"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'private'"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS shared_by UUID"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS app_id VARCHAR(50) NOT NULL DEFAULT ''"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS queue_class VARCHAR(20) NOT NULL DEFAULT 'standard'"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 1"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(120)"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_lettered_at TIMESTAMPTZ"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_letter_reason TEXT"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS uq_settings_shared_scope ON settings (tenant_id, app_id, key, visibility) WHERE visibility = 'SHARED'"
-        ))
+    async with engine.begin() as conn:
         await conn.execute(text(
             "UPDATE settings SET visibility = 'SHARED' WHERE visibility = 'APP'"
         ))
@@ -228,31 +172,6 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(statement))
         await conn.execute(text(
             "DROP INDEX IF EXISTS uq_settings_app_scope"
-        ))
-        await conn.execute(text(
-            """
-            UPDATE jobs
-            SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')
-            WHERE app_id = ''
-            """
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_status_priority_created ON jobs (status, priority, created_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_status_lease_expires ON jobs (status, lease_expires_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_status_next_retry ON jobs (status, next_retry_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status_created ON jobs (tenant_id, status, created_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_tenant_app_status_created ON jobs (tenant_id, app_id, status, created_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_eval_runs_tenant_visibility_created ON eval_runs (tenant_id, visibility, created_at)"
         ))
 
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin

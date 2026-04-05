@@ -3,10 +3,9 @@
 import asyncio
 import logging
 
-from sqlalchemy import text
-
 from app.config import settings
 from app.database import engine
+from app.startup_schema import bootstrap_database_schema
 from app.services.job_worker import (
     recover_stale_jobs,
     recover_stale_eval_runs,
@@ -15,8 +14,6 @@ from app.services.job_worker import (
 )
 
 logger = logging.getLogger(__name__)
-WORKER_SCHEMA_WAIT_TIMEOUT_SECONDS = 60
-WORKER_SCHEMA_WAIT_INTERVAL_SECONDS = 1
 
 
 def _validate_worker_config() -> None:
@@ -35,54 +32,11 @@ def _validate_worker_config() -> None:
     if settings.JOB_USER_MAX_CONCURRENT < 1:
         raise RuntimeError("JOB_USER_MAX_CONCURRENT must be at least 1.")
 
-
-async def _wait_for_worker_schema(
-    timeout_seconds: int = WORKER_SCHEMA_WAIT_TIMEOUT_SECONDS,
-    poll_interval_seconds: int = WORKER_SCHEMA_WAIT_INTERVAL_SECONDS,
-) -> None:
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
-    has_logged_wait = False
-
-    while True:
-        async with engine.connect() as conn:
-            result = await conn.execute(
-                text(
-                    """
-                    SELECT
-                        to_regclass('public.jobs') IS NOT NULL AS jobs_ready,
-                        to_regclass('public.eval_runs') IS NOT NULL AS eval_runs_ready
-                    """
-                )
-            )
-            jobs_ready, eval_runs_ready = result.one()
-
-        if jobs_ready and eval_runs_ready:
-            if has_logged_wait:
-                logger.info("Worker schema detected; continuing startup")
-            return
-
-        if not has_logged_wait:
-            logger.info("Waiting for backend schema bootstrap before starting worker recovery")
-            has_logged_wait = True
-
-        if asyncio.get_running_loop().time() >= deadline:
-            missing_tables: list[str] = []
-            if not jobs_ready:
-                missing_tables.append("jobs")
-            if not eval_runs_ready:
-                missing_tables.append("eval_runs")
-            raise RuntimeError(
-                f"Worker startup timed out waiting for database schema: {', '.join(missing_tables)}"
-            )
-
-        await asyncio.sleep(poll_interval_seconds)
-
-
 async def run_worker() -> None:
     """Run recovery once, then start the worker and recovery loops."""
     _validate_worker_config()
     logger.info("Starting dedicated job worker process")
-    await _wait_for_worker_schema()
+    await bootstrap_database_schema()
     await recover_stale_jobs()
     await recover_stale_eval_runs()
 
