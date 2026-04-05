@@ -11,7 +11,8 @@ v3 → v4 migration: Rules gain explicit evaluation_scopes so batch built-ins an
                     adversarial flows can share the same contract source.
 v4 → v5 migration: Rule coverage is backfilled for question answering and
                     cross-goal conversation-state checks.
-v5 → v6 migration: Crack persona trait and anti-mirroring rule are backfilled.
+v5 → v6 migration: Anti-mirroring rule is backfilled.
+v6 → v7 migration: Remove persona-only labels such as crack from the trait catalog.
 """
 
 import logging
@@ -31,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_APP_ID = "kaira-bot"
 SETTINGS_KEY = "adversarial-config"
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
+PERSONA_ONLY_TRAIT_IDS = {"crack"}
 
 
 # ─── Pydantic Config Models ─────────────────────────────────────
@@ -137,6 +139,12 @@ class AdversarialConfig(BaseModel):
         if len(trait_ids) != len(set(trait_ids)):
             dupes = [tid for tid in trait_ids if trait_ids.count(tid) > 1]
             raise ValueError(f"Duplicate trait IDs: {set(dupes)}")
+        reserved_trait_ids = sorted(set(trait_ids) & PERSONA_ONLY_TRAIT_IDS)
+        if reserved_trait_ids:
+            raise ValueError(
+                "Trait IDs reserved for persona labels only: "
+                + ", ".join(reserved_trait_ids)
+            )
 
         # At least one enabled trait
         if self.traits and not any(t.enabled for t in self.traits):
@@ -406,12 +414,6 @@ def get_default_config() -> AdversarialConfig:
                 description="User describes a composite dish with multiple ingredients as one item (e.g. 'porridge with almonds and honey').",
                 behavior_hint="Describe a dish with ingredients together as a single item, not as separate foods.",
             ),
-            AdversarialTrait(
-                id="crack",
-                label="Crack",
-                description="User is abusive, profane, deviant, erratic, irrelevant, or incoherent enough to pressure the bot.",
-                behavior_hint="Use profanity, derail the conversation, ask irrelevant or incoherent follow-ups, and pressure the bot without making the case unreadable.",
-            ),
         ],
         rules=[
             AdversarialRule(
@@ -525,15 +527,8 @@ def _migrate_v4_to_v5(raw: dict) -> dict:
 
 
 def _migrate_v5_to_v6(raw: dict) -> dict:
-    """Migrate v5 config dict to v6 by backfilling Crack trait and anti-mirroring rule."""
+    """Migrate v5 config dict to v6 by backfilling the anti-mirroring rule."""
     default = get_default_config()
-    existing_traits = {trait.get("id"): trait for trait in raw.get("traits", [])}
-    merged_traits = list(raw.get("traits", []))
-    for trait in default.traits:
-        if trait.id in existing_traits:
-            continue
-        merged_traits.append(trait.model_dump())
-
     existing_rules = {rule.get("rule_id"): rule for rule in raw.get("rules", [])}
     merged_rules = list(raw.get("rules", []))
     for rule in default.rules:
@@ -544,9 +539,52 @@ def _migrate_v5_to_v6(raw: dict) -> dict:
     return {
         "version": 6,
         "goals": raw.get("goals", []),
-        "traits": merged_traits,
+        "traits": raw.get("traits", []),
         "rules": merged_rules,
     }
+
+
+def _strip_persona_only_traits(traits: list[dict]) -> list[dict]:
+    return [
+        trait
+        for trait in traits
+        if str(trait.get("id", "")).strip().lower() not in PERSONA_ONLY_TRAIT_IDS
+    ]
+
+
+def _migrate_v6_to_v7(raw: dict) -> dict:
+    """Migrate v6 config dict to v7 by removing persona-only labels from traits."""
+    return {
+        "version": 7,
+        "goals": raw.get("goals", []),
+        "traits": _strip_persona_only_traits(raw.get("traits", [])),
+        "rules": raw.get("rules", []),
+    }
+
+
+def _upgrade_raw_config(raw: dict) -> tuple[dict, int]:
+    version = raw.get("version", 1) if isinstance(raw, dict) else 1
+    original_version = version
+    if version < 3:
+        logger.info(f"Migrating adversarial config v{version} → v3")
+        raw = _migrate_v2_to_v3(raw)
+        version = 3
+    if version < 4:
+        logger.info(f"Migrating adversarial config v{version} → v4")
+        raw = _migrate_v3_to_v4(raw)
+        version = 4
+    if version < 5:
+        logger.info(f"Migrating adversarial config v{version} → v5")
+        raw = _migrate_v4_to_v5(raw)
+        version = 5
+    if version < 6:
+        logger.info(f"Migrating adversarial config v{version} → v6")
+        raw = _migrate_v5_to_v6(raw)
+        version = 6
+    if version < 7:
+        logger.info(f"Migrating adversarial config v{version} → v7")
+        raw = _migrate_v6_to_v7(raw)
+    return raw, original_version
 
 
 # ─── DB Load / Save ──────────────────────────────────────────────
@@ -556,7 +594,7 @@ async def load_config_from_db(
     tenant_id,
     user_id,
 ) -> AdversarialConfig:
-    """Load adversarial config from settings table, auto-migrating v1/v2→v3.
+    """Load adversarial config from settings table, auto-upgrading legacy versions.
 
     Resolution chain:
       1. Shared setting (tenant, app, key, visibility=shared)
@@ -597,24 +635,7 @@ async def load_config_from_db(
 
             if setting and setting.value:
                 raw = setting.value
-                version = raw.get("version", 1) if isinstance(raw, dict) else 1
-                original_version = version
-                if version < 3:
-                    logger.info(f"Migrating adversarial config v{version} → v3")
-                    raw = _migrate_v2_to_v3(raw)
-                    version = 3
-                if version < 4:
-                    logger.info(f"Migrating adversarial config v{version} → v4")
-                    raw = _migrate_v3_to_v4(raw)
-                    version = 4
-                if version < 5:
-                    logger.info(f"Migrating adversarial config v{version} → v5")
-                    raw = _migrate_v4_to_v5(raw)
-                    version = 5
-                if version < 6:
-                    logger.info(f"Migrating adversarial config v{version} → v6")
-                    raw = _migrate_v5_to_v6(raw)
-                    version = 6
+                raw, original_version = _upgrade_raw_config(raw)
                 config = AdversarialConfig.model_validate(raw)
                 if original_version < CURRENT_VERSION:
                     await save_config_to_db(config, tenant_id=tenant_id, user_id=user_id)
@@ -648,7 +669,8 @@ async def load_system_default_config() -> AdversarialConfig:
             )
             setting = result.scalar_one_or_none()
             if setting and setting.value:
-                return AdversarialConfig.model_validate(setting.value)
+                raw, _ = _upgrade_raw_config(setting.value)
+                return AdversarialConfig.model_validate(raw)
     except Exception as e:
         logger.warning("Failed to load system adversarial config from DB, using defaults: %s", e)
 

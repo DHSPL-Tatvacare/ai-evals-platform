@@ -9,6 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from pydantic import ValidationError
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
@@ -572,9 +574,9 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
         self.assertIn('ask_time_if_missing', meal_rule_ids)
         self.assertIn('maintain_conversational_state_across_goal_transitions', meal_rule_ids)
         self.assertIn('no_abusive_language_mirroring', meal_rule_ids)
-        self.assertIn('crack', trait_ids)
+        self.assertNotIn('crack', trait_ids)
 
-    def test_v5_to_v6_migration_backfills_crack_trait_and_anti_mirroring_rule(self):
+    def test_v5_to_v6_migration_backfills_anti_mirroring_rule_without_persona_trait(self):
         from app.services.evaluators import adversarial_config as config_module
 
         migrated = config_module._migrate_v5_to_v6(
@@ -596,9 +598,53 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
 
         migrated_trait_ids = {trait['id'] for trait in migrated['traits']}
         migrated_rule_ids = {rule['rule_id'] for rule in migrated['rules']}
-        self.assertEqual(migrated['version'], config_module.CURRENT_VERSION)
-        self.assertIn('crack', migrated_trait_ids)
+        self.assertEqual(migrated['version'], 6)
+        self.assertNotIn('crack', migrated_trait_ids)
         self.assertIn('no_abusive_language_mirroring', migrated_rule_ids)
+
+    def test_v6_to_v7_migration_removes_crack_trait_from_existing_configs(self):
+        from app.services.evaluators import adversarial_config as config_module
+
+        migrated = config_module._migrate_v6_to_v7(
+            {
+                'version': 6,
+                'goals': [goal.model_dump() for goal in get_default_config().goals],
+                'traits': [
+                    {
+                        'id': 'ambiguous_quantity',
+                        'label': 'Ambiguous Quantity',
+                        'description': 'Ambiguous amounts.',
+                        'enabled': True,
+                    },
+                    {
+                        'id': 'crack',
+                        'label': 'Crack',
+                        'description': 'Rude persona leaked into traits.',
+                        'enabled': True,
+                    },
+                ],
+                'rules': [rule.model_dump() for rule in get_default_config().rules],
+            }
+        )
+
+        migrated_trait_ids = {trait['id'] for trait in migrated['traits']}
+        self.assertEqual(migrated['version'], config_module.CURRENT_VERSION)
+        self.assertIn('ambiguous_quantity', migrated_trait_ids)
+        self.assertNotIn('crack', migrated_trait_ids)
+
+    def test_config_validation_rejects_persona_only_trait_ids(self):
+        config = get_default_config().model_dump()
+        config['traits'].append(
+            {
+                'id': 'crack',
+                'label': 'Crack',
+                'description': 'Should only exist as a persona.',
+                'enabled': True,
+            }
+        )
+
+        with self.assertRaises(ValidationError):
+            AdversarialConfig.model_validate(config)
 
     def test_disabled_rules_are_excluded_from_prompt_helpers(self):
         config = get_default_config()
