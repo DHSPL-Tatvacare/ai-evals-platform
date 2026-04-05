@@ -22,8 +22,8 @@ def load_cached_payload_or_raise(
 ) -> CamelModel:
     try:
         return loader(cached_data)
-    except ValidationError as exc:
-        logger.warning(log_message)
+    except (ValidationError, ValueError) as exc:
+        logger.warning('%s: %s', log_message, exc)
         raise HTTPException(status_code=409, detail=detail) from exc
 
 
@@ -37,7 +37,7 @@ def partition_valid_single_run_payloads(
     for meta, data in runs_data:
         try:
             payload = payload_model.model_validate(data)
-        except ValidationError:
+        except (ValidationError, ValueError):
             invalid_count += 1
             logger.warning(
                 'Skipping outdated single-run report cache for run %s during cross-run refresh',

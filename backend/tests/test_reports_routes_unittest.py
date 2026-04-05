@@ -95,6 +95,21 @@ class ReportsRouteHelperTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(ctx.exception.detail, 'Cached report is outdated. Regenerate the report.')
 
+    def test_load_cached_payload_or_raise_converts_value_error_to_conflict(self):
+        def _broken_loader(_payload: dict):
+            raise ValueError('badly formed hexadecimal UUID string')
+
+        with self.assertRaises(HTTPException) as ctx:
+            load_cached_payload_or_raise(
+                _broken_loader,
+                {'metadata': {'runId': 'not-a-uuid'}},
+                detail='Cached report is outdated. Regenerate the report.',
+                log_message='test log',
+            )
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail, 'Cached report is outdated. Regenerate the report.')
+
     def test_partition_valid_single_run_payloads_skips_legacy_rows(self):
         valid_rows, invalid_count = partition_valid_single_run_payloads(
             [
@@ -108,3 +123,19 @@ class ReportsRouteHelperTests(unittest.TestCase):
         self.assertEqual(len(valid_rows), 1)
         self.assertEqual(valid_rows[0][0]['id'], 'run-valid')
         self.assertIn('computedAt', valid_rows[0][1]['metadata'])
+
+    def test_partition_valid_single_run_payloads_skips_value_error_rows(self):
+        class BrokenPayloadModel:
+            @classmethod
+            def model_validate(cls, _payload: dict):
+                raise ValueError('badly formed hexadecimal UUID string')
+
+        valid_rows, invalid_count = partition_valid_single_run_payloads(
+            [
+                ({'id': 'run-broken'}, {'metadata': {'runId': 'not-a-uuid'}}),
+            ],
+            BrokenPayloadModel,
+        )
+
+        self.assertEqual(invalid_count, 1)
+        self.assertEqual(valid_rows, [])

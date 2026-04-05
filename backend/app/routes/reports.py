@@ -116,6 +116,24 @@ def _load_report_payload(artifact_data: dict, *, detail: str, log_message: str) 
     )
 
 
+def _load_cross_run_payload(
+    profile: AnalyticsProfile,
+    cached_data: dict,
+    *,
+    detail: str,
+    log_message: str,
+) -> PlatformCrossRunPayload:
+    if profile.cross_run_adapter is None:
+        raise ValueError('Cross-run adapter is required')
+
+    return load_cached_payload_or_raise(
+        profile.cross_run_adapter.load_cached,
+        cached_data,
+        detail=detail,
+        log_message=log_message,
+    )
+
+
 def _compose_export_document(
     *,
     payload: PlatformRunReportPayload,
@@ -437,8 +455,8 @@ async def get_cross_run_analytics(
     stale_result = await db.execute(stale_stmt)
     new_runs_since = stale_result.scalar() or 0
 
-    analytics = load_cached_payload_or_raise(
-        profile.cross_run_adapter.load_cached,
+    analytics = _load_cross_run_payload(
+        profile,
         cached.analytics_data,
         detail='Cached cross-run analytics are outdated. Refresh analytics.',
         log_message=f'Cross-run analytics cache invalid for app {app_id}',
@@ -804,7 +822,12 @@ async def generate_cross_run_ai_summary(
     if not cached_data:
         raise HTTPException(status_code=404, detail='No cached cross-run analytics. Refresh analytics first.')
 
-    payload = profile.cross_run_adapter.load_cached(cached_data)
+    payload = _load_cross_run_payload(
+        profile,
+        cached_data,
+        detail='Cached cross-run analytics are outdated. Refresh analytics first.',
+        log_message=f'Cross-run analytics cache invalid for app {request.app_id} during AI summary generation',
+    )
     stats, health_trend, top_issues, top_recommendations = _extract_cross_run_summary_inputs(payload, analytics_config)
 
     try:
