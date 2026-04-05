@@ -59,6 +59,7 @@ interface ChatStoreState {
     title: string,
   ) => Promise<void>;
   updateMessageMetadata: (
+    appId: AppId,
     messageId: string,
     metadata: Partial<KairaChatMessage["metadata"]>,
   ) => Promise<void>;
@@ -137,7 +138,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         set({ currentSessionId: targetSessionId, isLoadingMessages: true });
         try {
           const messages =
-            await chatMessagesRepository.getBySession(targetSessionId);
+            await chatMessagesRepository.getBySession(appId, targetSessionId);
           set({ messages, isLoadingMessages: false });
         } catch {
           set({ messages: [], isLoadingMessages: false });
@@ -159,7 +160,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  selectSession: async (_appId: AppId, sessionId: string | null) => {
+  selectSession: async (appId: AppId, sessionId: string | null) => {
     if (!sessionId) {
       set({ currentSessionId: null, messages: [] });
       return;
@@ -174,7 +175,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     });
 
     try {
-      const messages = await chatMessagesRepository.getBySession(sessionId);
+      const messages = await chatMessagesRepository.getBySession(appId, sessionId);
       set({
         messages,
         isLoadingMessages: false,
@@ -295,7 +296,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
 
     try {
       // Create user message
-      const userMessage = await chatMessagesRepository.create({
+      const userMessage = await chatMessagesRepository.create(appId, {
         sessionId: currentSessionId,
         role: "user",
         content,
@@ -304,7 +305,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       });
 
       // Create pending assistant message
-      const assistantMessage = await chatMessagesRepository.create({
+      const assistantMessage = await chatMessagesRepository.create(appId, {
         sessionId: currentSessionId,
         role: "assistant",
         content: "",
@@ -336,7 +337,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const response = await kairaChatService.sendMessage(apiRequest);
 
       // Update assistant message with response
-      await chatMessagesRepository.update(assistantMessage.id, {
+      await chatMessagesRepository.update(appId, assistantMessage.id, {
         content: response.message,
         status: "complete",
         metadata: {
@@ -481,7 +482,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     const abortController = new AbortController();
 
     // Create user message
-    const userMessage = await chatMessagesRepository.create({
+    const userMessage = await chatMessagesRepository.create(appId, {
       sessionId: currentSessionId,
       role: "user",
       content,
@@ -490,7 +491,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     });
 
     // Create streaming assistant message
-    const assistantMessage = await chatMessagesRepository.create({
+    const assistantMessage = await chatMessagesRepository.create(appId, {
       sessionId: currentSessionId,
       role: "assistant",
       content: "",
@@ -607,7 +608,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       };
 
       // Update assistant message with final content
-      await chatMessagesRepository.update(assistantMessage.id, {
+      await chatMessagesRepository.update(appId, assistantMessage.id, {
         content: fullContent,
         status: "complete",
         metadata,
@@ -650,7 +651,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     } catch (err) {
       console.error("Streaming error:", err);
 
-      await chatMessagesRepository.update(assistantMessage.id, {
+      await chatMessagesRepository.update(appId, assistantMessage.id, {
         status: "error",
         errorMessage: err instanceof Error ? err.message : "Streaming failed",
       });
@@ -709,6 +710,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   updateMessageMetadata: async (
+    appId: AppId,
     messageId: string,
     metadataUpdates: Partial<KairaChatMessage["metadata"]>,
   ) => {
@@ -724,7 +726,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     };
 
     // Update in database
-    await chatMessagesRepository.update(messageId, {
+    await chatMessagesRepository.update(appId, messageId, {
       metadata: updatedMetadata,
     });
 

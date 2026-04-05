@@ -144,9 +144,9 @@ export function useKairaChat(opts?: {
 
   const updateMessageMetadata = useCallback(
     (messageId: string, metadata: Partial<KairaChatMessage["metadata"]>) => {
-      return storeUpdateMessageMetadata(messageId, metadata);
+      return storeUpdateMessageMetadata(appId, messageId, metadata);
     },
-    [storeUpdateMessageMetadata],
+    [appId, storeUpdateMessageMetadata],
   );
 
   return {

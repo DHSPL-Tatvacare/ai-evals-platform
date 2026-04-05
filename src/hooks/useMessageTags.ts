@@ -53,7 +53,7 @@ export function useMessageTags({
 
     try {
       // Add tag to message
-      await chatMessagesRepository.addTag(messageId, tagName);
+      await chatMessagesRepository.addTag(appId, messageId, tagName);
       
       // Add to registry
       await tagRegistryRepository.addTag(appId, tagName);
@@ -79,7 +79,7 @@ export function useMessageTags({
 
     try {
       // Remove from message
-      await chatMessagesRepository.removeTag(messageId, tagName);
+      await chatMessagesRepository.removeTag(appId, messageId, tagName);
       
       // Decrement in registry
       await tagRegistryRepository.decrementTag(appId, tagName);

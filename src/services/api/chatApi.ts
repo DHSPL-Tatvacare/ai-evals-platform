@@ -7,6 +7,11 @@
 import type { AppId, KairaChatSession, KairaChatMessage } from '@/types';
 import { apiRequest } from './client';
 
+function withAppId(path: string, appId: AppId): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}app_id=${encodeURIComponent(appId)}`;
+}
+
 /** API session shape (camelCase from backend) */
 interface ApiSession {
   id: string;
@@ -70,13 +75,13 @@ function toMessage(m: ApiMessage): KairaChatMessage {
 
 export const chatSessionsRepository = {
   async getAll(appId: AppId): Promise<KairaChatSession[]> {
-    const data = await apiRequest<ApiSession[]>(`/api/chat/sessions?app_id=${appId}`);
+    const data = await apiRequest<ApiSession[]>(withAppId('/api/chat/sessions', appId));
     return data.map(toSession);
   },
 
-  async getById(_appId: AppId, id: string): Promise<KairaChatSession | undefined> {
+  async getById(appId: AppId, id: string): Promise<KairaChatSession | undefined> {
     try {
-      const data = await apiRequest<ApiSession>(`/api/chat/sessions/${id}`);
+      const data = await apiRequest<ApiSession>(withAppId(`/api/chat/sessions/${id}`, appId));
       return toSession(data);
     } catch {
       return undefined;
@@ -87,7 +92,7 @@ export const chatSessionsRepository = {
     appId: AppId,
     session: Omit<KairaChatSession, 'id' | 'appId' | 'tenantId' | 'createdAt' | 'updatedAt'>
   ): Promise<KairaChatSession> {
-    const data = await apiRequest<ApiSession>('/api/chat/sessions', {
+    const data = await apiRequest<ApiSession>(withAppId('/api/chat/sessions', appId), {
       method: 'POST',
       body: JSON.stringify({
         appId,
@@ -104,11 +109,11 @@ export const chatSessionsRepository = {
   },
 
   async update(
-    _appId: AppId,
+    appId: AppId,
     id: string,
     updates: Partial<Omit<KairaChatSession, 'id' | 'appId' | 'tenantId' | 'createdAt'>>
   ): Promise<void> {
-    await apiRequest(`/api/chat/sessions/${id}`, {
+    await apiRequest(withAppId(`/api/chat/sessions/${id}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         externalUserId: updates.userId,
@@ -122,8 +127,8 @@ export const chatSessionsRepository = {
     });
   },
 
-  async delete(_appId: AppId, id: string): Promise<void> {
-    await apiRequest(`/api/chat/sessions/${id}`, { method: 'DELETE' });
+  async delete(appId: AppId, id: string): Promise<void> {
+    await apiRequest(withAppId(`/api/chat/sessions/${id}`, appId), { method: 'DELETE' });
   },
 
   async search(appId: AppId, query: string): Promise<KairaChatSession[]> {
@@ -134,13 +139,13 @@ export const chatSessionsRepository = {
 };
 
 export const chatMessagesRepository = {
-  async getBySession(sessionId: string): Promise<KairaChatMessage[]> {
-    const data = await apiRequest<ApiMessage[]>(`/api/chat/sessions/${sessionId}/messages`);
+  async getBySession(appId: AppId, sessionId: string): Promise<KairaChatMessage[]> {
+    const data = await apiRequest<ApiMessage[]>(withAppId(`/api/chat/sessions/${sessionId}/messages`, appId));
     return data.map(toMessage);
   },
 
-  async create(message: Omit<KairaChatMessage, 'id'>): Promise<KairaChatMessage> {
-    const data = await apiRequest<ApiMessage>('/api/chat/messages', {
+  async create(appId: AppId, message: Omit<KairaChatMessage, 'id'>): Promise<KairaChatMessage> {
+    const data = await apiRequest<ApiMessage>(withAppId('/api/chat/messages', appId), {
       method: 'POST',
       body: JSON.stringify({
         sessionId: message.sessionId,
@@ -155,10 +160,11 @@ export const chatMessagesRepository = {
   },
 
   async update(
+    appId: AppId,
     id: string,
     updates: Partial<Omit<KairaChatMessage, 'id' | 'sessionId'>>
   ): Promise<void> {
-    await apiRequest(`/api/chat/messages/${id}`, {
+    await apiRequest(withAppId(`/api/chat/messages/${id}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         role: updates.role,
@@ -170,25 +176,25 @@ export const chatMessagesRepository = {
     });
   },
 
-  async delete(id: string): Promise<void> {
-    await apiRequest(`/api/chat/messages/${id}`, { method: 'DELETE' });
+  async delete(appId: AppId, id: string): Promise<void> {
+    await apiRequest(withAppId(`/api/chat/messages/${id}`, appId), { method: 'DELETE' });
   },
 
-  async deleteBySession(sessionId: string): Promise<void> {
-    const messages = await this.getBySession(sessionId);
+  async deleteBySession(appId: AppId, sessionId: string): Promise<void> {
+    const messages = await this.getBySession(appId, sessionId);
     for (const message of messages) {
-      await this.delete(message.id);
+      await this.delete(appId, message.id);
     }
   },
 
-  async addTag(messageId: string, tagName: string): Promise<void> {
-    const msg = await apiRequest<ApiMessage>(`/api/chat/messages/${messageId}`);
+  async addTag(appId: AppId, messageId: string, tagName: string): Promise<void> {
+    const msg = await apiRequest<ApiMessage>(withAppId(`/api/chat/messages/${messageId}`, appId));
     const meta = (msg.metadata ?? {}) as Record<string, unknown>;
     const currentTags = (meta.tags ?? []) as string[];
     const normalizedTag = tagName.trim().toLowerCase();
 
     if (!currentTags.includes(normalizedTag)) {
-      await apiRequest(`/api/chat/messages/${messageId}`, {
+      await apiRequest(withAppId(`/api/chat/messages/${messageId}`, appId), {
         method: 'PUT',
         body: JSON.stringify({
           metadata: { ...meta, tags: [...currentTags, normalizedTag] },
@@ -197,13 +203,13 @@ export const chatMessagesRepository = {
     }
   },
 
-  async removeTag(messageId: string, tagName: string): Promise<void> {
-    const msg = await apiRequest<ApiMessage>(`/api/chat/messages/${messageId}`);
+  async removeTag(appId: AppId, messageId: string, tagName: string): Promise<void> {
+    const msg = await apiRequest<ApiMessage>(withAppId(`/api/chat/messages/${messageId}`, appId));
     const meta = (msg.metadata ?? {}) as Record<string, unknown>;
     const currentTags = (meta.tags ?? []) as string[];
     const normalizedTag = tagName.trim().toLowerCase();
 
-    await apiRequest(`/api/chat/messages/${messageId}`, {
+    await apiRequest(withAppId(`/api/chat/messages/${messageId}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         metadata: { ...meta, tags: currentTags.filter(t => t !== normalizedTag) },
@@ -211,11 +217,11 @@ export const chatMessagesRepository = {
     });
   },
 
-  async updateTags(messageId: string, tags: string[]): Promise<void> {
-    const msg = await apiRequest<ApiMessage>(`/api/chat/messages/${messageId}`);
+  async updateTags(appId: AppId, messageId: string, tags: string[]): Promise<void> {
+    const msg = await apiRequest<ApiMessage>(withAppId(`/api/chat/messages/${messageId}`, appId));
     const meta = (msg.metadata ?? {}) as Record<string, unknown>;
 
-    await apiRequest(`/api/chat/messages/${messageId}`, {
+    await apiRequest(withAppId(`/api/chat/messages/${messageId}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         metadata: { ...meta, tags: tags.map(t => t.trim().toLowerCase()) },
