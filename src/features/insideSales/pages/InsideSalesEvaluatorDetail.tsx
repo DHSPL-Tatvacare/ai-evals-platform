@@ -6,7 +6,9 @@ import { CreateEvaluatorWizard } from '@/features/evals/components/CreateEvaluat
 import { routes } from '@/config/routes';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
+import { isSystemEvaluator } from '@/features/evals/utils/evaluatorMetadata';
 import type { EvaluatorDefinition, EvaluatorOutputField } from '@/types';
 
 function getDimensionCount(schema: EvaluatorOutputField[]): number {
@@ -46,7 +48,7 @@ function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
     );
   }
 
-  if (evaluator.isGlobal) {
+  if (isSystemEvaluator(evaluator)) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-medium text-purple-400">
         <Shield className="h-3 w-3" />
@@ -68,6 +70,7 @@ export function InsideSalesEvaluatorDetail() {
   const { id } = useParams<{ id: string }>();
   const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [editEvaluator, setEditEvaluator] = useState<EvaluatorDefinition | undefined>();
+  const currentUser = useAuthStore((state) => state.user);
 
   const {
     evaluators,
@@ -88,6 +91,12 @@ export function InsideSalesEvaluatorDetail() {
   const evaluator = useMemo(
     () => evaluators.find((entry) => entry.id === id),
     [evaluators, id],
+  );
+  const canEdit = Boolean(
+    evaluator &&
+    currentUser &&
+    evaluator.tenantId === currentUser.tenantId &&
+    evaluator.userId === currentUser.id,
   );
 
   const handleFork = async () => {
@@ -236,7 +245,7 @@ export function InsideSalesEvaluatorDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {evaluator.isGlobal ? (
+            {!canEdit ? (
               <Button variant="secondary" size="sm" onClick={handleFork}>
                 <GitFork className="h-3.5 w-3.5" />
                 Fork & Edit

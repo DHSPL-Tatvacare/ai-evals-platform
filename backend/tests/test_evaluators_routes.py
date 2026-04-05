@@ -94,7 +94,7 @@ def test_can_access_denies_system_seeded_evaluator_edit():
     assert can_access(reader, asset, "edit") is False
 
 
-def test_evaluator_response_keeps_legacy_fields_as_derived_compatibility_output():
+def test_evaluator_response_emits_only_canonical_visibility_fields():
     evaluator = Evaluator(
         id=uuid.uuid4(),
         app_id="kaira-bot",
@@ -113,9 +113,9 @@ def test_evaluator_response_keeps_legacy_fields_as_derived_compatibility_output(
 
     assert payload["visibility"] == "shared"
     assert payload["linkedRuleIds"] == ["rule-1"]
-    assert payload["isGlobal"] is True
-    assert payload["isBuiltIn"] is True
-    assert payload["showInHeader"] is True
+    assert "isGlobal" not in payload
+    assert "isBuiltIn" not in payload
+    assert "showInHeader" not in payload
 
 
 def test_can_access_legacy_app_visibility_during_rollout():
@@ -163,46 +163,6 @@ def test_is_visible_field_v1_display_mode_header():
 
 def test_is_visible_field_v1_display_mode_hidden():
     assert _is_visible_field({"key": "chain", "displayMode": "hidden"}) is False
-
-
-def test_evaluator_show_in_header_from_is_main_metric():
-    """showInHeader derived field should detect isMainMetric."""
-    evaluator = Evaluator(
-        id=uuid.uuid4(),
-        app_id="kaira-bot",
-        name="Role-based Eval",
-        prompt="prompt",
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        visibility=Visibility.PRIVATE,
-        output_schema=[
-            {"key": "score", "role": "metric", "isMainMetric": True},
-            {"key": "notes", "role": "detail"},
-        ],
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    assert evaluator.show_in_header is True
-
-
-def test_evaluator_show_in_header_false_when_no_main_metric():
-    """showInHeader should be False when no field has isMainMetric."""
-    evaluator = Evaluator(
-        id=uuid.uuid4(),
-        app_id="kaira-bot",
-        name="No Main Metric Eval",
-        prompt="prompt",
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        visibility=Visibility.PRIVATE,
-        output_schema=[
-            {"key": "notes", "role": "detail"},
-            {"key": "chain", "role": "reasoning"},
-        ],
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    assert evaluator.show_in_header is False
 
 
 def test_evaluator_response_includes_owner_metadata_fields():

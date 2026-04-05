@@ -48,10 +48,6 @@ class EvaluatorResponse(VisibilityOutputMixin, CamelORMModel):
     owner_name: Optional[str] = None
     shared_by: Optional[uuid.UUID] = None
     shared_at: Optional[datetime] = None
-    # Transitional response-only fields. Remove after frontend harmonization.
-    is_global: bool
-    is_built_in: bool = False
-    show_in_header: bool
     forked_from: Optional[str] = None
     created_at: datetime
     updated_at: datetime

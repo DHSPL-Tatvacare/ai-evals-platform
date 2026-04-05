@@ -1,4 +1,5 @@
 """Evaluators API routes."""
+from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select, desc, or_, and_
@@ -53,12 +54,12 @@ def _annotate_owner_metadata(evaluator: Evaluator, owner_name: str | None) -> Ev
 async def list_evaluators(
     app_id: str = Query(...),
     listing_id: str = Query(None),
-    filter: str = Query("all"),
+    filter: Literal["all", "private", "shared"] = Query("all"),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List evaluators for an app — own + shared + seeded system defaults."""
-    if filter == "mine":
+    """List evaluators for an app by canonical visibility scope."""
+    if filter == "private":
         query = select(Evaluator, User.display_name).outerjoin(
             User,
             and_(User.id == Evaluator.user_id, User.tenant_id == Evaluator.tenant_id),
@@ -261,7 +262,7 @@ async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            visibility=Visibility.SHARED if seed.get("is_global", True) else Visibility.PRIVATE,
+            visibility=Visibility.normalize(seed.get("visibility")) or Visibility.SHARED,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )
@@ -304,7 +305,7 @@ async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evalua
             prompt=seed["prompt"],
             output_schema=seed["output_schema"],
             model_id=None,
-            visibility=Visibility.SHARED if seed.get("is_global", True) else Visibility.PRIVATE,
+            visibility=Visibility.normalize(seed.get("visibility")) or Visibility.SHARED,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
         )

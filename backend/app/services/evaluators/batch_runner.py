@@ -11,7 +11,7 @@ Standard pipeline contract:
     skipping/sampling, progress tracking, parallel execution (parallel_engine),
     and summary aggregation with pass-rate and per-evaluator breakdowns.
   - Custom evaluators: appended via custom_evaluator_ids; custom prompts/schemas are
-    user-defined and stored in the evaluator registry (DB). Uses prompt_resolver for
+    user-defined and stored in the shared evaluator library (DB). Uses prompt_resolver for
     variable injection and schema_generator for dynamic JSON schema.
   - Guarantees: creates eval_run record before starting any work (always visible in UI),
     finalises with status/summary even on failure, supports job cancellation.

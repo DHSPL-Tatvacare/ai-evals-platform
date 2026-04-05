@@ -19,6 +19,7 @@ import { RubricBuilder } from '@/features/insideSales/components/RubricBuilder';
 import { BuildModeToggle, type EvaluatorBuildMode } from './BuildModeToggle';
 import { RulePicker } from './RulePicker';
 import { SchemaTable } from './SchemaTable';
+import { evaluatorShowsInHeader, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
 import type {
   EvaluatorContext,
   EvaluatorDefinition,
@@ -128,7 +129,7 @@ export function CreateEvaluatorWizard({
     setPrompt(editEvaluator?.prompt ?? '');
     setFields(normalizeDraftFields(editEvaluator?.outputSchema ?? []));
     setVisibility(editEvaluator?.visibility ?? appConfig.evaluator.defaultVisibility);
-    setShowInHeader(editEvaluator?.showInHeader ?? false);
+    setShowInHeader(editEvaluator ? evaluatorShowsInHeader(editEvaluator) : false);
     const initialModel = editEvaluator?.modelId ?? appConfig.evaluator.defaultModel;
     setModelId(initialModel);
     const detected = initialModel ? detectProvider(initialModel) : null;
@@ -244,6 +245,7 @@ export function CreateEvaluatorWizard({
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
+      const normalizedFields = normalizeDraftFields(fields);
       await onSave({
         id: editEvaluator?.id ?? '',
         appId: context.appId,
@@ -251,9 +253,8 @@ export function CreateEvaluatorWizard({
         name,
         prompt,
         modelId,
-        outputSchema: normalizeDraftFields(fields),
+        outputSchema: setEvaluatorHeaderVisibility(normalizedFields, showInHeader),
         visibility,
-        showInHeader,
         linkedRuleIds,
         forkedFrom: editEvaluator?.forkedFrom,
         createdAt: editEvaluator?.createdAt ?? new Date(),

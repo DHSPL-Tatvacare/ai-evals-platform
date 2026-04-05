@@ -1,5 +1,6 @@
 import { cn } from '@/utils';
 import type { EvaluatorDefinition, EvalRun } from '@/types';
+import { evaluatorShowsInHeader } from '@/features/evals/utils/evaluatorMetadata';
 
 interface EvaluatorMetricsProps {
   evaluators: EvaluatorDefinition[];
@@ -8,7 +9,7 @@ interface EvaluatorMetricsProps {
 
 export function EvaluatorMetrics({ evaluators, latestRuns = {} }: EvaluatorMetricsProps) {
   // Filter evaluators that should show in header
-  const headerEvaluators = evaluators.filter(e => e.showInHeader);
+  const headerEvaluators = evaluators.filter(evaluatorShowsInHeader);
 
   if (headerEvaluators.length === 0) {
     return null;
@@ -84,9 +85,10 @@ function formatValue(value: unknown, type: string): string {
       return value ? 'Yes' : 'No';
     case 'array':
       return Array.isArray(value) ? value.length.toString() : String(value);
-    default:
+    default: {
       // Truncate long strings
       const str = String(value);
       return str.length > 20 ? str.substring(0, 20) + '...' : str;
+    }
   }
 }

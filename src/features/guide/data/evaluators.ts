@@ -21,8 +21,6 @@ export interface SeedEvaluator {
   prompt: string;
   output_schema: EvaluatorSchemaField[];
   app_id?: string;
-  is_global?: boolean;
-  show_in_header?: boolean;
   visibility?: string;
 }
 
@@ -93,9 +91,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
           }
         ],
         "app_id": "kaira-bot",
-        "is_global": true,
-        "visibility": "shared",
-        "show_in_header": true
+        "visibility": "shared"
       },
       {
         "name": "Health Accuracy Checker",
@@ -136,9 +132,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
           }
         ],
         "app_id": "kaira-bot",
-        "is_global": true,
-        "visibility": "shared",
-        "show_in_header": false
+        "visibility": "shared"
       },
       {
         "name": "Empathy Assessment",
@@ -187,9 +181,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
           }
         ],
         "app_id": "kaira-bot",
-        "is_global": true,
-        "visibility": "shared",
-        "show_in_header": false
+        "visibility": "shared"
       },
       {
         "name": "Risk Detection",
@@ -233,9 +225,7 @@ export const evaluatorGroups: EvaluatorGroup[] = [
           }
         ],
         "app_id": "kaira-bot",
-        "is_global": true,
-        "visibility": "shared",
-        "show_in_header": true
+        "visibility": "shared"
       }
     ]
   },

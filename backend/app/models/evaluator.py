@@ -6,9 +6,8 @@ from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.base import Base, TenantUserMixin, TimestampMixin
-from app.models.mixins.shareable import ShareableMixin, Visibility, shareable_uuid_forked_from
+from app.models.mixins.shareable import ShareableMixin, shareable_uuid_forked_from
 
 
 class Evaluator(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
@@ -31,34 +30,3 @@ class Evaluator(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
         Index("idx_evaluators_tenant_user", "tenant_id", "user_id"),
         Index("idx_evaluators_tenant_app", "tenant_id", "app_id"),
     )
-
-    @property
-    def is_global(self) -> bool:
-        """Deprecated frontend compatibility field until the harmonized UI lands."""
-
-        return Visibility.normalize(self.visibility) == Visibility.SHARED
-
-    @property
-    def is_built_in(self) -> bool:
-        """Deprecated frontend compatibility field until sharing UI is cut over."""
-
-        return Visibility.normalize(self.visibility) == Visibility.SHARED and (
-            self.tenant_id == SYSTEM_TENANT_ID or self.user_id == SYSTEM_USER_ID
-        )
-
-    @property
-    def show_in_header(self) -> bool:
-        """Deprecated frontend compatibility field derived from legacy output schema rows."""
-
-        if not isinstance(self.output_schema, list):
-            return False
-        for field in self.output_schema:
-            if not isinstance(field, dict):
-                continue
-            if field.get("displayMode") == "header":
-                return True
-            if field.get("showInHeader") is True:
-                return True
-            if field.get("isMainMetric") is True:
-                return True
-        return False

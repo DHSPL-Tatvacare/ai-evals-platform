@@ -5,7 +5,7 @@ export type EvaluatorFieldType = 'number' | 'text' | 'boolean' | 'array' | 'enum
 export type EvaluatorDisplayMode = 'header' | 'card' | 'hidden';
 export type ArrayItemType = 'string' | 'number' | 'boolean' | 'object';
 export type FieldRole = 'metric' | 'reasoning' | 'detail';
-export type EvaluatorVisibilityFilter = 'all' | 'mine' | 'shared' | 'registry';
+export type EvaluatorVisibilityFilter = 'all' | 'private' | 'shared';
 
 export interface EvaluatorThresholds {
   green: number;  // Value >= green is good (green)
@@ -49,16 +49,10 @@ export interface EvaluatorDefinition {
   appId: string;                  // 'voice-rx' | 'kaira-bot'
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
   visibility?: AssetVisibility;   // Sharing scope
-  /** @deprecated Use visibility === 'shared' instead */
-  isGlobal?: boolean;
-  /** @deprecated Derive from visibility + system ownership */
-  isBuiltIn?: boolean;
   forkedFrom?: string;            // Source evaluator ID if forked (lineage tracking)
   sharedBy?: string | null;
   sharedAt?: string | null;
   linkedRuleIds?: string[];
-  /** @deprecated Derive from outputSchema isMainMetric field */
-  showInHeader?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

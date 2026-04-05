@@ -196,7 +196,7 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
         modelId: '',
         outputSchema,
         appId: 'inside-sales',
-        isGlobal: false,
+        visibility: 'private',
         createdAt: new Date(),
         updatedAt: new Date(),
       });

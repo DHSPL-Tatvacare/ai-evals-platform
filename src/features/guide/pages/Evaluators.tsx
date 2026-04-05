@@ -167,8 +167,8 @@ function EvaluatorDetail({ evaluator }: { evaluator: SeedEvaluator }) {
     <div className="space-y-5">
       {/* Meta row */}
       <div className="flex flex-wrap gap-2 items-center">
-        {(evaluator.visibility === 'shared' || evaluator.is_global) && <Badge color="purple">shared</Badge>}
-        {evaluator.show_in_header && <Badge color="green">main metric</Badge>}
+        {evaluator.visibility === 'shared' && <Badge color="purple">shared</Badge>}
+        {mainMetric?.displayMode === 'header' && <Badge color="green">main metric</Badge>}
         {mainMetric && (
           <Badge color="blue">
             main: {mainMetric.key} ({mainMetric.type})
@@ -313,8 +313,7 @@ export default function Evaluators() {
         These evaluators are auto-seeded on backend startup from{" "}
         <code>seed_defaults.py</code>. Voice RX evaluators are created
         per-listing via <code>POST /api/evaluators/seed-defaults</code>. Kaira
-        Bot evaluators are global (available to all listings). Each can be forked
-        and customised.
+        Bot evaluators are shared across the app and can be forked and customised.
       </InfoBox>
 
       {/* Overview cards */}
@@ -337,7 +336,7 @@ export default function Evaluators() {
               className="text-xs mt-1"
               style={{ color: "var(--text-secondary)" }}
             >
-              {g.appId === "kaira-bot" ? "global" : "per-listing"} evaluators
+              {g.appId === "kaira-bot" ? "shared app-level" : "per-listing"} evaluators
             </div>
           </Card>
         ))}

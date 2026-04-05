@@ -413,8 +413,7 @@ interface RawEvaluator {
   prompt: string;
   output_schema: RawSchemaField[];
   app_id?: string;
-  is_global?: boolean;
-  show_in_header?: boolean;
+  visibility?: string;
   listing_id?: null;
 }
 
@@ -485,13 +484,12 @@ function syncEvaluators(): boolean {
   // Strip fields not needed in docs (listing_id is always null)
   for (const g of groups) {
     g.evaluators = g.evaluators.map(
-      ({ name, prompt, output_schema, app_id, is_global, show_in_header }) => ({
+      ({ name, prompt, output_schema, app_id, visibility }) => ({
         name,
         prompt,
         output_schema,
         ...(app_id != null && { app_id }),
-        ...(is_global != null && { is_global }),
-        ...(show_in_header != null && { show_in_header }),
+        ...(visibility != null && { visibility }),
       }),
     );
   }
@@ -524,8 +522,7 @@ export interface SeedEvaluator {
   prompt: string;
   output_schema: EvaluatorSchemaField[];
   app_id?: string;
-  is_global?: boolean;
-  show_in_header?: boolean;
+  visibility?: string;
 }
 
 export interface EvaluatorGroup {

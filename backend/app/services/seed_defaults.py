@@ -738,9 +738,8 @@ INSIDE_SALES_EVALUATORS = [
     {
         "app_id": "inside-sales",
         "name": "GoodFlip Sales Call QA",
-        "is_global": True,
+        "visibility": "shared",
         "listing_id": None,
-        "show_in_header": True,
         "prompt": """You are an expert sales call quality evaluator for GoodFlip, a metabolic health program by TatvaCare. Evaluate the following sales call transcript against the GoodFlip QA rubric.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -869,9 +868,8 @@ KAIRA_BOT_EVALUATORS = [
     {
         "app_id": "kaira-bot",
         "name": "Chat Quality Analysis",
-        "is_global": True,
+        "visibility": "shared",
         "listing_id": None,
-        "show_in_header": True,
         "prompt": """You are a health chat evaluation expert. Analyze this Kaira Bot conversation for quality, accuracy, and helpfulness.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -975,9 +973,8 @@ Output structure is controlled by the schema - just provide the data.""",
     {
         "app_id": "kaira-bot",
         "name": "Health Accuracy Checker",
-        "is_global": True,
+        "visibility": "shared",
         "listing_id": None,
-        "show_in_header": False,
         "prompt": """You are a medical content reviewer evaluating Kaira Bot's health advice for accuracy.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -1051,9 +1048,8 @@ Output structure is controlled by the schema - just provide the data.""",
     {
         "app_id": "kaira-bot",
         "name": "Empathy Assessment",
-        "is_global": True,
+        "visibility": "shared",
         "listing_id": None,
-        "show_in_header": False,
         "prompt": """You are an empathy assessment specialist evaluating Kaira Bot's emotional intelligence in health conversations.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -1148,9 +1144,8 @@ Output structure is controlled by the schema - just provide the data.""",
     {
         "app_id": "kaira-bot",
         "name": "Risk Detection",
-        "is_global": True,
+        "visibility": "shared",
         "listing_id": None,
-        "show_in_header": True,
         "prompt": """You are a health chat safety auditor identifying potentially harmful content in Kaira Bot conversations.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -2662,7 +2657,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
             db_eval = existing.get(e_data["name"])
             if db_eval:
                 db_eval.output_schema = e_data["output_schema"]
-                db_eval.visibility = Visibility.SHARED if e_data.get("is_global", True) else Visibility.PRIVATE
+                db_eval.visibility = Visibility.normalize(e_data.get("visibility")) or Visibility.SHARED
                 updated += 1
         await session.flush()
         logger.info("Updated output_schema for %d existing kaira-bot evaluators", updated)
@@ -2672,8 +2667,8 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         for e_data in KAIRA_BOT_EVALUATORS:
             if e_data["name"] in new_names:
                 session.add(Evaluator(**{
-                    **{k: v for k, v in e_data.items() if k not in {"is_global", "show_in_header"}},
-                    "visibility": Visibility.SHARED if e_data.get("is_global", True) else Visibility.PRIVATE,
+                    **{k: v for k, v in e_data.items() if k != "visibility"},
+                    "visibility": Visibility.normalize(e_data.get("visibility")) or Visibility.SHARED,
                     "tenant_id": SYSTEM_TENANT_ID,
                     "user_id": SYSTEM_USER_ID,
                 }))
@@ -2684,8 +2679,8 @@ async def _seed_evaluators(session: AsyncSession) -> None:
 
     for e in KAIRA_BOT_EVALUATORS:
         session.add(Evaluator(**{
-            **{k: v for k, v in e.items() if k not in {"is_global", "show_in_header"}},
-            "visibility": Visibility.SHARED if e.get("is_global", True) else Visibility.PRIVATE,
+            **{k: v for k, v in e.items() if k != "visibility"},
+            "visibility": Visibility.normalize(e.get("visibility")) or Visibility.SHARED,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
         }))

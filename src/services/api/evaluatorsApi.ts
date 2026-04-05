@@ -31,9 +31,6 @@ interface ApiEvaluator {
   linkedRuleIds?: string[];
   sharedBy?: string | null;
   sharedAt?: string | null;
-  isGlobal?: boolean;
-  isBuiltIn?: boolean;
-  showInHeader?: boolean;
   forkedFrom?: string;
   createdAt: string;
   updatedAt: string;
@@ -45,9 +42,6 @@ export interface EvaluatorListOptions {
 }
 
 function normalizeVisibilityFilter(filter: EvaluatorVisibilityFilter = 'all'): string | undefined {
-  if (filter === 'registry') {
-    return 'shared';
-  }
   return filter === 'all' ? undefined : filter;
 }
 
@@ -65,9 +59,6 @@ function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
     modelId: e.modelId,
     outputSchema: e.outputSchema as EvaluatorDefinition['outputSchema'],
     visibility: normalizeAssetVisibility(e.visibility),
-    isGlobal: e.isGlobal ?? normalizeAssetVisibility(e.visibility) === 'shared',
-    isBuiltIn: e.isBuiltIn,
-    showInHeader: e.showInHeader,
     forkedFrom: e.forkedFrom,
     sharedBy: e.sharedBy,
     sharedAt: e.sharedAt,
@@ -84,10 +75,10 @@ export function filterEvaluatorsByVisibility(
   if (filter === 'all') {
     return evaluators;
   }
-  if (filter === 'mine') {
+  if (filter === 'private') {
     return evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === 'private');
   }
-  if (filter === 'shared' || filter === 'registry') {
+  if (filter === 'shared') {
     return evaluators.filter((evaluator) => (evaluator.visibility ?? 'private') === 'shared');
   }
   return evaluators;
@@ -152,12 +143,8 @@ export const evaluatorsRepository = {
     return this.list(appId, { listingId });
   },
 
-  async getRegistry(appId: string): Promise<EvaluatorDefinition[]> {
-    return this.list(appId, { filter: 'registry' });
-  },
-
-  async getMine(appId: string): Promise<EvaluatorDefinition[]> {
-    return this.list(appId, { filter: 'mine' });
+  async getPrivate(appId: string): Promise<EvaluatorDefinition[]> {
+    return this.list(appId, { filter: 'private' });
   },
 
   async getShared(appId: string): Promise<EvaluatorDefinition[]> {
@@ -179,16 +166,6 @@ export const evaluatorsRepository = {
       body: JSON.stringify({ visibility }),
     });
     return toEvaluatorDefinition(data);
-  },
-
-  async setGlobal(id: string, isGlobal: boolean): Promise<EvaluatorDefinition> {
-    return evaluatorsRepository.setVisibility(id, isGlobal ? 'shared' : 'private');
-  },
-
-  async setBuiltIn(_id: string, _isBuiltIn: boolean): Promise<EvaluatorDefinition> {
-    void _id;
-    void _isBuiltIn;
-    throw new Error('Built-in status is managed by system defaults and cannot be changed');
   },
 
   async delete(id: string): Promise<void> {

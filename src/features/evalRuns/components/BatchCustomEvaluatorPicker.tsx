@@ -1,10 +1,10 @@
 /**
  * BatchCustomEvaluatorPicker — overlay for selecting custom evaluators to include in batch eval.
  *
- * Loads kaira-bot registry evaluators and allows multi-select with checkboxes.
+ * Loads shared kaira-bot evaluators and allows multi-select with checkboxes.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, Search, Library, Check, Eye } from 'lucide-react';
 import { Button, Input, EmptyState } from '@/components/ui';
 import { evaluatorsRepository } from '@/services/storage';
@@ -26,25 +26,21 @@ export function BatchCustomEvaluatorPicker({
   onSelectionChange,
 }: BatchCustomEvaluatorPickerProps) {
   const [search, setSearch] = useState('');
-  const [evaluators, setEvaluators] = useState<EvaluatorDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isVisible, setIsVisible] = useState(false);
-  const [localSelected, setLocalSelected] = useState<Set<string>>(new Set(selectedIds));
+  const [evaluators, setEvaluators] = useState<EvaluatorDefinition[] | null>(null);
+  const [draftSelected, setDraftSelected] = useState<Set<string> | null>(null);
   const [previewEvaluator, setPreviewEvaluator] = useState<EvaluatorDefinition | null>(null);
+  const localSelected = draftSelected ?? new Set(selectedIds);
+  const loading = isOpen && evaluators === null;
 
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => setIsVisible(true));
-      setLocalSelected(new Set(selectedIds));
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen, selectedIds]);
+  const handleClose = useCallback(() => {
+    setDraftSelected(null);
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     if (isOpen) {
       function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === 'Escape') onClose();
+        if (e.key === 'Escape') handleClose();
       }
       document.addEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'hidden';
@@ -53,25 +49,23 @@ export function BatchCustomEvaluatorPicker({
         document.body.style.overflow = 'unset';
       };
     }
-  }, [isOpen, onClose]);
+  }, [handleClose, isOpen]);
 
   useEffect(() => {
-    if (isOpen) {
-      setLoading(true);
-      evaluatorsRepository.getRegistry('kaira-bot').then(list => {
+    if (isOpen && evaluators === null) {
+      evaluatorsRepository.getShared('kaira-bot').then(list => {
         setEvaluators(list);
-        setLoading(false);
       });
     }
-  }, [isOpen]);
+  }, [evaluators, isOpen]);
 
-  const filtered = evaluators.filter(e =>
+  const filtered = (evaluators ?? []).filter(e =>
     !search || e.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const toggle = (id: string) => {
-    setLocalSelected(prev => {
-      const next = new Set(prev);
+    setDraftSelected(prev => {
+      const next = new Set(prev ?? selectedIds);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
@@ -80,6 +74,7 @@ export function BatchCustomEvaluatorPicker({
 
   const handleApply = () => {
     onSelectionChange(Array.from(localSelected));
+    setDraftSelected(null);
     onClose();
   };
 
@@ -90,7 +85,7 @@ export function BatchCustomEvaluatorPicker({
       <div
         className={cn(
           "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0"
+          "opacity-100"
         )}
       />
 
@@ -99,7 +94,7 @@ export function BatchCustomEvaluatorPicker({
           "ml-auto relative z-10 h-full w-[500px] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
           "flex flex-col",
           "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full"
+          "translate-x-0"
         )}
       >
         {/* Header */}
@@ -108,7 +103,7 @@ export function BatchCustomEvaluatorPicker({
             Custom Evaluators
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-[6px] p-1 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X className="h-5 w-5" />
@@ -127,7 +122,7 @@ export function BatchCustomEvaluatorPicker({
             />
           </div>
           <p className="text-xs text-[var(--text-muted)] mt-2">
-            Select custom evaluators from the registry to run alongside default evaluators.
+            Select shared custom evaluators to run alongside default evaluators.
           </p>
         </div>
 
@@ -140,11 +135,11 @@ export function BatchCustomEvaluatorPicker({
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={search ? Search : Library}
-              title={search ? 'No matching evaluators' : 'No registry evaluators'}
+              title={search ? 'No matching evaluators' : 'No shared evaluators'}
               description={
                 search
                   ? 'Try a different search term.'
-                  : 'Create evaluators in the Kaira Bot Evaluators tab and add them to the registry first.'
+                  : 'Create an evaluator in the Kaira Bot Evaluators tab and share it to use it here.'
               }
               className="w-full"
             />
@@ -211,7 +206,7 @@ export function BatchCustomEvaluatorPicker({
             {localSelected.size} selected
           </span>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button variant="secondary" onClick={handleClose}>Cancel</Button>
             <Button onClick={handleApply}>Apply</Button>
           </div>
         </div>

@@ -9,6 +9,7 @@ import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore, LLM_PROVIDERS } from '@/stores';
 import { usePermission } from '@/utils/permissions';
+import { evaluatorShowsInHeader, getEvaluatorMainMetricField, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
 import { CreateEvaluatorWizard } from './CreateEvaluatorWizard';
 import { EvaluatorsTable } from './EvaluatorsTable';
 import type {
@@ -104,20 +105,24 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
     const nextVisibility = evaluator.visibility === 'shared' ? 'private' : 'shared';
     await setVisibility(evaluator.id, nextVisibility);
     notificationService.success(
-      nextVisibility === 'shared'
-        ? 'Evaluator shared'
-        : 'Evaluator moved to private library',
+      nextVisibility === 'shared' ? 'Evaluator shared' : 'Evaluator made private',
     );
   };
 
   const handleToggleHeader = async (evaluator: EvaluatorDefinition) => {
+    if (!getEvaluatorMainMetricField(evaluator)) {
+      notificationService.error('Select a main metric before changing header visibility');
+      return;
+    }
+
+    const nextShowInHeader = !evaluatorShowsInHeader(evaluator);
     await updateEvaluator({
       ...evaluator,
-      showInHeader: !evaluator.showInHeader,
+      outputSchema: setEvaluatorHeaderVisibility(evaluator.outputSchema, nextShowInHeader),
       updatedAt: new Date(),
     });
     notificationService.success(
-      evaluator.showInHeader ? 'Evaluator removed from header' : 'Evaluator added to header',
+      nextShowInHeader ? 'Evaluator added to header' : 'Evaluator removed from header',
     );
   };
 

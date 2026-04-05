@@ -4,6 +4,7 @@ import { Button, EmptyState, RoleBadge, VisibilityBadge } from '@/components/ui'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
+import { evaluatorShowsInHeader } from '@/features/evals/utils/evaluatorMetadata';
 import { EvaluatorExpandRow } from './EvaluatorExpandRow';
 import type { EvalRun, EvaluatorDefinition, EvaluatorVisibilityFilter, RuleCatalogEntry } from '@/types';
 
@@ -31,7 +32,7 @@ interface EvaluatorsTableProps {
   canCreate?: boolean;
 }
 
-const FILTER_OPTIONS: EvaluatorVisibilityFilter[] = ['all', 'shared', 'mine'];
+const FILTER_OPTIONS: EvaluatorVisibilityFilter[] = ['all', 'shared', 'private'];
 
 export function EvaluatorsTable({
   evaluators,
@@ -84,7 +85,7 @@ export function EvaluatorsTable({
 
   const emptyDescription = filter === 'shared'
     ? 'No shared evaluators are available yet.'
-    : filter === 'mine'
+    : filter === 'private'
       ? 'You have not created any private evaluators yet.'
       : 'No evaluators are available yet.';
 
@@ -119,7 +120,7 @@ export function EvaluatorsTable({
                 : 'text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
             )}
           >
-            {option === 'all' ? 'All' : option === 'shared' ? 'Shared' : 'Mine'}
+            {option === 'all' ? 'All' : option === 'shared' ? 'Shared' : 'Private'}
           </button>
         ))}
       </div>
@@ -185,7 +186,7 @@ export function EvaluatorsTable({
                             ) : (
                               <p className="font-medium text-[var(--text-primary)]">{evaluator.name}</p>
                             )}
-                            {evaluator.showInHeader ? <RoleBadge role="metric" /> : null}
+                            {evaluatorShowsInHeader(evaluator) ? <RoleBadge role="metric" /> : null}
                           </div>
                           <p className="mt-1 max-w-[360px] truncate text-xs text-[var(--text-secondary)]">
                             {evaluator.prompt}
@@ -288,7 +289,7 @@ export function EvaluatorsTable({
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
                                 >
-                                  {evaluator.showInHeader ? 'Remove from Header' : 'Show in Header'}
+                                  {evaluatorShowsInHeader(evaluator) ? 'Remove from Header' : 'Show in Header'}
                                 </button>
                               ) : null}
                               {isOwned ? (
