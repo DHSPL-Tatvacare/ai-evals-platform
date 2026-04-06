@@ -51,7 +51,7 @@ export function VariablePickerPopover({
             ? evaluatorsRepository.getVariables(effectiveAppId, sourceType)
             : Promise.resolve([]),
           listingId && sourceType === 'api' && appConfig.evaluator.dynamicVariableSources.listingApiPaths
-            ? evaluatorsRepository.getApiPaths(listingId)
+            ? evaluatorsRepository.getApiPaths(effectiveAppId, listingId)
             : Promise.resolve([]),
         ]);
         if (!cancelled) {

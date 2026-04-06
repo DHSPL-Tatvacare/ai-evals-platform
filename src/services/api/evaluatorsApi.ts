@@ -9,6 +9,7 @@ import type {
   EvaluatorVisibilityFilter,
   PromptValidation,
   VariableInfo,
+  AppId,
 } from '@/types';
 import { normalizeAssetVisibility } from '@/types/settings.types';
 import type { AssetVisibility, LegacyAssetVisibility } from '@/types/settings.types';
@@ -68,6 +69,11 @@ function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
   };
 }
 
+function withAccessAppId(path: string, appId: string): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}app_id=${encodeURIComponent(appId)}`;
+}
+
 export function filterEvaluatorsByVisibility(
   evaluators: EvaluatorDefinition[],
   filter: EvaluatorVisibilityFilter = 'all',
@@ -113,9 +119,9 @@ export const evaluatorsRepository = {
     return toEvaluatorDefinition(data);
   },
 
-  async getById(id: string): Promise<EvaluatorDefinition | undefined> {
+  async getById(appId: string, id: string): Promise<EvaluatorDefinition | undefined> {
     try {
-      const data = await apiRequest<ApiEvaluator>(`/api/evaluators/${id}`);
+      const data = await apiRequest<ApiEvaluator>(withAccessAppId(`/api/evaluators/${id}`, appId));
       return toEvaluatorDefinition(data);
     } catch {
       return undefined;
@@ -151,25 +157,28 @@ export const evaluatorsRepository = {
     return this.list(appId, { filter: 'shared' });
   },
 
-  async fork(sourceId: string, targetListingId?: string): Promise<EvaluatorDefinition> {
-    const params = targetListingId ? `?listing_id=${targetListingId}` : '';
+  async fork(appId: string, sourceId: string, targetListingId?: string): Promise<EvaluatorDefinition> {
+    const params = new URLSearchParams({ app_id: appId });
+    if (targetListingId) {
+      params.set('listing_id', targetListingId);
+    }
     const data = await apiRequest<ApiEvaluator>(
-      `/api/evaluators/${sourceId}/fork${params}`,
+      `/api/evaluators/${sourceId}/fork?${params.toString()}`,
       { method: 'POST' }
     );
     return toEvaluatorDefinition(data);
   },
 
-  async setVisibility(id: string, visibility: AssetVisibility): Promise<EvaluatorDefinition> {
-    const data = await apiRequest<ApiEvaluator>(`/api/evaluators/${id}/visibility`, {
+  async setVisibility(appId: string, id: string, visibility: AssetVisibility): Promise<EvaluatorDefinition> {
+    const data = await apiRequest<ApiEvaluator>(withAccessAppId(`/api/evaluators/${id}/visibility`, appId), {
       method: 'PATCH',
       body: JSON.stringify({ visibility }),
     });
     return toEvaluatorDefinition(data);
   },
 
-  async delete(id: string): Promise<void> {
-    await apiRequest(`/api/evaluators/${id}`, {
+  async delete(appId: string, id: string): Promise<void> {
+    await apiRequest(withAccessAppId(`/api/evaluators/${id}`, appId), {
       method: 'DELETE',
     });
   },
@@ -192,9 +201,9 @@ export const evaluatorsRepository = {
   },
 
   /** Create recommended seed evaluators for a voice-rx listing. */
-  async seedDefaults(listingId: string): Promise<EvaluatorDefinition[]> {
+  async seedDefaults(appId: AppId, listingId: string): Promise<EvaluatorDefinition[]> {
     const data = await apiRequest<ApiEvaluator[]>(
-      `/api/evaluators/seed-defaults?appId=voice-rx&listingId=${listingId}`,
+      `/api/evaluators/seed-defaults?appId=${encodeURIComponent(appId)}&listingId=${encodeURIComponent(listingId)}`,
       { method: 'POST' },
     );
     return data.map(toEvaluatorDefinition);
@@ -210,7 +219,7 @@ export const evaluatorsRepository = {
   },
 
   /** Extract available API response variable paths for a listing. */
-  async getApiPaths(listingId: string): Promise<string[]> {
-    return apiRequest<string[]>(`/api/evaluators/variables/api-paths?listingId=${listingId}`);
+  async getApiPaths(appId: string, listingId: string): Promise<string[]> {
+    return apiRequest<string[]>(`/api/evaluators/variables/api-paths?app_id=${encodeURIComponent(appId)}&listingId=${encodeURIComponent(listingId)}`);
   },
 };

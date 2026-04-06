@@ -1,5 +1,7 @@
 """Helpers for app-registry validation and app-access enforcement."""
 
+import json
+import re
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
@@ -16,6 +18,53 @@ if TYPE_CHECKING:
 def normalize_app_slug(app_slug: str | None) -> str | None:
     normalized = (app_slug or '').strip()
     return normalized or None
+
+
+def _to_snake_case(param_name: str) -> str:
+    normalized = re.sub(r'(?<!^)(?=[A-Z])', '_', param_name)
+    return normalized.replace('-', '_').lower()
+
+
+def _to_camel_case(param_name: str) -> str:
+    parts = _to_snake_case(param_name).split('_')
+    return parts[0] + ''.join(part.capitalize() for part in parts[1:])
+
+
+def candidate_param_names(param_name: str) -> tuple[str, ...]:
+    candidates: list[str] = []
+    for candidate in (param_name, _to_snake_case(param_name), _to_camel_case(param_name)):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+async def extract_app_slug_from_request(request: Request, param_name: str) -> str | None:
+    for candidate in candidate_param_names(param_name):
+        value = request.query_params.get(candidate) or request.path_params.get(candidate)
+        normalized = normalize_app_slug(value)
+        if normalized is not None:
+            return normalized
+
+    content_type = request.headers.get('content-type', '')
+    if 'application/json' not in content_type:
+        return None
+
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, RuntimeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    for candidate in candidate_param_names(param_name):
+        value = payload.get(candidate)
+        if isinstance(value, str):
+            normalized = normalize_app_slug(value)
+            if normalized is not None:
+                return normalized
+
+    return None
 
 
 async def load_active_app_map(db: AsyncSession) -> dict[str, App]:
@@ -73,10 +122,7 @@ def require_registered_app_access(app_id_param: str = 'app_id'):
         auth: AuthContext = Depends(get_auth_context),
         db: AsyncSession = Depends(get_db),
     ) -> AuthContext:
-        app_slug = (
-            request.query_params.get(app_id_param)
-            or request.path_params.get(app_id_param)
-        )
+        app_slug = await extract_app_slug_from_request(request, app_id_param)
         await ensure_registered_app_access(
             db,
             auth,

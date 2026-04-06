@@ -64,6 +64,11 @@ function toSchemaDefinition(s: ApiSchema): SchemaDefinition {
   };
 }
 
+function withAppAccess(path: string, appId: AppId): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}app_id=${encodeURIComponent(appId)}`;
+}
+
 export function filterSchemasByVisibility(
   schemas: SchemaDefinition[],
   visibility?: AssetVisibility,
@@ -99,9 +104,9 @@ export const schemasRepository = {
     return filterSchemasByVisibility(schemas, opts.visibility);
   },
 
-  async getById(_appId: AppId, id: string): Promise<SchemaDefinition | null> {
+  async getById(appId: AppId, id: string): Promise<SchemaDefinition | null> {
     try {
-      const data = await apiRequest<ApiSchema>(`/api/schemas/${id}`);
+      const data = await apiRequest<ApiSchema>(withAppAccess(`/api/schemas/${id}`, appId));
       return toSchemaDefinition(data);
     } catch {
       return null;
@@ -146,10 +151,11 @@ export const schemasRepository = {
   },
 
   async updateMetadata(
+    appId: AppId,
     schemaId: string,
     updates: Pick<SchemaDefinition, 'name' | 'description'>,
   ): Promise<SchemaDefinition> {
-    const data = await apiRequest<ApiSchema>(`/api/schemas/${schemaId}`, {
+    const data = await apiRequest<ApiSchema>(withAppAccess(`/api/schemas/${schemaId}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         name: updates.name,
@@ -167,7 +173,7 @@ export const schemasRepository = {
   },
 
   async delete(_appId: AppId, id: string): Promise<void> {
-    await apiRequest(`/api/schemas/${id}`, {
+    await apiRequest(withAppAccess(`/api/schemas/${id}`, _appId), {
       method: 'DELETE',
     });
   },
@@ -179,15 +185,15 @@ export const schemasRepository = {
     });
   },
 
-  async fork(schemaId: string): Promise<SchemaDefinition> {
-    const data = await apiRequest<ApiSchema>(`/api/schemas/${schemaId}/fork`, {
+  async fork(appId: AppId, schemaId: string): Promise<SchemaDefinition> {
+    const data = await apiRequest<ApiSchema>(withAppAccess(`/api/schemas/${schemaId}/fork`, appId), {
       method: 'POST',
     });
     return toSchemaDefinition(data);
   },
 
-  async patchVisibility(schemaId: string, visibility: AssetVisibility): Promise<SchemaDefinition> {
-    const data = await apiRequest<ApiSchema>(`/api/schemas/${schemaId}/visibility`, {
+  async patchVisibility(appId: AppId, schemaId: string, visibility: AssetVisibility): Promise<SchemaDefinition> {
+    const data = await apiRequest<ApiSchema>(withAppAccess(`/api/schemas/${schemaId}/visibility`, appId), {
       method: 'PATCH',
       body: JSON.stringify({ visibility }),
     });

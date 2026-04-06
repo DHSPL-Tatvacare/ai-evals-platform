@@ -22,19 +22,22 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
+  Tooltip,
 } from "@/components/ui";
 import {
   useUIStore,
   useAppStore,
+  useAppSettingsStore,
   useChatStore,
   useKairaBotSettings,
 } from "@/stores";
 import { useAuthStore } from "@/stores/authStore";
-import { useCurrentAppMetadata } from "@/hooks";
+import { useCurrentAppConfig, useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from "@/utils/permissions";
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
+import { evaluateActionAvailability } from "@/utils/actionAvailability";
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
@@ -49,8 +52,10 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const appId = useAppStore((state) => state.currentApp);
+  const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
+  const appSettings = useAppSettingsStore((state) => state.settings[appId]);
 
   // Kaira chat specific
   const { createSession, isCreatingSession, isStreaming } = useChatStore();
@@ -85,8 +90,22 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Disable new button when creating session or streaming
-  const isNewButtonDisabled =
-    isKairaBot && (!kairaChatUserId || isCreatingSession || isStreaming);
+  const newActionAvailability = evaluateActionAvailability({
+    appId,
+    action: appConfig.actions.primaryNew,
+    sources: {
+      appSettings,
+    },
+    runtimeBlockers: [
+      {
+        key: 'action-in-progress',
+        isActive: isKairaBot && (isCreatingSession || isStreaming),
+        title: `${appMetadata.newItemLabel} is temporarily unavailable`,
+        description: 'Wait for the current action to finish, then try again.',
+      },
+    ],
+  });
+  const isNewButtonDisabled = newActionAvailability.disabled;
 
   // Handle new button click - different behavior for Kaira vs Voice Rx
   const handleNewClick = useCallback(async () => {
@@ -119,6 +138,34 @@ export function Sidebar({ onNewEval }: SidebarProps) {
     onNewEval,
   ]);
 
+  const newActionTooltip = isNewButtonDisabled && newActionAvailability.blockers.length > 0 ? (
+    <div className="space-y-2">
+      <div className="font-medium text-[var(--text-primary)]">
+        {appMetadata.newItemLabel} is unavailable
+      </div>
+      <div className="space-y-1.5">
+        {newActionAvailability.blockers.map((blocker) => (
+          <div key={blocker.key} className="space-y-0.5">
+            <div className="font-medium text-[var(--text-primary)]">{blocker.title}</div>
+            <div className="text-[var(--text-secondary)]">{blocker.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  const renderNewActionButton = (button: React.ReactNode, position: 'bottom' | 'right') => {
+    if (!newActionTooltip) {
+      return button;
+    }
+
+    return (
+      <Tooltip content={newActionTooltip} position={position} maxWidth={320}>
+        <span className="inline-flex">{button}</span>
+      </Tooltip>
+    );
+  };
+
   // Collapsed sidebar
   if (sidebarCollapsed) {
     return (
@@ -134,40 +181,54 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         </div>
         <div className="flex-1 flex flex-col items-center py-3 gap-2">
           {!isInsideSales && (isKairaBot ? (
-            <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  size="sm"
-                  disabled={isNewButtonDisabled}
-                  className="h-9 w-9 p-0"
-                  title="New"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="right"
-                align="start"
-                className="w-[220px] p-1"
+            isNewButtonDisabled ? renderNewActionButton(
+              <Button
+                size="sm"
+                disabled
+                className="h-9 w-9 p-0"
+                title={appMetadata.newItemLabel}
               >
-                <KairaNewMenu
-                  onNewChat={handleNewClick}
-                  onBatchEval={() => openModal("batchEval")}
-                  onAdversarialTest={() => openModal("adversarialTest")}
-                  onClose={() => setNewMenuOpen(false)}
-                />
-              </PopoverContent>
-            </Popover>
+                <Plus className="h-4 w-4" />
+              </Button>,
+              'right',
+            ) : (
+              <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    title={appMetadata.newItemLabel}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="right"
+                  align="start"
+                  className="w-[220px] p-1"
+                >
+                  <KairaNewMenu
+                    onNewChat={handleNewClick}
+                    onBatchEval={() => openModal("batchEval")}
+                    onAdversarialTest={() => openModal("adversarialTest")}
+                    onClose={() => setNewMenuOpen(false)}
+                  />
+                </PopoverContent>
+              </Popover>
+            )
           ) : (
-            <Button
-              size="sm"
-              onClick={handleNewClick}
-              disabled={isNewButtonDisabled}
-              className="h-9 w-9 p-0"
-              title="New evaluation"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+            renderNewActionButton(
+              <Button
+                size="sm"
+                onClick={handleNewClick}
+                disabled={isNewButtonDisabled}
+                className="h-9 w-9 p-0"
+                title={appMetadata.newItemLabel}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>,
+              'right',
+            )
           ))}
 
           <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
@@ -306,40 +367,54 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         <AppSwitcher />
         <div className="flex items-center gap-1">
           {!isInsideSales && (isKairaBot ? (
-            <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  size="sm"
-                  disabled={isNewButtonDisabled}
-                  isLoading={isCreatingSession}
-                >
-                  <Plus className="h-4 w-4" />
-                  New
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="bottom"
-                align="end"
-                className="w-[260px] p-1"
+            isNewButtonDisabled ? renderNewActionButton(
+              <Button
+                size="sm"
+                disabled
+                isLoading={isCreatingSession}
               >
-                <KairaNewMenu
-                  onNewChat={handleNewClick}
-                  onBatchEval={() => openModal("batchEval")}
-                  onAdversarialTest={() => openModal("adversarialTest")}
-                  onClose={() => setNewMenuOpen(false)}
-                />
-              </PopoverContent>
-            </Popover>
+                <Plus className="h-4 w-4" />
+                New
+              </Button>,
+              'bottom',
+            ) : (
+              <Popover open={newMenuOpen} onOpenChange={setNewMenuOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="sm"
+                    isLoading={isCreatingSession}
+                  >
+                    <Plus className="h-4 w-4" />
+                    New
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="bottom"
+                  align="end"
+                  className="w-[260px] p-1"
+                >
+                  <KairaNewMenu
+                    onNewChat={handleNewClick}
+                    onBatchEval={() => openModal("batchEval")}
+                    onAdversarialTest={() => openModal("adversarialTest")}
+                    onClose={() => setNewMenuOpen(false)}
+                  />
+                </PopoverContent>
+              </Popover>
+            )
           ) : (
-            <Button
-              size="sm"
-              onClick={handleNewClick}
-              disabled={isNewButtonDisabled}
-              isLoading={isCreatingSession}
-            >
-              <Plus className="h-4 w-4" />
-              New
-            </Button>
+            renderNewActionButton(
+              <Button
+                size="sm"
+                onClick={handleNewClick}
+                disabled={isNewButtonDisabled}
+                isLoading={isCreatingSession}
+              >
+                <Plus className="h-4 w-4" />
+                New
+              </Button>,
+              'bottom',
+            )
           ))}
           <button
             onClick={toggleSidebar}

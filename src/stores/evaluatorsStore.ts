@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AssetVisibility, EvaluatorDefinition, EvaluatorVisibilityFilter } from '@/types';
+import type { AppId, AssetVisibility, EvaluatorDefinition, EvaluatorVisibilityFilter } from '@/types';
 import { evaluatorsRepository } from '@/services/storage';
 import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 
@@ -103,29 +103,44 @@ export const useEvaluatorsStore = create<EvaluatorsStore>((set, get) => ({
   },
   
   deleteEvaluator: async (id: string) => {
-    await evaluatorsRepository.delete(id);
+    const { currentAppId } = get();
+    if (!currentAppId) {
+      throw new Error('No current app selected');
+    }
+    await evaluatorsRepository.delete(currentAppId, id);
     set((state) => ({
       evaluators: removeById(state.evaluators, id),
     }));
   },
 
   setVisibility: async (id: string, visibility: AssetVisibility) => {
-    const updated = await evaluatorsRepository.setVisibility(id, visibility);
+    const { currentAppId } = get();
+    if (!currentAppId) {
+      throw new Error('No current app selected');
+    }
+    const updated = await evaluatorsRepository.setVisibility(currentAppId, id, visibility);
     set((state) => ({
       evaluators: replaceById(state.evaluators, updated),
     }));
   },
   
   forkEvaluator: async (sourceId: string, targetListingId?: string) => {
-    const forked = await evaluatorsRepository.fork(sourceId, targetListingId);
+    const { currentAppId } = get();
+    if (!currentAppId) {
+      throw new Error('No current app selected');
+    }
+    const forked = await evaluatorsRepository.fork(currentAppId, sourceId, targetListingId);
     set((state) => upsertEvaluatorState(state, forked));
     return forked;
   },
 
   seedDefaults: async (listingId: string) => {
-    const seeded = await evaluatorsRepository.seedDefaults(listingId);
-    // Reload from list endpoint to get properly annotated data (owner names)
     const { currentAppId } = get();
+    if (!currentAppId) {
+      throw new Error('No current app selected');
+    }
+    const seeded = await evaluatorsRepository.seedDefaults(currentAppId as AppId, listingId);
+    // Reload from list endpoint to get properly annotated data (owner names)
     if (currentAppId) {
       const evaluators = await evaluatorsRepository.getForListing(currentAppId, listingId);
       set({ evaluators, isLoaded: true, currentListingId: listingId, currentAppId });

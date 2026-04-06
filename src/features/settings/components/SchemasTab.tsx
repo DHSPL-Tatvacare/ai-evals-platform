@@ -181,7 +181,7 @@ export function SchemasTab() {
 
   const handleForkSchema = useCallback(async (schema: SchemaDefinition) => {
     try {
-      await schemasRepository.fork(String(schema.id));
+      await schemasRepository.fork(appId, String(schema.id));
       loadSchemasAction(appId);
     } catch (err) {
       console.error('Failed to fork schema:', err);
@@ -191,7 +191,7 @@ export function SchemasTab() {
   const handleToggleVisibility = useCallback(async (schema: SchemaDefinition) => {
     const newVisibility = schema.visibility === 'shared' ? 'private' : 'shared';
     try {
-      await schemasRepository.patchVisibility(String(schema.id), newVisibility);
+      await schemasRepository.patchVisibility(appId, String(schema.id), newVisibility);
       loadSchemasAction(appId);
     } catch (err) {
       console.error('Failed to change visibility:', err);

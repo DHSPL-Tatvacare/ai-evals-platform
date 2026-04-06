@@ -3,7 +3,7 @@
  * Settings unique to each app
  */
 
-import type { SettingDefinition } from '@/types';
+import type { AppId, SettingDefinition } from '@/types';
 import { SCRIPTS } from '@/constants/scripts';
 
 // Build script options from registry: "auto" + all named scripts + "original"
@@ -148,4 +148,18 @@ export function getVoiceRxSettingsByCategory(category: string): SettingDefinitio
 
 export function getKairaBotSettingsByCategory(category: string): SettingDefinition[] {
   return kairaBotSettingsSchema.filter((s) => s.category === category);
+}
+
+const appSettingsSchemaByApp: Record<AppId, SettingDefinition[]> = {
+  'voice-rx': voiceRxSettingsSchema,
+  'kaira-bot': kairaBotSettingsSchema,
+  'inside-sales': [],
+};
+
+export function getAppSettingsSchema(appId: AppId): SettingDefinition[] {
+  return appSettingsSchemaByApp[appId] ?? [];
+}
+
+export function getAppSettingDefinition(appId: AppId, key: string): SettingDefinition | undefined {
+  return getAppSettingsSchema(appId).find((setting) => setting.key === key);
 }

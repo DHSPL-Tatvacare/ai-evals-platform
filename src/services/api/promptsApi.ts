@@ -61,6 +61,11 @@ function toPromptDefinition(p: ApiPrompt): PromptDefinition {
   };
 }
 
+function withAppAccess(path: string, appId: AppId): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}app_id=${encodeURIComponent(appId)}`;
+}
+
 export function filterPromptsByVisibility(
   prompts: PromptDefinition[],
   visibility?: AssetVisibility,
@@ -96,9 +101,9 @@ export const promptsRepository = {
     return filterPromptsByVisibility(prompts, opts.visibility);
   },
 
-  async getById(_appId: AppId, id: string): Promise<PromptDefinition | null> {
+  async getById(appId: AppId, id: string): Promise<PromptDefinition | null> {
     try {
-      const data = await apiRequest<ApiPrompt>(`/api/prompts/${id}`);
+      const data = await apiRequest<ApiPrompt>(withAppAccess(`/api/prompts/${id}`, appId));
       return toPromptDefinition(data);
     } catch {
       return null;
@@ -143,10 +148,11 @@ export const promptsRepository = {
   },
 
   async updateMetadata(
+    appId: AppId,
     promptId: string,
     updates: Pick<PromptDefinition, 'name' | 'description'>,
   ): Promise<PromptDefinition> {
-    const data = await apiRequest<ApiPrompt>(`/api/prompts/${promptId}`, {
+    const data = await apiRequest<ApiPrompt>(withAppAccess(`/api/prompts/${promptId}`, appId), {
       method: 'PUT',
       body: JSON.stringify({
         name: updates.name,
@@ -164,20 +170,20 @@ export const promptsRepository = {
   },
 
   async delete(_appId: AppId, id: string): Promise<void> {
-    await apiRequest(`/api/prompts/${id}`, {
+    await apiRequest(withAppAccess(`/api/prompts/${id}`, _appId), {
       method: 'DELETE',
     });
   },
 
-  async fork(promptId: string): Promise<PromptDefinition> {
-    const data = await apiRequest<ApiPrompt>(`/api/prompts/${promptId}/fork`, {
+  async fork(appId: AppId, promptId: string): Promise<PromptDefinition> {
+    const data = await apiRequest<ApiPrompt>(withAppAccess(`/api/prompts/${promptId}/fork`, appId), {
       method: 'POST',
     });
     return toPromptDefinition(data);
   },
 
-  async patchVisibility(promptId: string, visibility: AssetVisibility): Promise<PromptDefinition> {
-    const data = await apiRequest<ApiPrompt>(`/api/prompts/${promptId}/visibility`, {
+  async patchVisibility(appId: AppId, promptId: string, visibility: AssetVisibility): Promise<PromptDefinition> {
+    const data = await apiRequest<ApiPrompt>(withAppAccess(`/api/prompts/${promptId}/visibility`, appId), {
       method: 'PATCH',
       body: JSON.stringify({ visibility }),
     });

@@ -185,7 +185,7 @@ export function PromptsTab() {
 
   const handleForkPrompt = useCallback(async (prompt: PromptDefinition) => {
     try {
-      await promptsRepository.fork(String(prompt.id));
+      await promptsRepository.fork(appId, String(prompt.id));
       loadPromptsAction(appId);
     } catch (err) {
       console.error('Failed to fork prompt:', err);
@@ -195,7 +195,7 @@ export function PromptsTab() {
   const handleToggleVisibility = useCallback(async (prompt: PromptDefinition) => {
     const newVisibility = prompt.visibility === 'shared' ? 'private' : 'shared';
     try {
-      await promptsRepository.patchVisibility(String(prompt.id), newVisibility);
+      await promptsRepository.patchVisibility(appId, String(prompt.id), newVisibility);
       loadPromptsAction(appId);
     } catch (err) {
       console.error('Failed to change visibility:', err);

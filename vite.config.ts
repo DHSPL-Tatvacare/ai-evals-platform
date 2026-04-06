@@ -12,6 +12,8 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
+    // Dev server only: lets local ngrok URLs reach Vite without affecting production builds.
+    allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://localhost:8721',

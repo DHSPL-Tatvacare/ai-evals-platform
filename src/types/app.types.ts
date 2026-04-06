@@ -100,6 +100,24 @@ export interface AppNavigationConfig {
   threadDetailPath: string | null;
 }
 
+export type AppActionRequirementSource = 'appSettings' | 'globalSettings' | 'llmSettings';
+export type AppActionRequirementValidation = 'nonEmpty' | 'truthy';
+
+export interface AppActionRequirementConfig {
+  source: AppActionRequirementSource;
+  key: string;
+  validation?: AppActionRequirementValidation;
+  label?: string;
+}
+
+export interface AppPrimaryActionConfig {
+  requirements: AppActionRequirementConfig[];
+}
+
+export interface AppActionsConfig {
+  primaryNew: AppPrimaryActionConfig;
+}
+
 export type AnalyticsSectionType =
   | 'summary_cards'
   | 'narrative'
@@ -174,6 +192,7 @@ export interface AppConfig {
   authorization: AppAuthorizationConfig;
   evalRun: AppEvalRunConfig;
   navigation: AppNavigationConfig;
+  actions: AppActionsConfig;
   analytics: AppAnalyticsConfig;
 }
 
@@ -240,6 +259,12 @@ const DEFAULT_APP_AUTHORIZATION_CONFIG: AppAuthorizationConfig = {
   },
 };
 
+const DEFAULT_APP_ACTIONS_CONFIG: AppActionsConfig = {
+  primaryNew: {
+    requirements: [],
+  },
+};
+
 export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
   'voice-rx': {
     displayName: APPS['voice-rx'].name,
@@ -288,6 +313,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runDetailPath: '/runs/:runId',
       threadDetailPath: null,
     },
+    actions: DEFAULT_APP_ACTIONS_CONFIG,
     analytics: {
       profile: 'voice_rx_v1',
       capabilities: {
@@ -395,6 +421,16 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runDetailPath: '/kaira/runs/:runId',
       threadDetailPath: '/kaira/threads/:threadId',
     },
+    actions: {
+      primaryNew: {
+        requirements: [
+          {
+            source: 'appSettings',
+            key: 'kairaChatUserId',
+          },
+        ],
+      },
+    },
     analytics: {
       profile: 'kaira_v1',
       capabilities: {
@@ -483,6 +519,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runDetailPath: '/inside-sales/runs/:runId',
       threadDetailPath: '/inside-sales/runs/:runId/calls/:threadId',
     },
+    actions: DEFAULT_APP_ACTIONS_CONFIG,
     analytics: {
       profile: 'inside_sales_v1',
       capabilities: {
@@ -604,6 +641,15 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
       ...fallback.navigation,
       ...config.navigation,
       ownedPathPrefixes: config.navigation?.ownedPathPrefixes ?? fallback.navigation.ownedPathPrefixes,
+    },
+    actions: {
+      ...fallback.actions,
+      ...config.actions,
+      primaryNew: {
+        ...fallback.actions.primaryNew,
+        ...config.actions?.primaryNew,
+        requirements: config.actions?.primaryNew?.requirements ?? fallback.actions.primaryNew.requirements,
+      },
     },
     analytics: {
       ...fallback.analytics,
