@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { usePoll } from "@/hooks";
 import { useSearchParams, useLocation, Link } from "react-router-dom";
-import { runDetailForApp, apiLogsForApp } from "@/config/routes";
+import { apiLogsForApp, inferAppIdFromPath, runDetailForApp, threadDetailForApp } from "@/config/routes";
 import { ExternalLink, X, Trash2, Tag, MessageCircle } from "lucide-react";
 import { ConfirmDialog, Badge, ModelBadge } from "@/components/ui";
 import type { ApiLogEntry } from "@/types";
@@ -42,11 +42,7 @@ interface ThreadGroup {
 
 export default function Logs() {
   const location = useLocation();
-  const appId = location.pathname.startsWith("/kaira")
-    ? "kaira-bot"
-    : location.pathname.startsWith("/inside-sales")
-    ? "inside-sales"
-    : "voice-rx";
+  const appId = inferAppIdFromPath(location.pathname) ?? "voice-rx";
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdFilter = searchParams.get("run_id") || "";
   const [logs, setLogs] = useState<ApiLogEntry[]>([]);
@@ -576,6 +572,7 @@ function ThreadGroupCard({
   const primaryModel = group.logs[0]?.model;
   const latestTimestamp = group.logs[0]?.created_at;
   const isUngrouped = group.threadId === "(ungrouped)";
+  const threadHref = threadDetailForApp(appId, group.threadId, group.logs[0]?.run_id);
 
   return (
     <LogGroupCard
@@ -589,14 +586,18 @@ function ThreadGroupCard({
               <span className="text-[13px] font-semibold text-[var(--text-muted)] italic">
                 {group.threadId}
               </span>
-            ) : (
+            ) : threadHref ? (
               <Link
-                to={`/kaira/threads/${group.threadId}`}
+                to={threadHref}
                 onClick={(e) => e.stopPropagation()}
                 className="font-mono text-[13px] font-semibold text-[var(--text-brand)] hover:underline truncate"
               >
                 {group.threadId.slice(0, 20)}
               </Link>
+            ) : (
+              <span className="font-mono text-[13px] font-semibold text-[var(--text-brand)] truncate">
+                {group.threadId.slice(0, 20)}
+              </span>
             )}
           </div>
 
@@ -737,6 +738,7 @@ function LogRowItem({
   const truncatedPrompt = cleanPrompt.length > 90 ? `${cleanPrompt.slice(0, 90)}…` : cleanPrompt;
   const methodLabel = log.method === "generate_json" ? "JSON" : log.method === "stream_message" ? "API" : "TEXT";
   const methodVariant = log.method === "generate_json" ? "info" : log.method === "stream_message" ? "warning" : "primary";
+  const threadHref = log.thread_id ? threadDetailForApp(appId, log.thread_id, log.run_id) : null;
 
   // Determine which fields the search matched in (excluding prompt since that's highlighted in-line)
   const q = searchQuery.trim();
@@ -839,12 +841,16 @@ function LogRowItem({
       {log.thread_id && (
         <div className="text-xs">
           <span className="text-[var(--text-muted)]">Thread ID: </span>
-          <Link
-            to={`/kaira/threads/${log.thread_id}`}
-            className="font-mono text-[var(--text-brand)] hover:underline"
-          >
-            {log.thread_id}
-          </Link>
+          {threadHref ? (
+            <Link
+              to={threadHref}
+              className="font-mono text-[var(--text-brand)] hover:underline"
+            >
+              {log.thread_id}
+            </Link>
+          ) : (
+            <span className="font-mono text-[var(--text-primary)]">{log.thread_id}</span>
+          )}
         </div>
       )}
 

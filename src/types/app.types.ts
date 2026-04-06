@@ -90,6 +90,16 @@ export interface AppEvalRunConfig {
   supportedTypes: string[];
 }
 
+export interface AppNavigationConfig {
+  homePath: string;
+  ownedPathPrefixes: string[];
+  settingsPath: string | null;
+  logsPath: string | null;
+  runsPath: string | null;
+  runDetailPath: string | null;
+  threadDetailPath: string | null;
+}
+
 export type AnalyticsSectionType =
   | 'summary_cards'
   | 'narrative'
@@ -163,6 +173,7 @@ export interface AppConfig {
   assetDefaults: AppAssetDefaults;
   authorization: AppAuthorizationConfig;
   evalRun: AppEvalRunConfig;
+  navigation: AppNavigationConfig;
   analytics: AppAnalyticsConfig;
 }
 
@@ -268,6 +279,15 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     evalRun: {
       supportedTypes: [],
     },
+    navigation: {
+      homePath: '/',
+      ownedPathPrefixes: ['/dashboard', '/upload', '/listing', '/runs', '/logs', '/settings', '/evaluators'],
+      settingsPath: '/settings',
+      logsPath: '/logs',
+      runsPath: '/runs',
+      runDetailPath: '/runs/:runId',
+      threadDetailPath: null,
+    },
     analytics: {
       profile: 'voice_rx_v1',
       capabilities: {
@@ -366,6 +386,15 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     evalRun: {
       supportedTypes: [],
     },
+    navigation: {
+      homePath: '/kaira',
+      ownedPathPrefixes: ['/kaira'],
+      settingsPath: '/kaira/settings',
+      logsPath: '/kaira/logs',
+      runsPath: '/kaira/runs',
+      runDetailPath: '/kaira/runs/:runId',
+      threadDetailPath: '/kaira/threads/:threadId',
+    },
     analytics: {
       profile: 'kaira_v1',
       capabilities: {
@@ -444,6 +473,15 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     authorization: DEFAULT_APP_AUTHORIZATION_CONFIG,
     evalRun: {
       supportedTypes: [],
+    },
+    navigation: {
+      homePath: '/inside-sales',
+      ownedPathPrefixes: ['/inside-sales'],
+      settingsPath: '/inside-sales/settings',
+      logsPath: '/inside-sales/logs',
+      runsPath: '/inside-sales/runs',
+      runDetailPath: '/inside-sales/runs/:runId',
+      threadDetailPath: '/inside-sales/runs/:runId/calls/:threadId',
     },
     analytics: {
       profile: 'inside_sales_v1',
@@ -561,6 +599,11 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
     evalRun: {
       ...fallback.evalRun,
       ...config.evalRun,
+    },
+    navigation: {
+      ...fallback.navigation,
+      ...config.navigation,
+      ownedPathPrefixes: config.navigation?.ownedPathPrefixes ?? fallback.navigation.ownedPathPrefixes,
     },
     analytics: {
       ...fallback.analytics,

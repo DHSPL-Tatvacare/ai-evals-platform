@@ -61,7 +61,6 @@ services:
       - ./src:/app/src # hot-reload: React source
       - ./public:/app/public # hot-reload: static assets
       - ./index.html:/app/index.html # hot-reload: entry HTML
-      - /app/node_modules # prevent host override
     depends_on:
       - backend
 

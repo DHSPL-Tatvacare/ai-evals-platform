@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link2, Copy, Check, Trash2, Plus, Search, SearchX, X } from 'lucide-react';
-import { Button, Badge, Spinner, ConfirmDialog, EmptyState } from '@/components/ui';
+import { Button, Badge, Spinner, ConfirmDialog, EmptyState, SingleSelect } from '@/components/ui';
+import type { SingleSelectOption } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
 import { rolesApi } from '@/services/api/rolesApi';
@@ -61,6 +62,16 @@ export function InviteLinksSection() {
 
   const isExpired = (link: InviteLink) => new Date(link.expiresAt) < new Date();
   const isExhausted = (link: InviteLink) => link.maxUses !== null && link.usesCount >= link.maxUses;
+
+  const roleOptions = useMemo<SingleSelectOption[]>(
+    () => roles.map((role) => ({ value: role.id, label: role.name })),
+    [roles],
+  );
+
+  const expiryOptions = useMemo<SingleSelectOption[]>(
+    () => EXPIRY_OPTIONS.map((option) => ({ value: String(option.value), label: option.label })),
+    [],
+  );
 
   const linkStatus = (link: InviteLink): { label: string; variant: 'success' | 'neutral' | 'warning' } => {
     if (!link.isActive) return { label: 'Revoked', variant: 'neutral' };
@@ -128,7 +139,6 @@ export function InviteLinksSection() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const selectClass = 'rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
   const inputClass = 'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
 
   if (isLoading) {
@@ -176,11 +186,12 @@ export function InviteLinksSection() {
               </div>
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Role</label>
-                <select value={roleId} onChange={(e) => setRoleId(e.target.value)} className={cn(selectClass, 'w-full')}>
-                  {roles.map((r) => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </select>
+                <SingleSelect
+                  value={roleId}
+                  onChange={setRoleId}
+                  options={roleOptions}
+                  className="w-full"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Max Uses</label>
@@ -188,11 +199,12 @@ export function InviteLinksSection() {
               </div>
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[var(--text-secondary)]">Expires In</label>
-                <select value={expiresInHours} onChange={(e) => setExpiresInHours(Number(e.target.value))} className={cn(selectClass, 'w-full')}>
-                  {EXPIRY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                <SingleSelect
+                  value={String(expiresInHours)}
+                  onChange={(value) => setExpiresInHours(Number(value))}
+                  options={expiryOptions}
+                  className="w-full"
+                />
               </div>
             </div>
             <div className="border-t border-[var(--border-default)] px-5 py-3 flex justify-end gap-2">

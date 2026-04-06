@@ -788,6 +788,15 @@ def _invite_response(invite: InviteLink, creator_email: str) -> dict:
     }
 
 
+def _invite_base_url(request: Request) -> str:
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+
+    from app.config import settings
+    return settings.APP_BASE_URL.rstrip("/")
+
+
 @router.post("/invite-links", status_code=201)
 async def create_invite_link(
     body: CreateInviteLinkRequest,
@@ -829,9 +838,8 @@ async def create_invite_link(
     await db.commit()
     await db.refresh(invite)
 
-    # Build the invite URL from the configured frontend base URL
-    from app.config import settings
-    base = settings.APP_BASE_URL.rstrip("/")
+    # Prefer the current frontend origin so local IP changes do not break generated links.
+    base = _invite_base_url(request)
     invite_url = f"{base}/signup?invite={raw_token}"
 
     resp = _invite_response(invite, auth.email)

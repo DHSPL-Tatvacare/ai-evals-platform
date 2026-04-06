@@ -2,6 +2,14 @@
  * Centralized route path constants and builder functions.
  * Use these instead of hardcoded string literals.
  */
+import {
+  APP_CONFIG_FALLBACKS,
+  APP_IDS,
+  DEFAULT_APP,
+  type AppId,
+  type AppNavigationConfig,
+} from '../types/app.types';
+
 export const routes = {
   login: '/login',
   signup: '/signup',
@@ -50,34 +58,133 @@ export const routes = {
   },
 };
 
+const appNavigationRegistry = new Map<string, AppNavigationConfig>(
+  APP_IDS.map((appId) => [appId, APP_CONFIG_FALLBACKS[appId].navigation]),
+);
+
+function isKnownAppId(appId: string): appId is AppId {
+  return appId in APP_CONFIG_FALLBACKS;
+}
+
+function fallbackNavigation(): AppNavigationConfig {
+  return APP_CONFIG_FALLBACKS[DEFAULT_APP].navigation;
+}
+
+function navigationForApp(appId: string): AppNavigationConfig {
+  if (!isKnownAppId(appId)) {
+    return fallbackNavigation();
+  }
+  return appNavigationRegistry.get(appId) ?? APP_CONFIG_FALLBACKS[appId].navigation;
+}
+
+function fillPathTemplate(
+  template: string | null | undefined,
+  params: Record<string, string | undefined>,
+): string | null {
+  if (!template) return null;
+
+  let path = template;
+  for (const [key, value] of Object.entries(params)) {
+    if (!value) continue;
+    path = path.replaceAll(`:${key}`, value);
+  }
+
+  return path.includes('/:') ? null : path;
+}
+
+function templateToRegExp(template: string | null | undefined): RegExp | null {
+  if (!template) return null;
+
+  const pattern = template
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/:([A-Za-z0-9_]+)/g, '[^/]+');
+
+  return new RegExp(`^${pattern}$`);
+}
+
+function matchesOwnedPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+export function syncAppNavigation(appId: string, navigation?: Partial<AppNavigationConfig> | null): void {
+  if (!isKnownAppId(appId)) {
+    return;
+  }
+
+  const fallback = APP_CONFIG_FALLBACKS[appId].navigation;
+  appNavigationRegistry.set(appId, {
+    ...fallback,
+    ...navigation,
+    ownedPathPrefixes: navigation?.ownedPathPrefixes ?? fallback.ownedPathPrefixes,
+  });
+}
+
+export function resetAppNavigationRegistry(): void {
+  appNavigationRegistry.clear();
+  APP_IDS.forEach((appId) => {
+    appNavigationRegistry.set(appId, APP_CONFIG_FALLBACKS[appId].navigation);
+  });
+}
+
+export function homeRouteForApp(appId: string): string {
+  return navigationForApp(appId).homePath;
+}
+
+export function settingsRouteForApp(appId: string): string {
+  return navigationForApp(appId).settingsPath ?? fallbackNavigation().settingsPath ?? routes.voiceRx.settings;
+}
+
+export function firstAccessibleAppId(appAccess: string[]): AppId {
+  return appAccess.find((appId): appId is AppId => isKnownAppId(appId)) ?? DEFAULT_APP;
+}
+
+export function firstAccessibleRoute(appAccess: string[]): string {
+  return homeRouteForApp(firstAccessibleAppId(appAccess));
+}
+
 /** Resolve the run detail path for a given appId. */
 export function runDetailForApp(appId: string, runId: string): string {
-  if (appId === "kaira-bot") {
-    return routes.kaira.runDetail(runId);
-  }
-  if (appId === "inside-sales") {
-    return routes.insideSales.runDetail(runId);
-  }
-  return routes.voiceRx.runDetail(runId);
+  return (
+    fillPathTemplate(navigationForApp(appId).runDetailPath, { runId }) ??
+    fillPathTemplate(fallbackNavigation().runDetailPath, { runId }) ??
+    routes.voiceRx.runDetail(runId)
+  );
 }
 
 /** Resolve the API logs path for a given appId. */
 export function apiLogsForApp(appId: string): string {
-  if (appId === "kaira-bot") {
-    return routes.kaira.logs;
+  return navigationForApp(appId).logsPath ?? fallbackNavigation().logsPath ?? routes.voiceRx.logs;
+}
+
+export function threadDetailForApp(appId: string, threadId: string, runId?: string): string | null {
+  return fillPathTemplate(navigationForApp(appId).threadDetailPath, { threadId, runId });
+}
+
+export function inferAppIdFromPath(pathname: string, candidateAppIds: string[] = APP_IDS): AppId | null {
+  for (const appId of candidateAppIds) {
+    if (!isKnownAppId(appId)) {
+      continue;
+    }
+    const navigation = navigationForApp(appId);
+    if (pathname === navigation.homePath) {
+      return appId;
+    }
+    if (navigation.ownedPathPrefixes.some((prefix) => matchesOwnedPrefix(pathname, prefix))) {
+      return appId;
+    }
   }
-  if (appId === "inside-sales") {
-    return routes.insideSales.logs;
-  }
-  return routes.voiceRx.logs;
+
+  return null;
 }
 
 /** Check if a pathname is a run detail page for a given runId (Kaira or VoiceRx). */
 export function isRunDetailPath(pathname: string, runId?: string): boolean {
   if (runId) {
-    return pathname === `/kaira/runs/${runId}` || pathname === `/runs/${runId}` || pathname === `/inside-sales/runs/${runId}`;
+    return APP_IDS.some((appId) => pathname === runDetailForApp(appId, runId));
   }
-  return (
-    /^\/kaira\/runs\/[^/]+$/.test(pathname) || /^\/runs\/[^/]+$/.test(pathname) || /^\/inside-sales\/runs\/[^/]+$/.test(pathname)
-  );
+
+  return APP_IDS.some((appId) => {
+    const pattern = templateToRegExp(navigationForApp(appId).runDetailPath);
+    return pattern?.test(pathname) ?? false;
+  });
 }

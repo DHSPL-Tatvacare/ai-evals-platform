@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { OfflineBanner, ShortcutsHelpModal } from '@/components/feedback';
 import { MiniPlayerConnector } from '@/features/transcript';
 import { cn } from '@/utils';
-import { routes } from '@/config/routes';
+import { firstAccessibleAppId, inferAppIdFromPath, routes } from '@/config/routes';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
 import { NewInsideSalesEvalOverlay } from '@/features/insideSales/components/NewInsideSalesEvalOverlay';
@@ -22,6 +22,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation();
   const setCurrentApp = useAppStore((state) => state.setCurrentApp);
   const loadAppConfigs = useAppStore((state) => state.loadAppConfigs);
+  const currentApp = useAppStore((state) => state.currentApp);
   const user = useAuthStore((state) => state.user);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const activeModal = useUIStore((s) => s.activeModal);
@@ -29,12 +30,14 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // Sync app store from route — route is the single source of truth
   useEffect(() => {
-    const isKairaRoute = location.pathname.startsWith('/kaira');
-    const isInsideSalesRoute = location.pathname.startsWith('/inside-sales');
-    const newApp = isInsideSalesRoute ? 'inside-sales' : isKairaRoute ? 'kaira-bot' : 'voice-rx';
+    const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
+    const newApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
+    if (!newApp || newApp === currentApp) {
+      return;
+    }
     setCurrentApp(newApp);
     useMiniPlayerStore.getState().closeIfAppChanged(newApp);
-  }, [location.pathname, setCurrentApp]);
+  }, [currentApp, location.pathname, setCurrentApp, user]);
 
   useEffect(() => {
     if (!user) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, GitCompare, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GitCompare, Loader2 } from 'lucide-react';
 
 import { Card, SearchableSelect } from '@/components/ui';
 import type { AdversarialEvalRow, EvalRun } from '@/types';
@@ -83,6 +83,7 @@ export function AdversarialComparisonPanel({
   currentRunCreatedAt,
   currentEvaluations,
 }: Props) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [baselineRuns, setBaselineRuns] = useState<EvalRun[]>([]);
   const [selectedBaselineRunId, setSelectedBaselineRunId] = useState('');
   const [baselineEvaluations, setBaselineEvaluations] = useState<AdversarialEvalRow[]>([]);
@@ -179,146 +180,168 @@ export function AdversarialComparisonPanel({
       }));
   }, [baselineGoalRates, currentGoalRates]);
 
+  const selectedBaselineLabel = useMemo(() => {
+    if (loadingRuns) return 'Loading baseline runs...';
+    if (baselineOptions.length === 0) return 'No other adversarial runs available yet.';
+    return baselineRuns.find((run) => run.id === selectedBaselineRunId)?.name
+      || baselineOptions.find((option) => option.value === selectedBaselineRunId)?.label
+      || 'Select baseline run';
+  }, [baselineOptions, baselineRuns, loadingRuns, selectedBaselineRunId]);
+
   return (
     <Card className="space-y-4" hoverable={false}>
-      <div className="flex items-start gap-2">
-        <GitCompare className="mt-0.5 h-4 w-4 text-[var(--text-brand)]" />
-        <div>
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
-            Compare Against Baseline
-          </h3>
-          <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-            Keep the current run fixed and compare it to an older adversarial run to see whether resilience improved or regressed.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[12px] font-medium text-[var(--text-primary)]">Current Run</p>
-          <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-            <div>
-              <p className="text-[12px] font-semibold text-[var(--text-primary)]">{currentRunName || 'Current adversarial run'}</p>
-              {currentRunCreatedAt && <p className="text-[11px] text-[var(--text-muted)]">{new Date(currentRunCreatedAt).toLocaleDateString()}</p>}
-            </div>
+      <button
+        type="button"
+        onClick={() => setIsExpanded((current) => !current)}
+        className="flex w-full items-start justify-between gap-3 text-left"
+        aria-expanded={isExpanded}
+      >
+        <div className="flex items-start gap-2">
+          <GitCompare className="mt-0.5 h-4 w-4 text-[var(--text-brand)]" />
+          <div>
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+              Compare Against Baseline
+            </h3>
+            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+              {selectedBaselineLabel}
+            </p>
           </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[12px] font-medium text-[var(--text-primary)]">Baseline Run</p>
-          {loadingRuns ? (
-            <div className="flex-1 flex items-center gap-2 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading past runs...
-            </div>
-          ) : baselineOptions.length === 0 ? (
-            <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
-              No other adversarial runs available yet.
-            </div>
-          ) : (
-            <SearchableSelect
-              value={selectedBaselineRunId}
-              onChange={setSelectedBaselineRunId}
-              options={baselineOptions}
-              placeholder="Select a baseline run"
-            />
-          )}
-        </div>
-      </div>
+        <span className="mt-0.5 shrink-0 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1 text-[var(--text-muted)]">
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </span>
+      </button>
 
-      {selectedBaselineRunId && (
+      {isExpanded && (
         <>
-          <div className="grid gap-2 md:grid-cols-4">
-            <DeltaMetric
-              label="Pass Rate"
-              mode="percent"
-              current={formatMetricValue(currentMetrics.passRate, 'percent')}
-              baseline={formatMetricValue(baselineMetrics.passRate, 'percent')}
-              delta={
-                currentMetrics.passRate != null && baselineMetrics.passRate != null
-                  ? currentMetrics.passRate - baselineMetrics.passRate
-                  : null
-              }
-              improveWhenPositive
-            />
-            <DeltaMetric
-              label="Goal Achievement"
-              mode="percent"
-              current={formatMetricValue(currentMetrics.goalRate, 'percent')}
-              baseline={formatMetricValue(baselineMetrics.goalRate, 'percent')}
-              delta={
-                currentMetrics.goalRate != null && baselineMetrics.goalRate != null
-                  ? currentMetrics.goalRate - baselineMetrics.goalRate
-                  : null
-              }
-              improveWhenPositive
-            />
-            <DeltaMetric
-              label="Infra Error Rate"
-              mode="percent"
-              current={formatMetricValue(currentMetrics.errorRate, 'percent')}
-              baseline={formatMetricValue(baselineMetrics.errorRate, 'percent')}
-              delta={currentMetrics.errorRate - baselineMetrics.errorRate}
-              improveWhenPositive={false}
-            />
-            <DeltaMetric
-              label="Avg Turns"
-              mode="number"
-              current={formatMetricValue(currentMetrics.avgTurns, 'number')}
-              baseline={formatMetricValue(baselineMetrics.avgTurns, 'number')}
-              delta={
-                currentMetrics.avgTurns != null && baselineMetrics.avgTurns != null
-                  ? currentMetrics.avgTurns - baselineMetrics.avgTurns
-                  : null
-              }
-              improveWhenPositive={false}
-            />
-          </div>
-
-          <div className="rounded-[6px] border border-[var(--border-subtle)] overflow-hidden">
-            <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_90px] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-              <span>Goal</span>
-              <span>Baseline</span>
-              <span>Current</span>
-              <span>Delta</span>
-            </div>
-            <div className="divide-y divide-[var(--border-subtle)]">
-              {loadingBaseline ? (
-                <div className="px-3 py-3 text-[12px] text-[var(--text-muted)]">
-                  Loading baseline results...
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[12px] font-medium text-[var(--text-primary)]">Current Run</p>
+              <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+                <div>
+                  <p className="text-[12px] font-semibold text-[var(--text-primary)]">{currentRunName || 'Current adversarial run'}</p>
+                  {currentRunCreatedAt && <p className="text-[11px] text-[var(--text-muted)]">{new Date(currentRunCreatedAt).toLocaleDateString()}</p>}
                 </div>
-              ) : goalRows.length === 0 ? (
-                <div className="px-3 py-3 text-[12px] text-[var(--text-muted)]">
-                  No comparable goal data yet.
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[12px] font-medium text-[var(--text-primary)]">Baseline Run</p>
+              {loadingRuns ? (
+                <div className="flex-1 flex items-center gap-2 rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading past runs...
+                </div>
+              ) : baselineOptions.length === 0 ? (
+                <div className="flex-1 flex items-center rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+                  No other adversarial runs available yet.
                 </div>
               ) : (
-                goalRows.map((row) => {
-                  const delta =
-                    row.current != null && row.baseline != null
-                      ? row.current - row.baseline
-                      : null;
-                  return (
-                    <div
-                      key={row.goal}
-                      className="grid grid-cols-[minmax(0,1fr)_110px_110px_90px] items-center px-3 py-2 text-[12px]"
-                    >
-                      <span className="font-medium text-[var(--text-primary)]">
-                        {humanize(row.goal)}
-                      </span>
-                      <span className="text-[var(--text-secondary)]">
-                        {formatMetricValue(row.baseline, 'percent')}
-                      </span>
-                      <span className="text-[var(--text-secondary)]">
-                        {formatMetricValue(row.current, 'percent')}
-                      </span>
-                      <span className={delta == null ? 'text-[var(--text-muted)]' : delta >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}>
-                        {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`}
-                      </span>
-                    </div>
-                  );
-                })
+                <SearchableSelect
+                  value={selectedBaselineRunId}
+                  onChange={setSelectedBaselineRunId}
+                  options={baselineOptions}
+                  placeholder="Select a baseline run"
+                />
               )}
             </div>
           </div>
+
+          {selectedBaselineRunId && (
+            <>
+              <div className="grid gap-2 md:grid-cols-4">
+                <DeltaMetric
+                  label="Pass Rate"
+                  mode="percent"
+                  current={formatMetricValue(currentMetrics.passRate, 'percent')}
+                  baseline={formatMetricValue(baselineMetrics.passRate, 'percent')}
+                  delta={
+                    currentMetrics.passRate != null && baselineMetrics.passRate != null
+                      ? currentMetrics.passRate - baselineMetrics.passRate
+                      : null
+                  }
+                  improveWhenPositive
+                />
+                <DeltaMetric
+                  label="Goal Achievement"
+                  mode="percent"
+                  current={formatMetricValue(currentMetrics.goalRate, 'percent')}
+                  baseline={formatMetricValue(baselineMetrics.goalRate, 'percent')}
+                  delta={
+                    currentMetrics.goalRate != null && baselineMetrics.goalRate != null
+                      ? currentMetrics.goalRate - baselineMetrics.goalRate
+                      : null
+                  }
+                  improveWhenPositive
+                />
+                <DeltaMetric
+                  label="Infra Error Rate"
+                  mode="percent"
+                  current={formatMetricValue(currentMetrics.errorRate, 'percent')}
+                  baseline={formatMetricValue(baselineMetrics.errorRate, 'percent')}
+                  delta={currentMetrics.errorRate - baselineMetrics.errorRate}
+                  improveWhenPositive={false}
+                />
+                <DeltaMetric
+                  label="Avg Turns"
+                  mode="number"
+                  current={formatMetricValue(currentMetrics.avgTurns, 'number')}
+                  baseline={formatMetricValue(baselineMetrics.avgTurns, 'number')}
+                  delta={
+                    currentMetrics.avgTurns != null && baselineMetrics.avgTurns != null
+                      ? currentMetrics.avgTurns - baselineMetrics.avgTurns
+                      : null
+                  }
+                  improveWhenPositive={false}
+                />
+              </div>
+
+              <div className="rounded-[6px] border border-[var(--border-subtle)] overflow-hidden">
+                <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_90px] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  <span>Goal</span>
+                  <span>Baseline</span>
+                  <span>Current</span>
+                  <span>Delta</span>
+                </div>
+                <div className="divide-y divide-[var(--border-subtle)]">
+                  {loadingBaseline ? (
+                    <div className="px-3 py-3 text-[12px] text-[var(--text-muted)]">
+                      Loading baseline results...
+                    </div>
+                  ) : goalRows.length === 0 ? (
+                    <div className="px-3 py-3 text-[12px] text-[var(--text-muted)]">
+                      No comparable goal data yet.
+                    </div>
+                  ) : (
+                    goalRows.map((row) => {
+                      const delta =
+                        row.current != null && row.baseline != null
+                          ? row.current - row.baseline
+                          : null;
+                      return (
+                        <div
+                          key={row.goal}
+                          className="grid grid-cols-[minmax(0,1fr)_110px_110px_90px] items-center px-3 py-2 text-[12px]"
+                        >
+                          <span className="font-medium text-[var(--text-primary)]">
+                            {humanize(row.goal)}
+                          </span>
+                          <span className="text-[var(--text-secondary)]">
+                            {formatMetricValue(row.baseline, 'percent')}
+                          </span>
+                          <span className="text-[var(--text-secondary)]">
+                            {formatMetricValue(row.current, 'percent')}
+                          </span>
+                          <span className={delta == null ? 'text-[var(--text-muted)]' : delta >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}>
+                            {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </Card>

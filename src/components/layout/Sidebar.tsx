@@ -33,7 +33,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from "@/utils/permissions";
-import { routes } from "@/config/routes";
+import { routes, settingsRouteForApp } from "@/config/routes";
+import { APP_IDS } from '@/types';
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
@@ -57,14 +58,8 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const kairaChatUserId = kairaBotSettings.kairaChatUserId;
 
   // Compute settings path based on current app
-  const settingsPath =
-    appId === "kaira-bot" ? routes.kaira.settings
-    : appId === "inside-sales" ? routes.insideSales.settings
-    : routes.voiceRx.settings;
-  const isSettingsActive =
-    location.pathname === routes.voiceRx.settings ||
-    location.pathname === routes.kaira.settings ||
-    location.pathname === routes.insideSales.settings;
+  const settingsPath = settingsRouteForApp(appId);
+  const isSettingsActive = APP_IDS.some((candidateAppId) => location.pathname === settingsRouteForApp(candidateAppId));
   const isGuideActive = location.pathname === routes.guide;
 
   // Auth

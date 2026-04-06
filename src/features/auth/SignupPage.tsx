@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Button, PasswordStrengthIndicator, validatePasswordStrength } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/services/api/authApi';
-import { routes } from '@/config/routes';
+import { firstAccessibleRoute, routes } from '@/config/routes';
 import type { ValidateInviteResult } from '@/types/auth.types';
 
 function isEmailDomainAllowed(email: string, allowedDomains: string[]): boolean {
@@ -82,7 +82,8 @@ export function SignupPage() {
       useAuthStore.getState().setAccessToken(result.accessToken);
       // Reload user to populate store
       await useAuthStore.getState().loadUser();
-      navigate(routes.voiceRx.home);
+      const user = useAuthStore.getState().user;
+      navigate(firstAccessibleRoute(user?.appAccess ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed');
     } finally {

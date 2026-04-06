@@ -1965,6 +1965,23 @@ APP_SEEDS = [
             },
             "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "human", "call_quality"]},
+            "navigation": {
+                "homePath": "/",
+                "ownedPathPrefixes": [
+                    "/dashboard",
+                    "/upload",
+                    "/listing",
+                    "/runs",
+                    "/logs",
+                    "/settings",
+                    "/evaluators",
+                ],
+                "settingsPath": "/settings",
+                "logsPath": "/logs",
+                "runsPath": "/runs",
+                "runDetailPath": "/runs/:runId",
+                "threadDetailPath": None,
+            },
             "analytics": {
                 "profile": "voice_rx_v1",
                 "capabilities": {
@@ -2064,6 +2081,17 @@ APP_SEEDS = [
             },
             "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "batch_thread", "batch_adversarial"]},
+            "navigation": {
+                "homePath": "/kaira",
+                "ownedPathPrefixes": [
+                    "/kaira",
+                ],
+                "settingsPath": "/kaira/settings",
+                "logsPath": "/kaira/logs",
+                "runsPath": "/kaira/runs",
+                "runDetailPath": "/kaira/runs/:runId",
+                "threadDetailPath": "/kaira/threads/:threadId",
+            },
             "analytics": {
                 "profile": "kaira_v1",
                 "capabilities": {
@@ -2178,6 +2206,17 @@ APP_SEEDS = [
             },
             "authorization": default_app_authorization_config(),
             "evalRun": {"supportedTypes": ["custom", "full_evaluation", "call_quality"]},
+            "navigation": {
+                "homePath": "/inside-sales",
+                "ownedPathPrefixes": [
+                    "/inside-sales",
+                ],
+                "settingsPath": "/inside-sales/settings",
+                "logsPath": "/inside-sales/logs",
+                "runsPath": "/inside-sales/runs",
+                "runDetailPath": "/inside-sales/runs/:runId",
+                "threadDetailPath": "/inside-sales/runs/:runId/calls/:threadId",
+            },
             "analytics": {
                 "profile": "inside_sales_v1",
                 "capabilities": {

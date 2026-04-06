@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { ChevronDown, Check } from 'lucide-react';
+import { useMemo } from 'react';
+import * as Select from '@radix-ui/react-select';
+import { Check, ChevronDown } from 'lucide-react';
 
 import { cn } from '@/utils';
 
@@ -28,137 +28,70 @@ export function SingleSelect({
   disabled = false,
   size = 'md',
 }: SingleSelectProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    maxHeight: number;
-  } | null>(null);
-
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value),
     [options, value],
   );
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      const clickedTrigger = containerRef.current?.contains(target);
-      const clickedDropdown = dropdownRef.current?.contains(target);
-      if (!clickedTrigger && !clickedDropdown) {
-        setIsOpen(false);
-      }
-    }
-
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const updateDropdownPosition = useCallback(() => {
-    const trigger = containerRef.current;
-    if (!trigger) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const viewportPadding = 8;
-    const top = rect.bottom + 4;
-    const width = Math.max(rect.width, 220);
-
-    setDropdownPosition({
-      left: Math.max(
-        viewportPadding,
-        Math.min(rect.left, window.innerWidth - width - viewportPadding),
-      ),
-      top,
-      width,
-      maxHeight: Math.max(160, window.innerHeight - top - viewportPadding),
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    updateDropdownPosition();
-    const handlePositionChange = () => updateDropdownPosition();
-    window.addEventListener('resize', handlePositionChange);
-    window.addEventListener('scroll', handlePositionChange, true);
-
-    return () => {
-      window.removeEventListener('resize', handlePositionChange);
-      window.removeEventListener('scroll', handlePositionChange, true);
-    };
-  }, [isOpen, updateDropdownPosition]);
-
-  const selectOption = useCallback((nextValue: string) => {
-    onChange(nextValue);
-    setIsOpen(false);
-  }, [onChange]);
-
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
-      <button
-        type="button"
-        onClick={() => {
-          if (disabled) return;
-          setIsOpen((current) => !current);
-        }}
-        disabled={disabled}
+    <Select.Root
+      value={value || undefined}
+      onValueChange={onChange}
+      disabled={disabled}
+    >
+      <Select.Trigger
         className={cn(
           'w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)]',
           'flex items-center justify-between gap-2 text-left text-[var(--text-primary)]',
           size === 'sm' ? 'h-7 px-2.5 text-[13px]' : 'h-9 px-3 text-[13px]',
           'focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50',
           'disabled:cursor-not-allowed disabled:opacity-50',
+          className,
         )}
         title={selectedOption?.label}
+        aria-label={selectedOption?.label ?? placeholder}
       >
-        <span className={cn('truncate', !selectedOption && 'text-[var(--text-muted)]')}>
-          {selectedOption?.label ?? placeholder}
-        </span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-      </button>
+        <Select.Value
+          placeholder={<span className="text-[var(--text-muted)]">{placeholder}</span>}
+        />
+        <Select.Icon asChild>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+        </Select.Icon>
+      </Select.Trigger>
 
-      {isOpen && dropdownPosition && createPortal(
-        <div
-          ref={dropdownRef}
-          className="fixed z-[9999] rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] py-1 shadow-lg"
-          style={{
-            left: dropdownPosition.left,
-            top: dropdownPosition.top,
-            width: dropdownPosition.width,
-            maxHeight: Math.min(dropdownPosition.maxHeight, 280),
-          }}
+      <Select.Portal>
+        <Select.Content
+          position="popper"
+          sideOffset={4}
+          className={cn(
+            'z-[9999] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] py-1 shadow-lg',
+            'min-w-[220px] w-[var(--radix-select-trigger-width)] max-h-[280px]',
+          )}
         >
-          <div className="overflow-y-auto">
-            {options.map((option) => {
-              const selected = option.value === value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => selectOption(option.value)}
-                  className={cn(
-                    'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] transition-colors',
-                    selected
-                      ? 'bg-[var(--surface-brand-subtle)] text-[var(--text-brand)]'
-                      : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
-                  )}
-                  role="option"
-                  aria-selected={selected}
-                >
+          <Select.Viewport>
+            {options.map((option) => (
+              <Select.Item
+                key={option.value}
+                value={option.value}
+                className={cn(
+                  'relative flex w-full cursor-default items-center justify-between gap-3 px-3 py-2 text-[13px] outline-none transition-colors',
+                  'text-[var(--text-primary)] hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-hover)]',
+                  'data-[state=checked]:bg-[var(--surface-brand-subtle)] data-[state=checked]:text-[var(--text-brand)]',
+                )}
+              >
+                <Select.ItemText>
                   <span className="truncate">{option.label}</span>
+                </Select.ItemText>
+                <Select.ItemIndicator>
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                    {selected ? <Check className="h-3.5 w-3.5 text-[var(--text-brand)]" /> : null}
+                    <Check className="h-3.5 w-3.5 text-[var(--text-brand)]" />
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>,
-        document.body,
-      )}
-    </div>
+                </Select.ItemIndicator>
+              </Select.Item>
+            ))}
+          </Select.Viewport>
+        </Select.Content>
+      </Select.Portal>
+    </Select.Root>
   );
 }

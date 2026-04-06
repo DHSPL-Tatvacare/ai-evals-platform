@@ -75,6 +75,16 @@ class AppEvalRunConfig(CamelModel):
     supported_types: list[str] = Field(default_factory=list)
 
 
+class AppNavigationConfig(CamelModel):
+    home_path: str = "/"
+    owned_path_prefixes: list[str] = Field(default_factory=list)
+    settings_path: str | None = None
+    logs_path: str | None = None
+    runs_path: str | None = None
+    run_detail_path: str | None = None
+    thread_detail_path: str | None = None
+
+
 class AppConfig(CamelModel):
     display_name: str
     icon: str
@@ -85,4 +95,5 @@ class AppConfig(CamelModel):
     asset_defaults: AppAssetDefaults = Field(default_factory=AppAssetDefaults)
     authorization: AppAuthorizationConfig = Field(default_factory=AppAuthorizationConfig)
     eval_run: AppEvalRunConfig = Field(default_factory=AppEvalRunConfig)
+    navigation: AppNavigationConfig = Field(default_factory=AppNavigationConfig)
     analytics: AppAnalyticsConfig = Field(default_factory=AppAnalyticsConfig)

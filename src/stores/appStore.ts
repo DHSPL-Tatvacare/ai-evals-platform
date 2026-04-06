@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { appsRepository } from '@/services/api/appsApi';
 import { APP_CONFIG_FALLBACKS, DEFAULT_APP, mergeAppConfig, type AppConfig, type AppId } from '@/types';
+import { resetAppNavigationRegistry, syncAppNavigation } from '@/config/routes';
 
 interface AppStoreState {
   currentApp: AppId;
@@ -22,19 +23,25 @@ export const useAppStore = create<AppStoreState>()(
       appConfigs: APP_CONFIG_FALLBACKS,
       setCurrentApp: (app) => set({ currentApp: app }),
       setAppConfig: (app, config) =>
-        set((state) => ({
-          appConfigs: {
-            ...state.appConfigs,
-            [app]: mergeAppConfig(app, config),
-          },
-        })),
+        set((state) => {
+          const mergedConfig = mergeAppConfig(app, config);
+          syncAppNavigation(app, mergedConfig.navigation);
+          return {
+            appConfigs: {
+              ...state.appConfigs,
+              [app]: mergedConfig,
+            },
+          };
+        }),
       setAppConfigs: (configs) =>
         set((state) => {
           const nextConfigs: Record<AppId, AppConfig> = { ...state.appConfigs };
           (Object.keys(configs) as AppId[]).forEach((app) => {
             const config = configs[app];
             if (config) {
-              nextConfigs[app] = mergeAppConfig(app, config);
+              const mergedConfig = mergeAppConfig(app, config);
+              nextConfigs[app] = mergedConfig;
+              syncAppNavigation(app, mergedConfig.navigation);
             }
           });
           return { appConfigs: nextConfigs };
@@ -72,7 +79,10 @@ export const useAppStore = create<AppStoreState>()(
           get().setAppConfigs(nextConfigs);
         }
       },
-      reset: () => set({ currentApp: DEFAULT_APP, appConfigs: APP_CONFIG_FALLBACKS }),
+      reset: () => {
+        resetAppNavigationRegistry();
+        set({ currentApp: DEFAULT_APP, appConfigs: APP_CONFIG_FALLBACKS });
+      },
     }),
     {
       name: 'app-selection',

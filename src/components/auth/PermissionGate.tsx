@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { firstAccessibleRoute } from '@/config/routes';
 
 interface PermissionGateProps {
   action: string;
@@ -30,8 +31,6 @@ export function AppAccessGuard({ app, children }: AppAccessGuardProps) {
   if (!user) return null;
   if (user.isOwner || user.appAccess.includes(app)) return <>{children}</>;
 
-  // Redirect to first accessible app or home
-  const firstApp = user.appAccess[0];
-  const fallbackRoute = firstApp ? `/${firstApp}` : '/';
+  const fallbackRoute = firstAccessibleRoute(user.appAccess);
   return <Navigate to={fallbackRoute} replace />;
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui';
-import { routes } from '@/config/routes';
+import { firstAccessibleRoute } from '@/config/routes';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -21,7 +21,8 @@ export function LoginPage() {
     setError('');
     try {
       await login({ email, password });
-      navigate(routes.voiceRx.home);
+      const user = useAuthStore.getState().user;
+      navigate(firstAccessibleRoute(user?.appAccess ?? []));
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('Email domain not allowed')) {

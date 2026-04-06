@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 import { APP_IDS, getAppMetadataFromConfig, type AppId } from '@/types';
 import { cn } from '@/utils';
-import { routes } from '@/config/routes';
+import { homeRouteForApp } from '@/config/routes';
 
 interface AppConfig {
   id: AppId;
@@ -13,27 +13,6 @@ interface AppConfig {
   icon: string;
   route: string;
 }
-
-const apps: AppConfig[] = [
-  {
-    id: 'voice-rx',
-    name: '',
-    icon: '',
-    route: routes.voiceRx.dashboard,
-  },
-  {
-    id: 'kaira-bot',
-    name: '',
-    icon: '',
-    route: routes.kaira.dashboard,
-  },
-  {
-    id: 'inside-sales',
-    name: '',
-    icon: '',
-    route: routes.insideSales.listing,
-  },
-];
 
 export function AppSwitcher() {
   const [isOpen, setIsOpen] = useState(false);
@@ -44,13 +23,13 @@ export function AppSwitcher() {
   const getAppConfig = useAppStore((state) => state.getAppConfig);
   const user = useAuthStore((s) => s.user);
 
-  const appOptions = APP_IDS.map((appId, index) => {
+  const appOptions = APP_IDS.map((appId) => {
     const metadata = getAppMetadataFromConfig(appId, getAppConfig(appId));
     return {
-      ...apps[index],
       id: appId,
       name: metadata.name,
       icon: metadata.icon,
+      route: homeRouteForApp(appId),
     };
   });
 

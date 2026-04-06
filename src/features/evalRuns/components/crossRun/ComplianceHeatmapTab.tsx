@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { AppId } from '@/types';
 import type { RuleComplianceHeatmap } from '@/types/crossRunAnalytics';
-import { routes } from '@/config/routes';
+import { runDetailForApp } from '@/config/routes';
 import SectionHeader from '../report/shared/SectionHeader';
 import Heatmap from './Heatmap';
 
@@ -43,7 +43,7 @@ export default function ComplianceHeatmapTab({ appId, heatmap }: Props) {
         columnHeaders={columnHeaders}
         rows={rows}
         rowHeaderLabel="Rule"
-        onColumnClick={(id) => navigate(appId === 'inside-sales' ? routes.insideSales.runDetail(id) : routes.kaira.runDetail(id))}
+        onColumnClick={(id) => navigate(runDetailForApp(appId, id))}
         emptyMessage="No rule compliance data found in reports. Run evaluations with correctness evaluation enabled."
       />
     </div>
