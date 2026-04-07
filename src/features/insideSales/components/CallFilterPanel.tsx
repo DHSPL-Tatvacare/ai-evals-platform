@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { Button, MultiSelect } from '@/components/ui';
+import { Button, Combobox } from '@/components/ui';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import { apiRequest } from '@/services/api/client';
@@ -116,8 +116,9 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
             {/* Stage */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Stage</label>
-              <MultiSelect
-                values={leadFilters.stage}
+              <Combobox
+                multi
+                value={leadFilters.stage}
                 onChange={(stage) => useLeadsStore.getState().setLeadFilters({ stage })}
                 options={STAGE_OPTIONS}
                 placeholder="Select stages..."
@@ -146,8 +147,9 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
             {/* Condition */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Condition</label>
-              <MultiSelect
-                values={leadFilters.condition}
+              <Combobox
+                multi
+                value={leadFilters.condition}
                 onChange={(condition) => useLeadsStore.getState().setLeadFilters({ condition })}
                 options={CONDITION_OPTIONS}
                 placeholder="Select conditions..."
@@ -178,8 +180,9 @@ export function CallFilterPanel({ onClose, activeTab }: CallFilterPanelProps) {
             {/* Agent */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">Agent</label>
-              <MultiSelect
-                values={filters.agents}
+              <Combobox
+                multi
+                value={filters.agents}
                 onChange={(agents) => useInsideSalesStore.getState().setFilters({ agents })}
                 options={agentOptions}
                 placeholder="Select agents..."

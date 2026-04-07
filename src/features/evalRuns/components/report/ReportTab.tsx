@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Clock, Download, FileBarChart, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 
-import { Button, EmptyState, LLMConfigSection, SingleSelect, Tooltip, type SingleSelectOption } from '@/components/ui';
+import { Button, EmptyState, LLMConfigSection, Select, Tooltip, type SelectOption } from '@/components/ui';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
 import { pollJobUntilComplete, submitAndPollJob, type JobProgress } from '@/services/api/jobPolling';
 import { reportsApi } from '@/services/api/reportsApi';
@@ -524,7 +524,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const hasReportRuns = reportRuns.length > 0;
   const canOpenGenerateOverlay = canGenerate && configs.length > 0;
   const reportActionLabel = hasReportRuns ? 'Refresh' : 'Generate report';
-  const reportRunOptions: SingleSelectOption[] = reportRuns.map((reportRun) => ({
+  const reportRunOptions: SelectOption[] = reportRuns.map((reportRun) => ({
     value: reportRun.id,
     label: formatRunLabel(reportRun),
   }));
@@ -532,7 +532,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const reportActionButtons = (
     <div className="flex flex-wrap items-center justify-end gap-2">
       {reportRuns.length > 1 && selectedReportRunId ? (
-        <SingleSelect
+        <Select
           value={selectedReportRunId}
           onChange={setSelectedReportRunId}
           options={reportRunOptions}
