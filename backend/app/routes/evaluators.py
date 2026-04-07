@@ -135,7 +135,10 @@ async def list_evaluators(
         _annotate_owner_metadata(evaluator, owner_name)
         for evaluator, owner_name in result.all()
     ]
-    await _annotate_template_upgrades(db, evaluators)
+    try:
+        await _annotate_template_upgrades(db, evaluators)
+    except Exception:
+        pass  # eval_templates table may not exist yet; degrade gracefully
     return evaluators
 
 

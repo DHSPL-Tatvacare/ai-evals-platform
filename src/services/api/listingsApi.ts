@@ -35,8 +35,8 @@ export const listingsRepository = {
     return parseDates(data);
   },
 
-  async update(_appId: string, id: string, updates: Partial<Listing>): Promise<void> {
-    await apiRequest(`/api/listings/${id}`, {
+  async update(appId: string, id: string, updates: Partial<Listing>): Promise<void> {
+    await apiRequest(`/api/listings/${id}?app_id=${appId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
