@@ -176,7 +176,7 @@ export function MultiSelect({
       {isOpen && dropdownPosition && createPortal(
         <div
           ref={dropdownRef}
-          className="fixed z-[9999] rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg"
+          className="fixed z-[var(--z-dropdown)] rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg"
           style={{
             left: dropdownPosition.left,
             top: dropdownPosition.top,

@@ -141,7 +141,7 @@ export function SearchableSelect({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full min-w-[240px] rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg">
+        <div className="absolute z-[var(--z-dropdown)] mt-1 w-full min-w-[240px] rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg">
           {/* Search input */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-default)]">
             <Search className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" />
