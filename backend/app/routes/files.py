@@ -1,7 +1,8 @@
 """Files API routes."""
+import io
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,10 +91,11 @@ async def download_file(
     if not file_rec:
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(
-        path=file_rec.storage_path,
-        filename=file_rec.original_name,
+    content = await file_storage.read(file_rec.storage_path)
+    return StreamingResponse(
+        io.BytesIO(content),
         media_type=file_rec.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{file_rec.original_name}"'},
     )
 
 
