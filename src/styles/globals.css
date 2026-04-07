@@ -89,11 +89,13 @@
   --color-accent-fuchsia: #d946ef;
   --color-accent-rose: #f43f5e;
 
-  /* Run type accent colors */
-  --color-type-batch: var(--color-accent-blue);
-  --color-type-adversarial: var(--color-accent-rose);
-  --color-type-thread: var(--color-accent-purple);
-  --color-type-custom: var(--color-accent-teal);
+  /* Run type badge colors — muted tones that won't be confused with status */
+  --color-type-batch: #475569;
+  --color-type-adversarial: #6d28d9;
+  --color-type-thread: #0e7490;
+  --color-type-custom: #4338ca;
+  --color-type-evaluation: #0e7490;
+  --color-type-call-quality: #7e22ce;
 
   /* Chat-specific dimensions */
   --chat-avatar-size: 32px;
@@ -262,6 +264,14 @@
   --color-accent-sky: #38bdf8;
   --color-accent-fuchsia: #e879f9;
   --color-accent-rose: #fb7185;
+
+  /* Run type badge overrides for dark — slightly lighter for contrast */
+  --color-type-batch: #64748b;
+  --color-type-adversarial: #7c3aed;
+  --color-type-thread: #0891b2;
+  --color-type-custom: #4f46e5;
+  --color-type-evaluation: #0891b2;
+  --color-type-call-quality: #9333ea;
 
   /* Verdict overrides for dark (deeper greens for white-text badges) */
   --color-verdict-pass: #059669;
