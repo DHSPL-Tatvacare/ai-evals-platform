@@ -231,15 +231,17 @@ app.add_middleware(
 )
 
 
+API_VERSION = "2.1.0"
+
 @app.get("/api/health")
 async def health_check():
     """Verify API and database connectivity."""
     try:
         async for db in get_db():
             await db.execute(text("SELECT 1"))
-            return {"status": "ok", "database": "connected"}
+            return {"status": "ok", "database": "connected", "version": API_VERSION}
     except Exception as e:
-        return {"status": "error", "database": str(e)}
+        return {"status": "error", "database": str(e), "version": API_VERSION}
 
 
 # Register routers

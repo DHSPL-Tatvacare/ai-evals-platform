@@ -489,6 +489,9 @@ export function Sidebar({ onNewEval }: SidebarProps) {
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
       />
+      <div className="px-4 py-1.5 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-subtle)] select-none" title={`Built ${__BUILD_TIME__}`}>
+        v{__APP_VERSION__}
+      </div>
     </aside>
   );
 }
