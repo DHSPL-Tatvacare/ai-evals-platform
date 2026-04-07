@@ -52,7 +52,7 @@ export function extractMainMetricValue(
   const output = (run.result as Record<string, unknown> | undefined)?.output as Record<string, unknown> | undefined;
   const value = output?.[field.key];
   if (value === undefined || value === null) return null;
-  return { label: field.label ?? field.key, value, type: field.type, field };
+  return { label: field.key, value, type: field.type, field };
 }
 
 /**
@@ -69,7 +69,7 @@ export function extractMetricFields(
     .filter((f) => f.role === 'metric')
     .map((field) => ({
       key: field.key,
-      label: field.label ?? field.key,
+      label: field.key,
       value: output[field.key],
       type: field.type,
       field,

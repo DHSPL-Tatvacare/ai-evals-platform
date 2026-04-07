@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
 import { evaluatorShowsInHeader, extractMainMetricValue } from '@/features/evals/utils/evaluatorMetadata';
 import { EvaluatorExpandRow } from './EvaluatorExpandRow';
+import type { EvalRun, EvaluatorDefinition, EvaluatorVisibilityFilter, RuleCatalogEntry } from '@/types';
 
 function formatMetricValue(value: unknown, type: string): string {
   if (value === null || value === undefined) return '—';
@@ -14,7 +15,6 @@ function formatMetricValue(value: unknown, type: string): string {
   const str = String(value);
   return str.length > 20 ? str.slice(0, 20) + '…' : str;
 }
-import type { EvalRun, EvaluatorDefinition, EvaluatorVisibilityFilter, RuleCatalogEntry } from '@/types';
 
 interface EvaluatorsTableProps {
   evaluators: EvaluatorDefinition[];
