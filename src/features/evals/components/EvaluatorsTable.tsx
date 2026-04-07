@@ -4,8 +4,16 @@ import { Button, EmptyState, RoleBadge, VisibilityBadge } from '@/components/ui'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
-import { evaluatorShowsInHeader } from '@/features/evals/utils/evaluatorMetadata';
+import { evaluatorShowsInHeader, extractMainMetricValue } from '@/features/evals/utils/evaluatorMetadata';
 import { EvaluatorExpandRow } from './EvaluatorExpandRow';
+
+function formatMetricValue(value: unknown, type: string): string {
+  if (value === null || value === undefined) return '—';
+  if (type === 'number' && typeof value === 'number') return value.toFixed(2);
+  if (type === 'boolean') return value ? 'Yes' : 'No';
+  const str = String(value);
+  return str.length > 20 ? str.slice(0, 20) + '…' : str;
+}
 import type { EvalRun, EvaluatorDefinition, EvaluatorVisibilityFilter, RuleCatalogEntry } from '@/types';
 
 interface EvaluatorsTableProps {
@@ -149,6 +157,7 @@ export function EvaluatorsTable({
                 <th className="px-3 py-2 font-medium">Visibility</th>
                 <th className="px-3 py-2 font-medium">Schema</th>
                 <th className="px-3 py-2 font-medium">Updated</th>
+                <th className="px-3 py-2 font-medium">Metric</th>
                 {showRunColumn ? <th className="px-3 py-2 font-medium">Run</th> : null}
                 <th className="w-24 px-3 py-2 font-medium">Actions</th>
               </tr>
@@ -211,6 +220,17 @@ export function EvaluatorsTable({
                       </td>
                       <td className="px-3 py-3 text-sm text-[var(--text-secondary)]">
                         {evaluator.updatedAt.toLocaleDateString()}
+                      </td>
+                      <td className="px-3 py-3">
+                        {(() => {
+                          const metric = extractMainMetricValue(evaluator, latestRun);
+                          if (!metric) return <span className="text-sm text-[var(--text-muted)]">—</span>;
+                          return (
+                            <span className="text-sm font-medium text-[var(--text-primary)]">
+                              {formatMetricValue(metric.value, metric.type)}
+                            </span>
+                          );
+                        })()}
                       </td>
                       {showRunColumn ? (
                         <td className="px-3 py-3">
@@ -314,7 +334,7 @@ export function EvaluatorsTable({
                     </tr>
                     {isExpanded ? (
                       <tr className="border-b border-[var(--border-subtle)]">
-                        <td colSpan={showRunColumn ? 8 : 7} className="px-3 py-3">
+                        <td colSpan={showRunColumn ? 9 : 8} className="px-3 py-3">
                           <EvaluatorExpandRow
                             evaluator={evaluator}
                             rules={rules}
