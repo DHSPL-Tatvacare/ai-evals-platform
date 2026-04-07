@@ -60,7 +60,7 @@ export function Tabs({ tabs, defaultTab, onChange, className, fillHeight }: Tabs
             key={tab.id}
             className={cn(
               activeTab !== tab.id && 'hidden',
-              fillHeight && activeTab === tab.id && 'h-full overflow-hidden'
+              fillHeight && activeTab === tab.id && 'h-full overflow-y-auto'
             )}
           >
             {tab.content}
