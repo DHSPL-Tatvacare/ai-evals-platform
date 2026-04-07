@@ -36,15 +36,22 @@ export function TemplateUpgradeModal({
 
   useEffect(() => {
     if (!isOpen || !evaluator.templateBranchKey) return;
+    let cancelled = false;
 
-    setIsLoading(true);
-    getBranchVersions(appId, evaluator.templateBranchKey)
-      .then((v) => {
-        // Sort descending by version number
-        const sorted = [...v].sort((a, b) => b.version - a.version);
-        setVersions(sorted);
-      })
-      .finally(() => setIsLoading(false));
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const v = await getBranchVersions(appId, evaluator.templateBranchKey!);
+        if (!cancelled) {
+          setVersions([...v].sort((a, b) => b.version - a.version));
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    load();
+
+    return () => { cancelled = true; };
   }, [isOpen, evaluator.templateBranchKey, appId, getBranchVersions]);
 
   const current = versions.find((v) => v.id === evaluator.templateId) ?? null;
