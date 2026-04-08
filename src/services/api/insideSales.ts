@@ -72,12 +72,8 @@ export interface CallFilters {
   status: string;
   hasRecording: boolean;
   eventCodes: string;
-  evalStatus: string;
   durationMin: string;
   durationMax: string;
-  scoreMin: string;
-  scoreMax: string;
-  search: string;
 }
 
 export interface LeadCallRecord {
@@ -141,11 +137,11 @@ export interface LeadDetailFullResponse {
 export interface LeadFilters {
   dateFrom: string;
   dateTo: string;
-  agents: string[];
+  agents: string;
   stage: string[];
   mqlMin: string;
   condition: string[];
-  city: string[];
+  city: string;
   prospectId: string;
 }
 
@@ -201,11 +197,11 @@ export async function fetchLeads(
     page: String(page),
     page_size: String(pageSize),
   });
-  if (filters.agents.length > 0) params.set('agents', filters.agents.join(','));
+  if (filters.agents.trim()) params.set('agents', filters.agents);
   if (filters.stage.length > 0) params.set('stage', filters.stage.join(','));
   if (filters.mqlMin) params.set('mql_min', filters.mqlMin);
   if (filters.condition.length > 0) params.set('condition', filters.condition.join(','));
-  if (filters.city.length > 0) params.set('city', filters.city.join(','));
+  if (filters.city.trim()) params.set('city', filters.city);
   if (filters.prospectId) params.set('prospect_id', filters.prospectId);
 
   return apiRequest<LeadListResponse>(`/api/inside-sales/leads?${params.toString()}`);

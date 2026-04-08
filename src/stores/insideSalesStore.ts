@@ -21,6 +21,7 @@ interface InsideSalesState {
   clearFilters: () => void;
   setPage: (page: number) => void;
   toggleCallSelection: (activityId: string) => void;
+  replaceCallSelection: (activityIds: string[]) => void;
   selectAllOnPage: () => void;
   deselectAll: () => void;
   loadCalls: (force?: boolean) => Promise<void>;
@@ -46,12 +47,8 @@ const DEFAULT_FILTERS: CallFilters = {
   status: '',
   hasRecording: false,
   eventCodes: '',
-  evalStatus: '',
   durationMin: '',
   durationMax: '',
-  scoreMin: '',
-  scoreMax: '',
-  search: '',
 };
 
 export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
@@ -83,6 +80,9 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       else next.add(activityId);
       return { selectedCallIds: next };
     }),
+
+  replaceCallSelection: (activityIds) =>
+    set({ selectedCallIds: new Set(activityIds) }),
 
   selectAllOnPage: () =>
     set((s) => ({
@@ -153,16 +153,16 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 }));
 
 // Re-export types so pages can import from one place
-export type { LeadListRecord, LeadFilters };
+export type { CallRecord, CallFilters, LeadListRecord, LeadFilters };
 
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
   dateFrom: daysAgoDateString(7) + ' 00:00:00',
   dateTo: todayDateString() + ' 23:59:59',
-  agents: [],
+  agents: '',
   stage: [],
   mqlMin: '',
   condition: [],
-  city: [],
+  city: '',
   prospectId: '',
 };
 
@@ -209,11 +209,11 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
     const filterHash = [
       leadFilters.dateFrom,
       leadFilters.dateTo,
-      leadFilters.agents.join(','),
+      leadFilters.agents,
       leadFilters.stage.join(','),
       leadFilters.condition.join(','),
       leadFilters.mqlMin,
-      leadFilters.city.join(','),
+      leadFilters.city,
       leadFilters.prospectId,
       leadsPageSize,
     ].join('|');

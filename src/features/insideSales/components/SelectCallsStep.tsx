@@ -249,12 +249,8 @@ export function SelectCallsStep({
     status: config.status,
     hasRecording: config.hasRecording,
     eventCodes: '',
-    evalStatus: '',
     durationMin: config.durationMin,
     durationMax: config.durationMax,
-    scoreMin: '',
-    scoreMax: '',
-    search: '',
   }), [
     config.dateFrom,
     config.dateTo,

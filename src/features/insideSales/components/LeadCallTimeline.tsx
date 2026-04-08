@@ -57,7 +57,7 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
   }
 
   return (
-    <div className="overflow-auto rounded-md border border-[var(--border-default)]">
+    <div className="overflow-x-auto rounded-md border border-[var(--border-default)]">
       <table className="w-full text-xs">
         <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
           <tr className="border-b border-[var(--border-default)]">

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
-  ChevronLeft,
-  ChevronRight,
   Phone,
   PhoneIncoming,
   PhoneOutgoing,
@@ -15,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Button, EmptyState, Tabs, Tooltip, Pagination } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
+import { useCurrentAppConfig } from '@/hooks';
 import { useInsideSalesStore, useUIStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
@@ -26,6 +25,7 @@ import { routes } from '@/config/routes';
 import { CallFilterPanel } from '../components/CallFilterPanel';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { StageBadge } from '../components/StageBadge';
+import { buildCollectionFilterPills, countActiveCollectionFilters } from '../utils/collectionFilters';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -48,7 +48,13 @@ function ColHeader({ label, tip }: { label: string; tip: string }) {
   );
 }
 
-function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
+function LeadsTableContent({
+  onOpenFilters,
+  emptyState,
+}: {
+  onOpenFilters: () => void;
+  emptyState?: { title: string; description: string };
+}) {
   const navigate = useNavigate();
   const leads = useLeadsStore((s) => s.leads);
   const leadsTotal = useLeadsStore((s) => s.leadsTotal);
@@ -59,7 +65,7 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
   const leadFilters = useLeadsStore((s) => s.leadFilters);
   const [search, setSearch] = useState('');
 
-  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents.join(',')}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city.join(',')}|${leadFilters.prospectId}|${leadsPage}`;
+  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city}|${leadFilters.prospectId}|${leadsPage}`;
 
   // Client-side search filter
   const visibleLeads = useMemo(() => {
@@ -72,23 +78,22 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
     );
   }, [leads, search]);
 
-  // Active filter count (exclude date range — always set)
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (leadFilters.stage.length > 0) count++;
-    if (leadFilters.condition.length > 0) count++;
-    if (leadFilters.mqlMin) count++;
-    if (leadFilters.city.length > 0) count++;
-    if (leadFilters.agents.length > 0) count++;
-    return count;
-  }, [leadFilters]);
+  const appConfig = useCurrentAppConfig();
+  const leadDatasetConfig = appConfig.collections.datasets.leads;
+  const activeFilterCount = useMemo(
+    () => countActiveCollectionFilters(leadDatasetConfig, leadFilters),
+    [leadDatasetConfig, leadFilters],
+  );
+  const activeFilterPills = useMemo(
+    () => buildCollectionFilterPills(leadDatasetConfig, leadFilters),
+    [leadDatasetConfig, leadFilters],
+  );
 
   useEffect(() => {
     useLeadsStore.getState().loadLeads();
   }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // leadsTotal === -1 means LSQ returned a full page (more may exist)
-  const hasMore = leadsTotal === -1 || leads.length === leadsPageSize;
+  const totalPages = Math.max(1, Math.ceil(Math.max(leadsTotal, 1) / leadsPageSize));
 
   const handleRowClick = useCallback((lead: LeadListRecord) => {
     navigate(routes.insideSales.leadDetail(lead.prospectId));
@@ -121,7 +126,11 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
   if (leads.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <EmptyState icon={Phone} title="No leads found" description="No leads for the selected date range and filters." />
+        <EmptyState
+          icon={Phone}
+          title={emptyState?.title ?? 'No leads found'}
+          description={emptyState?.description ?? 'No leads for the selected date range and filters.'}
+        />
       </div>
     );
   }
@@ -163,38 +172,15 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
       </div>
 
       {/* Active filter pills */}
-      {activeFilterCount > 0 && (
+      {activeFilterPills.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
-          {leadFilters.stage.length > 0 && (
+          {activeFilterPills.map((pill) => (
             <FilterPill
-              label={`Stage: ${leadFilters.stage.length === 1 ? leadFilters.stage[0] : `${leadFilters.stage.length} stages`}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ stage: [] })}
+              key={pill.key}
+              label={pill.label}
+              onRemove={() => useLeadsStore.getState().setLeadFilters(pill.clearPatch)}
             />
-          )}
-          {leadFilters.condition.length > 0 && (
-            <FilterPill
-              label={`Condition: ${leadFilters.condition.length === 1 ? leadFilters.condition[0] : `${leadFilters.condition.length} conditions`}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ condition: [] })}
-            />
-          )}
-          {leadFilters.mqlMin && (
-            <FilterPill
-              label={`MQL ≥ ${leadFilters.mqlMin}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ mqlMin: '' })}
-            />
-          )}
-          {leadFilters.city.length > 0 && (
-            <FilterPill
-              label={`City: ${leadFilters.city.length === 1 ? leadFilters.city[0] : `${leadFilters.city.length} cities`}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ city: [] })}
-            />
-          )}
-          {leadFilters.agents.length > 0 && (
-            <FilterPill
-              label={`Agent: ${leadFilters.agents.length === 1 ? leadFilters.agents[0] : `${leadFilters.agents.length} agents`}`}
-              onRemove={() => useLeadsStore.getState().setLeadFilters({ agents: [] })}
-            />
-          )}
+          ))}
         </div>
       )}
 
@@ -277,21 +263,15 @@ function LeadsTableContent({ onOpenFilters }: { onOpenFilters: () => void }) {
       </div>
 
       <div className="flex items-center justify-between pt-3 pb-1">
-        <span className="text-xs text-[var(--text-muted)]">
-          Page {leadsPage}{hasMore ? '' : ` · ${visibleLeads.length + (leadsPage - 1) * leadsPageSize} leads`}
-        </span>
-        <div className="flex items-center gap-1">
-          <Button variant="secondary" size="sm" disabled={leadsPage <= 1}
-            onClick={() => useLeadsStore.getState().setLeadsPage(leadsPage - 1)}
-            className="h-7 w-7 p-0">
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </Button>
-          <Button variant="secondary" size="sm" disabled={!hasMore}
-            onClick={() => useLeadsStore.getState().setLeadsPage(leadsPage + 1)}
-            className="h-7 w-7 p-0">
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <Pagination
+          page={leadsPage}
+          totalPages={totalPages}
+          onPageChange={(nextPage) => useLeadsStore.getState().setLeadsPage(nextPage)}
+          showCount
+          totalItems={leadsTotal}
+          pageSize={leadsPageSize}
+          className="w-full"
+        />
       </div>
     </div>
   );
@@ -349,6 +329,9 @@ function StatusBadge({ status }: { status: string }) {
 /* ── Main Component ──────────────────────────────────────── */
 
 export function InsideSalesListing() {
+  const appConfig = useCurrentAppConfig();
+  const leadDatasetConfig = appConfig.collections.datasets.leads;
+  const callDatasetConfig = appConfig.collections.datasets.calls;
   const navigate = useNavigate();
   const calls = useInsideSalesStore((s) => s.calls);
   const total = useInsideSalesStore((s) => s.total);
@@ -362,11 +345,24 @@ export function InsideSalesListing() {
   const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'leads' | 'calls'>('leads');
+  const [callSearch, setCallSearch] = useState('');
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioEl] = useState(() => typeof Audio !== 'undefined' ? new Audio() : null);
 
   // Stable key from filter values + page — only re-fetch when these actually change
-  const filterKey = `${filters.dateFrom}|${filters.dateTo}|${filters.agents.join(',')}|${filters.direction}|${filters.status}|${filters.eventCodes}|${page}`;
+  const filterKey = [
+    filters.dateFrom,
+    filters.dateTo,
+    filters.agents.join(','),
+    filters.prospectId,
+    filters.direction,
+    filters.status,
+    filters.hasRecording ? 'recording' : '',
+    filters.durationMin,
+    filters.durationMax,
+    filters.eventCodes,
+    page,
+  ].join('|');
 
   useEffect(() => {
     useInsideSalesStore.getState().loadCalls();
@@ -384,53 +380,34 @@ export function InsideSalesListing() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // Client-side filtering (search + duration)
+  // Client-side search only; server-side filters own dataset counts and pagination.
   const filteredCalls = useMemo(() => {
-    let result = calls;
-
-    const q = filters.search.toLowerCase().trim();
+    const q = callSearch.toLowerCase().trim();
     if (q) {
-      result = result.filter(
+      return calls.filter(
         (c) =>
           c.agentName.toLowerCase().includes(q) ||
-          c.displayNumber.includes(q)
+          c.displayNumber.includes(q) ||
+          c.activityId.toLowerCase().includes(q)
       );
     }
-
-    if (filters.durationMin) {
-      const min = Number(filters.durationMin);
-      result = result.filter((c) => c.durationSeconds >= min);
-    }
-    if (filters.durationMax) {
-      const max = Number(filters.durationMax);
-      result = result.filter((c) => c.durationSeconds <= max);
-    }
-
-    return result;
-  }, [calls, filters.search, filters.durationMin, filters.durationMax]);
-
-  // Active filter count (excluding dateFrom/dateTo/search which have dedicated UI)
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (filters.agents.length > 0) count++;
-    if (filters.prospectId) count++;
-    if (filters.direction) count++;
-    if (filters.status) count++;
-    if (filters.eventCodes) count++;
-    if (filters.evalStatus) count++;
-    if (filters.durationMin) count++;
-    if (filters.durationMax) count++;
-    if (filters.scoreMin) count++;
-    if (filters.scoreMax) count++;
-    return count;
-  }, [filters]);
+    return calls;
+  }, [calls, callSearch]);
+  const activeFilterCount = useMemo(
+    () => countActiveCollectionFilters(callDatasetConfig, filters),
+    [callDatasetConfig, filters],
+  );
+  const activeFilterPills = useMemo(
+    () => buildCollectionFilterPills(callDatasetConfig, filters),
+    [callDatasetConfig, filters],
+  );
 
   const handlePageChange = useCallback((newPage: number) => {
     useInsideSalesStore.getState().setPage(newPage);
   }, []);
 
   const handleSearchChange = useCallback((value: string) => {
-    useInsideSalesStore.getState().setFilters({ search: value });
+    setCallSearch(value);
   }, []);
 
   const handleRowClick = useCallback(
@@ -448,12 +425,17 @@ export function InsideSalesListing() {
 
   const handleSelectAll = useCallback(() => {
     const store = useInsideSalesStore.getState();
-    if (selectedCallIds.size === filteredCalls.length) {
-      store.deselectAll();
+    const visibleIds = filteredCalls.map((call) => call.activityId);
+    const visibleSelectedCount = visibleIds.filter((id) => selectedCallIds.has(id)).length;
+
+    if (visibleSelectedCount === visibleIds.length) {
+      store.replaceCallSelection(
+        [...selectedCallIds].filter((id) => !visibleIds.includes(id)),
+      );
     } else {
-      store.selectAllOnPage();
+      store.replaceCallSelection([...new Set([...selectedCallIds, ...visibleIds])]);
     }
-  }, [selectedCallIds.size, filteredCalls.length]);
+  }, [filteredCalls, selectedCallIds]);
 
   const handlePlayToggle = useCallback(
     (call: CallRecord, e: React.MouseEvent) => {
@@ -485,7 +467,7 @@ export function InsideSalesListing() {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
           <input
             type="text"
-            value={filters.search}
+            value={callSearch}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search agent, number..."
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]"
@@ -519,38 +501,15 @@ export function InsideSalesListing() {
       </div>
 
       {/* Active filter pills */}
-      {activeFilterCount > 0 && (
+      {activeFilterPills.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
-          {filters.agents.length > 0 && (
+          {activeFilterPills.map((pill) => (
             <FilterPill
-              label={`Agent: ${filters.agents.length === 1 ? filters.agents[0] : `${filters.agents.length} agents`}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ agents: [] })}
+              key={pill.key}
+              label={pill.label}
+              onRemove={() => useInsideSalesStore.getState().setFilters(pill.clearPatch)}
             />
-          )}
-          {filters.prospectId && (
-            <FilterPill
-              label={`Prospect: ${filters.prospectId.length > 12 ? filters.prospectId.slice(0, 8) + '…' : filters.prospectId}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ prospectId: '' })}
-            />
-          )}
-          {filters.direction && (
-            <FilterPill
-              label={`Dir: ${filters.direction}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ direction: '' })}
-            />
-          )}
-          {filters.status && (
-            <FilterPill
-              label={`Status: ${filters.status}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ status: '' })}
-            />
-          )}
-          {filters.eventCodes && (
-            <FilterPill
-              label={`Events: ${filters.eventCodes}`}
-              onRemove={() => useInsideSalesStore.getState().setFilters({ eventCodes: '' })}
-            />
-          )}
+          ))}
         </div>
       )}
 
@@ -598,11 +557,11 @@ export function InsideSalesListing() {
         <div className="flex min-h-[60vh] items-center justify-center">
           <EmptyState
             icon={Phone}
-            title={filters.search ? 'No matching calls' : 'No calls found'}
+            title={callSearch ? 'No matching calls' : (callDatasetConfig.emptyState?.title ?? 'No calls found')}
             description={
-              filters.search
+              callSearch
                 ? 'Try adjusting your search terms.'
-                : 'No call activities for the selected date range.'
+                : (callDatasetConfig.emptyState?.description ?? 'No call activities for the selected date range.')
             }
           />
         </div>
@@ -615,7 +574,7 @@ export function InsideSalesListing() {
                   <th className="w-8 px-2 py-2 text-left">
                     <input
                       type="checkbox"
-                      checked={selectedCallIds.size === filteredCalls.length && filteredCalls.length > 0}
+                      checked={filteredCalls.length > 0 && filteredCalls.every((call) => selectedCallIds.has(call.activityId))}
                       onChange={handleSelectAll}
                       className="h-3.5 w-3.5 rounded border-[var(--border-default)] accent-[var(--color-brand-accent)]"
                     />
@@ -722,13 +681,13 @@ export function InsideSalesListing() {
       </div>
 
       {/* Tabs */}
-      <Tabs
-        tabs={[
-          { id: 'leads', label: 'Leads', content: <LeadsTableContent onOpenFilters={() => setFilterPanelOpen(true)} /> },
-          { id: 'all', label: 'All Calls', content: tableContent },
-        ]}
-        defaultTab="leads"
-        onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
+        <Tabs
+          tabs={[
+          { id: 'leads', label: 'Leads', content: <LeadsTableContent onOpenFilters={() => setFilterPanelOpen(true)} emptyState={leadDatasetConfig.emptyState} /> },
+          { id: 'calls', label: 'All Calls', content: tableContent },
+          ]}
+          defaultTab="leads"
+          onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
         fillHeight
       />
 

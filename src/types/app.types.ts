@@ -129,6 +129,15 @@ export interface AppCollectionFilterConfig {
   key: string;
   label: string;
   pillLabel?: string | null;
+  control: 'date-range' | 'text' | 'multi-select' | 'segmented' | 'number-range' | 'toggle';
+  fields?: string[];
+  placeholder?: string;
+  description?: string;
+  optionSource?: 'agents';
+  options?: Array<{
+    value: string;
+    label: string;
+  }>;
 }
 
 export interface AppCollectionEmptyStateConfig {
@@ -576,13 +585,64 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       datasets: {
         leads: {
           filters: [
-            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date' },
-            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect' },
-            { key: 'stage', label: 'Stage' },
-            { key: 'mqlMin', label: 'MQL Score', pillLabel: 'MQL' },
-            { key: 'condition', label: 'Condition' },
-            { key: 'city', label: 'City' },
-            { key: 'agents', label: 'Agent', pillLabel: 'Agent' },
+            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date', control: 'date-range', fields: ['dateFrom', 'dateTo'] },
+            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect', control: 'text', fields: ['prospectId'], placeholder: 'Paste or type prospect ID...' },
+            {
+              key: 'stage',
+              label: 'Stage',
+              control: 'multi-select',
+              fields: ['stage'],
+              options: [
+                { value: 'New Lead', label: 'New Lead' },
+                { value: 'Call Back', label: 'Call Back' },
+                { value: 'RNR', label: 'RNR' },
+                { value: 'Interested in future plan', label: 'Interested in future plan' },
+                { value: 'Not Interested', label: 'Not Interested' },
+                { value: 'Converted', label: 'Converted' },
+                { value: 'Invalid / Junk', label: 'Invalid / Junk' },
+                { value: 'Re-enquired', label: 'Re-enquired' },
+              ],
+            },
+            {
+              key: 'mqlMin',
+              label: 'MQL Score',
+              pillLabel: 'MQL',
+              control: 'segmented',
+              fields: ['mqlMin'],
+              options: [
+                { value: '', label: 'Any' },
+                { value: '3', label: '>= 3' },
+                { value: '5', label: '= 5 (MQL)' },
+              ],
+            },
+            {
+              key: 'condition',
+              label: 'Condition',
+              control: 'multi-select',
+              fields: ['condition'],
+              options: [
+                { value: 'Diabetes', label: 'Diabetes' },
+                { value: 'PCOS', label: 'PCOS' },
+                { value: 'Fatty Liver', label: 'Fatty Liver' },
+                { value: 'Obesity', label: 'Obesity' },
+                { value: 'Hypertension', label: 'Hypertension' },
+              ],
+            },
+            {
+              key: 'city',
+              label: 'City',
+              control: 'text',
+              fields: ['city'],
+              placeholder: 'Type one or more cities, comma-separated...',
+            },
+            {
+              key: 'agents',
+              label: 'Agent',
+              pillLabel: 'Agent',
+              control: 'text',
+              fields: ['agents'],
+              placeholder: 'Type one or more lead owners, comma-separated...',
+            },
           ],
           emptyState: {
             title: 'No leads found',
@@ -591,14 +651,51 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         calls: {
           filters: [
-            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date' },
-            { key: 'agents', label: 'Agent', pillLabel: 'Agent' },
-            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect' },
-            { key: 'direction', label: 'Direction', pillLabel: 'Dir' },
-            { key: 'status', label: 'Call Status', pillLabel: 'Status' },
-            { key: 'duration', label: 'Duration' },
-            { key: 'eventCodes', label: 'Event Codes', pillLabel: 'Events' },
-            { key: 'hasRecording', label: 'Recording', pillLabel: 'Recording' },
+            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date', control: 'date-range', fields: ['dateFrom', 'dateTo'] },
+            {
+              key: 'agents',
+              label: 'Agent',
+              pillLabel: 'Agent',
+              control: 'multi-select',
+              fields: ['agents'],
+              optionSource: 'agents',
+              placeholder: 'Select agents...',
+            },
+            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect', control: 'text', fields: ['prospectId'], placeholder: 'Paste or type prospect ID...' },
+            {
+              key: 'direction',
+              label: 'Direction',
+              pillLabel: 'Dir',
+              control: 'segmented',
+              fields: ['direction'],
+              options: [
+                { value: '', label: 'All' },
+                { value: 'inbound', label: 'Inbound' },
+                { value: 'outbound', label: 'Outbound' },
+              ],
+            },
+            {
+              key: 'status',
+              label: 'Call Status',
+              pillLabel: 'Status',
+              control: 'segmented',
+              fields: ['status'],
+              options: [
+                { value: '', label: 'All' },
+                { value: 'answered', label: 'Answered' },
+                { value: 'notanswered', label: 'Missed' },
+              ],
+            },
+            { key: 'duration', label: 'Duration', control: 'number-range', fields: ['durationMin', 'durationMax'] },
+            { key: 'eventCodes', label: 'Event Codes', pillLabel: 'Events', control: 'text', fields: ['eventCodes'], placeholder: 'e.g. 21,22' },
+            {
+              key: 'hasRecording',
+              label: 'Recording',
+              pillLabel: 'Recording',
+              control: 'toggle',
+              fields: ['hasRecording'],
+              description: 'Only include calls with audio available',
+            },
           ],
           emptyState: {
             title: 'No calls found',
