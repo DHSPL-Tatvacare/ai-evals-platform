@@ -236,6 +236,13 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
       return;
     }
 
+    if (reportRun.status === 'failed' || reportRun.status === 'cancelled') {
+      setReport(null);
+      setError('Report generation failed. Click Generate to retry.');
+      setStatus('error');
+      return;
+    }
+
     if (reportRun.status !== 'completed') {
       setReport(null);
       setStatus('generating');
@@ -360,7 +367,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
       setStatus('error');
     });
 
-    if (selectedReportRun.status !== 'completed' && selectedReportRun.jobId) {
+    if ((selectedReportRun.status === 'queued' || selectedReportRun.status === 'running') && selectedReportRun.jobId) {
       void pollExistingJob(selectedReportRun);
     }
   }, [loadSelectedArtifact, pollExistingJob, selectedReportRun]);

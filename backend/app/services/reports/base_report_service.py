@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
 from app.models.evaluation_analytics import EvaluationAnalytics
 from app.schemas.base import CamelModel
+from app.services.access_control import readable_scope_clause
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log
 from app.services.evaluators.settings_helper import get_llm_settings_from_db
@@ -89,11 +90,19 @@ class BaseReportService(ABC):
     # --- Data loading ---
 
     async def _load_run(self, run_id: str) -> EvalRun:
+        access_user = type(
+            'AccessUser',
+            (),
+            {
+                'tenant_id': self.tenant_id,
+                'user_id': self.user_id,
+                'app_access': frozenset(),
+            },
+        )()
         run = await self.db.scalar(
             select(EvalRun).where(
                 EvalRun.id == UUID(run_id),
-                EvalRun.tenant_id == self.tenant_id,
-                EvalRun.user_id == self.user_id,
+                readable_scope_clause(EvalRun, access_user),
             )
         )
         if not run:

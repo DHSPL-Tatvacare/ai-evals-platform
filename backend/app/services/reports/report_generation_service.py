@@ -578,7 +578,7 @@ async def generate_cross_run_report_artifact(
             if export_config.enabled:
                 pre_sections = compose_cross_run_report(
                     metadata=metadata,
-                    section_configs=_presentation_sections(presentation_config),
+                    section_configs=_effective_presentation_sections(presentation_config, analytics_config.cross_run.sections),
                     section_payloads=section_payloads,
                     export_document=None,
                 ).sections
@@ -595,7 +595,7 @@ async def generate_cross_run_report_artifact(
                 )
             payload = compose_cross_run_report(
                 metadata=metadata,
-                section_configs=_presentation_sections(presentation_config),
+                section_configs=_effective_presentation_sections(presentation_config, analytics_config.cross_run.sections),
                 section_payloads=section_payloads,
                 export_document=export_document,
             )
