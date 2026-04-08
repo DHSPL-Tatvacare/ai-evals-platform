@@ -33,6 +33,10 @@ interface ApiEvaluator {
   sharedBy?: string | null;
   sharedAt?: string | null;
   forkedFrom?: string;
+  seedKey?: string | null;
+  seedVariant?: string | null;
+  isSeededDefault?: boolean;
+  isCanonicalSeededDefault?: boolean;
   templateId?: string | null;
   templateBranchKey?: string | null;
   templateUpgradeAvailable?: boolean;
@@ -64,6 +68,10 @@ function toEvaluatorDefinition(e: ApiEvaluator): EvaluatorDefinition {
     outputSchema: e.outputSchema as EvaluatorDefinition['outputSchema'],
     visibility: normalizeAssetVisibility(e.visibility),
     forkedFrom: e.forkedFrom,
+    seedKey: e.seedKey ?? null,
+    seedVariant: e.seedVariant ?? null,
+    isSeededDefault: e.isSeededDefault ?? false,
+    isCanonicalSeededDefault: e.isCanonicalSeededDefault ?? false,
     templateId: e.templateId ?? null,
     templateBranchKey: e.templateBranchKey ?? null,
     templateUpgradeAvailable: e.templateUpgradeAvailable ?? false,

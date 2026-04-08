@@ -5,8 +5,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select, desc, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import AuthContext, get_auth_context
-from app.auth.permissions import require_permission, require_app_access
+from app.auth.context import AuthContext, get_auth_context, require_owner
+from app.auth.permissions import ensure_permissions, require_permission, require_app_access
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import get_db
 from app.models.eval_template import EvalTemplate
@@ -16,6 +16,14 @@ from app.models.listing import Listing
 from app.models.user import User
 from app.schemas.evaluator import EvaluatorCreate, EvaluatorUpdate, EvaluatorResponse
 from app.services.access_control import readable_scope_clause, shared_visibility_clause
+from app.services.evaluator_seed_catalog import (
+    collapse_visible_seeded_evaluators,
+    is_canonical_seeded_default,
+    is_seeded_default,
+    resolve_seed_variant,
+    restore_seeded_evaluators_for_tenant,
+    supports_seed_restore,
+)
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 
@@ -41,15 +49,57 @@ def _extract_paths(data: dict, prefix: str, max_depth: int = 4) -> list[str]:
 
 def _owner_name_for_row(evaluator: Evaluator, owner_name: str | None) -> str:
     if evaluator.tenant_id == SYSTEM_TENANT_ID:
-        return "System"
+        return 'System'
+    if is_canonical_seeded_default(evaluator):
+        return 'Tenant Default'
     return owner_name or str(evaluator.user_id)
 
 
 def _annotate_owner_metadata(evaluator: Evaluator, owner_name: str | None) -> Evaluator:
     evaluator.owner_id = evaluator.user_id
     evaluator.owner_name = _owner_name_for_row(evaluator, owner_name)
+    evaluator.is_seeded_default = is_seeded_default(evaluator)
+    evaluator.is_canonical_seeded_default = is_canonical_seeded_default(evaluator)
     evaluator.template_upgrade_available = False  # default, may be overwritten
     return evaluator
+
+
+async def _load_tenant_evaluator(
+    db: AsyncSession,
+    *,
+    evaluator_id: UUID,
+    tenant_id: UUID,
+) -> Evaluator:
+    result = await db.execute(
+        select(Evaluator).where(
+            Evaluator.id == evaluator_id,
+            Evaluator.tenant_id == tenant_id,
+        )
+    )
+    evaluator = result.scalar_one_or_none()
+    if evaluator is None:
+        raise HTTPException(status_code=404, detail='Evaluator not found')
+    return evaluator
+
+
+def _is_tenant_managed_seeded_default(evaluator: Evaluator) -> bool:
+    return is_canonical_seeded_default(evaluator) and evaluator.tenant_id != SYSTEM_TENANT_ID
+
+
+def _ensure_mutation_access(
+    auth: AuthContext,
+    evaluator: Evaluator,
+    *,
+    owned_permission: str,
+) -> None:
+    if _is_tenant_managed_seeded_default(evaluator):
+        if not auth.is_owner:
+            raise HTTPException(status_code=403, detail='Owner access required')
+        return
+
+    ensure_permissions(auth, owned_permission)
+    if evaluator.user_id != auth.user_id:
+        raise HTTPException(status_code=404, detail='Evaluator not found')
 
 
 async def _annotate_template_upgrades(db: AsyncSession, evaluators: list[Evaluator]) -> None:
@@ -87,7 +137,7 @@ async def _annotate_template_upgrades(db: AsyncSession, evaluators: list[Evaluat
 @router.get("", response_model=list[EvaluatorResponse])
 async def list_evaluators(
     app_id: str = Query(...),
-    listing_id: str = Query(None),
+    listing_id: str | None = Query(None),
     filter: Literal["all", "private", "shared"] = Query("all"),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
@@ -126,8 +176,22 @@ async def list_evaluators(
             Evaluator.app_id == app_id,
         )
 
-    if listing_id:
-        query = query.where(Evaluator.listing_id == UUID(listing_id))
+    listing_uuid = UUID(listing_id) if listing_id else None
+    if listing_uuid:
+        if filter == "private":
+            query = query.where(Evaluator.listing_id == listing_uuid)
+        else:
+            query = query.where(
+                or_(
+                    Evaluator.listing_id == listing_uuid,
+                    and_(
+                        Evaluator.listing_id == None,
+                        Evaluator.forked_from == None,
+                        shared_visibility_clause(Evaluator.visibility),
+                        Evaluator.seed_key != None,
+                    ),
+                )
+            )
     query = query.order_by(desc(Evaluator.created_at))
 
     result = await db.execute(query)
@@ -135,6 +199,7 @@ async def list_evaluators(
         _annotate_owner_metadata(evaluator, owner_name)
         for evaluator, owner_name in result.all()
     ]
+    evaluators = collapse_visible_seeded_evaluators(evaluators, listing_id=listing_uuid)
     try:
         await _annotate_template_upgrades(db, evaluators)
     except Exception:
@@ -192,29 +257,44 @@ async def validate_prompt(
 async def seed_defaults(
     app_id: str = Query(..., alias="appId"),
     listing_id: str | None = Query(None, alias="listingId"),
-    auth: AuthContext = require_permission('asset:create'),
+    auth: AuthContext = Depends(require_owner),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create recommended evaluators for an app.
+    """Restore missing canonical seeded evaluators for a tenant/app scope."""
+    seed_variant = None
+    if app_id == 'voice-rx':
+        seed_variant = await _resolve_voice_rx_seed_variant(
+            listing_id=listing_id,
+            auth=auth,
+            db=db,
+        )
 
-    - voice-rx: requires listingId, seeds per-listing evaluators based on source_type.
-    - kaira-bot: no listingId needed, seeds app-level evaluators.
-    """
-    if app_id == "voice-rx":
-        return await _seed_voice_rx(listing_id, auth, db)
-    elif app_id == "kaira-bot":
-        return await _seed_kaira_bot(auth, db)
-    elif app_id == "inside-sales":
-        return await _seed_inside_sales(auth, db)
-    else:
+    if not supports_seed_restore(app_id, seed_variant=seed_variant):
         raise HTTPException(status_code=400, detail=f"Seed evaluators not available for app '{app_id}'")
 
+    restored = await restore_seeded_evaluators_for_tenant(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        app_id=app_id,
+        seed_variant=seed_variant,
+    )
+    await db.commit()
+    for evaluator in restored:
+        await db.refresh(evaluator)
+        _annotate_owner_metadata(evaluator, None)
+    return restored
 
-async def _seed_voice_rx(listing_id: str | None, auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
-    """Seed recommended evaluators for a voice-rx listing."""
+
+async def _resolve_voice_rx_seed_variant(
+    *,
+    listing_id: str | None,
+    auth: AuthContext,
+    db: AsyncSession,
+) -> str:
     if not listing_id:
-        raise HTTPException(status_code=400, detail="listingId is required for voice-rx")
+        raise HTTPException(status_code=400, detail='listingId is required for voice-rx')
 
     listing = await db.scalar(
         select(Listing).where(
@@ -224,142 +304,17 @@ async def _seed_voice_rx(listing_id: str | None, auth: AuthContext, db: AsyncSes
         )
     )
     if not listing:
-        raise HTTPException(status_code=404, detail="Listing not found")
-    if listing.app_id != "voice-rx":
-        raise HTTPException(status_code=400, detail="Listing does not belong to voice-rx")
+        raise HTTPException(status_code=404, detail='Listing not found')
+    if listing.app_id != 'voice-rx':
+        raise HTTPException(status_code=400, detail='Listing does not belong to voice-rx')
 
-    source_type = listing.source_type
-    if source_type == "upload":
-        from app.services.seed_defaults import VOICE_RX_UPLOAD_EVALUATORS
-        seeds = VOICE_RX_UPLOAD_EVALUATORS
-    elif source_type == "api":
-        from app.services.seed_defaults import VOICE_RX_API_EVALUATORS
-        seeds = VOICE_RX_API_EVALUATORS
-    else:
+    seed_variant = resolve_seed_variant('voice-rx', listing.source_type)
+    if seed_variant is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Listing source type '{source_type}' is not supported",
+            detail=f"Listing source type '{listing.source_type}' is not supported",
         )
-
-    # Idempotency: check existing evaluators on this listing for this user
-    result = await db.execute(
-        select(Evaluator)
-        .where(
-            Evaluator.listing_id == listing.id,
-            Evaluator.app_id == "voice-rx",
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
-    )
-    existing_names = {e.name for e in result.scalars().all()}
-
-    created = []
-    for seed in seeds:
-        if seed["name"] in existing_names:
-            continue
-        evaluator = Evaluator(
-            app_id="voice-rx",
-            listing_id=listing.id,
-            name=seed["name"],
-            prompt=seed["prompt"],
-            output_schema=seed["output_schema"],
-            model_id=None,
-            visibility=Visibility.PRIVATE,
-            tenant_id=auth.tenant_id,
-            user_id=auth.user_id,
-        )
-        db.add(evaluator)
-        created.append(evaluator)
-
-    if created:
-        await db.commit()
-        for e in created:
-            await db.refresh(e)
-
-    return created
-
-
-async def _seed_kaira_bot(auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
-    """Seed recommended app-level evaluators for kaira-bot."""
-    from app.services.seed_defaults import KAIRA_BOT_EVALUATORS
-
-    # Idempotency: check existing app-level evaluators for this user
-    result = await db.execute(
-        select(Evaluator).where(
-            Evaluator.app_id == "kaira-bot",
-            Evaluator.listing_id == None,
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
-    )
-    existing_names = {e.name for e in result.scalars().all()}
-
-    created = []
-    for seed in KAIRA_BOT_EVALUATORS:
-        if seed["name"] in existing_names:
-            continue
-        evaluator = Evaluator(
-            app_id=seed["app_id"],
-            listing_id=None,
-            name=seed["name"],
-            prompt=seed["prompt"],
-            output_schema=seed["output_schema"],
-            model_id=None,
-            visibility=Visibility.normalize(seed.get("visibility")) or Visibility.SHARED,
-            tenant_id=auth.tenant_id,
-            user_id=auth.user_id,
-        )
-        db.add(evaluator)
-        created.append(evaluator)
-
-    if created:
-        await db.commit()
-        for e in created:
-            await db.refresh(e)
-
-    return created
-
-
-async def _seed_inside_sales(auth: AuthContext, db: AsyncSession) -> list[Evaluator]:
-    """Seed recommended evaluators for inside-sales."""
-    from app.services.seed_defaults import INSIDE_SALES_EVALUATORS
-
-    result = await db.execute(
-        select(Evaluator).where(
-            Evaluator.app_id == "inside-sales",
-            Evaluator.listing_id == None,
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
-    )
-    existing_map = {e.name: e for e in result.scalars().all()}
-
-    created = []
-    for seed in INSIDE_SALES_EVALUATORS:
-        existing = existing_map.get(seed["name"])
-        if existing:
-            existing.output_schema = seed["output_schema"]
-            existing.prompt = seed["prompt"]
-            continue
-        evaluator = Evaluator(
-            app_id=seed["app_id"],
-            listing_id=None,
-            name=seed["name"],
-            prompt=seed["prompt"],
-            output_schema=seed["output_schema"],
-            model_id=None,
-            visibility=Visibility.normalize(seed.get("visibility")) or Visibility.SHARED,
-            tenant_id=auth.tenant_id,
-            user_id=auth.user_id,
-        )
-        db.add(evaluator)
-        created.append(evaluator)
-
-    await db.commit()
-    for e in created:
-        await db.refresh(e)
-
-    return created
+    return seed_variant
 
 
 @router.get("/variables/api-paths")
@@ -432,23 +387,22 @@ async def create_evaluator(
 async def update_evaluator(
     evaluator_id: UUID,
     body: EvaluatorUpdate,
-    auth: AuthContext = require_permission('asset:edit'),
+    auth: AuthContext = Depends(get_auth_context),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an evaluator. Cannot edit system evaluators."""
-    result = await db.execute(
-        select(Evaluator).where(
-            Evaluator.id == evaluator_id,
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
+    evaluator = await _load_tenant_evaluator(
+        db,
+        evaluator_id=evaluator_id,
+        tenant_id=auth.tenant_id,
     )
-    evaluator = result.scalar_one_or_none()
-    if not evaluator:
-        raise HTTPException(status_code=404, detail="Evaluator not found")
+    _ensure_mutation_access(auth, evaluator, owned_permission='asset:edit')
 
     update_data = body.model_dump(exclude_unset=True)
+    if _is_tenant_managed_seeded_default(evaluator):
+        update_data.pop('listing_id', None)
+        update_data.pop('visibility', None)
     for key, value in update_data.items():
         setattr(evaluator, key, value)
 
@@ -460,21 +414,17 @@ async def update_evaluator(
 @router.delete("/{evaluator_id}")
 async def delete_evaluator(
     evaluator_id: UUID,
-    auth: AuthContext = require_permission('asset:delete'),
+    auth: AuthContext = Depends(get_auth_context),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an evaluator. Cannot delete system evaluators."""
-    result = await db.execute(
-        select(Evaluator).where(
-            Evaluator.id == evaluator_id,
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
+    evaluator = await _load_tenant_evaluator(
+        db,
+        evaluator_id=evaluator_id,
+        tenant_id=auth.tenant_id,
     )
-    evaluator = result.scalar_one_or_none()
-    if not evaluator:
-        raise HTTPException(status_code=404, detail="Evaluator not found")
+    _ensure_mutation_access(auth, evaluator, owned_permission='asset:delete')
 
     await db.delete(evaluator)
     await db.commit()
@@ -523,23 +473,25 @@ async def fork_evaluator(
 async def patch_evaluator_visibility(
     evaluator_id: UUID,
     body: dict,
-    auth: AuthContext = require_permission('asset:share'),
+    auth: AuthContext = Depends(get_auth_context),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
     """Change visibility on an evaluator. Only the owner can change visibility."""
     from sqlalchemy import func as sqlfunc
 
-    result = await db.execute(
-        select(Evaluator).where(
-            Evaluator.id == evaluator_id,
-            Evaluator.tenant_id == auth.tenant_id,
-            Evaluator.user_id == auth.user_id,
-        )
+    evaluator = await _load_tenant_evaluator(
+        db,
+        evaluator_id=evaluator_id,
+        tenant_id=auth.tenant_id,
     )
-    evaluator = result.scalar_one_or_none()
-    if not evaluator:
-        raise HTTPException(status_code=404, detail="Evaluator not found or not owned by you")
+    if _is_tenant_managed_seeded_default(evaluator):
+        if not auth.is_owner:
+            raise HTTPException(status_code=403, detail='Owner access required')
+        raise HTTPException(status_code=400, detail='Seeded defaults must remain shared')
+    ensure_permissions(auth, 'asset:share')
+    if evaluator.user_id != auth.user_id:
+        raise HTTPException(status_code=404, detail='Evaluator not found or not owned by you')
 
     try:
         new_visibility = Visibility.normalize(body.get("visibility"))

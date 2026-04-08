@@ -24,7 +24,6 @@ from app.models.job import Job
 from app.models.history import History
 from app.models.setting import Setting
 from app.models.mixins.shareable import Visibility
-from app.services.access_control import shared_visibility_clause
 from app.models.tag import Tag
 from app.models.user import User, RefreshToken
 from app.models.tenant import Tenant
@@ -154,7 +153,7 @@ async def get_stats(
         )
         tables["evaluators"] = await count_with_seed(
             Evaluator, Evaluator.app_id,
-            shared_visibility_clause(Evaluator.visibility) & (Evaluator.listing_id == None),
+            (Evaluator.seed_key != None) & (Evaluator.listing_id == None),
             app_filter=app_id,
         )
     else:
@@ -168,7 +167,7 @@ async def get_stats(
         )
         tables["evaluators"] = await count_with_seed(
             Evaluator, Evaluator.app_id,
-            shared_visibility_clause(Evaluator.visibility) & (Evaluator.listing_id == None),
+            (Evaluator.seed_key != None) & (Evaluator.listing_id == None),
         )
 
     # ── Tables without app_id ──
@@ -417,7 +416,7 @@ async def erase_data(
             q = q.where(Evaluator.app_id == app_id)
         if not body.include_seed_data:
             q = q.where(
-                ~(shared_visibility_clause(Evaluator.visibility) & (Evaluator.listing_id == None))
+                ~((Evaluator.seed_key != None) & (Evaluator.listing_id == None))
             )
         result = await db.execute(q)
         deleted["evaluators"] = result.rowcount

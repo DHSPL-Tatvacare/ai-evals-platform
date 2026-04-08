@@ -50,6 +50,10 @@ export interface EvaluatorDefinition {
   listingId?: string;             // Which listing owns this (null for kaira-bot app-level)
   visibility?: AssetVisibility;   // Sharing scope
   forkedFrom?: string;            // Source evaluator ID if forked (lineage tracking)
+  seedKey?: string | null;
+  seedVariant?: string | null;
+  isSeededDefault?: boolean;
+  isCanonicalSeededDefault?: boolean;
   templateId?: string | null;
   templateBranchKey?: string | null;
   templateUpgradeAvailable?: boolean;

@@ -8,6 +8,7 @@ import { evaluatorExecutor } from '@/services/evaluators/evaluatorExecutor';
 import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore, LLM_PROVIDERS } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { usePermission } from '@/utils/permissions';
 import { evaluatorShowsInHeader, getEvaluatorMainMetricField, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
 import { CreateEvaluatorWizard } from './CreateEvaluatorWizard';
@@ -32,6 +33,7 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
   const canDelete = usePermission('asset:delete');
   const canShare = usePermission('asset:share');
   const canRun = usePermission('evaluation:run');
+  const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
@@ -165,14 +167,18 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
       });
   };
 
-  const handleSeedDefaults = async () => {
+  const handleRestoreDefaults = async () => {
     setIsSeeding(true);
     try {
       const seeded = await seedDefaults(listing.id);
-      notificationService.success(`Added ${seeded.length} recommended evaluators`);
+      if (seeded.length > 0) {
+        notificationService.success(`Restored ${seeded.length} missing default evaluators`);
+      } else {
+        notificationService.info('All default evaluators are already present');
+      }
     } catch (error) {
       notificationService.error(
-        error instanceof Error ? error.message : 'Failed to add recommended evaluators',
+        error instanceof Error ? error.message : 'Failed to restore defaults',
       );
     } finally {
       setIsSeeding(false);
@@ -215,13 +221,17 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
           onVisibilityChange={canShare ? handleVisibilityChange : undefined}
           onRun={canRun ? handleSingleRun : undefined}
           onCancelRun={canRun ? runner.handleCancel : undefined}
-          onSeedDefaults={supportsListingSeedDefaults && canCreate ? handleSeedDefaults : undefined}
+          onRestoreDefaults={supportsListingSeedDefaults && isOwner ? handleRestoreDefaults : undefined}
           onToggleHeader={handleToggleHeader}
-          isSeeding={isSeeding}
+          isRestoringDefaults={isSeeding}
           title="Evaluators"
           description="Run private and shared evaluators against this listing without leaving the transcript workflow."
           headerActions={headerActions}
           canCreate={canCreate}
+          canEditOwned={canEdit}
+          canDeleteOwned={canDelete}
+          canShareOwned={canShare}
+          canManageSeededDefaults={isOwner}
         />
       )}
 

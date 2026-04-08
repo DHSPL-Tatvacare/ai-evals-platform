@@ -34,9 +34,9 @@ interface EvaluatorsTableProps {
   onVisibilityChange?: (evaluator: EvaluatorDefinition) => void;
   onRun?: (evaluator: EvaluatorDefinition) => void;
   onCancelRun?: (evaluatorId: string) => void;
-  onSeedDefaults?: () => void;
+  onRestoreDefaults?: () => void;
   onToggleHeader?: (evaluator: EvaluatorDefinition) => void;
-  isSeeding?: boolean;
+  isRestoringDefaults?: boolean;
   title?: string;
   description?: string;
   headerActions?: ReactNode;
@@ -44,6 +44,10 @@ interface EvaluatorsTableProps {
   onOpen?: (evaluator: EvaluatorDefinition) => void;
   onUpgradeReview?: (evaluator: EvaluatorDefinition) => void;
   canCreate?: boolean;
+  canEditOwned?: boolean;
+  canDeleteOwned?: boolean;
+  canShareOwned?: boolean;
+  canManageSeededDefaults?: boolean;
 }
 
 const FILTER_OPTIONS: EvaluatorVisibilityFilter[] = ['all', 'shared', 'private'];
@@ -60,9 +64,9 @@ export function EvaluatorsTable({
   onVisibilityChange,
   onRun,
   onCancelRun,
-  onSeedDefaults,
+  onRestoreDefaults,
   onToggleHeader,
-  isSeeding = false,
+  isRestoringDefaults = false,
   title = 'Evaluators',
   description = 'Manage shared and private evaluators in one place.',
   headerActions,
@@ -70,6 +74,10 @@ export function EvaluatorsTable({
   onOpen,
   onUpgradeReview,
   canCreate = true,
+  canEditOwned = false,
+  canDeleteOwned = false,
+  canShareOwned = false,
+  canManageSeededDefaults = false,
 }: EvaluatorsTableProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -112,9 +120,9 @@ export function EvaluatorsTable({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {headerActions}
-          {onSeedDefaults ? (
-            <Button variant="secondary" onClick={onSeedDefaults} isLoading={isSeeding}>
-              Seed Defaults
+          {onRestoreDefaults ? (
+            <Button variant="secondary" onClick={onRestoreDefaults} isLoading={isRestoringDefaults}>
+              Restore Defaults
             </Button>
           ) : null}
           {canCreate ? <Button onClick={onCreate}>Create Evaluator</Button> : null}
@@ -173,6 +181,19 @@ export function EvaluatorsTable({
                 const isExpanded = expandedIds.has(evaluator.id);
                 const isOwned = Boolean(user && evaluator.userId === user.id && evaluator.tenantId === user.tenantId);
                 const isRunning = latestRun?.status === 'running';
+                const isCanonicalSeededDefault = evaluator.isCanonicalSeededDefault === true;
+                const canEditRow = isCanonicalSeededDefault
+                  ? canManageSeededDefaults && Boolean(onEdit)
+                  : isOwned && canEditOwned && Boolean(onEdit);
+                const canDeleteRow = isCanonicalSeededDefault
+                  ? canManageSeededDefaults && Boolean(onDelete)
+                  : isOwned && canDeleteOwned && Boolean(onDelete);
+                const canVisibilityRow = isCanonicalSeededDefault
+                  ? false
+                  : isOwned && canShareOwned && Boolean(onVisibilityChange);
+                const canToggleHeaderRow = isCanonicalSeededDefault
+                  ? canManageSeededDefaults && Boolean(onToggleHeader)
+                  : isOwned && canEditOwned && Boolean(onToggleHeader);
 
                 return (
                   <Fragment key={evaluator.id}>
@@ -222,6 +243,8 @@ export function EvaluatorsTable({
                                 </button>
                               ) : null}
                             </>
+                          ) : evaluator.isCanonicalSeededDefault ? (
+                            <Badge size="sm" variant="info">default</Badge>
                           ) : (
                             <Badge size="sm" variant="neutral">custom</Badge>
                           )}
@@ -272,11 +295,11 @@ export function EvaluatorsTable({
                               side="bottom"
                               className="w-fit min-w-[140px] rounded-[8px] bg-[var(--bg-elevated)] py-1"
                             >
-                              {isOwned && onEdit ? (
+                              {canEditRow ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onEdit(evaluator);
+                                    onEdit?.(evaluator);
                                     setMenuOpenId(null);
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
@@ -296,11 +319,11 @@ export function EvaluatorsTable({
                                   Fork
                                 </button>
                               ) : null}
-                              {onVisibilityChange && isOwned ? (
+                              {canVisibilityRow ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onVisibilityChange(evaluator);
+                                    onVisibilityChange?.(evaluator);
                                     setMenuOpenId(null);
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
@@ -308,11 +331,11 @@ export function EvaluatorsTable({
                                   {evaluator.visibility === 'shared' ? 'Make Private' : 'Share'}
                                 </button>
                               ) : null}
-                              {onToggleHeader && isOwned ? (
+                              {canToggleHeaderRow ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onToggleHeader(evaluator);
+                                    onToggleHeader?.(evaluator);
                                     setMenuOpenId(null);
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]"
@@ -320,11 +343,11 @@ export function EvaluatorsTable({
                                   {evaluatorShowsInHeader(evaluator) ? 'Remove from Header' : 'Show in Header'}
                                 </button>
                               ) : null}
-                              {isOwned && onDelete ? (
+                              {canDeleteRow ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onDelete(evaluator);
+                                    onDelete?.(evaluator);
                                     setMenuOpenId(null);
                                   }}
                                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)]"

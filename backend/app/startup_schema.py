@@ -41,6 +41,8 @@ SCHEMA_BOOTSTRAP_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_eval_runs_tenant_visibility_created ON eval_runs (tenant_id, visibility, created_at)",
     "ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS template_id UUID",
     "ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS template_branch_key VARCHAR(100)",
+    "ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_key VARCHAR(120)",
+    "ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_variant VARCHAR(50)",
 )
 
 INDEX_REPAIR_SQL = (

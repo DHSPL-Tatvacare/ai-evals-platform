@@ -2730,6 +2730,8 @@ async def _seed_adversarial_contract_defaults(session: AsyncSession) -> None:
 
 async def _seed_evaluators(session: AsyncSession) -> None:
     """Seed system evaluators as shared rows, or update existing ones."""
+    from app.services.evaluator_seed_catalog import KAIRA_BOT_SEED_SPECS
+
     result = await session.execute(
         select(Evaluator).where(
             Evaluator.app_id == "kaira-bot",
@@ -2739,6 +2741,7 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         )
     )
     existing = {e.name: e for e in result.scalars().all()}
+    seed_specs_by_name = {seed_spec.name: seed_spec for seed_spec in KAIRA_BOT_SEED_SPECS}
 
     if existing:
         # Update output_schema of existing evaluators to match seed data
@@ -2746,8 +2749,11 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         for e_data in KAIRA_BOT_EVALUATORS:
             db_eval = existing.get(e_data["name"])
             if db_eval:
+                seed_spec = seed_specs_by_name[e_data["name"]]
                 db_eval.output_schema = e_data["output_schema"]
                 db_eval.visibility = Visibility.normalize(e_data.get("visibility")) or Visibility.SHARED
+                db_eval.seed_key = seed_spec.seed_key
+                db_eval.seed_variant = seed_spec.seed_variant
                 updated += 1
         await session.flush()
         logger.info("Updated output_schema for %d existing kaira-bot evaluators", updated)
@@ -2756,11 +2762,14 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         new_names = set(e["name"] for e in KAIRA_BOT_EVALUATORS) - set(existing.keys())
         for e_data in KAIRA_BOT_EVALUATORS:
             if e_data["name"] in new_names:
+                seed_spec = seed_specs_by_name[e_data["name"]]
                 session.add(Evaluator(**{
                     **{k: v for k, v in e_data.items() if k != "visibility"},
                     "visibility": Visibility.normalize(e_data.get("visibility")) or Visibility.SHARED,
                     "tenant_id": SYSTEM_TENANT_ID,
                     "user_id": SYSTEM_USER_ID,
+                    "seed_key": seed_spec.seed_key,
+                    "seed_variant": seed_spec.seed_variant,
                 }))
         if new_names:
             await session.flush()
@@ -2768,11 +2777,14 @@ async def _seed_evaluators(session: AsyncSession) -> None:
         return
 
     for e in KAIRA_BOT_EVALUATORS:
+        seed_spec = seed_specs_by_name[e["name"]]
         session.add(Evaluator(**{
             **{k: v for k, v in e.items() if k != "visibility"},
             "visibility": Visibility.normalize(e.get("visibility")) or Visibility.SHARED,
             "tenant_id": SYSTEM_TENANT_ID,
             "user_id": SYSTEM_USER_ID,
+            "seed_key": seed_spec.seed_key,
+            "seed_variant": seed_spec.seed_variant,
         }))
     await session.flush()
     logger.info("Seeded %d shared system evaluators for kaira-bot", len(KAIRA_BOT_EVALUATORS))
@@ -2842,6 +2854,8 @@ async def seed_bootstrap_admin() -> None:
 
 async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
+    from app.services.evaluator_seed_catalog import reconcile_evaluator_seed_catalog
+
     logger.info("Checking seed defaults...")
     await seed_apps(session)
     await _seed_system_tenant_and_user(session)
@@ -2849,8 +2863,12 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await _seed_report_prompt_references(session)
     await _seed_report_configs(session)
     await _seed_eval_templates(session)
-    # kaira-bot evaluators are NOT auto-seeded; they use the on-demand
-    # POST /api/evaluators/seed-defaults?appId=kaira-bot endpoint instead
-    # (same pattern as voice-rx).
+    reconciled, deduped = await reconcile_evaluator_seed_catalog(session)
+    if reconciled or deduped:
+        logger.info(
+            "Reconciled evaluator seed metadata (updated=%d, deduped=%d)",
+            reconciled,
+            deduped,
+        )
     await session.commit()
     logger.info("Seed defaults check complete")

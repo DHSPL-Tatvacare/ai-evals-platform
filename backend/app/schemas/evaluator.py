@@ -53,6 +53,10 @@ class EvaluatorResponse(VisibilityOutputMixin, CamelORMModel):
     shared_by: Optional[uuid.UUID] = None
     shared_at: Optional[datetime] = None
     forked_from: Optional[str] = None
+    seed_key: Optional[str] = None
+    seed_variant: Optional[str] = None
+    is_seeded_default: bool = False
+    is_canonical_seeded_default: bool = False
     template_id: Optional[str] = None
     template_branch_key: Optional[str] = None
     template_upgrade_available: bool = False

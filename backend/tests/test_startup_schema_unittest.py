@@ -27,3 +27,9 @@ class StartupSchemaTests(unittest.TestCase):
 
         for snippet in expected_snippets:
             self.assertIn(snippet, contents)
+
+    def test_schema_bootstrap_adds_evaluator_seed_identity_columns(self):
+        contents = SCHEMA_BOOTSTRAP_PATH.read_text()
+
+        self.assertIn("ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_key VARCHAR(120)", contents)
+        self.assertIn("ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_variant VARCHAR(50)", contents)

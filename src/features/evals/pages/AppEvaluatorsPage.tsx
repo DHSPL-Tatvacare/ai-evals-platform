@@ -5,6 +5,7 @@ import { CreateEvaluatorWizard, EvaluatorsTable } from '@/features/evals/compone
 import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { usePermission } from '@/utils/permissions';
 import { evaluatorShowsInHeader, getEvaluatorMainMetricField, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
 import type {
@@ -31,6 +32,7 @@ export function AppEvaluatorsPage({
   const canEdit = usePermission('asset:edit');
   const canDelete = usePermission('asset:delete');
   const canShare = usePermission('asset:share');
+  const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
@@ -119,7 +121,7 @@ export function AppEvaluatorsPage({
     setEvaluatorToDelete(undefined);
   };
 
-  const handleSeedDefaults = async () => {
+  const handleRestoreDefaults = async () => {
     if (!supportsAppLevelSeedDefaults) {
       return;
     }
@@ -127,10 +129,14 @@ export function AppEvaluatorsPage({
     setIsSeeding(true);
     try {
       const seeded = await seedAppDefaults(appId);
-      notificationService.success(`Added ${seeded.length} default evaluators`);
+      if (seeded.length > 0) {
+        notificationService.success(`Restored ${seeded.length} missing default evaluators`);
+      } else {
+        notificationService.info('All default evaluators are already present');
+      }
     } catch (error) {
       notificationService.error(
-        error instanceof Error ? error.message : 'Failed to seed defaults',
+        error instanceof Error ? error.message : 'Failed to restore defaults',
       );
     } finally {
       setIsSeeding(false);
@@ -164,15 +170,19 @@ export function AppEvaluatorsPage({
             setDeleteConfirmOpen(true);
           } : undefined}
           onVisibilityChange={canShare ? handleVisibilityChange : undefined}
-          onSeedDefaults={supportsAppLevelSeedDefaults && canCreate ? handleSeedDefaults : undefined}
+          onRestoreDefaults={supportsAppLevelSeedDefaults && isOwner ? handleRestoreDefaults : undefined}
           onToggleHeader={handleToggleHeader}
-          isSeeding={isSeeding}
+          isRestoringDefaults={isSeeding}
           title="Evaluators"
           description={`Manage private and shared evaluators for ${appMetadata.name}.`}
           headerActions={extraHeaderActions}
           emptyStateActions={extraEmptyStateActions}
           onOpen={onOpenEvaluator}
           canCreate={canCreate}
+          canEditOwned={canEdit}
+          canDeleteOwned={canDelete}
+          canShareOwned={canShare}
+          canManageSeededDefaults={isOwner}
         />
       )}
 

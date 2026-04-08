@@ -12,6 +12,7 @@ import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
 
 import { notificationService } from '@/services/notifications';
 import { useEvaluatorsStore, LLM_PROVIDERS } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { usePermission } from '@/utils/permissions';
 import { evaluatorShowsInHeader, getEvaluatorMainMetricField, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
 import type {
@@ -35,6 +36,7 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
   const canDelete = usePermission('asset:delete');
   const canShare = usePermission('asset:share');
   const canRun = usePermission('evaluation:run');
+  const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
@@ -176,14 +178,18 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
       });
   };
 
-  const handleSeedDefaults = async () => {
+  const handleRestoreDefaults = async () => {
     setIsSeeding(true);
     try {
       const seeded = await seedAppDefaults(appId);
-      notificationService.success(`Added ${seeded.length} recommended evaluators`);
+      if (seeded.length > 0) {
+        notificationService.success(`Restored ${seeded.length} missing default evaluators`);
+      } else {
+        notificationService.info('All default evaluators are already present');
+      }
     } catch (error) {
       notificationService.error(
-        error instanceof Error ? error.message : 'Failed to add recommended evaluators',
+        error instanceof Error ? error.message : 'Failed to restore defaults',
       );
     } finally {
       setIsSeeding(false);
@@ -232,13 +238,17 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
           onVisibilityChange={canShare ? handleVisibilityChange : undefined}
           onRun={canRun && session ? handleSingleRun : undefined}
           onCancelRun={canRun && session ? runner.handleCancel : undefined}
-          onSeedDefaults={canCreate ? handleSeedDefaults : undefined}
+          onRestoreDefaults={isOwner ? handleRestoreDefaults : undefined}
           onToggleHeader={handleToggleHeader}
-          isSeeding={isSeeding}
+          isRestoringDefaults={isSeeding}
           title="Evaluators"
           description="Manage private and shared evaluators for Kaira and run selected evaluators against the current session."
           headerActions={headerActions}
           canCreate={canCreate}
+          canEditOwned={canEdit}
+          canDeleteOwned={canDelete}
+          canShareOwned={canShare}
+          canManageSeededDefaults={isOwner}
         />
       )}
 

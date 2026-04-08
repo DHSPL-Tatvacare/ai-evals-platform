@@ -170,6 +170,31 @@ def test_evaluator_response_includes_owner_metadata_fields():
     assert payload["ownerName"] == "Casey Admin"
 
 
+def test_evaluator_response_includes_seed_metadata_fields():
+    evaluator = Evaluator(
+        id=uuid.uuid4(),
+        app_id="voice-rx",
+        name="Medical Entity Recall",
+        prompt="prompt",
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        visibility=Visibility.SHARED,
+        seed_key="medical-entity-recall",
+        seed_variant="upload",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    evaluator.is_seeded_default = True
+    evaluator.is_canonical_seeded_default = True
+
+    payload = EvaluatorResponse.model_validate(evaluator).model_dump(by_alias=True, mode="json")
+
+    assert payload["seedKey"] == "medical-entity-recall"
+    assert payload["seedVariant"] == "upload"
+    assert payload["isSeededDefault"] is True
+    assert payload["isCanonicalSeededDefault"] is True
+
+
 def test_visible_breakdown_hides_reasoning_fields_without_display_mode():
     output_schema = [
         {"key": "score", "type": "number", "role": "metric", "isMainMetric": True, "thresholds": {"green": 5}},
