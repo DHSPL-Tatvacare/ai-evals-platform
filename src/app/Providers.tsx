@@ -12,14 +12,19 @@ function loadAllStores() {
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  // Load auth first, then app data only if authenticated
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  // Bootstrap auth on mount
   useEffect(() => {
-    useAuthStore.getState().loadUser().then(() => {
-      if (useAuthStore.getState().isAuthenticated) {
-        loadAllStores();
-      }
-    });
+    useAuthStore.getState().loadUser();
   }, []);
+
+  // Load data stores whenever auth becomes true (initial load or post-login)
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadAllStores();
+    }
+  }, [isAuthenticated]);
 
   return (
     <ThemeProvider>
