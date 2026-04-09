@@ -989,19 +989,53 @@ async def call_llm(
         api_version=settings.get("api_version", ""),
     )
 
-    # For Gemini, use the google-genai SDK's native chat+tools support
+    # For Gemini, use the SDK's native chat API which handles thought
+    # signatures, multi-turn state, and function calling automatically.
     if provider == "gemini" and isinstance(llm, GeminiProvider):
         from google.genai import types as genai_types
 
         client = llm.client
 
-        # Convert OpenAI messages → Gemini contents
+        # Extract system instruction
         system_instruction = None
-        contents = []
         for msg in messages:
-            role = msg.get("role", "user")
-            if role == "system":
+            if msg.get("role") == "system":
                 system_instruction = msg.get("content", "")
+                break
+
+        # Build tool declarations
+        gemini_tools = None
+        if tools:
+            declarations = []
+            for tool in tools:
+                func = tool.get("function", tool)
+                declarations.append(genai_types.FunctionDeclaration(
+                    name=func.get("name", ""),
+                    description=func.get("description", ""),
+                    parameters_json_schema=func.get("parameters"),
+                ))
+            gemini_tools = [genai_types.Tool(function_declarations=declarations)]
+
+        config = genai_types.GenerateContentConfig(
+            temperature=temperature,
+            system_instruction=system_instruction,
+            tools=gemini_tools,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+        )
+
+        # Create async chat session — SDK manages history + thought signatures
+        chat = client.aio.chats.create(model=model, config=config)
+
+        # Replay prior conversation turns into the chat
+        for msg in messages:
+            role = msg.get("role", "")
+            if role == "system":
+                continue  # already in config
+            elif role == "user":
+                chat._curated_history.append(genai_types.Content(
+                    role="user",
+                    parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
+                ))
             elif role == "assistant":
                 tc_list = msg.get("tool_calls")
                 if tc_list:
@@ -1015,76 +1049,57 @@ async def call_llm(
                         parts.append(genai_types.Part.from_function_call(
                             name=func.get("name", ""), args=args,
                         ))
-                    contents.append(genai_types.Content(role="model", parts=parts))
+                    chat._curated_history.append(genai_types.Content(role="model", parts=parts))
                 else:
-                    contents.append(genai_types.Content(
-                        role="model",
-                        parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
-                    ))
+                    content = msg.get("content", "")
+                    if content:
+                        chat._curated_history.append(genai_types.Content(
+                            role="model",
+                            parts=[genai_types.Part.from_text(text=content)],
+                        ))
             elif role == "tool":
                 try:
                     result = _json.loads(msg.get("content", "{}"))
                 except Exception:
                     result = {"result": msg.get("content", "")}
-                contents.append(genai_types.Content(
+                chat._curated_history.append(genai_types.Content(
                     role="user",
                     parts=[genai_types.Part.from_function_response(
                         name="tool_result", response=result,
                     )],
                 ))
-            else:
-                contents.append(genai_types.Content(
-                    role="user",
-                    parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
-                ))
 
-        # Convert tool definitions (support both flat and OpenAI-wrapped formats)
-        gemini_tools = None
-        if tools:
-            declarations = []
-            for tool in tools:
-                func = tool.get("function", tool)
-                declarations.append(genai_types.FunctionDeclaration(
-                    name=func.get("name", ""),
-                    description=func.get("description", ""),
-                    parameters=func.get("parameters"),
-                ))
-            gemini_tools = [genai_types.Tool(function_declarations=declarations)]
+        # Pop the last user message — that's the one we send via send_message
+        last_user_text = ""
+        if chat._curated_history and chat._curated_history[-1].role == "user":
+            last_content = chat._curated_history.pop()
+            if last_content.parts and hasattr(last_content.parts[0], 'text'):
+                last_user_text = last_content.parts[0].text or ""
 
-        config = genai_types.GenerateContentConfig(
-            temperature=temperature,
-            system_instruction=system_instruction,
-            tools=gemini_tools,
-        )
+        if not last_user_text:
+            return {"message": {"content": ""}}
 
-        resp = await client.aio.models.generate_content(
-            model=model, contents=contents, config=config,
-        )
+        resp = await chat.send_message(last_user_text)
 
-        # Convert Gemini response → OpenAI format
+        # Convert response → OpenAI format
         out: dict = {"content": ""}
-        if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
-            text_parts = []
+        if resp.function_calls:
             tool_calls = []
-            for i, part in enumerate(resp.candidates[0].content.parts):
-                if part.function_call:
-                    tool_calls.append({
-                        "id": f"call_{i}",
-                        "type": "function",
-                        "function": {
-                            "name": part.function_call.name,
-                            "arguments": _json.dumps(dict(part.function_call.args) if part.function_call.args else {}),
-                        },
-                    })
-                elif part.text:
-                    text_parts.append(part.text)
-            out["content"] = "".join(text_parts)
-            if tool_calls:
-                out["tool_calls"] = tool_calls
+            for i, fc in enumerate(resp.function_calls):
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": fc.name,
+                        "arguments": _json.dumps(dict(fc.args) if fc.args else {}),
+                    },
+                })
+            out["tool_calls"] = tool_calls
+        elif resp.text:
+            out["content"] = resp.text
         return {"message": out}
 
     # For OpenAI/Azure/Anthropic — use simple text generation as fallback
-    # (tool calling for these providers can be added later)
     system_text = ""
     user_parts = []
     for msg in messages:
