@@ -1038,12 +1038,12 @@ async def call_llm(
                     parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
                 ))
 
-        # Convert tool definitions
+        # Convert tool definitions (support both flat and OpenAI-wrapped formats)
         gemini_tools = None
         if tools:
             declarations = []
             for tool in tools:
-                func = tool.get("function", {})
+                func = tool.get("function", tool)
                 declarations.append(genai_types.FunctionDeclaration(
                     name=func.get("name", ""),
                     description=func.get("description", ""),
