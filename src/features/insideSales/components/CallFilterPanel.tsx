@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button, Combobox } from '@/components/ui';
-import { useCurrentAppConfig } from '@/hooks';
+import { useAppConfig } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import { apiRequest } from '@/services/api/client';
@@ -134,7 +134,7 @@ function renderFilterControl(
 }
 
 export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPanelProps) {
-  const appConfig = useCurrentAppConfig();
+  const appConfig = useAppConfig('inside-sales');
   const datasetKey = activeTab === 'leads' ? 'leads' : 'calls';
   const datasetConfig = appConfig.collections.datasets[datasetKey];
 

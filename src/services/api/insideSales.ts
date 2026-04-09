@@ -34,6 +34,7 @@ export interface LeadListResponse {
   total: number;
   page: number;
   pageSize: number;
+  freshness: CollectionFreshness;
 }
 
 export interface CallRecord {
@@ -61,6 +62,13 @@ export interface CallListResponse {
   total: number;
   page: number;
   pageSize: number;
+  freshness: CollectionFreshness;
+}
+
+export interface CollectionFreshness {
+  lastSyncedAt: string | null;
+  syncInProgress: boolean;
+  stale: boolean;
 }
 
 export interface CallFilters {
@@ -146,6 +154,14 @@ export interface LeadFilters {
 }
 
 export type CallQueryScope = 'page' | 'all';
+export type InsideSalesCollectionFamily = 'calls' | 'leads';
+
+export interface CollectionRefreshResponse {
+  jobId: string;
+  sourceFamily: InsideSalesCollectionFamily;
+  syncMode: string;
+  status: string;
+}
 
 function buildCallSearchParams(
   filters: CallFilters,
@@ -186,6 +202,13 @@ export async function fetchCalls(
   return apiRequest<CallListResponse>(`/api/inside-sales/calls?${params.toString()}`);
 }
 
+export async function fetchCallsForSelection(
+  filters: CallFilters,
+  pageSize = 500,
+): Promise<CallListResponse> {
+  return fetchCalls(filters, 1, pageSize, { scope: 'all' });
+}
+
 export async function fetchLeads(
   filters: LeadFilters,
   page: number,
@@ -209,4 +232,22 @@ export async function fetchLeads(
 
 export async function fetchLeadDetail(prospectId: string): Promise<LeadDetailFullResponse> {
   return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
+}
+
+export async function refreshInsideSalesCollection(
+  sourceFamily: InsideSalesCollectionFamily,
+  payload: {
+    dateFrom?: string;
+    dateTo?: string;
+    eventCodes?: string;
+  },
+): Promise<CollectionRefreshResponse> {
+  return apiRequest<CollectionRefreshResponse>(`/api/inside-sales/collections/${sourceFamily}/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({
+      dateFrom: payload.dateFrom,
+      dateTo: payload.dateTo,
+      eventCodes: payload.eventCodes,
+    }),
+  });
 }

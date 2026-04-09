@@ -47,6 +47,27 @@ function normalizeAssetPolicyConfig(
   };
 }
 
+function mergeNamedConfigMap<T extends object>(
+  fallback: Record<string, T>,
+  override: unknown,
+): Record<string, T> {
+  if (typeof override !== 'object' || override === null) {
+    return fallback;
+  }
+
+  const overrideRecord = override as Record<string, unknown>;
+  const mergedEntries = Array.from(new Set([...Object.keys(fallback), ...Object.keys(overrideRecord)])).map((key) => {
+    const fallbackValue = fallback[key] ?? ({} as T);
+    const overrideValue = overrideRecord[key];
+    if (typeof overrideValue !== 'object' || overrideValue === null) {
+      return [key, fallbackValue] as const;
+    }
+    return [key, { ...fallbackValue, ...(overrideValue as Partial<T>) }] as const;
+  });
+
+  return Object.fromEntries(mergedEntries) as Record<string, T>;
+}
+
 function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Partial<AppConfig> {
   const rawAssetDefaults =
     typeof config.assetDefaults === 'object' && config.assetDefaults !== null
@@ -140,12 +161,14 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     collections: {
       ...APP_CONFIG_FALLBACKS[appId].collections,
       ...(rawCollections as Partial<AppConfig['collections']>),
-      datasets:
-        (rawCollections.datasets as AppConfig['collections']['datasets'] | undefined)
-        ?? APP_CONFIG_FALLBACKS[appId].collections.datasets,
-      drilldowns:
-        (rawCollections.drilldowns as AppConfig['collections']['drilldowns'] | undefined)
-        ?? APP_CONFIG_FALLBACKS[appId].collections.drilldowns,
+      datasets: mergeNamedConfigMap(
+        APP_CONFIG_FALLBACKS[appId].collections.datasets,
+        rawCollections.datasets,
+      ),
+      drilldowns: mergeNamedConfigMap(
+        APP_CONFIG_FALLBACKS[appId].collections.drilldowns,
+        rawCollections.drilldowns,
+      ),
     },
     reviews: {
       ...APP_CONFIG_FALLBACKS[appId].reviews,
@@ -192,7 +215,7 @@ function toAppSummary(app: ApiAppSummary): AppSummary {
   };
 }
 
-function toAppConfig(appId: AppId, config: ApiAppConfig): AppConfig {
+export function toAppConfig(appId: AppId, config: ApiAppConfig): AppConfig {
   return mergeAppConfig(appId, normalizeAppConfig(appId, config as Record<string, unknown>));
 }
 

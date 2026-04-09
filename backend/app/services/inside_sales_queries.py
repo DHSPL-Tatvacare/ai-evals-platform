@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.inside_sales_mirror import InsideSalesCallMirror, InsideSalesLeadMirror
+from app.models.job import Job
+from app.models.inside_sales_mirror import InsideSalesCallMirror, InsideSalesLeadMirror, InsideSalesSyncRun
 from app.services.inside_sales_dataset_resolver import (
     CallDatasetScope,
     InsideSalesCallFilters,
@@ -22,6 +23,12 @@ from app.services.inside_sales_eval_linkage import (
     extract_inside_sales_eval_score,
     fetch_latest_eval_overlays,
 )
+
+INSIDE_SALES_STALE_AFTER = timedelta(minutes=30)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _parse_query_datetime(value: str) -> datetime:
@@ -393,3 +400,45 @@ async def list_leads_from_mirror(
         page=page,
         page_size=page_size,
     )
+
+
+async def get_collection_freshness(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    source_family: str,
+) -> dict[str, Any]:
+    latest_successful = await db.scalar(
+        select(InsideSalesSyncRun)
+        .where(
+            InsideSalesSyncRun.tenant_id == tenant_id,
+            InsideSalesSyncRun.app_id == app_id,
+            InsideSalesSyncRun.source_family == source_family,
+            InsideSalesSyncRun.status == "completed",
+        )
+        .order_by(InsideSalesSyncRun.completed_at.desc(), InsideSalesSyncRun.created_at.desc())
+        .limit(1)
+    )
+    pending_jobs = await db.execute(
+        select(Job.id, Job.params)
+        .where(
+            Job.tenant_id == tenant_id,
+            Job.app_id == app_id,
+            Job.job_type == "sync-external-source",
+            Job.status.in_(("queued", "running", "retryable_failed")),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(20)
+    )
+    sync_in_progress = any(
+        (params or {}).get("source_family") == source_family
+        for _job_id, params in pending_jobs.all()
+    )
+    last_synced_at = latest_successful.completed_at if latest_successful else None
+    stale = last_synced_at is None or (_utc_now() - last_synced_at > INSIDE_SALES_STALE_AFTER)
+    return {
+        "lastSyncedAt": last_synced_at,
+        "syncInProgress": sync_in_progress,
+        "stale": stale,
+    }

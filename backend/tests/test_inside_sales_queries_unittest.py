@@ -1,7 +1,8 @@
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
@@ -11,10 +12,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from app.models.inside_sales_mirror import InsideSalesCallMirror, InsideSalesLeadMirror  # noqa: E402
 from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters, InsideSalesLeadFilters  # noqa: E402
 from app.services.inside_sales_queries import (  # noqa: E402
+    INSIDE_SALES_STALE_AFTER,
     build_call_count_query,
     build_call_listing_query,
     build_lead_count_query,
     build_lead_listing_query,
+    get_collection_freshness,
     map_call_listing_row,
     map_lead_listing_row,
 )
@@ -192,3 +195,61 @@ def test_map_lead_listing_row_preserves_existing_api_shape():
     assert payload["createdOn"] == "2026-04-01 09:00:00"
     assert payload["lastActivityOn"] == "2026-04-07 09:00:00"
     assert payload["connectRate"] == 60.0
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeFreshnessSession:
+    def __init__(self, latest_successful, pending_jobs):
+        self.latest_successful = latest_successful
+        self.pending_jobs = pending_jobs
+
+    async def scalar(self, _statement):
+        return self.latest_successful
+
+    async def execute(self, _statement):
+        return _FakeResult(self.pending_jobs)
+
+
+class InsideSalesFreshnessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_collection_freshness_marks_recent_completed_sync_as_fresh(self):
+        completed_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        session = _FakeFreshnessSession(
+            latest_successful=SimpleNamespace(completed_at=completed_at),
+            pending_jobs=[('job-1', {'source_family': 'calls'})],
+        )
+
+        freshness = await get_collection_freshness(
+            session,
+            tenant_id=uuid.uuid4(),
+            app_id='inside-sales',
+            source_family='calls',
+        )
+
+        assert freshness['lastSyncedAt'] == completed_at
+        assert freshness['syncInProgress'] is True
+        assert freshness['stale'] is False
+
+    async def test_get_collection_freshness_marks_missing_or_old_sync_as_stale(self):
+        completed_at = datetime.now(timezone.utc) - INSIDE_SALES_STALE_AFTER - timedelta(minutes=1)
+        session = _FakeFreshnessSession(
+            latest_successful=SimpleNamespace(completed_at=completed_at),
+            pending_jobs=[],
+        )
+
+        freshness = await get_collection_freshness(
+            session,
+            tenant_id=uuid.uuid4(),
+            app_id='inside-sales',
+            source_family='leads',
+        )
+
+        assert freshness['lastSyncedAt'] == completed_at
+        assert freshness['syncInProgress'] is False
+        assert freshness['stale'] is True

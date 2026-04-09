@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle, FileText } from 'lucide-react';
 import { Button, Tabs, EmptyState } from '@/components/ui';
-import { useCurrentAppConfig } from '@/hooks';
+import { useAppConfig } from '@/hooks';
 import { CallResultPanel } from '../components/CallResultPanel';
 import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
@@ -132,7 +132,7 @@ function DrilldownSectionCard({
 }
 
 export function InsideSalesLeadDetail() {
-  const appConfig = useCurrentAppConfig();
+  const appConfig = useAppConfig('inside-sales');
   const drilldownSections = appConfig.collections.drilldowns.lead?.sections ?? [];
   const { prospectId } = useParams<{ prospectId: string }>();
   const navigate = useNavigate();

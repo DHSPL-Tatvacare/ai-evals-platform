@@ -5,6 +5,7 @@ import {
   Phone,
   PhoneIncoming,
   PhoneOutgoing,
+  RefreshCcw,
   Filter,
   X,
   Play,
@@ -13,15 +14,16 @@ import {
 } from 'lucide-react';
 import { Button, EmptyState, Tabs, Tooltip, Pagination } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { useCurrentAppConfig } from '@/hooks';
+import { useAppConfig, usePoll } from '@/hooks';
 import { useInsideSalesStore, useUIStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
-import type { LeadListRecord } from '@/services/api/insideSales';
+import type { CollectionFreshness, LeadListRecord } from '@/services/api/insideSales';
 import { cn } from '@/utils';
 import { formatDuration, formatFrt } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
+import { notificationService } from '@/services/notifications';
 import { CallFilterPanel } from '../components/CallFilterPanel';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { StageBadge } from '../components/StageBadge';
@@ -45,6 +47,59 @@ function ColHeader({ label, tip }: { label: string; tip: string }) {
         <Info className="h-3 w-3 text-[var(--text-muted)] cursor-default shrink-0" />
       </Tooltip>
     </span>
+  );
+}
+
+function describeFreshness(freshness: CollectionFreshness | null): string {
+  if (!freshness?.lastSyncedAt) {
+    return 'Not synced yet';
+  }
+  const syncedAt = new Date(freshness.lastSyncedAt);
+  const elapsedMs = Date.now() - syncedAt.getTime();
+  const elapsedMinutes = Math.max(0, Math.round(elapsedMs / 60000));
+  if (elapsedMinutes < 1) return 'Synced just now';
+  if (elapsedMinutes < 60) return `Synced ${elapsedMinutes}m ago`;
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Synced ${elapsedHours}h ago`;
+  return `Synced ${syncedAt.toLocaleString('en-IN')}`;
+}
+
+function FreshnessBadge({
+  freshness,
+  refreshing,
+  onRefresh,
+}: {
+  freshness: CollectionFreshness | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const syncing = refreshing || freshness?.syncInProgress;
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+      <div className="flex flex-col">
+        <span
+          className={cn(
+            'text-xs font-medium',
+            freshness?.stale ? 'text-[var(--color-warning)]' : 'text-[var(--text-secondary)]'
+          )}
+        >
+          {describeFreshness(freshness)}
+        </span>
+        <span className="text-[11px] text-[var(--text-muted)]">
+          {syncing ? 'Sync in progress' : freshness?.stale ? 'Data may be stale' : 'Mirror serving is up to date'}
+        </span>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={onRefresh}
+        disabled={syncing}
+        className="gap-1.5"
+      >
+        <RefreshCcw className={cn('h-3.5 w-3.5', syncing && 'animate-spin')} />
+        {syncing ? 'Refreshing' : 'Refresh'}
+      </Button>
+    </div>
   );
 }
 
@@ -78,7 +133,7 @@ function LeadsTableContent({
     );
   }, [leads, search]);
 
-  const appConfig = useCurrentAppConfig();
+  const appConfig = useAppConfig('inside-sales');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
   const activeFilterCount = useMemo(
     () => countActiveCollectionFilters(leadDatasetConfig, leadFilters),
@@ -329,7 +384,7 @@ function StatusBadge({ status }: { status: string }) {
 /* ── Main Component ──────────────────────────────────────── */
 
 export function InsideSalesListing() {
-  const appConfig = useCurrentAppConfig();
+  const appConfig = useAppConfig('inside-sales');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
   const callDatasetConfig = appConfig.collections.datasets.calls;
   const navigate = useNavigate();
@@ -337,10 +392,18 @@ export function InsideSalesListing() {
   const total = useInsideSalesStore((s) => s.total);
   const page = useInsideSalesStore((s) => s.page);
   const pageSize = useInsideSalesStore((s) => s.pageSize);
+  const callsFreshness = useInsideSalesStore((s) => s.freshness);
   const isLoading = useInsideSalesStore((s) => s.isLoading);
   const error = useInsideSalesStore((s) => s.error);
+  const isRefreshingCalls = useInsideSalesStore((s) => s.isRefreshing);
+  const callsRefreshError = useInsideSalesStore((s) => s.refreshError);
+  const callsRefreshJobId = useInsideSalesStore((s) => s.refreshJobId);
   const filters = useInsideSalesStore((s) => s.filters);
   const selectedCallIds = useInsideSalesStore((s) => s.selectedCallIds);
+  const leadsFreshness = useLeadsStore((s) => s.leadsFreshness);
+  const leadsRefreshing = useLeadsStore((s) => s.leadsRefreshing);
+  const leadsRefreshError = useLeadsStore((s) => s.leadsRefreshError);
+  const leadsRefreshJobId = useLeadsStore((s) => s.leadsRefreshJobId);
 
   const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -365,8 +428,33 @@ export function InsideSalesListing() {
   ].join('|');
 
   useEffect(() => {
+    if (activeTab !== 'calls') return;
     useInsideSalesStore.getState().loadCalls();
-  }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  usePoll({
+    enabled: Boolean(callsRefreshJobId),
+    fn: async () => useInsideSalesStore.getState().pollCallsRefresh(),
+    intervalMs: 3000,
+  });
+
+  usePoll({
+    enabled: Boolean(leadsRefreshJobId),
+    fn: async () => useLeadsStore.getState().pollLeadsRefresh(),
+    intervalMs: 3000,
+  });
+
+  useEffect(() => {
+    if (callsRefreshError) {
+      notificationService.error(callsRefreshError);
+    }
+  }, [callsRefreshError]);
+
+  useEffect(() => {
+    if (leadsRefreshError) {
+      notificationService.error(leadsRefreshError);
+    }
+  }, [leadsRefreshError]);
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -458,6 +546,23 @@ export function InsideSalesListing() {
   const handleClearFilters = useCallback(() => {
     useInsideSalesStore.getState().clearFilters();
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    if (activeTab === 'calls') {
+      const jobId = await useInsideSalesStore.getState().refreshCalls();
+      if (jobId) {
+        notificationService.info('Calls refresh queued.');
+      }
+      return;
+    }
+    const jobId = await useLeadsStore.getState().refreshLeads();
+    if (jobId) {
+      notificationService.info('Leads refresh queued.');
+    }
+  }, [activeTab]);
+
+  const activeFreshness = activeTab === 'calls' ? callsFreshness : leadsFreshness;
+  const activeRefreshing = activeTab === 'calls' ? isRefreshingCalls : leadsRefreshing;
 
   const tableContent = (
     <div className="flex flex-col h-full">
@@ -676,18 +781,25 @@ export function InsideSalesListing() {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Page header */}
-      <div className="flex items-center justify-between shrink-0 pb-2">
-        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Calls</h1>
+      <div className="flex items-center justify-between gap-4 shrink-0 pb-2">
+        <div>
+          <h1 className="text-lg font-semibold text-[var(--text-primary)]">Inside Sales</h1>
+          <p className="text-xs text-[var(--text-muted)]">
+            PostgreSQL-backed collection serving with explicit sync refresh.
+          </p>
+        </div>
+        <FreshnessBadge freshness={activeFreshness} refreshing={activeRefreshing} onRefresh={handleRefresh} />
       </div>
 
       {/* Tabs */}
-        <Tabs
-          tabs={[
+      <Tabs
+        tabs={[
           { id: 'leads', label: 'Leads', content: <LeadsTableContent onOpenFilters={() => setFilterPanelOpen(true)} emptyState={leadDatasetConfig.emptyState} /> },
           { id: 'calls', label: 'All Calls', content: tableContent },
-          ]}
-          defaultTab="leads"
-          onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
+        ]}
+        defaultTab="leads"
+        onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
+        mountStrategy="active-only"
         fillHeight
       />
 

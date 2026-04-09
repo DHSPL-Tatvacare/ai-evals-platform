@@ -71,6 +71,29 @@ class InsideSalesSyncRequestTests(unittest.TestCase):
         self.assertEqual(date_from, "2026-04-07 00:00:00")
         self.assertTrue(isinstance(date_to, str) and len(date_to) >= 19)
 
+    def test_build_manual_refresh_job_params_uses_incremental_after_first_success(self):
+        params = sync_service.build_manual_refresh_job_params(
+            source_family='calls',
+            has_successful_sync=True,
+            date_from='2026-04-01 00:00:00',
+            date_to='2026-04-08 23:59:59',
+            event_codes='21,22',
+        )
+
+        self.assertEqual(params['sync_mode'], 'incremental')
+        self.assertEqual(params['event_codes'], '21,22')
+        self.assertNotIn('date_from', params)
+        self.assertNotIn('date_to', params)
+
+    def test_build_manual_refresh_job_params_requires_window_before_first_success(self):
+        with self.assertRaisesRegex(ValueError, 'date_from and date_to are required'):
+            sync_service.build_manual_refresh_job_params(
+                source_family='leads',
+                has_successful_sync=False,
+                date_from=None,
+                date_to='2026-04-08 23:59:59',
+            )
+
 
 class InsideSalesMirrorRowBuilderTests(unittest.TestCase):
     def test_build_call_mirror_row_sets_normalized_fields(self):

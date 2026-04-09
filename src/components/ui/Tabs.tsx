@@ -14,9 +14,18 @@ interface TabsProps {
   className?: string;
   /** When true, tabs fill available height and content scrolls internally */
   fillHeight?: boolean;
+  /** Controls whether inactive tabs stay mounted or unmount until active */
+  mountStrategy?: 'all' | 'active-only';
 }
 
-export function Tabs({ tabs, defaultTab, onChange, className, fillHeight }: TabsProps) {
+export function Tabs({
+  tabs,
+  defaultTab,
+  onChange,
+  className,
+  fillHeight,
+  mountStrategy = 'all',
+}: TabsProps) {
   const [activeTab, setActiveTab] = useState(defaultTab || tabs[0]?.id);
 
   const firstTabId = tabs[0]?.id;
@@ -53,19 +62,23 @@ export function Tabs({ tabs, defaultTab, onChange, className, fillHeight }: Tabs
           </button>
         ))}
       </div>
-      {/* Keep all tabs mounted but hide inactive ones to preserve state */}
       <div className={cn(fillHeight ? 'pt-2 flex-1 min-h-0 overflow-hidden' : 'pt-4')}>
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={cn(
-              activeTab !== tab.id && 'hidden',
-              fillHeight && activeTab === tab.id && 'h-full overflow-y-auto'
-            )}
-          >
-            {tab.content}
-          </div>
-        ))}
+        {tabs.map((tab) => {
+          if (mountStrategy === 'active-only' && activeTab !== tab.id) {
+            return null;
+          }
+          return (
+            <div
+              key={tab.id}
+              className={cn(
+                mountStrategy === 'all' && activeTab !== tab.id && 'hidden',
+                fillHeight && activeTab === tab.id && 'h-full overflow-y-auto'
+              )}
+            >
+              {tab.content}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

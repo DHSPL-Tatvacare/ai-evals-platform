@@ -17,9 +17,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.auth.app_scope import require_fixed_app_access
 from app.auth.context import AuthContext
 from app.database import get_db
+from app.models.job import Job
 from app.schemas.inside_sales import (
-    CallRecord, CallListResponse, LeadDetailResponse, AgentListResponse,
-    LeadListRecord, LeadListResponse, LeadCallRecord, LeadDetailFullResponse, LeadEvalHistoryEntry,
+    AgentListResponse,
+    CallListResponse,
+    CallRecord,
+    CollectionRefreshRequest,
+    CollectionRefreshResponse,
+    LeadCallRecord,
+    LeadDetailFullResponse,
+    LeadDetailResponse,
+    LeadEvalHistoryEntry,
+    LeadListRecord,
+    LeadListResponse,
 )
 from app.services.inside_sales_dataset_resolver import (
     InsideSalesCallFilters,
@@ -30,10 +40,12 @@ from app.services.inside_sales_eval_linkage import (
     list_eval_history_entries,
 )
 from app.services.inside_sales_queries import (
+    get_collection_freshness,
     list_call_agent_names_from_mirror,
     list_calls_from_mirror,
     list_leads_from_mirror,
 )
+from app.services.inside_sales_sync import build_manual_refresh_job_params, get_latest_successful_sync_run
 from app.services.lsq_client import (
     LsqRateLimitError,
     LsqRequestError,
@@ -69,6 +81,13 @@ def _translate_lsq_error(exc: LsqRequestError) -> HTTPException:
         status_code=502,
         detail="LeadSquared request failed.",
     )
+
+
+def _validate_source_family(source_family: str) -> str:
+    family = source_family.strip().lower()
+    if family not in {"calls", "leads"}:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return family
 
 
 @router.get("/agents", response_model=AgentListResponse)
@@ -135,12 +154,19 @@ async def list_calls(
         page_size=page_size,
         scope=scope,
     )
+    freshness = await get_collection_freshness(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id="inside-sales",
+        source_family="calls",
+    )
 
     return CallListResponse(
         calls=[CallRecord(**call) for call in call_page.records],
         total=call_page.total,
         page=call_page.page,
         page_size=call_page.page_size,
+        freshness=freshness,
     )
 
 
@@ -250,12 +276,77 @@ async def list_leads(
         page=page,
         page_size=page_size,
     )
+    freshness = await get_collection_freshness(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id="inside-sales",
+        source_family="leads",
+    )
 
     return LeadListResponse(
         leads=[LeadListRecord(**lead) for lead in lead_page.records],
         total=lead_page.total,
         page=lead_page.page,
         page_size=lead_page.page_size,
+        freshness=freshness,
+    )
+
+
+@router.post("/collections/{source_family}/refresh", response_model=CollectionRefreshResponse, status_code=202)
+async def refresh_collection(
+    source_family: str,
+    body: CollectionRefreshRequest,
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicit refresh trigger for collection mirrors. Enqueues sync work only."""
+    family = _validate_source_family(source_family)
+    latest_successful = await get_latest_successful_sync_run(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id="inside-sales",
+        source_family=family,  # type: ignore[arg-type]
+    )
+    try:
+        job_params = build_manual_refresh_job_params(
+            source_family=family,  # type: ignore[arg-type]
+            has_successful_sync=latest_successful is not None,
+            date_from=body.date_from,
+            date_to=body.date_to,
+            event_codes=body.event_codes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from app.services.job_worker import get_job_submission_metadata
+
+    metadata = get_job_submission_metadata("sync-external-source", job_params)
+    normalized_params = {
+        **job_params,
+        "tenant_id": str(auth.tenant_id),
+        "user_id": str(auth.user_id),
+        "app_id": str(metadata["app_id"]),
+    }
+    job = Job(
+        app_id=str(metadata["app_id"]),
+        job_type="sync-external-source",
+        status="queued",
+        priority=int(metadata["priority"]),
+        queue_class=str(metadata["queue_class"]),
+        max_attempts=int(metadata["max_attempts"]),
+        progress={"current": 0, "total": 0, "message": "Refresh queued"},
+        params=normalized_params,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return CollectionRefreshResponse(
+        job_id=str(job.id),
+        source_family=family,
+        sync_mode=str(normalized_params["sync_mode"]),
+        status=job.status,
     )
 
 

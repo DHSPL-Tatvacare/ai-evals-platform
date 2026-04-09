@@ -1,5 +1,6 @@
 """Schemas for Inside Sales API."""
 
+from datetime import datetime
 from typing import Optional
 from pydantic import Field
 from app.schemas.base import CamelModel
@@ -25,11 +26,18 @@ class CallRecord(CamelModel):
     eval_count: int = 0
 
 
+class CollectionFreshness(CamelModel):
+    last_synced_at: datetime | None = None
+    sync_in_progress: bool = False
+    stale: bool = True
+
+
 class CallListResponse(CamelModel):
     calls: list[CallRecord]
     total: int
     page: int
     page_size: int
+    freshness: CollectionFreshness = Field(default_factory=CollectionFreshness)
 
 
 class AgentListResponse(CamelModel):
@@ -77,6 +85,20 @@ class LeadListResponse(CamelModel):
     total: int
     page: int
     page_size: int
+    freshness: CollectionFreshness = Field(default_factory=CollectionFreshness)
+
+
+class CollectionRefreshRequest(CamelModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    event_codes: str | None = None
+
+
+class CollectionRefreshResponse(CamelModel):
+    job_id: str
+    source_family: str
+    sync_mode: str
+    status: str
 
 
 class LeadEvalHistoryEntry(CamelModel):

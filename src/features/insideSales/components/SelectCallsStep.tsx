@@ -5,7 +5,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Search, Check, Info, Filter, X } from 'lucide-react';
 import { apiRequest } from '@/services/api/client';
-import { fetchCalls } from '@/services/api/insideSales';
+import { fetchCalls, fetchCallsForSelection } from '@/services/api/insideSales';
 import { Input, Button, Combobox } from '@/components/ui';
 import type { CallFilters, CallRecord } from '@/services/api/insideSales';
 import { formatDuration } from '@/utils/formatters';
@@ -286,7 +286,7 @@ export function SelectCallsStep({
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const data = await fetchCalls(callFilters, 1, 500, { scope: 'all' });
+        const data = await fetchCallsForSelection(callFilters, 500);
         if (!cancelled) setAllCalls(data.calls);
       } catch {
         if (!cancelled) setAllCalls([]);

@@ -39,7 +39,7 @@ LEADS_PAGE_SIZE = 100
 def _async_session_factory():
     from app.database import async_session
 
-    return async_session
+    return async_session()
 
 
 @dataclass(frozen=True)
@@ -140,6 +140,34 @@ def parse_inside_sales_sync_request(params: dict[str, Any]) -> InsideSalesSyncRe
             raise ValueError("targeted call sync requires both date_from and date_to")
 
     return request
+
+
+def build_manual_refresh_job_params(
+    *,
+    source_family: SourceFamily,
+    has_successful_sync: bool,
+    date_from: str | None,
+    date_to: str | None,
+    event_codes: str | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "app_id": "inside-sales",
+        "source_family": source_family,
+        "source_system": "lsq",
+    }
+    if has_successful_sync:
+        params["sync_mode"] = "incremental"
+    else:
+        if not date_from or not date_to:
+            raise ValueError("date_from and date_to are required until the first successful sync completes")
+        params.update({
+            "sync_mode": "date_range",
+            "date_from": date_from,
+            "date_to": date_to,
+        })
+    if source_family == "calls" and event_codes:
+        params["event_codes"] = event_codes
+    return params
 
 
 async def get_latest_successful_sync_run(
