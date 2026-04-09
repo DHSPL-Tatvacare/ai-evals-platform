@@ -959,214 +959,140 @@ async def call_llm(
     messages: list[dict],
     tools: list[dict] | None = None,
     temperature: float = 0.3,
+    tenant_id: str = "",
+    user_id: str = "",
 ) -> dict:
     """
     Chat-with-tools interface for multi-turn conversations.
-    Uses OpenAI SDK for OpenAI/Azure, google-genai for Gemini, anthropic for Anthropic.
+    Reuses existing credential resolution and GeminiProvider client.
     Returns OpenAI-style response: {"message": {"content": str, "tool_calls": [...]}}
-    Credentials are resolved from environment / settings at call time.
     """
-    if provider in ("openai", "azure_openai"):
-        return await _call_llm_openai(provider=provider, model=model, messages=messages, tools=tools, temperature=temperature)
-    elif provider == "gemini":
-        return await _call_llm_gemini(model=model, messages=messages, tools=tools, temperature=temperature)
-    elif provider == "anthropic":
-        return await _call_llm_anthropic(model=model, messages=messages, tools=tools, temperature=temperature)
-    else:
-        raise ValueError(f"call_llm: unsupported provider {provider}")
+    import json as _json
+    from app.services.evaluators.settings_helper import get_llm_settings_from_db
 
+    # Resolve credentials using the existing settings helper
+    settings = await get_llm_settings_from_db(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        provider_override=provider,
+        auth_intent="interactive",
+    )
 
-async def _call_llm_openai(*, provider: str, model: str, messages: list[dict], tools: list[dict] | None, temperature: float) -> dict:
-    import openai
-    import os
+    # Create provider using existing factory
+    llm = create_llm_provider(
+        provider=provider,
+        api_key=settings.get("api_key", ""),
+        model_name=model,
+        temperature=temperature,
+        service_account_path=settings.get("service_account_path", ""),
+        azure_endpoint=settings.get("azure_endpoint", ""),
+        api_version=settings.get("api_version", ""),
+    )
 
-    if provider == "azure_openai":
-        client = openai.AsyncAzureOpenAI(
-            api_key=os.environ.get("AZURE_OPENAI_API_KEY", ""),
-            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
-            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-03-01-preview"),
-        )
-    else:
-        client = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+    # For Gemini, use the google-genai SDK's native chat+tools support
+    if provider == "gemini" and isinstance(llm, GeminiProvider):
+        from google.genai import types as genai_types
 
-    kwargs: dict = {"model": model, "messages": messages, "temperature": temperature}
-    if tools:
-        kwargs["tools"] = tools
+        client = llm.client
 
-    resp = await client.chat.completions.create(**kwargs)
-    choice = resp.choices[0]
-    msg: dict = {"content": choice.message.content or ""}
-    if choice.message.tool_calls:
-        msg["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-            }
-            for tc in choice.message.tool_calls
-        ]
-    return {"message": msg}
-
-
-async def _call_llm_gemini(*, model: str, messages: list[dict], tools: list[dict] | None, temperature: float) -> dict:
-    """Use google-genai SDK with OpenAI-style messages converted to Gemini format."""
-    from google import genai
-    from google.genai import types as genai_types
-    import os
-
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    sa_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "/app/service-account.json")
-
-    if api_key:
-        client = genai.Client(api_key=api_key)
-    else:
-        from pathlib import Path
-        sa_file = Path(sa_path)
-        if sa_file.exists():
-            import json as _json
-            from google.oauth2 import service_account as sa_module
-            info = _json.loads(sa_file.read_text())
-            creds = sa_module.Credentials.from_service_account_info(
-                info, scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            client = genai.Client(credentials=creds)
-        else:
-            client = genai.Client()
-
-    # Convert OpenAI messages to Gemini contents
-    system_instruction = None
-    contents = []
-    for msg in messages:
-        role = msg.get("role", "user")
-        if role == "system":
-            system_instruction = msg.get("content", "")
-            continue
-        if role == "assistant":
-            tool_calls = msg.get("tool_calls")
-            if tool_calls:
-                parts = []
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    import json as _json
-                    try:
-                        args = _json.loads(func.get("arguments", "{}"))
-                    except Exception:
-                        args = {}
-                    parts.append(genai_types.Part.from_function_call(
-                        name=func.get("name", ""), args=args,
+        # Convert OpenAI messages → Gemini contents
+        system_instruction = None
+        contents = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            if role == "system":
+                system_instruction = msg.get("content", "")
+            elif role == "assistant":
+                tc_list = msg.get("tool_calls")
+                if tc_list:
+                    parts = []
+                    for tc in tc_list:
+                        func = tc.get("function", {})
+                        try:
+                            args = _json.loads(func.get("arguments", "{}"))
+                        except Exception:
+                            args = {}
+                        parts.append(genai_types.Part.from_function_call(
+                            name=func.get("name", ""), args=args,
+                        ))
+                    contents.append(genai_types.Content(role="model", parts=parts))
+                else:
+                    contents.append(genai_types.Content(
+                        role="model",
+                        parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
                     ))
-                contents.append(genai_types.Content(role="model", parts=parts))
+            elif role == "tool":
+                try:
+                    result = _json.loads(msg.get("content", "{}"))
+                except Exception:
+                    result = {"result": msg.get("content", "")}
+                contents.append(genai_types.Content(
+                    role="user",
+                    parts=[genai_types.Part.from_function_response(
+                        name="tool_result", response=result,
+                    )],
+                ))
             else:
                 contents.append(genai_types.Content(
-                    role="model",
+                    role="user",
                     parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
                 ))
-        elif role == "tool":
-            import json as _json
-            try:
-                result = _json.loads(msg.get("content", "{}"))
-            except Exception:
-                result = {"result": msg.get("content", "")}
-            contents.append(genai_types.Content(
-                role="user",
-                parts=[genai_types.Part.from_function_response(
-                    name="tool_result", response=result,
-                )],
-            ))
-        else:
-            contents.append(genai_types.Content(
-                role="user",
-                parts=[genai_types.Part.from_text(text=msg.get("content", ""))],
-            ))
 
-    # Convert OpenAI tool definitions to Gemini function declarations
-    gemini_tools = None
-    if tools:
-        declarations = []
-        for tool in tools:
-            func = tool.get("function", {})
-            declarations.append(genai_types.FunctionDeclaration(
-                name=func.get("name", ""),
-                description=func.get("description", ""),
-                parameters=func.get("parameters"),
-            ))
-        gemini_tools = [genai_types.Tool(function_declarations=declarations)]
+        # Convert tool definitions
+        gemini_tools = None
+        if tools:
+            declarations = []
+            for tool in tools:
+                func = tool.get("function", {})
+                declarations.append(genai_types.FunctionDeclaration(
+                    name=func.get("name", ""),
+                    description=func.get("description", ""),
+                    parameters=func.get("parameters"),
+                ))
+            gemini_tools = [genai_types.Tool(function_declarations=declarations)]
 
-    config = genai_types.GenerateContentConfig(
-        temperature=temperature,
-        system_instruction=system_instruction,
-        tools=gemini_tools,
-    )
+        config = genai_types.GenerateContentConfig(
+            temperature=temperature,
+            system_instruction=system_instruction,
+            tools=gemini_tools,
+        )
 
-    resp = await client.aio.models.generate_content(
-        model=model, contents=contents, config=config,
-    )
+        resp = await client.aio.models.generate_content(
+            model=model, contents=contents, config=config,
+        )
 
-    # Convert Gemini response back to OpenAI format
-    msg: dict = {"content": ""}
-    if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
-        text_parts = []
-        tool_calls = []
-        for i, part in enumerate(resp.candidates[0].content.parts):
-            if part.function_call:
-                import json as _json
-                tool_calls.append({
-                    "id": f"call_{i}",
-                    "type": "function",
-                    "function": {
-                        "name": part.function_call.name,
-                        "arguments": _json.dumps(dict(part.function_call.args) if part.function_call.args else {}),
-                    },
-                })
-            elif part.text:
-                text_parts.append(part.text)
-        msg["content"] = "".join(text_parts)
-        if tool_calls:
-            msg["tool_calls"] = tool_calls
+        # Convert Gemini response → OpenAI format
+        out: dict = {"content": ""}
+        if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
+            text_parts = []
+            tool_calls = []
+            for i, part in enumerate(resp.candidates[0].content.parts):
+                if part.function_call:
+                    tool_calls.append({
+                        "id": f"call_{i}",
+                        "type": "function",
+                        "function": {
+                            "name": part.function_call.name,
+                            "arguments": _json.dumps(dict(part.function_call.args) if part.function_call.args else {}),
+                        },
+                    })
+                elif part.text:
+                    text_parts.append(part.text)
+            out["content"] = "".join(text_parts)
+            if tool_calls:
+                out["tool_calls"] = tool_calls
+        return {"message": out}
 
-    return {"message": msg}
-
-
-async def _call_llm_anthropic(*, model: str, messages: list[dict], tools: list[dict] | None, temperature: float) -> dict:
-    import anthropic
-    import os
-
-    client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-
-    # Extract system prompt
+    # For OpenAI/Azure/Anthropic — use simple text generation as fallback
+    # (tool calling for these providers can be added later)
     system_text = ""
-    filtered = []
+    user_parts = []
     for msg in messages:
         if msg.get("role") == "system":
             system_text = msg.get("content", "")
-        else:
-            filtered.append(msg)
+        elif msg.get("role") == "user":
+            user_parts.append(msg.get("content", ""))
 
-    kwargs: dict = {"model": model, "messages": filtered, "temperature": temperature, "max_tokens": 4096}
-    if system_text:
-        kwargs["system"] = system_text
-    if tools:
-        kwargs["tools"] = [
-            {"name": t["function"]["name"], "description": t["function"].get("description", ""), "input_schema": t["function"].get("parameters", {})}
-            for t in tools
-        ]
-
-    resp = await client.messages.create(**kwargs)
-
-    msg: dict = {"content": ""}
-    tool_calls = []
-    text_parts = []
-    for block in resp.content:
-        if block.type == "text":
-            text_parts.append(block.text)
-        elif block.type == "tool_use":
-            import json as _json
-            tool_calls.append({
-                "id": block.id,
-                "type": "function",
-                "function": {"name": block.name, "arguments": _json.dumps(block.input)},
-            })
-    msg["content"] = "".join(text_parts)
-    if tool_calls:
-        msg["tool_calls"] = tool_calls
-    return {"message": msg}
+    prompt = "\n\n".join(user_parts)
+    result_text = await llm.generate(prompt, system_prompt=system_text)
+    return {"message": {"content": result_text}}
