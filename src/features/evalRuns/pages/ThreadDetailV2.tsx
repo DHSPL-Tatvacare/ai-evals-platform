@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { History, ChevronLeft, ChevronRight } from 'lucide-react';
-import { EmptyState, Select } from '@/components/ui';
+import { History, ChevronLeft, ChevronRight, PencilLine } from 'lucide-react';
+import { Button, EmptyState, Select } from '@/components/ui';
 import { Tabs } from '@/components/ui/Tabs';
 import type {
   ThreadEvalRow,
@@ -24,6 +24,12 @@ import {
 } from '../components/threadReview';
 import type { EvalTab } from '../components/threadReview';
 import { getCanonicalThreadEvaluation } from '../utils/threadCanonical';
+import {
+  InlineReviewProvider,
+  useInlineReviewOptional,
+  DirtyBar,
+} from '@/features/reviews/inline';
+import { usePermission } from '@/utils/permissions';
 
 export default function ThreadDetailV2() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -125,6 +131,7 @@ export default function ThreadDetailV2() {
     || (result?.correctness_evaluations ?? []).some(ce => (ce.rule_compliance?.length ?? 0) > 0);
 
   const linking = useEvalLinking('efficiency');
+  const canReview = usePermission('review:manage');
 
   const handleTableRowClick = (tab: EvalTab) => (turnIndex: number) => {
     linking.onTableHover(turnIndex);
@@ -199,6 +206,7 @@ export default function ThreadDetailV2() {
             efficiencyEvaluation={result?.efficiency_evaluation}
             correctnessEvaluations={result?.correctness_evaluations}
             canonicalThread={canonicalThread}
+            threadId={threadId}
           />
         ),
       });
@@ -238,6 +246,7 @@ export default function ThreadDetailV2() {
   // - Header: shrink-0, standard page content (title, metrics)
   // - Body: flex-1 min-h-0, fills remaining space
   return (
+    <InlineReviewProvider runId={current?.run_id ?? ''} appId="kaira-bot" enabled={canReview && !!current?.run_id}>
     <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
       {/* Header — two rows: breadcrumb + controls, then centered metric bar */}
       <div className="shrink-0 pb-3 space-y-2">
@@ -265,6 +274,7 @@ export default function ThreadDetailV2() {
 
           {/* Controls: run selector + thread nav */}
           <div className="flex items-center gap-2 shrink-0">
+            <ThreadStartReviewButton />
             {history.length > 1 && (
               <Select
                 value={String(selected)}
@@ -311,7 +321,7 @@ export default function ThreadDetailV2() {
         {current && result && (
           <div className="overflow-x-auto scrollbar-thin">
             <div className="w-fit mx-auto">
-              <SummaryBar evalRow={current} result={result} evaluatorDescriptors={evaluatorDescriptors} />
+              <SummaryBar evalRow={current} result={result} evaluatorDescriptors={evaluatorDescriptors} threadId={threadId} />
             </div>
           </div>
         )}
@@ -377,6 +387,35 @@ export default function ThreadDetailV2() {
           </div>
         </>
       )}
+      <ThreadReviewDirtyBar />
     </div>
+    </InlineReviewProvider>
+  );
+}
+
+function ThreadStartReviewButton() {
+  const review = useInlineReviewOptional();
+  if (!review || review.loading || review.isEditing) return null;
+  return (
+    <Button variant="secondary" size="sm" icon={PencilLine} onClick={review.startDraft}>
+      Start Review
+    </Button>
+  );
+}
+
+
+function ThreadReviewDirtyBar() {
+  const review = useInlineReviewOptional();
+  if (!review) return null;
+  return (
+    <DirtyBar
+      isEditing={review.isEditing}
+      changeCount={review.dirtyCount}
+      changeSummary={review.dirtySummary}
+      saving={review.saving}
+      onSaveDraft={review.saveDraft}
+      onFinalize={review.finalize}
+      onDiscard={review.discardDraft}
+    />
   );
 }

@@ -3,12 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import { EmptyState, Pagination } from "@/components/ui";
 import {
-  InlineReviewBadge,
   InlineReviewControls,
   useInlineReviewNavigationGuard,
   useInlineReviewOptional,
 } from '@/features/reviews/inline';
-import type { ThreadEvalRow, EvaluatorDescriptor, ReviewableAttribute, ReviewableItem } from "@/types";
+import type { ThreadEvalRow, EvaluatorDescriptor, ReviewableItem } from "@/types";
 import VerdictBadge from "./VerdictBadge";
 import { pct, normalizeLabel } from "@/utils/evalFormatters";
 import { routes } from "@/config/routes";
@@ -166,12 +165,6 @@ function SortHeader({ label, k, sortKey, sortDir, onToggle }: {
   );
 }
 
-function getPrimaryReviewAttribute(reviewableItem?: ReviewableItem): ReviewableAttribute | undefined {
-  if (!reviewableItem) return undefined;
-  return reviewableItem.attributes.find((attribute) => attribute.key === 'worst_correctness')
-    ?? reviewableItem.attributes.find((attribute) => attribute.key === 'efficiency_verdict')
-    ?? reviewableItem.attributes[0];
-}
 
 export default function EvalTable({
   evaluations,
@@ -253,7 +246,7 @@ export default function EvalTable({
 
   const showReviewSummaryColumn = !!reviewedThreadIds;
   const showReviewColumns = !!review && !!reviewableItems && reviewableItems.size > 0;
-  const totalCols = 2 + descriptors.length + 1 + (showReviewSummaryColumn ? 1 : 0) + (showReviewColumns ? 1 : 0) + (showReviewColumns && review?.isEditing ? 1 : 0);
+  const totalCols = 2 + descriptors.length + 1 + (showReviewSummaryColumn ? 1 : 0);
 
   return (
     <div>
@@ -279,25 +272,11 @@ export default function EvalTable({
                   Human Review
                 </th>
               )}
-              {showReviewColumns && (
-                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                  Review
-                </th>
-              )}
-              {showReviewColumns && review?.isEditing && (
-                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                  Actions
-                </th>
-              )}
             </tr>
           </thead>
           <tbody>
             {paged.map((e) => {
               const reviewableItem = reviewableItems?.get(e.thread_id);
-              const primaryAttribute = getPrimaryReviewAttribute(reviewableItem);
-              const primaryEdit = reviewableItem && primaryAttribute
-                ? review?.getEdit(reviewableItem.itemKey, primaryAttribute.key)
-                : undefined;
 
               return (
                 <tr
@@ -322,15 +301,37 @@ export default function EvalTable({
                   </td>
                   {descriptors.map(desc => {
                     const { value, state } = getCellValue(e, desc);
+                    const attrKey = desc.primaryField?.key;
+                    const attr = attrKey && reviewableItem
+                      ? reviewableItem.attributes.find((a) => a.key === attrKey)
+                      : undefined;
+                    const edit = attr && reviewableItem
+                      ? review?.getEdit(reviewableItem.itemKey, attr.key)
+                      : undefined;
                     return (
-                      <td key={desc.id} className="px-2.5 py-2">
-                        {state === 'failed' ? (
-                          <StatusBadge status="failed" />
-                        ) : state === 'skipped' ? (
-                          <StatusBadge status="skipped" />
-                        ) : (
-                          <CellRenderer desc={desc} value={value} humanVerdict={desc.primaryField?.key ? humanVerdicts?.get(e.thread_id)?.get(desc.primaryField.key) : undefined} />
-                        )}
+                      <td key={desc.id} className="px-2.5 py-2" onClick={(ev) => { if (attr && review?.isEditing) ev.stopPropagation(); }}>
+                        <div className="flex items-center gap-1">
+                          {state === 'failed' ? (
+                            <StatusBadge status="failed" />
+                          ) : state === 'skipped' ? (
+                            <StatusBadge status="skipped" />
+                          ) : (
+                            <CellRenderer desc={desc} value={value} humanVerdict={desc.primaryField?.key ? humanVerdicts?.get(e.thread_id)?.get(desc.primaryField.key) : undefined} />
+                          )}
+                          {showReviewColumns && review?.isEditing && attr && reviewableItem && (
+                            <InlineReviewControls
+                              decision={edit?.decision}
+                              note={edit?.note}
+                              originalValue={attr.originalValue}
+                              reviewedValue={edit?.reviewedValue}
+                              allowedValues={attr.allowedValues}
+                              onReject={() => review.acceptAttribute(reviewableItem, attr)}
+                              onOverride={(v) => review.correctAttribute(reviewableItem, attr, v)}
+                              onNote={(n) => review.setAttributeNote(reviewableItem, attr, n)}
+                              onClear={() => review.clearAttribute(reviewableItem, attr)}
+                            />
+                          )}
+                        </div>
                       </td>
                     );
                   })}
@@ -347,32 +348,6 @@ export default function EvalTable({
                         <span className="font-semibold text-[var(--text-brand)]">Yes</span>
                       ) : (
                         <span className="text-[var(--text-muted)]">No</span>
-                      )}
-                    </td>
-                  )}
-                  {showReviewColumns && (
-                    <td className="px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
-                      <InlineReviewBadge
-                        decision={primaryEdit?.decision}
-                        isDraft={review?.selectedReview?.status === 'draft'}
-                      />
-                    </td>
-                  )}
-                  {showReviewColumns && review?.isEditing && (
-                    <td className="px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
-                      {reviewableItem && primaryAttribute ? (
-                        <InlineReviewControls
-                          decision={primaryEdit?.decision}
-                          note={primaryEdit?.note}
-                          originalValue={primaryAttribute.originalValue}
-                          reviewedValue={primaryEdit?.reviewedValue}
-                          allowedValues={primaryAttribute.allowedValues}
-                          onAccept={() => review.acceptAttribute(reviewableItem, primaryAttribute)}
-                          onOverride={(nextValue) => review.correctAttribute(reviewableItem, primaryAttribute, nextValue)}
-                          onNote={(nextNote) => review.setAttributeNote(reviewableItem, primaryAttribute, nextNote)}
-                        />
-                      ) : (
-                        <span className="text-[11px] text-[var(--text-muted)]">—</span>
                       )}
                     </td>
                   )}

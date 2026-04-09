@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   CanonicalThreadEvaluation,
   RuleCompliance,
@@ -13,6 +13,10 @@ import {
   sortRuleOutcomes,
   summarizeRuleOutcomes,
 } from '../../utils/ruleCompliance';
+import {
+  InlineReviewControls,
+  useInlineReviewOptional,
+} from '@/features/reviews/inline';
 
 type Filter = 'ALL' | RuleOutcomeStatus;
 
@@ -31,6 +35,7 @@ interface Props {
   canonicalThread?: CanonicalThreadEvaluation | null;
   rules?: RuleCompliance[];
   sourceLabel?: string;
+  threadId?: string;
 }
 
 const STATUS_PRIORITY: Record<RuleOutcomeStatus, number> = {
@@ -120,8 +125,19 @@ export default function RuleComplianceTab({
   canonicalThread,
   rules,
   sourceLabel = 'Overall',
+  threadId,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('ALL');
+  const review = useInlineReviewOptional();
+
+  // Find the reviewable item for this thread
+  const reviewableItem = useMemo(() => {
+    if (!review?.context || !threadId) return undefined;
+    return review.context.items.find((item) => {
+      const rawKey = item.itemKey.includes(':') ? item.itemKey.split(':').slice(1).join(':') : item.itemKey;
+      return rawKey === threadId;
+    });
+  }, [review?.context, threadId]);
 
   const allRules: AggregatedRule[] = rules
     ? sortRuleOutcomes(rules).map((rule) => {
@@ -211,12 +227,32 @@ export default function RuleComplianceTab({
             <tbody>
               {filtered.map((rule) => {
                 const meta = getRuleOutcomeMeta(rule.status);
+                const ruleAttrKey = `rule:${rule.ruleId}`;
+                const ruleAttr = reviewableItem?.attributes.find((a) => a.key === ruleAttrKey);
+                const ruleEdit = ruleAttr && reviewableItem
+                  ? review?.getEdit(reviewableItem.itemKey, ruleAttr.key)
+                  : undefined;
                 return (
                   <tr key={rule.ruleId} className="border-b border-[var(--border-subtle)]">
                     <td className="py-3 px-4 text-center align-top">
-                      <span className={`inline-flex items-center justify-center min-w-[96px] px-2 py-0.5 rounded-full text-[0.65rem] font-semibold ${meta.badgeClass}`}>
-                        {meta.label}
-                      </span>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={`inline-flex items-center justify-center min-w-[96px] px-2 py-0.5 rounded-full text-[0.65rem] font-semibold ${meta.badgeClass}`}>
+                          {meta.label}
+                        </span>
+                        {review?.isEditing && ruleAttr && reviewableItem && (
+                          <InlineReviewControls
+                            decision={ruleEdit?.decision}
+                            note={ruleEdit?.note}
+                            originalValue={ruleAttr.originalValue}
+                            reviewedValue={ruleEdit?.reviewedValue}
+                            allowedValues={ruleAttr.allowedValues}
+                            onReject={() => review.acceptAttribute(reviewableItem, ruleAttr)}
+                            onOverride={(v) => review.correctAttribute(reviewableItem, ruleAttr, v)}
+                            onNote={(n) => review.setAttributeNote(reviewableItem, ruleAttr, n)}
+                            onClear={() => review.clearAttribute(reviewableItem, ruleAttr)}
+                          />
+                        )}
+                      </div>
                     </td>
                     <td className={`py-3 px-4 font-semibold whitespace-nowrap align-top ${meta.textClass}`}>
                       {rule.ruleId}

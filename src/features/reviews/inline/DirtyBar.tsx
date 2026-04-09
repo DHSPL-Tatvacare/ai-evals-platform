@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Button, ConfirmDialog } from '@/components/ui';
-import { Save, SendHorizontal, Trash2 } from 'lucide-react';
+import { PencilLine, Save, SendHorizontal, Trash2 } from 'lucide-react';
 
 interface DirtyBarProps {
+  isEditing: boolean;
   changeCount: number;
   changeSummary?: string;
   saving?: boolean;
@@ -11,33 +12,46 @@ interface DirtyBarProps {
   onFinalize: () => void;
 }
 
-export function DirtyBar({ changeCount, changeSummary, saving = false, onDiscard, onSaveDraft, onFinalize }: DirtyBarProps) {
+export function DirtyBar({ isEditing, changeCount, changeSummary, saving = false, onDiscard, onSaveDraft, onFinalize }: DirtyBarProps) {
   const [discardOpen, setDiscardOpen] = useState(false);
 
-  if (changeCount === 0) return null;
+  if (!isEditing) return null;
+
+  const hasDirty = changeCount > 0;
 
   return (
     <>
       <div className="sticky bottom-0 z-[var(--z-sticky)] -mx-1 border border-[var(--interactive-primary)]/25 bg-[color-mix(in_srgb,var(--interactive-primary)_9%,var(--bg-primary))] px-4 py-3 shadow-[0_-10px_24px_color-mix(in_srgb,var(--interactive-primary)_10%,transparent)] backdrop-blur-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-brand)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--text-brand)] animate-pulse" />
-              {changeCount} unsaved {changeCount === 1 ? 'change' : 'changes'}
-            </div>
-            {changeSummary && (
-              <p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">
-                {changeSummary}
-              </p>
+            {hasDirty ? (
+              <>
+                <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-brand)]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--text-brand)] animate-pulse" />
+                  {changeCount} unsaved {changeCount === 1 ? 'change' : 'changes'}
+                </div>
+                {changeSummary && (
+                  <p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">
+                    {changeSummary}
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
+                <PencilLine className="h-3.5 w-3.5" />
+                Review in progress
+              </div>
             )}
           </div>
           <div className="flex gap-1.5 self-end md:self-auto">
             <Button variant="ghost" size="sm" icon={Trash2} onClick={() => setDiscardOpen(true)} disabled={saving}>
               Discard
             </Button>
-            <Button variant="secondary" size="sm" icon={Save} onClick={onSaveDraft} isLoading={saving}>
-              Save Draft
-            </Button>
+            {hasDirty && (
+              <Button variant="secondary" size="sm" icon={Save} onClick={onSaveDraft} isLoading={saving}>
+                Save Draft
+              </Button>
+            )}
             <Button size="sm" icon={SendHorizontal} onClick={onFinalize} isLoading={saving}>
               Finalize
             </Button>
@@ -51,8 +65,10 @@ export function DirtyBar({ changeCount, changeSummary, saving = false, onDiscard
           setDiscardOpen(false);
           onDiscard();
         }}
-        title="Discard review draft changes"
-        description="Discard the current unsaved review changes? This cannot be undone."
+        title="Discard review draft"
+        description={hasDirty
+          ? 'Discard the current review draft and all unsaved changes? This cannot be undone.'
+          : 'Discard the review draft? This cannot be undone.'}
         confirmLabel="Discard"
         variant="danger"
       />

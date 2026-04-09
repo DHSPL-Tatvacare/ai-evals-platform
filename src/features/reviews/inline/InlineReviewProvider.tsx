@@ -313,6 +313,17 @@ export function InlineReviewProvider({ runId, appId, enabled, children }: Inline
     [updateAttribute],
   );
 
+  const clearAttribute = useCallback(
+    (item: ReviewableItem, attribute: ReviewableAttribute) => {
+      updateAttribute(item, attribute, {
+        decision: '',
+        reviewedValue: null,
+        reasonCode: null,
+      });
+    },
+    [updateAttribute],
+  );
+
   const correctAttribute = useCallback(
     (item: ReviewableItem, attribute: ReviewableAttribute, reviewedValue: string) => {
       updateAttribute(item, attribute, {
@@ -473,6 +484,7 @@ export function InlineReviewProvider({ runId, appId, enabled, children }: Inline
       getEdit,
       updateAttribute,
       acceptAttribute,
+      clearAttribute,
       correctAttribute,
       setAttributeNote,
       saveDraft: handleSaveDraft,
@@ -493,6 +505,7 @@ export function InlineReviewProvider({ runId, appId, enabled, children }: Inline
       getEdit,
       updateAttribute,
       acceptAttribute,
+      clearAttribute,
       correctAttribute,
       setAttributeNote,
       handleSaveDraft,

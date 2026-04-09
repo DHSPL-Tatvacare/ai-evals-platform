@@ -237,9 +237,16 @@ export interface ComplianceRow {
   total?: number | null;
 }
 
+export interface ComplianceCoFailure {
+  ruleA: string;
+  ruleB: string;
+  coOccurrenceRate: number;
+}
+
 export interface ComplianceTableSection extends PlatformReportSectionBase {
   type: 'compliance_table';
   data: ComplianceRow[];
+  coFailures?: ComplianceCoFailure[];
 }
 
 export interface PlatformFrictionPattern {
@@ -312,6 +319,7 @@ export interface IssueItem {
   area: string;
   summary: string;
   priority: string;
+  affectedCount?: number;
 }
 
 export interface RecommendationItem {

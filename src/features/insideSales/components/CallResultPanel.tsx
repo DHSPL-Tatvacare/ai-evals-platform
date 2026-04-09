@@ -232,9 +232,10 @@ function ScorecardContent({
                   originalValue={band}
                   reviewedValue={edit?.reviewedValue}
                   allowedValues={attr.allowedValues}
-                  onAccept={() => review.acceptAttribute(item, attr)}
+                  onReject={() => review.acceptAttribute(item, attr)}
                   onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
                   onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
+                  onClear={() => review.clearAttribute(item, attr)}
                 />
               )}
             </div>
@@ -362,9 +363,10 @@ function ComplianceContent({
                       originalValue={passed ? 'Pass' : 'Fail'}
                       reviewedValue={edit?.reviewedValue}
                       allowedValues={attr.allowedValues}
-                      onAccept={() => review.acceptAttribute(item, attr)}
+                      onReject={() => review.acceptAttribute(item, attr)}
                       onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
                       onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
+                      onClear={() => review.clearAttribute(item, attr)}
                     />
                   </td>
                 )}

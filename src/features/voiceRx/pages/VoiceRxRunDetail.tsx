@@ -528,7 +528,8 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
                         originalValue={(seg.severity as string) ?? 'NONE'}
                         reviewedValue={edit?.reviewedValue}
                         allowedValues={attr.allowedValues}
-                        onAccept={() => review.acceptAttribute(item, attr)}
+                        onReject={() => review.acceptAttribute(item, attr)}
+                        onClear={() => review.clearAttribute(item, attr)}
                         onOverride={(nextSeverity) => review.correctAttribute(item, attr, nextSeverity)}
                         onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                       />
@@ -634,7 +635,8 @@ function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
                         originalValue={fc.severity ?? 'NONE'}
                         reviewedValue={edit?.reviewedValue}
                         allowedValues={attr.allowedValues}
-                        onAccept={() => review.acceptAttribute(item, attr)}
+                        onReject={() => review.acceptAttribute(item, attr)}
+                        onClear={() => review.clearAttribute(item, attr)}
                         onOverride={(nextSeverity) => review.correctAttribute(item, attr, nextSeverity)}
                         onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                       />
@@ -864,10 +866,11 @@ function ReviewLinkGuard() {
 
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || !review.isEditing || !review.hasDirtyChanges) return null;
+  if (!review) return null;
 
   return (
     <DirtyBar
+      isEditing={review.isEditing}
       changeCount={review.dirtyCount}
       changeSummary={review.dirtySummary}
       saving={review.saving}

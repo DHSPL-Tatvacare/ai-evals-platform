@@ -1,12 +1,15 @@
+import { useMemo } from 'react';
 import type { ThreadEvalRow, ThreadEvalResult, EvaluatorDescriptor } from '@/types/evalRuns';
 import VerdictBadge from '../VerdictBadge';
 import { OutputFieldRenderer } from '../OutputFieldRenderer';
 import { pct } from '@/utils/evalFormatters';
+import { InlineReviewControls, useInlineReviewOptional } from '@/features/reviews/inline';
 
 interface Props {
   evalRow: ThreadEvalRow;
   result: ThreadEvalResult;
   evaluatorDescriptors?: EvaluatorDescriptor[];
+  threadId?: string;
 }
 
 function MetaStatusPill({ status }: { status: 'failed' | 'skipped' }) {
@@ -24,9 +27,18 @@ function MetaStatusPill({ status }: { status: 'failed' | 'skipped' }) {
   );
 }
 
-export default function SummaryBar({ evalRow, result, evaluatorDescriptors }: Props) {
+export default function SummaryBar({ evalRow, result, evaluatorDescriptors, threadId }: Props) {
   const failed = result.failed_evaluators ?? {};
   const skipped = result.skipped_evaluators ?? [];
+  const review = useInlineReviewOptional();
+
+  const reviewableItem = useMemo(() => {
+    if (!review?.context || !threadId) return undefined;
+    return review.context.items.find((item) => {
+      const rawKey = item.itemKey.includes(':') ? item.itemKey.split(':').slice(1).join(':') : item.itemKey;
+      return rawKey === threadId;
+    });
+  }, [review?.context, threadId]);
 
   // Custom evaluator primary metrics
   const customMetrics: { name: string; descriptor: EvaluatorDescriptor; output: Record<string, unknown> }[] = [];
@@ -44,6 +56,7 @@ export default function SummaryBar({ evalRow, result, evaluatorDescriptors }: Pr
     {
       key: 'efficiency',
       label: 'Efficiency',
+      attrKey: 'efficiency_verdict',
       content: failed.efficiency ? (
         <MetaStatusPill status="failed" />
       ) : skipped.includes('efficiency') ? (
@@ -57,6 +70,7 @@ export default function SummaryBar({ evalRow, result, evaluatorDescriptors }: Pr
     {
       key: 'correctness',
       label: 'Correctness',
+      attrKey: 'worst_correctness',
       content: failed.correctness ? (
         <MetaStatusPill status="failed" />
       ) : skipped.includes('correctness') ? (
@@ -100,17 +114,40 @@ export default function SummaryBar({ evalRow, result, evaluatorDescriptors }: Pr
     <div
       className="inline-flex items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm"
     >
-      {metrics.map((m, i) => (
-        <div
-          key={m.key}
-          className={`flex flex-col items-center justify-center gap-0.5 px-4 py-2 ${
-            i > 0 ? 'border-l border-[var(--border-subtle)]' : ''
-          }`}
-        >
-          <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">{m.label}</span>
-          <span className="leading-none">{m.content}</span>
-        </div>
-      ))}
+      {metrics.map((m, i) => {
+        const attr = m.attrKey && reviewableItem
+          ? reviewableItem.attributes.find((a) => a.key === m.attrKey)
+          : undefined;
+        const edit = attr && reviewableItem
+          ? review?.getEdit(reviewableItem.itemKey, attr.key)
+          : undefined;
+        return (
+          <div
+            key={m.key}
+            className={`flex flex-col items-center justify-center gap-0.5 px-4 py-2 ${
+              i > 0 ? 'border-l border-[var(--border-subtle)]' : ''
+            }`}
+          >
+            <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">{m.label}</span>
+            <span className="leading-none flex items-center gap-1">
+              {m.content}
+              {review?.isEditing && attr && reviewableItem && (
+                <InlineReviewControls
+                  decision={edit?.decision}
+                  note={edit?.note}
+                  originalValue={attr.originalValue}
+                  reviewedValue={edit?.reviewedValue}
+                  allowedValues={attr.allowedValues}
+                  onReject={() => review.acceptAttribute(reviewableItem, attr)}
+                  onOverride={(v) => review.correctAttribute(reviewableItem, attr, v)}
+                  onNote={(n) => review.setAttributeNote(reviewableItem, attr, n)}
+                  onClear={() => review.clearAttribute(reviewableItem, attr)}
+                />
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

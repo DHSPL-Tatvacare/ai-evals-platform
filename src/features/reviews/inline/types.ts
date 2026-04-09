@@ -37,6 +37,7 @@ export interface InlineReviewContextValue {
     patch: Partial<InlineEditState>,
   ) => void;
   acceptAttribute: (item: ReviewableItem, attribute: ReviewableAttribute) => void;
+  clearAttribute: (item: ReviewableItem, attribute: ReviewableAttribute) => void;
   correctAttribute: (
     item: ReviewableItem,
     attribute: ReviewableAttribute,

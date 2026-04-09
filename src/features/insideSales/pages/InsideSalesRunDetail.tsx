@@ -518,9 +518,10 @@ function ResultsTabContent({
                           originalValue={band}
                           reviewedValue={edit?.reviewedValue}
                           allowedValues={attr.allowedValues}
-                          onAccept={() => review.acceptAttribute(item, attr)}
+                          onReject={() => review.acceptAttribute(item, attr)}
                           onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
                           onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
+                          onClear={() => review.clearAttribute(item, attr)}
                         />
                       </td>
                     )}
@@ -559,10 +560,11 @@ function StartReviewButton() {
 
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || !review.isEditing || !review.hasDirtyChanges) return null;
+  if (!review) return null;
 
   return (
     <DirtyBar
+      isEditing={review.isEditing}
       changeCount={review.dirtyCount}
       changeSummary={review.dirtySummary}
       saving={review.saving}
@@ -717,9 +719,10 @@ function CallEvalDetail({
                         originalValue={verdictAttribute.originalValue}
                         reviewedValue={verdictEdit?.reviewedValue}
                         allowedValues={verdictAttribute.allowedValues}
-                        onAccept={() => review.acceptAttribute(verdictItem, verdictAttribute)}
+                        onReject={() => review.acceptAttribute(verdictItem, verdictAttribute)}
                         onOverride={(nextValue) => review.correctAttribute(verdictItem, verdictAttribute, nextValue)}
                         onNote={(nextNote) => review.setAttributeNote(verdictItem, verdictAttribute, nextNote)}
+                        onClear={() => review.clearAttribute(verdictItem, verdictAttribute)}
                       />
                     )}
                   </div>

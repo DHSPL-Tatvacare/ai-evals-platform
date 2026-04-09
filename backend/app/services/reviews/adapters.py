@@ -7,6 +7,7 @@ from app.services.evaluators.thread_canonical import build_canonical_thread_eval
 
 KAIRA_CORRECTNESS_VALUES = ["PASS", "SOFT FAIL", "HARD FAIL", "CRITICAL", "NOT APPLICABLE"]
 KAIRA_EFFICIENCY_VALUES = ["EFFICIENT", "ACCEPTABLE", "INCOMPLETE", "FRICTION", "BROKEN", "NOT APPLICABLE"]
+ADVERSARIAL_VERDICT_VALUES = ["PASS", "SOFT FAIL", "HARD FAIL", "CRITICAL"]
 VOICE_RX_SEVERITY_VALUES = ["none", "low", "medium", "high", "critical"]
 VOICE_RX_LIKELY_CORRECT_VALUES = ["yes", "no", "unclear"]
 PASS_FAIL_VALUES = ["PASS", "FAIL"]
@@ -328,6 +329,42 @@ def build_kaira_items(run: EvalRun) -> list[dict]:
             ]),
             "attributes": attributes,
         })
+
+    # ── Adversarial evaluations ──────────────────────────────────────────
+    for ae in run.adversarial_evaluations:
+        attributes = []
+        if ae.verdict is not None:
+            attribute = _review_attribute(
+                key="verdict",
+                label="Verdict",
+                original_value=ae.verdict,
+                allowed_values=ADVERSARIAL_VERDICT_VALUES,
+                group="metric",
+                source_label="Judge",
+            )
+            if attribute:
+                attributes.append(attribute)
+        if not attributes:
+            continue
+
+        goal_label = " → ".join(
+            _humanize_key(g) for g in (ae.goal_flow or [])
+        ) or f"Case {ae.id}"
+
+        items.append({
+            "item_key": f"adversarial:{ae.id}",
+            "item_type": "adversarial",
+            "title": goal_label,
+            "subtitle": ae.difficulty,
+            "badges": [ae.verdict] if ae.verdict else [],
+            "evidence": _filter_evidence([
+                _evidence_entry("Difficulty", ae.difficulty),
+                _evidence_entry("Goal achieved", ae.goal_achieved),
+                _evidence_entry("Turns", ae.total_turns),
+            ]),
+            "attributes": attributes,
+        })
+
     return items
 
 

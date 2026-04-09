@@ -753,7 +753,7 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
         />
       )}
 
-      <AdversarialTable evaluations={evals} runId={run.run_id} />
+      <ReviewAwareAdversarialTable evaluations={evals} runId={run.run_id} />
     </>
   );
 }
@@ -768,11 +768,13 @@ function StartReviewButton() {
   );
 }
 
+
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || !review.hasDirtyChanges) return null;
+  if (!review) return null;
   return (
     <DirtyBar
+      isEditing={review.isEditing}
       changeCount={review.dirtyCount}
       changeSummary={review.dirtySummary}
       saving={review.saving}
@@ -1019,6 +1021,42 @@ function ReviewAwareSummarySection({
         </div>
       )}
     </>
+  );
+}
+
+function ReviewAwareAdversarialTable({ evaluations, runId }: { evaluations: AdversarialEvalRow[]; runId: string }) {
+  const review = useInlineReviewOptional();
+  const reviewableItems = useMemo(() => {
+    if (!review?.context) return undefined;
+    const map = new Map<string, import('@/types').ReviewableItem>();
+    for (const item of review.context.items) {
+      if (item.itemType !== 'adversarial') continue;
+      const rawKey = stripReviewItemKeyPrefix(item.itemKey);
+      map.set(rawKey, item);
+    }
+    return map.size > 0 ? map : undefined;
+  }, [review]);
+  const reviewedIds = useMemo(() => {
+    if (!review?.context) return undefined;
+    const set = new Set<string>();
+    for (const item of review.context.items) {
+      if (item.itemType !== 'adversarial') continue;
+      const hasDecision = item.attributes.some(attr => {
+        const edit = review.getEdit(item.itemKey, attr.key);
+        return edit && edit.decision !== '';
+      });
+      if (hasDecision) set.add(stripReviewItemKeyPrefix(item.itemKey));
+    }
+    return set.size > 0 || reviewableItems?.size ? set : undefined;
+  }, [review, reviewableItems]);
+
+  return (
+    <AdversarialTable
+      evaluations={evaluations}
+      runId={runId}
+      reviewableItems={reviewableItems}
+      reviewedIds={reviewedIds}
+    />
   );
 }
 

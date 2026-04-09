@@ -28,7 +28,7 @@ def app_access_clause(model, auth: AuthContext):
 async def get_readable_run(db: AsyncSession, *, run_id, auth: AuthContext) -> EvalRun:
     run = await db.scalar(
         select(EvalRun)
-        .options(selectinload(EvalRun.thread_evaluations))
+        .options(selectinload(EvalRun.thread_evaluations), selectinload(EvalRun.adversarial_evaluations))
         .where(
             EvalRun.id == run_id,
             readable_scope_clause(EvalRun, auth),

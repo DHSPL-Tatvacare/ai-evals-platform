@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, MessageCircle, PenLine } from 'lucide-react';
+import { Ban, MessageCircle, PenLine } from 'lucide-react';
 import { Button, Modal, Popover, PopoverContent, PopoverTrigger, Select } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { ReviewDecision } from '@/types';
@@ -11,9 +11,10 @@ interface InlineReviewControlsProps {
   reviewedValue?: string | null;
   allowedValues?: string[];
   disabled?: boolean;
-  onAccept: () => void;
+  onReject: () => void;
   onOverride: (reviewedValue: string) => void;
   onNote: (note: string | null) => void;
+  onClear: () => void;
 }
 
 function getInitialOverrideValue(
@@ -35,9 +36,10 @@ export function InlineReviewControls({
   reviewedValue,
   allowedValues = [],
   disabled = false,
-  onAccept,
+  onReject,
   onOverride,
   onNote,
+  onClear,
 }: InlineReviewControlsProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -46,7 +48,7 @@ export function InlineReviewControls({
   );
   const [draftNote, setDraftNote] = useState(note ?? '');
 
-  const isAccepted = decision === 'accept';
+  const isRejected = decision === 'accept';
   const isOverridden = decision === 'reject' || decision === 'correct';
   const hasNote = !!note?.trim();
   const overrideOptions = useMemo(
@@ -69,16 +71,16 @@ export function InlineReviewControls({
       <span className="inline-flex items-center gap-px rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-px">
         <button
           type="button"
-          onClick={onAccept}
+          onClick={() => isRejected ? onClear() : onReject()}
           className={cn(
             'inline-flex h-5 w-[22px] items-center justify-center rounded transition-colors',
-            isAccepted
-              ? 'bg-[var(--surface-success)] text-[var(--color-success)]'
-              : 'text-[var(--text-muted)] hover:bg-[var(--surface-success)] hover:text-[var(--color-success)]',
+            isRejected
+              ? 'bg-[var(--surface-error)] text-[var(--color-error)]'
+              : 'text-[var(--text-muted)] hover:bg-[var(--surface-error)] hover:text-[var(--color-error)]',
           )}
-          title="Accept"
+          title={isRejected ? 'Undo reject' : 'Reject'}
         >
-          <Check className="h-3 w-3" />
+          <Ban className="h-3 w-3" />
         </button>
         <Popover open={overrideOpen} onOpenChange={setOverrideOpen}>
           <PopoverTrigger asChild>
@@ -113,6 +115,18 @@ export function InlineReviewControls({
               size="sm"
             />
             <div className="flex justify-end gap-2">
+              {isOverridden && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    onClear();
+                    setOverrideOpen(false);
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={() => setOverrideOpen(false)}>
                 Cancel
               </Button>

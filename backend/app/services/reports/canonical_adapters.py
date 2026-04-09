@@ -213,19 +213,29 @@ def adapt_kaira_run_report(
                 'values': payload.distributions.intent_histogram.counts,
             },
         ],
-        'kaira-compliance': [
-            {
-                'key': rule.rule_id,
-                'label': rule.rule_id,
-                'section': rule.section,
-                'passed': rule.passed,
-                'failed': rule.failed,
-                'rate': rule.rate * 100,
-                'severity': rule.severity.lower(),
-                'total': rule.passed + rule.failed,
-            }
-            for rule in payload.rule_compliance.rules
-        ],
+        'kaira-compliance': {
+            'data': [
+                {
+                    'key': rule.rule_id,
+                    'label': rule.rule_id,
+                    'section': rule.section,
+                    'passed': rule.passed,
+                    'failed': rule.failed,
+                    'rate': rule.rate * 100,
+                    'severity': rule.severity.lower(),
+                    'total': rule.passed + rule.failed,
+                }
+                for rule in payload.rule_compliance.rules
+            ],
+            'co_failures': [
+                {
+                    'rule_a': cf.rule_a,
+                    'rule_b': cf.rule_b,
+                    'co_occurrence_rate': cf.co_occurrence_rate,
+                }
+                for cf in payload.rule_compliance.co_failures
+            ],
+        },
         'kaira-friction': payload.friction.model_dump(by_alias=True),
         'kaira-exemplars': [
             {
@@ -306,6 +316,7 @@ def adapt_kaira_run_report(
                     'area': item.area,
                     'priority': f'P{max(item.rank - 1, 0)}',
                     'summary': item.description,
+                    'affectedCount': item.affected_count,
                 }
                 for item in payload.narrative.top_issues
             ],
@@ -314,6 +325,7 @@ def adapt_kaira_run_report(
                     'priority': item.priority,
                     'title': item.area or item.priority,
                     'action': item.action,
+                    'expectedImpact': item.estimated_impact,
                 }
                 for item in payload.narrative.recommendations
             ],

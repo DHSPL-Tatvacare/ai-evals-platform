@@ -2,15 +2,22 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
 import { EmptyState } from '@/components/ui';
-import type { AdversarialEvalRow } from '@/types';
+import {
+  InlineReviewControls,
+  useInlineReviewOptional,
+} from '@/features/reviews/inline';
+import type { AdversarialEvalRow, ReviewableItem } from '@/types';
 import VerdictBadge from './VerdictBadge';
 import { routes } from '@/config/routes';
+import { cn } from '@/utils/cn';
 import { humanize, normalizeLabel } from '@/utils/evalFormatters';
 import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 
 interface Props {
   evaluations: AdversarialEvalRow[];
   runId: string;
+  reviewableItems?: Map<string, ReviewableItem>;
+  reviewedIds?: Set<string>;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -42,10 +49,19 @@ function SortHeader({ label, k, sortKey, sortDir, onToggle }: {
   );
 }
 
-export default function AdversarialTable({ evaluations, runId }: Props) {
+function getPrimaryAttribute(item?: ReviewableItem) {
+  if (!item) return undefined;
+  return item.attributes.find((a) => a.key === 'verdict') ?? item.attributes[0];
+}
+
+export default function AdversarialTable({ evaluations, runId, reviewableItems, reviewedIds }: Props) {
+  const review = useInlineReviewOptional();
   const [sortKey, setSortKey] = useState<SortKey>('goal_flow');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(0);
+
+  const showReviewSummaryColumn = !!reviewedIds;
+  const showReviewColumns = !!review && !!reviewableItems && reviewableItems.size > 0;
 
   const sorted = useMemo(() => {
     const arr = [...evaluations];
@@ -103,15 +119,30 @@ export default function AdversarialTable({ evaluations, runId }: Props) {
               <SortHeader label="Turns" k="total_turns" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               <SortHeader label="Goal" k="goal_achieved" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               <SortHeader label="Verdict" k="verdict" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+              {showReviewSummaryColumn && (
+                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                  Human Review
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {paged.map((ae) => {
               const canonical = getCanonicalAdversarialCase(ae.result, ae);
+              const itemKey = String(ae.id);
+              const reviewableItem = reviewableItems?.get(itemKey);
+              const primaryAttr = getPrimaryAttribute(reviewableItem);
+              const primaryEdit = reviewableItem && primaryAttr
+                ? review?.getEdit(reviewableItem.itemKey, primaryAttr.key)
+                : undefined;
+
               return (
               <tr
                 key={ae.id}
-                className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] transition-colors"
+                className={cn(
+                  'border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] transition-colors',
+                  reviewedIds?.has(itemKey) && 'bg-[color-mix(in_srgb,var(--interactive-primary)_2.5%,transparent)]',
+                )}
               >
                 <td className="px-2.5 py-2 text-sm font-semibold text-[var(--text-primary)]">
                   <Link
@@ -143,23 +174,47 @@ export default function AdversarialTable({ evaluations, runId }: Props) {
                   )}
                 </td>
                 <td className="px-2.5 py-2">
-                  {canonical.judge.verdict != null ? (
-                    <VerdictBadge verdict={canonical.judge.verdict} category="adversarial" />
-                  ) : (
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-white"
-                      style={{ backgroundColor: 'var(--color-error)' }}
-                    >
-                      Infra Error
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {canonical.judge.verdict != null ? (
+                      <VerdictBadge verdict={canonical.judge.verdict} category="adversarial" />
+                    ) : (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-white"
+                        style={{ backgroundColor: 'var(--color-error)' }}
+                      >
+                        Infra Error
+                      </span>
+                    )}
+                    {showReviewColumns && review?.isEditing && reviewableItem && primaryAttr && (
+                      <InlineReviewControls
+                        decision={primaryEdit?.decision}
+                        note={primaryEdit?.note}
+                        originalValue={primaryAttr.originalValue}
+                        reviewedValue={primaryEdit?.reviewedValue}
+                        allowedValues={primaryAttr.allowedValues}
+                        onReject={() => review.acceptAttribute(reviewableItem, primaryAttr)}
+                        onOverride={(v) => review.correctAttribute(reviewableItem, primaryAttr, v)}
+                        onNote={(n) => review.setAttributeNote(reviewableItem, primaryAttr, n)}
+                        onClear={() => review.clearAttribute(reviewableItem, primaryAttr)}
+                      />
+                    )}
+                  </div>
                 </td>
+                {showReviewSummaryColumn && (
+                  <td className="px-2.5 py-2 text-[11px]">
+                    {reviewedIds!.has(itemKey) ? (
+                      <span className="font-semibold text-[var(--text-brand)]">Yes</span>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">No</span>
+                    )}
+                  </td>
+                )}
               </tr>
               );
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={5} className="p-3">
+                <td colSpan={5 + (showReviewSummaryColumn ? 1 : 0)} className="p-3">
                   <EmptyState
                     icon={ClipboardList}
                     title="No adversarial tests found"

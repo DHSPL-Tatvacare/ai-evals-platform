@@ -60,6 +60,16 @@ def build_section(
     section_id = getattr(config, 'section_id', None) or getattr(config, 'id')
     model_cls = _SECTION_MODEL_BY_TYPE[component_id]
     title = config.title or section_id.replace('-', ' ').replace('_', ' ').title()
+    if isinstance(data, dict) and 'data' in data:
+        extra = {k: v for k, v in data.items() if k != 'data'}
+        return model_cls(
+            id=section_id,
+            title=title,
+            description=config.description,
+            variant=config.variant,
+            data=data['data'],
+            **extra,
+        )
     return model_cls(
         id=section_id,
         title=title,

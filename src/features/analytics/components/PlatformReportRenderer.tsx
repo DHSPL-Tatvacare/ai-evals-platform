@@ -5,7 +5,6 @@ import type {
   EntityTableBlock,
   FrictionAnalysisSection,
   HeatmapTableBlock,
-  IssuesRecommendationsSection,
   MetricBarListBlock,
   MetricBreakdownSection,
   NarrativeSection,
@@ -14,11 +13,8 @@ import type {
   PlatformCrossRunNarrative,
   PlatformCrossRunPayload,
   PlatformReportSection,
-  PlatformRunNarrativeIssue,
-  PlatformRunNarrativeRecommendation,
   RecommendationListBlock,
   StatGridBlock,
-  SummaryCard,
   SummaryCardsSection,
   TableBlock,
   PlatformRunNarrative,
@@ -34,7 +30,34 @@ import { notificationService } from '@/services/notifications';
 import { useAppConfig } from '@/hooks';
 import SectionHeader from '@/features/evalRuns/components/report/shared/SectionHeader';
 import CalloutBox from '@/features/evalRuns/components/report/shared/CalloutBox';
+import VerdictDistributions from '@/features/evalRuns/components/report/VerdictDistributions';
+import RuleComplianceTable from '@/features/evalRuns/components/report/RuleComplianceTable';
+import ExemplarThreads from '@/features/evalRuns/components/report/ExemplarThreads';
+import FrictionAnalysisView from '@/features/evalRuns/components/report/FrictionAnalysis';
+import PromptGapAnalysis from '@/features/evalRuns/components/report/PromptGapAnalysis';
+import Recommendations from '@/features/evalRuns/components/report/Recommendations';
+import {
+  transformDistributions,
+  transformAdversarialBreakdown,
+  transformCompliance,
+  transformExemplars,
+  transformNarrative,
+} from '@/features/evalRuns/components/report/sectionTransforms';
+import type { ComplianceTableSection, DistributionChartSection, ExemplarsSection } from '@/types/platformReports';
+import { HeatmapTable } from '@/components/report/HeatmapTable';
+import type { HeatmapColumn, HeatmapRow } from '@/components/report/HeatmapTable';
 import { cn } from '@/utils/cn';
+
+/** Section types that render their own SectionHeader and layout — no outer box wrapper. */
+const RICH_COMPONENT_IDS = new Set([
+  'distribution_chart',
+  'compliance_table',
+  'exemplars',
+  'friction_analysis',
+  'prompt_gap_analysis',
+  'issues_recommendations',
+  'entity_slices',
+]);
 
 function normalizeTokenKey(key: string): string {
   return key.replace(/[_\s-]+/g, '').toLowerCase();
@@ -436,9 +459,11 @@ function ReportDocumentPreview({ document, report }: { document: PlatformReportD
 function SectionContent({
   section,
   presentationSection,
+  report,
 }: {
   section: PlatformReportSection;
   presentationSection?: PresentationSection;
+  report?: PlatformRunReportPayload;
 }) {
   const componentId = getSectionComponentId(section, presentationSection);
 
@@ -545,54 +570,23 @@ function SectionContent({
   }
 
   if (componentId === 'distribution_chart') {
-    const distributionSection = section as Extract<PlatformReportSection, { type: 'distribution_chart' }>;
+    const distSection = section as DistributionChartSection;
+    const distributions = transformDistributions(distSection);
+    const isAdversarial = report?.metadata.evalType === 'batch_adversarial';
+    const adversarialBreakdown = transformAdversarialBreakdown(distSection);
     return (
-      <div className="space-y-4">
-        {distributionSection.data.map((series) => (
-          <div key={`${series.label}-${series.categories.join('-')}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="mb-3 font-semibold text-[var(--text-primary)]">{series.label}</div>
-            <div className="space-y-2">
-              {series.categories.map((category, index) => (
-                <div key={`${series.label}-${category}`} className="flex items-center justify-between text-sm">
-                  <span className="text-[var(--text-secondary)]">{category}</span>
-                  <span className="font-medium text-[var(--text-primary)]">{series.values[index] ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <VerdictDistributions
+        distributions={distributions}
+        isAdversarial={isAdversarial}
+        adversarialBreakdown={adversarialBreakdown}
+      />
     );
   }
 
   if (componentId === 'compliance_table') {
-    const complianceSection = section as Extract<PlatformReportSection, { type: 'compliance_table' }>;
-    return (
-      <div className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border-subtle)]">
-              <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">Rule</th>
-              <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-[var(--text-muted)]">Passed</th>
-              <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-[var(--text-muted)]">Failed</th>
-              <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-[var(--text-muted)]">Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {complianceSection.data.map((row) => (
-              <tr key={row.key} className="border-b border-[var(--border-subtle)] last:border-b-0">
-                <td className="px-4 py-3 text-[var(--text-primary)]">{row.label}</td>
-                <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{row.passed}</td>
-                <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{row.failed}</td>
-                <td className={cn('px-4 py-3 text-right font-medium', toneClass(row.rate >= 85 ? 'positive' : row.rate >= 60 ? 'warning' : 'negative'))}>
-                  {row.rate.toFixed(1)}%
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
+    const complianceSection = section as ComplianceTableSection;
+    const ruleCompliance = transformCompliance(complianceSection);
+    return <RuleComplianceTable ruleCompliance={ruleCompliance} />;
   }
 
   if (componentId === 'heatmap') {
@@ -625,22 +619,53 @@ function SectionContent({
 
   if (componentId === 'entity_slices') {
     const entitySection = section as Extract<PlatformReportSection, { type: 'entity_slices' }>;
+    const items = entitySection.data;
+    const hasDetails = items.some((item) => item.details && Object.keys(item.details).length > 0);
+
+    if (hasDetails && items.length > 0) {
+      const detailKeys = Array.from(
+        new Set(items.flatMap((item) => Object.keys(item.details ?? {}))),
+      );
+      const columns: HeatmapColumn[] = detailKeys.map((key) => ({
+        key,
+        label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        shortLabel: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 10),
+        max: 100,
+        greenThreshold: 80,
+        yellowThreshold: 65,
+      }));
+      const rows: HeatmapRow[] = items.map((item) => ({
+        id: item.entityId,
+        label: item.label,
+        extraColumns: Object.entries(item.summary).map(([key, value]) => ({
+          label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).trim(),
+          value: typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(1)) : String(value),
+          className: key.toLowerCase().includes('score') || key.toLowerCase().includes('avg')
+            ? cn('font-bold', typeof value === 'number' && value >= 80 ? 'text-[var(--color-success)]' : typeof value === 'number' && value >= 65 ? 'text-[var(--color-warning)]' : typeof value === 'number' ? 'text-[var(--color-error)]' : '')
+            : undefined,
+        })),
+      }));
+      const cells: Record<string, Record<string, number>> = {};
+      for (const item of items) {
+        cells[item.entityId] = {};
+        for (const key of detailKeys) {
+          const val = item.details?.[key];
+          cells[item.entityId][key] = typeof val === 'number' ? val : 0;
+        }
+      }
+      return <HeatmapTable rows={rows} columns={columns} cells={cells} />;
+    }
+
     return (
       <div className="grid gap-3 md:grid-cols-2">
-        {entitySection.data.map((item) => (
-          <div key={item.entityId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+        {items.map((item) => (
+          <div key={item.entityId} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
             <div className="font-semibold text-[var(--text-primary)]">{item.label}</div>
             <dl className="mt-3 space-y-1">
               {Object.entries(item.summary).map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between gap-4 text-sm">
                   <dt className="text-[var(--text-muted)]">{key}</dt>
                   <dd className="text-[var(--text-primary)]">{String(value)}</dd>
-                </div>
-              ))}
-              {item.details && Object.entries(item.details).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-[var(--text-muted)]">{key}</dt>
-                  <dd className="text-[var(--text-secondary)]">{String(value)}</dd>
                 </div>
               ))}
             </dl>
@@ -681,154 +706,33 @@ function SectionContent({
   }
 
   if (componentId === 'issues_recommendations') {
-    const issuesSection = section as IssuesRecommendationsSection;
-    return (
-      <div className="space-y-4">
-        <div className="space-y-3">
-          {issuesSection.data.issues.map((issue, index) => (
-            <div key={`${issue.area}-${index}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{issue.priority}</div>
-              <div className="mt-1 font-semibold text-[var(--text-primary)]">{issue.title}</div>
-              <div className="mt-1 text-sm text-[var(--text-secondary)]">{issue.summary}</div>
-            </div>
-          ))}
-        </div>
-        <div className="space-y-3">
-          {issuesSection.data.recommendations.map((item, index) => (
-            <div key={`${item.title}-${index}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{item.priority}</div>
-              <div className="mt-1 font-semibold text-[var(--text-primary)]">{item.title}</div>
-              <div className="mt-1 text-sm text-[var(--text-secondary)]">{item.action}</div>
-              {item.expectedImpact && <div className="mt-1 text-sm text-[var(--text-muted)]">{item.expectedImpact}</div>}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    const narrative = report ? transformNarrative(report) : null;
+    return <Recommendations narrative={narrative} />;
   }
 
   if (componentId === 'exemplars') {
-    const exemplarsSection = section as Extract<PlatformReportSection, { type: 'exemplars' }>;
+    const exemplarsSection = section as ExemplarsSection;
+    const exemplars = transformExemplars(exemplarsSection);
+    const narrative = report ? transformNarrative(report) : null;
+    const isAdversarial = report?.metadata.evalType === 'batch_adversarial';
     return (
-      <div className="grid gap-3 md:grid-cols-2">
-        {exemplarsSection.data.map((item) => (
-          <div key={item.itemId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="font-semibold text-[var(--text-primary)]">{item.label}</div>
-              {item.score != null && <div className="text-sm text-[var(--text-secondary)]">{item.score.toFixed(1)}</div>}
-            </div>
-            <div className="mt-2 text-sm text-[var(--text-secondary)]">{item.summary}</div>
-            {item.details && (
-              <dl className="mt-3 space-y-1 text-sm">
-                {Object.entries(item.details).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between gap-4">
-                    <dt className="text-[var(--text-muted)]">{key}</dt>
-                    <dd className="text-[var(--text-primary)]">{String(value)}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </div>
-        ))}
-      </div>
+      <ExemplarThreads
+        exemplars={exemplars}
+        narrative={narrative}
+        isAdversarial={isAdversarial}
+        runId={report?.metadata.runId}
+      />
     );
   }
 
   if (componentId === 'prompt_gap_analysis') {
-    const promptGapSection = section as Extract<PlatformReportSection, { type: 'prompt_gap_analysis' }>;
-    return (
-      <div className="space-y-3">
-        {promptGapSection.data.map((item, index) => (
-          <div key={`${item.gapType}-${index}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{item.gapType}</div>
-            <div className="mt-1 text-sm text-[var(--text-primary)]">{item.summary}</div>
-            <div className="mt-2 text-xs text-[var(--text-muted)]">
-              {item.promptSection} · {item.evaluationRule}
-            </div>
-            {item.suggestedFix && <div className="mt-2 text-sm text-[var(--text-secondary)]">{item.suggestedFix}</div>}
-          </div>
-        ))}
-      </div>
-    );
+    const narrative = report ? transformNarrative(report) : null;
+    return <PromptGapAnalysis narrative={narrative} />;
   }
 
   if (componentId === 'friction_analysis') {
-    const friction = section.data as FrictionAnalysisSection['data'];
-    const totalExamples = friction.topPatterns.reduce((sum, pattern) => sum + pattern.exampleThreadIds.length, 0);
-
-    return (
-      <div className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Total Friction</div>
-            <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{friction.totalFrictionTurns}</div>
-          </div>
-          {Object.entries(friction.byCause).map(([cause, count]) => (
-            <div key={cause} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{cause.replace(/_/g, ' ')}</div>
-              <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{count}</div>
-            </div>
-          ))}
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Example Threads</div>
-            <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{totalExamples}</div>
-          </div>
-        </div>
-
-        {Object.keys(friction.recoveryQuality).length > 0 ? (
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="text-sm font-semibold text-[var(--text-primary)]">Recovery Quality</div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {Object.entries(friction.recoveryQuality).map(([key, value]) => (
-                <div key={key} className="rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-                  <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{key.replace(/_/g, ' ')}</div>
-                  <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {Object.keys(friction.avgTurnsByVerdict).length > 0 ? (
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="text-sm font-semibold text-[var(--text-primary)]">Average Turns by Verdict</div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {Object.entries(friction.avgTurnsByVerdict).map(([key, value]) => (
-                <div key={key} className="rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-                  <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{key.replace(/_/g, ' ')}</div>
-                  <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{value.toFixed(1)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {friction.topPatterns.length > 0 ? (
-          <div className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-[var(--border-subtle)]">
-                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">Pattern</th>
-                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-[var(--text-muted)]">Count</th>
-                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">Example Threads</th>
-                </tr>
-              </thead>
-              <tbody>
-                {friction.topPatterns.map((pattern, index) => (
-                  <tr key={`${pattern.description}-${index}`} className="border-b border-[var(--border-subtle)] last:border-b-0">
-                    <td className="px-4 py-3 text-[var(--text-primary)]">{pattern.description}</td>
-                    <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{pattern.count}</td>
-                    <td className="px-4 py-3 text-[var(--text-secondary)]">
-                      {pattern.exampleThreadIds.length > 0 ? pattern.exampleThreadIds.slice(0, 3).join(', ') : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </div>
-    );
+    const friction = (section as FrictionAnalysisSection).data;
+    return <FrictionAnalysisView friction={friction} runId={report?.metadata.runId} />;
   }
 
   if (componentId === 'callout') {
@@ -843,118 +747,12 @@ function SectionContent({
   return null;
 }
 
-function isRunNarrative(data: PlatformRunNarrative | PlatformCrossRunNarrative): data is PlatformRunNarrative {
-  return 'issues' in data && 'recommendations' in data;
-}
-
-function toneSurfaceClass(tone: string): string {
-  if (tone === 'positive' || tone === 'success') return 'bg-emerald-500/12 text-emerald-300 border-emerald-400/20';
-  if (tone === 'warning') return 'bg-amber-500/12 text-amber-300 border-amber-400/20';
-  if (tone === 'negative' || tone === 'danger' || tone === 'error') return 'bg-rose-500/12 text-rose-300 border-rose-400/20';
-  return 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-subtle)]';
-}
-
-function priorityClass(priority: string | null | undefined): string {
-  const normalized = (priority ?? '').trim().toUpperCase();
-  if (normalized === 'P0' || normalized === 'CRITICAL' || normalized === 'HIGH') {
-    return 'border-rose-400/30 bg-rose-500/12 text-rose-300';
-  }
-  if (normalized === 'P1' || normalized === 'MEDIUM') {
-    return 'border-amber-400/30 bg-amber-500/12 text-amber-300';
-  }
-  return 'border-sky-400/30 bg-sky-500/12 text-sky-300';
-}
 
 function metricBarTone(tone: string): string {
   if (tone === 'positive' || tone === 'success') return 'var(--color-success)';
   if (tone === 'warning') return 'var(--color-warning)';
   if (tone === 'negative' || tone === 'danger' || tone === 'error') return 'var(--color-error)';
   return 'var(--color-brand-accent)';
-}
-
-function PlatformPrimaryMetricCard({ card }: { card: SummaryCard }) {
-  return (
-    <div className="min-w-[160px] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-        {card.label}
-      </div>
-      <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-        {card.value}
-      </div>
-      {card.subtitle ? (
-        <div className={cn('mt-3 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold', toneSurfaceClass(card.tone))}>
-          {card.subtitle}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PlatformSummaryCardGrid({ cards }: { cards: SummaryCard[] }) {
-  if (cards.length === 0) return null;
-
-  return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {cards.map((card) => (
-        <div
-          key={card.key}
-          className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
-        >
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-            {card.label}
-          </div>
-          <div className="mt-2 text-2xl font-semibold leading-none text-[var(--text-primary)]">
-            {card.value}
-          </div>
-          {(card.subtitle || card.tone) ? (
-            <div className="mt-3 flex items-center gap-2">
-              {card.subtitle ? (
-                <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold', toneSurfaceClass(card.tone))}>
-                  {card.subtitle}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function PlatformMetricBreakdown({ section }: { section: MetricBreakdownSection | null }) {
-  if (!section || section.data.length === 0) return null;
-
-  return (
-    <section className="rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
-      <SectionHeader title={section.title} description={section.description ?? undefined} />
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {section.data.map((metric) => {
-          const percentage = metric.maxValue > 0 ? Math.max(0, Math.min(100, (metric.value / metric.maxValue) * 100)) : 0;
-          const color = metricBarTone(metric.tone);
-          return (
-            <div key={metric.key} className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">{metric.label}</div>
-                  <div className="mt-1 text-xs text-[var(--text-muted)]">
-                    {metric.value}
-                    {metric.unit ?? ''}
-                    {metric.maxValue ? ` / ${metric.maxValue}${metric.unit ?? ''}` : ''}
-                  </div>
-                </div>
-                <div className="text-sm font-semibold" style={{ color }}>
-                  {Math.round(percentage)}%
-                </div>
-              </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-                <div className="h-full rounded-full" style={{ width: `${percentage}%`, backgroundColor: color }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
 }
 
 const LEGACY_SUMMARY_COMPONENT_IDS = new Set([
@@ -1020,138 +818,107 @@ function getSectionsForTab(report: PlatformRunReportPayload, tab: 'summary' | 'd
   return report.sections;
 }
 
-function SummarySectionFrame({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string | null;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
-      <SectionHeader title={title} description={description ?? undefined} />
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-function SummaryNarrativeSection({ section }: { section: NarrativeSection }) {
-  const narrative = isRunNarrative(section.data) ? section.data : null;
-  return (
-    <SummarySectionFrame
-      title={section.title}
-      description={section.description ?? 'Narrative summary for the selected report run.'}
-    >
-      <div className="text-[15px] leading-7 text-[var(--text-secondary)]">
-        {narrative?.executiveSummary ?? 'AI narrative was not generated for this report run.'}
-      </div>
-    </SummarySectionFrame>
-  );
-}
-
-function SummaryIssuesRecommendationsSection({ section }: { section: IssuesRecommendationsSection }) {
-  const issues: PlatformRunNarrativeIssue[] = section.data.issues.map((item) => ({
-    title: item.title,
-    area: item.area,
-    severity: item.priority,
-    summary: item.summary,
-  }));
-  const recommendations: PlatformRunNarrativeRecommendation[] = section.data.recommendations.map((item) => ({
-    priority: item.priority,
-    area: item.title,
-    action: item.action,
-    rationale: item.expectedImpact ?? '',
-  }));
-
-  return (
-    <section className="space-y-4">
-      <SummarySectionFrame title="Top Issues">
-        <div className="space-y-3">
-          {issues.length > 0 ? issues.slice(0, 4).map((issue, index) => (
-            <div key={`${issue.title}-${index}`} className="rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">{issue.title}</div>
-                  <div className="mt-1 text-xs text-[var(--text-muted)]">{issue.area}</div>
-                </div>
-                <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', priorityClass(issue.severity))}>
-                  {issue.severity}
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{issue.summary}</p>
-            </div>
-          )) : (
-            <div className="text-sm text-[var(--text-muted)]">No issue narratives are available for this run.</div>
-          )}
-        </div>
-      </SummarySectionFrame>
-
-      <SummarySectionFrame title="Top Recommendations">
-        <div className="space-y-3">
-          {recommendations.length > 0 ? recommendations.slice(0, 4).map((item, index) => (
-            <div key={`${item.action}-${index}`} className="rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">{item.action}</div>
-                  <div className="mt-1 text-xs text-[var(--text-muted)]">{item.area}</div>
-                </div>
-                <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', priorityClass(item.priority))}>
-                  {item.priority}
-                </span>
-              </div>
-              {item.rationale ? (
-                <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{item.rationale}</p>
-              ) : null}
-            </div>
-          )) : (
-            <div className="text-sm text-[var(--text-muted)]">No recommendations are available for this run.</div>
-          )}
-        </div>
-      </SummarySectionFrame>
-    </section>
-  );
-}
-
 function SummarySectionContent({
   section,
   presentationSection,
+  report,
 }: {
   section: PlatformReportSection;
   presentationSection?: PresentationSection;
+  report?: PlatformRunReportPayload;
 }) {
   const componentId = getSectionComponentId(section, presentationSection);
 
   if (componentId === 'summary_cards') {
-    const summarySection = section as SummaryCardsSection;
-    return <PlatformSummaryCardGrid cards={summarySection.data} />;
+    return null;
   }
 
   if (componentId === 'metric_breakdown') {
-    return <PlatformMetricBreakdown section={section as MetricBreakdownSection} />;
-  }
-
-  if (componentId === 'narrative') {
-    return <SummaryNarrativeSection section={section as NarrativeSection} />;
-  }
-
-  if (componentId === 'issues_recommendations') {
-    return <SummaryIssuesRecommendationsSection section={section as IssuesRecommendationsSection} />;
-  }
-
-  if (componentId === 'callout') {
+    const metricSection = section as MetricBreakdownSection;
     return (
-      <section className="rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
-        <SectionContent section={section} presentationSection={presentationSection} />
-      </section>
+      <div className="grid gap-3 md:grid-cols-4">
+        {metricSection.data.map((metric) => {
+          const pct = metric.maxValue > 0 ? Math.round((metric.value / metric.maxValue) * 100) : 0;
+          const color = metricBarTone(metric.tone);
+          return (
+            <div key={metric.key}>
+              <div className="text-xs text-[var(--text-muted)] mb-1">{metric.label}</div>
+              <div className="text-xl font-bold" style={{ color }}>{pct}%</div>
+              <div className="mt-2 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     );
   }
 
+  if (componentId === 'narrative') {
+    const narrativeData = (section as NarrativeSection).data as PlatformRunNarrative | undefined;
+    return narrativeData?.executiveSummary ? (
+      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+        <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{narrativeData.executiveSummary}</p>
+      </div>
+    ) : (
+      <p className="text-sm italic text-[var(--text-muted)]">AI narrative was not generated for this report.</p>
+    );
+  }
+
+  if (componentId === 'issues_recommendations') {
+    const narrative = report ? transformNarrative(report) : null;
+    return (
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Top Issues</h3>
+          {narrative?.topIssues && narrative.topIssues.length > 0 ? (
+            <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-[var(--border-subtle)]">
+                    <th style={{ width: 12 }} className="px-2 py-1.5" />
+                    <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Issue</th>
+                    <th className="text-left px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Focus Area</th>
+                    <th className="text-right px-2 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Affected</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {narrative.topIssues.slice(0, 5).map((issue, i) => (
+                    <tr key={issue.rank} className={i % 2 === 0 ? 'bg-[var(--bg-primary)]' : 'bg-[var(--bg-secondary)]'}>
+                      <td className="px-2 py-2 align-top"><span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: i < 2 ? 'var(--color-error)' : i < 4 ? 'var(--color-warning)' : 'var(--color-info)' }} /></td>
+                      <td className="px-2 py-2 align-top font-medium text-[var(--text-primary)]">{issue.description}</td>
+                      <td className="px-2 py-2 align-top whitespace-nowrap text-[var(--text-muted)]">{issue.area}</td>
+                      <td className="px-2 py-2 align-top text-right text-[var(--text-muted)]">{issue.affectedCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <CalloutBox variant="info">No issue narratives are available for this run.</CalloutBox>
+          )}
+        </div>
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Top Recommendations</h3>
+          <Recommendations narrative={narrative} />
+        </div>
+      </div>
+    );
+  }
+
+  if (componentId === 'callout') {
+    return <SectionContent section={section} presentationSection={presentationSection} report={report} />;
+  }
+
+  if (RICH_COMPONENT_IDS.has(componentId)) {
+    return <SectionContent section={section} presentationSection={presentationSection} report={report} />;
+  }
+
   return (
-    <SummarySectionFrame title={section.title} description={section.description}>
-      <SectionContent section={section} presentationSection={presentationSection} />
-    </SummarySectionFrame>
+    <div>
+      <SectionHeader title={section.title} description={section.description ?? undefined} />
+      <SectionContent section={section} presentationSection={presentationSection} report={report} />
+    </div>
   );
 }
 
@@ -1170,50 +937,47 @@ export function PlatformReportView({ report, actions }: { report: PlatformRunRep
   const detailedSections = getSectionsForTab(report, 'detailed');
   const presentationSectionMap = getPresentationSectionMap(report);
 
+  const gradeColor = primaryCard?.tone === 'positive' || primaryCard?.tone === 'success'
+    ? 'var(--color-success)'
+    : primaryCard?.tone === 'warning'
+      ? 'var(--color-warning)'
+      : primaryCard?.tone === 'negative' || primaryCard?.tone === 'danger' || primaryCard?.tone === 'error'
+        ? 'var(--color-error)'
+        : 'var(--text-muted)';
+
   return (
     <div className="space-y-6" style={buildReportPresentationStyle(report)}>
-      <section className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
-        <div className="flex flex-wrap items-start gap-4">
-          {primaryCard ? <PlatformPrimaryMetricCard card={primaryCard} /> : null}
-
-          <div className="min-w-0 flex-1">
-            <h2 className="text-[28px] font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-              {reportTitle}
-            </h2>
-            <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--text-muted)]">
-              <span>Generated {new Date(report.metadata.computedAt).toLocaleString()}</span>
-              {report.metadata.evalType ? (
-                <>
-                  <span>·</span>
-                  <span>{report.metadata.evalType}</span>
-                </>
-              ) : null}
-              {modelLabel ? (
-                <>
-                  <span>·</span>
-                  <span>{modelLabel}</span>
-                </>
-              ) : null}
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+        {primaryCard ? (
+          <>
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full shrink-0"
+              style={{ backgroundColor: gradeColor }}
+            >
+              <span className="text-sm font-bold text-white">{primaryCard.subtitle ?? ''}</span>
             </div>
-            {secondaryCards.length > 0 ? (
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                {secondaryCards.slice(0, 3).map((card) => (
-                  <div key={card.key} className="rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                      {card.label}
-                    </div>
-                    <div className="mt-2 text-lg font-semibold leading-none text-[var(--text-primary)]">
-                      {card.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
+            <div className="flex h-10 items-center shrink-0">
+              <span className="text-xl font-bold leading-none text-[var(--text-primary)]">{primaryCard.value}</span>
+              <span className="ml-1.5 text-sm leading-none text-[var(--text-muted)]">/ 100</span>
+            </div>
+          </>
+        ) : null}
 
-          <div className="ml-auto shrink-0">{actions}</div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">{reportTitle}</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[var(--text-muted)]">
+            {secondaryCards.map((card) => (
+              <span key={card.key}>{card.value} {card.label.toLowerCase()}</span>
+            ))}
+            {report.metadata.evalType ? <><span>·</span><span>{report.metadata.evalType}</span></> : null}
+            {modelLabel ? <><span>·</span><span>{modelLabel}</span></> : null}
+            <span>·</span>
+            <span>{new Date(report.metadata.computedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          </div>
         </div>
-      </section>
+
+        <div className="ml-auto shrink-0">{actions}</div>
+      </div>
 
       {hasRenderableSections ? (
         <Tabs
@@ -1231,6 +995,7 @@ export function PlatformReportView({ report, actions }: { report: PlatformRunRep
                       key={section.id}
                       section={section}
                       presentationSection={presentationSectionMap.get(section.id)}
+                      report={report}
                     />
                   )) : (
                     <div className="text-sm text-[var(--text-muted)]">No summary sections are configured for this report.</div>
@@ -1242,13 +1007,22 @@ export function PlatformReportView({ report, actions }: { report: PlatformRunRep
               id: 'detailed',
               label: 'Detailed Analysis',
               content: (
-                <div className="space-y-6 pt-2">
-                  {detailedSections.map((section) => (
-                    <section key={section.id} className="space-y-4 rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
-                      <SectionHeader title={section.title} description={section.description ?? undefined} />
-                      <SectionContent section={section} presentationSection={presentationSectionMap.get(section.id)} />
-                    </section>
-                  ))}
+                <div className="space-y-8 pt-2">
+                  {detailedSections.map((section) => {
+                    const pSection = presentationSectionMap.get(section.id);
+                    const cId = getSectionComponentId(section, pSection);
+                    const isRich = RICH_COMPONENT_IDS.has(cId);
+                    return isRich ? (
+                      <div key={section.id}>
+                        <SectionContent section={section} presentationSection={pSection} report={report} />
+                      </div>
+                    ) : (
+                      <section key={section.id} className="space-y-4">
+                        <SectionHeader title={section.title} description={section.description ?? undefined} />
+                        <SectionContent section={section} presentationSection={pSection} report={report} />
+                      </section>
+                    );
+                  })}
                 </div>
               ),
             },

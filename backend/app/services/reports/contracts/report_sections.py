@@ -74,9 +74,16 @@ class ComplianceRow(CamelModel):
     total: int | None = None
 
 
+class CoFailureItem(CamelModel):
+    rule_a: str
+    rule_b: str
+    co_occurrence_rate: float
+
+
 class ComplianceTableSection(ReportSectionBase):
     type: Literal["compliance_table"] = "compliance_table"
     data: list[ComplianceRow]
+    co_failures: list[CoFailureItem] = Field(default_factory=list)
 
 
 class FrictionPattern(CamelModel):
