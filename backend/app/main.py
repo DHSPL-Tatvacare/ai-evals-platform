@@ -259,6 +259,7 @@ from app.routes.adversarial_config import router as adversarial_config_router
 from app.routes.adversarial_test_cases import router as adversarial_test_cases_router
 from app.routes.admin import router as admin_router
 from app.routes.reports import router as reports_router
+from app.routes.report_builder import router as report_builder_router
 from app.routes.auth import router as auth_router
 from app.routes.inside_sales import router as inside_sales_router
 from app.routes.apps import router as apps_router
@@ -282,6 +283,7 @@ app.include_router(adversarial_config_router)
 app.include_router(adversarial_test_cases_router)
 app.include_router(admin_router)
 app.include_router(reports_router)
+app.include_router(report_builder_router)
 app.include_router(inside_sales_router)
 app.include_router(apps_router)
 app.include_router(roles_router)

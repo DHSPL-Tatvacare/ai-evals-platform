@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import func, select
@@ -200,7 +200,8 @@ def _resolve_incremental_window(
     latest_watermark = latest_successful.watermark_to if latest_successful else None
     date_from = _format_sync_datetime(request.date_from) or _format_sync_datetime(latest_watermark)
     if not date_from:
-        raise ValueError("incremental sync requires date_from or an existing successful watermark")
+        # No watermark and no explicit date_from — default to last 30 days
+        date_from = (_utc_now() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
 
     date_to = _format_sync_datetime(request.date_to) or _utc_now().strftime("%Y-%m-%d %H:%M:%S")
     return date_from, date_to

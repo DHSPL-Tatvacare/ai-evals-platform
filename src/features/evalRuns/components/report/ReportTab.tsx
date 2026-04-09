@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Clock, Download, FileBarChart, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Clock, Download, FileBarChart, Loader2, RefreshCw, Sparkles, Wand2 } from 'lucide-react';
 
 import { Button, EmptyState, LLMConfigSection, Select, Tooltip, type SelectOption } from '@/components/ui';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
@@ -9,6 +9,7 @@ import { notificationService } from '@/services/notifications';
 import { hasProviderCredentials, LLM_PROVIDERS, useLLMSettingsStore } from '@/stores';
 import type { AppId, LLMProvider, ReportConfigSummary, ReportRunSummary } from '@/types';
 import { usePermission } from '@/utils/permissions';
+import { BuilderOverlay } from '@/features/reportBuilder/components/BuilderOverlay';
 
 interface ReportMetadataLike {
   llmProvider?: string | null;
@@ -92,7 +93,7 @@ function ReportZeroState({
   };
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-secondary)] shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
+    <section className="overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-secondary)]">
       <div className="px-7 py-8 text-white md:px-9 md:py-10" style={heroStyle}>
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75">
           <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">Default single-run report</span>
@@ -165,6 +166,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const [jobPhase, setJobPhase] = useState<'queued' | 'running' | null>(null);
@@ -566,6 +568,17 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
           />
         </Tooltip>
       ) : null}
+      <Tooltip content="Build custom report">
+        <Button
+          size="sm"
+          variant="secondary"
+          iconOnly
+          icon={Wand2}
+          onClick={() => setShowBuilder(true)}
+          title="Build Your Own Report"
+          aria-label="Build Your Own Report"
+        />
+      </Tooltip>
     </div>
   );
 
@@ -654,6 +667,13 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
 
         </div>
       </SettingsSlideOver>
+
+      <BuilderOverlay
+        appId={appId}
+        open={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        reportPayload={report as any}
+      />
     </>
   );
 }
