@@ -592,6 +592,7 @@ export default function RunDetail() {
                   </div>
                 );
               })()}
+              <ReviewedStatPill />
             </div>
 
             <div className="flex gap-4 flex-wrap">
@@ -676,7 +677,7 @@ export default function RunDetail() {
               </span>
             </div>
 
-            <EvalTable evaluations={filteredThreads} evaluatorDescriptors={run.evaluator_descriptors} />
+            <ReviewAwareEvalTable evaluations={filteredThreads} evaluatorDescriptors={run.evaluator_descriptors} />
           </>
         )}
 
@@ -887,6 +888,42 @@ function ReviewDirtyBar() {
       onSaveDraft={review.saveDraft}
       onFinalize={review.finalize}
     />
+  );
+}
+
+function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors }: { evaluations: ThreadEvalRow[]; evaluatorDescriptors?: import('@/types').EvaluatorDescriptor[] }) {
+  const review = useInlineReviewOptional();
+  const reviewedThreadIds = useMemo(() => {
+    if (!review?.context) return undefined;
+    const set = new Set<string>();
+    for (const item of review.context.items) {
+      const hasDecision = item.attributes.some(attr => {
+        const edit = review.getEdit(item.itemKey, attr.key);
+        return edit && edit.decision !== '';
+      });
+      if (hasDecision) set.add(item.itemKey);
+    }
+    return set.size > 0 || review.context.items.length > 0 ? set : undefined;
+  }, [review]);
+  return <EvalTable evaluations={evaluations} evaluatorDescriptors={evaluatorDescriptors} reviewedThreadIds={reviewedThreadIds} />;
+}
+
+function ReviewedStatPill() {
+  const review = useInlineReviewOptional();
+  if (!review?.context) return null;
+  const totalItems = review.context.items.length;
+  if (totalItems === 0) return null;
+  const reviewedCount = review.context.items.filter(item =>
+    item.attributes.some(attr => {
+      const edit = review.getEdit(item.itemKey, attr.key);
+      return edit && edit.decision !== '';
+    })
+  ).length;
+  return (
+    <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
+      <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">Reviewed</p>
+      <p className="text-lg font-bold mt-0.5 leading-tight text-[var(--text-brand)]">{reviewedCount} / {totalItems}</p>
+    </div>
   );
 }
 

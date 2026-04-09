@@ -6,10 +6,13 @@ import type { ThreadEvalRow, EvaluatorDescriptor } from "@/types";
 import VerdictBadge from "./VerdictBadge";
 import { pct, normalizeLabel } from "@/utils/evalFormatters";
 import { routes } from "@/config/routes";
+import { cn } from "@/utils/cn";
 
 interface Props {
   evaluations: ThreadEvalRow[];
   evaluatorDescriptors?: EvaluatorDescriptor[];
+  /** Set of thread IDs that have been human-reviewed */
+  reviewedThreadIds?: Set<string>;
 }
 
 type SortDir = "asc" | "desc";
@@ -154,7 +157,7 @@ function SortHeader({ label, k, sortKey, sortDir, onToggle }: {
   );
 }
 
-export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) {
+export default function EvalTable({ evaluations, evaluatorDescriptors, reviewedThreadIds }: Props) {
   const descriptors = evaluatorDescriptors ?? DEFAULT_DESCRIPTORS;
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<string>("thread_id");
@@ -224,7 +227,7 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
     }
   }
 
-  const totalCols = 2 + descriptors.length + 1;
+  const totalCols = 2 + descriptors.length + 1 + (reviewedThreadIds ? 1 : 0);
 
   return (
     <div>
@@ -245,6 +248,11 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
                 />
               ))}
               <SortHeader label="Completed" k="success_status" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+              {reviewedThreadIds && (
+                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                  Human Review
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -252,7 +260,10 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
               <tr
                 key={e.id}
                 onClick={() => navigate(routes.kaira.threadDetail(e.thread_id))}
-                className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+                className={cn(
+                  'border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors',
+                  reviewedThreadIds?.has(e.thread_id) && 'bg-[color-mix(in_srgb,var(--interactive-primary)_2.5%,transparent)]',
+                )}
               >
                 <td className="px-2.5 py-2 text-sm font-mono text-[var(--text-primary)]">
                   <Link
@@ -287,6 +298,15 @@ export default function EvalTable({ evaluations, evaluatorDescriptors }: Props) 
                     <span className="text-[var(--color-error)]">{"\u2717"}</span>
                   )}
                 </td>
+                {reviewedThreadIds && (
+                  <td className="px-2.5 py-2 text-[11px]">
+                    {reviewedThreadIds.has(e.thread_id) ? (
+                      <span className="font-semibold text-[var(--text-brand)]">Yes</span>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">No</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
             {sorted.length === 0 && (
