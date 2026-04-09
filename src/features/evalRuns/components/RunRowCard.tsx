@@ -4,6 +4,7 @@ import { Trash2, Square, Clock } from 'lucide-react';
 import { detectProvider, ModelBadge, VisibilityBadge } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import type { AssetVisibility } from '@/types';
+import { cn } from '@/utils/cn';
 import type { RunType } from '../types';
 import { RUN_TYPE_CONFIG } from '../types';
 
@@ -33,6 +34,7 @@ export interface RunRowCardProps {
   progress?: { current: number; total: number };
   visibility?: AssetVisibility;
   ownerName?: string;
+  hasHumanReview?: boolean;
 }
 
 /* ── Inline sub-components ───────────────────────────────── */
@@ -115,6 +117,7 @@ export default function RunRowCard({
   progress,
   visibility,
   ownerName,
+  hasHumanReview = false,
 }: RunRowCardProps) {
   const accentColor = runType ? RUN_TYPE_CONFIG[runType].color : 'var(--border-subtle)';
 
@@ -122,7 +125,12 @@ export default function RunRowCard({
     <div className="group relative">
       <Link
         to={to}
-        className="relative block overflow-hidden bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-lg pl-4 pr-4 py-3 hover:border-[var(--border-focus)] transition-colors"
+        className={cn(
+          'relative block overflow-hidden border border-[var(--border-subtle)] rounded-lg pl-4 pr-4 py-3 hover:border-[var(--border-focus)] transition-colors',
+          hasHumanReview
+            ? 'bg-[color-mix(in_srgb,var(--interactive-primary)_3%,var(--bg-primary))]'
+            : 'bg-[var(--bg-primary)]',
+        )}
       >
         {/* Left accent stripe */}
         <span
@@ -187,6 +195,17 @@ export default function RunRowCard({
 
                   if (visibility) {
                     parts.push(<VisibilityBadge key="vis" visibility={visibility} compact />);
+                  }
+
+                  if (hasHumanReview) {
+                    parts.push(
+                      <span
+                        key="reviewed"
+                        className="inline-flex items-center rounded-full border border-[var(--interactive-primary)]/20 bg-[color-mix(in_srgb,var(--interactive-primary)_10%,transparent)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-brand)]"
+                      >
+                        Human review
+                      </span>
+                    );
                   }
 
                   metadata.forEach((item, i) => {

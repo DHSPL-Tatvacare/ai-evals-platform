@@ -161,11 +161,6 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
 
 const BAND_VALUES = ['Strong', 'Good', 'Needs work', 'Poor'] as const;
 
-function nextDimBand(current: string): string {
-  const idx = BAND_VALUES.indexOf(current as typeof BAND_VALUES[number]);
-  return BAND_VALUES[(idx + 1) % BAND_VALUES.length];
-}
-
 function ScorecardContent({
   dimensions,
   reasoningItems,
@@ -192,11 +187,12 @@ function ScorecardContent({
         const bandColor = dimensionBandColor(ratio);
         const band = dimensionBand(ratio);
 
+        const itemKey = `call:${threadId}`;
         const attrKey = `metric:${key}`;
-        const edit = review?.getEdit(threadId, attrKey);
+        const edit = review?.getEdit(itemKey, attrKey);
         const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
         const item: ReviewableItem = {
-          itemKey: threadId, itemType: 'call', title: label,
+          itemKey, itemType: 'call', title: label,
           subtitle: null, badges: [], evidence: [], attributes: [],
         };
         const attr: ReviewableAttribute = {
@@ -232,20 +228,13 @@ function ScorecardContent({
               {isEditing && review && (
                 <InlineReviewControls
                   decision={edit?.decision}
+                  note={edit?.note}
+                  originalValue={band}
+                  reviewedValue={edit?.reviewedValue}
+                  allowedValues={attr.allowedValues}
                   onAccept={() => review.acceptAttribute(item, attr)}
-                  onOverride={() => {
-                    const next = nextDimBand(band);
-                    review.updateAttribute(item, attr, {
-                      decision: 'correct',
-                      reviewedValue: next,
-                    });
-                  }}
-                  onNote={() => {
-                    const note = window.prompt('Add a note:', edit?.note ?? '');
-                    if (note != null) {
-                      review.updateAttribute(item, attr, { note });
-                    }
-                  }}
+                  onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
+                  onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                 />
               )}
             </div>
@@ -313,11 +302,12 @@ function ComplianceContent({
           {complianceGates.map(([key, val]) => {
             const label = key.replace(/^compliance_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
             const passed = val as boolean;
+            const itemKey = `call:${threadId}`;
             const attrKey = `rule:${key}`;
-            const edit = review?.getEdit(threadId, attrKey);
+            const edit = review?.getEdit(itemKey, attrKey);
             const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
             const item: ReviewableItem = {
-              itemKey: threadId, itemType: 'call', title: label,
+              itemKey, itemType: 'call', title: label,
               subtitle: null, badges: [], evidence: [], attributes: [],
             };
             const attr: ReviewableAttribute = {
@@ -368,20 +358,13 @@ function ComplianceContent({
                   <td className="py-2 px-2">
                     <InlineReviewControls
                       decision={edit?.decision}
+                      note={edit?.note}
+                      originalValue={passed ? 'Pass' : 'Fail'}
+                      reviewedValue={edit?.reviewedValue}
+                      allowedValues={attr.allowedValues}
                       onAccept={() => review.acceptAttribute(item, attr)}
-                      onOverride={() => {
-                        const nextVal = passed ? 'Fail' : 'Pass';
-                        review.updateAttribute(item, attr, {
-                          decision: 'correct',
-                          reviewedValue: nextVal,
-                        });
-                      }}
-                      onNote={() => {
-                        const note = window.prompt('Add a note:', edit?.note ?? '');
-                        if (note != null) {
-                          review.updateAttribute(item, attr, { note });
-                        }
-                      }}
+                      onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
+                      onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                     />
                   </td>
                 )}

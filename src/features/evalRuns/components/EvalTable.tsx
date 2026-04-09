@@ -2,7 +2,13 @@ import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import { EmptyState, Pagination } from "@/components/ui";
-import type { ThreadEvalRow, EvaluatorDescriptor } from "@/types";
+import {
+  InlineReviewBadge,
+  InlineReviewControls,
+  useInlineReviewNavigationGuard,
+  useInlineReviewOptional,
+} from '@/features/reviews/inline';
+import type { ThreadEvalRow, EvaluatorDescriptor, ReviewableAttribute, ReviewableItem } from "@/types";
 import VerdictBadge from "./VerdictBadge";
 import { pct, normalizeLabel } from "@/utils/evalFormatters";
 import { routes } from "@/config/routes";
@@ -15,6 +21,7 @@ interface Props {
   reviewedThreadIds?: Set<string>;
   /** Map of threadId → attributeKey → reviewedValue for before→after chips on verdict cells */
   humanVerdicts?: Map<string, Map<string, string>>;
+  reviewableItems?: Map<string, ReviewableItem>;
 }
 
 type SortDir = "asc" | "desc";
@@ -69,7 +76,7 @@ function StatusBadge({ status }: { status: "failed" | "skipped" }) {
   );
 }
 
-function getCellValue(
+export function getCellValue(
   evaluation: ThreadEvalRow,
   desc: EvaluatorDescriptor,
 ): { value: unknown; state: 'ok' | 'failed' | 'skipped' } {
@@ -159,9 +166,24 @@ function SortHeader({ label, k, sortKey, sortDir, onToggle }: {
   );
 }
 
-export default function EvalTable({ evaluations, evaluatorDescriptors, reviewedThreadIds, humanVerdicts }: Props) {
+function getPrimaryReviewAttribute(reviewableItem?: ReviewableItem): ReviewableAttribute | undefined {
+  if (!reviewableItem) return undefined;
+  return reviewableItem.attributes.find((attribute) => attribute.key === 'worst_correctness')
+    ?? reviewableItem.attributes.find((attribute) => attribute.key === 'efficiency_verdict')
+    ?? reviewableItem.attributes[0];
+}
+
+export default function EvalTable({
+  evaluations,
+  evaluatorDescriptors,
+  reviewedThreadIds,
+  humanVerdicts,
+  reviewableItems,
+}: Props) {
   const descriptors = evaluatorDescriptors ?? DEFAULT_DESCRIPTORS;
   const navigate = useNavigate();
+  const review = useInlineReviewOptional();
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
   const [sortKey, setSortKey] = useState<string>("thread_id");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(0);
@@ -229,7 +251,9 @@ export default function EvalTable({ evaluations, evaluatorDescriptors, reviewedT
     }
   }
 
-  const totalCols = 2 + descriptors.length + 1 + (reviewedThreadIds ? 1 : 0);
+  const showReviewSummaryColumn = !!reviewedThreadIds;
+  const showReviewColumns = !!review && !!reviewableItems && reviewableItems.size > 0;
+  const totalCols = 2 + descriptors.length + 1 + (showReviewSummaryColumn ? 1 : 0) + (showReviewColumns ? 1 : 0) + (showReviewColumns && review?.isEditing ? 1 : 0);
 
   return (
     <div>
@@ -250,67 +274,111 @@ export default function EvalTable({ evaluations, evaluatorDescriptors, reviewedT
                 />
               ))}
               <SortHeader label="Completed" k="success_status" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-              {reviewedThreadIds && (
+              {showReviewSummaryColumn && (
                 <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
                   Human Review
+                </th>
+              )}
+              {showReviewColumns && (
+                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                  Review
+                </th>
+              )}
+              {showReviewColumns && review?.isEditing && (
+                <th className="text-left px-2.5 py-2 text-xs uppercase tracking-wider whitespace-nowrap border-b-2 border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                  Actions
                 </th>
               )}
             </tr>
           </thead>
           <tbody>
-            {paged.map((e) => (
-              <tr
-                key={e.id}
-                onClick={() => navigate(routes.kaira.threadDetail(e.thread_id))}
-                className={cn(
-                  'border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors',
-                  reviewedThreadIds?.has(e.thread_id) && 'bg-[color-mix(in_srgb,var(--interactive-primary)_2.5%,transparent)]',
-                )}
-              >
-                <td className="px-2.5 py-2 text-sm font-mono text-[var(--text-primary)]">
-                  <Link
-                    to={routes.kaira.threadDetail(e.thread_id)}
-                    className="text-[var(--text-brand)] hover:underline"
-                    onClick={(ev) => ev.stopPropagation()}
-                  >
-                    {e.thread_id}
-                  </Link>
-                </td>
-                <td className="px-2.5 py-2 text-sm text-right text-[var(--text-secondary)]">
-                  {getMsgCount(e)}
-                </td>
-                {descriptors.map(desc => {
-                  const { value, state } = getCellValue(e, desc);
-                  return (
-                    <td key={desc.id} className="px-2.5 py-2">
-                      {state === 'failed' ? (
-                        <StatusBadge status="failed" />
-                      ) : state === 'skipped' ? (
-                        <StatusBadge status="skipped" />
-                      ) : (
-                        <CellRenderer desc={desc} value={value} humanVerdict={desc.primaryField?.key ? humanVerdicts?.get(e.thread_id)?.get(desc.primaryField.key) : undefined} />
-                      )}
-                    </td>
-                  );
-                })}
-                <td className="px-2.5 py-2 text-center text-sm">
-                  {e.success_status ? (
-                    <span className="text-[var(--color-success)]">{"\u2713"}</span>
-                  ) : (
-                    <span className="text-[var(--color-error)]">{"\u2717"}</span>
+            {paged.map((e) => {
+              const reviewableItem = reviewableItems?.get(e.thread_id);
+              const primaryAttribute = getPrimaryReviewAttribute(reviewableItem);
+              const primaryEdit = reviewableItem && primaryAttribute
+                ? review?.getEdit(reviewableItem.itemKey, primaryAttribute.key)
+                : undefined;
+
+              return (
+                <tr
+                  key={e.id}
+                  onClick={() => confirmNavigation(() => navigate(routes.kaira.threadDetail(e.thread_id)))}
+                  className={cn(
+                    'border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors',
+                    reviewedThreadIds?.has(e.thread_id) && 'bg-[color-mix(in_srgb,var(--interactive-primary)_2.5%,transparent)]',
                   )}
-                </td>
-                {reviewedThreadIds && (
-                  <td className="px-2.5 py-2 text-[11px]">
-                    {reviewedThreadIds.has(e.thread_id) ? (
-                      <span className="font-semibold text-[var(--text-brand)]">Yes</span>
+                >
+                  <td className="px-2.5 py-2 text-sm font-mono text-[var(--text-primary)]">
+                    <Link
+                      to={routes.kaira.threadDetail(e.thread_id)}
+                      className="text-[var(--text-brand)] hover:underline"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
+                      {e.thread_id}
+                    </Link>
+                  </td>
+                  <td className="px-2.5 py-2 text-sm text-right text-[var(--text-secondary)]">
+                    {getMsgCount(e)}
+                  </td>
+                  {descriptors.map(desc => {
+                    const { value, state } = getCellValue(e, desc);
+                    return (
+                      <td key={desc.id} className="px-2.5 py-2">
+                        {state === 'failed' ? (
+                          <StatusBadge status="failed" />
+                        ) : state === 'skipped' ? (
+                          <StatusBadge status="skipped" />
+                        ) : (
+                          <CellRenderer desc={desc} value={value} humanVerdict={desc.primaryField?.key ? humanVerdicts?.get(e.thread_id)?.get(desc.primaryField.key) : undefined} />
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className="px-2.5 py-2 text-center text-sm">
+                    {e.success_status ? (
+                      <span className="text-[var(--color-success)]">{"\u2713"}</span>
                     ) : (
-                      <span className="text-[var(--text-muted)]">No</span>
+                      <span className="text-[var(--color-error)]">{"\u2717"}</span>
                     )}
                   </td>
-                )}
-              </tr>
-            ))}
+                  {showReviewSummaryColumn && (
+                    <td className="px-2.5 py-2 text-[11px]">
+                      {reviewedThreadIds.has(e.thread_id) ? (
+                        <span className="font-semibold text-[var(--text-brand)]">Yes</span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">No</span>
+                      )}
+                    </td>
+                  )}
+                  {showReviewColumns && (
+                    <td className="px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
+                      <InlineReviewBadge
+                        decision={primaryEdit?.decision}
+                        isDraft={review?.selectedReview?.status === 'draft'}
+                      />
+                    </td>
+                  )}
+                  {showReviewColumns && review?.isEditing && (
+                    <td className="px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
+                      {reviewableItem && primaryAttribute ? (
+                        <InlineReviewControls
+                          decision={primaryEdit?.decision}
+                          note={primaryEdit?.note}
+                          originalValue={primaryAttribute.originalValue}
+                          reviewedValue={primaryEdit?.reviewedValue}
+                          allowedValues={primaryAttribute.allowedValues}
+                          onAccept={() => review.acceptAttribute(reviewableItem, primaryAttribute)}
+                          onOverride={(nextValue) => review.correctAttribute(reviewableItem, primaryAttribute, nextValue)}
+                          onNote={(nextNote) => review.setAttributeNote(reviewableItem, primaryAttribute, nextNote)}
+                        />
+                      ) : (
+                        <span className="text-[11px] text-[var(--text-muted)]">—</span>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={totalCols} className="p-3">
@@ -328,6 +396,7 @@ export default function EvalTable({ evaluations, evaluatorDescriptors, reviewedT
       </div>
 
       <Pagination page={safePage + 1} totalPages={totalPages} onPageChange={(p) => setPage(p - 1)} showCount totalItems={sorted.length} pageSize={PAGE_SIZE} className="mt-1.5" />
+      {guardModal}
     </div>
   );
 }

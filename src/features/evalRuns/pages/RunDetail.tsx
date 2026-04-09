@@ -21,6 +21,7 @@ import {
   VerdictBadge,
   MetricInfo,
   EvalTable,
+  getCellValue,
   DistributionBar,
   RunProgressBar,
   EvalRunVisibilityPanel,
@@ -34,7 +35,7 @@ import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
 import { formatTimestamp, formatDuration, humanize, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
 import { AppReportTab } from '@/features/analytics/AppReportTab';
-import { InlineReviewProvider, useInlineReviewOptional, DirtyBar } from '@/features/reviews/inline';
+import { InlineReviewProvider, useInlineReviewNavigationGuard, useInlineReviewOptional, DirtyBar } from '@/features/reviews/inline';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
@@ -515,20 +516,7 @@ export default function RunDetail() {
 
       {/* ── Tab bar (only when report tab is available) ──── */}
       {run && !isRunActive && ['completed', 'completed_with_errors'].includes(run.status.toLowerCase()) && (
-        <div className="run-detail-tabs shrink-0 flex gap-0 border-b border-[var(--border-subtle)]">
-          <button
-            onClick={() => setActiveTab('results')}
-            className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'results' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
-          >
-            Results
-          </button>
-          <button
-            onClick={() => setActiveTab('report')}
-            className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'report' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
-          >
-            Report
-          </button>
-        </div>
+        <ReviewAwareRunTabs activeTab={activeTab} onChange={setActiveTab} />
       )}
 
       {/* ── Scrollable body ───────────────────────────────── */}
@@ -539,113 +527,16 @@ export default function RunDetail() {
 
         {activeTab === 'results' && threadEvals.length > 0 && (
           <>
-            <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage')).length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
-              <StatPill label="Threads" metricKey="total_threads" value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length} />
-              {summarySkipped > 0 && <StatPill label="Skipped" value={summarySkipped} color="var(--text-muted)" />}
-              {(run.evaluator_descriptors ?? [])
-                .filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage'))
-                .slice(0, 2)
-                .map(d => (
-                  <StatPill
-                    key={d.id}
-                    label={d.name}
-                    metricKey={d.id}
-                    value={d.aggregation?.average != null
-                      ? formatMetric(d.aggregation.average, d.primaryField?.format)
-                      : (() => {
-                        const valid = threadEvals.filter(e => e.intent_accuracy != null);
-                        return valid.length > 0 ? pct(valid.reduce((s, e) => s + e.intent_accuracy!, 0) / valid.length) : 'N/A';
-                      })()}
-                  />
-                ))}
-              {!(run.evaluator_descriptors?.length) && (() => {
-                const incompleteCount = threadEvals.filter((e) => normalizeLabel(e.efficiency_verdict ?? '') === 'INCOMPLETE').length;
-                const evaluable = threadEvals.length - incompleteCount;
-                const completedCount = threadEvals.filter((e) => e.success_status).length;
-                return (
-                  <>
-                    <StatPill label="Avg Judge Intent Acc" metricKey="avg_intent_acc" value={(() => {
-                      const valid = threadEvals.filter(e => e.intent_accuracy != null);
-                      return valid.length > 0 ? pct(valid.reduce((s, e) => s + e.intent_accuracy!, 0) / valid.length) : 'N/A';
-                    })()} />
-                    <StatPill label="Completion Rate" metricKey="completion_rate" value={evaluable > 0 ? pct(completedCount / evaluable) : 'N/A'} />
-                    {incompleteCount > 0 && <StatPill label="Incomplete" value={incompleteCount} color="var(--text-muted)" />}
-                  </>
-                );
-              })()}
-              {summaryErrors > 0 ? (
-                <StatPill label="Errors" value={`${summaryErrors} / ${summaryTotal}`} color="var(--color-error)" />
-              ) : (() => {
-                const incompleteCount = threadEvals.filter((e) => normalizeLabel(e.efficiency_verdict ?? '') === 'INCOMPLETE').length;
-                const evaluable = threadEvals.length - incompleteCount;
-                const completedCount = threadEvals.filter((e) => e.success_status).length;
-                return (
-                  <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">Completed</p>
-                      <MetricInfo metricKey="completed" />
-                    </div>
-                    <p className="text-lg font-bold mt-0.5 leading-tight text-[var(--text-primary)]">{completedCount} / {evaluable}</p>
-                    {incompleteCount > 0 && (
-                      <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{incompleteCount} thread{incompleteCount > 1 ? 's' : ''} excluded (incomplete)</p>
-                    )}
-                  </div>
-                );
-              })()}
-              <ReviewedStatPill />
-            </div>
-
-            <div className="flex gap-4 flex-wrap">
-              {run.evaluator_descriptors
-                ? run.evaluator_descriptors
-                  .filter(d => d.type === 'built-in' && d.primaryField?.format === 'verdict' && d.aggregation?.distribution && Object.keys(d.aggregation.distribution).length > 0)
-                  .map(d => (
-                    <div key={d.id} className="flex-1 min-w-[260px]">
-                      <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">{d.name}</h3>
-                      <DistributionBar distribution={d.aggregation!.distribution!} order={d.primaryField!.verdictOrder} />
-                    </div>
-                  ))
-                : (
-                  <>
-                    {Object.keys(correctnessDist).length > 0 && (
-                      <div className="flex-1 min-w-[260px]">
-                        <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Correctness</h3>
-                        <DistributionBar distribution={correctnessDist} order={CORRECTNESS_ORDER} />
-                      </div>
-                    )}
-                    {Object.keys(efficiencyDist).length > 0 && (
-                      <div className="flex-1 min-w-[260px]">
-                        <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Efficiency</h3>
-                        <DistributionBar distribution={efficiencyDist} order={EFFICIENCY_ORDER} />
-                      </div>
-                    )}
-                  </>
-                )}
-            </div>
-
-            {customEvalSummary.length > 0 && (
-              <div>
-                <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Custom Evaluators</h3>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
-                  {customEvalSummary.map(({ id, name, completed, errors, distribution, average }) => (
-                    <div
-                      key={id}
-                      className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2"
-                      style={{ borderLeftWidth: 3, borderLeftColor: errors > 0 ? STATUS_COLORS.hardFail : STATUS_COLORS.pass }}
-                    >
-                      <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{name}</p>
-                      <p className="text-xs text-[var(--text-muted)] mt-0.5">{completed} completed{errors > 0 ? `, ${errors} failed` : ""}</p>
-                      {average != null && (
-                        <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">Avg: {formatMetric(average, run.evaluator_descriptors?.find(d => d.id === id)?.primaryField?.format)}</p>
-                      )}
-                      {distribution && Object.keys(distribution).length > 0 && (
-                        <div className="mt-1.5"><DistributionBar distribution={distribution} /></div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <ReviewAwareSummarySection
+              run={run}
+              threadEvals={threadEvals}
+              summaryTotal={summaryTotal}
+              summarySkipped={summarySkipped}
+              summaryErrors={summaryErrors}
+              correctnessDist={correctnessDist}
+              efficiencyDist={efficiencyDist}
+              customEvalSummary={customEvalSummary}
+            />
 
             <div className="flex items-center gap-2 flex-wrap">
               <input
@@ -707,6 +598,7 @@ export default function RunDetail() {
       </div>
 
       <ReviewDirtyBar />
+      <ReviewLinkGuard />
 
       {run && (
         <ConfirmDialog
@@ -878,7 +770,7 @@ function StartReviewButton() {
 
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || review.dirtyCount === 0) return null;
+  if (!review || !review.hasDirtyChanges) return null;
   return (
     <DirtyBar
       changeCount={review.dirtyCount}
@@ -891,8 +783,255 @@ function ReviewDirtyBar() {
   );
 }
 
+function ReviewAwareRunTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: 'results' | 'report';
+  onChange: (tab: 'results' | 'report') => void;
+}) {
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
+
+  return (
+    <>
+      <div className="run-detail-tabs shrink-0 flex gap-0 border-b border-[var(--border-subtle)]">
+        <button
+          onClick={() => confirmNavigation(() => onChange('results'))}
+          className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'results' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+        >
+          Results
+        </button>
+        <button
+          onClick={() => confirmNavigation(() => onChange('report'))}
+          className={`px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${activeTab === 'report' ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+        >
+          Report
+        </button>
+      </div>
+      {guardModal}
+    </>
+  );
+}
+
+function ReviewLinkGuard() {
+  const { guardModal } = useInlineReviewNavigationGuard({ captureLinks: true });
+  return guardModal;
+}
+
+function stripReviewItemKeyPrefix(itemKey: string): string {
+  return itemKey.includes(':') ? itemKey.split(':').slice(1).join(':') : itemKey;
+}
+
+function ReviewAwareSummarySection({
+  run,
+  threadEvals,
+  summaryTotal,
+  summarySkipped,
+  summaryErrors,
+  correctnessDist,
+  efficiencyDist,
+  customEvalSummary,
+}: {
+  run: Run;
+  threadEvals: ThreadEvalRow[];
+  summaryTotal: number;
+  summarySkipped: number;
+  summaryErrors: number;
+  correctnessDist: Record<string, number>;
+  efficiencyDist: Record<string, number>;
+  customEvalSummary: Array<{
+    id: string;
+    name: string;
+    completed: number;
+    errors: number;
+    distribution?: Record<string, number>;
+    average?: number;
+  }>;
+}) {
+  const review = useInlineReviewOptional();
+  const adjustedDistributions = useMemo(() => {
+    if (!review) return null;
+
+    const distributions = new Map<string, Record<string, number>>();
+    let changed = false;
+    const descriptors = run.evaluator_descriptors ?? [];
+
+    for (const descriptor of descriptors) {
+      if (descriptor.primaryField?.format !== 'verdict' || !descriptor.primaryField.key) {
+        continue;
+      }
+
+      const distribution: Record<string, number> = {};
+      for (const thread of threadEvals) {
+        const { value, state } = getCellValue(thread, descriptor);
+        if (state !== 'ok' || typeof value !== 'string') {
+          continue;
+        }
+
+        const attributeKey = descriptor.type === 'built-in'
+          ? descriptor.primaryField.key
+          : `custom:${descriptor.id}:${descriptor.primaryField.key}`;
+        const edit = review.getEdit(`thread:${thread.thread_id}`, attributeKey);
+        const finalValue = edit?.decision === 'correct' && edit.reviewedValue != null
+          ? edit.reviewedValue
+          : value;
+
+        if (finalValue !== value) {
+          changed = true;
+        }
+
+        const normalized = normalizeLabel(finalValue);
+        distribution[normalized] = (distribution[normalized] ?? 0) + 1;
+      }
+
+      distributions.set(descriptor.id, distribution);
+    }
+
+    if (!changed) {
+      return null;
+    }
+
+    return distributions;
+  }, [review, run.evaluator_descriptors, threadEvals]);
+
+  const incompleteCount = threadEvals.filter((e) => normalizeLabel(e.efficiency_verdict ?? '') === 'INCOMPLETE').length;
+  const evaluable = threadEvals.length - incompleteCount;
+  const completedCount = threadEvals.filter((e) => e.success_status).length;
+  const avgIntentAccuracy = (() => {
+    const valid = threadEvals.filter((e) => e.intent_accuracy != null);
+    return valid.length > 0 ? pct(valid.reduce((sum, thread) => sum + thread.intent_accuracy!, 0) / valid.length) : 'N/A';
+  })();
+
+  return (
+    <>
+      <div className={`grid gap-3 ${(run.evaluator_descriptors ?? []).filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage')).length > 0 ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-2 md:grid-cols-4'}`}>
+        <StatPill label="Threads" metricKey="total_threads" value={summaryTotal > 0 ? `${threadEvals.length} / ${summaryTotal}` : threadEvals.length} />
+        {summarySkipped > 0 && <StatPill label="Skipped" value={summarySkipped} color="var(--text-muted)" />}
+        {(run.evaluator_descriptors ?? [])
+          .filter(d => d.type === 'built-in' && (d.aggregation?.average != null || d.primaryField?.format === 'percentage'))
+          .slice(0, 2)
+          .map(d => (
+            <StatPill
+              key={d.id}
+              label={d.name}
+              metricKey={d.id}
+              value={d.aggregation?.average != null ? formatMetric(d.aggregation.average, d.primaryField?.format) : avgIntentAccuracy}
+            />
+          ))}
+        {!(run.evaluator_descriptors?.length) && (
+          <>
+            <StatPill label="Avg Judge Intent Acc" metricKey="avg_intent_acc" value={avgIntentAccuracy} />
+            <StatPill label="Completion Rate" metricKey="completion_rate" value={evaluable > 0 ? pct(completedCount / evaluable) : 'N/A'} />
+            {incompleteCount > 0 && <StatPill label="Incomplete" value={incompleteCount} color="var(--text-muted)" />}
+          </>
+        )}
+        {summaryErrors > 0 ? (
+          <StatPill label="Errors" value={`${summaryErrors} / ${summaryTotal}`} color="var(--color-error)" />
+        ) : (
+          <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
+            <div className="flex items-center gap-1">
+              <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">Completed</p>
+              <MetricInfo metricKey="completed" />
+            </div>
+            <p className="text-lg font-bold mt-0.5 leading-tight text-[var(--text-primary)]">{completedCount} / {evaluable}</p>
+            {incompleteCount > 0 && (
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{incompleteCount} thread{incompleteCount > 1 ? 's' : ''} excluded (incomplete)</p>
+            )}
+          </div>
+        )}
+        <ReviewedStatPill />
+      </div>
+
+      <div className="flex gap-4 flex-wrap">
+        {run.evaluator_descriptors
+          ? run.evaluator_descriptors
+            .filter(d => d.type === 'built-in' && d.primaryField?.format === 'verdict' && d.aggregation?.distribution && Object.keys(d.aggregation.distribution).length > 0)
+            .map(d => {
+              const adjustedDistribution = adjustedDistributions?.get(d.id);
+              const hasChanged = adjustedDistribution && JSON.stringify(adjustedDistribution) !== JSON.stringify(d.aggregation!.distribution!);
+              return (
+                <div key={d.id} className="flex-1 min-w-[260px]">
+                  <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">{d.name}</h3>
+                  <DistributionBar
+                    distribution={hasChanged ? adjustedDistribution! : d.aggregation!.distribution!}
+                    aiDistribution={hasChanged ? d.aggregation!.distribution! : undefined}
+                    order={d.primaryField!.verdictOrder}
+                  />
+                </div>
+              );
+            })
+          : (
+            <>
+              {Object.keys(correctnessDist).length > 0 && (
+                <div className="flex-1 min-w-[260px]">
+                  <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Correctness</h3>
+                  <DistributionBar
+                    distribution={adjustedDistributions?.get('correctness') ?? correctnessDist}
+                    aiDistribution={adjustedDistributions?.get('correctness') ? correctnessDist : undefined}
+                    order={CORRECTNESS_ORDER}
+                  />
+                </div>
+              )}
+              {Object.keys(efficiencyDist).length > 0 && (
+                <div className="flex-1 min-w-[260px]">
+                  <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Efficiency</h3>
+                  <DistributionBar
+                    distribution={adjustedDistributions?.get('efficiency') ?? efficiencyDist}
+                    aiDistribution={adjustedDistributions?.get('efficiency') ? efficiencyDist : undefined}
+                    order={EFFICIENCY_ORDER}
+                  />
+                </div>
+              )}
+            </>
+          )}
+      </div>
+
+      {customEvalSummary.length > 0 && (
+        <div>
+          <h3 className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1.5">Custom Evaluators</h3>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+            {customEvalSummary.map(({ id, name, completed, errors, distribution, average }) => {
+              const adjustedDistribution = adjustedDistributions?.get(id);
+              const hasChanged = adjustedDistribution && distribution && JSON.stringify(adjustedDistribution) !== JSON.stringify(distribution);
+              return (
+                <div
+                  key={id}
+                  className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2"
+                  style={{ borderLeftWidth: 3, borderLeftColor: errors > 0 ? STATUS_COLORS.hardFail : STATUS_COLORS.pass }}
+                >
+                  <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{name}</p>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">{completed} completed{errors > 0 ? `, ${errors} failed` : ""}</p>
+                  {average != null && (
+                    <p className="text-xs font-medium mt-1 text-[var(--text-primary)]">Avg: {formatMetric(average, run.evaluator_descriptors?.find(d => d.id === id)?.primaryField?.format)}</p>
+                  )}
+                  {distribution && Object.keys(distribution).length > 0 && (
+                    <div className="mt-1.5">
+                      <DistributionBar
+                        distribution={hasChanged ? adjustedDistribution! : distribution}
+                        aiDistribution={hasChanged ? distribution : undefined}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors }: { evaluations: ThreadEvalRow[]; evaluatorDescriptors?: import('@/types').EvaluatorDescriptor[] }) {
   const review = useInlineReviewOptional();
+  const reviewableItems = useMemo(() => {
+    if (!review?.context) return undefined;
+    const map = new Map<string, import('@/types').ReviewableItem>();
+    for (const item of review.context.items) {
+      map.set(stripReviewItemKeyPrefix(item.itemKey), item);
+    }
+    return map.size > 0 ? map : undefined;
+  }, [review]);
   const reviewedThreadIds = useMemo(() => {
     if (!review?.context) return undefined;
     const set = new Set<string>();
@@ -901,7 +1040,7 @@ function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors }: { evaluatio
         const edit = review.getEdit(item.itemKey, attr.key);
         return edit && edit.decision !== '';
       });
-      if (hasDecision) set.add(item.itemKey);
+      if (hasDecision) set.add(stripReviewItemKeyPrefix(item.itemKey));
     }
     return set.size > 0 || review.context.items.length > 0 ? set : undefined;
   }, [review]);
@@ -912,14 +1051,23 @@ function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors }: { evaluatio
     for (const [key, edit] of Object.entries(review.edits)) {
       if (edit.decision === 'correct' && edit.reviewedValue != null) {
         const [threadId, attrKey] = key.split('::');
-        if (!map.has(threadId)) map.set(threadId, new Map());
-        map.get(threadId)!.set(attrKey, edit.reviewedValue);
+        const normalizedThreadId = stripReviewItemKeyPrefix(threadId);
+        if (!map.has(normalizedThreadId)) map.set(normalizedThreadId, new Map());
+        map.get(normalizedThreadId)!.set(attrKey, edit.reviewedValue);
       }
     }
     return map.size > 0 ? map : undefined;
   }, [review]);
 
-  return <EvalTable evaluations={evaluations} evaluatorDescriptors={evaluatorDescriptors} reviewedThreadIds={reviewedThreadIds} humanVerdicts={humanVerdicts} />;
+  return (
+    <EvalTable
+      evaluations={evaluations}
+      evaluatorDescriptors={evaluatorDescriptors}
+      reviewedThreadIds={reviewedThreadIds}
+      humanVerdicts={humanVerdicts}
+      reviewableItems={reviewableItems}
+    />
+  );
 }
 
 function ReviewedStatPill() {

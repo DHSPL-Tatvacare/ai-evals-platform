@@ -1,4 +1,5 @@
 import type {
+  AppId,
   ReviewDecision,
   ReviewableItem,
   ReviewableAttribute,
@@ -18,7 +19,9 @@ export interface InlineEditState {
 }
 
 export interface InlineReviewContextValue {
+  appId: AppId;
   isEditing: boolean;
+  hasDirtyChanges: boolean;
   loading: boolean;
   saving: boolean;
   context: RunReviewContext | null;
@@ -34,6 +37,16 @@ export interface InlineReviewContextValue {
     patch: Partial<InlineEditState>,
   ) => void;
   acceptAttribute: (item: ReviewableItem, attribute: ReviewableAttribute) => void;
+  correctAttribute: (
+    item: ReviewableItem,
+    attribute: ReviewableAttribute,
+    reviewedValue: string,
+  ) => void;
+  setAttributeNote: (
+    item: ReviewableItem,
+    attribute: ReviewableAttribute,
+    note: string | null,
+  ) => void;
   saveDraft: () => Promise<void>;
   finalize: () => Promise<void>;
   discardDraft: () => Promise<void>;

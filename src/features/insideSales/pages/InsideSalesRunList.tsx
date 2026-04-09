@@ -215,6 +215,7 @@ export function InsideSalesRunList() {
                 progress={getProgress(run)}
                 visibility={run.visibility}
                 ownerName={run.ownerName ?? undefined}
+                hasHumanReview={!!run.latestReviewId}
                 metadata={[
                   ...(run.durationMs ? [{ text: formatDuration(Math.round(run.durationMs / 1000)) }] : []),
                 ]}

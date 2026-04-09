@@ -11,6 +11,7 @@ interface TabsProps {
   tabs: Tab[];
   defaultTab?: string;
   onChange?: (tabId: string) => void;
+  beforeChange?: (tabId: string, commit: () => void) => void;
   className?: string;
   /** When true, tabs fill available height and content scrolls internally */
   fillHeight?: boolean;
@@ -22,6 +23,7 @@ export function Tabs({
   tabs,
   defaultTab,
   onChange,
+  beforeChange,
   className,
   fillHeight,
   mountStrategy = 'all',
@@ -40,8 +42,17 @@ export function Tabs({
   }, [defaultTab]);
 
   const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId);
-    onChange?.(tabId);
+    const commit = () => {
+      setActiveTab(tabId);
+      onChange?.(tabId);
+    };
+
+    if (beforeChange) {
+      beforeChange(tabId, commit);
+      return;
+    }
+
+    commit();
   };
 
   return (

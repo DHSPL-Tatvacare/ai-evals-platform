@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -17,7 +17,7 @@ import { useElapsedTime } from '@/features/evalRuns/hooks';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import {
   InlineReviewProvider, useInlineReviewOptional,
-  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip,
+  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip, VerdictDropdown, useInlineReviewNavigationGuard,
 } from '@/features/reviews/inline';
 import { fetchEvalRun, fetchRunThreads, deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi } from '@/services/api/jobsApi';
@@ -270,13 +270,11 @@ export function InsideSalesRunDetail() {
         {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
 
         {/* Tabs */}
-        <Tabs
-          tabs={[resultsTab, reportTab]}
-          defaultTab="results"
-        />
+        <ReviewAwareTabs tabs={[resultsTab, reportTab]} defaultTab="results" />
 
         {/* Dirty bar for unsaved review changes */}
         <ReviewDirtyBar />
+        <ReviewLinkGuard />
       </div>
     </InlineReviewProvider>
   );
@@ -306,13 +304,6 @@ function StatCard({ label, value, color, beforeValue }: { label: string; value: 
 
 /* ── ResultsTabContent (extracted so it can use review context) ──── */
 
-const BAND_CYCLE = ['Strong', 'Good', 'Needs work', 'Poor'] as const;
-
-function nextBand(current: string): string {
-  const idx = BAND_CYCLE.indexOf(current as typeof BAND_CYCLE[number]);
-  return BAND_CYCLE[(idx + 1) % BAND_CYCLE.length];
-}
-
 function ResultsTabContent({
   threads,
   filteredThreads,
@@ -341,6 +332,7 @@ function ResultsTabContent({
   const navigate = useNavigate();
   const review = useInlineReviewOptional();
   const isEditing = review?.isEditing ?? false;
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
 
   // Compute human-adjusted stats from review overrides
   const adjusted = useMemo(() => {
@@ -354,7 +346,7 @@ function ResultsTabContent({
       const aiScore = getOverallScore(t);
       if (aiScore === null) continue;
 
-      const edit = review.getEdit(t.thread_id, 'overall_verdict');
+      const edit = review.getEdit(`call:${t.thread_id}`, 'overall_verdict');
       const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
 
       if (hasOverride) {
@@ -468,10 +460,11 @@ function ResultsTabContent({
                 const duration = (meta?.duration as number) || 0;
                 const band = getScoreBand(score);
 
-                const edit = review?.getEdit(t.thread_id, 'overall_verdict');
+                const itemKey = `call:${t.thread_id}`;
+                const edit = review?.getEdit(itemKey, 'overall_verdict');
                 const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
                 const item: ReviewableItem = {
-                  itemKey: t.thread_id, itemType: 'call', title: `${agent} \u2192 ${lead}`,
+                  itemKey, itemType: 'call', title: `${agent} \u2192 ${lead}`,
                   subtitle: null, badges: [], evidence: [], attributes: [],
                 };
                 const attr: ReviewableAttribute = {
@@ -483,7 +476,7 @@ function ResultsTabContent({
                 return (
                   <tr
                     key={t.id}
-                    onClick={() => navigate(`/inside-sales/runs/${runId}/calls/${t.thread_id}`)}
+                    onClick={() => confirmNavigation(() => navigate(`/inside-sales/runs/${runId}/calls/${t.thread_id}`))}
                     className="border-b border-[var(--border-subtle)] cursor-pointer hover:bg-[var(--interactive-secondary)] transition-colors"
                   >
                     <td className="px-3 py-2.5 text-[var(--text-primary)]">
@@ -521,20 +514,13 @@ function ResultsTabContent({
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <InlineReviewControls
                           decision={edit?.decision}
+                          note={edit?.note}
+                          originalValue={band}
+                          reviewedValue={edit?.reviewedValue}
+                          allowedValues={attr.allowedValues}
                           onAccept={() => review.acceptAttribute(item, attr)}
-                          onOverride={() => {
-                            const next = nextBand(band);
-                            review.updateAttribute(item, attr, {
-                              decision: 'correct',
-                              reviewedValue: next,
-                            });
-                          }}
-                          onNote={() => {
-                            const note = window.prompt('Add a note:', edit?.note ?? '');
-                            if (note != null) {
-                              review.updateAttribute(item, attr, { note });
-                            }
-                          }}
+                          onOverride={(nextValue) => review.correctAttribute(item, attr, nextValue)}
+                          onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                         />
                       </td>
                     )}
@@ -545,6 +531,7 @@ function ResultsTabContent({
           </table>
         </div>
       )}
+      {guardModal}
     </div>
   );
 }
@@ -572,7 +559,7 @@ function StartReviewButton() {
 
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || !review.isEditing) return null;
+  if (!review || !review.isEditing || !review.hasDirtyChanges) return null;
 
   return (
     <DirtyBar
@@ -584,6 +571,27 @@ function ReviewDirtyBar() {
       onFinalize={review.finalize}
     />
   );
+}
+
+function ReviewAwareTabs(props: Parameters<typeof Tabs>[0]) {
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
+
+  return (
+    <>
+      <Tabs
+        {...props}
+        beforeChange={(_tabId, commit) => {
+          confirmNavigation(commit);
+        }}
+      />
+      {guardModal}
+    </>
+  );
+}
+
+function ReviewLinkGuard() {
+  const { guardModal } = useInlineReviewNavigationGuard({ captureLinks: true });
+  return guardModal;
 }
 
 /* ── Call Eval Detail (split-pane, mirrors ThreadDetailV2 layout) ── */
@@ -598,6 +606,8 @@ function CallEvalDetail({
   siblings: ThreadEvalRow[];
 }) {
   const navigate = useNavigate();
+  const review = useInlineReviewOptional();
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
 
   const result = thread.result as unknown as Record<string, unknown> | undefined;
   const meta = result?.call_metadata as Record<string, unknown> | undefined;
@@ -616,7 +626,27 @@ function CallEvalDetail({
   const currentIdx = siblings.findIndex((s) => s.thread_id === thread.thread_id);
   const prevThread = currentIdx > 0 ? siblings[currentIdx - 1] : null;
   const nextThread = currentIdx < siblings.length - 1 ? siblings[currentIdx + 1] : null;
-  const goToThread = (id: string) => navigate(`/inside-sales/runs/${run.id}/calls/${id}`);
+  const goToThread = (id: string) => confirmNavigation(() => navigate(`/inside-sales/runs/${run.id}/calls/${id}`));
+  const verdictItem: ReviewableItem = {
+    itemKey: `call:${thread.thread_id}`,
+    itemType: 'call',
+    title: thread.thread_id,
+    subtitle: null,
+    badges: [],
+    evidence: [],
+    attributes: [],
+  };
+  const verdictAttribute: ReviewableAttribute = {
+    key: 'overall_verdict',
+    label: 'Overall Band',
+    originalValue: getScoreBand(overallScore),
+    allowedValues: ['Strong', 'Good', 'Needs work', 'Poor'],
+  };
+  const verdictEdit = review?.getEdit(verdictItem.itemKey, verdictAttribute.key);
+  const verdictValue = verdictEdit?.decision === 'correct' && verdictEdit.reviewedValue != null
+    ? verdictEdit.reviewedValue
+    : verdictAttribute.originalValue;
+  const canEditVerdict = !!review?.isEditing;
 
   return (
     <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
@@ -627,10 +657,10 @@ function CallEvalDetail({
           <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] min-w-0">
             <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)] shrink-0">Runs</Link>
             <span>/</span>
-            <button
-              onClick={() => navigate(routes.insideSales.runDetail(run.id))}
-              className="hover:text-[var(--text-brand)] font-mono shrink-0"
-            >
+              <button
+                onClick={() => confirmNavigation(() => navigate(routes.insideSales.runDetail(run.id)))}
+                className="hover:text-[var(--text-brand)] font-mono shrink-0"
+              >
               {run.id.slice(0, 12)}
             </button>
             <span>/</span>
@@ -668,7 +698,33 @@ function CallEvalDetail({
           <div className="w-fit mx-auto">
             <div className="inline-flex items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm">
               <SummaryPill label="Score" value={overallScore !== null ? `${overallScore}/100` : '—'} color={scoreColor(overallScore)} />
-              <SummaryPill label="Verdict" value={getScoreBand(overallScore)} color={scoreColor(overallScore)} />
+              <SummaryPill
+                label="Verdict"
+                value={(
+                  <div className="flex flex-col items-center gap-1">
+                    <VerdictDropdown
+                      originalValue={verdictAttribute.originalValue}
+                      value={verdictValue}
+                      allowedValues={verdictAttribute.allowedValues}
+                      isEditing={canEditVerdict}
+                      color={scoreColor(overallScore)}
+                      onChange={(nextValue) => review?.correctAttribute(verdictItem, verdictAttribute, nextValue)}
+                    />
+                    {canEditVerdict && review && (
+                      <InlineReviewControls
+                        decision={verdictEdit?.decision}
+                        note={verdictEdit?.note}
+                        originalValue={verdictAttribute.originalValue}
+                        reviewedValue={verdictEdit?.reviewedValue}
+                        allowedValues={verdictAttribute.allowedValues}
+                        onAccept={() => review.acceptAttribute(verdictItem, verdictAttribute)}
+                        onOverride={(nextValue) => review.correctAttribute(verdictItem, verdictAttribute, nextValue)}
+                        onNote={(nextNote) => review.setAttributeNote(verdictItem, verdictAttribute, nextNote)}
+                      />
+                    )}
+                  </div>
+                )}
+              />
               <SummaryPill
                 label="Compliance"
                 value={complianceGates.length > 0 ? (allPassed ? 'Pass' : 'Fail') : '—'}
@@ -682,17 +738,18 @@ function CallEvalDetail({
       </div>
 
       <CallResultPanel thread={thread} />
+      {guardModal}
     </div>
   );
 }
 
 /* ── Summary Pill ───────────────────────────────────────── */
 
-function SummaryPill({ label, value, color }: { label: string; value: string; color?: string }) {
+function SummaryPill({ label, value, color }: { label: string; value: ReactNode; color?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)] first:border-l-0">
       <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">{label}</span>
-      <span className="leading-none font-semibold text-sm" style={{ color: color || 'var(--text-primary)' }}>{value}</span>
+      <span className="leading-none font-semibold text-sm" style={typeof value === 'string' ? { color: color || 'var(--text-primary)' } : undefined}>{value}</span>
     </div>
   );
 }

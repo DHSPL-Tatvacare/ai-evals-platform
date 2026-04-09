@@ -8,7 +8,7 @@ export { default as RunCard } from './RunCard';
 export { default as RunRowCard } from './RunRowCard';
 export type { RunRowCardProps, MetadataItem } from './RunRowCard';
 export { default as EvalSection, EvalCard, EvalCardHeader, EvalCardBody } from './EvalSection';
-export { default as EvalTable } from './EvalTable';
+export { default as EvalTable, getCellValue } from './EvalTable';
 export { default as AdversarialTable } from './AdversarialTable';
 export { default as RuleComplianceInline } from './RuleComplianceInline';
 export { default as TranscriptViewer, ChatViewer, CompactTranscript } from './TranscriptViewer';

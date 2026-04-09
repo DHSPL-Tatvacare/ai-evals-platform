@@ -341,6 +341,7 @@ export function VoiceRxRunList() {
                 provider={run.llmProvider || undefined}
                 visibility={run.visibility}
                 ownerName={run.ownerName ?? undefined}
+                hasHumanReview={!!run.latestReviewId}
               />
             );
           })}

@@ -9,7 +9,7 @@ import { useElapsedTime } from '@/features/evalRuns/hooks';
 import { AppReportTab } from '@/features/analytics/AppReportTab';
 import {
   InlineReviewProvider, useInlineReviewOptional,
-  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip,
+  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip, useInlineReviewNavigationGuard,
 } from '@/features/reviews/inline';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import { fetchEvalRun, deleteEvalRun } from '@/services/api/evalRunsApi';
@@ -151,7 +151,7 @@ export function VoiceRxRunDetail() {
         {/* Progress bar for active runs */}
         {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
 
-        <Tabs
+        <ReviewAwareTabs
           defaultTab="results"
           tabs={[
             {
@@ -177,6 +177,7 @@ export function VoiceRxRunDetail() {
 
         {/* Dirty bar for unsaved review changes */}
         <ReviewDirtyBar />
+        <ReviewLinkGuard />
 
         <ConfirmDialog
           isOpen={deleteOpen}
@@ -306,7 +307,8 @@ function FullEvaluationDetail({ run }: { run: EvalRun }) {
     const dist: Record<string, number> = {};
 
     for (const { aiSeverity, key } of items) {
-      const edit = review.getEdit(key, 'severity');
+      const itemKey = flowType === 'upload' ? `segment:${key}` : `field:${key}`;
+      const edit = review.getEdit(itemKey, 'severity');
       const sev = (edit?.decision === 'correct' && edit.reviewedValue != null)
         ? edit.reviewedValue.toUpperCase()
         : aiSeverity.toUpperCase();
@@ -468,10 +470,11 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
           <tbody>
             {segments.map((seg, i) => {
               const segIdx = String((seg.segmentIndex as number) ?? i);
-              const edit = review?.getEdit(segIdx, 'severity');
+              const itemKey = `segment:${segIdx}`;
+              const edit = review?.getEdit(itemKey, 'severity');
               const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
               const item: ReviewableItem = {
-                itemKey: segIdx, itemType: 'segment', title: '', subtitle: null,
+                itemKey, itemType: 'segment', title: '', subtitle: null,
                 badges: [], evidence: [], attributes: [],
               };
               const attr: ReviewableAttribute = {
@@ -521,20 +524,13 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
                     <td className="px-3 py-2 align-top">
                       <InlineReviewControls
                         decision={edit?.decision}
+                        note={edit?.note}
+                        originalValue={(seg.severity as string) ?? 'NONE'}
+                        reviewedValue={edit?.reviewedValue}
+                        allowedValues={attr.allowedValues}
                         onAccept={() => review.acceptAttribute(item, attr)}
-                        onOverride={() => {
-                          const nextSev = promptNextSeverity(seg.severity as string);
-                          review.updateAttribute(item, attr, {
-                            decision: 'correct',
-                            reviewedValue: nextSev,
-                          });
-                        }}
-                        onNote={() => {
-                          const note = window.prompt('Add a note:', edit?.note ?? '');
-                          if (note != null) {
-                            review.updateAttribute(item, attr, { note });
-                          }
-                        }}
+                        onOverride={(nextSeverity) => review.correctAttribute(item, attr, nextSeverity)}
+                        onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                       />
                     </td>
                   )}
@@ -580,7 +576,7 @@ function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
           </thead>
           <tbody>
             {fieldCritiques.map((fc, i) => {
-              const itemKey = fc.fieldPath;
+              const itemKey = `field:${fc.fieldPath}`;
               const edit = review?.getEdit(itemKey, 'severity');
               const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
               const item: ReviewableItem = {
@@ -634,20 +630,13 @@ function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
                     <td className="px-3 py-2 align-top">
                       <InlineReviewControls
                         decision={edit?.decision}
+                        note={edit?.note}
+                        originalValue={fc.severity ?? 'NONE'}
+                        reviewedValue={edit?.reviewedValue}
+                        allowedValues={attr.allowedValues}
                         onAccept={() => review.acceptAttribute(item, attr)}
-                        onOverride={() => {
-                          const nextSev = promptNextSeverity(fc.severity);
-                          review.updateAttribute(item, attr, {
-                            decision: 'correct',
-                            reviewedValue: nextSev,
-                          });
-                        }}
-                        onNote={() => {
-                          const note = window.prompt('Add a note:', edit?.note ?? '');
-                          if (note != null) {
-                            review.updateAttribute(item, attr, { note });
-                          }
-                        }}
+                        onOverride={(nextSeverity) => review.correctAttribute(item, attr, nextSeverity)}
+                        onNote={(nextNote) => review.setAttributeNote(item, attr, nextNote)}
                       />
                     </td>
                   )}
@@ -833,14 +822,6 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 /* ── Inline Review Helpers ───────────────────────────────── */
 
-const SEVERITY_CYCLE = ['NONE', 'MINOR', 'MODERATE', 'CRITICAL'] as const;
-
-/** Cycle to next severity value (wraps around). */
-function promptNextSeverity(current: string): string {
-  const idx = SEVERITY_CYCLE.indexOf(current?.toUpperCase() as typeof SEVERITY_CYCLE[number]);
-  return SEVERITY_CYCLE[(idx + 1) % SEVERITY_CYCLE.length];
-}
-
 function StartReviewButton() {
   const review = useInlineReviewOptional();
   if (!review || review.isEditing || review.loading) return null;
@@ -860,9 +841,30 @@ function StartReviewButton() {
   );
 }
 
+function ReviewAwareTabs(props: Parameters<typeof Tabs>[0]) {
+  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
+
+  return (
+    <>
+      <Tabs
+        {...props}
+        beforeChange={(_tabId, commit) => {
+          confirmNavigation(commit);
+        }}
+      />
+      {guardModal}
+    </>
+  );
+}
+
+function ReviewLinkGuard() {
+  const { guardModal } = useInlineReviewNavigationGuard({ captureLinks: true });
+  return guardModal;
+}
+
 function ReviewDirtyBar() {
   const review = useInlineReviewOptional();
-  if (!review || !review.isEditing) return null;
+  if (!review || !review.isEditing || !review.hasDirtyChanges) return null;
 
   return (
     <DirtyBar
