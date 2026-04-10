@@ -217,8 +217,8 @@ async def get_or_create_draft_review(db: AsyncSession, *, run: EvalRun, auth: Au
     )
     if latest_final:
         draft.notes = latest_final.notes
-        draft.items = [
-            EvalReviewItem(
+        for item in latest_final.items:
+            db.add(EvalReviewItem(
                 review_id=draft.id,
                 item_key=item.item_key,
                 item_type=item.item_type,
@@ -228,9 +228,8 @@ async def get_or_create_draft_review(db: AsyncSession, *, run: EvalRun, auth: Au
                 decision=item.decision,
                 reason_code=item.reason_code,
                 note=item.note,
-            )
-            for item in latest_final.items
-        ]
+            ))
+        await db.flush()
     return draft
 
 
