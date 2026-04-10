@@ -1,13 +1,15 @@
 """
-Tool schemas for LLM function-calling in the report builder.
-Each tool is a dict matching the provider-agnostic tool format
-used by llm_base.py. The handler maps tool names to callables.
+Tool registry for chat assistant function calling.
+Tools are grouped by capability. The chat handler resolves which tools
+to load based on App.config.chat.capabilities for the session's app.
 """
 from __future__ import annotations
 
 from typing import Any
 
-TOOLS: list[dict[str, Any]] = [
+# ── Report Builder tools ─────────────────────────────────────────────
+
+REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
     {
         "name": "list_section_types",
         "description": (
@@ -131,6 +133,11 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["report_name", "sections"],
         },
     },
+]
+
+# ── Data Explorer tools ──────────────────────────────────────────────
+
+DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
     {
         "name": "query_eval_runs",
         "description": (
@@ -234,4 +241,33 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+# ── Registry ─────────────────────────────────────────────────────────
+
+CAPABILITY_TOOLS: dict[str, list[dict[str, Any]]] = {
+    "report_builder": REPORT_BUILDER_TOOLS,
+    "data_explorer": DATA_EXPLORER_TOOLS,
+}
+
+# Default capabilities when App.config.chat.capabilities is not set
+DEFAULT_CAPABILITIES = ["report_builder", "data_explorer"]
+
+
+def resolve_tools(capabilities: list[str] | None = None) -> list[dict[str, Any]]:
+    """
+    Resolve tool definitions for a set of capabilities.
+    If capabilities is None or empty, uses DEFAULT_CAPABILITIES.
+    """
+    caps = capabilities if capabilities else DEFAULT_CAPABILITIES
+    tools: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cap in caps:
+        for tool in CAPABILITY_TOOLS.get(cap, []):
+            if tool["name"] not in seen:
+                tools.append(tool)
+                seen.add(tool["name"])
+    return tools
+
+
+# Backwards compat — flat list of all tools + name set
+TOOLS = resolve_tools()
 TOOL_NAMES = {tool["name"] for tool in TOOLS}

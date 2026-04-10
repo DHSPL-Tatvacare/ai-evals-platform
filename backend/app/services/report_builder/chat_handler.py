@@ -12,7 +12,7 @@ from typing import Any, AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.chat_engine import create_adapter, run_tool_loop
-from app.services.report_builder.tool_definitions import TOOLS
+from app.services.report_builder.tool_definitions import resolve_tools
 from app.services.report_builder.tool_handlers import dispatch_tool_call
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,22 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
     return "done"
 
 
+async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str, Any]]:
+    """Resolve tools from App.config.chat.capabilities. Falls back to all tools."""
+    from sqlalchemy import select
+    from app.models.app import App
+
+    result = await db.execute(
+        select(App.config).where(App.slug == app_id, App.is_active.is_(True))
+    )
+    config = result.scalar_one_or_none()
+    capabilities = None
+    if config:
+        chat_config = (config or {}).get("chat", {})
+        capabilities = chat_config.get("capabilities")
+    return resolve_tools(capabilities)
+
+
 async def run_chat_turn(
     session: dict[str, Any],
     user_message: str,
@@ -102,6 +118,8 @@ async def run_chat_turn(
     Process one user message through the LLM with tool calling.
     Returns the final assistant response + any composed report config.
     """
+    tools = await _resolve_tools_for_app(session["app_id"], db)
+
     adapter = await create_adapter(
         provider=provider,
         model=model,
@@ -141,7 +159,7 @@ async def run_chat_turn(
     text, session["messages"] = await run_tool_loop(
         adapter=adapter,
         messages=session["messages"],
-        tools=TOOLS,
+        tools=tools,
         system=SYSTEM_PROMPT,
         temperature=0.3,
         dispatch_fn=dispatch,
@@ -171,6 +189,8 @@ async def run_chat_turn_streaming(
     Generator version of run_chat_turn that yields SSE-style event dicts.
     Each yielded dict has {"event": str, "data": dict}.
     """
+    tools = await _resolve_tools_for_app(session["app_id"], db)
+
     adapter = await create_adapter(
         provider=provider,
         model=model,
@@ -214,7 +234,7 @@ async def run_chat_turn_streaming(
     text, session["messages"] = await run_tool_loop(
         adapter=adapter,
         messages=session["messages"],
-        tools=TOOLS,
+        tools=tools,
         system=SYSTEM_PROMPT,
         temperature=0.3,
         dispatch_fn=dispatch,
