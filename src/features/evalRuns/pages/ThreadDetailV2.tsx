@@ -30,6 +30,7 @@ import {
   DirtyBar,
 } from '@/features/reviews/inline';
 import { usePermission } from '@/utils/permissions';
+import { useReviewModeStore } from '@/stores/reviewModeStore';
 
 export default function ThreadDetailV2() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -394,7 +395,9 @@ export default function ThreadDetailV2() {
 }
 
 function ThreadStartReviewButton() {
+  const reviewActive = useReviewModeStore((s) => s.active);
   const review = useInlineReviewOptional();
+  if (reviewActive) return null;
   if (!review || review.loading || review.isEditing) return null;
   return (
     <Button variant="secondary" size="sm" icon={PencilLine} onClick={review.startDraft}>

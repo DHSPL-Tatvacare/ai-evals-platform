@@ -6,3 +6,4 @@ export { DirtyBar } from './DirtyBar';
 export { InlineReviewProvider, useInlineReview, useInlineReviewOptional } from './InlineReviewProvider';
 export { useInlineReviewNavigationGuard } from './useInlineReviewNavigationGuard';
 export type { InlineEditState, InlineReviewContextValue } from './types';
+export { useReviewModeStore } from '@/stores/reviewModeStore';
