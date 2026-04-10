@@ -128,6 +128,7 @@ async def run_chat_turn(
     provider: str,
     model: str,
     db: AsyncSession,
+    auth: "Any",
 ) -> dict[str, Any]:
     """
     Process one user message through the LLM with tool calling.
@@ -153,8 +154,7 @@ async def run_chat_turn(
         result_str = await dispatch_tool_call(
             name, arguments,
             db=db,
-            tenant_id=session["tenant_id"],
-            user_id=session["user_id"],
+            auth=auth,
             app_id=session["app_id"],
         )
 
@@ -199,6 +199,7 @@ async def run_chat_turn_streaming(
     provider: str,
     model: str,
     db: AsyncSession,
+    auth: "Any",
 ) -> AsyncGenerator[dict[str, Any], None]:
     """
     Generator version of run_chat_turn that yields SSE-style event dicts.
@@ -227,8 +228,7 @@ async def run_chat_turn_streaming(
         result_str = await dispatch_tool_call(
             name, arguments,
             db=db,
-            tenant_id=session["tenant_id"],
-            user_id=session["user_id"],
+            auth=auth,
             app_id=session["app_id"],
         )
 

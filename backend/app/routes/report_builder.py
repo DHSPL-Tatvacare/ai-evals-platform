@@ -48,6 +48,7 @@ async def chat(
         provider=body.provider,
         model=body.model,
         db=db,
+        auth=auth,
     )
 
     composed = None
@@ -97,7 +98,7 @@ async def chat_stream(
         yield f"event: session\ndata: {json_mod.dumps({'sessionId': session_id})}\n\n"
         async for event in run_chat_turn_streaming(
             session, body.message,
-            provider=body.provider, model=body.model, db=db,
+            provider=body.provider, model=body.model, db=db, auth=auth,
         ):
             yield f"event: {event['event']}\ndata: {json_mod.dumps(event['data'])}\n\n"
 

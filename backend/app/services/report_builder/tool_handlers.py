@@ -16,12 +16,26 @@ from app.services.report_builder.section_catalog import (
 )
 
 
-async def _resolve_run_id(run_id: str, tenant_id: str, db: AsyncSession):
+def _app_access_clause_for_tools(model, auth):
+    """App-access clause matching eval_runs routes pattern."""
+    from sqlalchemy.sql import true, false
+    if auth.is_owner:
+        return true()
+    if not auth.app_access:
+        return false()
+    return model.app_id.in_(tuple(sorted(auth.app_access)))
+
+
+async def _resolve_run_id(run_id: str, auth, db: AsyncSession):
     """Resolve a short or full run ID to the actual UUID. Returns None if not found."""
     from sqlalchemy import select, String as SAString
     from app.models.eval_run import EvalRun
+    from app.services.access_control import readable_scope_clause
 
-    q = select(EvalRun.id).where(EvalRun.tenant_id == tenant_id)
+    q = select(EvalRun.id).where(
+        readable_scope_clause(EvalRun, auth),
+        _app_access_clause_for_tools(EvalRun, auth),
+    )
     if len(run_id) < 36:
         q = q.where(EvalRun.id.cast(SAString).startswith(run_id))
     else:
@@ -45,7 +59,7 @@ async def handle_list_app_sections(
     *,
     app_id: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Look up analytics config for the app and return its declared sections."""
@@ -121,8 +135,7 @@ async def handle_save_template(
     report_name: str,
     sections: list[dict],
     db: AsyncSession,
-    tenant_id: str,
-    user_id: str,
+    auth,
     app_id: str,
     **_kwargs: Any,
 ) -> dict:
@@ -157,8 +170,8 @@ async def handle_save_template(
         }
 
         config = ReportConfig(
-            tenant_id=tenant_id,
-            user_id=user_id,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
             app_id=app_id,
             report_id=report_id,
             scope="single_run",
@@ -186,7 +199,7 @@ async def handle_query_eval_runs(
     limit: int = 10,
     eval_type: str = "",
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     app_id: str,
     **_kwargs: Any,
 ) -> dict:
@@ -194,11 +207,16 @@ async def handle_query_eval_runs(
     try:
         from sqlalchemy import select, desc
         from app.models.eval_run import EvalRun
+        from app.services.access_control import readable_scope_clause
 
         limit = min(max(limit, 1), 50)
         q = (
             select(EvalRun)
-            .where(EvalRun.tenant_id == tenant_id, EvalRun.app_id == app_id)
+            .where(
+                readable_scope_clause(EvalRun, auth),
+                _app_access_clause_for_tools(EvalRun, auth),
+                EvalRun.app_id == app_id,
+            )
             .order_by(desc(EvalRun.created_at))
             .limit(limit)
         )
@@ -245,7 +263,7 @@ async def handle_get_run_summary(
     *,
     run_id: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Get detailed summary for a single run."""
@@ -253,7 +271,7 @@ async def handle_get_run_summary(
         from sqlalchemy import select
         from app.models.eval_run import EvalRun
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -288,7 +306,7 @@ async def handle_compare_runs(
     run_id_a: str,
     run_id_b: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Compare two runs side by side."""
@@ -296,8 +314,8 @@ async def handle_compare_runs(
         from sqlalchemy import select
         from app.models.eval_run import EvalRun
 
-        real_run_id_a = await _resolve_run_id(run_id_a, tenant_id, db)
-        real_run_id_b = await _resolve_run_id(run_id_b, tenant_id, db)
+        real_run_id_a = await _resolve_run_id(run_id_a, auth, db)
+        real_run_id_b = await _resolve_run_id(run_id_b, auth, db)
 
         if not real_run_id_a:
             return {"error": f"Run A not found: {run_id_a}"}
@@ -367,7 +385,7 @@ async def handle_query_threads(
     verdict: str = "",
     limit: int = 10,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """List threads from a specific run."""
@@ -375,7 +393,7 @@ async def handle_query_threads(
         from sqlalchemy import select, desc
         from app.models.eval_run import ThreadEvaluation
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -413,7 +431,7 @@ async def handle_query_threads(
 async def handle_get_app_stats(
     *,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     app_id: str,
     **_kwargs: Any,
 ) -> dict:
@@ -421,30 +439,30 @@ async def handle_get_app_stats(
     try:
         from sqlalchemy import select, func
         from app.models.eval_run import EvalRun, ThreadEvaluation
+        from app.services.access_control import readable_scope_clause
+
+        accessible = (
+            readable_scope_clause(EvalRun, auth),
+            _app_access_clause_for_tools(EvalRun, auth),
+            EvalRun.app_id == app_id,
+        )
 
         # Count runs
         run_count = await db.execute(
-            select(func.count(EvalRun.id)).where(
-                EvalRun.tenant_id == tenant_id,
-                EvalRun.app_id == app_id,
-            )
+            select(func.count(EvalRun.id)).where(*accessible)
         )
         total_runs = run_count.scalar() or 0
 
         # Count threads
         thread_count = await db.execute(
-            select(func.count(ThreadEvaluation.id)).join(EvalRun).where(
-                EvalRun.tenant_id == tenant_id,
-                EvalRun.app_id == app_id,
-            )
+            select(func.count(ThreadEvaluation.id)).join(EvalRun).where(*accessible)
         )
         total_threads = thread_count.scalar() or 0
 
         # Avg intent accuracy
         avg_acc = await db.execute(
             select(func.avg(ThreadEvaluation.intent_accuracy)).join(EvalRun).where(
-                EvalRun.tenant_id == tenant_id,
-                EvalRun.app_id == app_id,
+                *accessible,
                 ThreadEvaluation.intent_accuracy.isnot(None),
             )
         )
@@ -455,8 +473,7 @@ async def handle_get_app_stats(
             select(ThreadEvaluation.worst_correctness, func.count(ThreadEvaluation.id))
             .join(EvalRun)
             .where(
-                EvalRun.tenant_id == tenant_id,
-                EvalRun.app_id == app_id,
+                *accessible,
                 ThreadEvaluation.worst_correctness.isnot(None),
             )
             .group_by(ThreadEvaluation.worst_correctness)
@@ -479,7 +496,7 @@ async def handle_get_report_section(
     run_id: str,
     section_type: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Read a pre-computed report section from the analytics cache."""
@@ -487,7 +504,7 @@ async def handle_get_report_section(
         from sqlalchemy import select
         from app.models.evaluation_analytics import EvaluationAnalytics
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -526,7 +543,7 @@ async def handle_get_thread_detail(
     run_id: str,
     thread_id: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Get detailed evaluation result for a specific thread."""
@@ -534,7 +551,7 @@ async def handle_get_thread_detail(
         from sqlalchemy import select
         from app.models.eval_run import ThreadEvaluation
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -607,7 +624,7 @@ async def handle_get_rule_compliance(
     *,
     run_id: str,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """Compute rule compliance using the ReportAggregator."""
@@ -616,7 +633,7 @@ async def handle_get_rule_compliance(
         from app.models.eval_run import EvalRun, ThreadEvaluation
         from app.services.reports.aggregator import ReportAggregator
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -670,7 +687,7 @@ async def handle_query_adversarial(
     run_id: str,
     limit: int = 20,
     db: AsyncSession,
-    tenant_id: str,
+    auth,
     **_kwargs: Any,
 ) -> dict:
     """List adversarial test results for a run."""
@@ -678,7 +695,7 @@ async def handle_query_adversarial(
         from sqlalchemy import select, desc
         from app.models.eval_run import AdversarialEvaluation
 
-        real_run_id = await _resolve_run_id(run_id, tenant_id, db)
+        real_run_id = await _resolve_run_id(run_id, auth, db)
         if not real_run_id:
             return {"error": f"Run not found: {run_id}"}
 
@@ -740,8 +757,7 @@ async def dispatch_tool_call(
     arguments: dict[str, Any],
     *,
     db: AsyncSession,
-    tenant_id: str,
-    user_id: str,
+    auth: "Any",
     app_id: str,
 ) -> str:
     """Route a tool call to its handler and return JSON string result."""
@@ -749,8 +765,8 @@ async def dispatch_tool_call(
     if not handler:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
-    # Context kwargs (db, tenant_id, etc.) take precedence over LLM-supplied args
-    context = dict(db=db, tenant_id=tenant_id, user_id=user_id, app_id=app_id)
+    # Context kwargs (db, auth, app_id) take precedence over LLM-supplied args
+    context = dict(db=db, auth=auth, app_id=app_id)
     safe_args = {k: v for k, v in arguments.items() if k not in context}
     result = await handler(**safe_args, **context)
     return json.dumps(result, default=str)
