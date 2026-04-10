@@ -183,11 +183,8 @@ async def dispatch_tool_call(
     if not handler:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
-    result = await handler(
-        **arguments,
-        db=db,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        app_id=app_id,
-    )
+    # Context kwargs (db, tenant_id, etc.) take precedence over LLM-supplied args
+    context = dict(db=db, tenant_id=tenant_id, user_id=user_id, app_id=app_id)
+    safe_args = {k: v for k, v in arguments.items() if k not in context}
+    result = await handler(**safe_args, **context)
     return json.dumps(result, default=str)
