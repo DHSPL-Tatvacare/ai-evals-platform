@@ -1,0 +1,212 @@
+##
+## Semantic model for the evaluation analytics platform.
+## Loaded by the SQL agent to generate queries from natural language.
+## Update this file when the schema changes.
+##
+version: "1.0"
+description: >
+  Evaluation analytics platform. Evaluates AI chatbot conversations
+  for intent accuracy, correctness (rule compliance), efficiency (friction),
+  and adversarial robustness.
+
+tables:
+
+  eval_runs:
+    description: >
+      Central entity. Each row is one evaluation run — a batch of
+      threads evaluated together. Has summary stats and config snapshot.
+    primary_key: id
+    columns:
+      id: { type: uuid }
+      app_id: { type: text, description: "App slug: kaira-bot, voice-rx, inside-sales" }
+      eval_type: { type: text, description: "batch_thread, batch_adversarial, full_evaluation, custom, call_quality" }
+      status: { type: text, description: "pending, running, completed, failed, cancelled" }
+      created_at: { type: timestamptz }
+      completed_at: { type: timestamptz }
+      duration_ms: { type: float }
+      error_message: { type: text, nullable: true }
+      # JSONB fields — use arrow operators to access
+      "summary->>'total_evaluated'": { type: int, description: "Total threads evaluated in this run" }
+      "summary->'correctness_verdicts'": { type: jsonb, description: "Object with keys PASS, SOFT FAIL, HARD FAIL, CRITICAL — values are counts" }
+      "summary->'efficiency_verdicts'": { type: jsonb, description: "Object with keys EFFICIENT, ACCEPTABLE, FRICTION, BROKEN — values are counts" }
+      "summary->>'avg_intent_accuracy'": { type: float, description: "Average intent accuracy 0.0-1.0" }
+      "batch_metadata->>'name'": { type: text, description: "User-given name for this run" }
+      "batch_metadata->>'thread_count'": { type: int, description: "Number of threads in the batch" }
+    access_control:
+      tenant_column: tenant_id
+      user_column: user_id
+      visibility_column: visibility
+      app_column: app_id
+
+  thread_evaluations:
+    description: >
+      Per-thread scores within a run. Each row = one conversation thread
+      evaluated. Contains verdicts and a large result JSONB with rule
+      compliance, transcript, friction analysis.
+    primary_key: id
+    foreign_keys:
+      run_id: { references: eval_runs.id }
+    columns:
+      id: { type: integer }
+      run_id: { type: uuid }
+      thread_id: { type: text, description: "External thread identifier" }
+      intent_accuracy: { type: float, description: "0.0-1.0 intent detection accuracy" }
+      worst_correctness: { type: text, description: "PASS, SOFT FAIL, HARD FAIL, CRITICAL — worst across all rules" }
+      efficiency_verdict: { type: text, description: "EFFICIENT, ACCEPTABLE, FRICTION, BROKEN" }
+      success_status: { type: boolean }
+      created_at: { type: timestamptz }
+    jsonb_extractions:
+      rule_compliance:
+        description: >
+          Per-rule pass/fail for each thread. Nested inside
+          result->'correctness_evaluations'[]->rule_compliance[].
+          Each item has rule_id, status (FOLLOWED/VIOLATED/NOT_APPLICABLE),
+          section, followed (bool), evidence (text).
+          IMPORTANT: the result column is JSON type, not JSONB. You MUST cast
+          with ::jsonb before using jsonb_array_elements.
+        extraction_sql: |
+          CROSS JOIN LATERAL jsonb_array_elements((t.result::jsonb)->'correctness_evaluations') AS ce(val)
+          CROSS JOIN LATERAL jsonb_array_elements(ce.val->'rule_compliance') AS rc(val)
+        columns:
+          "rc.val->>'rule_id'": { alias: rule_id, type: text }
+          "rc.val->>'status'": { alias: rule_status, type: text, description: "FOLLOWED, VIOLATED, NOT_APPLICABLE" }
+          "rc.val->>'section'": { alias: rule_section, type: text }
+          "rc.val->>'evidence'": { alias: rule_evidence, type: text }
+      friction_turns:
+        description: >
+          Friction events within a thread. Nested inside
+          result->'efficiency_evaluation'->'friction_turns'[].
+          IMPORTANT: result is JSON type — cast with ::jsonb first.
+        extraction_sql: |
+          CROSS JOIN LATERAL jsonb_array_elements((t.result::jsonb)->'efficiency_evaluation'->'friction_turns') AS ft(val)
+        columns:
+          "ft.val->>'cause'": { alias: friction_cause, type: text, description: "BOT or USER" }
+          "ft.val->>'description'": { alias: friction_description, type: text }
+          "ft.val->>'turn'": { alias: friction_turn_number, type: int }
+
+  adversarial_evaluations:
+    description: >
+      Adversarial/red-team test results. Each row = one attack scenario.
+    primary_key: id
+    foreign_keys:
+      run_id: { references: eval_runs.id }
+    columns:
+      id: { type: integer }
+      run_id: { type: uuid }
+      verdict: { type: text }
+      goal_achieved: { type: boolean, description: "Did the adversarial attack succeed in achieving its goal?" }
+      difficulty: { type: text, description: "easy, medium, hard" }
+      total_turns: { type: integer, description: "Number of conversation turns in the test" }
+      created_at: { type: timestamptz }
+      # JSONB arrays
+      "goal_flow": { type: jsonb, description: "Array of goal steps e.g. ['meal_logged', 'cgm_insight']" }
+      "active_traits": { type: jsonb, description: "Array of attack traits e.g. ['ambiguous_qty', 'social_pressure']" }
+
+metrics:
+  pass_rate:
+    description: "Percentage of threads with PASS correctness verdict"
+    sql: "ROUND(COUNT(*) FILTER (WHERE t.worst_correctness = 'PASS') * 100.0 / NULLIF(COUNT(*), 0), 1)"
+    applies_to: thread_evaluations
+
+  fail_rate:
+    description: "Percentage of threads with any failure verdict (SOFT FAIL, HARD FAIL, CRITICAL)"
+    sql: "ROUND(COUNT(*) FILTER (WHERE t.worst_correctness != 'PASS') * 100.0 / NULLIF(COUNT(*), 0), 1)"
+    applies_to: thread_evaluations
+
+  avg_intent_accuracy:
+    description: "Average intent accuracy across threads"
+    sql: "ROUND(AVG(t.intent_accuracy)::numeric, 3)"
+    applies_to: thread_evaluations
+
+  adversarial_block_rate:
+    description: "Percentage of adversarial attacks that were blocked (goal NOT achieved)"
+    sql: "ROUND(COUNT(*) FILTER (WHERE NOT a.goal_achieved) * 100.0 / NULLIF(COUNT(*), 0), 1)"
+    applies_to: adversarial_evaluations
+
+  rule_compliance_rate:
+    description: "Per-rule: FOLLOWED / (FOLLOWED + VIOLATED)"
+    sql: |
+      ROUND(
+        COUNT(*) FILTER (WHERE rc.val->>'status' = 'FOLLOWED') * 100.0 /
+        NULLIF(COUNT(*) FILTER (WHERE rc.val->>'status' IN ('FOLLOWED', 'VIOLATED')), 0),
+      1)
+    applies_to: thread_evaluations
+    requires: rule_compliance
+
+common_queries:
+  - intent: "Which rules are most violated?"
+    sql: |
+      SELECT rc.val->>'rule_id' AS rule_id,
+             rc.val->>'section' AS section,
+             COUNT(*) FILTER (WHERE rc.val->>'status' = 'VIOLATED') AS violated,
+             COUNT(*) FILTER (WHERE rc.val->>'status' = 'FOLLOWED') AS followed,
+             ROUND(
+               COUNT(*) FILTER (WHERE rc.val->>'status' = 'FOLLOWED') * 100.0 /
+               NULLIF(COUNT(*) FILTER (WHERE rc.val->>'status' IN ('FOLLOWED', 'VIOLATED')), 0),
+             1) AS compliance_pct
+      FROM thread_evaluations t
+      JOIN eval_runs e ON t.run_id = e.id,
+           jsonb_array_elements((t.result::jsonb)->'correctness_evaluations') AS ce(val),
+           jsonb_array_elements(ce.val->'rule_compliance') AS rc(val)
+      WHERE e.app_id = :app_id {access_filter}
+      GROUP BY rc.val->>'rule_id', rc.val->>'section'
+      ORDER BY violated DESC
+
+  - intent: "Pass rate trend over time"
+    sql: |
+      SELECT e.id::text AS run_id,
+             (e.batch_metadata->>'name') AS run_name,
+             e.created_at::date AS date,
+             COUNT(*) AS threads,
+             ROUND(COUNT(*) FILTER (WHERE t.worst_correctness = 'PASS') * 100.0 / COUNT(*), 1) AS pass_rate
+      FROM eval_runs e
+      JOIN thread_evaluations t ON t.run_id = e.id
+      WHERE e.app_id = :app_id AND e.status = 'completed' {access_filter}
+      GROUP BY e.id, e.batch_metadata->>'name', e.created_at
+      ORDER BY e.created_at DESC
+
+  - intent: "Worst performing threads"
+    sql: |
+      SELECT t.thread_id,
+             t.worst_correctness,
+             t.efficiency_verdict,
+             t.intent_accuracy,
+             e.created_at::date AS run_date,
+             LEFT(e.id::text, 8) AS run_id
+      FROM thread_evaluations t
+      JOIN eval_runs e ON t.run_id = e.id
+      WHERE e.app_id = :app_id AND t.worst_correctness != 'PASS' {access_filter}
+      ORDER BY
+        CASE t.worst_correctness
+          WHEN 'CRITICAL' THEN 1
+          WHEN 'HARD FAIL' THEN 2
+          WHEN 'SOFT FAIL' THEN 3
+          ELSE 4
+        END,
+        t.intent_accuracy ASC
+      LIMIT 20
+
+  - intent: "Friction patterns and causes"
+    sql: |
+      SELECT ft.val->>'cause' AS cause,
+             COUNT(*) AS occurrences,
+             COUNT(DISTINCT t.thread_id) AS affected_threads
+      FROM thread_evaluations t
+      JOIN eval_runs e ON t.run_id = e.id,
+           jsonb_array_elements((t.result::jsonb)->'efficiency_evaluation'->'friction_turns') AS ft(val)
+      WHERE e.app_id = :app_id {access_filter}
+      GROUP BY ft.val->>'cause'
+      ORDER BY occurrences DESC
+
+  - intent: "Adversarial test results summary"
+    sql: |
+      SELECT a.difficulty,
+             COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE a.goal_achieved) AS goals_achieved,
+             COUNT(*) FILTER (WHERE NOT a.goal_achieved) AS goals_blocked,
+             ROUND(COUNT(*) FILTER (WHERE NOT a.goal_achieved) * 100.0 / COUNT(*), 1) AS block_rate
+      FROM adversarial_evaluations a
+      JOIN eval_runs e ON a.run_id = e.id
+      WHERE e.app_id = :app_id {access_filter}
+      GROUP BY a.difficulty
+      ORDER BY block_rate ASC

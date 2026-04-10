@@ -825,12 +825,29 @@ async def handle_get_cross_run_rule_compliance(
         return {"error": f"Database error: {str(e)}"}
 
 
+async def handle_analyze(
+    *,
+    question: str,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    """Semantic SQL agent — generates and executes SQL from natural language."""
+    from app.services.chat_engine.sql_agent import analyze
+    return await analyze(question=question, db=db, auth=auth, app_id=app_id)
+
+
 TOOL_HANDLER_MAP = {
+    # Report builder tools (action tools)
     "list_section_types": handle_list_section_types,
     "get_section_detail": handle_get_section_detail,
     "list_app_sections": handle_list_app_sections,
     "compose_report": handle_compose_report,
     "save_template": handle_save_template,
+    # Semantic analytics (replaces all fixed data explorer tools)
+    "analyze": handle_analyze,
+    # Deprecated but kept for backwards compat if referenced
     "query_eval_runs": handle_query_eval_runs,
     "get_run_summary": handle_get_run_summary,
     "compare_runs": handle_compare_runs,

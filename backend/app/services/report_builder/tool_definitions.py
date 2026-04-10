@@ -135,9 +135,45 @@ REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-# ── Data Explorer tools ──────────────────────────────────────────────
+# ── Semantic Analytics (replaces fixed data explorer tools) ──────────
 
-DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
+ANALYTICS_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "analyze",
+        "description": (
+            "Answer ANY data question about evaluation runs, threads, rules, "
+            "adversarial tests, pass rates, trends, comparisons, or compliance. "
+            "This tool generates and executes a database query from your natural "
+            "language question. Use it for ALL analytical questions — it can "
+            "aggregate across runs, drill into threads, compute rule compliance, "
+            "compare time periods, find patterns, and more. "
+            "Always prefer this tool over report builder tools for data questions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "The analytical question to answer, in plain English. "
+                        "Be specific about what data you want: which app, time range, "
+                        "filters, grouping, or comparison. Examples: "
+                        "'Which rules have the lowest compliance rate across all runs?', "
+                        "'Show pass rate trend for the last 10 runs', "
+                        "'What are the most common friction causes?'"
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+    },
+]
+
+# ── Data Explorer tools (DEPRECATED — kept for backwards compat) ─────
+# These are superseded by the 'analyze' tool which uses semantic SQL
+# generation. Unplugged from the default capability set but kept in code.
+
+_DEPRECATED_DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
     {
         "name": "query_eval_runs",
         "description": (
@@ -359,11 +395,13 @@ DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
 
 CAPABILITY_TOOLS: dict[str, list[dict[str, Any]]] = {
     "report_builder": REPORT_BUILDER_TOOLS,
-    "data_explorer": DATA_EXPLORER_TOOLS,
+    "analytics": ANALYTICS_TOOLS,
+    # Deprecated: fixed data explorer tools, kept for reference
+    # "data_explorer": _DEPRECATED_DATA_EXPLORER_TOOLS,
 }
 
 # Default capabilities when App.config.chat.capabilities is not set
-DEFAULT_CAPABILITIES = ["report_builder", "data_explorer"]
+DEFAULT_CAPABILITIES = ["report_builder", "analytics"]
 
 
 def resolve_tools(capabilities: list[str] | None = None) -> list[dict[str, Any]]:
