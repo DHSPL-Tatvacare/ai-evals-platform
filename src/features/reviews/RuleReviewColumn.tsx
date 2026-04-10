@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Undo2, MessageCircle } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Select } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
 import { NoteModal } from './NoteModal';
@@ -18,21 +18,19 @@ export function RuleReviewStatus({ item, attr, edit }: RuleReviewProps) {
   const isOverridden = edit?.decision === 'correct' && edit.reviewedValue != null;
   const currentValue = isOverridden ? edit.reviewedValue : attr.originalValue;
 
+  const options = attr.allowedValues.map((v) => ({ value: v, label: v }));
+
   return (
-    <select
+    <Select
       value={currentValue ?? ''}
-      onChange={(e) => correctAttribute(item, attr, e.target.value)}
+      onChange={(val) => correctAttribute(item, attr, val)}
+      options={options}
+      size="sm"
       className={cn(
-        'text-xs rounded border px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-primary)]',
-        'focus:outline-none focus:border-[var(--border-brand)]',
-        isOverridden && 'border-[var(--color-warning)] ring-1 ring-[var(--color-warning)]',
-        !isOverridden && 'border-[var(--border-default)]',
+        'min-w-[140px]',
+        isOverridden && '[&_button]:border-[var(--color-warning)] [&_button]:ring-1 [&_button]:ring-[var(--color-warning)]',
       )}
-    >
-      {attr.allowedValues.map((v) => (
-        <option key={v} value={v}>{v}</option>
-      ))}
-    </select>
+    />
   );
 }
 

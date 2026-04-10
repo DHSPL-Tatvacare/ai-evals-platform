@@ -1,23 +1,35 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ui';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
 
-function isAllowedPath(pathname: string, runId: string | null): boolean {
+function isAllowedPath(pathname: string, runId: string | null, threadIds: Set<string>): boolean {
   if (runId && pathname.includes(`/runs/${runId}`)) return true;
-  if (pathname.includes('/threads/')) return true;
+  // Only allow thread detail for threads belonging to the active run
+  const threadMatch = pathname.match(/\/threads\/([^/]+)/);
+  if (threadMatch && threadIds.has(threadMatch[1])) return true;
   return false;
 }
 
 export function ReviewNavigationBlocker() {
   const active = useReviewModeStore((s) => s.active);
   const runId = useReviewModeStore((s) => s.runId);
+  const context = useReviewModeStore((s) => s.context);
   const saveDraft = useReviewModeStore((s) => s.saveDraft);
   const discardDraft = useReviewModeStore((s) => s.discardDraft);
 
+  // Build set of thread IDs belonging to the active run
+  const threadIds = useMemo(() => {
+    if (!context?.items) return new Set<string>();
+    return new Set(context.items.map((item) => {
+      const raw = item.itemKey.includes(':') ? item.itemKey.split(':').slice(1).join(':') : item.itemKey;
+      return raw;
+    }));
+  }, [context?.items]);
+
   const blocker = useBlocker(({ nextLocation }) => {
     if (!active) return false;
-    return !isAllowedPath(nextLocation.pathname, runId);
+    return !isAllowedPath(nextLocation.pathname, runId, threadIds);
   });
 
   // Block browser close / refresh
