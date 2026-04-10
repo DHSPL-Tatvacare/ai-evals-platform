@@ -408,7 +408,9 @@ function ThreadStartReviewButton() {
 
 
 function ThreadReviewDirtyBar() {
+  const reviewActive = useReviewModeStore((s) => s.active);
   const review = useInlineReviewOptional();
+  if (reviewActive) return null;
   if (!review) return null;
   return (
     <DirtyBar

@@ -132,7 +132,6 @@ export default function RuleComplianceTab({
   const [filter, setFilter] = useState<Filter>('ALL');
   const review = useInlineReviewOptional();
   const reviewActive = useReviewModeStore((s) => s.active);
-  const reviewContext = useReviewModeStore((s) => s.context);
   const reviewGetEdit = useReviewModeStore((s) => s.getEdit);
 
   // Find the reviewable item for this thread
@@ -144,14 +143,9 @@ export default function RuleComplianceTab({
     });
   }, [review?.context, threadId]);
 
-  // Global review mode: find reviewable item from the global store context
-  const globalReviewableItem = useMemo(() => {
-    if (!reviewActive || !reviewContext || !threadId) return undefined;
-    return reviewContext.items.find((item) => {
-      const rawKey = item.itemKey.includes(':') ? item.itemKey.split(':').slice(1).join(':') : item.itemKey;
-      return rawKey === threadId;
-    });
-  }, [reviewActive, reviewContext, threadId]);
+  // Use the existing reviewableItem for global review mode too — it reads
+  // from the same store context via the InlineReviewProvider shim.
+  const globalReviewableItem = reviewActive ? reviewableItem : undefined;
 
   const allRules: AggregatedRule[] = rules
     ? sortRuleOutcomes(rules).map((rule) => {
