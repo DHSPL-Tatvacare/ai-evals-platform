@@ -1,6 +1,6 @@
 """
-Multi-turn chat orchestrator for the report builder.
-Manages conversation state, LLM calls with tools, and tool dispatch.
+Report builder chat surface.
+Wires report-specific tools and system prompt into the shared chat engine.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.report_builder.llm_adapters import chat_completion
+from app.services.chat_engine import create_adapter, run_tool_loop
 from app.services.report_builder.tool_definitions import TOOLS
 from app.services.report_builder.tool_handlers import dispatch_tool_call
 
@@ -42,43 +42,8 @@ RULES:
 MAX_TOOL_ROUNDS = 5
 
 
-class ChatSession:
-    """In-memory conversation state for one builder session."""
-
-    def __init__(self, app_id: str, tenant_id: str, user_id: str):
-        self.app_id = app_id
-        self.tenant_id = tenant_id
-        self.user_id = user_id
-        self.messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-        ]
-
-    def add_user_message(self, content: str) -> None:
-        self.messages.append({"role": "user", "content": content})
-
-    def add_assistant_message(self, content: str) -> None:
-        self.messages.append({"role": "assistant", "content": content})
-
-    def add_tool_call(self, tool_call_id: str, name: str, arguments: str) -> None:
-        self.messages.append({
-            "role": "assistant",
-            "tool_calls": [{
-                "id": tool_call_id,
-                "type": "function",
-                "function": {"name": name, "arguments": arguments},
-            }],
-        })
-
-    def add_tool_result(self, tool_call_id: str, content: str) -> None:
-        self.messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": content,
-        })
-
-
 async def run_chat_turn(
-    session: ChatSession,
+    session: dict[str, Any],
     user_message: str,
     *,
     provider: str,
@@ -89,67 +54,53 @@ async def run_chat_turn(
     Process one user message through the LLM with tool calling.
     Returns the final assistant response + any composed report config.
     """
-    session.add_user_message(user_message)
+    adapter = await create_adapter(
+        provider=provider,
+        model=model,
+        tenant_id=session["tenant_id"],
+        user_id=session["user_id"],
+    )
+
+    session["messages"].append(adapter.build_user_message(user_message))
 
     composed_report: dict | None = None
 
-    for _round in range(MAX_TOOL_ROUNDS):
-        response = await chat_completion(
-            provider=provider,
-            model=model,
-            system_instruction=SYSTEM_PROMPT,
-            messages=session.messages,
-            tools=TOOLS,
-            temperature=0.3,
-            tenant_id=session.tenant_id,
-            user_id=session.user_id,
+    async def dispatch(name: str, arguments: dict) -> str:
+        nonlocal composed_report
+
+        result_str = await dispatch_tool_call(
+            name, arguments,
+            db=db,
+            tenant_id=session["tenant_id"],
+            user_id=session["user_id"],
+            app_id=session["app_id"],
         )
 
-        if not response.tool_calls:
-            session.add_assistant_message(response.content)
-            return {
-                "role": "assistant",
-                "content": response.content,
-                "composed_report": composed_report,
-            }
+        if name == "compose_report":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                composed_report = parsed
 
-        for tc in response.tool_calls:
-            func = tc.get("function", {})
-            tool_name = func.get("name", "")
-            raw_args = func.get("arguments", "{}")
-            tool_call_id = tc.get("id", f"tc_{_round}")
+        if name == "save_template":
+            await db.commit()
 
-            try:
-                arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            except json.JSONDecodeError:
-                arguments = {}
+        return result_str
 
-            logger.info("Report builder tool call: %s(%s)", tool_name, list(arguments.keys()))
+    text, session["messages"] = await run_tool_loop(
+        adapter=adapter,
+        messages=session["messages"],
+        tools=TOOLS,
+        system=SYSTEM_PROMPT,
+        temperature=0.3,
+        dispatch_fn=dispatch,
+        max_rounds=MAX_TOOL_ROUNDS,
+    )
 
-            result_str = await dispatch_tool_call(
-                tool_name,
-                arguments,
-                db=db,
-                tenant_id=session.tenant_id,
-                user_id=session.user_id,
-                app_id=session.app_id,
-            )
+    if text is None:
+        text = "I've reached the maximum number of tool calls for this turn. Please try a simpler request."
 
-            if tool_name == "compose_report":
-                parsed = json.loads(result_str)
-                if parsed.get("status") == "ok":
-                    composed_report = parsed
-
-            if tool_name == "save_template":
-                await db.commit()
-
-            session.add_tool_call(tool_call_id, tool_name, raw_args)
-            session.add_tool_result(tool_call_id, result_str)
-
-    content = "I've reached the maximum number of tool calls for this turn. Please try a simpler request."
-    session.add_assistant_message(content)
     return {
         "role": "assistant",
-        "content": content,
+        "content": text,
         "composed_report": composed_report,
     }
