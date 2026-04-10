@@ -2,17 +2,12 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { X, Minus, Plus, GripVertical } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
-function SherlockIcon({ className, variant = 'auto' }: { className?: string; variant?: 'light' | 'dark' | 'auto' }) {
+function SherlockIcon({ className }: { className?: string }) {
   return (
     <img
       src="/sherlock-icon.svg"
       alt="Sherlock"
-      className={cn(
-        className,
-        variant === 'light' && 'invert-0 dark:invert',
-        variant === 'dark' && 'invert dark:invert-0',
-        variant === 'auto' && 'dark:invert',
-      )}
+      className={cn(className, 'brightness-0 invert')}
     />
   );
 }
@@ -23,7 +18,6 @@ import { useChatWidgetStore } from './useChatWidget';
 import { ProviderToggle } from './ProviderToggle';
 import { ChatMessages } from './ChatMessages';
 import { ChatInput } from './ChatInput';
-import { PromptChips } from './PromptChips';
 import type { ChatProvider } from './types';
 import type { AppChatConfig } from '@/types/app.types';
 
@@ -126,7 +120,7 @@ export function ChatWidget() {
     [send, currentApp],
   );
 
-  const promptTemplates = chatConfig.promptTemplates ?? [];
+
 
   if (reviewActive) return null;
   if (chatConfig.enabled === false) return null;
@@ -150,7 +144,7 @@ export function ChatWidget() {
         )}
         aria-label="Open Sherlock"
       >
-        <SherlockIcon className="h-8 w-8" variant="light" />
+        <SherlockIcon className="h-8 w-8" />
       </button>
     );
   }
@@ -186,7 +180,7 @@ export function ChatWidget() {
             className="flex h-8 w-8 items-center justify-center rounded-full"
             style={{ background: 'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, #2D1B69 100%)' }}
           >
-            <SherlockIcon className="h-5 w-5" variant="light" />
+            <SherlockIcon className="h-5 w-5" />
           </div>
           <h3 className="text-sm font-semibold text-[var(--text-primary)]">Sherlock</h3>
           <span className="text-[10px] font-medium text-[var(--color-brand-primary)] bg-[var(--color-brand-accent)] px-1.5 py-0.5 rounded">
@@ -229,10 +223,6 @@ export function ChatWidget() {
         messages={messages}
         status={status}
       />
-
-      {messages.length === 0 && promptTemplates.length > 0 && (
-        <PromptChips templates={promptTemplates} onSelect={handleSend} />
-      )}
 
       <ChatInput
         onSend={handleSend}

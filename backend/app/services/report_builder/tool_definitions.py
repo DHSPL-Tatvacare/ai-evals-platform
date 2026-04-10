@@ -333,6 +333,26 @@ DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
             "required": ["run_id"],
         },
     },
+    {
+        "name": "get_cross_run_rule_compliance",
+        "description": (
+            "Aggregate rule compliance across ALL evaluation runs for the current app. "
+            "Returns each rule's total passed/failed counts, overall compliance rate, and "
+            "how many runs it appeared in — sorted by most violated first. "
+            "Use this to answer 'which rules are most frequently violated across all evals' "
+            "or 'what are the most followed rules overall'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rules to return (default 20). Use a high number to see all rules.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 # ── Registry ─────────────────────────────────────────────────────────

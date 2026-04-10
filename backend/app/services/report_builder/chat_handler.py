@@ -35,7 +35,8 @@ DATA EXPLORER TOOLS (use these to answer questions):
 - get_app_stats: Aggregate stats across all runs (totals, distributions, averages).
 - get_report_section: Pull a specific pre-computed section (compliance_table, friction_analysis, exemplars, etc.). Most detailed tool for analytical questions.
 - get_thread_detail: Rule outcomes, transcript excerpt, and friction turns for one thread.
-- get_rule_compliance: Per-rule pass/fail breakdown and co-failure patterns for a run.
+- get_rule_compliance: Per-rule pass/fail breakdown and co-failure patterns for a SINGLE run.
+- get_cross_run_rule_compliance: Aggregate rule compliance across ALL runs for the app. Use for "most violated rules overall".
 - query_adversarial: Adversarial test results — goal achievement, difficulty, traits.
 
 REPORT BUILDER TOOLS (use these only when user explicitly wants a report layout):
@@ -100,6 +101,10 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
     if name == "get_rule_compliance":
         rules = data.get("rules", [])
         return f"{len(rules)} rules"
+    if name == "get_cross_run_rule_compliance":
+        rules = data.get("rules", [])
+        runs = data.get("total_runs_analyzed", 0)
+        return f"{len(rules)} rules across {runs} runs"
     if name == "query_adversarial":
         return f"{data.get('total', 0)} cases"
     return "done"

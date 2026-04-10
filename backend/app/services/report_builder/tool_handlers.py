@@ -734,6 +734,97 @@ async def handle_query_adversarial(
         return {"error": f"Database error: {str(e)}"}
 
 
+async def handle_get_cross_run_rule_compliance(
+    *,
+    limit: int = 20,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    """Aggregate rule compliance across ALL runs for the app."""
+    try:
+        from collections import defaultdict
+        from sqlalchemy import select
+        from app.models.eval_run import EvalRun, ThreadEvaluation
+        from app.services.access_control import readable_scope_clause
+
+        # Get all accessible completed runs for this app
+        run_q = (
+            select(EvalRun.id)
+            .where(
+                readable_scope_clause(EvalRun, auth),
+                _app_access_clause_for_tools(EvalRun, auth),
+                EvalRun.app_id == app_id,
+                EvalRun.status == "completed",
+            )
+        )
+        run_result = await db.execute(run_q)
+        run_ids = [r[0] for r in run_result.all()]
+        if not run_ids:
+            return {"error": "No completed runs found for this app"}
+
+        # Load all threads across those runs
+        thread_result = await db.execute(
+            select(ThreadEvaluation).where(ThreadEvaluation.run_id.in_(run_ids))
+        )
+        threads = thread_result.scalars().all()
+        if not threads:
+            return {"error": "No evaluated threads found"}
+
+        # Aggregate rule compliance across all threads
+        rule_stats: dict[str, dict] = defaultdict(lambda: {
+            "passed": 0, "failed": 0, "not_applicable": 0, "run_ids": set(),
+        })
+
+        for thread in threads:
+            result = thread.result if isinstance(thread.result, dict) else {}
+            for ce in result.get("correctness_evaluations", []):
+                for rc in ce.get("rule_compliance", []):
+                    rule_id = rc.get("rule_id", "")
+                    if not rule_id:
+                        continue
+                    stats = rule_stats[rule_id]
+                    stats["run_ids"].add(str(thread.run_id))
+                    status = rc.get("status", "")
+                    if status == "FOLLOWED":
+                        stats["passed"] += 1
+                    elif status == "VIOLATED":
+                        stats["failed"] += 1
+                    elif status == "NOT_APPLICABLE":
+                        stats["not_applicable"] += 1
+
+        # Sort by most violated
+        sorted_rules = sorted(
+            rule_stats.items(),
+            key=lambda x: x[1]["failed"],
+            reverse=True,
+        )
+
+        limit = min(max(limit, 1), 100)
+        return {
+            "app_id": app_id,
+            "total_runs_analyzed": len(run_ids),
+            "total_threads_analyzed": len(threads),
+            "rules": [
+                {
+                    "rule": rule_id,
+                    "passed": s["passed"],
+                    "failed": s["failed"],
+                    "not_applicable": s["not_applicable"],
+                    "total_evaluated": s["passed"] + s["failed"],
+                    "compliance_rate": round(
+                        s["passed"] / (s["passed"] + s["failed"]) * 100, 1
+                    ) if (s["passed"] + s["failed"]) > 0 else None,
+                    "appeared_in_runs": len(s["run_ids"]),
+                }
+                for rule_id, s in sorted_rules[:limit]
+            ],
+        }
+    except Exception as e:
+        return {"error": f"Database error: {str(e)}"}
+
+
 TOOL_HANDLER_MAP = {
     "list_section_types": handle_list_section_types,
     "get_section_detail": handle_get_section_detail,
@@ -749,6 +840,7 @@ TOOL_HANDLER_MAP = {
     "get_thread_detail": handle_get_thread_detail,
     "get_rule_compliance": handle_get_rule_compliance,
     "query_adversarial": handle_query_adversarial,
+    "get_cross_run_rule_compliance": handle_get_cross_run_rule_compliance,
 }
 
 
