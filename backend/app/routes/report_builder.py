@@ -10,6 +10,7 @@ from app.services.report_builder.schemas import (
     BuilderChatRequest,
     BuilderChatResponse,
     ComposedReportOut,
+    ToolCallOut,
 )
 from app.services.report_builder.session_store import create_session, get_session
 
@@ -57,5 +58,9 @@ async def chat(
     return BuilderChatResponse(
         session_id=session_id,
         content=result.get("content", ""),
+        tool_calls=[
+            ToolCallOut(name=tc["name"], summary=tc["summary"])
+            for tc in result.get("tool_calls", [])
+        ],
         composed_report=composed,
     )

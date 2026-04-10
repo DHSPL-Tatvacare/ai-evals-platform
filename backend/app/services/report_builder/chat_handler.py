@@ -42,6 +42,30 @@ RULES:
 MAX_TOOL_ROUNDS = 5
 
 
+def _summarize_tool_result(name: str, result_str: str) -> str:
+    """Extract a short label from a tool result for the UI badge."""
+    try:
+        data = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        return "done"
+
+    if name == "list_section_types":
+        sections = data.get("sections", [])
+        return f"{len(sections)} types"
+    if name == "list_app_sections":
+        app_id = data.get("app_id", "")
+        sections = data.get("sections", [])
+        return f"{app_id} · {len(sections)} sections" if app_id else f"{len(sections)} sections"
+    if name == "get_section_detail":
+        return data.get("key", data.get("label", "done"))
+    if name == "compose_report":
+        sections = data.get("sections", [])
+        return f"{len(sections)} sections"
+    if name == "save_template":
+        return data.get("report_name", "saved")
+    return "done"
+
+
 async def run_chat_turn(
     session: dict[str, Any],
     user_message: str,
@@ -64,6 +88,7 @@ async def run_chat_turn(
     session["messages"].append(adapter.build_user_message(user_message))
 
     composed_report: dict | None = None
+    tool_call_log: list[dict[str, str]] = []
 
     async def dispatch(name: str, arguments: dict) -> str:
         nonlocal composed_report
@@ -84,6 +109,9 @@ async def run_chat_turn(
         if name == "save_template":
             await db.commit()
 
+        summary = _summarize_tool_result(name, result_str)
+        tool_call_log.append({"name": name, "summary": summary})
+
         return result_str
 
     text, session["messages"] = await run_tool_loop(
@@ -102,5 +130,6 @@ async def run_chat_turn(
     return {
         "role": "assistant",
         "content": text,
+        "tool_calls": tool_call_log,
         "composed_report": composed_report,
     }
