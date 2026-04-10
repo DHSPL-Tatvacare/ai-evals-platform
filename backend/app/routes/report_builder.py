@@ -1,11 +1,14 @@
 """API routes for the report builder chat."""
 from __future__ import annotations
 
+import json as json_mod
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from app.auth import AuthContext, get_auth_context
 from app.database import get_db
-from app.services.report_builder.chat_handler import run_chat_turn
+from app.services.report_builder.chat_handler import run_chat_turn, run_chat_turn_streaming
 from app.services.report_builder.schemas import (
     BuilderChatRequest,
     BuilderChatResponse,
@@ -64,3 +67,38 @@ async def chat(
         ],
         composed_report=composed,
     )
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    body: BuilderChatRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db=Depends(get_db),
+):
+    """SSE streaming version of the chat endpoint."""
+    if body.session_id:
+        session = get_session(body.session_id)
+    else:
+        session = None
+
+    if not session:
+        session_id, session = create_session(
+            app_id=body.app_id,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
+            provider=body.provider,
+            model=body.model,
+        )
+    else:
+        session_id = body.session_id
+
+    async def event_generator():
+        # First event: session ID
+        yield f"event: session\ndata: {json_mod.dumps({'sessionId': session_id})}\n\n"
+        async for event in run_chat_turn_streaming(
+            session, body.message,
+            provider=body.provider, model=body.model, db=db,
+        ):
+            yield f"event: {event['event']}\ndata: {json_mod.dumps(event['data'])}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

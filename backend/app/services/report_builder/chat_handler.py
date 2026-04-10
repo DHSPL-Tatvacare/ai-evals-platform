@@ -4,9 +4,10 @@ Wires report-specific tools and system prompt into the shared chat engine.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -132,4 +133,93 @@ async def run_chat_turn(
         "content": text,
         "tool_calls": tool_call_log,
         "composed_report": composed_report,
+    }
+
+
+async def run_chat_turn_streaming(
+    session: dict[str, Any],
+    user_message: str,
+    *,
+    provider: str,
+    model: str,
+    db: AsyncSession,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """
+    Generator version of run_chat_turn that yields SSE-style event dicts.
+    Each yielded dict has {"event": str, "data": dict}.
+    """
+    adapter = await create_adapter(
+        provider=provider,
+        model=model,
+        tenant_id=session["tenant_id"],
+        user_id=session["user_id"],
+    )
+
+    session["messages"].append(adapter.build_user_message(user_message))
+
+    composed_report: dict | None = None
+    tool_call_log: list[dict[str, str]] = []
+    event_queue: list[dict[str, Any]] = []
+
+    async def dispatch(name: str, arguments: dict) -> str:
+        nonlocal composed_report
+
+        event_queue.append({"event": "tool_call_start", "data": {"name": name}})
+
+        result_str = await dispatch_tool_call(
+            name, arguments,
+            db=db,
+            tenant_id=session["tenant_id"],
+            user_id=session["user_id"],
+            app_id=session["app_id"],
+        )
+
+        summary = _summarize_tool_result(name, result_str)
+        tool_call_log.append({"name": name, "summary": summary})
+        event_queue.append({"event": "tool_call_end", "data": {"name": name, "summary": summary}})
+
+        if name == "compose_report":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                composed_report = parsed
+
+        if name == "save_template":
+            await db.commit()
+
+        return result_str
+
+    text, session["messages"] = await run_tool_loop(
+        adapter=adapter,
+        messages=session["messages"],
+        tools=TOOLS,
+        system=SYSTEM_PROMPT,
+        temperature=0.3,
+        dispatch_fn=dispatch,
+        max_rounds=MAX_TOOL_ROUNDS,
+    )
+
+    if text is None:
+        text = "I've reached the maximum number of tool calls for this turn. Please try a simpler request."
+
+    # Yield all queued tool call events
+    for event in event_queue:
+        yield event
+
+    # Yield content
+    yield {"event": "content_delta", "data": {"delta": text}}
+
+    # Yield done
+    composed_out = None
+    if composed_report:
+        composed_out = {
+            "reportName": composed_report.get("report_name"),
+            "sections": composed_report.get("sections", []),
+        }
+
+    yield {
+        "event": "done",
+        "data": {
+            "toolCalls": tool_call_log,
+            "composedReport": composed_out,
+        },
     }
