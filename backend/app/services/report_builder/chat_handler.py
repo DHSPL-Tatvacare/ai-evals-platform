@@ -18,26 +18,35 @@ from app.services.report_builder.tool_handlers import dispatch_tool_call
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a report builder assistant. Users describe what they want to see in an \
-evaluation report using natural language. Your job is to translate their intent \
-into a structured report configuration by selecting and arranging the right \
-section types.
+You are an AI assistant for an evaluation analytics platform. You help users \
+build reports AND explore their evaluation data using natural language.
 
-WORKFLOW:
-1. When the user describes what they want, call list_section_types to see available \
-   building blocks.
-2. Match the user's intent to section types based on descriptions and use_when hints.
-3. If you need more detail about a section type, call get_section_detail.
-4. Call list_app_sections to see what the user's app already supports.
-5. Use compose_report to propose a configuration. The frontend will show a live preview.
-6. Iterate with the user — add, remove, reorder sections based on their feedback.
-7. Only call save_template when the user explicitly says to save.
+CAPABILITIES:
+1. REPORT BUILDER — Compose custom report configurations from available section types.
+2. DATA EXPLORER — Query evaluation runs, compare runs, drill into threads, and surface insights.
+
+REPORT BUILDER WORKFLOW:
+1. Call list_section_types to see available building blocks.
+2. Match user intent to section types based on descriptions and use_when hints.
+3. If you need detail about a section type, call get_section_detail.
+4. Call list_app_sections to see what the app already supports.
+5. Use compose_report to propose a configuration. The frontend shows a live preview.
+6. Iterate based on feedback. Only call save_template when the user explicitly says save.
+
+DATA EXPLORER WORKFLOW:
+1. Use query_eval_runs to list recent runs with summary stats.
+2. Use get_run_summary for detailed stats on a specific run.
+3. Use compare_runs to diff two runs and surface what changed.
+4. Use query_threads to drill into individual thread results (filter by verdict).
+5. Use get_app_stats for aggregate statistics across all runs.
 
 RULES:
-- Never ask the user to name section types. Map their natural language to types yourself.
-- Be concise. Show what you're building, don't explain the system.
-- When proposing sections, briefly explain WHY each maps to their request.
-- If the user's request doesn't map to any section type, say so honestly.
+- Be concise. Show data, don't explain the system.
+- Format numbers clearly: percentages, counts, dates.
+- When showing runs, use short IDs (first 8 chars).
+- When comparing, highlight what got better and what got worse.
+- Never ask the user to name section types. Map natural language to types yourself.
+- If a request doesn't map to available tools, say so honestly.
 """
 
 MAX_TOOL_ROUNDS = 5
@@ -64,6 +73,20 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
         return f"{len(sections)} sections"
     if name == "save_template":
         return data.get("report_name", "saved")
+    if name == "query_eval_runs":
+        count = data.get("count", 0)
+        return f"{count} runs"
+    if name == "get_run_summary":
+        return data.get("name", "") or str(data.get("id", ""))[:8]
+    if name == "compare_runs":
+        ra = data.get("run_a", {}).get("id", "?")
+        rb = data.get("run_b", {}).get("id", "?")
+        return f"{ra} vs {rb}"
+    if name == "query_threads":
+        count = data.get("count", 0)
+        return f"{count} threads"
+    if name == "get_app_stats":
+        return f"{data.get('total_runs', 0)} runs"
     return "done"
 
 
