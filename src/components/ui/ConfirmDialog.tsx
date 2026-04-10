@@ -2,6 +2,12 @@ import { Trash2, AlertTriangle, type LucideIcon } from 'lucide-react';
 import { Modal, Button } from '@/components/ui';
 import type { ButtonVariant } from '@/components/ui/Button';
 
+interface ExtraAction {
+  label: string;
+  onClick: () => void;
+  variant?: ButtonVariant;
+}
+
 interface ConfirmDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -14,6 +20,8 @@ interface ConfirmDialogProps {
   isLoading?: boolean;
   /** Override the default icon. Set to `null` to hide. */
   icon?: LucideIcon | null;
+  /** Additional action buttons rendered before the confirm button. */
+  extraActions?: ExtraAction[];
 }
 
 const variantDefaults: Record<string, { icon: LucideIcon; buttonVariant: ButtonVariant; accent: string }> = {
@@ -45,6 +53,7 @@ export function ConfirmDialog({
   variant = 'primary',
   isLoading = false,
   icon,
+  extraActions,
 }: ConfirmDialogProps) {
   const defaults = variantDefaults[variant] ?? variantDefaults.primary;
   const Icon = icon === null ? null : (icon ?? defaults.icon);
@@ -69,6 +78,16 @@ export function ConfirmDialog({
           <Button variant="ghost" onClick={onClose} disabled={isLoading}>
             {cancelLabel}
           </Button>
+          {extraActions?.map((action) => (
+            <Button
+              key={action.label}
+              variant={action.variant ?? 'secondary'}
+              onClick={action.onClick}
+              disabled={isLoading}
+            >
+              {action.label}
+            </Button>
+          ))}
           <Button
             variant={defaults.buttonVariant}
             onClick={onConfirm}
