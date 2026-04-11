@@ -94,6 +94,7 @@ export function KairaSidebarContent({
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
+          getSessionHref={routes.kaira.chatSession}
         />
       </nav>
     </>

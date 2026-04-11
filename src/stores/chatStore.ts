@@ -110,7 +110,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     try {
       set({ isLoadingSessions: true, error: null });
 
-      const sessions = await chatSessionsRepository.getAll(appId);
+      const sessions = (await chatSessionsRepository.getAll(appId))
+        .filter((s) => s.serverSessionId !== 'sherlock');
 
       set((state) => ({
         sessions: {

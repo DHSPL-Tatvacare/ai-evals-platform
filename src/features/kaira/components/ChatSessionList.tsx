@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { MessageSquare, Pencil, Trash2, Check, X } from 'lucide-react';
 import { cn, formatDate } from '@/utils';
 import { Modal, Button, EmptyState } from '@/components/ui';
@@ -15,6 +16,8 @@ interface ChatSessionListProps {
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, newTitle: string) => void;
+  /** When provided, session items render as <a> tags (interceptable by nav blockers) */
+  getSessionHref?: (sessionId: string) => string;
 }
 
 interface SessionItemProps {
@@ -23,14 +26,16 @@ interface SessionItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onRename: (newTitle: string) => void;
+  href?: string;
 }
 
-function SessionItem({ 
-  session, 
-  isSelected, 
-  onSelect, 
-  onDelete, 
-  onRename 
+function SessionItem({
+  session,
+  isSelected,
+  onSelect,
+  onDelete,
+  onRename,
+  href,
 }: SessionItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(session.title);
@@ -108,26 +113,37 @@ function SessionItem({
     );
   }
 
+  const sharedClassName = cn(
+    'w-full text-left block rounded-[6px] px-3 py-2 pr-16 transition-colors',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1',
+    isSelected
+      ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]'
+      : 'text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]'
+  );
+
+  const content = (
+    <>
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 shrink-0 opacity-60" />
+        <span className="truncate text-[13px] font-medium">{session.title}</span>
+      </div>
+      <div className="mt-1 text-[11px] text-[var(--text-muted)] pl-6">
+        {formatDate(session.updatedAt)}
+      </div>
+    </>
+  );
+
   return (
     <div className="group relative">
-      <button
-        onClick={onSelect}
-        className={cn(
-          'w-full text-left block rounded-[6px] px-3 py-2 pr-16 transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1',
-          isSelected
-            ? 'bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]'
-            : 'text-[var(--text-primary)] hover:bg-[var(--interactive-secondary)]'
-        )}
-      >
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 shrink-0 opacity-60" />
-          <span className="truncate text-[13px] font-medium">{session.title}</span>
-        </div>
-        <div className="mt-1 text-[11px] text-[var(--text-muted)] pl-6">
-          {formatDate(session.updatedAt)}
-        </div>
-      </button>
+      {href ? (
+        <Link to={href} onClick={onSelect} className={sharedClassName}>
+          {content}
+        </Link>
+      ) : (
+        <button onClick={onSelect} className={sharedClassName}>
+          {content}
+        </button>
+      )}
       
       {/* Action buttons - visible on hover */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -156,6 +172,7 @@ export function ChatSessionList({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  getSessionHref,
 }: ChatSessionListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KairaChatSession | null>(null);
 
@@ -190,6 +207,7 @@ export function ChatSessionList({
               onSelect={() => onSelectSession(session.id)}
               onDelete={() => setDeleteTarget(session)}
               onRename={(title) => onRenameSession(session.id, title)}
+              href={getSessionHref?.(session.id)}
             />
           </li>
         ))}

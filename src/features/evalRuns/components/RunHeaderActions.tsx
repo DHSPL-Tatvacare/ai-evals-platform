@@ -110,9 +110,9 @@ export function RunHeaderActions({
 
       {!hideActions && (
         <>
-          <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
-
           <ActionIconLink icon={FileText} label="Logs" tooltip="Logs" to={logsHref} />
+
+          <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
 
           {isActive && (
             <PermissionGate action="evaluation:cancel">

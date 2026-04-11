@@ -197,6 +197,13 @@
   --surface-brand-subtle: color-mix(in srgb, var(--interactive-primary) 10%, var(--bg-primary));
   --surface-brand-hover: color-mix(in srgb, var(--interactive-primary) 16%, var(--bg-primary));
 
+  /* Review mode — light needs stronger values on white bg */
+  --review-glow-lo: color-mix(in srgb, var(--color-brand-primary) 28%, transparent);
+  --review-glow-hi: color-mix(in srgb, var(--color-brand-primary) 44%, transparent);
+  --review-bar-bg: color-mix(in srgb, var(--color-brand-primary) 14%, var(--bg-primary));
+  --review-bar-border: color-mix(in srgb, var(--color-brand-primary) 35%, transparent);
+  --review-bar-shadow: color-mix(in srgb, var(--color-brand-primary) 16%, transparent);
+
   /* Status border tokens */
   --border-success: #bbf7d0;
   --border-error: #fecaca;
@@ -326,6 +333,13 @@
   --surface-neutral: var(--bg-tertiary);
   --surface-brand-subtle: color-mix(in srgb, var(--interactive-primary) 18%, var(--bg-primary));
   --surface-brand-hover: color-mix(in srgb, var(--interactive-primary) 26%, var(--bg-primary));
+
+  /* Review mode — dark: brand pops against dark bg at lower % */
+  --review-glow-lo: color-mix(in srgb, var(--color-brand-primary) 22%, transparent);
+  --review-glow-hi: color-mix(in srgb, var(--color-brand-primary) 36%, transparent);
+  --review-bar-bg: color-mix(in srgb, var(--color-brand-primary) 20%, var(--bg-primary));
+  --review-bar-border: color-mix(in srgb, var(--color-brand-primary) 40%, transparent);
+  --review-bar-shadow: color-mix(in srgb, var(--color-brand-primary) 20%, transparent);
 
   --border-success: rgba(16, 185, 129, 0.3);
   --border-error: rgba(239, 68, 68, 0.3);
@@ -462,11 +476,11 @@ html[data-theme-transitioning] * {
 /* Dark mode fix for provider SVG icons rendered as <img> that use fill="currentColor" */
 [data-theme="dark"] .provider-icon-invert { filter: invert(1); }
 
-/* Review Universe — subtle border glow breathe */
+/* Review Universe — border glow breathe */
 .review-border-glow {
-  animation: review-glow-breathe 3s ease-in-out infinite;
+  animation: review-glow-breathe 4s ease-in-out infinite;
 }
 @keyframes review-glow-breathe {
-  0%, 100% { box-shadow: inset 0 0 30px 0 color-mix(in srgb, var(--color-brand-primary) 10%, transparent); }
-  50% { box-shadow: inset 0 0 40px 0 color-mix(in srgb, var(--color-brand-primary) 18%, transparent); }
+  0%, 100% { box-shadow: inset 0 0 48px 0 var(--review-glow-lo); }
+  50% { box-shadow: inset 0 0 64px 0 var(--review-glow-hi); }
 }

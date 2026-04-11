@@ -29,7 +29,7 @@ export function ReviewNavigationBlocker() {
     }));
   }, [context?.items]);
 
-  // Intercept all internal link clicks
+  // Intercept all internal link clicks (<a> tags)
   useEffect(() => {
     if (!active) return;
 
@@ -89,7 +89,6 @@ export function ReviewNavigationBlocker() {
     setPendingHref(null);
     await discardDraft();
     if (href && href !== '__back__') {
-      // Wait for exitReview to complete
       setTimeout(() => navigate(href), 600);
     }
   }, [pendingHref, discardDraft, navigate]);

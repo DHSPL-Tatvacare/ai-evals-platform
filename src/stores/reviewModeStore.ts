@@ -214,7 +214,7 @@ export const useReviewModeStore = create<ReviewModeState>()((set, get) => ({
   ...INITIAL_STATE,
 
   enterReview: async (runId, appId) => {
-    set({ status: 'entering', runId, appId });
+    set({ status: 'entering', runId, appId, active: false });
 
     // Close Sherlock if open
     try {
@@ -284,17 +284,24 @@ export const useReviewModeStore = create<ReviewModeState>()((set, get) => ({
   },
 
   clearAttribute: (item, attr) => {
-    const { edits, baselineEdits } = get();
+    const { edits } = get();
     const storedKey = findStoredKey(edits, item.itemKey, attr.key) ?? reviewKey(item.itemKey, attr.key);
-    const baseline = baselineEdits[storedKey];
-    if (baseline) {
-      // Reset to baseline
-      set({ edits: { ...edits, [storedKey]: { ...baseline } } });
-    } else {
-      const next = { ...edits };
-      delete next[storedKey];
-      set({ edits: next });
-    }
+    const current = edits[storedKey];
+    if (!current) return;
+    // Clear to unreviewed state — keep the key with empty decision
+    // so saveDraft can distinguish "explicitly cleared" from "never touched"
+    set({
+      edits: {
+        ...edits,
+        [storedKey]: {
+          ...current,
+          decision: '' as const,
+          reviewedValue: null,
+          reasonCode: null,
+          note: null,
+        },
+      },
+    });
   },
 
   setAttributeNote: (item, attr, note) => {

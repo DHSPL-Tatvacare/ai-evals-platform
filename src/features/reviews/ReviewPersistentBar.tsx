@@ -26,11 +26,11 @@ export function ReviewPersistentBar() {
       {active && (
         <motion.div
           key="review-persistent-bar"
-          initial={{ y: 60, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: 60, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-          className="fixed bottom-0 left-0 right-0 border-t border-[var(--interactive-primary)]/25 bg-[color-mix(in_srgb,var(--interactive-primary)_9%,var(--bg-primary))] px-6 py-3 shadow-[0_-10px_24px_color-mix(in_srgb,var(--interactive-primary)_10%,transparent)] backdrop-blur-sm"
+          initial={{ y: 40, opacity: 0, filter: 'blur(4px)' }}
+          animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
+          exit={{ y: 20, opacity: 0, filter: 'blur(4px)' }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="bg-[var(--review-bar-bg)] px-6 py-3 shadow-[0_-10px_24px_var(--review-bar-shadow)] backdrop-blur-sm"
           style={{ zIndex: 'var(--z-sticky)' }}
         >
           <div className="mx-auto flex max-w-screen-xl flex-col gap-3 md:flex-row md:items-center md:justify-between">

@@ -21,7 +21,7 @@ export function DirtyBar({ isEditing, changeCount, changeSummary, saving = false
 
   return (
     <>
-      <div className="sticky bottom-0 z-[var(--z-sticky)] -mx-1 border border-[var(--interactive-primary)]/25 bg-[color-mix(in_srgb,var(--interactive-primary)_9%,var(--bg-primary))] px-4 py-3 shadow-[0_-10px_24px_color-mix(in_srgb,var(--interactive-primary)_10%,transparent)] backdrop-blur-sm">
+      <div className="sticky bottom-0 z-[var(--z-sticky)] -mx-1 border border-[var(--review-bar-border)] bg-[var(--review-bar-bg)] px-4 py-3 shadow-[0_-10px_24px_var(--review-bar-shadow)] backdrop-blur-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             {hasDirty ? (

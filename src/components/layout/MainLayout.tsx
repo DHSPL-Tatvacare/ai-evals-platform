@@ -13,7 +13,9 @@ import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/
 import { NewInsideSalesEvalOverlay } from '@/features/insideSales/components/NewInsideSalesEvalOverlay';
 import { APP_IDS } from '@/types';
 import { ChatWidget } from '@/features/chat-widget/ChatWidget';
-import { ReviewUniverse } from '@/features/reviews/ReviewUniverse';
+import { ReviewBorderGlow } from '@/features/reviews/ReviewBorderGlow';
+import { ReviewPersistentBar } from '@/features/reviews/ReviewPersistentBar';
+import { ReviewNavigationBlocker } from '@/features/reviews/ReviewNavigationBlocker';
 
 interface MainLayoutProps {
   children?: ReactNode;
@@ -75,16 +77,20 @@ export function MainLayout({ children }: MainLayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)]">
       <Sidebar onNewEval={handleNewEval} />
-      <main className={cn('flex-1 flex flex-col min-h-0 overflow-y-auto px-6 pt-6', miniPlayerOpen && 'pb-20')}>
-        {children ?? <Outlet />}
-      </main>
+      <div className="relative flex-1 flex flex-col min-h-0">
+        <ReviewBorderGlow />
+        <main className={cn('flex-1 flex flex-col min-h-0 overflow-y-auto px-6 pt-6', miniPlayerOpen && 'pb-20')}>
+          {children ?? <Outlet />}
+        </main>
+        <ReviewPersistentBar />
+        <ReviewNavigationBlocker />
+      </div>
       <MiniPlayerConnector />
       <JobCompletionWatcher />
       {activeModal === 'batchEval' && <NewBatchEvalOverlay onClose={closeModal} />}
       {activeModal === 'adversarialTest' && <NewAdversarialOverlay onClose={closeModal} />}
       {activeModal === 'insideSalesEval' && <NewInsideSalesEvalOverlay onClose={closeModal} />}
       <ChatWidget />
-      <ReviewUniverse />
       <OfflineBanner />
       <ShortcutsHelpModal
         isOpen={showShortcutsHelp}

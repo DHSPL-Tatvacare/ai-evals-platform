@@ -765,13 +765,15 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
 
 function StartReviewButton() {
   const review = useInlineReviewOptional();
-  if (!review || review.loading || review.isEditing) return null;
+  if (!review || review.isEditing) return null;
   return (
     <ActionIconButton
-      icon={UserRoundPen}
+      icon={review.loading ? Loader2 : UserRoundPen}
       label="Start human review"
-      tooltip="Start human review"
-      onClick={review.startDraft}
+      tooltip={review.loading ? 'Loading review…' : 'Start human review'}
+      onClick={review.loading ? undefined : review.startDraft}
+      spinning={review.loading}
+      disabled={review.loading}
     />
   );
 }
