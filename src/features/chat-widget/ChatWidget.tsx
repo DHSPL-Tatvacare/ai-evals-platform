@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { X, GripVertical, MessageCirclePlus, History } from 'lucide-react';
+import { Minus, GripVertical, MessageCirclePlus, History } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 function SherlockIcon({ className }: { className?: string }) {
@@ -11,7 +11,7 @@ function SherlockIcon({ className }: { className?: string }) {
     />
   );
 }
-import { useAppStore } from '@/stores';
+import { useAppStore, useUIStore } from '@/stores';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
 import { useLLMSettingsStore, hasProviderCredentials } from '@/stores/llmSettingsStore';
 import { useChatWidgetStore } from './useChatWidget';
@@ -28,6 +28,7 @@ const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(ma
 
 export function ChatWidget() {
   const reviewActive = useReviewModeStore((s) => s.active);
+  const activeModal = useUIStore((s) => s.activeModal);
   const currentApp = useAppStore((s) => s.currentApp);
   const appConfig = useAppStore((s) => s.getAppConfig(currentApp));
   const chatConfig: AppChatConfig = appConfig?.chat ?? {};
@@ -165,6 +166,7 @@ export function ChatWidget() {
 
 
   if (reviewActive) return null;
+  if (activeModal) return null;
   if (chatConfig.enabled === false) return null;
 
   // Collapsed bubble
@@ -250,10 +252,10 @@ export function ChatWidget() {
           </button>
           <button
             onClick={toggle}
-            title="Close"
+            title="Minimize"
             className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
           >
-            <X className="h-3.5 w-3.5" />
+            <Minus className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

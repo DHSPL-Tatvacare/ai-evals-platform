@@ -161,14 +161,13 @@ export function PopoverContent({
     if (!open) return;
     
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        contentRef.current && 
-        !contentRef.current.contains(e.target as Node) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      // Don't close if clicking inside the popover or its trigger
+      if (contentRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      // Don't close if clicking inside a Radix portal (Select, Combobox, etc.)
+      if ((target as Element).closest?.('[data-radix-popper-content-wrapper], [role="listbox"], [data-radix-select-viewport]')) return;
+      setOpen(false);
     };
     
     document.addEventListener('mousedown', handleClickOutside);

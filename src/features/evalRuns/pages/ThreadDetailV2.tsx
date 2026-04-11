@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { History, ChevronLeft, ChevronRight, PencilLine } from 'lucide-react';
-import { Button, EmptyState, Select } from '@/components/ui';
+import { History, ChevronLeft, ChevronRight } from 'lucide-react';
+import { EmptyState, Select } from '@/components/ui';
 import { Tabs } from '@/components/ui/Tabs';
 import type {
   ThreadEvalRow,
@@ -26,11 +26,8 @@ import type { EvalTab } from '../components/threadReview';
 import { getCanonicalThreadEvaluation } from '../utils/threadCanonical';
 import {
   InlineReviewProvider,
-  useInlineReviewOptional,
-  DirtyBar,
 } from '@/features/reviews/inline';
 import { usePermission } from '@/utils/permissions';
-import { useReviewModeStore } from '@/stores/reviewModeStore';
 
 export default function ThreadDetailV2() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -248,7 +245,7 @@ export default function ThreadDetailV2() {
   // - Body: flex-1 min-h-0, fills remaining space
   return (
     <InlineReviewProvider runId={current?.run_id ?? ''} appId="kaira-bot" enabled={canReview && !!current?.run_id}>
-    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0">
       {/* Header — two rows: breadcrumb + controls, then centered metric bar */}
       <div className="shrink-0 pb-3 space-y-2">
         {/* Row 1: breadcrumb left, controls right */}
@@ -275,7 +272,6 @@ export default function ThreadDetailV2() {
 
           {/* Controls: run selector + thread nav */}
           <div className="flex items-center gap-2 shrink-0">
-            <ThreadStartReviewButton />
             {history.length > 1 && (
               <Select
                 value={String(selected)}
@@ -388,39 +384,7 @@ export default function ThreadDetailV2() {
           </div>
         </>
       )}
-      <ThreadReviewDirtyBar />
     </div>
     </InlineReviewProvider>
-  );
-}
-
-function ThreadStartReviewButton() {
-  const reviewActive = useReviewModeStore((s) => s.active);
-  const review = useInlineReviewOptional();
-  if (reviewActive) return null;
-  if (!review || review.loading || review.isEditing) return null;
-  return (
-    <Button variant="secondary" size="sm" icon={PencilLine} onClick={review.startDraft}>
-      Start Review
-    </Button>
-  );
-}
-
-
-function ThreadReviewDirtyBar() {
-  const reviewActive = useReviewModeStore((s) => s.active);
-  const review = useInlineReviewOptional();
-  if (reviewActive) return null;
-  if (!review) return null;
-  return (
-    <DirtyBar
-      isEditing={review.isEditing}
-      changeCount={review.dirtyCount}
-      changeSummary={review.dirtySummary}
-      saving={review.saving}
-      onSaveDraft={review.saveDraft}
-      onFinalize={review.finalize}
-      onDiscard={review.discardDraft}
-    />
   );
 }

@@ -51,9 +51,10 @@ interface LLMSettingsState extends LLMSettings {
  * Usage in components: `useLLMSettingsStore(hasLLMCredentials)`
  * Usage in callbacks:  `hasLLMCredentials(useLLMSettingsStore.getState())`
  */
-export const hasLLMCredentials = (state: Pick<LLMSettingsState, 'apiKey' | 'provider' | '_serviceAccountConfigured' | 'azureOpenaiEndpoint'>): boolean => {
+export const hasLLMCredentials = (state: Pick<LLMSettingsState, 'provider' | '_serviceAccountConfigured' | 'geminiApiKey' | 'openaiApiKey' | 'azureOpenaiApiKey' | 'azureOpenaiEndpoint' | 'anthropicApiKey'>): boolean => {
   if (state.provider === 'gemini' && state._serviceAccountConfigured) return true;
-  if (!state.apiKey) return false;
+  const key = getProviderApiKey(state.provider, state);
+  if (!key) return false;
   // Azure OpenAI requires both API key AND endpoint
   if (state.provider === 'azure_openai') return Boolean(state.azureOpenaiEndpoint);
   return true;
@@ -154,17 +155,17 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
 
   save: async () => {
     const state = get();
-    const settings: LLMSettings = {
+    const settings: Record<string, string> = {
       provider: state.provider,
-      apiKey: state.apiKey,
-      geminiApiKey: state.geminiApiKey,
-      openaiApiKey: state.openaiApiKey,
-      azureOpenaiApiKey: state.azureOpenaiApiKey,
-      azureOpenaiEndpoint: state.azureOpenaiEndpoint,
-      azureOpenaiApiVersion: state.azureOpenaiApiVersion,
-      anthropicApiKey: state.anthropicApiKey,
       geminiAuthMethod: state.geminiAuthMethod,
     };
+    // Only include non-empty keys — empty strings cause cross-provider contamination
+    if (state.geminiApiKey) settings.geminiApiKey = state.geminiApiKey;
+    if (state.openaiApiKey) settings.openaiApiKey = state.openaiApiKey;
+    if (state.azureOpenaiApiKey) settings.azureOpenaiApiKey = state.azureOpenaiApiKey;
+    if (state.azureOpenaiEndpoint) settings.azureOpenaiEndpoint = state.azureOpenaiEndpoint;
+    if (state.azureOpenaiApiVersion) settings.azureOpenaiApiVersion = state.azureOpenaiApiVersion;
+    if (state.anthropicApiKey) settings.anthropicApiKey = state.anthropicApiKey;
     await settingsRepository.set('', 'llm-settings', settings);
   },
 
@@ -191,10 +192,6 @@ export const useLLMSettingsStore = create<LLMSettingsState>((set, get) => ({
       updates.azureOpenaiApiKey = key;
     } else if (provider === 'anthropic') {
       updates.anthropicApiKey = key;
-    }
-    // If this is the active provider, also update apiKey
-    if (get().provider === provider) {
-      updates.apiKey = key;
     }
     set(updates);
   },

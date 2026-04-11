@@ -831,11 +831,12 @@ async def handle_analyze(
     db: AsyncSession,
     auth: Any,
     app_id: str,
+    provider: str | None = None,
     **_kwargs: Any,
 ) -> dict:
     """Semantic SQL agent — generates and executes SQL from natural language."""
     from app.services.chat_engine.sql_agent import analyze
-    return await analyze(question=question, db=db, auth=auth, app_id=app_id)
+    return await analyze(question=question, db=db, auth=auth, app_id=app_id, provider=provider)
 
 
 TOOL_HANDLER_MAP = {
@@ -868,6 +869,7 @@ async def dispatch_tool_call(
     db: AsyncSession,
     auth: "Any",
     app_id: str,
+    provider: str | None = None,
 ) -> str:
     """Route a tool call to its handler and return JSON string result."""
     import time
@@ -881,8 +883,8 @@ async def dispatch_tool_call(
         )
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
-    # Context kwargs (db, auth, app_id) take precedence over LLM-supplied args
-    context = dict(db=db, auth=auth, app_id=app_id)
+    # Context kwargs (db, auth, app_id, provider) take precedence over LLM-supplied args
+    context: dict[str, Any] = dict(db=db, auth=auth, app_id=app_id, provider=provider)
     safe_args = {k: v for k, v in arguments.items() if k not in context}
 
     try:

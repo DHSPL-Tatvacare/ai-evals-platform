@@ -229,6 +229,7 @@ async def run_chat_turn(
             db=db,
             auth=auth,
             app_id=session["app_id"],
+            provider=provider,
         )
         execution_ms = (time.monotonic() - start) * 1000
         detail = _build_tool_call_detail(name, result_str, execution_ms=execution_ms)
@@ -309,6 +310,7 @@ async def run_chat_turn_streaming(
             db=db,
             auth=auth,
             app_id=session["app_id"],
+            provider=provider,
         )
         execution_ms = (time.monotonic() - start) * 1000
         detail = _build_tool_call_detail(name, result_str, execution_ms=execution_ms)

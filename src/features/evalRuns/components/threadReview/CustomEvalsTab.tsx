@@ -23,7 +23,7 @@ export default function CustomEvalsTab({ customEvaluations, evaluatorDescriptors
   }
 
   return (
-    <div className="space-y-3 overflow-y-auto h-full px-4 pb-4">
+    <div className="space-y-3 h-full px-4 pb-4">
       {/* Sub-nav pills if multiple evaluators */}
       {entries.length > 1 && (
         <div className="flex flex-wrap gap-1">

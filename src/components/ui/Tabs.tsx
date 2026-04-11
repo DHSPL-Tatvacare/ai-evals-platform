@@ -73,7 +73,7 @@ export function Tabs({
           </button>
         ))}
       </div>
-      <div className={cn(fillHeight ? 'pt-2 flex-1 min-h-0 overflow-hidden' : 'pt-4')}>
+      <div className={cn(fillHeight ? 'pt-2 flex-1 min-h-0 flex flex-col' : 'pt-4')}>
         {tabs.map((tab) => {
           if (mountStrategy === 'active-only' && activeTab !== tab.id) {
             return null;
@@ -83,7 +83,7 @@ export function Tabs({
               key={tab.id}
               className={cn(
                 mountStrategy === 'all' && activeTab !== tab.id && 'hidden',
-                fillHeight && activeTab === tab.id && 'h-full overflow-y-auto'
+                fillHeight && activeTab === tab.id && 'flex-1 min-h-0 overflow-y-auto'
               )}
             >
               {tab.content}

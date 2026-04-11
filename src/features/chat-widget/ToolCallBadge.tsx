@@ -37,7 +37,7 @@ export function ToolCallBadge({ name, summary, detail, status }: ToolCallBadgeDa
           {typeof detail.cacheHit === 'boolean' && <div>Cache hit: {detail.cacheHit ? 'yes' : 'no'}</div>}
           {detail.error && <div>Error: {detail.error}</div>}
           {detail.sqlUsed && (
-            <pre className="mt-2 overflow-x-auto rounded bg-[var(--bg-primary)] p-2 text-[10px] text-[var(--text-primary)]">
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-primary)] p-2 text-[10px] text-[var(--text-primary)]">
               <code>{detail.sqlUsed}</code>
             </pre>
           )}

@@ -400,6 +400,7 @@ export default function RunDetail() {
   }
 
   const isInReview = reviewActive && reviewRunId === run.run_id;
+  const isReviewable = !isRunActive && ['completed', 'completed_with_errors'].includes(run.status.toLowerCase());
 
   const correctnessDist: Record<string, number> = {};
   const efficiencyDist: Record<string, number> = {};
@@ -433,7 +434,7 @@ export default function RunDetail() {
 
   return (
     <InlineReviewProvider runId={run.run_id} appId="kaira-bot" enabled={canReview}>
-    <div className="run-detail-container flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+    <div className="run-detail-container flex flex-col flex-1 min-h-0">
       {/* ── Sticky header ─────────────────────────────────── */}
       <div className="run-detail-header shrink-0 space-y-2 pb-2">
         <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
@@ -474,7 +475,7 @@ export default function RunDetail() {
               onCancel={handleCancel}
               onDelete={() => setConfirmDelete(true)}
               hideActions={isInReview}
-              visibilityContent={isInReview ? null : (
+              visibilityContent={isInReview || isRunActive ? null : (
                 <EvalRunVisibilityPanel
                   runId={run.run_id}
                   visibility={run.visibility ?? 'private'}
@@ -487,7 +488,7 @@ export default function RunDetail() {
                   ))}
                 />
               )}
-              reviewContent={isInReview ? null : <StartReviewButton />}
+              reviewContent={isInReview || !isReviewable ? null : <StartReviewButton />}
             />
           </div>
           <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">

@@ -182,6 +182,7 @@ async def generate_sql(
     *,
     tenant_id: str,
     user_id: str,
+    provider_override: str | None = None,
     model_override: str | None = None,
 ) -> str:
     """
@@ -205,9 +206,13 @@ async def generate_sql(
         max_rows=MAX_RESULT_ROWS,
     )
 
-    # Use a fast/cheap model for SQL generation
-    sql_model = model_override or os.getenv("SQL_AGENT_MODEL", "") or "gemini-2.0-flash"
-    sql_provider = os.getenv("SQL_AGENT_PROVIDER", "") or "gemini"
+    # Use a fast/cheap model for SQL generation — match outer provider
+    sql_provider = provider_override or os.getenv("SQL_AGENT_PROVIDER", "") or "gemini"
+    inner_model_defaults = {
+        "gemini": "gemini-3.1-flash-lite-preview",
+        "openai": "gpt-5.4-nano",
+    }
+    sql_model = model_override or os.getenv("SQL_AGENT_MODEL", "") or inner_model_defaults.get(sql_provider, "gemini-3.1-flash-lite-preview")
 
     creds = await get_llm_settings_from_db(
         tenant_id=tenant_id, user_id=user_id,
@@ -372,6 +377,7 @@ async def analyze(
     db: AsyncSession,
     auth: Any,
     app_id: str,
+    provider: str | None = None,
 ) -> dict:
     """
     End-to-end: question → SQL generation → validation → execution → results.
@@ -393,6 +399,7 @@ async def analyze(
                 question,
                 tenant_id=str(getattr(auth, "tenant_id", "")),
                 user_id=str(getattr(auth, "user_id", "")),
+                provider_override=provider,
             )
 
         logger.info("SQL agent: generated SQL: %s", sql[:200])
@@ -419,7 +426,7 @@ async def analyze(
                     "row_count": cached["row_count"],
                     "data": cached["data"][:MAX_RESULT_ROWS],
                     "generated_sql": sql[:300],
-                    "sql_used": safe_sql[:300],
+                    "sql_used": safe_sql,
                     "cache_hit": True,
                 }
 
@@ -444,6 +451,7 @@ async def analyze(
                     fix_question,
                     tenant_id=tenant_id,
                     user_id=str(getattr(auth, "user_id", "")),
+                    provider_override=provider,
                 )
                 logger.info("SQL agent: retry SQL: %s", fixed_sql[:200])
 
@@ -464,7 +472,7 @@ async def analyze(
             "row_count": len(rows),
             "data": rows[:MAX_RESULT_ROWS],
             "generated_sql": sql[:300],
-            "sql_used": safe_sql[:300],
+            "sql_used": safe_sql,
         }
 
     except SQLValidationError as e:

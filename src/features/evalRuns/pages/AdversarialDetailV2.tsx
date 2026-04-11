@@ -214,7 +214,7 @@ export default function AdversarialDetailV2() {
   const goalVerdicts = canonicalCase?.judge.goalVerdicts ?? [];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+    <div className="flex flex-col flex-1 min-h-0">
       <div className="shrink-0 pb-3 space-y-3">
         <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
           <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>

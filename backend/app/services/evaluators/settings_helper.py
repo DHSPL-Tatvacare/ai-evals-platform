@@ -105,7 +105,7 @@ async def get_llm_settings_from_db(
         elif provider == "openai":
             api_key = value.get("openaiApiKey", "")
         else:
-            api_key = value.get("geminiApiKey") or value.get("apiKey", "")
+            api_key = value.get("geminiApiKey", "")
         selected_model = value.get("selectedModel", "")
     elif "apiKey" in value:
         # Legacy format: single apiKey at top level

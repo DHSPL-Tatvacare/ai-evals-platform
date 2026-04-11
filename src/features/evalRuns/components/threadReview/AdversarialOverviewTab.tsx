@@ -20,7 +20,7 @@ export default function AdversarialOverviewTab({ result, canonicalCase, verdict,
   const transport = canonicalCase?.facts.transport;
 
   return (
-    <div className="space-y-4 overflow-y-auto h-full px-4 pb-4">
+    <div className="space-y-4 h-full px-4 pb-4">
       {/* Infra error banner */}
       {isFailure && infraError && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-md border text-sm bg-[var(--surface-error)] border-[var(--border-error)]">

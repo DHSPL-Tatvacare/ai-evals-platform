@@ -204,8 +204,7 @@ export default function RuleComplianceTab({
         {summarizeRuleOutcomes(allRules.map((rule) => ({ status: rule.status, followed: rule.followed })))}
       </p>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="overflow-x-auto pb-1">
+      <div className="flex-1 min-h-0 overflow-auto">
           <table className="w-full text-sm" style={{ minWidth: 1180 }}>
             <colgroup>
               <col style={{ width: '9rem' }} />
@@ -272,7 +271,6 @@ export default function RuleComplianceTab({
               })}
             </tbody>
           </table>
-        </div>
       </div>
     </div>
   );

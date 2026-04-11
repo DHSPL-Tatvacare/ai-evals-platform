@@ -85,7 +85,6 @@ export function ProviderConfigCard({
       anthropic: 'anthropicApiKey',
     };
     onChange(keyMap[provider], value);
-    onChange('apiKey', value);
   };
 
   return (

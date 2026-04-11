@@ -653,7 +653,7 @@ function CallEvalDetail({
   const isVerdictSaved = useReviewModeStore((s) => s.isAttributeSaved(verdictItem.itemKey, verdictAttribute.key));
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height,48px))]">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
       <div className="shrink-0 pb-3 space-y-2">
         {/* Row 1: breadcrumb + thread nav */}

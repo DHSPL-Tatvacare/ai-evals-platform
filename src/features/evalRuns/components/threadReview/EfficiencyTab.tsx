@@ -41,7 +41,7 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
   const summary = summarizeRuleOutcomes(allRules);
 
   return (
-    <div className="space-y-4 overflow-y-auto h-full px-4 pb-4">
+    <div className="space-y-4 h-full px-4 pb-4">
       {/* ── Summary card: badges + reasoning + failure reason ── */}
       <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
         {/* Badge row */}
