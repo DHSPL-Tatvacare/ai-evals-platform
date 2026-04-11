@@ -74,19 +74,26 @@ export function ChatWidget() {
     document.addEventListener('mouseup', handleUp);
   }, [pos]);
 
-  // ── Resize by dragging top edge ──
-  const resizeRef = useRef<{ startY: number; startHeight: number; startBottom: number } | null>(null);
+  // ── Resize by dragging edges ──
+  const resizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; edge: string } | null>(null);
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((edge: 'top' | 'left' | 'top-left') => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    resizeRef.current = { startY: e.clientY, startHeight: size.height, startBottom: pos.bottom };
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: size.width, startHeight: size.height, edge };
 
     const handleMove = (ev: MouseEvent) => {
       if (!resizeRef.current) return;
-      const dy = resizeRef.current.startY - ev.clientY;
-      const newHeight = clamp(resizeRef.current.startHeight + dy, 300, window.innerHeight - 40);
-      setSize((s) => ({ ...s, height: newHeight }));
+      const { edge: ed, startX, startY, startWidth, startHeight } = resizeRef.current;
+
+      if (ed === 'top' || ed === 'top-left') {
+        const dy = startY - ev.clientY;
+        setSize((s) => ({ ...s, height: clamp(startHeight + dy, 300, window.innerHeight - 40) }));
+      }
+      if (ed === 'left' || ed === 'top-left') {
+        const dx = startX - ev.clientX;
+        setSize((s) => ({ ...s, width: clamp(startWidth + dx, 360, window.innerWidth - 40) }));
+      }
     };
 
     const handleUp = () => {
@@ -97,7 +104,7 @@ export function ChatWidget() {
 
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [size.height, pos.bottom]);
+  }, [size.width, size.height]);
 
   useEffect(() => {
     if (!defaults) void loadDefaults();
@@ -161,13 +168,12 @@ export function ChatWidget() {
         'border border-[var(--border-default)]',
       )}
     >
-      {/* Top resize handle — drag to increase height upward */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="absolute top-0 left-4 right-4 h-1.5 cursor-n-resize z-10 group"
-      >
+      {/* Resize handles */}
+      <div onMouseDown={handleResizeStart('top')} className="absolute top-0 left-4 right-4 h-1.5 cursor-n-resize z-10 group">
         <div className="mx-auto mt-0.5 h-0.5 w-10 rounded-full bg-[var(--border-default)] group-hover:bg-[var(--text-muted)] transition-colors" />
       </div>
+      <div onMouseDown={handleResizeStart('left')} className="absolute top-4 bottom-4 left-0 w-1.5 cursor-w-resize z-10" />
+      <div onMouseDown={handleResizeStart('top-left')} className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize z-20" />
 
       {/* Header with drag handle */}
       <div
