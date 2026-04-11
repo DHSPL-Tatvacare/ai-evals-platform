@@ -30,6 +30,8 @@ from app.models.external_agent import ExternalAgent
 from app.models.eval_template import EvalTemplate
 from app.models.analytics_facts import AnalyticsRunFact, AnalyticsEvalFact, AnalyticsCriterionFact
 from app.models.analytics_log import AnalyticsJobLog, AgentToolLog, AnalyticsQueryCache
+from app.models.analytics_chart import AnalyticsChart
+from app.models.analytics_dashboard import AnalyticsDashboard
 
 __all__ = [
     "Base",
@@ -45,4 +47,5 @@ __all__ = [
     "EvalTemplate",
     "AnalyticsRunFact", "AnalyticsEvalFact", "AnalyticsCriterionFact",
     "AnalyticsJobLog", "AgentToolLog", "AnalyticsQueryCache",
+    "AnalyticsChart", "AnalyticsDashboard",
 ]

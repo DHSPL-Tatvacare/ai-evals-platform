@@ -1,0 +1,31 @@
+"""Dashboard — ordered collection of chart references with layout metadata."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, TimestampMixin, TenantUserMixin
+from app.models.mixins.shareable import ShareableMixin
+
+
+class AnalyticsDashboard(Base, TenantUserMixin, ShareableMixin, TimestampMixin):
+    __tablename__ = "analytics_dashboards"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+
+    # Ordered list of chart IDs + optional per-chart layout overrides
+    # [{chart_id: "uuid", width: "half"|"full", order: 0}, ...]
+    chart_entries: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+    )
