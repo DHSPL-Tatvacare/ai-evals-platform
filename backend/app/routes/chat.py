@@ -32,11 +32,12 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(
     app_id: str = Query(...),
+    source: str | None = Query(None),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all chat sessions for an app."""
-    result = await db.execute(
+    """List all chat sessions for an app. Optional source filter (e.g. 'sherlock')."""
+    q = (
         select(ChatSession)
         .where(
             ChatSession.tenant_id == auth.tenant_id,
@@ -45,6 +46,15 @@ async def list_sessions(
         )
         .order_by(desc(ChatSession.updated_at))
     )
+    if source:
+        q = q.where(ChatSession.server_session_id == source)
+    else:
+        # Default: exclude sherlock sessions from Kaira listing
+        q = q.where(
+            (ChatSession.server_session_id.is_(None))
+            | (ChatSession.server_session_id != "sherlock")
+        )
+    result = await db.execute(q)
     return result.scalars().all()
 
 

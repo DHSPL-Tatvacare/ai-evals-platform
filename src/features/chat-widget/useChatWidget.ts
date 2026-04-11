@@ -88,8 +88,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
 
   loadSessions: async (appId) => {
     try {
-      const sessions = await chatSessionsRepository.getAll(appId);
-      // Filter to sherlock sessions (title prefix or all — we use the same chat sessions table)
+      const sessions = await chatSessionsRepository.getAll(appId, 'sherlock');
       set({
         sessions: sessions.map((s) => ({
           id: s.id,
@@ -285,6 +284,7 @@ async function _persistMessages(
       const title = userContent.length > 60 ? userContent.slice(0, 57) + '...' : userContent;
       const session = await chatSessionsRepository.create(appId, {
         userId: '',
+        serverSessionId: 'sherlock',
         title,
         status: 'active',
       });

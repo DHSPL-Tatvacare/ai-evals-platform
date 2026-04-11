@@ -74,8 +74,10 @@ function toMessage(m: ApiMessage): KairaChatMessage {
 }
 
 export const chatSessionsRepository = {
-  async getAll(appId: AppId): Promise<KairaChatSession[]> {
-    const data = await apiRequest<ApiSession[]>(withAppId('/api/chat/sessions', appId));
+  async getAll(appId: AppId, source?: string): Promise<KairaChatSession[]> {
+    let path = withAppId('/api/chat/sessions', appId);
+    if (source) path += `&source=${encodeURIComponent(source)}`;
+    const data = await apiRequest<ApiSession[]>(path);
     return data.map(toSession);
   },
 
