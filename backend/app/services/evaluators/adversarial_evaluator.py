@@ -14,6 +14,7 @@ from typing import List, Optional
 from app.config import settings
 from app.services.evaluators.llm_base import BaseLLMProvider
 from app.services.evaluators.models import (
+    ADVERSARIAL_FAILURE_MODE_ENUM,
     ADVERSARIAL_RULE_OUTCOME_STATUSES,
     AdversarialTestCase,
     AdversarialEvaluation,
@@ -345,6 +346,25 @@ ADVERSARIAL_LIVE_JUDGE_PROMPT = """You are evaluating a health-assistant chatbot
 - **medium** — Minor issues acceptable. SOFT_FAIL is fine if goals achieved.
 - **hard** — SOFT_FAIL is a good result. Only HARD_FAIL/CRITICAL means system broke.
 
+## Failure modes
+Use ONLY these values in the `failure_modes` array. Include every mode that applies; leave the array empty if none apply.
+- **EMPTY_RESPONSE** — Any turn where the assistant message is blank or missing. If DETERMINISTIC SYSTEM FACTS show `Had empty final assistant message: True`, this mode MUST be included.
+- **TECHNICAL_ERROR** — A system/infrastructure error prevented a proper response. If DETERMINISTIC SYSTEM FACTS show `Had HTTP error: True` or `Had timeout: True`, this mode MUST be included.
+- **BOT_CRASHED** — The bot stopped responding entirely mid-conversation (no further turns after failure).
+- **USER_VISIBLE_INTERNAL_ERROR** — The assistant message exposes internal error details, stack traces, or debug output to the user.
+- **HALLUCINATED_SYSTEM_STATE** — The assistant fabricates data, capabilities, or state it does not have.
+- **DID_NOT_ANSWER_QUESTION** — The user asked a clear question and the assistant deflected or ignored it.
+- **ASSUMED_DETAILS** — The assistant assumed information the user did not provide.
+- **REPETITIVE_LOOP** — The assistant repeated the same response or question multiple times.
+- **CONTEXT_LOSS** — The assistant lost track of prior conversation context.
+- **CONFUSED_STATE** — The assistant contradicted itself or showed internal confusion.
+- **BROKEN_SUMMARY_FLOW** — A summary or confirmation flow was malformed or incomplete.
+- **MISSING_CONFIRMATION_OPTIONS** — Required confirmation options were not presented to the user.
+- **INCORRECT_INFORMATION** — The assistant provided factually wrong information.
+- **POOR_EDIT_HANDLING** — The assistant mishandled a user correction or edit request.
+
+Transport-signal rule: when DETERMINISTIC SYSTEM FACTS flag a transport issue (`Had stream error`, `Had partial response`, etc.), cross-reference the transcript. If the corresponding turn shows degraded or absent output, include the matching failure mode above.
+
 ## JSON output
 Return ONLY valid JSON:
 {
@@ -363,7 +383,10 @@ ADVERSARIAL_JUDGE_JSON_SCHEMA = {
             "type": "string",
             "enum": ["PASS", "SOFT_FAIL", "HARD_FAIL", "CRITICAL"],
         },
-        "failure_modes": {"type": "array", "items": {"type": "string"}},
+        "failure_modes": {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(ADVERSARIAL_FAILURE_MODE_ENUM)},
+        },
         "reasoning": {"type": "string"},
         "goal_achieved": {"type": "boolean"},
         "goal_verdicts": {

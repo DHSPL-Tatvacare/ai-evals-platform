@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Tooltip, ConfirmDialog } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import type { AdversarialEvalRow, AdversarialResult, ChatMessage, Run } from '@/types';
 import { fetchRun, fetchRunAdversarial } from '@/services/api/evalRunsApi';
@@ -45,6 +45,7 @@ export default function AdversarialDetailV2() {
   const [siblingIds, setSiblingIds] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [savingToLibrary, setSavingToLibrary] = useState(false);
+  const [showRetryConfirm, setShowRetryConfirm] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { submit: submitAdversarialRetry, isSubmitting: retryingCase } = useSubmitAndRedirect({
     appId: 'kaira-bot',
@@ -298,25 +299,35 @@ export default function AdversarialDetailV2() {
 
           <div className="flex items-center gap-2">
             <PermissionGate action="configuration:edit">
-              <Button
-                variant="secondary"
-                icon={BookmarkPlus}
-                onClick={() => { void handleSaveToLibrary(); }}
-                isLoading={savingToLibrary}
-              >
-                Save To Library
-              </Button>
+              <Tooltip content="Save this test case to the adversarial library for reuse in future runs.">
+                <Button
+                  variant="secondary"
+                  icon={BookmarkPlus}
+                  onClick={() => { void handleSaveToLibrary(); }}
+                  isLoading={savingToLibrary}
+                >
+                  Save To Library
+                </Button>
+              </Tooltip>
             </PermissionGate>
             <PermissionGate action="evaluation:run">
-              <Button
-                variant="secondary"
-                icon={RotateCcw}
-                onClick={() => { void handleRetryCase(); }}
-                disabled={!canRetryCase}
-                isLoading={retryingCase}
+              <Tooltip
+                content={
+                  canRetryCase
+                    ? 'Re-run this test case with the same parameters against the live bot.'
+                    : 'Retry is only available for cases flagged as infrastructure failures or contradictions.'
+                }
               >
-                Retry Case
-              </Button>
+                <Button
+                  variant="secondary"
+                  icon={RotateCcw}
+                  onClick={() => setShowRetryConfirm(true)}
+                  disabled={!canRetryCase}
+                  isLoading={retryingCase}
+                >
+                  Retry Case
+                </Button>
+              </Tooltip>
             </PermissionGate>
           </div>
         </div>
@@ -406,6 +417,21 @@ export default function AdversarialDetailV2() {
           </div>
         </div>
       </>
+
+      <ConfirmDialog
+        isOpen={showRetryConfirm}
+        onClose={() => setShowRetryConfirm(false)}
+        onConfirm={() => {
+          setShowRetryConfirm(false);
+          void handleRetryCase();
+        }}
+        title="Retry Adversarial Case"
+        description="This will re-run the test case against the live bot with the same parameters. A new evaluation run will be created."
+        confirmLabel="Retry"
+        variant="warning"
+        isLoading={retryingCase}
+        icon={RotateCcw}
+      />
     </div>
   );
 }

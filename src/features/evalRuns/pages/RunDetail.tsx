@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { usePoll } from "@/hooks";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText, UserRoundPen } from "lucide-react";
-import { EmptyState, ConfirmDialog, Button } from "@/components/ui";
+import { EmptyState, ConfirmDialog, Button, Tooltip } from "@/components/ui";
 import { PermissionGate } from "@/components/auth/PermissionGate";
 import { RunHeaderActions, ActionIconButton } from "../components/RunHeaderActions";
 import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
@@ -677,6 +677,7 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
   const sourceSummaryItems = describeAdversarialCaseSources(run.batch_metadata);
   const canCompare = !isRunActive && successfulCount > 0;
   const canRetryFailures = !isRunActive && retryableCaseCount > 0;
+  const [showRetryConfirm, setShowRetryConfirm] = useState(false);
 
   return (
     <>
@@ -728,16 +729,39 @@ function AdversarialSection({ evals, adversarialDist, run, isRunActive, onRetryF
               </p>
               <div className="mt-auto pt-2">
                 <PermissionGate action="evaluation:run">
-                  <Button
-                    variant="secondary"
-                    onClick={() => { void onRetryFailedCases(); }}
-                    disabled={!canRetryFailures}
-                    isLoading={retryingFailedCases}
+                  <Tooltip
+                    content={
+                      canRetryFailures
+                        ? `Re-run ${retryableCaseCount} failed case${retryableCaseCount === 1 ? '' : 's'} against the live bot.`
+                        : isRunActive
+                          ? 'Retry is available after the run completes.'
+                          : 'No retryable errored cases were found in this run.'
+                    }
                   >
-                    Retry Failed Cases
-                  </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setShowRetryConfirm(true)}
+                      disabled={!canRetryFailures}
+                      isLoading={retryingFailedCases}
+                    >
+                      Retry Failed Cases
+                    </Button>
+                  </Tooltip>
                 </PermissionGate>
               </div>
+              <ConfirmDialog
+                isOpen={showRetryConfirm}
+                onClose={() => setShowRetryConfirm(false)}
+                onConfirm={() => {
+                  setShowRetryConfirm(false);
+                  void onRetryFailedCases();
+                }}
+                title="Retry Failed Cases"
+                description={`This will re-run ${retryableCaseCount} failed case${retryableCaseCount === 1 ? '' : 's'} against the live bot with the same parameters. A new evaluation run will be created.`}
+                confirmLabel="Retry"
+                variant="warning"
+                isLoading={retryingFailedCases}
+              />
             </div>
           )}
         </div>
