@@ -300,6 +300,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
                         content: finalContent,
                         toolCalls: finalToolCalls,
                         composedReport: data.composedReport,
+                        chart: m.chart,
                         status: 'complete' as const,
                       }
                     : m,
