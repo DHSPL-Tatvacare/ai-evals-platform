@@ -1,7 +1,7 @@
 import { apiRequest } from '@/services/api/client';
 import type { ChatDefaults } from './types';
 import type { ComposedReport } from '@/features/reportBuilder/types';
-import type { ToolCallDetailData } from './types';
+import type { ToolCallDetailData, ChartData } from './types';
 
 interface ChatRequest {
   appId: string;
@@ -17,6 +17,7 @@ interface ChatResponse {
   content: string;
   toolCalls: Array<{ name: string; summary: string; detail?: ToolCallDetailData | null }>;
   composedReport: ComposedReport | null;
+  chart: ChartData | null;
 }
 
 export async function sendChatMessage(body: ChatRequest): Promise<ChatResponse> {
@@ -37,6 +38,7 @@ export async function streamChatMessage(
     onToolCallStart: (name: string) => void;
     onToolCallEnd: (name: string, summary: string, detail?: ToolCallDetailData | null) => void;
     onContentDelta: (delta: string) => void;
+    onChart: (chart: ChartData) => void;
     onDone: (data: { toolCalls: Array<{ name: string; summary: string; detail?: ToolCallDetailData | null }>; composedReport: ComposedReport | null }) => void;
     onError: (error: string) => void;
   },
@@ -84,6 +86,7 @@ export async function streamChatMessage(
               else if (eventType === 'tool_call_start') callbacks.onToolCallStart(data.name);
               else if (eventType === 'tool_call_end') callbacks.onToolCallEnd(data.name, data.summary, data.detail);
               else if (eventType === 'content_delta') callbacks.onContentDelta(data.delta);
+              else if (eventType === 'chart') callbacks.onChart(data as ChartData);
               else if (eventType === 'done') callbacks.onDone(data);
               else if (eventType === 'error') callbacks.onError(data.message || 'Unknown error');
             } catch { /* skip malformed */ }

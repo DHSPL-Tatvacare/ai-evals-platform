@@ -272,6 +272,15 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
                 ),
               }));
             },
+            onChart: (chart) => {
+              set((s) => ({
+                messages: s.messages.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, chart }
+                    : m,
+                ),
+              }));
+            },
             onDone: (data) => {
               finalToolCalls = data.toolCalls.map((tc) => ({
                 name: tc.name,

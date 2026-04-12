@@ -17,12 +17,30 @@ export interface ToolCallBadgeData {
   status: 'running' | 'done';
 }
 
+export interface ChartSpec {
+  type: 'bar' | 'horizontal_bar' | 'line' | 'pie' | 'stacked_bar';
+  title: string;
+  xKey: string;
+  yKey?: string;
+  seriesKeys: string[];
+  xLabel: string;
+  yLabel: string;
+}
+
+export interface ChartData {
+  spec: ChartSpec;
+  data: Record<string, unknown>[];
+  sqlQuery: string;
+  sourceQuestion: string;
+}
+
 export interface WidgetMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   toolCalls: ToolCallBadgeData[];
   composedReport?: ComposedReport | null;
+  chart?: ChartData;
   status: 'complete' | 'streaming' | 'error';
 }
 

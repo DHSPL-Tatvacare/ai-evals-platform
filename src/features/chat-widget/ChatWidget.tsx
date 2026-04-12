@@ -274,6 +274,7 @@ export function ChatWidget() {
           <ChatMessages
             messages={messages}
             status={status}
+            appId={currentApp}
             onRetry={handleRetry}
             onSaveComposedReport={handleSaveComposedReport}
           />

@@ -8,6 +8,7 @@ import { notificationService } from '@/services/notifications';
 import { Button } from '@/components/ui';
 import { ToolCallBadge } from './ToolCallBadge';
 import { ComposedReportCard } from './ComposedReportCard';
+import { ChatChart } from './ChatChart';
 import type { WidgetMessage } from './types';
 
 function getUserInitials(displayName?: string): string {
@@ -20,6 +21,7 @@ function getUserInitials(displayName?: string): string {
 interface ChatMessagesProps {
   messages: WidgetMessage[];
   status: 'idle' | 'sending' | 'error';
+  appId: string;
   onRetry: () => void;
   onSaveComposedReport: (reportName: string) => void;
 }
@@ -56,7 +58,7 @@ function AssistantMessageActions({
   );
 }
 
-export function ChatMessages({ messages, status, onRetry, onSaveComposedReport }: ChatMessagesProps) {
+export function ChatMessages({ messages, status, appId, onRetry, onSaveComposedReport }: ChatMessagesProps) {
   const displayName = useAuthStore((s) => s.user?.displayName);
   const initials = getUserInitials(displayName);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -133,6 +135,10 @@ export function ChatMessages({ messages, status, onRetry, onSaveComposedReport }
                 report={msg.composedReport}
                 onSaveTemplate={onSaveComposedReport}
               />
+            )}
+
+            {msg.role === 'assistant' && msg.chart && (
+              <ChatChart chart={msg.chart} appId={appId} />
             )}
 
             {msg.role === 'assistant' && msg.content && (
