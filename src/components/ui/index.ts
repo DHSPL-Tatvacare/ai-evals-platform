@@ -32,3 +32,5 @@ export { Switch } from './Switch';
 export { LLMConfigSection } from './LLMConfigSection';
 export { PasswordStrengthIndicator, validatePasswordStrength } from './PasswordStrengthIndicator';
 export { FilterPills } from './FilterPills';
+export { PageShell } from './PageShell';
+export { DataTable, type ColumnDef } from './DataTable';
