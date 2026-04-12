@@ -27,8 +27,8 @@ export function ChartCard({ chart, data, loading, onDelete, onClick }: ChartCard
           <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">Loading...</div>
         ) : data ? (
           <ChartRenderer
-            type={chart.chartConfig.type}
-            data={data}
+            type={chart.chartConfig.type === 'horizontal_bar' ? 'bar' : chart.chartConfig.type}
+            data={data.slice(0, 8)}
             xKey={chart.chartConfig.xKey}
             yKey={chart.chartConfig.yKey}
             seriesKeys={chart.chartConfig.seriesKeys}

@@ -6,6 +6,7 @@ import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
 import { EmptyState } from '@/components/ui';
 import { ChartCard } from '../components/ChartCard';
+import { ChartDetailView } from '../components/ChartDetailView';
 import { DashboardView } from '../components/DashboardView';
 import type { SavedChart, SavedDashboard } from '../types';
 
@@ -19,6 +20,7 @@ export function AnalyticsLibraryPage() {
   const [chartData, setChartData] = useState<Record<string, Record<string, unknown>[]>>({});
   const [loading, setLoading] = useState(true);
   const [activeDashboardId, setActiveDashboardId] = useState<string | null>(null);
+  const [activeChart, setActiveChart] = useState<SavedChart | null>(null);
 
   const loadCharts = useCallback(async () => {
     if (!appId) return;
@@ -79,13 +81,14 @@ export function AnalyticsLibraryPage() {
     }
   };
 
+  // Full-page chart detail
+  if (activeChart) {
+    return <ChartDetailView chart={activeChart} onBack={() => setActiveChart(null)} />;
+  }
+
+  // Full-page dashboard detail
   if (activeDashboardId) {
-    return (
-      <DashboardView
-        dashboardId={activeDashboardId}
-        onBack={() => setActiveDashboardId(null)}
-      />
-    );
+    return <DashboardView dashboardId={activeDashboardId} onBack={() => setActiveDashboardId(null)} />;
   }
 
   return (
@@ -153,7 +156,10 @@ export function AnalyticsLibraryPage() {
                   data={chartData[chart.id]}
                   loading={!chartData[chart.id]}
                   onDelete={handleDeleteChart}
-                  onClick={() => {/* TODO: expand/detail view */}}
+                  onClick={(id) => {
+                    const c = charts.find((ch) => ch.id === id);
+                    if (c) setActiveChart(c);
+                  }}
                 />
               ))}
             </div>
