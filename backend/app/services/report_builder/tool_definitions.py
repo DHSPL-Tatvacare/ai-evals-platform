@@ -167,6 +167,53 @@ ANALYTICS_TOOLS: list[dict[str, Any]] = [
             "required": ["question"],
         },
     },
+    {
+        "name": "render_chart",
+        "description": (
+            "Render an interactive chart visualization from data returned by the analyze tool. "
+            "Call this AFTER analyze when the user asks for a chart, visualization, or graph. "
+            "Supported chart types: bar (vertical bars for comparison), horizontal_bar (ranked lists "
+            "with long labels), line (trends over time), pie (proportions/shares), stacked_bar "
+            "(multi-category breakdowns). Choose the type based on the data shape and question. "
+            "The x_key and y_key must match column names from the analyze result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chart_type": {
+                    "type": "string",
+                    "enum": ["bar", "horizontal_bar", "line", "pie", "stacked_bar"],
+                    "description": "Chart type to render.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Chart title displayed above the visualization.",
+                },
+                "x_key": {
+                    "type": "string",
+                    "description": "Column name for the x-axis or category labels.",
+                },
+                "y_key": {
+                    "type": "string",
+                    "description": "Column name for the y-axis values (single series). Required for bar, horizontal_bar, line, pie.",
+                },
+                "series_keys": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Column names for multiple data series (stacked_bar). Each becomes a stacked segment.",
+                },
+                "x_label": {
+                    "type": "string",
+                    "description": "Optional display label for x-axis.",
+                },
+                "y_label": {
+                    "type": "string",
+                    "description": "Optional display label for y-axis.",
+                },
+            },
+            "required": ["chart_type", "title", "x_key"],
+        },
+    },
 ]
 
 # ── Data Explorer tools (DEPRECATED — kept for backwards compat) ─────

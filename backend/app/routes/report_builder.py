@@ -13,6 +13,8 @@ from app.services.report_builder.chat_handler import run_chat_turn, run_chat_tur
 from app.services.report_builder.schemas import (
     BuilderChatRequest,
     BuilderChatResponse,
+    ChartOut,
+    ChartSpecOut,
     ComposedReportOut,
     ToolCallOut,
 )
@@ -60,6 +62,16 @@ async def chat(
             sections=cr["sections"],
         )
 
+    chart_out = None
+    if result.get("chart"):
+        c = result["chart"]
+        chart_out = ChartOut(
+            spec=ChartSpecOut(**c["spec"]),
+            data=c["data"],
+            sql_query=c["sql_query"],
+            source_question=c["source_question"],
+        )
+
     return BuilderChatResponse(
         session_id=session_id,
         content=result.get("content", ""),
@@ -68,6 +80,7 @@ async def chat(
             for tc in result.get("tool_calls", [])
         ],
         composed_report=composed,
+        chart=chart_out,
     )
 
 

@@ -219,9 +219,11 @@ async def run_chat_turn(
 
     composed_report: dict | None = None
     tool_call_log: list[dict[str, Any]] = []
+    last_analyze: dict | None = None
+    chart_spec: dict | None = None
 
     async def dispatch(name: str, arguments: dict) -> str:
-        nonlocal composed_report
+        nonlocal composed_report, last_analyze, chart_spec
 
         start = time.monotonic()
         result_str = await dispatch_tool_call(
@@ -238,6 +240,16 @@ async def run_chat_turn(
             parsed = json.loads(result_str)
             if parsed.get("status") == "ok":
                 composed_report = parsed
+
+        if name == "analyze":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                last_analyze = parsed
+
+        if name == "render_chart":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                chart_spec = parsed.get("chart_spec")
 
         if name == "save_template":
             await db.commit()
@@ -267,6 +279,12 @@ async def run_chat_turn(
         "content": text,
         "tool_calls": tool_call_log,
         "composed_report": composed_report,
+        "chart": {
+            "spec": chart_spec,
+            "data": last_analyze.get("data", []),
+            "sql_query": last_analyze.get("sql_used", ""),
+            "source_question": last_analyze.get("question", ""),
+        } if chart_spec and last_analyze else None,
     }
 
 
@@ -298,9 +316,11 @@ async def run_chat_turn_streaming(
     composed_report: dict | None = None
     tool_call_log: list[dict[str, Any]] = []
     event_queue: list[dict[str, Any]] = []
+    last_analyze: dict | None = None
+    chart_spec: dict | None = None
 
     async def dispatch(name: str, arguments: dict) -> str:
-        nonlocal composed_report
+        nonlocal composed_report, last_analyze, chart_spec
 
         event_queue.append({"event": "tool_call_start", "data": {"name": name}})
 
@@ -319,6 +339,16 @@ async def run_chat_turn_streaming(
             parsed = json.loads(result_str)
             if parsed.get("status") == "ok":
                 composed_report = parsed
+
+        if name == "analyze":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                last_analyze = parsed
+
+        if name == "render_chart":
+            parsed = json.loads(result_str)
+            if parsed.get("status") == "ok":
+                chart_spec = parsed.get("chart_spec")
 
         if name == "save_template":
             await db.commit()
@@ -350,6 +380,18 @@ async def run_chat_turn_streaming(
 
     # Yield content
     yield {"event": "content_delta", "data": {"delta": text}}
+
+    # Yield chart if present
+    if chart_spec and last_analyze:
+        yield {
+            "event": "chart",
+            "data": {
+                "spec": chart_spec,
+                "data": last_analyze.get("data", []),
+                "sqlQuery": last_analyze.get("sql_used", ""),
+                "sourceQuestion": last_analyze.get("question", ""),
+            },
+        }
 
     # Yield done
     composed_out = None

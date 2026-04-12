@@ -839,6 +839,32 @@ async def handle_analyze(
     return await analyze(question=question, db=db, auth=auth, app_id=app_id, provider=provider)
 
 
+async def handle_render_chart(
+    *,
+    chart_type: str,
+    title: str,
+    x_key: str,
+    y_key: str | None = None,
+    series_keys: list[str] | None = None,
+    x_label: str = "",
+    y_label: str = "",
+    **_kwargs: Any,
+) -> dict:
+    """Package chart spec for frontend rendering. Data comes from prior analyze call."""
+    return {
+        "status": "ok",
+        "chart_spec": {
+            "type": chart_type,
+            "title": title,
+            "xKey": x_key,
+            "yKey": y_key,
+            "seriesKeys": series_keys or [],
+            "xLabel": x_label,
+            "yLabel": y_label,
+        },
+    }
+
+
 TOOL_HANDLER_MAP = {
     # Report builder tools (action tools)
     "list_section_types": handle_list_section_types,
@@ -848,6 +874,7 @@ TOOL_HANDLER_MAP = {
     "save_template": handle_save_template,
     # Semantic analytics (replaces all fixed data explorer tools)
     "analyze": handle_analyze,
+    "render_chart": handle_render_chart,
     # Deprecated but kept for backwards compat if referenced
     "query_eval_runs": handle_query_eval_runs,
     "get_run_summary": handle_get_run_summary,
