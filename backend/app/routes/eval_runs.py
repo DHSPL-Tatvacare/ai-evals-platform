@@ -340,9 +340,8 @@ async def list_all_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """List API logs scoped to readable runs."""
-    run_name_col = func.jsonb_extract_path_text(EvalRun.batch_metadata, 'name').label('run_name')
     query = (
-        select(ApiLog, EvalRun.eval_type, run_name_col)
+        select(ApiLog, EvalRun.eval_type, EvalRun.batch_metadata)
         .join(EvalRun, ApiLog.run_id == EvalRun.id)
         .where(
             readable_scope_clause(EvalRun, auth),
@@ -376,10 +375,10 @@ async def list_all_logs(
     total = (await db.execute(total_q)).scalar() or 0
 
     logs_out = []
-    for log, eval_type, run_name in rows:
+    for log, eval_type, batch_meta in rows:
         d = _log_to_dict_full(log)
         d["eval_type"] = eval_type
-        d["run_name"] = run_name
+        d["run_name"] = (batch_meta or {}).get("name")
         logs_out.append(d)
 
     return {
