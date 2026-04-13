@@ -1,10 +1,6 @@
-import os
-import sys
 import unittest
 import uuid
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.models.mixins.shareable import Visibility
 from app.services.reports.report_config_resolver import resolve_report_config

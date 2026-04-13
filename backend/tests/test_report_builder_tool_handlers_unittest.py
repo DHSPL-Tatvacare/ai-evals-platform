@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services.report_builder.tool_handlers import handle_query_eval_runs
 

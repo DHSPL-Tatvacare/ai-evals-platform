@@ -1,12 +1,8 @@
 """Evaluator contract tests — Phase 1 data + Phase 4 API harmonization."""
 
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.evaluator import Evaluator

@@ -1,10 +1,6 @@
-import os
-import sys
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.schemas.app_analytics_config import AnalyticsAssetKeys
 from app.services.reports.asset_resolver import resolve_report_assets, resolve_report_config_assets

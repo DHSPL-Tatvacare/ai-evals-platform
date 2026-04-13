@@ -1,4 +1,3 @@
-import os
 import sys
 import unittest
 from types import ModuleType, SimpleNamespace
@@ -6,8 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.get_db = None

@@ -1,11 +1,8 @@
-import os
 import sys
 import uuid
 import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.async_session = lambda: None

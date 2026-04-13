@@ -1,10 +1,6 @@
-import os
-import sys
 import unittest
 
 from fastapi import HTTPException
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services.reports.cache_validation import (
     load_cached_payload_or_raise,

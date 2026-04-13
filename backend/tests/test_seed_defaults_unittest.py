@@ -1,11 +1,7 @@
-import os
-import sys
 import unittest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.services.seed_defaults import _seed_adversarial_contract_defaults, seed_owner_role
 

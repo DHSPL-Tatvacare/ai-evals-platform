@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
 from pathlib import Path
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.models.evaluation_analytics import EvaluationAnalytics
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload

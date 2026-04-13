@@ -1,10 +1,5 @@
 """Reporting persistence contract tests for phases 2-3."""
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.eval_run import EvalRun
 from app.models.mixins.shareable import Visibility

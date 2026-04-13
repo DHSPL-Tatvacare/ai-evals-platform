@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import os
-import sys
 import uuid
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.auth import AuthContext
 from app.services.chat_engine import sql_agent

@@ -1,10 +1,6 @@
 """unittest coverage for backend analytics profile registry wiring."""
 
-import os
-import sys
 import unittest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 REGISTRY_IMPORT_ERROR = None
 

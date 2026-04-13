@@ -1,4 +1,3 @@
-import os
 import sys
 import unittest
 import uuid
@@ -6,8 +5,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.get_db = None

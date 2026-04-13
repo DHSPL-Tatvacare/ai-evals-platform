@@ -1,6 +1,4 @@
 """Unit tests for compute_mql_score() — all metrics are deterministic."""
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.services.lsq_client import compute_mql_score
 

@@ -1,12 +1,8 @@
 """Settings contract tests — Phase 1 data contracts + Phase 2 resolution."""
 
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy.dialects import postgresql
 from pydantic import ValidationError

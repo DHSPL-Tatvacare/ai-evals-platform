@@ -1,11 +1,7 @@
-import os
-import sys
 import uuid
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services import inside_sales_sync as sync_service  # noqa: E402
 

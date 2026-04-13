@@ -1,12 +1,9 @@
-import os
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.async_session = None

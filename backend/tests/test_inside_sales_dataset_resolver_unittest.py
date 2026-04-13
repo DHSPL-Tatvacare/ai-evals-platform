@@ -1,10 +1,6 @@
-import os
-import sys
 import unittest
 import uuid
 from unittest.mock import patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services import inside_sales_dataset_resolver as resolver  # noqa: E402
 

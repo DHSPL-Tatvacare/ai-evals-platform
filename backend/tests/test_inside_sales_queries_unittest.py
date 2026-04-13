@@ -1,13 +1,9 @@
-import os
-import sys
 import uuid
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.models.inside_sales_mirror import InsideSalesCallMirror, InsideSalesLeadMirror  # noqa: E402
 from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters, InsideSalesLeadFilters  # noqa: E402

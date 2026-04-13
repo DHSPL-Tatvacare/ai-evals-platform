@@ -1,11 +1,7 @@
 """Phase 1 shared-setting access rules for rule catalogs and LLM settings."""
 
-import os
-import sys
 import uuid
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.models.mixins.shareable import Visibility
 from app.models.setting import Setting

@@ -2,10 +2,7 @@
 
 import importlib.util
 import os
-import sys
 import unittest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
 def _load_module(name: str, relative_path: str):

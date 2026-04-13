@@ -1,10 +1,6 @@
 """App config contract tests — Phase 1 shape + Phase 2 seed configs."""
 
-import os
-import sys
 from pathlib import Path
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.models.app import App
 from app.schemas.app_config import AppConfig

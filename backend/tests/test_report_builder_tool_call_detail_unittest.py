@@ -1,11 +1,7 @@
 import json
-import os
-import sys
 import uuid
 import unittest
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.auth import AuthContext
 from app.routes import report_builder

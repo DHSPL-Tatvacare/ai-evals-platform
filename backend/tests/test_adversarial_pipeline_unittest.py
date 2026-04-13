@@ -1,7 +1,6 @@
 """Focused backend coverage for adversarial pipeline canonicalization phases 1-3."""
 
 import asyncio
-import os
 import sys
 import uuid
 from types import ModuleType
@@ -10,8 +9,6 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.async_session = None

@@ -1,11 +1,7 @@
-import os
-import sys
 import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.models.mixins.shareable import Visibility
 from app.models.report_artifact import ReportArtifact

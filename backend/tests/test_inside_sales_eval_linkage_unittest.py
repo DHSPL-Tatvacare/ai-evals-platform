@@ -1,11 +1,7 @@
-import os
-import sys
 import uuid
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services import inside_sales_eval_linkage as linkage  # noqa: E402
 

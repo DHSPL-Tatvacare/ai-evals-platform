@@ -1,11 +1,8 @@
 import asyncio
-import os
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 fake_database = ModuleType('app.database')
 fake_database.async_session = None

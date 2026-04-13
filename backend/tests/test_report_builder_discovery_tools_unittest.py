@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import os
-import sys
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.auth import AuthContext
 from app.services.report_builder import tool_handlers

@@ -1,11 +1,7 @@
-import os
-import sys
 import unittest
 from unittest.mock import patch
 
 import httpx
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services import lsq_client  # noqa: E402
 from app.routes.inside_sales import _translate_lsq_error  # noqa: E402

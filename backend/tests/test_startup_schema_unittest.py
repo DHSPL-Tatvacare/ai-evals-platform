@@ -1,9 +1,5 @@
-import os
-import sys
 import unittest
 from pathlib import Path
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_BOOTSTRAP_PATH = ROOT / 'app' / 'startup_schema.py'

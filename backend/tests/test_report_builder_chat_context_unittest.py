@@ -1,10 +1,6 @@
-import os
-import sys
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services.report_builder import chat_handler, session_store
 from app.services.chat_engine.prompts import app_context as app_context_prompt

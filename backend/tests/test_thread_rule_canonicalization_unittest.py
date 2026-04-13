@@ -1,11 +1,7 @@
 """Focused backend coverage for thread rule-compliance canonicalization."""
 
-import os
-import sys
 from types import SimpleNamespace
 import unittest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services.evaluators.correctness_evaluator import CorrectnessEvaluator  # noqa: E402
 from app.services.evaluators.efficiency_evaluator import EfficiencyEvaluator  # noqa: E402
