@@ -365,5 +365,97 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session['_user_context'], 'CACHED USER CONTEXT')
 
 
+class ChartPipelineRegressionTests(unittest.TestCase):
+    """Regression tests for the chart classifier → scratchpad → prompt pipeline."""
+
+    def test_scratchpad_renders_eligible_chart_types(self):
+        """Eligible chart types in last_analysis must appear in rendered scratchpad text."""
+        session = {
+            'scratchpad': {
+                'findings': [],
+                'composed_report': None,
+                'errors': [],
+                'discovery': None,
+                'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': {
+                    'question': 'revenue by agent',
+                    'row_count': 5,
+                    'columns': ['agent', 'revenue'],
+                    'column_types': {'agent': 'categorical', 'revenue': 'numeric'},
+                    'eligible_charts': ['bar', 'horizontal_bar', 'pie'],
+                    'preview_rows': [{'agent': 'Alice', 'revenue': 100}],
+                },
+                'analysis_history': [],
+                'last_evidence': None,
+            },
+        }
+        rendered = scratchpad_prompt.render(session)
+        self.assertIn('Chart types for this data:', rendered)
+        self.assertIn('bar', rendered)
+        self.assertIn('Best fit: bar', rendered)
+
+    def test_scratchpad_omits_chart_line_when_no_eligible(self):
+        """No eligible_charts → no chart types line in rendered prompt."""
+        session = {
+            'scratchpad': {
+                'findings': [],
+                'composed_report': None,
+                'errors': [],
+                'discovery': None,
+                'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': {
+                    'question': 'something',
+                    'row_count': 0,
+                    'columns': [],
+                    'eligible_charts': [],
+                    'preview_rows': [],
+                },
+                'analysis_history': [],
+                'last_evidence': None,
+            },
+        }
+        rendered = scratchpad_prompt.render(session)
+        self.assertNotIn('Chart types for this data:', rendered)
+
+    def test_semantic_model_ordering_produces_ordered_categorical(self):
+        """inside-sales result_status dimension with ordering → ordered_categorical classification."""
+        from app.services.chat_engine.sql_agent import load_semantic_model, _normalize_dimensions
+        from app.services.chat_engine.chart_classifier import classify_columns
+
+        model = load_semantic_model('inside-sales')
+        dimensions = _normalize_dimensions(model)
+        ordered_names = [d['name'] for d in dimensions if d.get('ordering')]
+        self.assertIn('result_status', ordered_names)
+
+        rows = [{'result_status': 'PASS', 'count': 10}]
+        column_types = classify_columns(['result_status', 'count'], rows, dimensions=dimensions)
+        self.assertEqual(column_types['result_status'], 'ordered_categorical')
+
+    def test_render_chart_tool_has_no_enum_on_chart_type(self):
+        """Regression: render_chart.chart_type must NOT have an enum constraint."""
+        from app.services.report_builder.tool_definitions import ANALYTICS_TOOLS
+
+        render_chart_tool = next(t for t in ANALYTICS_TOOLS if t['name'] == 'render_chart')
+        chart_type_prop = render_chart_tool['inputSchema']['properties']['chart_type']
+        self.assertNotIn('enum', chart_type_prop, 'chart_type must not have enum — classifier handles eligibility')
+
+    def test_build_analysis_snapshot_always_includes_classifier_fields(self):
+        """Regression: snapshot must always include column_types and eligible_charts."""
+        from app.services.report_builder.scratchpad_state import build_analysis_snapshot
+
+        snapshot = build_analysis_snapshot({
+            'status': 'ok',
+            'question': 'test',
+            'row_count': 1,
+            'data': [{'x': 'a', 'y': 1}],
+        })
+        self.assertIn('column_types', snapshot)
+        self.assertIn('eligible_charts', snapshot)
+        self.assertIsInstance(snapshot['column_types'], dict)
+        self.assertIsInstance(snapshot['eligible_charts'], list)
+
+
 if __name__ == '__main__':
     unittest.main()
