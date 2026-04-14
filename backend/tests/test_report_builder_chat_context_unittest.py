@@ -28,6 +28,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
             'errors': [],
             'discovery': None,
             'lookups': {},
+            'resolved_entities': {},
+            'last_analysis': None,
+            'analysis_history': [],
+            'last_evidence': None,
         })
         self.assertIsNone(session['_app_context'])
         self.assertIsNone(session['_user_context'])
@@ -42,6 +46,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                     'errors': [],
                     'discovery': None,
                     'lookups': {},
+                    'resolved_entities': {},
+                    'last_analysis': None,
+                    'analysis_history': [],
+                    'last_evidence': None,
                 },
             }),
             '',
@@ -52,12 +60,27 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'findings': ['pass rate by app (4 rows)'],
                 'composed_report': {'name': 'Weekly Review', 'sections': ['summary_cards', 'compliance_table']},
                 'errors': ['analyze: database unavailable'],
+                'resolved_entities': {'thread_id': {'matches': [{'value': 'thrd-123'}]}},
+                'last_analysis': {
+                    'question': 'latest run summary',
+                    'row_count': 1,
+                    'columns': ['run_name', 'pass_rate'],
+                    'preview_rows': [{'run_name': 'test 1', 'pass_rate': 60.0}],
+                },
+                'analysis_history': [],
+                'last_evidence': {'surface_key': 'logs', 'record_count': 4, 'entity_type': 'thread_id', 'entity_value': 'thrd-123'},
             },
         })
 
         self.assertIn('SESSION STATE:', rendered)
         self.assertIn('- pass rate by app (4 rows)', rendered)
         self.assertIn('Current composed report: "Weekly Review" (summary_cards, compliance_table)', rendered)
+        self.assertIn('Latest analysis context:', rendered)
+        self.assertIn('- Columns: run_name, pass_rate', rendered)
+        self.assertIn('- Row: run_name=test 1, pass_rate=60.0', rendered)
+        self.assertIn('Resolved entities:', rendered)
+        self.assertIn('- thread_id: thrd-123', rendered)
+        self.assertIn('Latest evidence context:', rendered)
         self.assertIn('- analyze: database unavailable', rendered)
 
     def test_update_scratchpad_tracks_successes_and_errors(self):
@@ -69,6 +92,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
             },
         }
 
@@ -79,6 +106,11 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'status': 'ok',
                 'question': 'pass rate by app',
                 'row_count': 4,
+                'sql_used': 'select * from analytics_run_facts',
+                'data': [
+                    {'run_name': 'test 1', 'pass_rate': 60.0},
+                    {'run_name': 'test 2', 'pass_rate': 88.0},
+                ],
             }),
         )
         chat_handler._update_scratchpad(
@@ -114,6 +146,24 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
             session['scratchpad']['findings'],
             ['pass rate by app (4 rows)', 'Saved template: Weekly Review'],
         )
+        snapshot = session['scratchpad']['last_analysis']
+        self.assertEqual(snapshot['question'], 'pass rate by app')
+        self.assertEqual(snapshot['row_count'], 4)
+        self.assertEqual(snapshot['sql_used'], 'select * from analytics_run_facts')
+        self.assertEqual(snapshot['columns'], ['run_name', 'pass_rate'])
+        self.assertEqual(snapshot['data'], [
+            {'run_name': 'test 1', 'pass_rate': 60.0},
+            {'run_name': 'test 2', 'pass_rate': 88.0},
+        ])
+        self.assertEqual(snapshot['preview_rows'], [
+            {'run_name': 'test 1', 'pass_rate': 60.0},
+            {'run_name': 'test 2', 'pass_rate': 88.0},
+        ])
+        self.assertEqual(snapshot['focus'], {'run_name': 'test 1', 'pass_rate': 60.0})
+        # Classifier fields are present
+        self.assertIn('column_types', snapshot)
+        self.assertIn('eligible_charts', snapshot)
+        self.assertEqual(session['scratchpad']['analysis_history'], [session['scratchpad']['last_analysis']])
         self.assertEqual(
             session['scratchpad']['composed_report'],
             {
@@ -124,6 +174,8 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session['scratchpad']['errors'], ['compose_report: Unknown section type: heatmap'])
         self.assertIsNone(session['scratchpad']['discovery'])
         self.assertEqual(session['scratchpad']['lookups'], {})
+        self.assertEqual(session['scratchpad']['resolved_entities'], {})
+        self.assertIsNone(session['scratchpad']['last_evidence'])
         self.assertIsNone(session['_user_context'])
 
     def test_update_scratchpad_caches_discovery_and_lookup_results(self):
@@ -134,6 +186,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
             },
         }
 
@@ -159,6 +215,9 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session['scratchpad']['discovery']['app_id'], 'inside-sales')
         self.assertEqual(session['scratchpad']['lookups']['agent']['values'][0]['value'], 'Pareekshith Bompally')
+        self.assertEqual(session['scratchpad']['resolved_entities'], {})
+        self.assertIsNone(session['scratchpad']['last_analysis'])
+        self.assertEqual(session['scratchpad']['analysis_history'], [])
 
     async def test_assemble_context_combines_all_layers(self):
         session = {
@@ -171,6 +230,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
             },
         }
 
@@ -244,6 +307,10 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
             },
         }
         db = AsyncMock()
@@ -293,6 +360,8 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session['scratchpad']['findings'], [])
         self.assertIsNone(session['scratchpad']['discovery'])
         self.assertEqual(session['scratchpad']['lookups'], {})
+        self.assertIsNone(session['scratchpad']['last_analysis'])
+        self.assertEqual(session['scratchpad']['analysis_history'], [])
         self.assertEqual(session['_user_context'], 'CACHED USER CONTEXT')
 
 
