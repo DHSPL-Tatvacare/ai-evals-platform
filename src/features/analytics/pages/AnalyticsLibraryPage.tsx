@@ -164,17 +164,12 @@ export function AnalyticsLibraryPage() {
       key: 'type',
       header: 'Type',
       render: (row) =>
-        row.itemType === 'chart' ? (
-          <div>
-            <Badge variant="info" size="sm">Chart</Badge>
-            {row.chartType && (
-              <span className="block text-[10px] text-[var(--text-muted)] mt-0.5">
-                {row.chartType.replace(/_/g, ' ')}
-              </span>
-            )}
-          </div>
+        row.itemType === 'dashboard' ? (
+          <Badge variant="neutral" size="sm" icon={LayoutGrid}>Dashboard</Badge>
         ) : (
-          <Badge variant="neutral" size="sm">Dashboard</Badge>
+          <Badge variant="info" size="sm" icon={ChartArea}>
+            {(row.chartType ?? 'chart').replace(/_/g, ' ')}
+          </Badge>
         ),
     },
     {
