@@ -35,7 +35,6 @@ interface AnalyticsRow {
   itemType: 'chart' | 'dashboard';
   chartType?: string;
   description: string;
-  source: string;
   visibility: 'private' | 'shared';
   updatedAt: string;
 }
@@ -117,20 +116,6 @@ export function AnalyticsLibraryPage() {
     }
   }, []);
 
-  const handleMergeDashboard = useCallback(async () => {
-    if (!appId || charts.length === 0) return;
-    try {
-      const dashboard = await analyticsLibraryApi.saveDashboard({
-        appId,
-        title: `Dashboard — ${new Date().toLocaleDateString()}`,
-        chartIds: charts.map((c) => c.id),
-      });
-      setDashboards((prev) => [dashboard, ...prev]);
-      notificationService.success('Dashboard created');
-    } catch {
-      notificationService.error('Failed to create dashboard');
-    }
-  }, [appId, charts]);
 
   const tableData = useMemo((): AnalyticsRow[] => {
     const chartRows: AnalyticsRow[] = charts.map((c) => ({
@@ -138,8 +123,7 @@ export function AnalyticsLibraryPage() {
       title: c.title,
       itemType: 'chart',
       chartType: c.chartConfig.type,
-      description: c.description.slice(0, 60),
-      source: c.sourceQuestion?.slice(0, 50) ?? '',
+      description: c.sourceQuestion?.slice(0, 80) || c.description.slice(0, 80),
       visibility: c.visibility,
       updatedAt: c.updatedAt,
     }));
@@ -147,8 +131,7 @@ export function AnalyticsLibraryPage() {
       id: d.id,
       title: d.title,
       itemType: 'dashboard',
-      description: d.description.slice(0, 60),
-      source: `${d.chartEntries.length} chart${d.chartEntries.length !== 1 ? 's' : ''}`,
+      description: d.description.slice(0, 80) || `${d.chartEntries.length} chart${d.chartEntries.length !== 1 ? 's' : ''}`,
       visibility: d.visibility,
       updatedAt: d.updatedAt,
     }));
@@ -197,16 +180,6 @@ export function AnalyticsLibraryPage() {
       render: (row) => (
         <span className="text-sm text-[var(--text-secondary)]">{row.description}</span>
       ),
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      render: (row) =>
-        row.itemType === 'chart' ? (
-          <span className="text-sm italic text-[var(--text-secondary)]">{row.source}</span>
-        ) : (
-          <span className="text-sm text-[var(--text-secondary)]">{row.source}</span>
-        ),
     },
     {
       key: 'visibility',
@@ -277,17 +250,7 @@ export function AnalyticsLibraryPage() {
     <PageShell
       title="Analytics"
       subtitle={`${charts.length} charts, ${dashboards.length} dashboards`}
-      headerActions={
-        charts.length > 0 ? (
-          <button
-            onClick={handleMergeDashboard}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-brand-primary)] text-white hover:bg-[var(--color-brand-primary-hover)]"
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Merge into Dashboard
-          </button>
-        ) : undefined
-      }
+      headerActions={undefined}
     >
       <DataTable
         columns={columns}
