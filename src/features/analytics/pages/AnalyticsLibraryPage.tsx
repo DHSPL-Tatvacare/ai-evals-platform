@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChartArea, LayoutGrid, MoreVertical, Trash2, Eye, EyeOff } from 'lucide-react';
+import { ChartArea, LayoutGrid, MoreVertical, Trash2, Globe2, Lock } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
@@ -220,9 +220,9 @@ export function AnalyticsLibraryPage() {
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
             >
               {row.visibility === 'shared' ? (
-                <><EyeOff className="h-3.5 w-3.5" /> Make Private</>
+                <><Lock className="h-3.5 w-3.5" /> Make Private</>
               ) : (
-                <><Eye className="h-3.5 w-3.5" /> Share</>
+                <><Globe2 className="h-3.5 w-3.5" /> Share</>
               )}
             </button>
             <button
