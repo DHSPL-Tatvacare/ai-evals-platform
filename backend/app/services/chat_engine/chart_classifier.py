@@ -95,3 +95,94 @@ def classify_columns(
         result[col] = 'categorical'
 
     return result
+
+
+# ── Chart type registry ──────────────────────────────────────────────
+
+CHART_TYPE_REGISTRY: dict[str, dict[str, Any]] = {
+    'bar':            {'min_categorical': 1, 'min_numeric': 1, 'max_series': 1},
+    'horizontal_bar': {'min_categorical': 1, 'min_numeric': 1, 'max_series': 1, 'prefer_when': 'high_cardinality'},
+    'stacked_bar':    {'min_categorical': 1, 'min_numeric': 2},
+    'grouped_bar':    {'min_categorical': 1, 'min_numeric': 2},
+    'line':           {'min_ordinal': 1, 'min_numeric': 1},
+    'area':           {'min_ordinal': 1, 'min_numeric': 1},
+    'stacked_area':   {'min_ordinal': 1, 'min_numeric': 2},
+    'pie':            {'min_categorical': 1, 'min_numeric': 1, 'max_rows': 12},
+    'donut':          {'min_categorical': 1, 'min_numeric': 1, 'max_rows': 12},
+    'scatter':        {'min_numeric': 2},
+    'radar':          {'min_categorical': 1, 'min_numeric': 1, 'min_rows': 3, 'max_rows': 10},
+    'funnel':         {'min_categorical': 1, 'min_numeric': 1, 'requires': 'ordered_categorical'},
+    'treemap':        {'min_categorical': 1, 'min_numeric': 1, 'min_rows': 3},
+    'radial_bar':     {'min_categorical': 1, 'min_numeric': 1, 'max_rows': 8},
+    'composed':       {'min_ordinal': 1, 'min_numeric': 2},
+}
+
+_HIGH_CARDINALITY_THRESHOLD = 8
+
+
+def get_eligible_charts(
+    column_types: dict[str, str],
+    *,
+    row_count: int,
+) -> list[str]:
+    """Return chart types eligible for the given data shape, ordered by fit.
+
+    Ranking:
+    1. Charts with ``requires`` constraints that match (specificity wins)
+    2. Charts with ``prefer_when`` conditions that match
+    3. General-purpose charts
+    """
+    if not column_types:
+        return []
+
+    counts: dict[str, int] = {
+        'numeric': 0,
+        'categorical': 0,
+        'temporal': 0,
+        'ordered_categorical': 0,
+    }
+    for col_type in column_types.values():
+        counts[col_type] = counts.get(col_type, 0) + 1
+
+    # Ordinal = temporal + ordered_categorical
+    ordinal_count = counts['temporal'] + counts['ordered_categorical']
+    # Categorical includes ordered_categorical and temporal (they can group)
+    categorical_count = counts['categorical'] + counts['ordered_categorical'] + counts['temporal']
+
+    has_ordered = counts['ordered_categorical'] > 0
+
+    eligible: list[tuple[int, str]] = []  # (priority, type_name)
+
+    for chart_type, reqs in CHART_TYPE_REGISTRY.items():
+        # Check min_numeric
+        if counts['numeric'] < reqs.get('min_numeric', 0):
+            continue
+        # Check min_categorical (temporal and ordered satisfy this)
+        if categorical_count < reqs.get('min_categorical', 0):
+            continue
+        # Check min_ordinal (temporal and ordered_categorical satisfy this)
+        if ordinal_count < reqs.get('min_ordinal', 0):
+            continue
+        # Check row count bounds
+        if row_count < reqs.get('min_rows', 0):
+            continue
+        if 'max_rows' in reqs and row_count > reqs['max_rows']:
+            continue
+        # Check requires constraint
+        requires = reqs.get('requires')
+        if requires == 'ordered_categorical' and not has_ordered:
+            continue
+
+        # Assign priority (lower = better)
+        priority = 30  # default: general purpose
+        if requires and requires == 'ordered_categorical' and has_ordered:
+            priority = 10  # specificity match
+        elif reqs.get('prefer_when') == 'high_cardinality' and row_count >= _HIGH_CARDINALITY_THRESHOLD:
+            priority = 20  # preference match
+        elif reqs.get('prefer_when') == 'high_cardinality' and row_count < _HIGH_CARDINALITY_THRESHOLD:
+            priority = 35  # demote when preference doesn't match
+
+        eligible.append((priority, chart_type))
+
+    eligible.sort(key=lambda item: item[0])
+    return [chart_type for _, chart_type in eligible]
