@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthContext, get_auth_context
+from app.auth.app_scope import ensure_registered_app_access
 from app.database import get_db
 from app.models.analytics_chart import AnalyticsChart
 from app.models.analytics_dashboard import AnalyticsDashboard
@@ -82,6 +83,7 @@ async def list_charts(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    await ensure_registered_app_access(db, auth, app_id)
     q = (
         select(AnalyticsChart)
         .where(
@@ -102,6 +104,7 @@ async def save_chart(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    await ensure_registered_app_access(db, auth, body.app_id)
     vis = Visibility.normalize(body.visibility) or Visibility.PRIVATE
     chart = AnalyticsChart(
         app_id=body.app_id,
@@ -193,6 +196,7 @@ async def list_dashboards(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    await ensure_registered_app_access(db, auth, app_id)
     q = (
         select(AnalyticsDashboard)
         .where(
@@ -213,6 +217,9 @@ async def save_dashboard(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    await ensure_registered_app_access(db, auth, body.app_id)
+    for chart_id in body.chart_ids:
+        await _get_readable_chart(db, chart_id, auth)
     vis = Visibility.normalize(body.visibility) or Visibility.PRIVATE
     entries = [{"chart_id": cid, "width": "full", "order": i} for i, cid in enumerate(body.chart_ids)]
     dashboard = AnalyticsDashboard(
@@ -294,6 +301,8 @@ async def update_dashboard(
     if body.description is not None:
         dashboard.description = body.description
     if body.chart_ids is not None:
+        for chart_id in body.chart_ids:
+            await _get_readable_chart(db, chart_id, auth)
         dashboard.chart_entries = [
             {"chart_id": cid, "width": "full", "order": i}
             for i, cid in enumerate(body.chart_ids)
