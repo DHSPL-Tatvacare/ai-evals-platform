@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, RefreshCw, Trash2, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trash2, Globe2, Lock } from 'lucide-react';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
-import { Button, Badge, VisibilityBadge } from '@/components/ui';
-import { IconButton } from '@/components/ui/IconButton';
+import { Badge, VisibilityBadge } from '@/components/ui';
+import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
 import { ChartRenderer } from './ChartRenderer';
 import type { SavedChart } from '../types';
 
@@ -35,14 +35,16 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
 
   useEffect(() => { load(); }, [load]);
 
+  const isShared = visibility === 'shared';
+
   const handleToggleVisibility = async () => {
     setToggling(true);
-    const newVis = visibility === 'shared' ? 'private' : 'shared';
+    const newVis = isShared ? 'private' : 'shared';
     try {
       const updated = await analyticsLibraryApi.updateChart(chart.id, { visibility: newVis });
       setVisibility(updated.visibility);
       onUpdate?.(updated);
-      notificationService.success(newVis === 'shared' ? 'Chart shared' : 'Chart set to private');
+      notificationService.success('Visibility updated');
     } catch {
       notificationService.error('Failed to update visibility');
     } finally {
@@ -65,10 +67,10 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
+      {/* Header — matches eval run detail pattern */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
         <div className="flex items-center gap-3 min-w-0">
-          <IconButton icon={ArrowLeft} label="Back" variant="ghost" size="sm" onClick={onBack} />
+          <ActionIconButton icon={ArrowLeft} label="Back" onClick={onBack} />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-[var(--text-primary)] truncate">{chart.title}</h2>
@@ -80,22 +82,36 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Button variant="ghost" size="sm" icon={RefreshCw} onClick={load} disabled={loading}>
-            Refresh
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={visibility === 'shared' ? EyeOff : Eye}
-            onClick={handleToggleVisibility}
+
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          <ActionIconButton
+            icon={isShared ? Globe2 : Lock}
+            label={isShared ? 'Shared — click to make private' : 'Private — click to share'}
+            tooltip={isShared ? 'Shared — click to make private' : 'Private — click to share'}
+            onClick={() => void handleToggleVisibility()}
             disabled={toggling}
-          >
-            {visibility === 'shared' ? 'Make Private' : 'Share'}
-          </Button>
-          <Button variant="danger" size="sm" icon={Trash2} onClick={handleDelete} disabled={deleting} isLoading={deleting}>
-            Delete
-          </Button>
+            spinning={toggling}
+          />
+          <ActionIconButton
+            icon={RefreshCw}
+            label="Refresh data"
+            tooltip="Refresh data"
+            onClick={() => void load()}
+            disabled={loading}
+            spinning={loading}
+          />
+
+          <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
+
+          <ActionIconButton
+            icon={Trash2}
+            label="Delete chart"
+            tooltip="Delete chart"
+            onClick={() => void handleDelete()}
+            disabled={deleting}
+            variant="danger"
+            spinning={deleting}
+          />
         </div>
       </div>
 
