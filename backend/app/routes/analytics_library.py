@@ -264,7 +264,7 @@ async def get_dashboard_data(
             results.append({
                 "chartId": str(chart.id),
                 "title": chart.title,
-                "chartConfig": chart.chart_config,
+                "chartConfig": _normalize_chart_config(chart.chart_config),
                 "data": rows,
                 "rowCount": len(rows),
                 "width": entry.get("width", "full"),
@@ -379,6 +379,21 @@ async def _get_owned_dashboard(db: AsyncSession, dashboard_id: str, auth: AuthCo
     return dashboard
 
 
+def _normalize_chart_config(raw: dict | None) -> dict:
+    """Normalize stored chart config to camelCase for the frontend.
+
+    Old charts were saved with snake_case keys (x_key, y_key). New charts
+    use camelCase. Parsing through ChartConfigIn normalizes both formats
+    because CamelModel accepts either via populate_by_name.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return raw or {}
+    try:
+        return ChartConfigIn(**raw).model_dump(by_alias=True)
+    except Exception:
+        return raw
+
+
 def _chart_to_dict(chart: AnalyticsChart) -> dict:
     return {
         "id": str(chart.id),
@@ -386,7 +401,7 @@ def _chart_to_dict(chart: AnalyticsChart) -> dict:
         "title": chart.title,
         "description": chart.description,
         "sqlQuery": chart.sql_query,
-        "chartConfig": chart.chart_config,
+        "chartConfig": _normalize_chart_config(chart.chart_config),
         "sourceQuestion": chart.source_question,
         "visibility": chart.visibility.value if chart.visibility else "private",
         "createdAt": chart.created_at.isoformat() if chart.created_at else None,

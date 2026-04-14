@@ -581,6 +581,49 @@ class AnalyticsLibraryChartConfigTests(unittest.TestCase):
         expected_keys = {'type', 'xKey', 'yKey', 'seriesKeys', 'series', 'title', 'xLabel', 'yLabel', 'legendPosition', 'colorMap'}
         self.assertTrue(expected_keys.issubset(set(dumped.keys())), f'Missing keys: {expected_keys - set(dumped.keys())}')
 
+    def test_normalize_chart_config_converts_snake_case_to_camel(self):
+        """Old charts stored with snake_case keys must be normalized to camelCase on read."""
+        from app.routes.analytics_library import _normalize_chart_config
+
+        # Simulate a chart saved before the by_alias fix — all snake_case
+        old_config = {
+            'type': 'bar',
+            'x_key': 'agent',
+            'y_key': 'revenue',
+            'series_keys': ['revenue'],
+            'x_label': 'Agent',
+            'y_label': 'Revenue',
+        }
+        normalized = _normalize_chart_config(old_config)
+        self.assertEqual(normalized['xKey'], 'agent')
+        self.assertEqual(normalized['yKey'], 'revenue')
+        self.assertEqual(normalized['seriesKeys'], ['revenue'])
+        self.assertEqual(normalized['xLabel'], 'Agent')
+        self.assertEqual(normalized['yLabel'], 'Revenue')
+        self.assertNotIn('x_key', normalized)
+
+    def test_normalize_chart_config_preserves_camel_case(self):
+        """New charts already in camelCase should pass through unchanged."""
+        from app.routes.analytics_library import _normalize_chart_config
+
+        new_config = {
+            'type': 'pie',
+            'xKey': 'category',
+            'yKey': 'count',
+            'seriesKeys': [],
+            'xLabel': '',
+            'yLabel': '',
+        }
+        normalized = _normalize_chart_config(new_config)
+        self.assertEqual(normalized['xKey'], 'category')
+        self.assertEqual(normalized['yKey'], 'count')
+
+    def test_normalize_chart_config_handles_none_and_empty(self):
+        from app.routes.analytics_library import _normalize_chart_config
+
+        self.assertEqual(_normalize_chart_config(None), {})
+        self.assertEqual(_normalize_chart_config({}), {})
+
 
 if __name__ == '__main__':
     unittest.main()
