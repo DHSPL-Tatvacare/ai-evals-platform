@@ -10,6 +10,25 @@ import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef } from '@/components/ui/DataTable';
 import type { SavedChart, SavedDashboard } from '../types';
 
+/** Short display labels for chart types — keeps badges compact. */
+const CHART_TYPE_LABELS: Record<string, string> = {
+  bar: 'Bar',
+  horizontal_bar: 'H. Bar',
+  stacked_bar: 'Stacked',
+  grouped_bar: 'Grouped',
+  line: 'Line',
+  area: 'Area',
+  stacked_area: 'Stacked Area',
+  pie: 'Pie',
+  donut: 'Donut',
+  scatter: 'Scatter',
+  radar: 'Radar',
+  funnel: 'Funnel',
+  treemap: 'Treemap',
+  radial_bar: 'Radial',
+  composed: 'Composed',
+};
+
 interface AnalyticsRow {
   id: string;
   title: string;
@@ -168,7 +187,7 @@ export function AnalyticsLibraryPage() {
           <Badge variant="neutral" size="sm" icon={LayoutGrid}>Dashboard</Badge>
         ) : (
           <Badge variant="info" size="sm" icon={ChartArea}>
-            {(row.chartType ?? 'chart').replace(/_/g, ' ')}
+            {CHART_TYPE_LABELS[row.chartType ?? ''] ?? row.chartType?.replace(/_/g, ' ') ?? 'Chart'}
           </Badge>
         ),
     },
