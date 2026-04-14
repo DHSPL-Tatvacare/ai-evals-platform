@@ -17,14 +17,23 @@ export interface ToolCallBadgeData {
   status: 'running' | 'done' | 'failed';
 }
 
+export interface SeriesConfig {
+  dataKey: string;
+  type: 'bar' | 'line' | 'area' | 'scatter';
+  stackId?: string;
+}
+
 export interface ChartSpec {
-  type: 'bar' | 'horizontal_bar' | 'line' | 'pie' | 'stacked_bar';
+  type: string;
   title: string;
   xKey: string;
   yKey?: string;
   seriesKeys: string[];
+  series?: SeriesConfig[];
   xLabel: string;
   yLabel: string;
+  legendPosition?: 'top' | 'bottom' | 'right' | 'none';
+  alternatives?: string[];
 }
 
 export interface ChartData {
