@@ -5,12 +5,14 @@ export interface SavedChart {
   description: string;
   sqlQuery: string;
   chartConfig: {
-    type: 'bar' | 'horizontal_bar' | 'line' | 'pie' | 'stacked_bar';
+    type: string;
     xKey: string;
     yKey?: string;
-    seriesKeys: string[];
-    xLabel: string;
-    yLabel: string;
+    seriesKeys?: string[];
+    series?: import('@/features/chat-widget/types').SeriesConfig[];
+    xLabel?: string;
+    yLabel?: string;
+    legendPosition?: 'top' | 'bottom' | 'right' | 'none';
   };
   sourceQuestion?: string;
   visibility: 'private' | 'shared';
