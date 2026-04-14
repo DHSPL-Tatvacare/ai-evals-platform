@@ -248,7 +248,7 @@ export function AnalyticsLibraryPage() {
   return (
     <PageShell
       title="Analytics"
-      subtitle={`${charts.length} charts, ${dashboards.length} dashboards`}
+      subtitle=""
       headerActions={undefined}
     >
       <DataTable
