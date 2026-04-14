@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.services.chat_engine.chart_classifier import classify_columns, get_eligible_charts
+from app.services.report_builder.scratchpad_state import build_analysis_snapshot
 
 
 class ClassifyColumnsTests(unittest.TestCase):
@@ -132,3 +133,103 @@ class GetEligibleChartsTests(unittest.TestCase):
         bar_idx = eligible.index('bar')
         hbar_idx = eligible.index('horizontal_bar')
         self.assertLess(bar_idx, hbar_idx)
+
+
+class ClassifyColumnsEdgeCaseTests(unittest.TestCase):
+
+    def test_boolean_values_are_not_numeric(self):
+        rows = [{'active': True}, {'active': False}]
+        result = classify_columns(['active'], rows)
+        self.assertEqual(result['active'], 'categorical')
+
+    def test_string_numbers_are_numeric(self):
+        rows = [{'price': '10.5'}, {'price': '20'}]
+        result = classify_columns(['price'], rows)
+        self.assertEqual(result['price'], 'numeric')
+
+    def test_mixed_numeric_and_string_is_categorical(self):
+        rows = [{'val': 10}, {'val': 'abc'}]
+        result = classify_columns(['val'], rows)
+        self.assertEqual(result['val'], 'categorical')
+
+    def test_year_month_format_is_temporal(self):
+        rows = [{'period': '2026-01'}, {'period': '2026-02'}]
+        result = classify_columns(['period'], rows)
+        self.assertEqual(result['period'], 'temporal')
+
+    def test_dimension_without_ordering_stays_categorical(self):
+        rows = [{'agent': 'Alice'}]
+        dimensions = [{'name': 'agent', 'description': 'Agent name'}]
+        result = classify_columns(['agent'], rows, dimensions=dimensions)
+        self.assertEqual(result['agent'], 'categorical')
+
+    def test_all_null_column_is_categorical(self):
+        rows = [{'x': None}, {'x': None}]
+        result = classify_columns(['x'], rows)
+        self.assertEqual(result['x'], 'categorical')
+
+
+class GetEligibleChartsEdgeCaseTests(unittest.TestCase):
+
+    def test_single_numeric_column_only(self):
+        """Only numeric columns — no categorical/ordinal means very limited charts."""
+        column_types = {'revenue': 'numeric'}
+        eligible = get_eligible_charts(column_types, row_count=10)
+        # No charts require only numeric without categorical/ordinal
+        # scatter needs 2 numeric
+        self.assertNotIn('bar', eligible)
+        self.assertNotIn('scatter', eligible)
+
+    def test_treemap_excluded_for_low_row_count(self):
+        column_types = {'cat': 'categorical', 'val': 'numeric'}
+        eligible = get_eligible_charts(column_types, row_count=2)
+        self.assertNotIn('treemap', eligible)
+        self.assertNotIn('radar', eligible)
+
+    def test_all_chart_types_in_registry_are_strings(self):
+        """Sanity check that registry keys are all strings."""
+        from app.services.chat_engine.chart_classifier import CHART_TYPE_REGISTRY
+        for key in CHART_TYPE_REGISTRY:
+            self.assertIsInstance(key, str)
+
+    def test_temporal_satisfies_categorical_requirement(self):
+        """Temporal columns should satisfy min_categorical — pie should be eligible."""
+        column_types = {'month': 'temporal', 'revenue': 'numeric'}
+        eligible = get_eligible_charts(column_types, row_count=6)
+        self.assertIn('pie', eligible)
+        self.assertIn('bar', eligible)
+
+
+class SnapshotIntegrationTests(unittest.TestCase):
+
+    def test_snapshot_includes_column_types_and_eligible_charts(self):
+        result = {
+            'status': 'ok',
+            'question': 'Revenue by agent',
+            'row_count': 5,
+            'data': [
+                {'agent': 'Alice', 'revenue': 100},
+                {'agent': 'Bob', 'revenue': 200},
+            ],
+        }
+        snapshot = build_analysis_snapshot(result)
+        self.assertIn('column_types', snapshot)
+        self.assertEqual(snapshot['column_types']['agent'], 'categorical')
+        self.assertEqual(snapshot['column_types']['revenue'], 'numeric')
+        self.assertIn('eligible_charts', snapshot)
+        self.assertIn('bar', snapshot['eligible_charts'])
+
+    def test_snapshot_with_dimensions_enables_funnel(self):
+        result = {
+            'status': 'ok',
+            'question': 'Leads by stage',
+            'row_count': 5,
+            'data': [
+                {'stage': 'new', 'count': 100},
+                {'stage': 'closed', 'count': 20},
+            ],
+        }
+        dimensions = [{'name': 'stage', 'ordering': ['new', 'contacted', 'closed']}]
+        snapshot = build_analysis_snapshot(result, dimensions=dimensions)
+        self.assertEqual(snapshot['column_types']['stage'], 'ordered_categorical')
+        self.assertIn('funnel', snapshot['eligible_charts'])

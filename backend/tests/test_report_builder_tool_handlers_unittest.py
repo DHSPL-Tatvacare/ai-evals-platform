@@ -309,3 +309,100 @@ class RenderChartEligibilityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result['status'], 'ok')
         self.assertEqual(len(result['chart_spec']['series']), 2)
+
+    async def test_render_chart_rejects_unknown_type_in_registry_fallback(self):
+        """When no eligible_charts, unknown types rejected against registry."""
+        session = {
+            'scratchpad': {
+                'last_analysis': {
+                    'columns': ['a', 'b'],
+                    'data': [{'a': 1, 'b': 2}],
+                },
+            },
+        }
+        result = await handle_render_chart(
+            chart_type='nonexistent_chart',
+            title='Test',
+            x_key='a',
+            y_key='b',
+            session=session,
+        )
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('Unknown chart type', result['error'])
+
+    async def test_render_chart_missing_analysis_returns_error(self):
+        session = {'scratchpad': {}}
+        result = await handle_render_chart(
+            chart_type='bar',
+            title='Test',
+            x_key='x',
+            session=session,
+        )
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('No analysis result', result['error'])
+
+    async def test_render_chart_validates_series_data_keys(self):
+        """series[].data_key must exist in analysis columns."""
+        session = {
+            'scratchpad': {
+                'last_analysis': {
+                    'columns': ['month', 'revenue'],
+                    'eligible_charts': ['composed'],
+                    'data': [{'month': '2026-01', 'revenue': 100}],
+                },
+            },
+        }
+        result = await handle_render_chart(
+            chart_type='composed',
+            title='Test',
+            x_key='month',
+            series=[
+                {'data_key': 'revenue', 'type': 'bar'},
+                {'data_key': 'nonexistent', 'type': 'line'},
+            ],
+            session=session,
+        )
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('nonexistent', str(result['error']))
+
+    async def test_render_chart_alternatives_capped_at_three(self):
+        session = {
+            'scratchpad': {
+                'last_analysis': {
+                    'columns': ['x', 'y'],
+                    'eligible_charts': ['bar', 'pie', 'line', 'area', 'scatter'],
+                    'data': [{'x': 'a', 'y': 1}],
+                },
+            },
+        }
+        result = await handle_render_chart(
+            chart_type='bar',
+            title='Test',
+            x_key='x',
+            y_key='y',
+            alternatives=['pie', 'line', 'area', 'scatter'],
+            session=session,
+        )
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(len(result['chart_spec']['alternatives']), 3)
+
+    async def test_render_chart_legend_position_passed_through(self):
+        session = {
+            'scratchpad': {
+                'last_analysis': {
+                    'columns': ['x', 'y'],
+                    'eligible_charts': ['bar'],
+                    'data': [{'x': 'a', 'y': 1}],
+                },
+            },
+        }
+        result = await handle_render_chart(
+            chart_type='bar',
+            title='Test',
+            x_key='x',
+            y_key='y',
+            legend_position='right',
+            session=session,
+        )
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['chart_spec']['legendPosition'], 'right')
