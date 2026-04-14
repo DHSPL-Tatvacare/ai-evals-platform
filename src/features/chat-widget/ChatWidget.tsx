@@ -56,7 +56,7 @@ export function ChatWidget() {
   // Position state (bottom-right corner anchor)
   const [pos, setPos] = useState({ bottom: 24, right: 24 });
   // Size state for expanded panel
-  const [size, setSize] = useState({ width: 420, height: 560 });
+  const [size, setSize] = useState({ width: 504, height: 672 });
 
   // ── Full-canvas drag (header) ──
   const dragRef = useRef<{ startX: number; startY: number; startRight: number; startBottom: number } | null>(null);

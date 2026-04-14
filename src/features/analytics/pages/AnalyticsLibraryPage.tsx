@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { ChartArea, LayoutGrid, MoreVertical, Trash2 } from 'lucide-react';
+import { ChartArea, LayoutGrid, MoreVertical, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
@@ -78,6 +78,28 @@ export function AnalyticsLibraryPage() {
     }
   }, []);
 
+  const handleToggleChartVisibility = useCallback(async (id: string, current: 'private' | 'shared') => {
+    const newVis = current === 'shared' ? 'private' : 'shared';
+    try {
+      const updated = await analyticsLibraryApi.updateChart(id, { visibility: newVis });
+      setCharts((prev) => prev.map((c) => (c.id === id ? updated : c)));
+      notificationService.success(newVis === 'shared' ? 'Chart shared' : 'Chart set to private');
+    } catch {
+      notificationService.error('Failed to update visibility');
+    }
+  }, []);
+
+  const handleToggleDashboardVisibility = useCallback(async (id: string, current: 'private' | 'shared') => {
+    const newVis = current === 'shared' ? 'private' : 'shared';
+    try {
+      const updated = await analyticsLibraryApi.updateDashboard(id, { visibility: newVis });
+      setDashboards((prev) => prev.map((d) => (d.id === id ? updated : d)));
+      notificationService.success(newVis === 'shared' ? 'Dashboard shared' : 'Dashboard set to private');
+    } catch {
+      notificationService.error('Failed to update visibility');
+    }
+  }, []);
+
   const handleMergeDashboard = useCallback(async () => {
     if (!appId || charts.length === 0) return;
     try {
@@ -92,6 +114,10 @@ export function AnalyticsLibraryPage() {
       notificationService.error('Failed to create dashboard');
     }
   }, [appId, charts]);
+
+  const handleChartUpdate = useCallback((updated: SavedChart) => {
+    setCharts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  }, []);
 
   const tableData = useMemo((): AnalyticsRow[] => {
     const chartRows: AnalyticsRow[] = charts.map((c) => ({
@@ -153,7 +179,7 @@ export function AnalyticsLibraryPage() {
             <Badge variant="info" size="sm">Chart</Badge>
             {row.chartType && (
               <span className="block text-[10px] text-[var(--text-muted)] mt-0.5">
-                {row.chartType.replace('_', ' ')}
+                {row.chartType.replace(/_/g, ' ')}
               </span>
             )}
           </div>
@@ -205,7 +231,24 @@ export function AnalyticsLibraryPage() {
               <MoreVertical className="h-4 w-4" />
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-36 p-1">
+          <PopoverContent className="w-44 p-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (row.itemType === 'chart') {
+                  handleToggleChartVisibility(row.id, row.visibility);
+                } else {
+                  handleToggleDashboardVisibility(row.id, row.visibility);
+                }
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+            >
+              {row.visibility === 'shared' ? (
+                <><EyeOff className="h-3.5 w-3.5" /> Make Private</>
+              ) : (
+                <><Eye className="h-3.5 w-3.5" /> Share</>
+              )}
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -224,11 +267,18 @@ export function AnalyticsLibraryPage() {
         </Popover>
       ),
     },
-  ], [handleDeleteChart, handleDeleteDashboard]);
+  ], [handleDeleteChart, handleDeleteDashboard, handleToggleChartVisibility, handleToggleDashboardVisibility]);
 
   // Full-page chart detail
   if (activeChart) {
-    return <ChartDetailView chart={activeChart} onBack={() => setActiveChart(null)} />;
+    return (
+      <ChartDetailView
+        chart={activeChart}
+        onBack={() => setActiveChart(null)}
+        onDelete={handleDeleteChart}
+        onUpdate={handleChartUpdate}
+      />
+    );
   }
 
   // Full-page dashboard detail
