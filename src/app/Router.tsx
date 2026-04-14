@@ -42,6 +42,8 @@ import { routes } from "@/config/routes";
 
 const GuidePage = lazy(() => import("@/features/guide"));
 const AnalyticsLibraryPage = lazy(() => import('@/features/analytics/pages/AnalyticsLibraryPage').then(m => ({ default: m.AnalyticsLibraryPage })));
+const AnalyticsChartDetail = lazy(() => import('@/features/analytics/pages/AnalyticsChartDetail').then(m => ({ default: m.AnalyticsChartDetail })));
+const AnalyticsDashboardDetail = lazy(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
 
 function VoiceRxGuard() {
   return <AppAccessGuard app="voice-rx"><Outlet /></AppAccessGuard>;
@@ -103,6 +105,8 @@ export function Router() {
             <Route path={routes.voiceRx.runs} element={<VoiceRxRunList />} />
             <Route path={routes.voiceRx.logs} element={<EvalLogs />} />
             <Route path={routes.voiceRx.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
             <Route
               path={routes.voiceRx.settings}
               element={<VoiceRxSettingsPage />}
@@ -144,6 +148,8 @@ export function Router() {
             />
             <Route path={routes.kaira.logs} element={<EvalLogs />} />
             <Route path={routes.kaira.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/kaira/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/kaira/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
           </Route>
 
           {/* Inside Sales routes */}
@@ -160,6 +166,8 @@ export function Router() {
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
             <Route path={routes.insideSales.settings} element={<InsideSalesSettings />} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
           </Route>
 
           {/* Admin routes */}

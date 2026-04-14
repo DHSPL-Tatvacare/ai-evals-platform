@@ -27,6 +27,8 @@ export const routes = {
     logs: "/logs",
     settings: "/settings",
     analytics: "/analytics",
+    analyticsChart: (chartId: string) => `/analytics/charts/${chartId}`,
+    analyticsDashboard: (dashboardId: string) => `/analytics/dashboards/${dashboardId}`,
   },
   kaira: {
     home: "/kaira",
@@ -43,6 +45,8 @@ export const routes = {
     settings: "/kaira/settings",
     settingsTags: "/kaira/settings/tags",
     analytics: "/kaira/analytics",
+    analyticsChart: (chartId: string) => `/kaira/analytics/charts/${chartId}`,
+    analyticsDashboard: (dashboardId: string) => `/kaira/analytics/dashboards/${dashboardId}`,
   },
   insideSales: {
     home: '/inside-sales',
@@ -58,6 +62,8 @@ export const routes = {
     logs: '/inside-sales/logs',
     settings: '/inside-sales/settings',
     analytics: '/inside-sales/analytics',
+    analyticsChart: (chartId: string) => `/inside-sales/analytics/charts/${chartId}`,
+    analyticsDashboard: (dashboardId: string) => `/inside-sales/analytics/dashboards/${dashboardId}`,
   },
 };
 

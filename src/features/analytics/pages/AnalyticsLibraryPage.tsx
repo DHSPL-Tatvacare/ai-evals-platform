@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChartArea, LayoutGrid, MoreVertical, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
@@ -7,8 +8,6 @@ import { Badge, VisibilityBadge, Popover, PopoverTrigger, PopoverContent } from 
 import { PageShell } from '@/components/ui/PageShell';
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef } from '@/components/ui/DataTable';
-import { ChartDetailView } from '../components/ChartDetailView';
-import { DashboardView } from '../components/DashboardView';
 import type { SavedChart, SavedDashboard } from '../types';
 
 interface AnalyticsRow {
@@ -24,11 +23,10 @@ interface AnalyticsRow {
 
 export function AnalyticsLibraryPage() {
   const appId = useAppStore((s) => s.currentApp);
+  const navigate = useNavigate();
   const [charts, setCharts] = useState<SavedChart[]>([]);
   const [dashboards, setDashboards] = useState<SavedDashboard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeDashboardId, setActiveDashboardId] = useState<string | null>(null);
-  const [activeChart, setActiveChart] = useState<SavedChart | null>(null);
 
   const loadCharts = useCallback(async () => {
     if (!appId) return;
@@ -115,10 +113,6 @@ export function AnalyticsLibraryPage() {
     }
   }, [appId, charts]);
 
-  const handleChartUpdate = useCallback((updated: SavedChart) => {
-    setCharts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  }, []);
-
   const tableData = useMemo((): AnalyticsRow[] => {
     const chartRows: AnalyticsRow[] = charts.map((c) => ({
       id: c.id,
@@ -144,17 +138,13 @@ export function AnalyticsLibraryPage() {
     );
   }, [charts, dashboards]);
 
-  const handleRowClick = useCallback(
-    (row: AnalyticsRow) => {
-      if (row.itemType === 'chart') {
-        const chart = charts.find((c) => c.id === row.id);
-        if (chart) setActiveChart(chart);
-      } else {
-        setActiveDashboardId(row.id);
-      }
-    },
-    [charts]
-  );
+  const handleRowClick = useCallback((row: AnalyticsRow) => {
+    if (row.itemType === 'chart') {
+      navigate(`charts/${row.id}`);
+    } else {
+      navigate(`dashboards/${row.id}`);
+    }
+  }, [navigate]);
 
   const columns = useMemo((): ColumnDef<AnalyticsRow>[] => [
     {
@@ -268,23 +258,6 @@ export function AnalyticsLibraryPage() {
       ),
     },
   ], [handleDeleteChart, handleDeleteDashboard, handleToggleChartVisibility, handleToggleDashboardVisibility]);
-
-  // Full-page chart detail
-  if (activeChart) {
-    return (
-      <ChartDetailView
-        chart={activeChart}
-        onBack={() => setActiveChart(null)}
-        onDelete={handleDeleteChart}
-        onUpdate={handleChartUpdate}
-      />
-    );
-  }
-
-  // Full-page dashboard detail
-  if (activeDashboardId) {
-    return <DashboardView dashboardId={activeDashboardId} onBack={() => setActiveDashboardId(null)} />;
-  }
 
   return (
     <PageShell

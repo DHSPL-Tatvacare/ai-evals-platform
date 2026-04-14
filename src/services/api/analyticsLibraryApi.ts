@@ -16,6 +16,9 @@ export const analyticsLibraryApi = {
     visibility?: string;
   }) => apiRequest<SavedChart>('/api/analytics-library/charts', { method: 'POST', body: JSON.stringify(payload) }),
 
+  getChart: (chartId: string) =>
+    apiRequest<SavedChart>(`/api/analytics-library/charts/${chartId}`),
+
   getChartData: (chartId: string) =>
     apiRequest<ChartDataResponse>(`/api/analytics-library/charts/${chartId}/data`),
 
@@ -36,6 +39,9 @@ export const analyticsLibraryApi = {
     chartIds: string[];
     visibility?: string;
   }) => apiRequest<SavedDashboard>('/api/analytics-library/dashboards', { method: 'POST', body: JSON.stringify(payload) }),
+
+  getDashboard: (dashboardId: string) =>
+    apiRequest<SavedDashboard>(`/api/analytics-library/dashboards/${dashboardId}`),
 
   getDashboardData: (dashboardId: string) =>
     apiRequest<DashboardDataResponse>(`/api/analytics-library/dashboards/${dashboardId}/data`),
