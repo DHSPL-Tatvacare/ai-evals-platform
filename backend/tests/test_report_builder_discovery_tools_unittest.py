@@ -125,6 +125,30 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             'app.services.report_builder.tool_handlers._load_active_semantic_model',
             new=AsyncMock(return_value=semantic_model),
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={
+                'chat': {
+                    'dataSurfaces': [
+                        {
+                            'key': 'logs',
+                            'description': 'Raw logs',
+                            'source': 'api_logs',
+                            'entityFieldMap': {'thread_id': 'thread_id'},
+                            'fields': ['thread_id', 'response'],
+                            'defaultLimit': 10,
+                        },
+                    ],
+                    'entityResolvers': [
+                        {
+                            'key': 'thread-id',
+                            'entityType': 'thread_id',
+                            'source': 'api_logs',
+                            'field': 'thread_id',
+                        },
+                    ],
+                },
+            }),
         ):
             result = await tool_handlers.handle_discover(
                 db=db,
@@ -139,6 +163,8 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['volume']['runs'], 4)
         self.assertEqual(result['volume']['evaluations'], 10)
         self.assertEqual(result['time_range']['earliest'], '2026-01-01')
+        self.assertEqual(result['surfaces'][0]['key'], 'logs')
+        self.assertEqual(result['entity_types'], ['thread_id'])
 
 
 if __name__ == '__main__':

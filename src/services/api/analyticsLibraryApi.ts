@@ -13,6 +13,7 @@ export const analyticsLibraryApi = {
     sqlQuery: string;
     chartConfig: SavedChart['chartConfig'];
     sourceQuestion?: string;
+    sourceSessionId?: string;
     visibility?: string;
   }) => apiRequest<SavedChart>('/api/analytics-library/charts', { method: 'POST', body: JSON.stringify(payload) }),
 
@@ -37,6 +38,7 @@ export const analyticsLibraryApi = {
     title: string;
     description?: string;
     chartIds: string[];
+    sourceSessionId?: string;
     visibility?: string;
   }) => apiRequest<SavedDashboard>('/api/analytics-library/dashboards', { method: 'POST', body: JSON.stringify(payload) }),
 

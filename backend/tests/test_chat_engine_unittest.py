@@ -17,6 +17,8 @@ def test_tool_call_empty_arguments():
     assert tc.arguments == {}
 
 
+from types import SimpleNamespace
+
 from app.services.chat_engine.openai_adapter import OpenAIAdapter
 from app.services.chat_engine.types import ChatAdapter
 
@@ -166,6 +168,46 @@ def test_gemini_serialize_json_safe_thought_signature_roundtrip():
     assert deserialized[0].parts[0].thought_signature == b"abc"
 
 
+def test_gemini_extract_response_message_prefers_streamed_message_contents():
+    from google.genai import types as genai_types
+
+    adapter = GeminiAdapter.__new__(GeminiAdapter)
+    streamed_contents = [
+        genai_types.Content(
+            role="model",
+            parts=[genai_types.Part(text="thinking", thought_signature=b"abc")],
+        ),
+        genai_types.Content(
+            role="model",
+            parts=[genai_types.Part.from_function_call(name="analyze", args={"foo": "bar"})],
+        ),
+    ]
+
+    response = {
+        "message_contents": streamed_contents,
+        "message_content": streamed_contents[-1],
+        "tool_calls": [],
+        "text": "",
+    }
+
+    assert adapter.extract_response_message(response) == streamed_contents
+
+
+def test_gemini_resolve_final_text_prefers_longer_streamed_text():
+    from google.genai import types as genai_types
+
+    adapter = GeminiAdapter.__new__(GeminiAdapter)
+    final_content = genai_types.Content(
+        role='model',
+        parts=[genai_types.Part.from_text(text=' lookup_beta is 15.')],
+    )
+
+    assert adapter._resolve_final_text(
+        final_content,
+        ['The sum of the values from lookup_alpha and', ' lookup_beta is 15.'],
+    ) == 'The sum of the values from lookup_alpha and lookup_beta is 15.'
+
+
 import pytest
 from unittest.mock import AsyncMock
 from app.services.chat_engine.runner import run_tool_loop
@@ -178,7 +220,7 @@ class FakeAdapter:
         self._responses = list(responses)
         self._call_count = 0
 
-    async def send(self, messages, tools, system, temperature):
+    async def send(self, messages, tools, system, temperature, tool_choice='auto'):
         resp = self._responses[self._call_count]
         self._call_count += 1
         return resp
@@ -210,8 +252,8 @@ class FakeAdapter:
     def deserialize(self, data):
         return data
 
-    async def send_stream(self, messages, tools, system, temperature):
-        response = await self.send(messages, tools, system, temperature)
+    async def send_stream(self, messages, tools, system, temperature, tool_choice='auto'):
+        response = await self.send(messages, tools, system, temperature, tool_choice=tool_choice)
         if response["message"].get("content"):
             yield {"type": "text_delta", "delta": response["message"]["content"]}
         yield {"type": "response", "response": response}
@@ -255,6 +297,46 @@ async def test_runner_one_tool_round():
     assert text == "Done!"
     dispatch.assert_called_once_with("my_tool", {"x": 1})
     assert len(out_messages) == 4  # user + assistant(tool_call) + tool_result + assistant(text)
+
+
+@pytest.mark.asyncio
+async def test_runner_extends_multiple_response_messages():
+    class MultiMessageAdapter(FakeAdapter):
+        async def send_stream(self, messages, tools, system, temperature, tool_choice='auto'):
+            response = await self.send(messages, tools, system, temperature, tool_choice=tool_choice)
+            yield {"type": "response", "response": response}
+
+        def extract_text(self, response):
+            return response["message"][-1].get("content", "")
+
+    adapter = MultiMessageAdapter([
+        {
+            "message": [
+                {"role": "assistant", "content": "partial"},
+                {"role": "assistant", "content": "final"},
+            ],
+            "tool_calls": [],
+        },
+    ])
+    dispatch = AsyncMock()
+
+    messages = [{"role": "user", "content": "hi"}]
+    text, out_messages = await run_tool_loop(
+        adapter=adapter,
+        messages=messages,
+        tools=[],
+        system="sys",
+        temperature=0.3,
+        dispatch_fn=dispatch,
+    )
+
+    assert text == "final"
+    assert out_messages == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "partial"},
+        {"role": "assistant", "content": "final"},
+    ]
+    dispatch.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -332,6 +414,93 @@ async def test_runner_streams_text_deltas_before_final_response():
     assert text == "Hello!"
     on_text_delta.assert_awaited_once_with("Hello!")
     assert len(out_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_runner_forces_tool_choice_only_on_first_round():
+    tool_call = ToolCall(id="call_1", name="discover", arguments={})
+
+    class TrackingAdapter(FakeAdapter):
+        def __init__(self, responses: list):
+            super().__init__(responses)
+            self.tool_choices = []
+
+        async def send_stream(self, messages, tools, system, temperature, tool_choice='auto'):
+            self.tool_choices.append(tool_choice)
+            response = await self.send(messages, tools, system, temperature, tool_choice=tool_choice)
+            yield {"type": "response", "response": response}
+
+    adapter = TrackingAdapter([
+        {
+            "message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
+            "tool_calls": [tool_call],
+        },
+        {
+            "message": {"role": "assistant", "content": "Done!"},
+            "tool_calls": [],
+        },
+    ])
+    dispatch = AsyncMock(return_value='{"status": "ok"}')
+
+    text, _ = await run_tool_loop(
+        adapter=adapter,
+        messages=[{"role": "user", "content": "find the right entity"}],
+        tools=[],
+        system="sys",
+        temperature=0.3,
+        dispatch_fn=dispatch,
+        first_round_tool_choice='any',
+    )
+
+    assert text == "Done!"
+    assert adapter.tool_choices == ['any', 'auto']
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_maps_tool_choice_any_to_required():
+    adapter = OpenAIAdapter.__new__(OpenAIAdapter)
+    create = AsyncMock(return_value={'id': 'resp'})
+    adapter._model = 'gpt-4o-mini'
+    adapter._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create),
+        )
+    )
+
+    await adapter.send(
+        messages=[{'role': 'user', 'content': 'hi'}],
+        tools=[{'name': 'catalog_inspect', 'description': 'Inspect', 'inputSchema': {'type': 'object'}}],
+        system='sys',
+        temperature=0.0,
+        tool_choice='any',
+    )
+
+    assert create.await_args.kwargs['tool_choice'] == 'required'
+
+
+@pytest.mark.asyncio
+async def test_gemini_adapter_maps_tool_choice_any_to_any_mode():
+    adapter = GeminiAdapter.__new__(GeminiAdapter)
+    generate_content = AsyncMock(return_value={'id': 'resp'})
+    adapter._model = 'gemini-2.5-flash'
+    adapter._provider = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=generate_content),
+            )
+        )
+    )
+
+    await adapter.send(
+        messages=[],
+        tools=[{'name': 'catalog_inspect', 'description': 'Inspect', 'inputSchema': {'type': 'object'}}],
+        system='sys',
+        temperature=0.0,
+        tool_choice='any',
+    )
+
+    config = generate_content.await_args.kwargs['config']
+    assert config.tool_config.function_calling_config.mode == 'ANY'
 
 
 from app.services.chat_engine import get_adapter_class

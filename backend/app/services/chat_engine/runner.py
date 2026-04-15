@@ -22,18 +22,27 @@ async def run_tool_loop(
     system: str,
     temperature: float,
     dispatch_fn: DispatchFn,
-    max_rounds: int = 5,
+    max_rounds: int = 15,
+    max_seconds: float = 150.0,
+    first_round_tool_choice: str = 'auto',
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str | None, list[Any]]:
     """
     Run the multi-turn tool calling loop.
 
     Returns (final_text, messages).
-    final_text is None if max_rounds exceeded.
+    final_text is None if max_rounds or time limit exceeded.
     """
+    import time
+    deadline = time.monotonic() + max_seconds
+
     for _round in range(max_rounds):
+        if time.monotonic() >= deadline:
+            logger.warning('Tool loop hit %ss time limit after %d rounds', max_seconds, _round)
+            break
+        tool_choice = first_round_tool_choice if _round == 0 else 'auto'
         response = None
-        async for event in adapter.send_stream(messages, tools, system, temperature):
+        async for event in adapter.send_stream(messages, tools, system, temperature, tool_choice=tool_choice):
             if event["type"] == "text_delta":
                 if on_text_delta is not None and event.get("delta"):
                     await on_text_delta(event["delta"])
@@ -43,9 +52,12 @@ async def run_tool_loop(
                 break
 
         if response is None:
-            response = await adapter.send(messages, tools, system, temperature)
+            response = await adapter.send(messages, tools, system, temperature, tool_choice=tool_choice)
         response_msg = adapter.extract_response_message(response)
-        messages.append(response_msg)
+        if isinstance(response_msg, list):
+            messages.extend(response_msg)
+        else:
+            messages.append(response_msg)
 
         tool_calls = adapter.extract_tool_calls(response)
         if not tool_calls:

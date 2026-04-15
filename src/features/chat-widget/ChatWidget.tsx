@@ -47,7 +47,6 @@ export function ChatWidget() {
   const openWithPrompt = useChatWidgetStore((s) => s.openWithPrompt);
   const pendingPrompt = useChatWidgetStore((s) => s.pendingPrompt);
   const consumePendingPrompt = useChatWidgetStore((s) => s.consumePendingPrompt);
-  const saveComposedReport = useChatWidgetStore((s) => s.saveComposedReport);
   const retryLastMessage = useChatWidgetStore((s) => s.retryLastMessage);
   const newChat = useChatWidgetStore((s) => s.newChat);
   const loadDefaults = useChatWidgetStore((s) => s.loadDefaults);
@@ -160,11 +159,6 @@ export function ChatWidget() {
   const handleSend = useCallback(
     (text: string) => void send(text, currentApp),
     [send, currentApp],
-  );
-
-  const handleSaveComposedReport = useCallback(
-    (reportName: string) => void saveComposedReport(reportName, currentApp),
-    [currentApp, saveComposedReport],
   );
 
   const handleRetry = useCallback(
@@ -285,7 +279,6 @@ export function ChatWidget() {
             status={status}
             appId={currentApp}
             onRetry={handleRetry}
-            onSaveComposedReport={handleSaveComposedReport}
           />
 
           {messages.length === 0 && (chatConfig.promptTemplates?.length ?? 0) > 0 && (

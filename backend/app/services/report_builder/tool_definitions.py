@@ -11,69 +11,42 @@ from typing import Any
 
 REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
     {
-        "name": "list_section_types",
+        "name": "blueprint_blocks",
         "description": (
-            "Returns all available report section types with a short description "
-            "and when to use each one. Call this first to understand what building "
-            "blocks are available."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "get_section_detail",
-        "description": (
-            "Returns full detail for a single section type — data shape, known variants, "
-            "and rendering hints. Call when you need to understand a specific section."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "section_type": {
-                    "type": "string",
-                    "description": "The section type key (e.g. 'compliance_table', 'exemplars').",
-                },
-            },
-            "required": ["section_type"],
-        },
-    },
-    {
-        "name": "list_app_sections",
-        "description": (
-            "Returns which section types the given app currently supports, "
-            "with the section IDs and variants configured in its analytics profile."
+            "Returns the available blueprint blocks for report composition. "
+            "Optionally scopes to the current app or a specific block type."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "app_id": {
                     "type": "string",
-                    "description": "The application identifier (e.g. 'kaira-bot', 'inside-sales').",
+                    "description": "Optional application identifier to filter supported blocks.",
+                },
+                "block_type": {
+                    "type": "string",
+                    "description": "Optional block type to inspect in detail.",
                 },
             },
-            "required": ["app_id"],
+            "required": [],
         },
     },
     {
-        "name": "compose_report",
+        "name": "blueprint_compose",
         "description": (
-            "Validates a proposed report configuration and returns a preview-ready "
-            "payload. The sections array defines which components appear and in what order. "
-            "Call this when you have a draft report to show the user."
+            "Validates a proposed analytics blueprint and returns a preview-ready payload. "
+            "Call this when you have a candidate blueprint to show the user."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "report_name": {
+                "name": {
                     "type": "string",
-                    "description": "Human-readable name for this report template.",
+                    "description": "Human-readable blueprint name.",
                 },
                 "sections": {
                     "type": "array",
-                    "description": "Ordered list of sections to include in the report.",
+                    "description": "Ordered list of blueprint sections.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -83,7 +56,7 @@ REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
                             },
                             "type": {
                                 "type": "string",
-                                "description": "Section type key from the catalog.",
+                                "description": "Section type key from the block catalog.",
                             },
                             "title": {
                                 "type": "string",
@@ -94,30 +67,29 @@ REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
                                 "description": "Variant hint for data selection (optional).",
                             },
                         },
-                        "required": ["id", "type", "title"],
+                        "required": ["type", "title"],
                     },
                 },
             },
-            "required": ["report_name", "sections"],
+            "required": ["name", "sections"],
         },
     },
     {
-        "name": "save_template",
+        "name": "blueprint_save",
         "description": (
-            "Persists the current report configuration as a reusable template. "
-            "Once saved, it appears in the report generation dropdown. "
+            "Persists the current blueprint as a reusable single-run report template. "
             "Only call this when the user explicitly confirms they want to save."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "report_name": {
+                "name": {
                     "type": "string",
-                    "description": "Human-readable name for the saved template.",
+                    "description": "Human-readable name for the saved blueprint.",
                 },
                 "sections": {
                     "type": "array",
-                    "description": "Finalized ordered list of sections.",
+                    "description": "Finalized ordered list of blueprint sections.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -126,16 +98,128 @@ REPORT_BUILDER_TOOLS: list[dict[str, Any]] = [
                             "title": {"type": "string"},
                             "variant": {"type": "string"},
                         },
-                        "required": ["id", "type", "title"],
+                        "required": ["type", "title"],
                     },
                 },
             },
-            "required": ["report_name", "sections"],
+            "required": ["name", "sections"],
+        },
+    },
+    {
+        "name": "blueprint_list",
+        "description": (
+            "Lists saved analytics blueprints for the current app. Use this to browse "
+            "existing templates before creating a new one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "type": "string",
+                    "description": "Optional application identifier (e.g. 'kaira-bot', 'inside-sales').",
+                },
+            },
+            "required": [],
         },
     },
 ]
 
 # ── Discovery tools ───────────────────────────────────────────────────
+
+CATALOG_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "catalog_inspect",
+        "description": (
+            "Inspect live schema metadata for one table or column. Returns column types, nullability, "
+            "defaults, primary key info, indexes, and parsed PostgreSQL column comments."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {
+                    "type": "string",
+                    "description": "Allowed table name to inspect.",
+                },
+                "column": {
+                    "type": "string",
+                    "description": "Optional column name. Omit to inspect the whole table.",
+                },
+            },
+            "required": ["table"],
+        },
+    },
+    {
+        "name": "catalog_relations",
+        "description": (
+            "Inspect foreign-key relationships for a table. Use this before joining tables to understand "
+            "join paths and cardinality direction."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {
+                    "type": "string",
+                    "description": "Allowed table name to inspect.",
+                },
+            },
+            "required": ["table"],
+        },
+    },
+    {
+        "name": "catalog_values",
+        "description": (
+            "Look up distinct values for a concrete column or JSONB expression on an allowed table. "
+            "Use this to resolve exact statuses, names, types, and other entity values before analysis."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {
+                    "type": "string",
+                    "description": "Allowed table name to query.",
+                },
+                "column": {
+                    "type": "string",
+                    "description": "Column name or supported JSONB expression such as context->>'agent'.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Optional case-insensitive search filter.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum values to return (default 20, max 100).",
+                },
+            },
+            "required": ["table", "column"],
+        },
+    },
+    {
+        "name": "catalog_sample",
+        "description": (
+            "Fetch sample rows from an allowed table. For JSONB columns, returns detected key structure, "
+            "leaf types, and representative sample values."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {
+                    "type": "string",
+                    "description": "Allowed table name to sample.",
+                },
+                "column": {
+                    "type": "string",
+                    "description": "Optional column name. Provide a JSONB column to inspect nested structure.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum rows to sample (default 5, max 25).",
+                },
+            },
+            "required": ["table"],
+        },
+    },
+]
 
 DISCOVERY_TOOLS: list[dict[str, Any]] = [
     {
@@ -248,12 +332,35 @@ EVIDENCE_TOOLS: list[dict[str, Any]] = [
 
 ANALYTICS_TOOLS: list[dict[str, Any]] = [
     {
-        "name": "analyze",
+        "name": "data_check",
+        "description": (
+            "Check whether matching data exists before running a heavier analytical query. "
+            "Use this when the question depends on a table plus concrete filters, especially to "
+            "confirm row availability, date coverage, or entity/filter combinations."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {
+                    "type": "string",
+                    "description": "Canonical table name to check, such as eval_runs or thread_evaluations.",
+                },
+                "filters": {
+                    "type": "object",
+                    "description": "Exact filters to apply for the existence check. Values must be concrete, not speculative.",
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["table"],
+        },
+    },
+    {
+        "name": "data_query",
         "description": (
             "Answer analytical questions about the application's data. "
-            "This tool generates and executes a database query from a natural-language question. "
-            "Use it for aggregations, trends, comparisons, breakdowns, and filtered analysis. "
-            "Always prefer this tool over report-builder tools for data questions."
+            "This tool generates and executes a safe SQL query from a natural-language question and "
+            "returns rows, deterministic result warnings, structured column metadata, and chart suggestions. "
+            "Use it for aggregations, trends, comparisons, breakdowns, and filtered analysis."
         ),
         "inputSchema": {
             "type": "object",
@@ -262,97 +369,14 @@ ANALYTICS_TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": (
                         "The analytical question to answer, in plain English. "
-                        "Be specific about what data you want: which dimensions, "
-                        "entity values, time range, filters, grouping, or comparison. Examples: "
-                        "'Show volume by agent for the last 30 days', "
-                        "'Compare inbound vs outbound result status', "
-                        "'What categories increased the most week over week?'"
+                        "Be specific about the metric, grouping, filters, entities, and time range. "
+                        "Examples: 'Show weekly pass rate for the last 8 weeks', "
+                        "'Compare status by agent for failed runs', "
+                        "'Break down rule violations by category this month'."
                     ),
-                },
+                }
             },
             "required": ["question"],
-        },
-    },
-    {
-        "name": "render_chart",
-        "description": (
-            "Render an interactive chart visualization from data returned by the analyze tool. "
-            "Call this AFTER analyze when the user asks for a chart, visualization, or graph. "
-            "If the user is charting the most recent analysis from session state, do not re-run analyze "
-            "unless the requested metric, grouping, or filters changed. "
-            "Pick chart_type from the eligible chart types listed in session state for the current data. "
-            "The x_key, y_key, and series data_key values must match column names from the analyze result."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "chart_type": {
-                    "type": "string",
-                    "description": "Chart type to render. Pick from the eligible chart types for the current data.",
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Chart title displayed above the visualization.",
-                },
-                "x_key": {
-                    "type": "string",
-                    "description": "Column name for the x-axis or category labels.",
-                },
-                "y_key": {
-                    "type": "string",
-                    "description": "Column name for the y-axis values (single series).",
-                },
-                "series_keys": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Column names for multiple data series (stacked/grouped). Each becomes a segment.",
-                },
-                "series": {
-                    "type": "array",
-                    "description": "For composed charts: per-series visual config. Each entry specifies a data column and how to render it.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "data_key": {
-                                "type": "string",
-                                "description": "Column name for this series.",
-                            },
-                            "type": {
-                                "type": "string",
-                                "enum": ["bar", "line", "area", "scatter"],
-                                "description": "Visual type for this series.",
-                            },
-                            "stack_id": {
-                                "type": "string",
-                                "description": "Optional stack group ID for stacking multiple bar series.",
-                            },
-                        },
-                        "required": ["data_key", "type"],
-                    },
-                },
-                "x_label": {
-                    "type": "string",
-                    "description": "Optional display label for x-axis.",
-                },
-                "y_label": {
-                    "type": "string",
-                    "description": "Optional display label for y-axis.",
-                },
-                "legend_position": {
-                    "type": "string",
-                    "enum": ["top", "bottom", "right", "none"],
-                    "description": "Legend position. Defaults to bottom for cartesian charts, right for pie/donut.",
-                },
-                "alternatives": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Up to 3 alternative chart types the user can switch to client-side. "
-                        "Only include when the user did not request a specific chart type."
-                    ),
-                },
-            },
-            "required": ["chart_type", "title", "x_key"],
         },
     },
 ]
@@ -582,6 +606,7 @@ _DEPRECATED_DATA_EXPLORER_TOOLS: list[dict[str, Any]] = [
 # ── Registry ─────────────────────────────────────────────────────────
 
 CAPABILITY_TOOLS: dict[str, list[dict[str, Any]]] = {
+    "catalog": CATALOG_TOOLS,
     "discovery": DISCOVERY_TOOLS,
     "evidence": EVIDENCE_TOOLS,
     "report_builder": REPORT_BUILDER_TOOLS,
@@ -591,7 +616,7 @@ CAPABILITY_TOOLS: dict[str, list[dict[str, Any]]] = {
 }
 
 # Default capabilities when App.config.chat.capabilities is not set
-DEFAULT_CAPABILITIES = ["discovery", "analytics", "evidence", "report_builder"]
+DEFAULT_CAPABILITIES = ["catalog", "discovery", "analytics", "evidence", "report_builder"]
 
 
 def resolve_tools(capabilities: list[str] | None = None) -> list[dict[str, Any]]:

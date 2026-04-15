@@ -8,6 +8,8 @@ import time
 import uuid
 from typing import Any
 
+from app.services.report_builder.scratchpad_state import default_scratchpad
+
 SESSION_TTL_SECONDS = 3600  # 1 hour
 
 _sessions: dict[str, tuple[dict, float]] = {}
@@ -24,13 +26,7 @@ def create_session(
         "provider": provider,
         "model": model,
         "messages": [],  # opaque, provider-native format
-        "scratchpad": {
-            "findings": [],
-            "composed_report": None,
-            "errors": [],
-            "discovery": None,
-            "lookups": {},
-        },
+        "scratchpad": default_scratchpad(),
         "_app_context": None,
         "_user_context": None,
     }

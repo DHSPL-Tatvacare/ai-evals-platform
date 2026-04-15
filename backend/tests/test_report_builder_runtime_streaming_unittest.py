@@ -27,6 +27,10 @@ class ReportBuilderRuntimeStreamingTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'resolved_entities': {},
+                'last_evidence': None,
             },
             next_event_seq=1,
         )
@@ -117,12 +121,25 @@ class ReportBuilderRuntimeStreamingTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'resolved_entities': {},
+                'last_evidence': None,
             },
         }
 
         with patch(
             'app.services.report_builder.chat_handler._resolve_tools_for_app',
             new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
         ), patch(
             'app.services.report_builder.chat_handler.create_adapter',
             new=AsyncMock(return_value=FakeAdapter()),
@@ -166,9 +183,13 @@ class ReportBuilderRuntimeStreamingTests(unittest.IsolatedAsyncioTestCase):
             )
 
             first_event = await asyncio.wait_for(anext(stream), timeout=0.05)
-            self.assertEqual(first_event['event'], 'tool_call_start')
-            self.assertEqual(first_event['data']['name'], 'analyze')
-            self.assertGreaterEqual(first_event['data']['seq'], 1)
+            self.assertEqual(first_event['event'], 'entity_recognition')
+            self.assertTrue(first_event['data']['is_platform_query'])
+
+            second_event = await asyncio.wait_for(anext(stream), timeout=0.05)
+            self.assertEqual(second_event['event'], 'tool_call_start')
+            self.assertEqual(second_event['data']['name'], 'analyze')
+            self.assertGreaterEqual(second_event['data']['seq'], 1)
 
             release_runner.set()
             remaining = []
@@ -223,12 +244,25 @@ class ReportBuilderRuntimeStreamingTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'resolved_entities': {},
+                'last_evidence': None,
             },
         }
 
         with patch(
             'app.services.report_builder.chat_handler._resolve_tools_for_app',
             new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
         ), patch(
             'app.services.report_builder.chat_handler.create_adapter',
             new=AsyncMock(return_value=FakeAdapter()),
@@ -262,8 +296,160 @@ class ReportBuilderRuntimeStreamingTests(unittest.IsolatedAsyncioTestCase):
             ):
                 events.append(event)
 
-        self.assertEqual([event['event'] for event in events], ['content_delta', 'done'])
-        self.assertEqual(events[0]['data']['delta'], 'Hello')
+        self.assertEqual([event['event'] for event in events], ['entity_recognition', 'content_delta', 'done'])
+        self.assertEqual(events[1]['data']['delta'], 'Hello')
+        self.assertEqual(events[2]['data']['content'], 'Hello')
+
+    async def test_run_chat_turn_streaming_includes_final_content_in_done_without_delta(self):
+        class FakeAdapter:
+            @staticmethod
+            def build_user_message(text: str) -> dict[str, str]:
+                return {'role': 'user', 'content': text}
+
+        async def fake_run_tool_loop(**kwargs):
+            return 'Final answer', kwargs['messages']
+
+        session = {
+            'chat_session_id': '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221',
+            'app_id': 'kaira-bot',
+            'tenant_id': 'tenant-1',
+            'user_id': 'user-1',
+            'messages': [],
+            'scratchpad': {
+                'findings': [],
+                'composed_report': None,
+                'errors': [],
+                'discovery': None,
+                'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
+            },
+        }
+
+        with patch(
+            'app.services.report_builder.chat_handler._resolve_tools_for_app',
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_adapter',
+            new=AsyncMock(return_value=FakeAdapter()),
+        ), patch(
+            'app.services.report_builder.chat_handler.run_tool_loop',
+            new=AsyncMock(side_effect=fake_run_tool_loop),
+        ), patch(
+            'app.services.report_builder.chat_handler.record_user_message',
+            new=AsyncMock(return_value='user-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_assistant_message',
+            new=AsyncMock(return_value='assistant-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.finalize_assistant_message',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.save_runtime_state',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.append_runtime_event',
+            new=AsyncMock(side_effect=range(1, 20)),
+        ), patch(
+            'app.services.report_builder.chat_handler.assemble_context',
+            new=AsyncMock(return_value='SYSTEM'),
+        ):
+            events = []
+            async for event in chat_handler.run_chat_turn_streaming(
+                session,
+                'hello',
+                provider='gemini',
+                model='gemini-3-flash-preview',
+                db=AsyncMock(),
+                auth=AsyncMock(),
+            ):
+                events.append(event)
+
+        self.assertEqual(events[-1]['event'], 'done')
+        self.assertEqual(events[-1]['data']['content'], 'Final answer')
+
+    async def test_run_chat_turn_streaming_short_circuits_off_topic_questions(self):
+        session = {
+            'chat_session_id': '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221',
+            'app_id': 'kaira-bot',
+            'tenant_id': 'tenant-1',
+            'user_id': 'user-1',
+            'messages': [],
+            'scratchpad': {
+                'findings': [],
+                'composed_report': None,
+                'errors': [],
+                'discovery': None,
+                'lookups': {},
+                'resolved_entities': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'last_evidence': None,
+            },
+        }
+
+        with patch(
+            'app.services.report_builder.chat_handler._resolve_tools_for_app',
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult(
+                is_platform_query=False,
+                out_of_scope_reason='General knowledge question',
+            )),
+        ), patch(
+            'app.services.report_builder.chat_handler.record_user_message',
+            new=AsyncMock(return_value='user-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_assistant_message',
+            new=AsyncMock(return_value='assistant-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.finalize_assistant_message',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.save_runtime_state',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.touch_sherlock_chat_session',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.append_runtime_event',
+            new=AsyncMock(side_effect=range(1, 20)),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_adapter',
+            new=AsyncMock(side_effect=AssertionError('adapter should not be created')),
+        ):
+            events = []
+            async for event in chat_handler.run_chat_turn_streaming(
+                session,
+                'What is the weather today?',
+                provider='openai',
+                model='gpt-5.4-mini',
+                db=AsyncMock(),
+                auth=AsyncMock(),
+            ):
+                events.append(event)
+
+        self.assertEqual([event['event'] for event in events], ['entity_recognition', 'done'])
+        self.assertFalse(events[0]['data']['is_platform_query'])
+        self.assertEqual(events[-1]['data']['terminalStatus'], 'done')
 
 
 if __name__ == '__main__':

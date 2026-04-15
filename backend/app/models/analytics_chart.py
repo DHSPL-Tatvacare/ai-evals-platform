@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,12 @@ class AnalyticsChart(Base, TenantUserMixin, ShareableMixin, TimestampMixin):
 
     # Optional: the natural language question that generated this chart
     source_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('chat_sessions.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
 
     # Soft delete
     archived_at: Mapped[datetime | None] = mapped_column(

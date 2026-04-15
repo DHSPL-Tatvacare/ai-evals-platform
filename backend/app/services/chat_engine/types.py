@@ -26,6 +26,7 @@ class ChatAdapter(Protocol):
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ) -> Any:
         """Send conversation to the LLM. Returns provider-native response."""
         ...
@@ -36,6 +37,7 @@ class ChatAdapter(Protocol):
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ) -> AsyncIterator[dict[str, Any]]:
         """Stream provider-native chunks as normalized events and end with a final response event."""
         ...

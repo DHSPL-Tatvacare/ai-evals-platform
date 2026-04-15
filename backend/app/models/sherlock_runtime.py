@@ -25,7 +25,7 @@ class SherlockRuntimeSession(Base, TenantUserMixin, TimestampMixin):
         JSONB,
         nullable=False,
         server_default=text(
-            "'{\"findings\": [], \"composed_report\": null, \"errors\": [], \"discovery\": null, \"lookups\": {}}'::jsonb"
+            "'{\"findings\": [], \"composed_report\": null, \"errors\": [], \"discovery\": null, \"lookups\": {}, \"resolved_entities\": {}, \"active_filters\": {}, \"discovered_schema\": {\"tables_inspected\": [], \"columns_by_table\": {}, \"relations_found\": [], \"json_structures\": {}}, \"last_analysis\": null, \"analysis_history\": [], \"last_evidence\": null, \"last_data_check\": null}'::jsonb"
         ),
     )
     next_event_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('1'))

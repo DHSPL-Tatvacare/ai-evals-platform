@@ -20,6 +20,41 @@ class _FakeAnalyticsSession:
 
 
 class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
+    def _auth_context(self) -> AuthContext:
+        return AuthContext(
+            user_id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            email='user@example.com',
+            role_id=uuid.uuid4(),
+            is_owner=True,
+            permissions=frozenset(),
+            app_access=frozenset({'kaira-bot'}),
+        )
+
+    def _semantic_model(self) -> dict[str, object]:
+        return {
+            'tables': {
+                'analytics_run_facts': {
+                    'alias': 'rf',
+                    'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
+                    'columns': {
+                        'created_at': {'type': 'timestamp', 'role': 'temporal'},
+                        'run_status': {'type': 'text', 'role': 'dimension'},
+                        'run_name': {'type': 'text', 'role': 'dimension'},
+                        'pass_rate': {'type': 'numeric', 'role': 'measure', 'pre_aggregated': True},
+                    },
+                },
+                'analytics_eval_facts': {
+                    'alias': 'ef',
+                    'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
+                    'columns': {
+                        'run_id': {'type': 'uuid', 'role': 'dimension'},
+                        'rule_id': {'type': 'text', 'role': 'dimension'},
+                    },
+                },
+            },
+        }
+
     def test_load_semantic_model_prefers_app_specific_yaml(self):
         model = sql_agent.load_semantic_model('inside-sales')
 
@@ -42,6 +77,48 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             semantic_model=semantic_model,
         )
         self.assertEqual(cleaned, 'SELECT st.category FROM support_ticket_facts st WHERE st.category IS NOT NULL')
+
+    def test_validate_sql_accepts_read_only_cte(self):
+        semantic_model = {
+            'tables': {
+                'support_ticket_facts': {
+                    'alias': 'st',
+                    'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
+                },
+            },
+        }
+
+        cleaned = sql_agent.validate_sql(
+            'WITH recent AS (SELECT st.category FROM support_ticket_facts st) SELECT * FROM recent',
+            semantic_model=semantic_model,
+        )
+        self.assertEqual(cleaned, 'WITH recent AS (SELECT st.category FROM support_ticket_facts st) SELECT * FROM recent')
+
+    def test_prepare_query_rejects_unbound_placeholders(self):
+        semantic_model = {
+            'tables': {
+                'analytics_eval_facts': {
+                    'alias': 'ef',
+                    'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
+                },
+            },
+        }
+
+        with self.assertRaises(sql_agent.SQLValidationError):
+            sql_agent.prepare_query(
+                'SELECT ef.item_id FROM analytics_eval_facts ef WHERE ef.item_id = :item_id',
+                auth=AuthContext(
+                    user_id=uuid.uuid4(),
+                    tenant_id=uuid.uuid4(),
+                    email='user@example.com',
+                    role_id=uuid.uuid4(),
+                    is_owner=True,
+                    permissions=frozenset(),
+                    app_access=frozenset({'kaira-bot'}),
+                ),
+                app_id='kaira-bot',
+                semantic_model=semantic_model,
+            )
 
     async def test_analyze_expands_short_run_ids_before_sql_generation(self):
         auth = AuthContext(
@@ -170,6 +247,285 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(check_cost.await_count, 2)
         analytics_db.rollback.assert_awaited_once()
         execute_query.assert_awaited_once()
+
+    async def test_data_check_returns_row_count_and_bounds(self):
+        from app.models.eval_run import EvalRun
+
+        db = AsyncMock()
+        result_proxy = Mock()
+        result_proxy.first.return_value = (5, '2026-04-01 00:00:00+00:00', '2026-04-14 00:00:00+00:00')
+        db.execute.return_value = result_proxy
+
+        with patch(
+            'app.services.chat_engine.catalog_tools._load_catalog_context',
+            new=AsyncMock(return_value=({}, self._semantic_model())),
+        ), patch(
+            'app.services.chat_engine.catalog_tools._validate_app_access',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.catalog_tools._validate_table_access',
+            return_value=None,
+        ), patch.dict(
+            'app.services.chat_engine.catalog_tools._CATALOG_MODEL_MAP',
+            {'eval_runs': EvalRun},
+            clear=False,
+        ):
+            payload = await sql_agent.data_check(
+                table='eval_runs',
+                filters=None,
+                db=db,
+                auth=self._auth_context(),
+                app_id='kaira-bot',
+            )
+
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['table'], 'eval_runs')
+        self.assertEqual(payload['row_count'], 5)
+        self.assertEqual(payload['min_created_at'], '2026-04-01 00:00:00+00:00')
+        self.assertEqual(payload['max_created_at'], '2026-04-14 00:00:00+00:00')
+
+    async def test_data_query_builds_time_series_metadata_and_chart_suggestion(self):
+        auth = self._auth_context()
+        app_db = AsyncMock()
+        analytics_db = Mock()
+        analytics_db.commit = AsyncMock()
+        analytics_db.rollback = AsyncMock()
+
+        with patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_semantic_model',
+            return_value=self._semantic_model(),
+        ), patch(
+            'app.services.chat_engine.sql_agent._match_common_query',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.sql_agent._expand_run_id_prefixes',
+            new=AsyncMock(side_effect=lambda question, **_kwargs: question),
+        ), patch(
+            'app.services.chat_engine.sql_agent.generate_sql',
+            new=AsyncMock(return_value=(
+                "SELECT date_trunc('week', rf.created_at) AS week_start, COUNT(*) AS total_runs "
+                'FROM analytics_run_facts rf GROUP BY 1 ORDER BY 1'
+            )),
+        ), patch(
+            'app.services.chat_engine.sql_agent._get_cache',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'app.services.chat_engine.sql_agent._check_query_cost',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.chat_engine.sql_agent.execute_query',
+            new=AsyncMock(return_value=[
+                {'week_start': '2026-04-01T00:00:00Z', 'total_runs': 8},
+                {'week_start': '2026-04-08T00:00:00Z', 'total_runs': 12},
+            ]),
+        ), patch(
+            'app.services.chat_engine.sql_agent._set_cache',
+            new=AsyncMock(),
+        ), patch(
+            'app.database.analytics_session',
+            return_value=_FakeAnalyticsSession(analytics_db),
+        ):
+            result = await sql_agent.data_query(
+                question='Show weekly runs for custom evals',
+                context={'active_filters': {'eval_type': 'custom'}},
+                db=app_db,
+                auth=auth,
+                app_id='kaira-bot',
+                provider='gemini',
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['applied_filters'], {'eval_type': 'custom'})
+        self.assertEqual(result['columns'][0]['name'], 'week_start')
+        self.assertEqual(result['columns'][0]['role'], 'temporal')
+        self.assertEqual(result['columns'][1]['name'], 'total_runs')
+        self.assertEqual(result['columns'][1]['role'], 'measure')
+        self.assertEqual(result['chart_options']['suggested']['x'], 'week_start')
+        self.assertEqual(result['chart_options']['suggested']['y'], ['total_runs'])
+        self.assertIn(result['chart_options']['suggested']['type'], result['chart_options']['eligible_types'])
+
+    async def test_data_query_handles_joined_breakdowns_without_losing_roles(self):
+        auth = self._auth_context()
+        app_db = AsyncMock()
+        analytics_db = Mock()
+        analytics_db.commit = AsyncMock()
+        analytics_db.rollback = AsyncMock()
+
+        with patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_semantic_model',
+            return_value=self._semantic_model(),
+        ), patch(
+            'app.services.chat_engine.sql_agent._match_common_query',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.sql_agent._expand_run_id_prefixes',
+            new=AsyncMock(side_effect=lambda question, **_kwargs: question),
+        ), patch(
+            'app.services.chat_engine.sql_agent.generate_sql',
+            new=AsyncMock(return_value=(
+                'SELECT rf.run_name, ef.rule_id, COUNT(*) AS violation_count '
+                'FROM analytics_run_facts rf '
+                'JOIN analytics_eval_facts ef ON ef.run_id = rf.run_id '
+                'GROUP BY rf.run_name, ef.rule_id'
+            )),
+        ), patch(
+            'app.services.chat_engine.sql_agent._get_cache',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'app.services.chat_engine.sql_agent._check_query_cost',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.chat_engine.sql_agent.execute_query',
+            new=AsyncMock(return_value=[
+                {'run_name': 'Smoke', 'rule_id': 'rule_a', 'violation_count': 4},
+                {'run_name': 'Smoke', 'rule_id': 'rule_b', 'violation_count': 2},
+            ]),
+        ), patch(
+            'app.services.chat_engine.sql_agent._set_cache',
+            new=AsyncMock(),
+        ), patch(
+            'app.database.analytics_session',
+            return_value=_FakeAnalyticsSession(analytics_db),
+        ):
+            result = await sql_agent.data_query(
+                question='Break down violations by run and rule',
+                db=app_db,
+                auth=auth,
+                app_id='kaira-bot',
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual([column['role'] for column in result['columns']], ['dimension', 'dimension', 'measure'])
+        self.assertIn('rf.tenant_id = :tenant_id', result['sql_used'])
+        self.assertIn('JOIN analytics_eval_facts ef ON ef.run_id = rf.run_id', result['sql_used'])
+
+    async def test_data_query_returns_deterministic_warning_codes(self):
+        auth = self._auth_context()
+        app_db = AsyncMock()
+        analytics_db = Mock()
+        analytics_db.commit = AsyncMock()
+        analytics_db.rollback = AsyncMock()
+
+        with patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_semantic_model',
+            return_value=self._semantic_model(),
+        ), patch(
+            'app.services.chat_engine.sql_agent._match_common_query',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.sql_agent._expand_run_id_prefixes',
+            new=AsyncMock(side_effect=lambda question, **_kwargs: question),
+        ), patch(
+            'app.services.chat_engine.sql_agent.generate_sql',
+            new=AsyncMock(return_value=(
+                'SELECT rf.run_status, SUM(rf.pass_rate) AS pass_rate '
+                'FROM analytics_run_facts rf'
+            )),
+        ), patch(
+            'app.services.chat_engine.sql_agent._get_cache',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'app.services.chat_engine.sql_agent._check_query_cost',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.chat_engine.sql_agent.execute_query',
+            new=AsyncMock(return_value=[
+                {'run_status': None, 'pass_rate': None},
+            ]),
+        ), patch(
+            'app.services.chat_engine.sql_agent._set_cache',
+            new=AsyncMock(),
+        ), patch(
+            'app.database.analytics_session',
+            return_value=_FakeAnalyticsSession(analytics_db),
+        ):
+            result = await sql_agent.data_query(
+                question='Show breakdown by run status',
+                db=app_db,
+                auth=auth,
+                app_id='kaira-bot',
+            )
+
+        warning_codes = {warning['code'] for warning in result['warnings']}
+        self.assertIn('possible_missing_group_by', warning_codes)
+        self.assertIn('all_null_column', warning_codes)
+
+    def test_verify_query_result_warns_on_pre_aggregated_measure(self):
+        from app.services.chat_engine.result_verifier import verify_query_result
+
+        warnings = verify_query_result(
+            question='Show average pass rate',
+            sql='SELECT AVG(rf.pass_rate) AS pass_rate FROM analytics_run_facts rf',
+            rows=[{'pass_rate': 82.5}],
+            columns=[
+                {
+                    'name': 'pass_rate',
+                    'role': 'measure',
+                    'pre_aggregated': True,
+                    'source_column': 'rf.pass_rate',
+                },
+            ],
+        )
+
+        self.assertIn('pre_aggregated_measure', {warning['code'] for warning in warnings})
+
+    async def test_data_query_reports_empty_result_without_chart_suggestion(self):
+        auth = self._auth_context()
+        app_db = AsyncMock()
+        analytics_db = Mock()
+        analytics_db.commit = AsyncMock()
+        analytics_db.rollback = AsyncMock()
+
+        with patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_semantic_model',
+            return_value=self._semantic_model(),
+        ), patch(
+            'app.services.chat_engine.sql_agent._match_common_query',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.sql_agent._expand_run_id_prefixes',
+            new=AsyncMock(side_effect=lambda question, **_kwargs: question),
+        ), patch(
+            'app.services.chat_engine.sql_agent.generate_sql',
+            new=AsyncMock(return_value='SELECT rf.run_name FROM analytics_run_facts rf WHERE 1 = 0'),
+        ), patch(
+            'app.services.chat_engine.sql_agent._get_cache',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'app.services.chat_engine.sql_agent._check_query_cost',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.chat_engine.sql_agent.execute_query',
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.chat_engine.sql_agent._set_cache',
+            new=AsyncMock(),
+        ), patch(
+            'app.database.analytics_session',
+            return_value=_FakeAnalyticsSession(analytics_db),
+        ):
+            result = await sql_agent.data_query(
+                question='Show runs for missing status',
+                db=app_db,
+                auth=auth,
+                app_id='kaira-bot',
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['chart_options']['eligible_types'], [])
+        self.assertEqual([warning['code'] for warning in result['warnings']], ['empty_result'])
 
 
 if __name__ == '__main__':

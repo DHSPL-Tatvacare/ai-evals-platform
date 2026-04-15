@@ -113,6 +113,9 @@ export interface AppNavigationConfig {
   runsPath: string | null;
   runDetailPath: string | null;
   threadDetailPath: string | null;
+  analyticsChartPath: string | null;
+  analyticsDashboardPath: string | null;
+  reportWizardPath: string | null;
 }
 
 export type AppActionRequirementSource = 'appSettings' | 'globalSettings' | 'llmSettings';
@@ -243,10 +246,34 @@ export interface AppAnalyticsConfig {
   semanticModel?: Record<string, unknown> | null;
 }
 
+export type AppChatEntityMatch = 'exact' | 'prefix' | 'contains';
+
+export interface AppChatDataSurfaceConfig {
+  key: string;
+  description: string;
+  source: string;
+  entityFieldMap?: Record<string, string>;
+  fields?: string[];
+  defaultLimit?: number;
+}
+
+export interface AppChatEntityResolverConfig {
+  key: string;
+  entityType: string;
+  description?: string;
+  source: string;
+  field?: string | null;
+  dimension?: string | null;
+  match?: AppChatEntityMatch;
+  limit?: number;
+}
+
 export interface AppChatConfig {
   enabled?: boolean;
   promptTemplates?: { label: string; prompt: string; category?: string }[];
   capabilities?: string[];
+  dataSurfaces?: AppChatDataSurfaceConfig[];
+  entityResolvers?: AppChatEntityResolverConfig[];
 }
 
 export interface AppConfig {
@@ -395,6 +422,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/runs',
       runDetailPath: '/runs/:runId',
       threadDetailPath: null,
+      analyticsChartPath: '/analytics/charts/:chartId',
+      analyticsDashboardPath: '/analytics/dashboards/:dashboardId',
+      reportWizardPath: '/reports/generate',
     },
     actions: DEFAULT_APP_ACTIONS_CONFIG,
     collections: DEFAULT_APP_COLLECTIONS_CONFIG,
@@ -464,6 +494,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { label: 'Compare accuracy trends', prompt: 'Compare accuracy trends across recent evaluation runs' },
         { label: 'Find top issues', prompt: 'What are the most common discrepancy patterns found in evaluations?' },
       ],
+      capabilities: ['discovery', 'analytics', 'evidence', 'report_builder'],
+      dataSurfaces: [],
+      entityResolvers: [],
     },
   },
   'kaira-bot': {
@@ -519,6 +552,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/kaira/runs',
       runDetailPath: '/kaira/runs/:runId',
       threadDetailPath: '/kaira/threads/:threadId',
+      analyticsChartPath: '/kaira/analytics/charts/:chartId',
+      analyticsDashboardPath: '/kaira/analytics/dashboards/:dashboardId',
+      reportWizardPath: '/kaira/reports/generate',
     },
     actions: {
       primaryNew: {
@@ -578,6 +614,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { label: 'Build a report', prompt: 'Build a detailed report from the most recent evaluation run' },
         { label: 'Check rule violations', prompt: 'Which rules were most frequently violated across recent evaluations?' },
       ],
+      capabilities: ['discovery', 'analytics', 'evidence', 'report_builder'],
+      dataSurfaces: [],
+      entityResolvers: [],
     },
   },
   'inside-sales': {
@@ -633,6 +672,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/inside-sales/runs',
       runDetailPath: '/inside-sales/runs/:runId',
       threadDetailPath: '/inside-sales/runs/:runId/calls/:threadId',
+      analyticsChartPath: '/inside-sales/analytics/charts/:chartId',
+      analyticsDashboardPath: '/inside-sales/analytics/dashboards/:dashboardId',
+      reportWizardPath: '/inside-sales/reports/generate',
     },
     actions: DEFAULT_APP_ACTIONS_CONFIG,
     collections: {
@@ -838,6 +880,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { label: 'Score distribution', prompt: 'Show me the score distribution across recent evaluation runs' },
         { label: 'Generate insights', prompt: 'Generate actionable insights from the most recent evaluation results' },
       ],
+      capabilities: ['discovery', 'analytics', 'evidence', 'report_builder'],
+      dataSurfaces: [],
+      entityResolvers: [],
     },
   },
 };
@@ -984,6 +1029,14 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
         ...fallback.analytics.assets,
         ...config.analytics?.assets,
       },
+    },
+    chat: {
+      ...fallback.chat,
+      ...config.chat,
+      promptTemplates: config.chat?.promptTemplates ?? fallback.chat.promptTemplates,
+      capabilities: config.chat?.capabilities ?? fallback.chat.capabilities,
+      dataSurfaces: config.chat?.dataSurfaces ?? fallback.chat.dataSurfaces,
+      entityResolvers: config.chat?.entityResolvers ?? fallback.chat.entityResolvers,
     },
   };
 }

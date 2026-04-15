@@ -5,15 +5,36 @@ Wires report-specific tools and system prompt into the shared chat engine.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import time
+import uuid
 from typing import Any, AsyncGenerator, Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.chat_engine import create_adapter, run_tool_loop
+from app.services.chat_engine.entity_recognition import (
+    EntityRecognitionResult,
+    recognize_entities,
+    render_entity_recognition_context,
+)
+from app.services.chat_engine.entity_registry import load_entity_registry
+from app.services.chat_engine.sql_agent import load_app_config, load_semantic_model
 from app.services.report_builder.schemas import ToolCallDetailOut
+from app.services.report_builder.scratchpad_state import (
+    build_analysis_snapshot,
+    default_scratchpad,
+    push_analysis_snapshot,
+    remember_active_filters,
+    remember_catalog_inspection,
+    remember_catalog_relations,
+    remember_data_check,
+    remember_json_structure,
+    remember_last_evidence,
+    remember_resolved_entities,
+)
 from app.services.report_builder.tool_definitions import resolve_tools
 from app.services.report_builder.runtime_store import (
     SherlockRuntimeSession,
@@ -22,26 +43,125 @@ from app.services.report_builder.runtime_store import (
     finalize_assistant_message,
     record_user_message,
     save_runtime_state,
+    touch_sherlock_chat_session,
 )
 from app.services.report_builder.tool_handlers import dispatch_tool_call
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 5
+MAX_TOOL_ROUNDS = 15
 EventEmitter = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+def _humanize_chart_title(question: str | None) -> str:
+    title = str(question or '').strip().rstrip('?.! ')
+    return title[:1].upper() + title[1:] if title else 'Suggested chart'
+
+
+def _pivot_chart_rows(
+    rows: list[dict[str, Any]],
+    *,
+    x_key: str,
+    series_key: str,
+    value_key: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    pivoted: dict[str, dict[str, Any]] = {}
+    series_values: list[str] = []
+    seen_series: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        x_value = row.get(x_key)
+        series_value = row.get(series_key)
+        if x_value in (None, '') or series_value in (None, ''):
+            continue
+        bucket_key = json.dumps(x_value, sort_keys=True, default=str)
+        bucket = pivoted.setdefault(bucket_key, {x_key: x_value})
+        series_text = str(series_value)
+        bucket[series_text] = row.get(value_key)
+        if series_text not in seen_series:
+            seen_series.add(series_text)
+            series_values.append(series_text)
+    return list(pivoted.values()), series_values
+
+
+def _build_chart_payload(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(result, dict) or result.get('status') != 'ok':
+        return None
+    rows = result.get('data')
+    chart_options = result.get('chart_options')
+    if not isinstance(rows, list) or not rows or not isinstance(chart_options, dict):
+        return None
+    suggested = chart_options.get('suggested')
+    if not isinstance(suggested, dict):
+        return None
+
+    chart_type = str(suggested.get('type') or '').strip()
+    x_key = str(suggested.get('x') or '').strip()
+    y_keys = [str(value) for value in suggested.get('y', []) if value]
+    series_dimension = str(suggested.get('series') or '').strip() or None
+    if not chart_type or not x_key or not y_keys:
+        return None
+
+    data_rows = [row for row in rows if isinstance(row, dict)]
+    spec: dict[str, Any] = {
+        'type': chart_type,
+        'title': _humanize_chart_title(result.get('question')),
+        'xKey': x_key,
+        'xLabel': str(suggested.get('x_label') or x_key),
+        'yLabel': str(suggested.get('y_label') or y_keys[0]),
+        'legendPosition': 'right' if chart_type in {'pie', 'donut', 'radar', 'radial_bar'} else 'bottom',
+    }
+
+    if series_dimension and len(y_keys) == 1:
+        data_rows, series_keys = _pivot_chart_rows(
+            data_rows,
+            x_key=x_key,
+            series_key=series_dimension,
+            value_key=y_keys[0],
+        )
+        if series_keys:
+            spec['seriesKeys'] = series_keys
+        else:
+            spec['yKey'] = y_keys[0]
+    elif chart_type in {'pie', 'donut', 'funnel', 'radial_bar', 'treemap'}:
+        spec['yKey'] = y_keys[0]
+    elif chart_type == 'scatter':
+        spec['seriesKeys'] = y_keys[:1]
+    elif chart_type == 'composed':
+        spec['series'] = [
+            {
+                'dataKey': key,
+                'type': 'line' if index == 0 else 'bar',
+            }
+            for index, key in enumerate(y_keys[:3])
+        ]
+    elif len(y_keys) > 1:
+        spec['seriesKeys'] = y_keys[:3]
+    else:
+        spec['yKey'] = y_keys[0]
+
+    eligible = [
+        str(value)
+        for value in chart_options.get('eligible_types', [])
+        if isinstance(value, str) and value != chart_type
+    ]
+    if eligible:
+        spec['alternatives'] = eligible[:3]
+
+    return {
+        'spec': spec,
+        'data': data_rows,
+        'sql_query': result.get('sql_used', ''),
+        'source_question': result.get('question', ''),
+    }
 
 
 async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
     """Build the report-builder system prompt from layered context modules."""
     from app.services.chat_engine.prompts import base, app_context, scratchpad, user_context
 
-    session.setdefault('scratchpad', {
-        'findings': [],
-        'composed_report': None,
-        'errors': [],
-        'discovery': None,
-        'lookups': {},
-    })
+    session.setdefault('scratchpad', default_scratchpad())
     session.setdefault('_app_context', None)
     session.setdefault('_user_context', None)
 
@@ -54,15 +174,33 @@ async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
     return '\n\n'.join(part for part in parts if part)
 
 
-def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str) -> None:
+def _copy_working_session(session: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **session,
+        'messages': list(session.get('messages', [])),
+        'scratchpad': copy.deepcopy(session.get('scratchpad', default_scratchpad())),
+        '_app_context': session.get('_app_context'),
+        '_user_context': session.get('_user_context'),
+    }
+
+
+def _sync_session_state(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key in ('messages', 'scratchpad', '_app_context', '_user_context'):
+        target[key] = source.get(key)
+
+
+def _off_topic_response(app_config: dict[str, Any] | None, app_id: str) -> str:
+    label = str((app_config or {}).get('displayName') or (app_config or {}).get('display_name') or app_id).strip() or app_id
+    return f"I'm Sherlock, a data detective for {label}. I can help with evaluation analytics, rule compliance, trends, and more."
+
+
+def _serialize_entity_recognition(result: EntityRecognitionResult) -> dict[str, Any]:
+    return result.model_dump(mode='json')
+
+
+def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str, *, app_id: str = '') -> None:
     """Capture compact tool outcomes for the next turn's prompt."""
-    pad = session.setdefault('scratchpad', {
-        'findings': [],
-        'composed_report': None,
-        'errors': [],
-        'discovery': None,
-        'lookups': {},
-    })
+    pad = session.setdefault('scratchpad', default_scratchpad())
 
     try:
         data = json.loads(result_str)
@@ -83,11 +221,27 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str)
             pad['errors'].append(f'{tool_name}: {error_text[:200]}')
         return
 
-    if tool_name == 'analyze' and data.get('status') == 'ok':
+    if tool_name in {'data_query', 'analyze'} and data.get('status') == 'ok':
         question = str(data.get('question', '')).strip()
         row_count = data.get('row_count', 0)
+        remember_active_filters(pad, data.get('applied_filters'))
+        # Load dimension metadata for chart classifier
+        dimensions: list[dict[str, Any]] | None = None
+        if app_id:
+            from app.services.chat_engine.sql_agent import load_semantic_model, _normalize_dimensions
+            try:
+                semantic_model = load_semantic_model(app_id)
+                dimensions = _normalize_dimensions(semantic_model)
+            except Exception:
+                pass
+        push_analysis_snapshot(pad, build_analysis_snapshot(data, dimensions=dimensions))
         if question:
             pad['findings'].append(f'{question} ({row_count} rows)')
+        return
+
+    if tool_name == 'data_check' and data.get('status') == 'ok':
+        remember_data_check(pad, data)
+        pad['findings'].append(f"{data.get('table', 'table')} check ({int(data.get('row_count', 0) or 0)} rows)")
         return
 
     if tool_name == 'discover' and data.get('status') == 'ok':
@@ -108,9 +262,56 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str)
             pad['findings'].append(f"Resolved {dimension} ({len(data.get('values', []))} values)")
         return
 
-    if tool_name == 'compose_report' and data.get('status') == 'ok':
+    if tool_name == 'catalog_inspect' and data.get('status') == 'ok':
+        table = str(data.get('table', '')).strip()
+        columns = data.get('columns', [])
+        if table and isinstance(columns, list):
+            remember_catalog_inspection(pad, table=table, columns=[column for column in columns if isinstance(column, dict)])
+        return
+
+    if tool_name == 'catalog_relations' and data.get('status') == 'ok':
+        relations = data.get('relations', [])
+        if isinstance(relations, list):
+            remember_catalog_relations(pad, [relation for relation in relations if isinstance(relation, dict)])
+        return
+
+    if tool_name == 'catalog_sample' and data.get('status') == 'ok' and data.get('json_structure') is not None:
+        table = str(data.get('table', '')).strip()
+        column = str(data.get('column', '')).strip()
+        json_structure = data.get('json_structure')
+        if table and column and isinstance(json_structure, dict):
+            remember_json_structure(pad, table=table, column=column, json_structure=json_structure)
+        return
+
+    if tool_name == 'resolve_entity' and data.get('status') == 'ok':
+        entity_type = str(data.get('entity_type', '')).strip()
+        if entity_type:
+            matches = data.get('matches', [])
+            remember_resolved_entities(
+                pad,
+                entity_type=entity_type,
+                search=str(data.get('search', '')).strip(),
+                matches=matches if isinstance(matches, list) else [],
+            )
+            pad['findings'].append(f"Resolved {entity_type} ({len(matches) if isinstance(matches, list) else 0} matches)")
+        return
+
+    if tool_name == 'get_surface_records' and data.get('status') == 'ok':
+        surface_key = str(data.get('surface_key', '')).strip()
+        if surface_key:
+            remember_last_evidence(
+                pad,
+                surface_key=surface_key,
+                record_count=int(data.get('record_count', 0) or 0),
+                entity_type=str(data.get('entity_type', '')).strip() or None,
+                entity_value=str(data.get('entity_value', '')).strip() or None,
+            )
+            pad['findings'].append(f"{surface_key} evidence ({int(data.get('record_count', 0) or 0)} records)")
+        return
+
+    if tool_name in {'compose_report', 'blueprint_compose'} and data.get('status') == 'ok':
         pad['composed_report'] = {
-            'name': data.get('report_name') or 'Untitled',
+            'name': data.get('report_name') or data.get('name') or 'Untitled',
             'sections': [
                 section.get('type')
                 for section in data.get('sections', [])
@@ -119,8 +320,8 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str)
         }
         return
 
-    if tool_name == 'save_template':
-        name = data.get('report_name')
+    if tool_name in {'save_template', 'blueprint_save'}:
+        name = data.get('report_name') or data.get('name')
         if name:
             pad['findings'].append(f'Saved template: {name}')
             session['_user_context'] = None
@@ -133,16 +334,40 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
     except (json.JSONDecodeError, TypeError):
         return "done"
 
-    if name == "analyze":
+    if name in {"data_query", "analyze"}:
         row_count = data.get("row_count", 0)
         status = data.get("status", "")
         if status == "error" or data.get("error"):
             return "query failed"
         return f"{row_count} rows"
+    if name == 'data_check':
+        if data.get('status') == 'error' or data.get('error'):
+            return 'check failed'
+        return f"{data.get('row_count', 0)} rows"
     if name == 'discover':
-        return f"{len(data.get('dimensions', []))} dims · {len(data.get('metrics', []))} metrics"
+        return f"{len(data.get('dimensions', []))} dims · {len(data.get('surfaces', []))} surfaces"
     if name == 'lookup':
         return f"{data.get('dimension', 'value')} · {len(data.get('values', []))} values"
+    if name == 'resolve_entity':
+        return f"{data.get('entity_type', 'entity')} · {len(data.get('matches', []))} matches"
+    if name == 'get_surface_records':
+        return f"{data.get('surface_key', 'surface')} · {data.get('record_count', 0)} records"
+    if name == 'catalog_inspect':
+        return f"{data.get('table', 'table')} · {len(data.get('columns', []))} cols"
+    if name == 'catalog_relations':
+        return f"{data.get('table', 'table')} · {len(data.get('relations', []))} relations"
+    if name == 'catalog_values':
+        return f"{data.get('column', 'column')} · {len(data.get('values', []))} values"
+    if name == 'catalog_sample':
+        if data.get('json_structure') is not None:
+            return f"{data.get('column', 'json')} · JSON structure"
+        return f"{data.get('table', 'table')} · {len(data.get('sample_rows', []))} samples"
+    if name == 'blueprint_blocks':
+        blocks = data.get('blocks', [])
+        return f"{len(blocks)} blocks"
+    if name == 'blueprint_list':
+        blueprints = data.get('blueprints', [])
+        return f"{len(blueprints)} blueprints"
     if name == "list_section_types":
         sections = data.get("sections", [])
         return f"{len(sections)} types"
@@ -152,11 +377,11 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
         return f"{app_id} · {len(sections)} sections" if app_id else f"{len(sections)} sections"
     if name == "get_section_detail":
         return data.get("key", data.get("label", "done"))
-    if name == "compose_report":
+    if name in {"compose_report", "blueprint_compose"}:
         sections = data.get("sections", [])
         return f"{len(sections)} sections"
-    if name == "save_template":
-        return data.get("report_name", "saved")
+    if name in {"save_template", "blueprint_save"}:
+        return data.get("report_name", data.get('name', "saved"))
     if name == "query_eval_runs":
         count = data.get("count", 0)
         return f"{count} runs"
@@ -203,10 +428,20 @@ def _build_tool_call_detail(name: str, result_str: str, *, execution_ms: float) 
         error=str(error) if error else None,
     )
 
-    if name == 'analyze':
+    if name in {'data_query', 'analyze'}:
         detail.sql_used = data.get('sql_used')
         detail.row_count = data.get('row_count')
         detail.cache_hit = bool(data.get('cache_hit', False))
+    elif name == 'data_check':
+        detail.row_count = data.get('row_count')
+    elif name == 'catalog_values':
+        detail.row_count = len(data.get('values', []))
+    elif name == 'catalog_sample':
+        detail.row_count = data.get('sample_count') or len(data.get('sample_rows', []))
+    elif name == 'resolve_entity':
+        detail.row_count = len(data.get('matches', []))
+    elif name == 'get_surface_records':
+        detail.row_count = data.get('record_count')
 
     return detail
 
@@ -234,15 +469,19 @@ def _runtime_session_from_state(session: dict[str, Any], provider: str, model: s
         provider=provider,
         model=model,
         message_state=list(session.get('messages', [])),
-        scratchpad=dict(session.get('scratchpad', {
-            'findings': [],
-            'composed_report': None,
-            'errors': [],
-            'discovery': None,
-            'lookups': {},
-        })),
+        scratchpad=dict(session.get('scratchpad', default_scratchpad())),
         next_event_seq=1,
     )
+
+
+def _new_tool_call_id() -> str:
+    return f'tc_{uuid.uuid4().hex[:12]}'
+
+
+def _tool_call_warning(tool_name: str, detail: ToolCallDetailOut | None) -> str | None:
+    if detail is None or not detail.error:
+        return None
+    return f'{tool_name}: {detail.error}'
 
 
 async def _emit_runtime_event(
@@ -250,11 +489,13 @@ async def _emit_runtime_event(
     event_type: str,
     payload: dict[str, Any],
     emit: EventEmitter | None,
+    db: AsyncSession,
 ) -> dict[str, Any]:
     seq = await append_runtime_event(
         runtime_session=runtime_session,
         event_type=event_type,
         payload=payload,
+        db=db,
     )
     event = {'event': event_type, 'data': {'seq': seq, **payload}}
     if emit is not None:
@@ -273,45 +514,137 @@ async def _execute_chat_turn(
     emit: EventEmitter | None = None,
 ) -> dict[str, Any]:
     tools = await _resolve_tools_for_app(session["app_id"], db)
-
-    adapter = await create_adapter(
+    working_session = _copy_working_session(session)
+    runtime_session = _runtime_session_from_state(working_session, provider, model)
+    app_config = await load_app_config(db, working_session['app_id'])
+    semantic_model = load_semantic_model(working_session['app_id'], app_config=app_config)
+    entity_registry = load_entity_registry(
+        working_session['app_id'],
+        app_config=app_config,
+        semantic_model=semantic_model,
+    )
+    entity_recognition = await recognize_entities(
+        question=user_message,
+        scratchpad=working_session.get('scratchpad'),
+        entity_registry=entity_registry,
         provider=provider,
         model=model,
-        tenant_id=session["tenant_id"],
-        user_id=session["user_id"],
+        tenant_id=working_session['tenant_id'],
+        user_id=working_session['user_id'],
     )
-    runtime_session = _runtime_session_from_state(session, provider, model)
-    deserialize_messages = getattr(adapter, 'deserialize', lambda data: list(data))
-    serialize_messages = getattr(adapter, 'serialize', lambda data: list(data))
+    entity_recognition_payload = _serialize_entity_recognition(entity_recognition)
 
-    messages = deserialize_messages(session.get('messages', []))
-    await record_user_message(runtime_session=runtime_session, content=user_message)
-    assistant_message_id = await create_assistant_message(runtime_session=runtime_session)
-    await _emit_runtime_event(
-        runtime_session,
-        'user_message_added',
-        {'role': 'user', 'content': user_message},
-        None,
-    )
-
-    messages.append(adapter.build_user_message(user_message))
-    system = await assemble_context(session, db)
+    messages: list[Any] = []
+    serialize_messages = lambda data: list(data)
 
     composed_report: dict | None = None
     tool_call_log: list[dict[str, Any]] = []
-    last_analyze: dict | None = None
-    chart_spec: dict | None = None
+    last_query: dict | None = None
+    chart_payload: dict | None = None
     streamed_text_parts: list[str] = []
+    warnings: list[str] = []
+    text = ''
+    assistant_message_id: str | None = None
 
     try:
-        async def dispatch(name: str, arguments: dict) -> str:
-            nonlocal composed_report, last_analyze, chart_spec
+        await record_user_message(runtime_session=runtime_session, content=user_message, db=db)
+        assistant_message_id = await create_assistant_message(runtime_session=runtime_session, db=db)
+        await _emit_runtime_event(
+            runtime_session,
+            'user_message_added',
+            {'role': 'user', 'content': user_message},
+            None,
+            db,
+        )
+        await _emit_runtime_event(
+            runtime_session,
+            'entity_recognition',
+            entity_recognition_payload,
+            emit,
+            db,
+        )
 
+        if not entity_recognition.is_platform_query:
+            text = _off_topic_response(app_config, working_session['app_id'])
+            serialized_messages = list(working_session.get('messages', []))
+            metadata = {
+                'terminalStatus': 'done',
+                'warnings': [],
+                'toolCalls': [],
+                'composedReport': None,
+                'chart': None,
+                'entityRecognition': entity_recognition_payload,
+            }
+            await save_runtime_state(
+                runtime_session=runtime_session,
+                message_state=serialized_messages,
+                scratchpad=working_session['scratchpad'],
+                status='done',
+                last_error=None,
+                db=db,
+            )
+            await finalize_assistant_message(
+                runtime_session=runtime_session,
+                message_id=assistant_message_id,
+                content=text,
+                metadata=metadata,
+                status='complete',
+                db=db,
+            )
+            await touch_sherlock_chat_session(runtime_session=runtime_session, db=db)
+            await _emit_runtime_event(
+                runtime_session,
+                'done',
+                {
+                    'terminalStatus': 'done',
+                    'content': text,
+                    'toolCalls': [],
+                    'composedReport': None,
+                    'chart': None,
+                    'warnings': [],
+                    'entityRecognition': entity_recognition_payload,
+                },
+                emit,
+                db,
+            )
+            await db.commit()
+            _sync_session_state(session, working_session)
+            return {
+                'role': 'assistant',
+                'content': text,
+                'tool_calls': [],
+                'composed_report': None,
+                'chart': None,
+                'terminal_status': 'done',
+                'warnings': [],
+                'entity_recognition': entity_recognition_payload,
+            }
+
+        adapter = await create_adapter(
+            provider=provider,
+            model=model,
+            tenant_id=working_session["tenant_id"],
+            user_id=working_session["user_id"],
+        )
+        deserialize_messages = getattr(adapter, 'deserialize', lambda data: list(data))
+        serialize_messages = getattr(adapter, 'serialize', lambda data: list(data))
+        messages = deserialize_messages(working_session.get('messages', []))
+        messages.append(adapter.build_user_message(user_message))
+        system = await assemble_context(working_session, db)
+        recognition_context = render_entity_recognition_context(entity_recognition)
+        if recognition_context:
+            system = f'{system}\n\n{recognition_context}'
+
+        async def dispatch(name: str, arguments: dict) -> str:
+            nonlocal composed_report, last_query, chart_payload
+
+            tool_call_id = _new_tool_call_id()
             await _emit_runtime_event(
                 runtime_session,
                 'tool_call_start',
-                {'name': name},
+                {'name': name, 'toolName': name, 'toolCallId': tool_call_id},
                 emit,
+                db,
             )
 
             start = time.monotonic()
@@ -319,40 +652,51 @@ async def _execute_chat_turn(
                 name, arguments,
                 db=db,
                 auth=auth,
-                app_id=session["app_id"],
+                app_id=working_session["app_id"],
                 provider=provider,
-                session=session,
+                session=working_session,
             )
             execution_ms = (time.monotonic() - start) * 1000
             detail = _build_tool_call_detail(name, result_str, execution_ms=execution_ms)
 
-            if name == "compose_report":
+            if name in {"data_query", "analyze"}:
+                parsed = json.loads(result_str)
+                if parsed.get("status") == "ok":
+                    last_query = parsed
+                    chart_payload = _build_chart_payload(parsed)
+            elif name in {"compose_report", "blueprint_compose"}:
                 parsed = json.loads(result_str)
                 if parsed.get("status") == "ok":
                     composed_report = parsed
 
-            if name == "analyze":
-                parsed = json.loads(result_str)
-                if parsed.get("status") == "ok":
-                    last_analyze = parsed
-
-            if name == "render_chart":
-                parsed = json.loads(result_str)
-                if parsed.get("status") == "ok":
-                    chart_spec = parsed.get("chart_spec")
-
-            if name == "save_template":
-                await db.commit()
-
-            _update_scratchpad(session, name, result_str)
+            _update_scratchpad(working_session, name, result_str, app_id=working_session.get("app_id", ""))
 
             summary = _summarize_tool_result(name, result_str)
-            tool_call_log.append({"name": name, "summary": summary, "detail": detail})
+            tool_call_log.append(
+                {
+                    'tool_call_id': tool_call_id,
+                    'name': name,
+                    'summary': summary,
+                    'detail': detail,
+                    'duration_ms': execution_ms,
+                }
+            )
+            warning = _tool_call_warning(name, detail)
+            if warning:
+                warnings.append(warning)
             await _emit_runtime_event(
                 runtime_session,
                 'tool_call_end',
-                {'name': name, 'summary': summary, 'detail': detail.model_dump(by_alias=True, mode='json')},
+                {
+                    'name': name,
+                    'toolName': name,
+                    'toolCallId': tool_call_id,
+                    'summary': summary,
+                    'detail': detail.model_dump(by_alias=True, mode='json'),
+                    'durationMs': execution_ms,
+                },
                 emit,
+                db,
             )
 
             return result_str
@@ -366,6 +710,7 @@ async def _execute_chat_turn(
                 'content_delta',
                 {'delta': delta},
                 emit,
+                db,
             )
 
         text, messages = await run_tool_loop(
@@ -376,29 +721,28 @@ async def _execute_chat_turn(
             temperature=0.3,
             dispatch_fn=dispatch,
             max_rounds=MAX_TOOL_ROUNDS,
+            first_round_tool_choice='any' if entity_recognition.needs_resolution else 'auto',
             on_text_delta=on_text_delta,
         )
 
         if text is None:
             text = "I've reached the maximum number of tool calls for this turn. Please try a simpler request."
+            warnings.append('maximum tool-call rounds reached')
         elif streamed_text_parts:
             text = ''.join(streamed_text_parts)
 
         serialized_messages = serialize_messages(messages)
-        session["messages"] = serialized_messages
+        working_session["messages"] = serialized_messages
+        terminal_status = 'degraded' if warnings else 'done'
         await save_runtime_state(
             runtime_session=runtime_session,
             message_state=serialized_messages,
-            scratchpad=session['scratchpad'],
-            status='active',
+            scratchpad=working_session['scratchpad'],
+            status=terminal_status,
+            last_error=None,
+            db=db,
         )
 
-        chart_payload = {
-            "spec": chart_spec,
-            "data": last_analyze.get("data", []),
-            "sql_query": last_analyze.get("sql_used", ""),
-            "source_question": last_analyze.get("question", ""),
-        } if chart_spec and last_analyze else None
         if chart_payload is not None:
             await _emit_runtime_event(
                 runtime_session,
@@ -410,6 +754,7 @@ async def _execute_chat_turn(
                     'sourceQuestion': chart_payload['source_question'],
                 },
                 emit,
+                db,
             )
 
         persisted_chart = None
@@ -422,8 +767,12 @@ async def _execute_chat_turn(
             }
 
         metadata = {
+            'terminalStatus': terminal_status,
+            'warnings': warnings,
+            'entityRecognition': entity_recognition_payload,
             'toolCalls': [
                 {
+                    'toolCallId': tc['tool_call_id'],
                     'name': tc['name'],
                     'summary': tc['summary'],
                     'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
@@ -431,7 +780,12 @@ async def _execute_chat_turn(
                 for tc in tool_call_log
             ],
             'composedReport': {
-                'reportName': composed_report.get('report_name'),
+                'reportName': composed_report.get('report_name') or composed_report.get('name'),
+                'sections': composed_report.get('sections', []),
+            } if composed_report else None,
+            'blueprint': {
+                'type': 'blueprint',
+                'name': composed_report.get('report_name') or composed_report.get('name'),
                 'sections': composed_report.get('sections', []),
             } if composed_report else None,
             'chart': persisted_chart,
@@ -442,11 +796,16 @@ async def _execute_chat_turn(
             content=text,
             metadata=metadata,
             status='complete',
+            db=db,
         )
+        await touch_sherlock_chat_session(runtime_session=runtime_session, db=db)
 
         done_payload = {
+            'terminalStatus': terminal_status,
+            'content': text,
             'toolCalls': [
                 {
+                    'toolCallId': tc['tool_call_id'],
                     'name': tc['name'],
                     'summary': tc['summary'],
                     'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
@@ -454,40 +813,71 @@ async def _execute_chat_turn(
                 for tc in tool_call_log
             ],
             'composedReport': {
-                'reportName': composed_report.get('report_name'),
+                'reportName': composed_report.get('report_name') or composed_report.get('name'),
                 'sections': composed_report.get('sections', []),
             } if composed_report else None,
+            'blueprint': {
+                'name': composed_report.get('report_name') or composed_report.get('name'),
+                'sections': composed_report.get('sections', []),
+            } if composed_report else None,
+            'chart': persisted_chart,
+            'warnings': warnings,
+            'entityRecognition': entity_recognition_payload,
         }
-        await _emit_runtime_event(runtime_session, 'done', done_payload, emit)
-    except Exception as exc:
+        await _emit_runtime_event(runtime_session, 'done', done_payload, emit, db)
+        await db.commit()
+        _sync_session_state(session, working_session)
+    except (Exception, asyncio.CancelledError) as exc:
+        terminal_status = 'interrupted' if isinstance(exc, asyncio.CancelledError) else 'error'
         error_text = str(exc)
         await save_runtime_state(
             runtime_session=runtime_session,
             message_state=serialize_messages(messages),
-            scratchpad=session['scratchpad'],
-            status='error',
+            scratchpad=working_session['scratchpad'],
+            status=terminal_status,
             last_error=error_text,
+            db=db,
         )
-        await finalize_assistant_message(
-            runtime_session=runtime_session,
-            message_id=assistant_message_id,
-            content=error_text,
-            metadata={
-                'toolCalls': [
-                    {
-                        'name': tc['name'],
-                        'summary': tc['summary'],
-                        'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
-                    }
-                    for tc in tool_call_log
-                ],
-                'composedReport': None,
-                'chart': None,
+        if assistant_message_id is not None:
+            await finalize_assistant_message(
+                runtime_session=runtime_session,
+                message_id=assistant_message_id,
+                content=''.join(streamed_text_parts) if streamed_text_parts else error_text,
+                metadata={
+                    'terminalStatus': terminal_status,
+                    'warnings': warnings,
+                    'toolCalls': [
+                        {
+                            'toolCallId': tc['tool_call_id'],
+                            'name': tc['name'],
+                            'summary': tc['summary'],
+                            'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
+                        }
+                        for tc in tool_call_log
+                    ],
+                    'composedReport': None,
+                    'chart': None,
+                    'entityRecognition': entity_recognition_payload,
+                },
+                status='error',
+                error_message=error_text,
+                db=db,
+            )
+        await touch_sherlock_chat_session(runtime_session=runtime_session, db=db)
+        await _emit_runtime_event(
+            runtime_session,
+            'error',
+            {
+                'terminalStatus': terminal_status,
+                'message': error_text,
+                'recoverable': False,
+                'entityRecognition': entity_recognition_payload,
             },
-            status='error',
-            error_message=error_text,
+            emit,
+            db,
         )
-        await _emit_runtime_event(runtime_session, 'error', {'message': error_text}, emit)
+        await db.commit()
+        _sync_session_state(session, working_session)
         raise
 
     return {
@@ -496,6 +886,9 @@ async def _execute_chat_turn(
         "tool_calls": tool_call_log,
         "composed_report": composed_report,
         "chart": chart_payload,
+        "terminal_status": terminal_status,
+        "warnings": warnings,
+        "entity_recognition": entity_recognition_payload,
     }
 
 
@@ -552,6 +945,8 @@ async def run_chat_turn_streaming(
                 auth=auth,
                 emit=emit,
             )
+        except (Exception, asyncio.CancelledError):
+            logger.debug('Sherlock stream worker terminated after terminal event', exc_info=True)
         finally:
             await queue.put(None)
 

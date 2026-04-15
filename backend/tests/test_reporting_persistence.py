@@ -1,5 +1,7 @@
 """Reporting persistence contract tests for phases 2-3."""
 
+from app.models.analytics_chart import AnalyticsChart
+from app.models.analytics_dashboard import AnalyticsDashboard
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.eval_run import EvalRun
 from app.models.mixins.shareable import Visibility
@@ -13,6 +15,7 @@ def test_report_config_and_run_models_expose_phase_two_columns():
     report_config_columns = ReportConfig.__table__.columns.keys()
     report_run_columns = ReportRun.__table__.columns.keys()
 
+    assert "source_session_id" in report_config_columns
     assert "visibility" in report_config_columns
     assert "shared_by" in report_config_columns
     assert "shared_at" in report_config_columns
@@ -38,6 +41,14 @@ def test_report_artifact_inherits_visibility_from_report_run():
     assert "report_run_id" in report_artifact_columns
     assert "artifact_data" in report_artifact_columns
     assert "visibility" not in report_artifact_columns
+
+
+def test_analytics_library_models_expose_source_session_lineage():
+    chart_columns = AnalyticsChart.__table__.columns.keys()
+    dashboard_columns = AnalyticsDashboard.__table__.columns.keys()
+
+    assert "source_session_id" in chart_columns
+    assert "source_session_id" in dashboard_columns
 
 
 def test_eval_run_model_exposes_normalized_visibility_columns():

@@ -1,5 +1,7 @@
 """Pydantic schemas for DB-backed app configuration."""
 
+from typing import Literal
+
 from pydantic import Field
 
 from app.models.mixins.shareable import Visibility
@@ -99,10 +101,39 @@ class AppChatPromptTemplate(CamelModel):
     category: str | None = None
 
 
+class AppChatDataSurfaceConfig(CamelModel):
+    key: str
+    description: str
+    source: str
+    entity_field_map: dict[str, str] = Field(default_factory=dict)
+    fields: list[str] = Field(default_factory=list)
+    default_limit: int = 10
+
+
+class AppChatEntityResolverConfig(CamelModel):
+    key: str
+    entity_type: str
+    description: str = ''
+    source: str
+    field: str | None = None
+    dimension: str | None = None
+    match: Literal['exact', 'prefix', 'contains'] = 'contains'
+    limit: int = 10
+
+
+class AppChatEntityTypeConfig(CamelModel):
+    name: str
+    description: str = ''
+    examples: list[str] = Field(default_factory=list)
+
+
 class AppChatConfig(CamelModel):
     enabled: bool = True
     prompt_templates: list[AppChatPromptTemplate] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+    data_surfaces: list[AppChatDataSurfaceConfig] = Field(default_factory=list)
+    entity_resolvers: list[AppChatEntityResolverConfig] = Field(default_factory=list)
+    entity_types: list[AppChatEntityTypeConfig] = Field(default_factory=list)
 
 
 class AppConfig(CamelModel):

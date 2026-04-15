@@ -1,10 +1,12 @@
 import { afterEach, test, expect } from 'vitest';
 
 import {
+  analyticsChartForApp,
   firstAccessibleRoute,
   homeRouteForApp,
   inferAppIdFromPath,
   resetAppNavigationRegistry,
+  reportWizardForApp,
   routes,
   runDetailForApp,
   syncAppNavigation,
@@ -60,4 +62,12 @@ test('threadDetailForApp fills all required template params and returns null whe
     threadDetailForApp('inside-sales', 'thread-9', 'run-7'),
   ).toBe('/inside-sales/runs/run-7/calls/thread-9');
   expect(threadDetailForApp('inside-sales', 'thread-9')).toBeNull();
+});
+
+test('analyticsChartForApp uses app-owned analytics chart paths', () => {
+  expect(analyticsChartForApp('kaira-bot', 'chart-42')).toBe('/kaira/analytics/charts/chart-42');
+});
+
+test('reportWizardForApp generates an app-safe report wizard link with the template query param', () => {
+  expect(reportWizardForApp('inside-sales', 'bp-7')).toBe('/inside-sales/reports/generate?template=bp-7');
 });

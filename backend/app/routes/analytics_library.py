@@ -1,6 +1,7 @@
 """API routes for the analytics library — saved charts and dashboards."""
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +43,7 @@ class SaveChartRequest(CamelModel):
     sql_query: str
     chart_config: ChartConfigIn
     source_question: str | None = None
+    source_session_id: str | None = None
     visibility: str = "private"
 
 class UpdateChartRequest(CamelModel):
@@ -55,6 +57,7 @@ class SaveDashboardRequest(CamelModel):
     title: str
     description: str = ""
     chart_ids: list[str]       # ordered list of chart UUIDs
+    source_session_id: str | None = None
     visibility: str = "private"
 
 class UpdateDashboardRequest(CamelModel):
@@ -73,6 +76,15 @@ def _app_access_clause(model, auth: AuthContext):
     if not auth.app_access:
         return false()
     return model.app_id.in_(tuple(sorted(auth.app_access)))
+
+
+def _coerce_source_session_id(value: str | None) -> uuid.UUID | None:
+    if not value:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(400, 'Invalid source_session_id')
 
 
 # ── Chart routes ─────────────────────────────────────────────────────
@@ -115,6 +127,7 @@ async def save_chart(
         sql_query=body.sql_query,
         chart_config=body.chart_config.model_dump(by_alias=True),
         source_question=body.source_question,
+        source_session_id=_coerce_source_session_id(body.source_session_id),
         visibility=vis,
         shared_by=auth.user_id if vis == Visibility.SHARED else None,
         shared_at=datetime.now(timezone.utc) if vis == Visibility.SHARED else None,
@@ -229,6 +242,7 @@ async def save_dashboard(
         title=body.title,
         description=body.description,
         chart_entries=entries,
+        source_session_id=_coerce_source_session_id(body.source_session_id),
         visibility=vis,
         shared_by=auth.user_id if vis == Visibility.SHARED else None,
         shared_at=datetime.now(timezone.utc) if vis == Visibility.SHARED else None,
@@ -412,6 +426,7 @@ def _chart_to_dict(chart: AnalyticsChart) -> dict:
         "sqlQuery": chart.sql_query,
         "chartConfig": _normalize_chart_config(chart.chart_config),
         "sourceQuestion": chart.source_question,
+        "sourceSessionId": str(chart.source_session_id) if chart.source_session_id else None,
         "visibility": chart.visibility.value if chart.visibility else "private",
         "createdAt": chart.created_at.isoformat() if chart.created_at else None,
         "updatedAt": chart.updated_at.isoformat() if chart.updated_at else None,
@@ -425,6 +440,7 @@ def _dashboard_to_dict(dashboard: AnalyticsDashboard) -> dict:
         "title": dashboard.title,
         "description": dashboard.description,
         "chartEntries": dashboard.chart_entries,
+        "sourceSessionId": str(dashboard.source_session_id) if dashboard.source_session_id else None,
         "visibility": dashboard.visibility.value if dashboard.visibility else "private",
         "createdAt": dashboard.created_at.isoformat() if dashboard.created_at else None,
         "updatedAt": dashboard.updated_at.isoformat() if dashboard.updated_at else None,

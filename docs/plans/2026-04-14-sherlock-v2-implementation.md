@@ -1,6 +1,8 @@
 # Sherlock v2 — Implementation Plan
 
 > 4 phases. Each phase ships a working increment. Each phase branch merges to `main` before the next starts.
+>
+> **Execution note:** phase numbering is thematic, not a mandate to start reliability last. The shared runtime contract items listed in Phase 4 — `toolCallId`, terminal turn semantics, EOF fallback, invalid-session 404, parent `updated_at`, per-turn atomicity, cancellation cleanup, replay/resume — should begin immediately and be stable before the Phase 3 widget/store/parser work depends on them.
 
 **Spec:** `docs/specs/2026-04-14-sherlock-v2-design.md`
 **Mocks:** `docs/investigations/sherlock-v2-chat-ui-mock.html`, `docs/investigations/sherlock-v2-integrations-mock.html`
@@ -11,6 +13,8 @@
 
 **Branch:** `feat/phase-1-sherlock-v2-foundation`
 **Goal:** Build the schema discovery layer and entity recognition pre-step. After this phase, the agent can explore the DB catalog, resolve entities, and the pipeline gates non-platform questions. Existing Sherlock continues to work — new tools are additive.
+
+**Guardrail:** semantic model/app config remain the source of truth for business meaning and app behavior. Column comments are live schema hints for SQL generation, not a replacement for the semantic model.
 
 ### 1.1 Column Comments Migration
 
@@ -277,6 +281,8 @@ Rewrite base prompt with Sherlock v2 persona and tool descriptions.
 **Branch:** `feat/phase-3-sherlock-v2-frontend`
 **Goal:** Rewrite the chat widget with parts-based message model, tool stack with collapse/expand, approved chart card design, and integration save flows. After this phase, the full v2 UX is live.
 
+**Dependency note:** start this only once the foundational runtime contract is stable across backend/frontend: `toolCallId`, terminal turn semantics, EOF fallback, invalid-session 404, and cancellation/finalization behavior.
+
 ### 3.1 Message Model & Store Rewrite
 
 Replace flat message model with parts-based model.
@@ -302,7 +308,9 @@ Update stream parser for v2 event types.
 
 **Changes:**
 - Handle new events: `entity_recognition`, `save_result`, `blueprint`
+- Persist `lastAppliedSeq` and ignore duplicate/out-of-order replayed events
 - Use `toolCallId` from `tool_call_start`/`tool_call_end` events
+- Read `terminalStatus` from terminal events (`done` / `error`) and map to message UI state
 - EOF handling: detect `reader.read()` done without `done` event → emit synthetic error
 - Malformed JSON: log + count, surface error if >3 malformed events
 - Parse non-OK response body for error detail (not just "API error N")
@@ -472,6 +480,21 @@ Build shimmer text animation for tool executing state.
 **Branch:** `feat/phase-4-sherlock-v2-reliability`
 **Goal:** Fix all transport/state reliability bugs identified in the investigation. Remove deprecated code paths. After this phase, Sherlock v2 is production-ready.
 
+**Execution note:** the first half of this phase is foundation, not polish. These items can start immediately and land as ready while the catalog and SQL work proceeds.
+
+### 4.0 Foundational Runtime Contract (Start Immediately)
+
+These items define the shared backend/frontend contract and should stabilize before Phase 3 depends on the new store/SSE flow:
+- `toolCallId` in all tool lifecycle events and frontend state
+- Explicit turn terminal outcomes: `done`, `error`, `interrupted`, `degraded`
+- `seq` on every mutating runtime event with client-side idempotent apply
+- EOF fallback and non-OK error parsing in the stream path
+- Invalid `session_id` → `404 session_not_found`
+- Parent `chat_sessions.updated_at` maintenance
+- Per-turn atomicity and cancellation cleanup
+- Replay/resume behavior for reconnect and restore
+- Feature flag or dedicated `/v2/` runtime path during migration
+
 ### 4.1 Session Resolution Fix
 
 **Files:**
@@ -527,7 +550,24 @@ except (Exception, asyncio.CancelledError) as exc:
     await finalize_assistant_message(msg_id, status='error')
 ```
 
-### 4.5 Lineage Tracking Migration
+### 4.5 Replay / Resume Contract
+
+**Files:**
+- `backend/app/models/sherlock_runtime.py`
+- `backend/app/services/report_builder/runtime_store.py`
+- `backend/app/services/report_builder/chat_handler.py`
+- `src/features/chat-widget/useChatWidget.ts`
+- `src/features/chat-widget/api.ts`
+
+**Change:** Make restore/reconnect use the runtime event log intentionally, not just message rows:
+- Persist and expose sequenced runtime events per session
+- Allow resume/replay from `last_event_seq`
+- Ignore duplicate replays by sequence / `toolCallId`
+- Make assistant finalization idempotent so disconnect/reconnect cannot double-append or silently lose a turn
+- Add explicit endpoints: `GET /api/report-builder/v2/sessions/{id}` and `GET /api/report-builder/v2/sessions/{id}/events?after_seq=N`
+- Stream via dedicated v2 route: `POST /api/report-builder/v2/chat/stream`
+
+### 4.6 Lineage Tracking Migration
 
 Add `source_session_id` column to charts, dashboards, and report configs.
 
@@ -536,7 +576,7 @@ Add `source_session_id` column to charts, dashboards, and report configs.
 - Update `analyticsLibraryApi` save methods to pass `source_session_id`
 - Update backend chart/dashboard/report-config create endpoints to accept and store `source_session_id`
 
-### 4.6 Remove Deprecated Code
+### 4.7 Remove Deprecated Code
 
 - Remove old `discover`, `lookup`, `resolve_entity`, `analyze`, `render_chart` tool definitions
 - Remove old handlers from `tool_handlers.py`
@@ -546,14 +586,14 @@ Add `source_session_id` column to charts, dashboards, and report configs.
 - Remove old `chatWidgetHelpers.ts` tool-name-based identity logic
 - Clean up any remaining references to old tool names in prompts, tests, seed data
 
-### 4.7 Route Helper for Blueprint → Wizard
+### 4.8 Route Helper for Blueprint → Wizard
 
 **Files:**
 - `src/config/routes.ts`
 
 **Add:** `reportWizardForApp(appId, blueprintId)` helper that resolves to the report generation wizard with template pre-selected. Verify the wizard's template selection UI actually fetches and displays custom blueprints from `GET /api/report-configs`.
 
-### 4.8 End-to-End Tests
+### 4.9 End-to-End Tests
 
 **Backend:**
 - Full turn test: user question → entity recognition → agent loop → data_query → chart options → response
@@ -562,11 +602,14 @@ Add `source_session_id` column to charts, dashboards, and report configs.
 - Off-topic rejection test: non-platform question → graceful message
 - Blueprint save test: compose → save → list → verify in report configs
 - Session tests: invalid session_id → 404, missing session_id → new session
+- Replay test: stream emits seq 1..N, reconnect with `after_seq=N-2` replays only missing events in order
+- Terminal-status test: `degraded` maps through `done`, `interrupted` maps through `error`
 
 **Frontend:**
 - Component tests for: ToolItem, ToolStack, ToolGroup, ChatChartCard, BlueprintCard, SaveToast, DashboardBar
 - Integration test: render full message with all part types
 - Streaming test: mock SSE events → verify correct parts accumulation
+- Replay test: duplicate or out-of-order events are ignored by `lastAppliedSeq`
 - Save flow test: chart save → toast appears → link correct
 - Router context test: DashboardBar doesn't break outside router (the bug that already broke tests)
 
@@ -576,6 +619,8 @@ Add `source_session_id` column to charts, dashboards, and report configs.
 - Chat history sorts by actual last-message time
 - Stream disconnect doesn't leave orphaned DB state
 - Task cancellation properly finalizes messages
+- Reconnect/restore can replay missing runtime events without duplicating tool rows or final messages
+- v1 and v2 can run side-by-side without sharing incompatible stream/message contracts
 - Charts/dashboards/blueprints have `source_session_id` populated
 - All deprecated tools removed, no references remain
 - Blueprint appears in report wizard template selection
@@ -598,14 +643,15 @@ Add `source_session_id` column to charts, dashboards, and report configs.
 
 ```
 Phase 1 ──→ Phase 2 ──→ Phase 3
-                    └──→ Phase 4
+     └────→ Phase 4 foundational contract work starts immediately
 ```
 
-Phase 3 and 4 can overlap — frontend rewrite (Phase 3) can start as soon as Phase 2's SSE event contract is stable. Phase 4 transport fixes can land in parallel with Phase 3 component work.
+Phase 3 and 4 can overlap — but only after the foundational Phase 4 contract items are stable. Frontend rewrite can start as soon as the SSE/turn/session contract is locked; cleanup and lineage work can continue in parallel.
 
 ### Risk Mitigation
 
 - **Phase 1 is additive** — new tools don't break existing Sherlock. Safe to merge to main.
-- **Phase 2 keeps `analyze` as deprecated alias** — old frontend continues working until Phase 3 ships.
+- **Phase 2 keeps `analyze` as deprecated alias** — old frontend continues working until Phase 3 ships, but prefer a feature flag or dedicated v2 runtime path so old and new contracts do not drift into each other.
 - **Phase 3 is a full widget rewrite** — test against mock HTML files for visual correctness.
-- **Phase 4 is all fixes** — each fix is independently testable and mergeable.
+- **Phase 4 starts with contract fixes** — treat them as foundation for the rewrite, then finish the cleanup/test sweep.
+- **Rollout isolation is deliberate** — keep v2 behind a flag or dedicated route until the old widget/runtime path is removed.

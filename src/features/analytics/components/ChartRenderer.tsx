@@ -240,6 +240,17 @@ export function ChartRenderer({
   const isVerticalLayout = mapping.layoutVertical;
   const yAxisWidth = compact ? 90 : 120;
 
+  // For horizontal_bar the LLM convention is xKey = value axis, yKey = category axis.
+  // Recharts vertical layout needs category on YAxis and value bars from the numeric key.
+  // Detect the swap: if xKey values are numeric and yKey values are strings, swap them.
+  const needsKeySwap = isVerticalLayout && data.length > 0 &&
+    typeof data[0][xKey] === 'number' && typeof data[0][yKey ?? ''] === 'string';
+  const resolvedCategoryKey = needsKeySwap ? (yKey ?? xKey) : xKey;
+  const resolvedBarKeys = needsKeySwap
+    ? (seriesKeys.length ? seriesKeys : [xKey])
+    : (seriesKeys.length ? seriesKeys : yKey ? [yKey] : []);
+  const resolvedXLabel = needsKeySwap ? yLabel : xLabel;
+
   if (type === 'line' || type === 'area') {
     const keys = seriesKeys.length ? seriesKeys : yKey ? [yKey] : [];
     const ChartContainer = type === 'area' ? AreaChart : LineChart;
@@ -262,7 +273,7 @@ export function ChartRenderer({
   }
 
   // Bar variants (bar, horizontal_bar, stacked_bar, grouped_bar)
-  const barKeys = seriesKeys.length ? seriesKeys : yKey ? [yKey] : [];
+  const barKeys = isVerticalLayout ? resolvedBarKeys : (seriesKeys.length ? seriesKeys : yKey ? [yKey] : []);
   const barHeight = compact ? 24 : 32;
   const resolvedHeight = isVerticalLayout ? Math.max(height, data.length * barHeight) : height;
 
@@ -272,8 +283,8 @@ export function ChartRenderer({
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
         {isVerticalLayout ? (
           <>
-            <XAxis type="number" tick={{ fontSize: tickFontSize }} label={yLabel ? { value: yLabel, position: 'bottom', fontSize: tickFontSize + 1 } : undefined} />
-            <YAxis type="category" dataKey={xKey} tick={{ fontSize: tickFontSize }} width={yAxisWidth} tickFormatter={(v: string) => truncateLabel(String(v), compact ? 14 : 20)} />
+            <XAxis type="number" tick={{ fontSize: tickFontSize }} label={resolvedXLabel ? { value: resolvedXLabel, position: 'bottom', fontSize: tickFontSize + 1 } : undefined} />
+            <YAxis type="category" dataKey={resolvedCategoryKey} tick={{ fontSize: tickFontSize }} width={yAxisWidth} tickFormatter={(v: string) => truncateLabel(String(v), compact ? 14 : 20)} />
           </>
         ) : (
           <>

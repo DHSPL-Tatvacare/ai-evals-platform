@@ -29,3 +29,18 @@ class StartupSchemaTests(unittest.TestCase):
 
         self.assertIn("ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_key VARCHAR(120)", contents)
         self.assertIn("ALTER TABLE evaluators ADD COLUMN IF NOT EXISTS seed_variant VARCHAR(50)", contents)
+
+    def test_schema_bootstrap_adds_sherlock_lineage_columns(self):
+        contents = SCHEMA_BOOTSTRAP_PATH.read_text()
+
+        self.assertIn("ALTER TABLE analytics_charts ADD COLUMN IF NOT EXISTS source_session_id UUID", contents)
+        self.assertIn("ALTER TABLE analytics_dashboards ADD COLUMN IF NOT EXISTS source_session_id UUID", contents)
+        self.assertIn("ALTER TABLE report_configs ADD COLUMN IF NOT EXISTS source_session_id UUID", contents)
+
+    def test_schema_bootstrap_seeds_catalog_column_comments(self):
+        contents = SCHEMA_BOOTSTRAP_PATH.read_text()
+
+        self.assertIn('COLUMN_COMMENT_SQL = (', contents)
+        self.assertIn('COMMENT ON COLUMN analytics_run_facts.eval_type IS', contents)
+        self.assertIn('COMMENT ON COLUMN analytics_eval_facts.result_status IS', contents)
+        self.assertIn('COMMENT ON COLUMN eval_runs.batch_metadata IS', contents)

@@ -1,21 +1,40 @@
 import { create } from 'zustand';
-import { getBuilderSession, getChatDefaults, streamChatMessage } from './api';
-import { chatSessionsRepository, chatMessagesRepository } from '@/services/api/chatApi';
+import type { StateCreator } from 'zustand';
+import { getBuilderRuntimeEvents, getBuilderSession, getChatDefaults, streamChatMessage } from './api';
+import { chatSessionsRepository } from '@/services/api/chatApi';
 import type { AppId } from '@/types';
-import type { ChatDefaults, ChatProvider, ChartData, ToolCallBadgeData, WidgetMessage, WidgetView, WidgetSessionSummary } from './types';
-import { buildSaveTemplatePrompt, upsertToolCall } from './chatWidgetHelpers';
+import type {
+  BlueprintPart,
+  BuilderSessionData,
+  ChatDefaults,
+  ChatProvider,
+  ChartPart,
+  MessagePart,
+  SaveToastPart,
+  TerminalStatus,
+  ToolCallDetailData,
+  WidgetMessage,
+  WidgetSessionSummary,
+  WidgetView,
+} from './types';
+import {
+  appendTextPart,
+  mergeTerminalText,
+  partsFromStoredMessage,
+  replaceOrAppendPart,
+  shouldApplyRuntimeSeq,
+  upsertToolPart,
+} from './chatWidgetHelpers';
 
 let msgCounter = 0;
 const nextId = () => `msg_${++msgCounter}`;
 
-// ── Session pointer persistence (survives page refresh) ─────────────
-// Only stores a tiny pointer — messages reload from the DB on restore.
-
 const SESSION_STORAGE_KEY = 'sherlock-active-session';
+const STREAM_FLUSH_MS = 50;
+const SEND_TIMEOUT_MS = 60_000;
 
 interface PersistedPointer {
   sessionId: string;
-  dbSessionId: string;
   provider: ChatProvider;
   appId: string;
   open: boolean;
@@ -32,124 +51,335 @@ function savePointer(pointer: PersistedPointer | null): void {
 function loadPointer(): PersistedPointer | null {
   try {
     const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) {
+      return null;
+    }
     const parsed = JSON.parse(raw);
-    if (parsed?.sessionId && parsed?.dbSessionId && parsed?.provider && parsed?.appId) {
+    if (parsed?.sessionId && parsed?.provider && parsed?.appId) {
       return parsed as PersistedPointer;
     }
-    return null;
   } catch {
     return null;
   }
+  return null;
 }
 
-type StoredWidgetMetadata = {
-  toolCalls?: WidgetMessage['toolCalls'];
-  composedReport?: WidgetMessage['composedReport'];
-  chart?: WidgetMessage['chart'];
-};
+function storedMessageToWidgetMessage(message: BuilderSessionData['messages'][number]): WidgetMessage {
+  const metadata = (message.metadata ?? null) as Record<string, unknown> | null;
+  const parts = partsFromStoredMessage(message.content, metadata as never);
+  const terminalStatus = (metadata?.terminalStatus as TerminalStatus | undefined) ?? undefined;
 
-function readWidgetMetadata(metadata: unknown): StoredWidgetMetadata {
-  if (!metadata || typeof metadata !== 'object') {
-    return {};
-  }
-  return metadata as StoredWidgetMetadata;
+  return {
+    id: message.id,
+    role: message.role,
+    parts: parts.length > 0 ? parts : appendTextPart([], message.content || message.errorMessage || ''),
+    status: message.status === 'error' ? 'error' : 'complete',
+    terminalStatus,
+  };
 }
 
 interface ChatWidgetStore {
-  // UI
   open: boolean;
   view: WidgetView;
   pendingPrompt: string | null;
-  toggle: () => void;
-  setView: (v: WidgetView) => void;
-  openWithPrompt: (prompt: string, appId: string) => void;
-  consumePendingPrompt: () => string | null;
-
-  // Current session
   sessionId: string | null;
-  dbSessionId: string | null; // ChatSession.id in the DB (separate from report-builder session)
+  dbSessionId: string | null;
   provider: ChatProvider | null;
   locked: boolean;
   messages: WidgetMessage[];
   status: 'idle' | 'sending' | 'error';
-  activeToolCall: string | null;
-
-  // Streaming state — separate from messages[] to avoid per-delta re-renders
-  streamingContent: string;
-  streamingToolCalls: ToolCallBadgeData[];
-  streamingChart: ChartData | null;
-
-  // Session history
+  lastAppliedSeq: number;
+  streamingParts: MessagePart[];
   sessions: WidgetSessionSummary[];
   sessionsLoaded: boolean;
+  defaults: ChatDefaults | null;
+
+  toggle: () => void;
+  setView: (v: WidgetView) => void;
+  openWithPrompt: (prompt: string, appId: string) => void;
+  consumePendingPrompt: () => string | null;
   loadSessions: (appId: AppId) => Promise<void>;
   selectSession: (appId: AppId, sessionId: string) => Promise<void>;
   deleteSession: (appId: AppId, sessionId: string) => Promise<void>;
-
-  // Actions
   setProvider: (p: ChatProvider) => void;
   send: (text: string, appId: string) => Promise<void>;
-  saveComposedReport: (reportName: string, appId: string) => Promise<void>;
   retryLastMessage: (appId: string) => Promise<void>;
   newChat: () => void;
-
-  // Restore from sessionStorage on mount
   restoreSession: (currentAppId: string) => Promise<void>;
-
-  // Defaults
-  defaults: ChatDefaults | null;
   loadDefaults: () => Promise<void>;
+  appendMessagePart: (messageId: string, part: MessagePart) => void;
+  updateMessagePart: (messageId: string, matcher: (part: MessagePart) => boolean, next: MessagePart) => void;
+}
+
+type RuntimeApplier = {
+  onToolCallStart: (event: { seq: number; toolCallId: string; toolName: string }) => void;
+  onToolCallEnd: (event: { seq: number; toolCallId: string; toolName: string; summary?: string; detail?: ToolCallDetailData | null; durationMs?: number }) => void;
+  onContentDelta: (event: { seq: number; delta: string }) => void;
+  onChart: (event: ChartPart & { seq: number }) => void;
+  onBlueprint: (event: BlueprintPart & { seq: number }) => void;
+  onSaveResult: (event: { seq: number; variant: SaveToastPart['variant']; id: string; title: string; subtitle?: string; linkText?: string; linkHref: string }) => void;
+  onDone: (event: { seq: number; terminalStatus?: TerminalStatus; content?: string; toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>; chart?: ChartPart | null; blueprint?: Omit<BlueprintPart, 'type'> | null }) => void;
+  onError: (event: { seq?: number; terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>; message: string; content?: string }) => void;
+};
+
+function createRuntimeApplier(
+  set: Parameters<StateCreator<ChatWidgetStore>>[0],
+  get: Parameters<StateCreator<ChatWidgetStore>>[1],
+  resolveSend?: () => void,
+  rejectSend?: (error: Error) => void,
+): RuntimeApplier {
+  let pendingParts = get().streamingParts;
+  let flushTimer: number | null = null;
+
+  const flush = () => {
+    flushTimer = null;
+    set({ streamingParts: pendingParts });
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer !== null) {
+      return;
+    }
+    flushTimer = window.setTimeout(flush, STREAM_FLUSH_MS);
+  };
+
+  const commitParts = (parts: MessagePart[]) => {
+    pendingParts = parts;
+    scheduleFlush();
+  };
+
+  const applySequencedEvent = (seq: number | undefined, apply: () => void) => {
+    if (typeof seq === 'number') {
+      const currentSeq = get().lastAppliedSeq;
+      if (!shouldApplyRuntimeSeq(currentSeq, seq)) {
+        return;
+      }
+      set({ lastAppliedSeq: seq });
+    }
+    apply();
+  };
+
+  const finalizeAssistantMessage = (parts: MessagePart[], terminalStatus: TerminalStatus | undefined, status: WidgetMessage['status']) => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+
+    pendingParts = [];
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: nextId(),
+          role: 'assistant',
+          parts,
+          status,
+          terminalStatus,
+        },
+      ],
+      streamingParts: [],
+      status: status === 'error' ? 'error' : 'idle',
+    }));
+  };
+
+  return {
+    onToolCallStart: (event) => {
+      applySequencedEvent(event.seq, () => {
+        commitParts(upsertToolPart(pendingParts, {
+          type: 'tool-call',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          state: 'executing',
+        }));
+      });
+    },
+    onToolCallEnd: (event) => {
+      applySequencedEvent(event.seq, () => {
+        commitParts(upsertToolPart(pendingParts, {
+          type: 'tool-call',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          state: event.detail?.error ? 'error' : 'completed',
+          summary: typeof event.summary === 'string' ? event.summary : undefined,
+          detail: event.detail ?? null,
+          durationMs: event.durationMs ?? (typeof event.detail?.executionMs === 'number' ? event.detail.executionMs : undefined),
+        }));
+      });
+    },
+    onContentDelta: (event) => {
+      applySequencedEvent(event.seq, () => {
+        commitParts(appendTextPart(pendingParts, event.delta));
+      });
+    },
+    onChart: (event) => {
+      applySequencedEvent(event.seq, () => {
+        const { seq: _seq, ...chartPart } = event;
+        commitParts(replaceOrAppendPart(
+          pendingParts,
+          (part): part is ChartPart => part.type === 'chart',
+          chartPart,
+        ));
+      });
+    },
+    onBlueprint: (event) => {
+      applySequencedEvent(event.seq, () => {
+        const { seq: _seq, ...blueprint } = event;
+        commitParts(replaceOrAppendPart(
+          pendingParts,
+          (part): part is BlueprintPart => part.type === 'blueprint',
+          blueprint,
+        ));
+      });
+    },
+    onSaveResult: (event) => {
+      applySequencedEvent(event.seq, () => {
+        const toast: SaveToastPart = {
+          type: 'save-toast',
+          variant: event.variant,
+          title: event.variant === 'chart'
+            ? 'Chart saved'
+            : event.variant === 'dashboard'
+              ? 'Dashboard created'
+              : 'Blueprint saved',
+          subtitle: event.subtitle ?? event.title,
+          linkText: event.linkText ?? (event.variant === 'dashboard' ? 'Open' : event.variant === 'blueprint' ? 'Use in wizard' : 'View'),
+          linkHref: event.linkHref,
+        };
+        commitParts([...pendingParts, toast]);
+      });
+    },
+    onDone: (event) => {
+      applySequencedEvent(event.seq, () => {
+        let finalParts = [...pendingParts];
+
+        for (const toolCall of event.toolCalls ?? []) {
+          if (!toolCall.toolCallId) {
+            continue;
+          }
+          finalParts = upsertToolPart(finalParts, {
+            type: 'tool-call',
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.name,
+            state: toolCall.detail?.error ? 'error' : 'completed',
+            summary: toolCall.summary,
+            detail: toolCall.detail ?? null,
+            durationMs: typeof toolCall.detail?.executionMs === 'number' ? toolCall.detail.executionMs : undefined,
+          });
+        }
+
+        if (event.chart) {
+          finalParts = replaceOrAppendPart(finalParts, (part): part is ChartPart => part.type === 'chart', event.chart);
+        }
+        if (event.blueprint) {
+          finalParts = replaceOrAppendPart(
+            finalParts,
+            (part): part is BlueprintPart => part.type === 'blueprint',
+            { type: 'blueprint', ...event.blueprint },
+          );
+        }
+        finalParts = mergeTerminalText(finalParts, event.content);
+        finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'done', 'complete');
+        resolveSend?.();
+      });
+    },
+    onError: (event) => {
+      applySequencedEvent(event.seq, () => {
+        let finalParts = [...pendingParts];
+        finalParts = mergeTerminalText(finalParts, event.content);
+        finalParts = appendTextPart(finalParts, finalParts.length > 0 ? `\n\n${event.message}` : event.message);
+        finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'error', 'error');
+        rejectSend?.(Object.assign(new Error(event.message), { terminalStatus: event.terminalStatus, content: event.content }));
+      });
+    },
+  };
+}
+
+async function replayRuntimeEvents(
+  appId: string,
+  sessionId: string,
+  afterSeq: number,
+  applier: RuntimeApplier,
+): Promise<number> {
+  const replay = await getBuilderRuntimeEvents(appId, sessionId, afterSeq);
+  for (const event of replay.events) {
+    const payload = { seq: event.seq, ...(event.payload ?? {}) } as Record<string, unknown> & { seq: number };
+    switch (event.eventType) {
+      case 'tool_call_start':
+        applier.onToolCallStart(payload as never);
+        break;
+      case 'tool_call_end':
+        applier.onToolCallEnd(payload as never);
+        break;
+      case 'content_delta':
+        applier.onContentDelta(payload as never);
+        break;
+      case 'chart':
+        applier.onChart({ type: 'chart', ...(payload as unknown as Omit<ChartPart, 'type'> & { seq: number }) });
+        break;
+      case 'blueprint':
+        applier.onBlueprint({ type: 'blueprint', ...(payload as unknown as Omit<BlueprintPart, 'type'> & { seq: number }) });
+        break;
+      case 'save_result':
+        applier.onSaveResult(payload as never);
+        break;
+      case 'done':
+        applier.onDone({
+          ...(payload as unknown as {
+            seq: number;
+            terminalStatus?: TerminalStatus;
+            content?: string;
+            toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>;
+          }),
+          chart: payload.chart ? { type: 'chart', ...(payload.chart as Record<string, unknown>) } as ChartPart : null,
+          blueprint: payload.blueprint ? payload.blueprint as Omit<BlueprintPart, 'type'> : null,
+        });
+        break;
+      case 'error':
+        applier.onError(payload as never);
+        break;
+      default:
+        break;
+    }
+  }
+  return replay.lastEventSeq;
 }
 
 export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
-  // ── UI ──
   open: false,
   view: 'chat',
   pendingPrompt: null,
-
-  toggle: () => set((s) => ({ open: !s.open })),
-
-  setView: (v) => set({ view: v }),
-
-  openWithPrompt: (prompt, appId) => {
-    void appId;
-    set({ open: true, view: 'chat', pendingPrompt: prompt });
-  },
-
-  consumePendingPrompt: () => {
-    const prompt = get().pendingPrompt;
-    if (prompt) set({ pendingPrompt: null });
-    return prompt;
-  },
-
-  // ── Current session ──
   sessionId: null,
   dbSessionId: null,
   provider: null,
   locked: false,
   messages: [],
   status: 'idle',
-  activeToolCall: null,
-
-  // ── Streaming (lives outside messages[] to avoid per-delta re-renders) ──
-  streamingContent: '',
-  streamingToolCalls: [],
-  streamingChart: null,
-
-  // ── Session history ──
+  lastAppliedSeq: 0,
+  streamingParts: [],
   sessions: [],
   sessionsLoaded: false,
+  defaults: null,
+
+  toggle: () => set((state) => ({ open: !state.open })),
+  setView: (v) => set({ view: v }),
+  openWithPrompt: (prompt) => set({ open: true, view: 'chat', pendingPrompt: prompt }),
+  consumePendingPrompt: () => {
+    const prompt = get().pendingPrompt;
+    if (prompt) {
+      set({ pendingPrompt: null });
+    }
+    return prompt;
+  },
 
   loadSessions: async (appId) => {
     try {
       const sessions = await chatSessionsRepository.getAll(appId, 'sherlock');
       set({
-        sessions: sessions.map((s) => ({
-          id: s.id,
-          title: s.title,
-          updatedAt: s.updatedAt,
-          status: s.status,
+        sessions: sessions.map((session) => ({
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          status: session.status,
         })),
         sessionsLoaded: true,
       });
@@ -160,51 +390,36 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
 
   selectSession: async (appId, sessionId) => {
     try {
-      const dbMessages = await chatMessagesRepository.getBySession(appId, sessionId);
-      let builderSession = null;
-      try {
-        builderSession = await getBuilderSession(appId, sessionId);
-      } catch {
-        builderSession = null;
-      }
-      const widgetMessages: WidgetMessage[] = dbMessages.map((m) => {
-        const metadata = readWidgetMetadata(m.metadata);
-        return {
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          toolCalls: (metadata.toolCalls ?? []).map((tc) => ({
-            name: tc.name,
-            summary: tc.summary,
-            detail: tc.detail ?? null,
-            status: 'done' as const,
-          })),
-          composedReport: metadata.composedReport ?? null,
-          chart: metadata.chart,
-          status: 'complete' as const,
-        };
+      const snapshot = await getBuilderSession(appId, sessionId);
+      const messages = snapshot.messages.map(storedMessageToWidgetMessage);
+      const isActive = snapshot.currentTurnStatus === 'active';
+
+      set({
+        open: true,
+        view: 'chat',
+        sessionId: snapshot.sessionId,
+        dbSessionId: snapshot.sessionId,
+        provider: snapshot.provider,
+        locked: true,
+        messages,
+        lastAppliedSeq: snapshot.lastEventSeq,
+        status: isActive ? 'sending' : 'idle',
+        streamingParts: [],
       });
 
-      const resolvedProvider = builderSession?.provider ?? get().provider;
-      set({
-        dbSessionId: sessionId,
-        sessionId: builderSession?.sessionId ?? sessionId,
-        provider: resolvedProvider,
-        locked: !!builderSession,
-        messages: widgetMessages,
-        view: 'chat',
+      savePointer({
+        sessionId: snapshot.sessionId,
+        provider: snapshot.provider,
+        appId,
+        open: true,
       });
-      if (resolvedProvider) {
-        savePointer({
-          sessionId: builderSession?.sessionId ?? sessionId,
-          dbSessionId: sessionId,
-          provider: resolvedProvider,
-          appId: appId as string,
-          open: get().open,
-        });
+
+      if (isActive) {
+        const applier = createRuntimeApplier(set, get);
+        const replaySeq = await replayRuntimeEvents(appId, snapshot.sessionId, snapshot.lastEventSeq, applier);
+        set({ lastAppliedSeq: replaySeq });
       }
     } catch {
-      // If loading fails, just switch to chat view
       set({ view: 'chat' });
     }
   },
@@ -212,206 +427,147 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
   deleteSession: async (appId, sessionId) => {
     try {
       await chatSessionsRepository.delete(appId, sessionId);
-      const wasActive = get().dbSessionId === sessionId;
-      set((s) => ({
-        sessions: s.sessions.filter((ss) => ss.id !== sessionId),
+      const wasActive = get().sessionId === sessionId;
+      set((state) => ({
+        sessions: state.sessions.filter((session) => session.id !== sessionId),
         ...(wasActive
-          ? { dbSessionId: null, sessionId: null, messages: [], locked: false }
+          ? {
+              sessionId: null,
+              dbSessionId: null,
+              messages: [],
+              streamingParts: [],
+              locked: false,
+              status: 'idle',
+              lastAppliedSeq: 0,
+            }
           : {}),
       }));
-      if (wasActive) savePointer(null);
+      if (wasActive) {
+        savePointer(null);
+      }
     } catch {
-      // Silently fail
+      // ignore
     }
   },
 
-  // ── Actions ──
   setProvider: (p) => {
-    if (get().locked) return;
+    if (get().locked) {
+      return;
+    }
     set({ provider: p });
   },
 
   send: async (text, appId) => {
     const { provider, defaults, sessionId } = get();
-    if (!provider || !defaults) return;
+    if (!provider || !defaults) {
+      return;
+    }
 
     const model = defaults[provider].model;
-
-    const userMsg: WidgetMessage = {
+    const userMessage: WidgetMessage = {
       id: nextId(),
       role: 'user',
-      content: text,
-      toolCalls: [],
+      parts: [{ type: 'text', content: text }],
       status: 'complete',
     };
 
-    // Add user message + placeholder; streaming content lives in separate fields
-    set((s) => ({
-      messages: [...s.messages, userMsg],
+    set((state) => ({
+      open: true,
+      view: 'chat',
+      messages: [...state.messages, userMessage],
       status: 'sending',
       locked: true,
-      view: 'chat',
-      activeToolCall: null,
-      streamingContent: '',
-      streamingToolCalls: [],
-      streamingChart: null,
+      streamingParts: [],
     }));
 
-    // rAF-buffered content flushing — batches multiple deltas per frame
-    let pendingContent = '';
-    let rafId: number | null = null;
-    const flushContent = () => {
-      rafId = null;
-      set({ streamingContent: pendingContent });
-    };
-    const cancelFlush = () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    };
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const resolveOnce = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        const rejectOnce = (error: Error) => {
-          if (settled) return;
-          settled = true;
-          reject(error);
-        };
-
-        void streamChatMessage(
-          {
-            appId,
-            sessionId,
-            message: text,
-            provider,
-            model,
-          },
-          {
-            onSessionId: (runtimeSession) => {
-              set({
-                sessionId: runtimeSession.sessionId,
-                dbSessionId: runtimeSession.sessionId,
-                provider: runtimeSession.provider,
-                locked: true,
-              });
-              savePointer({
-                sessionId: runtimeSession.sessionId,
-                dbSessionId: runtimeSession.sessionId,
-                provider: runtimeSession.provider,
-                appId,
-                open: true,
-              });
-            },
-            onToolCallStart: (name) => {
-              set((s) => ({
-                activeToolCall: name,
-                streamingToolCalls: upsertToolCall(s.streamingToolCalls, {
-                  name,
-                  status: 'running',
-                }),
-              }));
-            },
-            onToolCallEnd: (name, summary, detail) => {
-              set((s) => ({
-                activeToolCall: null,
-                streamingToolCalls: upsertToolCall(s.streamingToolCalls, {
-                  name,
-                  summary,
-                  detail: detail ?? null,
-                  status: 'done',
-                }),
-              }));
-            },
-            onContentDelta: (delta) => {
-              pendingContent += delta;
-              if (rafId === null) {
-                rafId = requestAnimationFrame(flushContent);
-              }
-            },
-            onChart: (chart) => {
-              set({ streamingChart: chart });
-            },
-            onDone: (data) => {
-              // Flush any remaining buffered content
-              cancelFlush();
-
-              const finalToolCalls: WidgetMessage['toolCalls'] = data.toolCalls.map((tc) => ({
-                name: tc.name,
-                summary: tc.summary,
-                detail: tc.detail ?? null,
-                status: 'done' as const,
-              }));
-
-              // Commit completed assistant message to messages[]
-              const completedMsg: WidgetMessage = {
-                id: nextId(),
-                role: 'assistant',
-                content: pendingContent,
-                toolCalls: finalToolCalls,
-                composedReport: data.composedReport,
-                chart: get().streamingChart ?? undefined,
-                status: 'complete',
-              };
-
-              set((s) => ({
-                status: 'idle',
-                activeToolCall: null,
-                messages: [...s.messages, completedMsg],
-                streamingContent: '',
-                streamingToolCalls: [],
-                streamingChart: null,
-              }));
-
-              resolveOnce();
-            },
-            onError: (error) => {
-              rejectOnce(new Error(error));
-            },
-          },
-        ).catch((error) => {
-          rejectOnce(error instanceof Error ? error : new Error(String(error)));
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeoutId = window.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        createRuntimeApplier(set, get).onError({
+          terminalStatus: 'error',
+          message: 'Sherlock timed out before the turn completed',
         });
-      });
-    } catch (err) {
-      cancelFlush();
+        reject(new Error('Sherlock timed out before the turn completed'));
+      }, SEND_TIMEOUT_MS);
 
-      // Commit error message to messages[]
-      const errorMsg: WidgetMessage = {
-        id: nextId(),
-        role: 'assistant',
-        content: err instanceof Error ? err.message : 'Request failed',
-        toolCalls: get().streamingToolCalls,
-        status: 'error',
+      const finishResolve = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve();
       };
 
-      set((s) => ({
-        status: 'error',
-        locked: false,
-        activeToolCall: null,
-        messages: [...s.messages, errorMsg],
-        streamingContent: '',
-        streamingToolCalls: [],
-        streamingChart: null,
-      }));
-    }
-  },
+      const finishReject = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      };
 
-  saveComposedReport: async (reportName, appId) => {
-    const prompt = buildSaveTemplatePrompt(reportName);
-    await get().send(prompt, appId);
+      const applier = createRuntimeApplier(set, get, finishResolve, finishReject);
+
+      void streamChatMessage(
+        {
+          appId,
+          sessionId,
+          message: text,
+          provider,
+          model,
+          resumeFromSeq: sessionId ? get().lastAppliedSeq : undefined,
+        },
+        {
+          onSessionId: (runtimeSession) => {
+            set({
+              sessionId: runtimeSession.sessionId,
+              dbSessionId: runtimeSession.sessionId,
+              provider: runtimeSession.provider,
+              lastAppliedSeq: runtimeSession.lastEventSeq ?? get().lastAppliedSeq,
+              locked: true,
+            });
+            savePointer({
+              sessionId: runtimeSession.sessionId,
+              provider: runtimeSession.provider,
+              appId,
+              open: true,
+            });
+          },
+          onEntityRecognition: () => {
+            // Recognition is informative but not user-visible in the widget.
+          },
+          onToolCallStart: applier.onToolCallStart,
+          onToolCallEnd: applier.onToolCallEnd,
+          onContentDelta: applier.onContentDelta,
+          onChart: (event) => applier.onChart({ type: 'chart', ...event }),
+          onBlueprint: applier.onBlueprint,
+          onSaveResult: applier.onSaveResult,
+          onDone: (event) => applier.onDone({
+            ...event,
+            chart: event.chart ? { type: 'chart', ...event.chart } : null,
+            blueprint: event.blueprint ?? null,
+          }),
+          onError: applier.onError,
+        },
+      ).catch((error) => finishReject(error instanceof Error ? error : new Error(String(error))));
+    }).catch(() => {
+      // State is already committed by the runtime applier.
+    });
   },
 
   retryLastMessage: async (appId) => {
     const lastUserMessage = [...get().messages].reverse().find((message) => message.role === 'user');
-    if (!lastUserMessage) return;
-    await get().send(lastUserMessage.content, appId);
+    const textPart = lastUserMessage?.parts.find((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text');
+    if (!textPart) {
+      return;
+    }
+    await get().send(textPart.content, appId);
   },
 
   newChat: () => {
@@ -419,37 +575,63 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
     set({
       sessionId: null,
       dbSessionId: null,
+      provider: get().provider,
       locked: false,
       messages: [],
       status: 'idle',
-      activeToolCall: null,
+      lastAppliedSeq: 0,
       pendingPrompt: null,
       view: 'chat',
-      sessionsLoaded: false, // force reload on next history view
-      streamingContent: '',
-      streamingToolCalls: [],
-      streamingChart: null,
+      sessionsLoaded: false,
+      streamingParts: [],
     });
   },
 
   restoreSession: async (currentAppId) => {
     const pointer = loadPointer();
-    if (!pointer) return;
-    // Only restore if the stored session belongs to the current app
-    if (pointer.appId !== currentAppId) return;
+    if (!pointer || pointer.appId !== currentAppId) {
+      return;
+    }
 
     set({ open: pointer.open, provider: pointer.provider });
-    await get().selectSession(currentAppId as AppId, pointer.dbSessionId);
+    await get().selectSession(currentAppId as AppId, pointer.sessionId);
   },
 
-  // ── Defaults ──
-  defaults: null,
   loadDefaults: async () => {
     try {
       const defaults = await getChatDefaults();
       set({ defaults });
     } catch {
-      // Silently fail
+      // ignore
     }
+  },
+
+  appendMessagePart: (messageId, part) => {
+    set((state) => ({
+      messages: state.messages.map((message) => (
+        message.id === messageId
+          ? { ...message, parts: [...message.parts, part] }
+          : message
+      )),
+    }));
+  },
+
+  updateMessagePart: (messageId, matcher, next) => {
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (message.id !== messageId) {
+          return message;
+        }
+
+        const index = message.parts.findIndex(matcher);
+        if (index === -1) {
+          return message;
+        }
+
+        const parts = [...message.parts];
+        parts[index] = next;
+        return { ...message, parts };
+      }),
+    }));
   },
 }));

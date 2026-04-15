@@ -165,6 +165,33 @@ export function apiLogsForApp(appId: string): string {
   return navigationForApp(appId).logsPath ?? fallbackNavigation().logsPath ?? routes.voiceRx.logs;
 }
 
+/** Resolve the analytics dashboard path for a given appId. */
+export function analyticsDashboardForApp(appId: string, dashboardId: string): string {
+  return (
+    fillPathTemplate(navigationForApp(appId).analyticsDashboardPath, { dashboardId }) ??
+    fillPathTemplate(fallbackNavigation().analyticsDashboardPath, { dashboardId }) ??
+    routes.voiceRx.analyticsDashboard(dashboardId)
+  );
+}
+
+export function analyticsChartForApp(appId: string, chartId: string): string {
+  return (
+    fillPathTemplate(navigationForApp(appId).analyticsChartPath, { chartId }) ??
+    fillPathTemplate(fallbackNavigation().analyticsChartPath, { chartId }) ??
+    routes.voiceRx.analyticsChart(chartId)
+  );
+}
+
+export function reportWizardForApp(appId: string, blueprintId: string): string {
+  const basePath =
+    navigationForApp(appId).reportWizardPath ??
+    fallbackNavigation().reportWizardPath ??
+    '/reports/generate';
+  const params = new URLSearchParams({ template: blueprintId });
+
+  return `${basePath}?${params.toString()}`;
+}
+
 export function threadDetailForApp(appId: string, threadId: string, runId?: string): string | null {
   return fillPathTemplate(navigationForApp(appId).threadDetailPath, { threadId, runId });
 }

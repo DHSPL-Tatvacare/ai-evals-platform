@@ -1,6 +1,8 @@
 import type { ComposedReport } from '@/features/reportBuilder/types';
 
 export type ChatProvider = 'gemini' | 'openai';
+export type TerminalStatus = 'done' | 'error' | 'interrupted' | 'degraded';
+export type SaveVariant = 'chart' | 'dashboard' | 'blueprint';
 
 export interface ToolCallDetailData {
   executionMs: number;
@@ -11,6 +13,7 @@ export interface ToolCallDetailData {
 }
 
 export interface ToolCallBadgeData {
+  toolCallId?: string;
   name: string;
   summary?: string;
   detail?: ToolCallDetailData | null;
@@ -43,14 +46,70 @@ export interface ChartData {
   sourceQuestion: string;
 }
 
+export interface BlueprintSection {
+  id: string;
+  type: string;
+  title: string;
+  variant?: string;
+}
+
+export interface TextPart {
+  type: 'text';
+  content: string;
+}
+
+export interface ToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  state: 'executing' | 'completed' | 'error';
+  summary?: string;
+  detail?: ToolCallDetailData | null;
+  durationMs?: number;
+}
+
+export interface ChartPart extends ChartData {
+  type: 'chart';
+  saved?: boolean;
+  chartId?: string;
+}
+
+export interface BlueprintPart {
+  type: 'blueprint';
+  name: string;
+  sections: BlueprintSection[];
+  saved?: boolean;
+  blueprintId?: string;
+}
+
+export interface SaveToastPart {
+  type: 'save-toast';
+  variant: SaveVariant;
+  title: string;
+  subtitle: string;
+  linkText: string;
+  linkHref: string;
+}
+
+export interface DashboardBarPart {
+  type: 'dashboard-bar';
+  charts: ChartPart[];
+}
+
+export type MessagePart =
+  | TextPart
+  | ToolCallPart
+  | ChartPart
+  | BlueprintPart
+  | SaveToastPart
+  | DashboardBarPart;
+
 export interface WidgetMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
-  toolCalls: ToolCallBadgeData[];
-  composedReport?: ComposedReport | null;
-  chart?: ChartData;
-  status: 'complete' | 'streaming' | 'error';
+  parts: MessagePart[];
+  status: 'pending' | 'streaming' | 'complete' | 'error';
+  terminalStatus?: TerminalStatus;
 }
 
 export interface ChatDefaults {
@@ -58,10 +117,36 @@ export interface ChatDefaults {
   openai: { model: string };
 }
 
+export interface BuilderStoredMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  status: string;
+  errorMessage?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+}
+
 export interface BuilderSessionData {
   sessionId: string;
   provider: ChatProvider;
   model: string;
+  lastEventSeq: number;
+  currentTurnStatus: TerminalStatus | 'active';
+  messages: BuilderStoredMessage[];
+}
+
+export interface RuntimeEventRecord {
+  seq: number;
+  eventType: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface BuilderRuntimeEventsData {
+  sessionId: string;
+  lastEventSeq: number;
+  events: RuntimeEventRecord[];
 }
 
 export interface PromptTemplate {
@@ -83,4 +168,18 @@ export interface WidgetSessionSummary {
   title: string;
   updatedAt: Date;
   status: string;
+}
+
+export interface StoredWidgetMetadata {
+  parts?: MessagePart[];
+  toolCalls?: Array<{
+    toolCallId?: string;
+    name: string;
+    summary?: string;
+    detail?: ToolCallDetailData | null;
+  }>;
+  chart?: ChartData | null;
+  blueprint?: BlueprintPart | null;
+  composedReport?: ComposedReport | null;
+  terminalStatus?: TerminalStatus;
 }

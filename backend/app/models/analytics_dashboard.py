@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,12 @@ class AnalyticsDashboard(Base, TenantUserMixin, ShareableMixin, TimestampMixin):
     # Ordered list of chart IDs + optional per-chart layout overrides
     # [{chart_id: "uuid", width: "half"|"full", order: 0}, ...]
     chart_entries: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    source_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('chat_sessions.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
 
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None,

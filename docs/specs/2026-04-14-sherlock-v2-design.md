@@ -197,7 +197,7 @@ Query `information_schema` + `pg_catalog` for table/column metadata.
 
 **Returns:** Column names, types, nullable, defaults, **column comments** (from `pg_description`), primary key, indexes. For JSONB columns, indicates "use `catalog_sample` to inspect structure."
 
-**Column comments serve as the semantic layer.** Comments should include: description, sample values, synonyms, role tag (`dimension` / `measure` / `temporal`). Example comment: `"Type of evaluation. Role: dimension. Values: batch_thread, call_quality, batch_adversarial, custom, inside_sales. Synonyms: evaluation type, run type, test type"`
+**Column comments augment the semantic layer.** The semantic model and app config stay the source of truth for business meaning, enabled capabilities, and app-specific behavior. Comments provide schema-local hints for SQL generation: description, sample values, synonyms, role tag (`dimension` / `measure` / `temporal`). Example comment: `"Type of evaluation. Role: dimension. Values: batch_thread, call_quality, batch_adversarial, custom, inside_sales. Synonyms: evaluation type, run type, test type"`
 
 #### `catalog_relations`
 
@@ -377,9 +377,13 @@ Browse saved blueprints for the current app.
 
 ## 5. Semantic Model & DB Catalog
 
-### Strategy: DB Catalog as Source of Truth
+### Strategy: Semantic Model + DB Catalog
 
-The semantic model YAML still exists for **app-specific configuration** (entity type registry, data surfaces, entity resolvers, capabilities). But the **schema knowledge** that feeds SQL generation comes from the DB catalog via `catalog_*` tools.
+The semantic model YAML and app config remain the **source of truth for business semantics and app behavior** (entity type registry, data surfaces, entity resolvers, capabilities, prompt scaffolding). The DB catalog is the **source of truth for live schema details** that feed SQL generation via `catalog_*` tools.
+
+In practice:
+- semantic model/app config = what the business concepts mean and which surfaces exist
+- DB catalog/comments = how those concepts map onto actual queryable columns right now
 
 ### Column Comments Convention
 
@@ -410,6 +414,8 @@ COMMENT ON COLUMN analytics_criterion_facts.criterion_label IS
 - `Granularities:` → for temporal columns (drives DATE_TRUNC)
 - `Ordering:` → for ordered categoricals (drives chart sort order)
 - `Pre-aggregated` → flag: this column is already an aggregate, don't re-aggregate
+
+Column comments are intentionally **supplemental metadata**, not the only semantic layer. If a business definition in app config or the semantic model conflicts with a column comment, the semantic model wins and the comment should be corrected.
 
 ### Selective Retrieval vs. Prompt Dumping
 
@@ -820,37 +826,60 @@ This exact design language MUST carry through to the React implementation. Use C
 
 ```
 event: session
-data: {"sessionId": "...", "provider": "gemini", "model": "..."}
+data: {"sessionId": "...", "provider": "gemini", "model": "...", "lastEventSeq": 0}
 
 event: entity_recognition
-data: {"entities": [...], "is_platform_query": true}
+data: {"seq": 1, "entities": [...], "is_platform_query": true}
 
 event: tool_call_start
-data: {"toolCallId": "tc_001", "toolName": "catalog_values"}
+data: {"seq": 2, "toolCallId": "tc_001", "toolName": "catalog_values"}
 
 event: tool_call_end
-data: {"toolCallId": "tc_001", "toolName": "catalog_values", "summary": "eval_type · 5 values", "detail": {...}, "durationMs": 120}
+data: {"seq": 3, "toolCallId": "tc_001", "toolName": "catalog_values", "summary": "eval_type · 5 values", "detail": {...}, "durationMs": 120}
 
 event: content_delta
-data: {"delta": "Here are the "}
+data: {"seq": 4, "delta": "Here are the "}
 
 event: chart
-data: {"spec": {...}, "data": [...], "sqlQuery": "...", "sourceQuestion": "..."}
+data: {"seq": 5, "spec": {...}, "data": [...], "sqlQuery": "...", "sourceQuestion": "..."}
 
 event: blueprint
-data: {"name": "...", "sections": [...], "blueprintId": null}
+data: {"seq": 6, "name": "...", "sections": [...], "blueprintId": null}
 
 event: save_result
-data: {"variant": "chart", "id": "...", "title": "...", "linkHref": "..."}
+data: {"seq": 7, "variant": "chart", "id": "...", "title": "...", "linkHref": "..."}
 
 event: done
-data: {"content": "full text", "toolCalls": [...], "chart": {...}, "blueprint": {...}}
+data: {"seq": 8, "terminalStatus": "done", "content": "full text", "toolCalls": [...], "chart": {...}, "blueprint": {...}, "warnings": []}
 
 event: error
-data: {"message": "...", "recoverable": false}
+data: {"seq": 8, "terminalStatus": "error", "message": "...", "recoverable": false}
 ```
 
 **Key change:** `tool_call_start` and `tool_call_end` include `toolCallId` (unique per call), not just `toolName`. Frontend uses this for stable identity.
+
+### Event Ordering & Idempotency
+
+- Every mutating runtime event carries a monotonic `seq` scoped to `sessionId`
+- The frontend stores `lastAppliedSeq` and ignores any event with `seq <= lastAppliedSeq`
+- `toolCallId` identifies tool lifecycle rows; `seq` identifies stream ordering
+- `done` and `error` are the only terminal SSE event names; runtime nuance is encoded in `terminalStatus`
+
+### Turn Terminal States
+
+Every turn must end in exactly one backend terminal outcome:
+- `done` — completed successfully
+- `error` — failed and no trustworthy answer should be shown as success
+- `interrupted` — client disconnected or stream broke mid-turn
+- `degraded` — partial answer shown with an explicit caveat
+
+The frontend can still map these to a simpler UI (`complete` / `error`), but the runtime contract must distinguish them so disconnects and partial completions are not misclassified as ordinary success.
+
+**Protocol mapping:**
+- `event: done` + `terminalStatus: "done" | "degraded"`
+- `event: error` + `terminalStatus: "error" | "interrupted"`
+
+This keeps the SSE surface small while preserving precise backend semantics.
 
 ### EOF Handling (Bug Fix)
 
@@ -896,6 +925,42 @@ except (Exception, asyncio.CancelledError) as exc:
     await save_runtime_state(session, status='error', ...)
     await finalize_assistant_message(msg_id, status='error', ...)
 ```
+
+### Replay / Resume Semantics
+
+V2 should treat the runtime event log as a first-class part of the protocol:
+- Runtime events remain sequenced per session (`session_id + seq`)
+- Reconnect/restore can request events after the last acknowledged sequence
+- Replay is idempotent: duplicate or already-applied events are ignored by sequence / `toolCallId`
+- Final assistant message persistence is idempotent, so disconnect during streaming cannot double-finalize or silently drop the turn
+
+### Replay / Resume API Contract
+
+Use explicit v2 endpoints during rollout:
+
+- `POST /api/report-builder/v2/chat/stream`
+  - body: `{message, session_id?, resume_from_seq?}`
+  - returns SSE stream with ordered `seq` values
+- `GET /api/report-builder/v2/sessions/{session_id}`
+  - returns `{messages, provider, model, lastEventSeq, currentTurnStatus}`
+- `GET /api/report-builder/v2/sessions/{session_id}/events?after_seq=N`
+  - returns ordered runtime events for reconnect/restore
+
+Reconnect flow:
+1. client restores session and reads `lastEventSeq`
+2. client requests `/events?after_seq=N` to fill any gap
+3. client resumes normal streaming with `lastAppliedSeq=N`
+
+If no active turn exists, replay returns an empty event list. If a turn was interrupted, the replayed terminal event must resolve it as `error` or `interrupted` — never leave the client hanging.
+
+### Rollout Isolation
+
+During migration, v2 should run behind a feature flag and a dedicated runtime path such as `/api/report-builder/v2/*`.
+
+This avoids:
+- old widget parsing new parts/events
+- new widget depending on old flat message assumptions
+- silent drift between old and new session/stream contracts
 
 ---
 
@@ -973,7 +1038,7 @@ See section 6 (Agent Loop & Orchestration) for the full orchestration guidance i
 
 - **Tool loop** → constrained agent with forced entity recognition + `tool_choice` gating
 - **Tool definitions** → `{namespace}_{action}` naming, new tools (`catalog_relations`, `catalog_sample`, `data_check`), consolidated tools (`blueprint_blocks`)
-- **Semantic model role** → lighter YAML for app config; DB catalog (column comments) for schema knowledge
+- **Semantic model role** → semantic model/app config stay primary for business meaning; DB catalog (column comments) augments live schema knowledge
 - **SQL generation prompt** → schema subset from catalog discovery, not full model dump
 - **Chart binding** → deterministic from column roles in `data_query` response; `render_chart` tool removed
 - **Message model** → parts-based array instead of flat `{content, toolCalls[]}`
@@ -999,11 +1064,12 @@ See section 6 (Agent Loop & Orchestration) for the full orchestration guidance i
 - `catalog_sample` tool (JSONB structure introspection)
 - `data_check` tool (pre-flight data availability)
 - Result verification layer (empty results, NULL columns, suspicious aggregation)
-- Column comments as semantic layer
+- Column comments as semantic hints for live schema discovery
 - `source_session_id` lineage tracking on charts/dashboards/blueprints
 - `blueprint_list` tool
 - Dashboard creation bar in chat (redesigned from MergeChartBar)
 - Inline save toasts with navigation links
 - Blueprint card with numbered sections
+- Explicit terminal turn states + replay/resume semantics
 - 50ms streaming throttle
 - 60s send timeout

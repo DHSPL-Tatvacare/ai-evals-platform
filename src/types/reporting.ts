@@ -9,6 +9,7 @@ export interface ReportConfigSummary {
   description: string;
   status: string;
   isDefault: boolean;
+  sourceSessionId?: string | null;
   visibility: AssetVisibility;
   sharedBy?: string | null;
   sharedAt?: string | null;

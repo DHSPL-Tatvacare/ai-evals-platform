@@ -17,6 +17,7 @@ class ReportConfigResponse(VisibilityOutputMixin, CamelORMModel):
     description: str
     status: str
     is_default: bool
+    source_session_id: uuid.UUID | None = None
     visibility: Visibility
     shared_by: uuid.UUID | None = None
     shared_at: datetime | None = None

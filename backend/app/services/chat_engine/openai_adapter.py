@@ -47,6 +47,7 @@ class OpenAIAdapter:
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ) -> Any:
         openai_tools = []
         for t in tools:
@@ -66,6 +67,7 @@ class OpenAIAdapter:
             model=self._model,
             messages=full_messages,  # type: ignore[arg-type]
             tools=openai_tools,
+            tool_choice='required' if tool_choice == 'any' else 'auto',
             temperature=temperature,
         )
 
@@ -75,6 +77,7 @@ class OpenAIAdapter:
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ):
         openai_tools = []
         for t in tools:
@@ -93,6 +96,7 @@ class OpenAIAdapter:
             model=self._model,
             messages=full_messages,  # type: ignore[arg-type]
             tools=openai_tools,
+            tool_choice='required' if tool_choice == 'any' else 'auto',
             temperature=temperature,
             stream=True,
         )

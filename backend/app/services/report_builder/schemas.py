@@ -1,12 +1,15 @@
 """Request/response schemas for the report builder API."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.schemas.base import CamelModel
 
 
 class BuilderChatRequest(CamelModel):
     app_id: str
     session_id: str | None = None
+    resume_from_seq: int | None = None
     message: str
     provider: str
     model: str
@@ -33,9 +36,16 @@ class ToolCallDetailOut(CamelModel):
 
 
 class ToolCallOut(CamelModel):
+    tool_call_id: str | None = None
     name: str
     summary: str
     detail: ToolCallDetailOut | None = None
+
+
+class ChartSeriesItemOut(CamelModel):
+    data_key: str
+    type: str
+    stack_id: str | None = None
 
 
 class ChartSpecOut(CamelModel):
@@ -46,6 +56,9 @@ class ChartSpecOut(CamelModel):
     series_keys: list[str] = []
     x_label: str = ""
     y_label: str = ""
+    legend_position: str = "bottom"
+    alternatives: list[str] = []
+    series: list[ChartSeriesItemOut] = []
 
 
 class ChartOut(CamelModel):
@@ -61,12 +74,46 @@ class BuilderChatResponse(CamelModel):
     model: str | None = None
     role: str = "assistant"
     content: str
+    terminal_status: str | None = None
     tool_calls: list[ToolCallOut] = []
     composed_report: ComposedReportOut | None = None
     chart: ChartOut | None = None
+    warnings: list[str] = []
 
 
 class BuilderSessionResponse(CamelModel):
     session_id: str
     provider: str
     model: str
+
+
+class BuilderMessageOut(CamelModel):
+    id: str
+    role: str
+    content: str
+    status: str
+    error_message: str | None = None
+    metadata: dict | None = None
+    created_at: datetime
+
+
+class BuilderSessionSnapshotResponse(CamelModel):
+    session_id: str
+    provider: str
+    model: str
+    last_event_seq: int
+    current_turn_status: str
+    messages: list[BuilderMessageOut] = []
+
+
+class BuilderRuntimeEventOut(CamelModel):
+    seq: int
+    event_type: str
+    payload: dict
+    created_at: datetime
+
+
+class BuilderRuntimeEventsResponse(CamelModel):
+    session_id: str
+    last_event_seq: int
+    events: list[BuilderRuntimeEventOut] = []

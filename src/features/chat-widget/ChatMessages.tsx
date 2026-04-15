@@ -1,320 +1,349 @@
-import { useRef, useEffect, useCallback, memo } from 'react';
-import { useState } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Loader2, RotateCcw, Check } from 'lucide-react';
+import { AlertCircle, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/authStore';
-import { notificationService } from '@/services/notifications';
-import { Button } from '@/components/ui';
-import { ToolCallBadge } from './ToolCallBadge';
-import { ComposedReportCard } from './ComposedReportCard';
-import { ChatChart } from './ChatChart';
 import { useChatWidgetStore } from './useChatWidget';
-import type { WidgetMessage, ToolCallBadgeData } from './types';
-import type { Components } from 'react-markdown';
+import {
+  buildSaveTemplatePrompt,
+  findLastChartParts,
+  isBlueprintPart,
+  isChartPart,
+  isSaveToastPart,
+  isToolCallPart,
+} from './chatWidgetHelpers';
+import { BlueprintCard } from './components/BlueprintCard';
+import { ChatChartCard } from './components/ChatChartCard';
+import { DashboardBar } from './components/DashboardBar';
+import { SaveToast } from './components/SaveToast';
+import { ToolGroup } from './components/ToolGroup';
+import { ToolStack } from './components/ToolStack';
+import type {
+  MessagePart,
+  ToolCallPart,
+  WidgetMessage,
+} from './types';
 
-const PROSE_CLASSES = 'prose prose-sm max-w-none overflow-hidden [&_p]:mb-1.5 [&_p:last-child]:mb-0 [&_ul]:mb-1.5 [&_li]:mb-0 [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--border-subtle)] [&_td]:border [&_td]:border-[var(--border-subtle)] [&_th]:bg-[var(--bg-secondary)] [&_strong]:text-[var(--text-primary)] [&_code]:text-[11px] [&_code]:bg-[var(--bg-secondary)] [&_code]:px-1 [&_code]:rounded';
-
-/** Custom renderers — wraps tables in a horizontal scroll container. */
-const MARKDOWN_COMPONENTS: Components = {
-  table: ({ children, ...props }) => (
-    <div className="overflow-x-auto">
-      <table {...props}>{children}</table>
-    </div>
-  ),
-};
+const PROSE_CLASSES = 'prose prose-sm max-w-none overflow-hidden text-[var(--text-primary)] [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_li]:mb-0 [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--border-default)] [&_td]:border [&_td]:border-[var(--border-default)] [&_th]:bg-[var(--bg-primary)] [&_strong]:text-[var(--text-primary)] [&_code]:rounded [&_code]:bg-[var(--bg-primary)] [&_code]:px-1 [&_code]:py-0.5';
 
 function getUserInitials(displayName?: string): string {
-  if (!displayName) return '?';
+  if (!displayName) {
+    return '?';
+  }
   const parts = displayName.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
   return parts[0].slice(0, 2).toUpperCase();
 }
-
-// ── Reusable pieces ────────────────────────────────────────────────
-
-function AssistantMessageActions({
-  content,
-  isError,
-  onRetry,
-}: {
-  content: string;
-  isError: boolean;
-  onRetry: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    notificationService.success('Message copied');
-    window.setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <div className="mt-2 flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-      <Button variant="ghost" size="sm" icon={copied ? Check : Copy} onClick={handleCopy}>
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
-      {isError && (
-        <Button variant="ghost" size="sm" icon={RotateCcw} onClick={onRetry}>
-          Retry
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function ToolCallBadges({ toolCalls, collapsed }: { toolCalls: ToolCallBadgeData[]; collapsed?: boolean }) {
-  if (toolCalls.length === 0) return null;
-  if (collapsed) {
-    const failed = toolCalls.filter((tc) => tc.status === 'failed').length;
-    const label = failed
-      ? `${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''} ran · ${failed} failed`
-      : `${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''} ran`;
-    return (
-      <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-mono font-medium bg-[var(--bg-secondary)] text-[var(--text-muted)]">
-        {label}
-      </span>
-    );
-  }
-  return (
-    <div className="flex flex-wrap gap-1">
-      {toolCalls.map((tc) => (
-        <ToolCallBadge key={tc.name} {...tc} />
-      ))}
-    </div>
-  );
-}
-
-function MessageBubble({
-  role,
-  content,
-  isError,
-  children,
-}: {
-  role: 'user' | 'assistant';
-  content?: string;
-  isError?: boolean;
-  children?: React.ReactNode;
-}) {
-  const body = children ?? (
-    role === 'assistant' && content ? (
-      <div className={PROSE_CLASSES}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-          {content}
-        </ReactMarkdown>
-      </div>
-    ) : (
-      <span>{content}</span>
-    )
-  );
-
-  return (
-    <div
-      className={cn(
-        'rounded-lg px-3 py-2 text-[13px] leading-relaxed',
-        role === 'user'
-          ? 'bg-[var(--color-brand-primary)] text-white rounded-br-sm'
-          : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-bl-sm',
-        isError && 'border border-[var(--color-verdict-fail)] bg-[var(--color-verdict-fail)]/5',
-      )}
-    >
-      {body}
-    </div>
-  );
-}
-
-// ── Avatar ─────────────────────────────────────────────────────────
 
 function Avatar({ role, initials }: { role: 'user' | 'assistant'; initials: string }) {
   if (role === 'user') {
     return (
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand-primary)] text-[10px] font-bold text-white">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--interactive-primary)] text-[11px] font-bold text-[var(--text-on-color)]">
         {initials}
       </div>
     );
   }
+
   return (
-    <div
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-      style={{ background: 'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, var(--color-brand-primary-deep) 100%)' }}
-    >
-      <img src="/sherlock-icon.svg" alt="Sherlock" className="h-3.5 w-3.5 invert" />
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--color-brand-primary),var(--color-brand-primary-deep))]">
+      <img src="/sherlock-icon.svg" alt="Sherlock" className="h-4 w-4 brightness-0 invert" />
     </div>
   );
 }
 
-// ── Individual message (memoized — won't re-render during streaming) ─
+function UserMessage({ message, initials }: { message: WidgetMessage; initials: string }) {
+  const text = message.parts
+    .filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.content)
+    .join('');
 
-interface MessageItemProps {
-  msg: WidgetMessage;
-  initials: string;
-  appId: string;
-  onRetry: () => void;
-  onSaveComposedReport: (reportName: string) => void;
+  return (
+    <div className="ml-auto flex max-w-[88%] flex-row-reverse gap-3">
+      <Avatar role="user" initials={initials} />
+      <div className="rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)]">
+        {text}
+      </div>
+    </div>
+  );
 }
 
-const MessageItem = memo(function MessageItem({
-  msg,
-  initials,
-  appId,
-  onRetry,
-  onSaveComposedReport,
-}: MessageItemProps) {
-  const isError = msg.status === 'error';
-
+function TextPartBlock({
+  content,
+  isError,
+}: {
+  content: string;
+  isError?: boolean;
+}) {
   return (
     <div
       className={cn(
-        'group flex gap-2 max-w-[92%]',
-        msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto',
+        'rounded-2xl px-4 py-3',
+        isError
+          ? 'border border-[color-mix(in_srgb,var(--interactive-danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_8%,var(--bg-primary))]'
+          : 'bg-transparent',
       )}
     >
-      <Avatar role={msg.role} initials={initials} />
-
-      <div className="flex flex-col gap-1 min-w-0">
-        <ToolCallBadges toolCalls={msg.toolCalls} collapsed={isError} />
-
-        <MessageBubble
-          role={msg.role}
-          content={msg.content || (isError ? 'Something went wrong.' : undefined)}
-          isError={isError}
-        />
-
-        {msg.role === 'assistant' && msg.composedReport && (
-          <ComposedReportCard
-            report={msg.composedReport}
-            onSaveTemplate={onSaveComposedReport}
-          />
-        )}
-
-        {msg.role === 'assistant' && msg.chart && (
-          <ChatChart chart={msg.chart} appId={appId} />
-        )}
-
-        {msg.role === 'assistant' && (msg.content || isError) && (
-          <AssistantMessageActions
-            content={msg.content}
-            isError={isError}
-            onRetry={onRetry}
-          />
-        )}
+      <div className={PROSE_CLASSES}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
     </div>
   );
-});
+}
 
-// ── Streaming message (reads from streaming store fields) ──────────
+function renderAssistantParts(
+  message: WidgetMessage,
+  appId: string,
+  sessionId: string | null,
+  onRetry: () => void,
+  appendMessagePart: (messageId: string, part: MessagePart) => void,
+  updateMessagePart: (messageId: string, matcher: (part: MessagePart) => boolean, next: MessagePart) => void,
+) {
+  const blocks: React.ReactNode[] = [];
+  let toolGroup: ToolCallPart[] = [];
 
-function StreamingMessage({ initials }: { initials: string }) {
-  const content = useChatWidgetStore((s) => s.streamingContent);
-  const toolCalls = useChatWidgetStore((s) => s.streamingToolCalls);
-  const chart = useChatWidgetStore((s) => s.streamingChart);
+  const flushToolGroup = (autoCollapsed: boolean) => {
+    if (toolGroup.length === 0) {
+      return;
+    }
+    const key = `${message.id}-tools-${blocks.length}`;
+    blocks.push(
+      autoCollapsed
+        ? <ToolGroup key={key} tools={toolGroup} autoCollapsed />
+        : <ToolStack key={key} tools={toolGroup} />,
+    );
+    toolGroup = [];
+  };
 
-  const showThinking = !content && toolCalls.length === 0;
-  const showBubble = !!content || showThinking;
+  for (let index = 0; index < message.parts.length; index += 1) {
+    const part = message.parts[index];
+    const nextPart = message.parts[index + 1];
+
+    if (isToolCallPart(part)) {
+      toolGroup.push(part);
+      const nextIsTool = nextPart && isToolCallPart(nextPart);
+      if (!nextIsTool) {
+        const autoCollapsed = toolGroup.every((tool) => tool.state !== 'executing') && nextPart?.type === 'text';
+        flushToolGroup(autoCollapsed);
+      }
+      continue;
+    }
+
+    if (part.type === 'text') {
+      blocks.push(
+        <TextPartBlock
+          key={`${message.id}-text-${index}`}
+          content={part.content}
+          isError={message.status === 'error'}
+        />,
+      );
+      continue;
+    }
+
+    if (isChartPart(part)) {
+      blocks.push(
+        <ChatChartCard
+          key={`${message.id}-chart-${index}`}
+          part={part}
+          appId={appId}
+          sessionId={sessionId}
+          onSaved={(nextChartPart, toast) => {
+            updateMessagePart(message.id, (candidate) => candidate === part, nextChartPart);
+            appendMessagePart(message.id, toast);
+          }}
+        />,
+      );
+      continue;
+    }
+
+    if (isBlueprintPart(part)) {
+      blocks.push(
+        <BlueprintCard
+          key={`${message.id}-blueprint-${index}`}
+          part={part}
+          onSave={() => {
+            void useChatWidgetStore.getState().send(buildSaveTemplatePrompt(part.name), appId);
+          }}
+        />,
+      );
+      continue;
+    }
+
+    if (isSaveToastPart(part)) {
+      blocks.push(<SaveToast key={`${message.id}-toast-${index}`} part={part} />);
+    }
+  }
+
+  if (message.status === 'error') {
+    blocks.push(
+      <div key={`${message.id}-retry`} className="flex items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--interactive-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] px-4 py-3 text-sm text-[var(--text-primary)]">
+        <AlertCircle className="h-4 w-4 shrink-0 text-[var(--interactive-danger)]" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium capitalize">{message.terminalStatus ?? 'error'}</div>
+          <div className="text-xs text-[var(--text-muted)]">Retry the last prompt to continue.</div>
+        </div>
+        <Button variant="ghost" size="sm" icon={RotateCcw} onClick={onRetry}>
+          Retry
+        </Button>
+      </div>,
+    );
+  }
+
+  return blocks;
+}
+
+interface AssistantMessageProps {
+  message: WidgetMessage;
+  appId: string;
+  initials: string;
+  sessionId: string | null;
+  onRetry: () => void;
+}
+
+const AssistantMessage = memo(function AssistantMessage({
+  message,
+  appId,
+  initials,
+  sessionId,
+  onRetry,
+}: AssistantMessageProps) {
+  const appendMessagePart = useChatWidgetStore((state) => state.appendMessagePart);
+  const updateMessagePart = useChatWidgetStore((state) => state.updateMessagePart);
 
   return (
-    <div className="group flex gap-2 max-w-[92%] mr-auto">
+    <div className="mr-auto flex w-full max-w-[94%] gap-3">
       <Avatar role="assistant" initials={initials} />
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+          Sherlock
+          {message.terminalStatus ? <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] capitalize tracking-normal">{message.terminalStatus}</span> : null}
+        </div>
+        {renderAssistantParts(message, appId, sessionId, onRetry, appendMessagePart, updateMessagePart)}
+      </div>
+    </div>
+  );
+}, (prevProps, nextProps) => prevProps.message === nextProps.message && prevProps.sessionId === nextProps.sessionId);
 
-      <div className="flex flex-col gap-1 min-w-0">
-        <ToolCallBadges toolCalls={toolCalls} />
+function StreamingAssistantMessage({ initials, appId, sessionId }: { initials: string; appId: string; sessionId: string | null }) {
+  const streamingParts = useChatWidgetStore((state) => state.streamingParts);
+  const appendMessagePart = useChatWidgetStore((state) => state.appendMessagePart);
+  const updateMessagePart = useChatWidgetStore((state) => state.updateMessagePart);
 
-        {showBubble && (
-          content ? (
-            <MessageBubble role="assistant" content={content} />
-          ) : (
-            <MessageBubble role="assistant">
-              <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
-                <Loader2 className="h-3 w-3 animate-spin" /> Thinking&hellip;
-              </span>
-            </MessageBubble>
-          )
+  if (streamingParts.length === 0) {
+    return (
+      <div className="mr-auto flex w-full max-w-[94%] gap-3">
+        <Avatar role="assistant" initials={initials} />
+        <div className="rounded-2xl bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--text-muted)]">Thinking…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mr-auto flex w-full max-w-[94%] gap-3">
+      <Avatar role="assistant" initials={initials} />
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">Sherlock</div>
+        {renderAssistantParts(
+          {
+            id: 'streaming',
+            role: 'assistant',
+            parts: streamingParts,
+            status: 'streaming',
+          },
+          appId,
+          sessionId,
+          () => {},
+          appendMessagePart,
+          updateMessagePart,
         )}
-
-        {chart && <ChatChart chart={chart} appId="" />}
       </div>
     </div>
   );
 }
-
-// ── Streaming scroll tracker (subscribes to store outside React render) ──
-
-/**
- * Scrolls the container to bottom on streaming content changes.
- * Lives outside ChatMessages render cycle so it doesn't cause re-renders.
- */
-function StreamingScrollTracker({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const streamingContent = useChatWidgetStore((s) => s.streamingContent);
-  const rafRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!streamingContent || !scrollRef.current) return;
-    if (rafRef.current !== null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'instant' as ScrollBehavior });
-    });
-  }, [streamingContent, scrollRef]);
-
-  return null;
-}
-
-// ── Main component ─────────────────────────────────────────────────
 
 interface ChatMessagesProps {
   messages: WidgetMessage[];
   status: 'idle' | 'sending' | 'error';
   appId: string;
   onRetry: () => void;
-  onSaveComposedReport: (reportName: string) => void;
 }
 
-export function ChatMessages({ messages, status, appId, onRetry, onSaveComposedReport }: ChatMessagesProps) {
-  const displayName = useAuthStore((s) => s.user?.displayName);
+export function ChatMessages({ messages, status, appId, onRetry }: ChatMessagesProps) {
+  const displayName = useAuthStore((state) => state.user?.displayName);
   const initials = getUserInitials(displayName);
-  const isStreaming = status === 'sending';
+  const sessionId = useChatWidgetStore((state) => state.sessionId);
+  const appendMessagePart = useChatWidgetStore((state) => state.appendMessagePart);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Smooth-scroll when messages array changes (new message added/completed)
-  useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: isStreaming ? 'instant' as ScrollBehavior : 'smooth',
-    });
-  }, [messages, isStreaming]);
+  const dashboardCharts = useMemo(() => findLastChartParts(messages), [messages]);
+  const defaultDashboardTitle = useMemo(() => {
+    const firstChart = dashboardCharts[0];
+    return firstChart ? `${firstChart.spec.title} dashboard` : 'Untitled dashboard';
+  }, [dashboardCharts]);
 
-  // Stable callbacks for memoized MessageItem
-  const handleRetry = useCallback(() => onRetry(), [onRetry]);
-  const handleSaveReport = useCallback((name: string) => onSaveComposedReport(name), [onSaveComposedReport]);
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || typeof node.scrollTo !== 'function') {
+      return;
+    }
+
+    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (distanceFromBottom < 120 || status === 'sending') {
+      node.scrollTo({ top: node.scrollHeight, behavior: status === 'sending' ? 'auto' : 'smooth' });
+    }
+  }, [messages, status, dashboardCharts.length]);
+
+  const hasEmptyState = messages.length === 0 && status !== 'sending';
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
-      {messages.length === 0 && !isStreaming && (
-        <div className="flex flex-col items-center justify-center h-full text-center px-4">
-          <img src="/sherlock-icon.svg" alt="Sherlock" className="h-12 w-12 opacity-30 dark:invert mb-3" />
-          <p className="text-sm text-[var(--text-muted)] max-w-[280px] leading-relaxed">
-            Ask me to discover data, analyze trends, visualize results, or build report templates.
-          </p>
-        </div>
-      )}
+    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex flex-col gap-5">
+        {hasEmptyState ? (
+          <div className="flex min-h-[260px] flex-col items-center justify-center px-6 text-center">
+            <img src="/sherlock-icon.svg" alt="Sherlock" className="mb-4 h-12 w-12 opacity-40 dark:invert" />
+            <p className="max-w-[320px] text-sm leading-relaxed text-[var(--text-muted)]">
+              Ask Sherlock to inspect schema, run queries, build charts, or compose a reusable analytics blueprint.
+            </p>
+          </div>
+        ) : null}
 
-      {messages.map((msg) => (
-        <MessageItem
-          key={msg.id}
-          msg={msg}
-          initials={initials}
-          appId={appId}
-          onRetry={handleRetry}
-          onSaveComposedReport={handleSaveReport}
-        />
-      ))}
+        {messages.map((message) => (
+          message.role === 'user' ? (
+            <UserMessage key={message.id} message={message} initials={initials} />
+          ) : (
+            <AssistantMessage
+              key={message.id}
+              message={message}
+              appId={appId}
+              initials={initials}
+              sessionId={sessionId}
+              onRetry={onRetry}
+            />
+          )
+        ))}
 
-      {isStreaming && <StreamingMessage initials={initials} />}
-      {isStreaming && <StreamingScrollTracker scrollRef={scrollRef} />}
+        {dashboardCharts.length >= 2 ? (
+          <div className="ml-10">
+            <DashboardBar
+              appId={appId}
+              sessionId={sessionId}
+              charts={dashboardCharts}
+              defaultTitle={defaultDashboardTitle}
+              onSaved={(toast) => {
+                const targetMessage = [...messages].reverse().find((message) => message.role === 'assistant' && message.parts.some(isChartPart));
+                if (targetMessage) {
+                  appendMessagePart(targetMessage.id, toast);
+                }
+              }}
+            />
+          </div>
+        ) : null}
+
+        {status === 'sending' ? <StreamingAssistantMessage initials={initials} appId={appId} sessionId={sessionId} /> : null}
+      </div>
     </div>
   );
 }

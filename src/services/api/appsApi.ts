@@ -101,6 +101,10 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     typeof config.reviews === 'object' && config.reviews !== null
       ? (config.reviews as Record<string, unknown>)
       : {};
+  const rawChat =
+    typeof config.chat === 'object' && config.chat !== null
+      ? (config.chat as Record<string, unknown>)
+      : {};
 
   return {
     ...config,
@@ -200,6 +204,25 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
         ) as string | null | undefined
           ?? APP_CONFIG_FALLBACKS[appId].analytics.assets.glossaryKey,
       },
+    },
+    chat: {
+      ...APP_CONFIG_FALLBACKS[appId].chat,
+      ...(rawChat as Partial<AppConfig['chat']>),
+      promptTemplates:
+        (rawChat.promptTemplates as AppConfig['chat']['promptTemplates'] | undefined)
+        ?? (rawChat.prompt_templates as AppConfig['chat']['promptTemplates'] | undefined)
+        ?? APP_CONFIG_FALLBACKS[appId].chat.promptTemplates,
+      capabilities:
+        (rawChat.capabilities as string[] | undefined)
+        ?? APP_CONFIG_FALLBACKS[appId].chat.capabilities,
+      dataSurfaces:
+        (rawChat.dataSurfaces as AppConfig['chat']['dataSurfaces'] | undefined)
+        ?? (rawChat.data_surfaces as AppConfig['chat']['dataSurfaces'] | undefined)
+        ?? APP_CONFIG_FALLBACKS[appId].chat.dataSurfaces,
+      entityResolvers:
+        (rawChat.entityResolvers as AppConfig['chat']['entityResolvers'] | undefined)
+        ?? (rawChat.entity_resolvers as AppConfig['chat']['entityResolvers'] | undefined)
+        ?? APP_CONFIG_FALLBACKS[appId].chat.entityResolvers,
     },
   };
 }

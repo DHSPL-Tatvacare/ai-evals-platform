@@ -4,10 +4,6 @@ import {
   PanelLeftClose,
   PanelLeft,
   Settings,
-  LayoutDashboard,
-  FileText,
-  ListChecks,
-  ScrollText,
   BookOpen,
   MessageSquare,
   FileSpreadsheet,
@@ -37,7 +33,9 @@ import { cn } from "@/utils";
 import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from "@/utils/permissions";
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
+import type { AppId } from '@/types';
 import { evaluateActionAvailability } from "@/utils/actionAvailability";
+import { getNavItems } from "@/config/sidebarNav";
 import { AppSwitcher } from "./AppSwitcher";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
@@ -232,81 +230,14 @@ export function Sidebar({ onNewEval }: SidebarProps) {
           ))}
 
           <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
-          {isInsideSales ? (
-            <>
-              <CollapsedNavLink
-                to={routes.insideSales.listing}
-                icon={LayoutDashboard}
-                title="Listing"
-              />
-              <CollapsedNavLink
-                to={routes.insideSales.evaluators}
-                icon={FileText}
-                title="Evaluators"
-              />
-              <CollapsedNavLink
-                to={routes.insideSales.runs}
-                icon={ListChecks}
-                title="Runs"
-              />
-              <CollapsedNavLink
-                to={routes.insideSales.dashboard}
-                icon={LayoutDashboard}
-                title="Dashboard"
-              />
-              <CollapsedNavLink
-                to={routes.insideSales.logs}
-                icon={ScrollText}
-                title="Logs"
-              />
-            </>
-          ) : isKairaBot ? (
-            <>
-              <CollapsedNavLink
-                to={routes.kaira.dashboard}
-                icon={LayoutDashboard}
-                title="Dashboard"
-              />
-              <CollapsedNavLink
-                to={routes.kaira.evaluators}
-                icon={FileText}
-                title="Evaluators"
-              />
-              <CollapsedNavLink
-                to={routes.kaira.runs}
-                icon={ListChecks}
-                title="Runs"
-              />
-              <CollapsedNavLink
-                to={routes.kaira.logs}
-                icon={ScrollText}
-                title="Logs"
-              />
-            </>
-          ) : (
-            <>
-              <CollapsedNavLink
-                to={routes.voiceRx.dashboard}
-                icon={LayoutDashboard}
-                title="Dashboard"
-              />
-              <CollapsedNavLink
-                to={routes.voiceRx.evaluators}
-                icon={FileText}
-                title="Evaluators"
-              />
-              <CollapsedNavLink
-                to={routes.voiceRx.runs}
-                icon={ListChecks}
-                title="Runs"
-              />
-              <CollapsedNavLink
-                to={routes.voiceRx.logs}
-                icon={ScrollText}
-                title="Logs"
-              />
-            </>
-          )}
+          {getNavItems(appId as AppId).map((item) => (
+            <CollapsedNavLink
+              key={item.to}
+              to={item.to}
+              icon={item.icon}
+              title={item.label}
+            />
+          ))}
         </div>
         <div className="border-t border-[var(--border-subtle)] p-2 space-y-1">
           <Link

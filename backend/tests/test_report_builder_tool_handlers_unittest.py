@@ -10,10 +10,12 @@ import pytest
 
 from app.services.report_builder.tool_handlers import (
     handle_analyze,
+    handle_data_check,
+    handle_data_query,
     handle_get_surface_records,
     handle_query_eval_runs,
-    handle_render_chart,
     handle_resolve_entity,
+    handle_save_template,
 )
 
 
@@ -93,8 +95,72 @@ async def test_handle_analyze_forwards_followup_context_from_session():
     kwargs = analyze_mock.await_args.kwargs
     assert kwargs['question'] == 'Which thread had the most rule violations in the latest run?'
     assert kwargs['question_context'] is not None
-    assert 'test 1' in kwargs['question_context']
-    assert 'thrd-50adbf9f-cc1b-4919-ad31-513deaee6d31' in kwargs['question_context']
+    assert kwargs['question_context']['prior_analysis']['preview_rows'][0]['run_name'] == 'test 1'
+    assert kwargs['question_context']['resolved_entities']['thread_id']['matches'][0]['value'] == 'thrd-50adbf9f-cc1b-4919-ad31-513deaee6d31'
+
+
+@pytest.mark.asyncio
+async def test_handle_data_query_carries_active_filters_and_schema_subset():
+    db = AsyncMock()
+    auth = SimpleNamespace()
+    session = {
+        'scratchpad': {
+            'active_filters': {'eval_type': 'custom'},
+            'discovered_schema': {
+                'tables_inspected': ['eval_runs'],
+                'columns_by_table': {'eval_runs': [{'column_name': 'created_at', 'parsed_comment': {'role': 'temporal'}}]},
+                'relations_found': [],
+                'json_structures': {},
+            },
+            'last_analysis': {
+                'question': 'show runs',
+                'columns': ['created_at', 'total_runs'],
+                'preview_rows': [{'created_at': '2026-04-01', 'total_runs': 4}],
+                'sql_used': 'select created_at, total_runs from eval_runs',
+            },
+            'analysis_history': [],
+            'resolved_entities': {},
+        },
+    }
+
+    with patch(
+        'app.services.chat_engine.sql_agent.data_query',
+        new=AsyncMock(return_value={'status': 'ok'}),
+    ) as data_query_mock:
+        await handle_data_query(
+            question='now show weekly runs',
+            db=db,
+            auth=auth,
+            app_id='kaira-bot',
+            provider='openai',
+            session=session,
+        )
+
+    context = data_query_mock.await_args.kwargs['context']
+    assert context['active_filters'] == {'eval_type': 'custom'}
+    assert context['discovered_schema']['tables_inspected'] == ['eval_runs']
+
+
+@pytest.mark.asyncio
+async def test_handle_data_check_forwards_table_and_filters():
+    db = AsyncMock()
+    auth = SimpleNamespace()
+
+    with patch(
+        'app.services.chat_engine.sql_agent.data_check',
+        new=AsyncMock(return_value={'status': 'ok', 'row_count': 4}),
+    ) as data_check_mock:
+        result = await handle_data_check(
+            table='eval_runs',
+            filters={'eval_type': 'custom'},
+            db=db,
+            auth=auth,
+            app_id='kaira-bot',
+        )
+
+    assert result['row_count'] == 4
+    assert data_check_mock.await_args.kwargs['table'] == 'eval_runs'
+    assert data_check_mock.await_args.kwargs['filters'] == {'eval_type': 'custom'}
 
 
 @pytest.mark.asyncio
@@ -165,322 +231,25 @@ async def test_handle_get_surface_records_reuses_resolved_entity_from_scratchpad
 
 
 @pytest.mark.asyncio
-async def test_handle_render_chart_validates_latest_analysis_columns():
-    payload = await handle_render_chart(
-        chart_type='pie',
-        title='Top Violated Rules',
-        x_key='rule_name',
-        y_key='violated_count',
-        session={
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['rule_name', 'violated_count'],
-                },
-            },
-        },
+async def test_handle_save_template_persists_source_session_lineage():
+    db = AsyncMock()
+    db.add = Mock()
+    auth = SimpleNamespace(
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
     )
 
-    assert payload['status'] == 'ok'
-    assert payload['chart_spec']['xKey'] == 'rule_name'
-
-    error_payload = await handle_render_chart(
-        chart_type='pie',
-        title='Top Violated Rules',
-        x_key='rule_name',
-        y_key='missing_metric',
-        session={
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['rule_name', 'violated_count'],
-                },
-            },
-        },
+    payload = await handle_save_template(
+        report_name='Weekly Review',
+        sections=[{'id': 'summary', 'type': 'summary_cards', 'title': 'Summary'}],
+        db=db,
+        auth=auth,
+        app_id='kaira-bot',
+        session={'chat_session_id': '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221'},
     )
 
-    assert error_payload['status'] == 'error'
-    assert 'missing_metric' in error_payload['error']
+    assert payload['status'] == 'saved'
+    saved_config = db.add.call_args.args[0]
+    assert str(getattr(saved_config, 'source_session_id', '')) == '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221'
 
 
-class RenderChartEligibilityTests(unittest.IsolatedAsyncioTestCase):
-
-    async def test_render_chart_accepts_eligible_type(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['stage', 'count'],
-                    'column_types': {'stage': 'ordered_categorical', 'count': 'numeric'},
-                    'eligible_charts': ['funnel', 'bar', 'pie'],
-                    'data': [{'stage': 'new', 'count': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='funnel',
-            title='Stage Progression',
-            x_key='stage',
-            y_key='count',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['chart_spec']['type'], 'funnel')
-
-    async def test_render_chart_rejects_ineligible_type(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['agent', 'revenue'],
-                    'column_types': {'agent': 'categorical', 'revenue': 'numeric'},
-                    'eligible_charts': ['bar', 'horizontal_bar', 'pie'],
-                    'data': [{'agent': 'A', 'revenue': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='funnel',
-            title='Test',
-            x_key='agent',
-            y_key='revenue',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'error')
-        self.assertIn('not eligible', result['error'])
-
-    async def test_render_chart_passes_through_alternatives(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['agent', 'revenue'],
-                    'column_types': {'agent': 'categorical', 'revenue': 'numeric'},
-                    'eligible_charts': ['bar', 'horizontal_bar', 'pie'],
-                    'data': [{'agent': 'A', 'revenue': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Revenue',
-            x_key='agent',
-            y_key='revenue',
-            alternatives=['horizontal_bar', 'pie'],
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['chart_spec']['alternatives'], ['horizontal_bar', 'pie'])
-
-    async def test_render_chart_fallback_to_registry_when_no_eligible(self):
-        """Backward compat: if scratchpad has no eligible_charts, accept any registry type."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['agent', 'revenue'],
-                    'data': [{'agent': 'A', 'revenue': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Revenue',
-            x_key='agent',
-            y_key='revenue',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-
-    async def test_render_chart_series_field_for_composed(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['month', 'revenue', 'cost'],
-                    'column_types': {'month': 'temporal', 'revenue': 'numeric', 'cost': 'numeric'},
-                    'eligible_charts': ['composed', 'line', 'stacked_area'],
-                    'data': [{'month': '2026-01', 'revenue': 100, 'cost': 50}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='composed',
-            title='Revenue vs Cost',
-            x_key='month',
-            series=[
-                {'data_key': 'revenue', 'type': 'bar'},
-                {'data_key': 'cost', 'type': 'line'},
-            ],
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(len(result['chart_spec']['series']), 2)
-
-    async def test_render_chart_rejects_unknown_type_in_registry_fallback(self):
-        """When no eligible_charts, unknown types rejected against registry."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['a', 'b'],
-                    'data': [{'a': 1, 'b': 2}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='nonexistent_chart',
-            title='Test',
-            x_key='a',
-            y_key='b',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'error')
-        self.assertIn('Unknown chart type', result['error'])
-
-    async def test_render_chart_missing_analysis_returns_error(self):
-        session = {'scratchpad': {}}
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'error')
-        self.assertIn('No analysis result', result['error'])
-
-    async def test_render_chart_validates_series_data_keys(self):
-        """series[].data_key must exist in analysis columns."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['month', 'revenue'],
-                    'eligible_charts': ['composed'],
-                    'data': [{'month': '2026-01', 'revenue': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='composed',
-            title='Test',
-            x_key='month',
-            series=[
-                {'data_key': 'revenue', 'type': 'bar'},
-                {'data_key': 'nonexistent', 'type': 'line'},
-            ],
-            session=session,
-        )
-        self.assertEqual(result['status'], 'error')
-        self.assertIn('nonexistent', str(result['error']))
-
-    async def test_render_chart_alternatives_capped_at_three(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['x', 'y'],
-                    'eligible_charts': ['bar', 'pie', 'line', 'area', 'scatter'],
-                    'data': [{'x': 'a', 'y': 1}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            y_key='y',
-            alternatives=['pie', 'line', 'area', 'scatter'],
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(len(result['chart_spec']['alternatives']), 3)
-
-    async def test_render_chart_none_session(self):
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            session=None,
-        )
-        self.assertEqual(result['status'], 'error')
-
-    async def test_render_chart_series_with_non_dict_items(self):
-        """series array with non-dict items should not crash."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['month', 'revenue'],
-                    'eligible_charts': ['composed'],
-                    'data': [{'month': '2026-01', 'revenue': 100}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='composed',
-            title='Test',
-            x_key='month',
-            series=[
-                {'data_key': 'revenue', 'type': 'bar'},
-                'not-a-dict',
-                None,
-            ],
-            session=session,
-        )
-        # Should succeed — non-dicts filtered out
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(len(result['chart_spec']['series']), 1)
-
-    async def test_render_chart_empty_eligible_list_falls_back_to_registry(self):
-        """Empty eligible_charts list (not missing, but []) should fall back to registry."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['x', 'y'],
-                    'eligible_charts': [],
-                    'data': [{'x': 'a', 'y': 1}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            y_key='y',
-            session=session,
-        )
-        # Empty list is falsy, so falls back to registry check
-        self.assertEqual(result['status'], 'ok')
-
-    async def test_render_chart_alternatives_filters_invalid_types(self):
-        """alternatives with unknown chart types are silently filtered."""
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['x', 'y'],
-                    'eligible_charts': ['bar', 'pie'],
-                    'data': [{'x': 'a', 'y': 1}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            y_key='y',
-            alternatives=['pie', 'not_a_real_chart', 'also_fake'],
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['chart_spec']['alternatives'], ['pie'])
-
-    async def test_render_chart_legend_position_passed_through(self):
-        session = {
-            'scratchpad': {
-                'last_analysis': {
-                    'columns': ['x', 'y'],
-                    'eligible_charts': ['bar'],
-                    'data': [{'x': 'a', 'y': 1}],
-                },
-            },
-        }
-        result = await handle_render_chart(
-            chart_type='bar',
-            title='Test',
-            x_key='x',
-            y_key='y',
-            legend_position='right',
-            session=session,
-        )
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['chart_spec']['legendPosition'], 'right')

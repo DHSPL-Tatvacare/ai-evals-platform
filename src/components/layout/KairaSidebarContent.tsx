@@ -5,13 +5,14 @@
 
 import { useState, useCallback } from "react";
 import { useNavigate, NavLink } from "react-router-dom";
-import { Search, LayoutDashboard, FileText, ListChecks, ScrollText, ChartArea } from "lucide-react";
+import { Search } from "lucide-react";
 import { Input } from "@/components/ui";
 import { ChatSessionList } from "@/features/kaira/components/ChatSessionList";
 import { useKairaChat } from "@/hooks";
 import { useDebounce } from "@/hooks";
 import { cn } from "@/utils";
 import { routes } from "@/config/routes";
+import { getNavItems } from "@/config/sidebarNav";
 
 interface KairaSidebarContentProps {
   searchPlaceholder: string;
@@ -61,19 +62,9 @@ export function KairaSidebarContent({
     <>
       {/* Eval nav links */}
       <nav className="px-2 pt-2 pb-1 space-y-0.5">
-        <KairaNavLink
-          to={routes.kaira.dashboard}
-          icon={LayoutDashboard}
-          label="Dashboard"
-        />
-        <KairaNavLink
-          to={routes.kaira.evaluators}
-          icon={FileText}
-          label="Evaluators"
-        />
-        <KairaNavLink to={routes.kaira.runs} icon={ListChecks} label="Runs" />
-        <KairaNavLink to={routes.kaira.logs} icon={ScrollText} label="Logs" />
-        <KairaNavLink to={routes.kaira.analytics} icon={ChartArea} label="Analytics" />
+        {getNavItems('kaira-bot').map((item) => (
+          <KairaNavLink key={item.to} to={item.to} icon={item.icon} label={item.label} />
+        ))}
       </nav>
 
       <div className="border-t border-[var(--border-subtle)] mx-3" />

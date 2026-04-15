@@ -62,6 +62,7 @@ tables:
       result_score: { type: float, nullable: true, description: "Numeric score if applicable" }
       result_verdict: { type: text, nullable: true }
       success: { type: boolean, nullable: true, description: "Did this evaluation pass?" }
+      result_detail: { type: jsonb, nullable: true, description: "Structured evaluation payload for the row" }
       context: { type: jsonb, description: "App-specific metadata, e.g. context->>'agent' for call quality" }
       created_at: { type: timestamptz }
     context_keys:
@@ -121,6 +122,10 @@ tables:
       app_column: app_id
 
 dimensions:
+  - name: run_id
+    table: analytics_run_facts
+    expression: "run_id::text"
+    description: "Canonical evaluation run identifier"
   - name: run_name
     table: analytics_run_facts
     expression: "context->>'run_name'"
@@ -129,6 +134,10 @@ dimensions:
     table: analytics_run_facts
     expression: "eval_type"
     description: "Type of run or evaluation"
+  - name: run_status
+    table: analytics_run_facts
+    expression: "status"
+    description: "Lifecycle status of the evaluation run"
   - name: evaluator_type
     table: analytics_eval_facts
     expression: "evaluator_type"
@@ -141,6 +150,14 @@ dimensions:
     table: analytics_eval_facts
     expression: "result_status"
     description: "Primary status or verdict"
+  - name: item_id
+    table: analytics_eval_facts
+    expression: "item_id"
+    description: "Canonical evaluated item identifier"
+  - name: item_type
+    table: analytics_eval_facts
+    expression: "item_type"
+    description: "Kind of evaluated item"
   - name: rule
     table: analytics_criterion_facts
     expression: "criterion_label"

@@ -1926,6 +1926,95 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 # APPS + ROLES SEEDING
 # ═══════════════════════════════════════════════════════════════════════════════
 
+COMMON_SHERLOCK_CAPABILITIES = ["catalog", "discovery", "analytics", "evidence", "report_builder"]
+
+COMMON_SHERLOCK_ENTITY_TYPES = [
+    {
+        "name": "eval_type",
+        "description": "Type of evaluation run or batch.",
+        "examples": ["batch_thread", "call_quality", "batch_adversarial"],
+    },
+    {
+        "name": "run_reference",
+        "description": "Reference to a run by exact ID, short ID, recency, or name.",
+        "examples": ["last run", "ca540908", "nightly batch"],
+    },
+    {
+        "name": "evaluator",
+        "description": "Evaluator or checker name used in analytics.",
+        "examples": ["correctness", "efficiency", "safety"],
+    },
+    {
+        "name": "rule",
+        "description": "Rule, criterion, or compliance check name.",
+        "examples": ["greeting rule", "medication check"],
+    },
+    {
+        "name": "time_range",
+        "description": "Time period or recency filter.",
+        "examples": ["last week", "past month", "March"],
+    },
+    {
+        "name": "metric",
+        "description": "Measured quantity or KPI.",
+        "examples": ["pass rate", "block rate", "accuracy"],
+    },
+    {
+        "name": "status",
+        "description": "Run or evaluation status/verdict.",
+        "examples": ["failed", "passing", "critical"],
+    },
+]
+
+COMMON_RUN_SURFACE = {
+    "key": "runs",
+    "description": "Raw evaluation run records with status, timing, and run metadata.",
+    "source": "eval_runs",
+    "entityFieldMap": {
+        "run_id": "run_id",
+        "run_name": "run_name",
+    },
+    "fields": [
+        "run_id",
+        "run_name",
+        "eval_type",
+        "status",
+        "created_at",
+        "error_message",
+    ],
+    "defaultLimit": 10,
+}
+
+COMMON_RUN_RESOLVERS = [
+    {
+        "key": "run-id",
+        "entityType": "run_id",
+        "description": "Resolve full run IDs or short run ID prefixes.",
+        "source": "eval_runs",
+        "field": "run_id",
+        "match": "prefix",
+        "limit": 10,
+    },
+    {
+        "key": "run-name",
+        "entityType": "run_name",
+        "description": "Resolve run names from the analytics model.",
+        "source": "semantic_dimension",
+        "dimension": "run_name",
+        "match": "contains",
+        "limit": 10,
+    },
+    {
+        "key": "item-id",
+        "entityType": "item_id",
+        "description": "Resolve analytics item identifiers when the app exposes them.",
+        "source": "semantic_dimension",
+        "dimension": "item_id",
+        "match": "prefix",
+        "limit": 10,
+    },
+]
+
 APP_SEEDS = [
     {
         "slug": "voice-rx",
@@ -2047,6 +2136,51 @@ APP_SEEDS = [
                 "assets": {
                     "glossaryKey": "voice-rx-report-glossary",
                 },
+            },
+            "chat": {
+                "enabled": True,
+                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
+                "entityTypes": [
+                    *COMMON_SHERLOCK_ENTITY_TYPES,
+                    {
+                        "name": "segment",
+                        "description": "Transcript segment or slice reference.",
+                        "examples": ["segment 14", "the first segment"],
+                    },
+                    {
+                        "name": "speaker",
+                        "description": "Speaker label within a transcript segment.",
+                        "examples": ["doctor", "patient"],
+                    },
+                ],
+                "promptTemplates": [
+                    {"label": "Analyze latest run", "prompt": "Analyze the most recent evaluation run and summarize key findings"},
+                    {"label": "Compare accuracy trends", "prompt": "Compare accuracy trends across recent evaluation runs"},
+                    {"label": "Find top issues", "prompt": "What are the most common discrepancy patterns found in evaluations?"},
+                ],
+                "dataSurfaces": [
+                    COMMON_RUN_SURFACE,
+                    {
+                        "key": "logs",
+                        "description": "Provider/API logs captured while a run was executing.",
+                        "source": "api_logs",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "provider",
+                            "model",
+                            "method",
+                            "prompt",
+                            "response",
+                            "error",
+                            "created_at",
+                        ],
+                        "defaultLimit": 10,
+                    },
+                ],
+                "entityResolvers": COMMON_RUN_RESOLVERS,
             },
         },
     },
@@ -2179,6 +2313,110 @@ APP_SEEDS = [
                     "glossaryKey": "report-glossary",
                 },
             },
+            "chat": {
+                "enabled": True,
+                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
+                "entityTypes": [
+                    *COMMON_SHERLOCK_ENTITY_TYPES,
+                    {
+                        "name": "intent",
+                        "description": "Detected intent or task category in the bot conversation.",
+                        "examples": ["FoodAgent", "Greeting", "General"],
+                    },
+                    {
+                        "name": "route",
+                        "description": "Routing or agent path chosen for the conversation.",
+                        "examples": ["FoodAgent", "FoodInsightAgent"],
+                    },
+                    {
+                        "name": "thread",
+                        "description": "Chat thread or conversation reference.",
+                        "examples": ["thread xyz", "the failing thread"],
+                    },
+                ],
+                "promptTemplates": [
+                    {"label": "Summarize evaluations", "prompt": "Summarize the latest evaluation results and highlight any failures"},
+                    {"label": "Build a report", "prompt": "Build a detailed report from the most recent evaluation run"},
+                    {"label": "Check rule violations", "prompt": "Which rules were most frequently violated across recent evaluations?"},
+                ],
+                "dataSurfaces": [
+                    COMMON_RUN_SURFACE,
+                    {
+                        "key": "logs",
+                        "description": "Provider/API logs captured for thread and adversarial evaluations.",
+                        "source": "api_logs",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                            "thread_id": "thread_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "thread_id",
+                            "provider",
+                            "model",
+                            "method",
+                            "prompt",
+                            "response",
+                            "error",
+                            "created_at",
+                        ],
+                        "defaultLimit": 12,
+                    },
+                    {
+                        "key": "thread_evaluations",
+                        "description": "Thread-level evaluation artifacts, verdicts, and per-thread result payloads.",
+                        "source": "thread_evaluations",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                            "thread_id": "thread_id",
+                            "item_id": "thread_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "thread_id",
+                            "worst_correctness",
+                            "efficiency_verdict",
+                            "intent_accuracy",
+                            "success_status",
+                            "result",
+                            "created_at",
+                        ],
+                        "defaultLimit": 10,
+                    },
+                    {
+                        "key": "adversarial_evaluations",
+                        "description": "Adversarial case verdicts and nested evidence, including cancelled or partial runs.",
+                        "source": "adversarial_evaluations",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "difficulty",
+                            "verdict",
+                            "goal_achieved",
+                            "goal_flow",
+                            "active_traits",
+                            "total_turns",
+                            "result",
+                            "created_at",
+                        ],
+                        "defaultLimit": 10,
+                    },
+                ],
+                "entityResolvers": [
+                    *COMMON_RUN_RESOLVERS,
+                    {
+                        "key": "thread-id",
+                        "entityType": "thread_id",
+                        "description": "Resolve short or partial thread identifiers from raw logs.",
+                        "source": "api_logs",
+                        "field": "thread_id",
+                        "match": "prefix",
+                        "limit": 10,
+                    },
+                ],
+            },
         },
     },
     {
@@ -2305,6 +2543,90 @@ APP_SEEDS = [
                     "narrativeTemplateKey": "inside-sales-report-narrative-template",
                     "glossaryKey": "inside-sales-report-glossary",
                 },
+            },
+            "chat": {
+                "enabled": True,
+                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
+                "entityTypes": [
+                    *COMMON_SHERLOCK_ENTITY_TYPES,
+                    {
+                        "name": "agent",
+                        "description": "Sales agent or rep associated with the interaction.",
+                        "examples": ["Priya", "Mr. Khan"],
+                    },
+                    {
+                        "name": "thread",
+                        "description": "Call or thread identifier.",
+                        "examples": ["call 1042", "thread xyz"],
+                    },
+                    {
+                        "name": "direction",
+                        "description": "Inbound or outbound call direction.",
+                        "examples": ["inbound", "outbound"],
+                    },
+                ],
+                "promptTemplates": [
+                    {"label": "Summarize recent calls", "prompt": "Summarize the most recent call evaluation results and highlight coaching opportunities"},
+                    {"label": "Compare agent trends", "prompt": "Compare recent call quality trends across agents"},
+                    {"label": "Find compliance gaps", "prompt": "Which compliance gaps show up most often across recent call evaluations?"},
+                ],
+                "dataSurfaces": [
+                    COMMON_RUN_SURFACE,
+                    {
+                        "key": "logs",
+                        "description": "Provider/API logs captured for call-evaluation runs.",
+                        "source": "api_logs",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                            "thread_id": "thread_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "thread_id",
+                            "provider",
+                            "model",
+                            "method",
+                            "prompt",
+                            "response",
+                            "error",
+                            "created_at",
+                        ],
+                        "defaultLimit": 12,
+                    },
+                    {
+                        "key": "thread_evaluations",
+                        "description": "Call-level evaluation artifacts and nested coaching evidence.",
+                        "source": "thread_evaluations",
+                        "entityFieldMap": {
+                            "run_id": "run_id",
+                            "thread_id": "thread_id",
+                            "item_id": "thread_id",
+                        },
+                        "fields": [
+                            "run_id",
+                            "thread_id",
+                            "worst_correctness",
+                            "efficiency_verdict",
+                            "intent_accuracy",
+                            "success_status",
+                            "result",
+                            "created_at",
+                        ],
+                        "defaultLimit": 10,
+                    },
+                ],
+                "entityResolvers": [
+                    *COMMON_RUN_RESOLVERS,
+                    {
+                        "key": "thread-id",
+                        "entityType": "thread_id",
+                        "description": "Resolve call/thread identifiers from evaluation rows or raw logs.",
+                        "source": "thread_evaluations",
+                        "field": "thread_id",
+                        "match": "prefix",
+                        "limit": 10,
+                    },
+                ],
             },
         },
     },

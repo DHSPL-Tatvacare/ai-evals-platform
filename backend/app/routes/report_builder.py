@@ -5,7 +5,7 @@ import json as json_mod
 
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.auth import AuthContext, get_auth_context
 from app.database import get_db
@@ -13,7 +13,11 @@ from app.services.report_builder.chat_handler import run_chat_turn, run_chat_tur
 from app.services.report_builder.schemas import (
     BuilderChatRequest,
     BuilderChatResponse,
+    BuilderMessageOut,
+    BuilderRuntimeEventOut,
+    BuilderRuntimeEventsResponse,
     BuilderSessionResponse,
+    BuilderSessionSnapshotResponse,
     ChartOut,
     ChartSpecOut,
     ComposedReportOut,
@@ -21,11 +25,15 @@ from app.services.report_builder.schemas import (
 )
 from app.services.report_builder.runtime_store import (
     SherlockRuntimeSession,
+    SherlockSessionNotFoundError,
     get_sherlock_runtime_session,
+    get_sherlock_runtime_session_snapshot,
+    list_sherlock_runtime_events,
     resolve_sherlock_runtime_session,
 )
 
-router = APIRouter(prefix="/api/report-builder", tags=["report-builder"])
+router = APIRouter(prefix='/api/report-builder', tags=['report-builder'])
+v2_router = APIRouter(prefix='/api/report-builder/v2', tags=['report-builder'])
 
 
 def _to_chat_handler_session(runtime_session: SherlockRuntimeSession) -> dict:
@@ -39,6 +47,19 @@ def _to_chat_handler_session(runtime_session: SherlockRuntimeSession) -> dict:
         'messages': list(runtime_session.message_state),
         'scratchpad': dict(runtime_session.scratchpad),
     }
+
+
+def _session_not_found_response() -> JSONResponse:
+    return JSONResponse(status_code=404, content={'error': 'session_not_found'})
+
+
+def _serialize_tool_call(tool_call: dict) -> ToolCallOut:
+    return ToolCallOut(
+        tool_call_id=tool_call.get('tool_call_id'),
+        name=tool_call['name'],
+        summary=tool_call['summary'],
+        detail=tool_call.get('detail'),
+    )
 
 
 @router.get('/sessions/{session_id}', response_model=BuilderSessionResponse)
@@ -64,7 +85,60 @@ async def get_builder_session(
     )
 
 
-@router.post("/chat", response_model=BuilderChatResponse)
+@v2_router.get('/sessions/{session_id}', response_model=BuilderSessionSnapshotResponse)
+async def get_builder_session_v2(
+    session_id: str,
+    app_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    db=Depends(get_db),
+):
+    try:
+        snapshot = await get_sherlock_runtime_session_snapshot(
+            session_id=session_id,
+            app_id=app_id,
+            auth=auth,
+            db=db,
+        )
+    except SherlockSessionNotFoundError:
+        return _session_not_found_response()
+
+    return BuilderSessionSnapshotResponse(
+        session_id=snapshot['session_id'],
+        provider=snapshot['provider'],
+        model=snapshot['model'],
+        last_event_seq=snapshot['last_event_seq'],
+        current_turn_status=snapshot['current_turn_status'],
+        messages=[BuilderMessageOut(**message) for message in snapshot['messages']],
+    )
+
+
+@v2_router.get('/sessions/{session_id}/events', response_model=BuilderRuntimeEventsResponse)
+async def get_builder_runtime_events_v2(
+    session_id: str,
+    app_id: str,
+    after_seq: int = 0,
+    auth: AuthContext = Depends(get_auth_context),
+    db=Depends(get_db),
+):
+    try:
+        payload = await list_sherlock_runtime_events(
+            session_id=session_id,
+            app_id=app_id,
+            auth=auth,
+            after_seq=after_seq,
+            db=db,
+        )
+    except SherlockSessionNotFoundError:
+        return _session_not_found_response()
+
+    return BuilderRuntimeEventsResponse(
+        session_id=payload['session_id'],
+        last_event_seq=payload['last_event_seq'],
+        events=[BuilderRuntimeEventOut(**event) for event in payload['events']],
+    )
+
+
+@router.post('/chat', response_model=BuilderChatResponse)
 async def chat(
     body: BuilderChatRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -77,7 +151,9 @@ async def chat(
         provider=body.provider,
         model=body.model,
         initial_user_message=body.message,
+        db=db,
     )
+    await db.commit()
     session = _to_chat_handler_session(runtime_session)
 
     result = await run_chat_turn(
@@ -90,38 +166,35 @@ async def chat(
     )
 
     composed = None
-    if result.get("composed_report"):
-        cr = result["composed_report"]
+    if result.get('composed_report'):
         composed = ComposedReportOut(
-            report_name=cr["report_name"],
-            sections=cr["sections"],
+            report_name=result['composed_report']['report_name'],
+            sections=result['composed_report']['sections'],
         )
 
     chart_out = None
-    if result.get("chart"):
-        c = result["chart"]
+    if result.get('chart'):
         chart_out = ChartOut(
-            spec=ChartSpecOut(**c["spec"]),
-            data=c["data"],
-            sql_query=c["sql_query"],
-            source_question=c["source_question"],
+            spec=ChartSpecOut(**result['chart']['spec']),
+            data=result['chart']['data'],
+            sql_query=result['chart']['sql_query'],
+            source_question=result['chart']['source_question'],
         )
 
     return BuilderChatResponse(
         session_id=runtime_session.chat_session_id,
         provider=runtime_session.provider,
         model=runtime_session.model,
-        content=result.get("content", ""),
-        tool_calls=[
-            ToolCallOut(name=tc["name"], summary=tc["summary"], detail=tc.get("detail"))
-            for tc in result.get("tool_calls", [])
-        ],
+        content=result.get('content', ''),
+        terminal_status=result.get('terminal_status'),
+        tool_calls=[_serialize_tool_call(tool_call) for tool_call in result.get('tool_calls', [])],
         composed_report=composed,
         chart=chart_out,
+        warnings=result.get('warnings', []),
     )
 
 
-@router.post("/chat/stream")
+@router.post('/chat/stream')
 async def chat_stream(
     body: BuilderChatRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -135,17 +208,19 @@ async def chat_stream(
         provider=body.provider,
         model=body.model,
         initial_user_message=body.message,
+        db=db,
     )
+    await db.commit()
     session = _to_chat_handler_session(runtime_session)
 
     async def event_generator():
-        # First event: session ID
         yield (
             'event: session\n'
             f"data: {json_mod.dumps(jsonable_encoder({'sessionId': runtime_session.chat_session_id, 'provider': runtime_session.provider, 'model': runtime_session.model}))}\n\n"
         )
         async for event in run_chat_turn_streaming(
-            session, body.message,
+            session,
+            body.message,
             provider=runtime_session.provider,
             model=runtime_session.model,
             db=db,
@@ -153,4 +228,63 @@ async def chat_stream(
         ):
             yield f"event: {event['event']}\ndata: {json_mod.dumps(jsonable_encoder(event['data']))}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type='text/event-stream')
+
+
+@v2_router.post('/chat/stream')
+async def chat_stream_v2(
+    body: BuilderChatRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db=Depends(get_db),
+):
+    """Dedicated v2 SSE runtime path with strict session semantics and replay support."""
+    try:
+        runtime_session = await resolve_sherlock_runtime_session(
+            session_id=body.session_id,
+            app_id=body.app_id,
+            auth=auth,
+            provider=body.provider,
+            model=body.model,
+            initial_user_message=body.message,
+            db=db,
+            strict_session_id=body.session_id is not None,
+        )
+    except SherlockSessionNotFoundError:
+        return _session_not_found_response()
+
+    await db.commit()
+    session = _to_chat_handler_session(runtime_session)
+
+    async def event_generator():
+        last_event_seq = max(runtime_session.next_event_seq - 1, 0)
+        session_payload = {
+            'sessionId': runtime_session.chat_session_id,
+            'provider': runtime_session.provider,
+            'model': runtime_session.model,
+            'lastEventSeq': last_event_seq,
+        }
+        yield f"event: session\ndata: {json_mod.dumps(jsonable_encoder(session_payload))}\n\n"
+
+        if body.session_id and body.resume_from_seq is not None:
+            replay = await list_sherlock_runtime_events(
+                session_id=runtime_session.chat_session_id,
+                app_id=body.app_id,
+                auth=auth,
+                after_seq=body.resume_from_seq,
+                db=db,
+            )
+            for event in replay['events']:
+                payload = {'seq': event['seq'], **event['payload']}
+                yield f"event: {event['event_type']}\ndata: {json_mod.dumps(jsonable_encoder(payload))}\n\n"
+
+        async for event in run_chat_turn_streaming(
+            session,
+            body.message,
+            provider=runtime_session.provider,
+            model=runtime_session.model,
+            db=db,
+            auth=auth,
+        ):
+            yield f"event: {event['event']}\ndata: {json_mod.dumps(jsonable_encoder(event['data']))}\n\n"
+
+    return StreamingResponse(event_generator(), media_type='text/event-stream')

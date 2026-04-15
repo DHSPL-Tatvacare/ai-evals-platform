@@ -287,6 +287,90 @@ async def handle_lookup(
         }
 
 
+async def handle_catalog_inspect(
+    *,
+    table: str,
+    column: str | None = None,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    from app.services.chat_engine.catalog_tools import catalog_inspect
+
+    return await catalog_inspect(
+        table=table,
+        column=column,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+    )
+
+
+async def handle_catalog_relations(
+    *,
+    table: str,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    from app.services.chat_engine.catalog_tools import catalog_relations
+
+    return await catalog_relations(
+        table=table,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+    )
+
+
+async def handle_catalog_values(
+    *,
+    table: str,
+    column: str,
+    search: str = '',
+    limit: int = 20,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    from app.services.chat_engine.catalog_tools import catalog_values
+
+    return await catalog_values(
+        table=table,
+        column=column,
+        search=search,
+        limit=limit,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+    )
+
+
+async def handle_catalog_sample(
+    *,
+    table: str,
+    column: str | None = None,
+    limit: int = 5,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    from app.services.chat_engine.catalog_tools import catalog_sample
+
+    return await catalog_sample(
+        table=table,
+        column=column,
+        limit=limit,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+    )
+
+
 async def handle_resolve_entity(
     *,
     entity_type: str,
@@ -420,6 +504,58 @@ async def handle_list_app_sections(
         return {"error": f"Database error: {str(e)}"}
 
 
+async def handle_blueprint_blocks(
+    *,
+    app_id: str | None = None,
+    block_type: str | None = None,
+    db: AsyncSession | None = None,
+    **_kwargs: Any,
+) -> dict:
+    """V2 blueprint block catalog. Consolidates list/detail/app-scoped block discovery."""
+    if block_type:
+        detail = get_section_detail(block_type)
+        if not detail:
+            return {'status': 'error', 'error': f'Unknown blueprint block: {block_type}'}
+
+        block = {
+            'type': detail['key'],
+            'label': detail['label'],
+            'description': detail['description'],
+            'use_when': detail['use_when'],
+            'known_variants': detail.get('known_variants', []),
+            'data_shape': detail.get('data_shape', {}),
+        }
+        if app_id and db is not None:
+            app_sections = await handle_list_app_sections(app_id=app_id, db=db, auth=None)
+            supported_types = {
+                section.get('type')
+                for section in app_sections.get('sections', [])
+                if isinstance(section, dict)
+            }
+            block['supported'] = block['type'] in supported_types
+        return {'status': 'ok', 'blocks': [block]}
+
+    blocks = [
+        {
+            'type': section['key'],
+            'label': section['label'],
+            'description': section['description'],
+            'use_when': section['use_when'],
+        }
+        for section in list_section_types()
+    ]
+    if app_id and db is not None:
+        app_sections = await handle_list_app_sections(app_id=app_id, db=db, auth=None)
+        supported_types = {
+            section.get('type')
+            for section in app_sections.get('sections', [])
+            if isinstance(section, dict)
+        }
+        for block in blocks:
+            block['supported'] = block['type'] in supported_types
+    return {'status': 'ok', 'blocks': blocks}
+
+
 async def handle_compose_report(
     *,
     report_name: str,
@@ -456,6 +592,23 @@ async def handle_compose_report(
     }
 
 
+async def handle_blueprint_compose(
+    *,
+    name: str,
+    sections: list[dict],
+    **kwargs: Any,
+) -> dict:
+    payload = await handle_compose_report(report_name=name, sections=sections, **kwargs)
+    if payload.get('status') != 'ok':
+        return payload
+    return {
+        'status': 'ok',
+        'name': payload['report_name'],
+        'sections': payload['sections'],
+        'preview_ready': payload.get('preview_ready', False),
+    }
+
+
 async def handle_save_template(
     *,
     report_name: str,
@@ -463,6 +616,7 @@ async def handle_save_template(
     db: AsyncSession,
     auth,
     app_id: str,
+    session: dict[str, Any] | None = None,
     **_kwargs: Any,
 ) -> dict:
     """Persist as a new ReportConfig row."""
@@ -494,6 +648,9 @@ async def handle_save_template(
             "documentVariant": "platform-default",
             "sectionIds": [s["id"] for s in sections],
         }
+        source_session_id = None
+        if isinstance(session, dict) and session.get('chat_session_id'):
+            source_session_id = uuid.UUID(str(session['chat_session_id']))
 
         config = ReportConfig(
             tenant_id=auth.tenant_id,
@@ -503,6 +660,7 @@ async def handle_save_template(
             scope="single_run",
             name=report_name,
             description=f"Custom report created via report builder",
+            source_session_id=source_session_id,
             presentation_config=presentation_config,
             narrative_config={"enabled": False},
             export_config=export_config,
@@ -518,6 +676,62 @@ async def handle_save_template(
         }
     except Exception as e:
         return {"error": f"Database error: {str(e)}"}
+
+
+async def handle_blueprint_save(
+    *,
+    name: str,
+    sections: list[dict],
+    **kwargs: Any,
+) -> dict:
+    payload = await handle_save_template(report_name=name, sections=sections, **kwargs)
+    if payload.get('status') != 'saved':
+        return payload
+    return {
+        'status': 'saved',
+        'blueprint_id': payload['report_id'],
+        'name': payload['report_name'],
+        'block_count': payload['section_count'],
+    }
+
+
+async def handle_blueprint_list(
+    *,
+    app_id: str | None = None,
+    db: AsyncSession,
+    auth,
+    **_kwargs: Any,
+) -> dict:
+    from sqlalchemy import desc, select
+
+    from app.models.report_config import ReportConfig
+    from app.services.access_control import readable_scope_clause
+
+    query = (
+        select(ReportConfig)
+        .where(
+            ReportConfig.scope == 'single_run',
+            ReportConfig.status == 'active',
+            readable_scope_clause(ReportConfig, auth),
+        )
+        .order_by(desc(ReportConfig.updated_at), desc(ReportConfig.created_at))
+    )
+    if app_id:
+        query = query.where(ReportConfig.app_id == app_id)
+
+    rows = (await db.execute(query)).scalars().all()
+    return {
+        'status': 'ok',
+        'blueprints': [
+            {
+                'id': row.report_id,
+                'name': row.name,
+                'block_count': len((row.presentation_config or {}).get('sections', [])),
+                'created_at': row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
+    }
 
 
 async def handle_query_eval_runs(
@@ -1159,6 +1373,54 @@ async def handle_get_cross_run_rule_compliance(
         return {"error": f"Database error: {str(e)}"}
 
 
+async def handle_data_check(
+    *,
+    table: str,
+    filters: dict[str, Any] | None = None,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    **_kwargs: Any,
+) -> dict:
+    """Lightweight existence and coverage check for concrete table filters."""
+    from app.services.chat_engine.sql_agent import data_check
+
+    return await data_check(
+        table=table,
+        filters=filters,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+    )
+
+
+async def handle_data_query(
+    *,
+    question: str,
+    db: AsyncSession,
+    auth: Any,
+    app_id: str,
+    provider: str | None = None,
+    session: dict[str, Any] | None = None,
+    **_kwargs: Any,
+) -> dict:
+    """Sherlock v2 analytical query handler with scratchpad carry-forward."""
+    from app.services.chat_engine.sql_agent import data_query
+    from app.services.report_builder.scratchpad_state import build_data_query_context
+
+    scratchpad = (session or {}).get('scratchpad', {}) if session else {}
+    context = build_data_query_context(question, scratchpad)
+
+    return await data_query(
+        question=question,
+        context=context or None,
+        db=db,
+        auth=auth,
+        app_id=app_id,
+        provider=provider,
+    )
+
+
 async def handle_analyze(
     *,
     question: str,
@@ -1169,31 +1431,16 @@ async def handle_analyze(
     session: dict[str, Any] | None = None,
     **_kwargs: Any,
 ) -> dict:
-    """Semantic SQL agent — generates and executes SQL from natural language."""
+    """Compatibility alias for legacy callers. Prefer handle_data_query."""
     from app.services.chat_engine.sql_agent import analyze
-    from app.services.report_builder.scratchpad_state import (
-        build_followup_analysis_context,
-        build_resolved_entity_context,
-        select_analysis_snapshot,
-        should_apply_analysis_context,
-    )
+    from app.services.report_builder.scratchpad_state import build_data_query_context
 
     scratchpad = (session or {}).get('scratchpad', {}) if session else {}
-    last_analysis = select_analysis_snapshot(question, scratchpad)
-    question_context = None
-    if should_apply_analysis_context(question, last_analysis):
-        question_context = build_followup_analysis_context(last_analysis)
-    resolved_entity_context = build_resolved_entity_context(scratchpad)
-    if resolved_entity_context:
-        question_context = (
-            f'{question_context}\n\n{resolved_entity_context}'
-            if question_context
-            else resolved_entity_context
-        )
+    context = build_data_query_context(question, scratchpad)
 
     return await analyze(
         question=question,
-        question_context=question_context,
+        question_context=context or None,
         db=db,
         auth=auth,
         app_id=app_id,
@@ -1201,115 +1448,25 @@ async def handle_analyze(
     )
 
 
-async def handle_render_chart(
-    *,
-    chart_type: str,
-    title: str,
-    x_key: str,
-    y_key: str | None = None,
-    series_keys: list[str] | None = None,
-    series: list[dict[str, Any]] | None = None,
-    x_label: str = "",
-    y_label: str = "",
-    legend_position: str | None = None,
-    alternatives: list[str] | None = None,
-    session: dict[str, Any] | None = None,
-    **_kwargs: Any,
-) -> dict:
-    """Package chart spec for frontend rendering. Data comes from prior analyze call."""
-    from app.services.chat_engine.chart_classifier import CHART_TYPE_REGISTRY
-
-    scratchpad = (session or {}).get('scratchpad', {}) if session else {}
-    last_analysis = scratchpad.get('last_analysis')
-    if not isinstance(last_analysis, dict):
-        return {
-            'status': 'error',
-            'error': 'No analysis result available to chart. Run analyze first.',
-        }
-
-    # Validate chart type against eligible set or registry fallback
-    eligible = last_analysis.get('eligible_charts')
-    if isinstance(eligible, list) and eligible:
-        if chart_type not in eligible:
-            return {
-                'status': 'error',
-                'error': f'Chart type "{chart_type}" is not eligible for this data. Eligible types: {eligible}',
-            }
-    elif chart_type not in CHART_TYPE_REGISTRY:
-        return {
-            'status': 'error',
-            'error': f'Unknown chart type "{chart_type}". Available: {list(CHART_TYPE_REGISTRY.keys())}',
-        }
-
-    # Validate column references
-    available_columns = [
-        str(column)
-        for column in last_analysis.get('columns', [])
-        if column
-    ]
-    requested_columns = [x_key]
-    if y_key:
-        requested_columns.append(y_key)
-    requested_columns.extend(series_keys or [])
-    if series:
-        requested_columns.extend(s.get('data_key', '') for s in series if isinstance(s, dict))
-    missing_columns = [
-        column
-        for column in requested_columns
-        if column and column not in available_columns
-    ]
-    if missing_columns:
-        return {
-            'status': 'error',
-            'error': f'Chart columns not present in the latest analysis result: {missing_columns}',
-            'available_columns': available_columns,
-        }
-
-    # Validate alternatives against registry
-    validated_alternatives: list[str] = []
-    if alternatives:
-        validated_alternatives = [alt for alt in alternatives if alt in CHART_TYPE_REGISTRY][:3]
-
-    chart_spec: dict[str, Any] = {
-        "type": chart_type,
-        "title": title,
-        "xKey": x_key,
-        "yKey": y_key,
-        "seriesKeys": series_keys or [],
-        "xLabel": x_label,
-        "yLabel": y_label,
-    }
-    if series:
-        chart_spec["series"] = [
-            {"dataKey": s["data_key"], "type": s["type"], **({"stackId": s["stack_id"]} if s.get("stack_id") else {})}
-            for s in series
-            if isinstance(s, dict) and s.get("data_key") and s.get("type")
-        ]
-    if legend_position:
-        chart_spec["legendPosition"] = legend_position
-    if validated_alternatives:
-        chart_spec["alternatives"] = validated_alternatives
-
-    return {
-        "status": "ok",
-        "chart_spec": chart_spec,
-    }
-
-
 TOOL_HANDLER_MAP = {
+    'catalog_inspect': handle_catalog_inspect,
+    'catalog_relations': handle_catalog_relations,
+    'catalog_values': handle_catalog_values,
+    'catalog_sample': handle_catalog_sample,
     'discover': handle_discover,
     'lookup': handle_lookup,
     'resolve_entity': handle_resolve_entity,
     'get_surface_records': handle_get_surface_records,
     # Report builder tools (action tools)
-    "list_section_types": handle_list_section_types,
-    "get_section_detail": handle_get_section_detail,
-    "list_app_sections": handle_list_app_sections,
-    "compose_report": handle_compose_report,
-    "save_template": handle_save_template,
-    # Semantic analytics (replaces all fixed data explorer tools)
+    'blueprint_blocks': handle_blueprint_blocks,
+    'blueprint_compose': handle_blueprint_compose,
+    'blueprint_save': handle_blueprint_save,
+    'blueprint_list': handle_blueprint_list,
+    # Sherlock v2 analytics
+    "data_check": handle_data_check,
+    "data_query": handle_data_query,
+    # Compatibility alias
     "analyze": handle_analyze,
-    "render_chart": handle_render_chart,
     # Deprecated but kept for backwards compat if referenced
     "query_eval_runs": handle_query_eval_runs,
     "get_run_summary": handle_get_run_summary,
@@ -1381,7 +1538,7 @@ async def _log_tool_call(
     """Fire-and-forget logging to agent_tool_logs.
 
     Uses its own session so the insert commits independently of the
-    caller's transaction (the chat handler only commits for save_template).
+    caller's transaction.
     """
     try:
         from app.database import async_session as _log_session

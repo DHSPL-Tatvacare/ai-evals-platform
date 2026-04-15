@@ -7,12 +7,13 @@ from app.auth import AuthContext
 from app.routes import report_builder
 from app.services.report_builder import chat_handler
 from app.services.report_builder.schemas import BuilderChatResponse
+from app.services.report_builder.scratchpad_state import default_scratchpad
 
 
 class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
     def test_build_tool_call_detail_includes_analyze_sql_and_execution_metadata(self):
         detail = chat_handler._build_tool_call_detail(
-            'analyze',
+            'data_query',
             json.dumps({
                 'status': 'ok',
                 'row_count': 7,
@@ -35,7 +36,7 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
 
     def test_build_tool_call_detail_includes_analyze_error_metadata(self):
         detail = chat_handler._build_tool_call_detail(
-            'analyze',
+            'data_query',
             json.dumps({
                 'status': 'error',
                 'error': 'database unavailable',
@@ -61,7 +62,7 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 return {'role': 'user', 'content': text}
 
         async def fake_run_tool_loop(**kwargs):
-            await kwargs['dispatch_fn']('analyze', {'question': 'show me rows'})
+            await kwargs['dispatch_fn']('data_query', {'question': 'show me rows'})
             return 'done', kwargs['messages']
 
         session = {
@@ -70,18 +71,21 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
             'tenant_id': 'tenant-1',
             'user_id': 'user-1',
             'messages': [],
-            'scratchpad': {
-                'findings': [],
-                'composed_report': None,
-                'errors': [],
-                'discovery': None,
-                'lookups': {},
-            },
+            'scratchpad': default_scratchpad(),
         }
         db = AsyncMock()
         auth = AsyncMock()
 
         with patch('app.services.report_builder.chat_handler._resolve_tools_for_app', new=AsyncMock(return_value=[])), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
+        ), patch(
             'app.services.report_builder.chat_handler.create_adapter',
             new=AsyncMock(return_value=FakeAdapter()),
         ), patch(
@@ -114,6 +118,9 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             'app.services.report_builder.chat_handler.append_runtime_event',
             new=AsyncMock(side_effect=range(1, 20)),
+        ), patch(
+            'app.services.report_builder.chat_handler.touch_sherlock_chat_session',
+            new=AsyncMock(),
         ):
             result = await chat_handler.run_chat_turn(
                 session,
@@ -124,7 +131,7 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 auth=auth,
             )
 
-        self.assertEqual(result['tool_calls'][0]['name'], 'analyze')
+        self.assertEqual(result['tool_calls'][0]['name'], 'data_query')
         self.assertEqual(result['tool_calls'][0]['summary'], '7 rows')
         detail = result['tool_calls'][0]['detail'].model_dump(by_alias=True)
         self.assertEqual(detail['sqlUsed'], 'select * from eval_runs')
@@ -140,7 +147,7 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 return {'role': 'user', 'content': text}
 
         async def fake_run_tool_loop(**kwargs):
-            await kwargs['dispatch_fn']('analyze', {'question': 'show me rows'})
+            await kwargs['dispatch_fn']('data_query', {'question': 'show me rows'})
             return 'done', kwargs['messages']
 
         session = {
@@ -149,18 +156,21 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
             'tenant_id': 'tenant-1',
             'user_id': 'user-1',
             'messages': [],
-            'scratchpad': {
-                'findings': [],
-                'composed_report': None,
-                'errors': [],
-                'discovery': None,
-                'lookups': {},
-            },
+            'scratchpad': default_scratchpad(),
         }
         db = AsyncMock()
         auth = AsyncMock()
 
         with patch('app.services.report_builder.chat_handler._resolve_tools_for_app', new=AsyncMock(return_value=[])), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
+        ), patch(
             'app.services.report_builder.chat_handler.create_adapter',
             new=AsyncMock(return_value=FakeAdapter()),
         ), patch(
@@ -193,6 +203,9 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             'app.services.report_builder.chat_handler.append_runtime_event',
             new=AsyncMock(side_effect=range(1, 20)),
+        ), patch(
+            'app.services.report_builder.chat_handler.touch_sherlock_chat_session',
+            new=AsyncMock(),
         ):
             events = []
             async for event in chat_handler.run_chat_turn_streaming(
@@ -205,8 +218,9 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
             ):
                 events.append(event)
 
-        self.assertEqual(events[0]['event'], 'tool_call_start')
-        tool_end_detail = events[1]['data']['detail']
+        self.assertEqual(events[0]['event'], 'entity_recognition')
+        self.assertEqual(events[1]['event'], 'tool_call_start')
+        tool_end_detail = events[2]['data']['detail']
         self.assertEqual(tool_end_detail['sqlUsed'], 'select * from eval_runs')
         self.assertEqual(tool_end_detail['rowCount'], 7)
         self.assertEqual(tool_end_detail['cacheHit'], False)
@@ -235,6 +249,10 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [],
                 'discovery': None,
                 'lookups': {},
+                'last_analysis': None,
+                'analysis_history': [],
+                'resolved_entities': {},
+                'last_evidence': None,
             },
             next_event_seq=1,
         )
@@ -262,10 +280,10 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 'content': 'done',
                 'tool_calls': [
                     {
-                        'name': 'analyze',
+                        'name': 'data_query',
                         'summary': '7 rows',
                         'detail': chat_handler._build_tool_call_detail(
-                            'analyze',
+                            'data_query',
                             json.dumps({
                                 'status': 'ok',
                                 'row_count': 7,
@@ -296,6 +314,103 @@ class ReportBuilderToolCallDetailTests(unittest.IsolatedAsyncioTestCase):
                 'error': None,
             },
         )
+
+    async def test_run_chat_turn_persists_chart_from_data_query_result(self):
+        class FakeAdapter:
+            @staticmethod
+            def build_user_message(text: str) -> dict[str, str]:
+                return {'role': 'user', 'content': text}
+
+        async def fake_run_tool_loop(**kwargs):
+            await kwargs['dispatch_fn']('data_query', {'question': 'Which rules were most frequently violated?'})
+            return 'done', kwargs['messages']
+
+        session = {
+            'chat_session_id': '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221',
+            'app_id': 'kaira-bot',
+            'tenant_id': 'tenant-1',
+            'user_id': 'user-1',
+            'messages': [],
+            'scratchpad': default_scratchpad(),
+        }
+
+        with patch('app.services.report_builder.chat_handler._resolve_tools_for_app', new=AsyncMock(return_value=[])), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_adapter',
+            new=AsyncMock(return_value=FakeAdapter()),
+        ), patch(
+            'app.services.report_builder.chat_handler.run_tool_loop',
+            new=AsyncMock(side_effect=fake_run_tool_loop),
+        ), patch(
+            'app.services.report_builder.chat_handler.dispatch_tool_call',
+            new=AsyncMock(return_value=json.dumps({
+                'status': 'ok',
+                'question': 'Which rules were most frequently violated?',
+                'row_count': 2,
+                'sql_used': 'select rule_name, violated_count from analytics_criterion_facts',
+                'columns': [
+                    {'name': 'rule_name', 'role': 'dimension'},
+                    {'name': 'violated_count', 'role': 'measure'},
+                ],
+                'chart_options': {
+                    'eligible_types': ['pie', 'bar'],
+                    'suggested': {
+                        'type': 'pie',
+                        'x': 'rule_name',
+                        'y': ['violated_count'],
+                        'series': None,
+                        'x_label': 'Rule name',
+                        'y_label': 'Violated count',
+                    },
+                },
+                'data': [
+                    {'rule_name': 'Meal Isolation Instructions', 'violated_count': 118},
+                    {'rule_name': 'Time Validation Instructions', 'violated_count': 52},
+                ],
+            })),
+        ), patch(
+            'app.services.report_builder.chat_handler.assemble_context',
+            new=AsyncMock(return_value='SYSTEM'),
+        ), patch(
+            'app.services.report_builder.chat_handler.record_user_message',
+            new=AsyncMock(return_value='user-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.create_assistant_message',
+            new=AsyncMock(return_value='assistant-message-1'),
+        ), patch(
+            'app.services.report_builder.chat_handler.finalize_assistant_message',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.save_runtime_state',
+            new=AsyncMock(),
+        ), patch(
+            'app.services.report_builder.chat_handler.append_runtime_event',
+            new=AsyncMock(side_effect=range(1, 20)),
+        ), patch(
+            'app.services.report_builder.chat_handler.touch_sherlock_chat_session',
+            new=AsyncMock(),
+        ):
+            result = await chat_handler.run_chat_turn(
+                session,
+                'Which rules were most frequently violated?',
+                provider='openai',
+                model='gpt-4o',
+                db=AsyncMock(),
+                auth=AsyncMock(),
+            )
+
+        self.assertIsNotNone(result['chart'])
+        self.assertEqual(result['chart']['spec']['type'], 'pie')
+        self.assertEqual(result['chart']['data'][0]['rule_name'], 'Meal Isolation Instructions')
+        self.assertEqual(result['chart']['source_question'], 'Which rules were most frequently violated?')
 
 
 if __name__ == '__main__':

@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.services.report_builder import chat_handler, session_store
+from app.services.report_builder.scratchpad_state import default_scratchpad
+from app.services.chat_engine.prompts import base as base_prompt
 from app.services.chat_engine.prompts import app_context as app_context_prompt
 from app.services.chat_engine.prompts import scratchpad as scratchpad_prompt
 from app.services.chat_engine.prompts import user_context as user_context_prompt
@@ -22,17 +24,7 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('scratchpad', session)
         self.assertIn('_app_context', session)
         self.assertIn('_user_context', session)
-        self.assertEqual(session['scratchpad'], {
-            'findings': [],
-            'composed_report': None,
-            'errors': [],
-            'discovery': None,
-            'lookups': {},
-            'resolved_entities': {},
-            'last_analysis': None,
-            'analysis_history': [],
-            'last_evidence': None,
-        })
+        self.assertEqual(session['scratchpad'], default_scratchpad())
         self.assertIsNone(session['_app_context'])
         self.assertIsNone(session['_user_context'])
 
@@ -40,34 +32,31 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scratchpad_prompt.render({}), '')
         self.assertEqual(
             scratchpad_prompt.render({
-                'scratchpad': {
-                    'findings': [],
-                    'composed_report': None,
-                    'errors': [],
-                    'discovery': None,
-                    'lookups': {},
-                    'resolved_entities': {},
-                    'last_analysis': None,
-                    'analysis_history': [],
-                    'last_evidence': None,
-                },
+                'scratchpad': default_scratchpad(),
             }),
             '',
         )
 
         rendered = scratchpad_prompt.render({
             'scratchpad': {
+                **default_scratchpad(),
                 'findings': ['pass rate by app (4 rows)'],
                 'composed_report': {'name': 'Weekly Review', 'sections': ['summary_cards', 'compliance_table']},
-                'errors': ['analyze: database unavailable'],
+                'errors': ['data_query: database unavailable'],
                 'resolved_entities': {'thread_id': {'matches': [{'value': 'thrd-123'}]}},
+                'active_filters': {'run_id': 'run-123'},
                 'last_analysis': {
                     'question': 'latest run summary',
                     'row_count': 1,
                     'columns': ['run_name', 'pass_rate'],
+                    'columns_metadata': [
+                        {'name': 'run_name', 'role': 'dimension'},
+                        {'name': 'pass_rate', 'role': 'measure'},
+                    ],
                     'preview_rows': [{'run_name': 'test 1', 'pass_rate': 60.0}],
+                    'chart_options': {'eligible_types': ['bar', 'pie'], 'suggested': {'type': 'bar'}},
+                    'warnings': [{'code': 'all_null_column'}],
                 },
-                'analysis_history': [],
                 'last_evidence': {'surface_key': 'logs', 'record_count': 4, 'entity_type': 'thread_id', 'entity_value': 'thrd-123'},
             },
         })
@@ -77,36 +66,37 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Current composed report: "Weekly Review" (summary_cards, compliance_table)', rendered)
         self.assertIn('Latest analysis context:', rendered)
         self.assertIn('- Columns: run_name, pass_rate', rendered)
+        self.assertIn('- Column roles: run_name (dimension), pass_rate (measure)', rendered)
         self.assertIn('- Row: run_name=test 1, pass_rate=60.0', rendered)
+        self.assertIn('Active filters to carry forward unless the user changes them:', rendered)
+        self.assertIn('- run_id: run-123', rendered)
+        self.assertIn('- Result warnings: all_null_column', rendered)
         self.assertIn('Resolved entities:', rendered)
         self.assertIn('- thread_id: thrd-123', rendered)
         self.assertIn('Latest evidence context:', rendered)
-        self.assertIn('- analyze: database unavailable', rendered)
+        self.assertIn('- data_query: database unavailable', rendered)
 
     def test_update_scratchpad_tracks_successes_and_errors(self):
         session = {
             '_user_context': 'STALE USER CONTEXT',
-            'scratchpad': {
-                'findings': [],
-                'composed_report': None,
-                'errors': [],
-                'discovery': None,
-                'lookups': {},
-                'resolved_entities': {},
-                'last_analysis': None,
-                'analysis_history': [],
-                'last_evidence': None,
-            },
+            'scratchpad': default_scratchpad(),
         }
 
         chat_handler._update_scratchpad(
             session,
-            'analyze',
+            'data_query',
             json.dumps({
                 'status': 'ok',
                 'question': 'pass rate by app',
                 'row_count': 4,
                 'sql_used': 'select * from analytics_run_facts',
+                'columns': [
+                    {'name': 'run_name', 'role': 'dimension'},
+                    {'name': 'pass_rate', 'role': 'measure'},
+                ],
+                'chart_options': {'eligible_types': ['bar', 'pie'], 'suggested': {'type': 'bar'}},
+                'warnings': [{'code': 'possible_missing_group_by'}],
+                'applied_filters': {'eval_type': 'custom'},
                 'data': [
                     {'run_name': 'test 1', 'pass_rate': 60.0},
                     {'run_name': 'test 2', 'pass_rate': 88.0},
@@ -151,6 +141,7 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot['row_count'], 4)
         self.assertEqual(snapshot['sql_used'], 'select * from analytics_run_facts')
         self.assertEqual(snapshot['columns'], ['run_name', 'pass_rate'])
+        self.assertEqual(snapshot['columns_metadata'][0]['role'], 'dimension')
         self.assertEqual(snapshot['data'], [
             {'run_name': 'test 1', 'pass_rate': 60.0},
             {'run_name': 'test 2', 'pass_rate': 88.0},
@@ -160,6 +151,9 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
             {'run_name': 'test 2', 'pass_rate': 88.0},
         ])
         self.assertEqual(snapshot['focus'], {'run_name': 'test 1', 'pass_rate': 60.0})
+        self.assertEqual(snapshot['applied_filters'], {'eval_type': 'custom'})
+        self.assertEqual(snapshot['warnings'], [{'code': 'possible_missing_group_by'}])
+        self.assertEqual(session['scratchpad']['active_filters'], {'eval_type': 'custom'})
         # Classifier fields are present
         self.assertIn('column_types', snapshot)
         self.assertIn('eligible_charts', snapshot)
@@ -179,19 +173,7 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(session['_user_context'])
 
     def test_update_scratchpad_caches_discovery_and_lookup_results(self):
-        session = {
-            'scratchpad': {
-                'findings': [],
-                'composed_report': None,
-                'errors': [],
-                'discovery': None,
-                'lookups': {},
-                'resolved_entities': {},
-                'last_analysis': None,
-                'analysis_history': [],
-                'last_evidence': None,
-            },
-        }
+        session = {'scratchpad': default_scratchpad()}
 
         chat_handler._update_scratchpad(
             session,
@@ -224,17 +206,7 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
             'app_id': 'kaira-bot',
             'tenant_id': 'tenant-1',
             'user_id': 'user-1',
-            'scratchpad': {
-                'findings': [],
-                'composed_report': None,
-                'errors': [],
-                'discovery': None,
-                'lookups': {},
-                'resolved_entities': {},
-                'last_analysis': None,
-                'analysis_history': [],
-                'last_evidence': None,
-            },
+            'scratchpad': default_scratchpad(),
         }
 
         with patch('app.services.chat_engine.prompts.base.render', return_value='BASE'), patch(
@@ -317,6 +289,15 @@ class ReportBuilderChatContextTests(unittest.IsolatedAsyncioTestCase):
         db.commit.side_effect = RuntimeError('commit failed')
 
         with patch('app.services.report_builder.chat_handler._resolve_tools_for_app', new=AsyncMock(return_value=[])), patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={'displayName': 'Kaira Bot'}),
+        ), patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ), patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=chat_handler.EntityRecognitionResult()),
+        ), patch(
             'app.services.report_builder.chat_handler.create_adapter',
             new=AsyncMock(return_value=FakeAdapter()),
         ), patch(
@@ -433,13 +414,37 @@ class ChartPipelineRegressionTests(unittest.TestCase):
         column_types = classify_columns(['result_status', 'count'], rows, dimensions=dimensions)
         self.assertEqual(column_types['result_status'], 'ordered_categorical')
 
-    def test_render_chart_tool_has_no_enum_on_chart_type(self):
-        """Regression: render_chart.chart_type must NOT have an enum constraint."""
+    def test_analytics_tools_expose_v2_contract(self):
+        """Sherlock v2 should expose data_check + data_query, not render_chart."""
         from app.services.report_builder.tool_definitions import ANALYTICS_TOOLS
 
-        render_chart_tool = next(t for t in ANALYTICS_TOOLS if t['name'] == 'render_chart')
-        chart_type_prop = render_chart_tool['inputSchema']['properties']['chart_type']
-        self.assertNotIn('enum', chart_type_prop, 'chart_type must not have enum — classifier handles eligibility')
+        names = [tool['name'] for tool in ANALYTICS_TOOLS]
+        self.assertIn('data_check', names)
+        self.assertIn('data_query', names)
+        self.assertNotIn('render_chart', names)
+
+    def test_report_builder_tools_expose_blueprint_contract(self):
+        from app.services.report_builder.tool_definitions import REPORT_BUILDER_TOOLS
+
+        names = [tool['name'] for tool in REPORT_BUILDER_TOOLS]
+        self.assertEqual(
+            names,
+            ['blueprint_blocks', 'blueprint_compose', 'blueprint_save', 'blueprint_list'],
+        )
+
+    def test_base_prompt_drops_deprecated_tool_names(self):
+        rendered = base_prompt.render()
+
+        for deprecated_name in (
+            'analyze(',
+            'render_chart',
+            'compose_report',
+            'save_template',
+            'list_section_types',
+            'list_app_sections',
+            'get_section_detail',
+        ):
+            self.assertNotIn(deprecated_name, rendered)
 
     def test_scratchpad_render_handles_non_list_eligible_charts(self):
         """If eligible_charts is somehow corrupted to non-list, render should not crash."""

@@ -46,6 +46,7 @@ class GeminiAdapter:
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ) -> Any:
         from google.genai import types as genai_types
 
@@ -63,6 +64,11 @@ class GeminiAdapter:
             temperature=temperature,
             system_instruction=system,
             tools=gemini_tools,
+            tool_config=genai_types.ToolConfig(
+                function_calling_config=genai_types.FunctionCallingConfig(
+                    mode='ANY' if tool_choice == 'any' else 'AUTO',
+                )
+            ) if gemini_tools else None,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
         )
 
@@ -76,6 +82,7 @@ class GeminiAdapter:
         tools: list[dict[str, Any]],
         system: str,
         temperature: float,
+        tool_choice: str = 'auto',
     ):
         from google.genai import types as genai_types
 
@@ -93,6 +100,11 @@ class GeminiAdapter:
             temperature=temperature,
             system_instruction=system,
             tools=gemini_tools,
+            tool_config=genai_types.ToolConfig(
+                function_calling_config=genai_types.FunctionCallingConfig(
+                    mode='ANY' if tool_choice == 'any' else 'AUTO',
+                )
+            ) if gemini_tools else None,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
         )
 
@@ -107,6 +119,7 @@ class GeminiAdapter:
         text_parts: list[str] = []
         tool_calls_by_index: dict[int, ToolCall] = {}
         tool_call_counter = 0
+        streamed_contents: list[Any] = []
         final_content: Any | None = None
         role = "model"
 
@@ -116,9 +129,18 @@ class GeminiAdapter:
             if candidate_content is not None and getattr(candidate_content, "role", None):
                 role = candidate_content.role
             if candidate_content is not None and getattr(candidate_content, "parts", None):
+                streamed_contents.append(candidate_content)
                 final_content = candidate_content
 
-            text_delta = getattr(chunk, "text", None)
+            current_text = self._extract_text_from_content(candidate_content)
+            accumulated_text = ''.join(text_parts)
+            text_delta = ''
+            if current_text:
+                text_delta = (
+                    current_text[len(accumulated_text):]
+                    if current_text.startswith(accumulated_text)
+                    else current_text
+                )
             if text_delta:
                 text_parts.append(text_delta)
                 yield {"type": "text_delta", "delta": text_delta}
@@ -137,13 +159,16 @@ class GeminiAdapter:
                 role=role,
                 parts=[genai_types.Part.from_text(text="".join(text_parts))] if text_parts else [],
             )
+        final_text = self._resolve_final_text(final_content, text_parts)
+        message_contents = streamed_contents or [final_content]
 
         yield {
             "type": "response",
             "response": {
+                "message_contents": message_contents,
                 "message_content": final_content,
                 "tool_calls": [tool_calls_by_index[index] for index in sorted(tool_calls_by_index)],
-                "text": "".join(text_parts),
+                "text": final_text,
             },
         }
 
@@ -192,6 +217,8 @@ class GeminiAdapter:
 
     def extract_response_message(self, response: Any) -> Any:
         """Return the raw Content object from the response. Preserves thought signatures."""
+        if isinstance(response, dict) and "message_contents" in response:
+            return response["message_contents"]
         if isinstance(response, dict) and "message_content" in response:
             return response["message_content"]
         return response.candidates[0].content
@@ -215,14 +242,27 @@ class GeminiAdapter:
         """Extract text content, skipping thinking parts."""
         if isinstance(response, dict) and "text" in response:
             return response["text"]
-        parts = response.candidates[0].content.parts
-        text_parts = []
+        return self._extract_text_from_content(response.candidates[0].content)
+
+    def _extract_text_from_content(self, content: Any) -> str:
+        if content is None:
+            return ""
+        parts = getattr(content, 'parts', None) or []
+        text_parts: list[str] = []
         for part in parts:
             if getattr(part, "thought", False):
                 continue
-            if part.text:
-                text_parts.append(part.text)
+            part_text = getattr(part, 'text', None)
+            if part_text:
+                text_parts.append(part_text)
         return "".join(text_parts) if text_parts else ""
+
+    def _resolve_final_text(self, final_content: Any, streamed_text_parts: list[str]) -> str:
+        final_content_text = self._extract_text_from_content(final_content)
+        streamed_text = ''.join(streamed_text_parts)
+        if len(streamed_text) > len(final_content_text):
+            return streamed_text
+        return final_content_text
 
     def serialize(self, messages: list[Any]) -> list[dict]:
         """Serialize Content objects to dicts via Pydantic model_dump."""

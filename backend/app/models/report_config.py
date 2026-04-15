@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Boolean, Enum as SAEnum, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,12 @@ class ReportConfig(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", server_default="active")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    source_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('chat_sessions.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     presentation_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     narrative_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     export_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")

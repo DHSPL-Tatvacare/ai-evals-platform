@@ -92,9 +92,37 @@ def test_app_config_schema_matches_phase_one_shape():
         },
         chat={
             "enabled": True,
-            "capabilities": ["discovery", "analytics", "report_builder"],
+            "capabilities": ["catalog", "discovery", "analytics", "evidence", "report_builder"],
             "promptTemplates": [
                 {"label": "Discover data", "prompt": "Discover what data is available"},
+            ],
+            "dataSurfaces": [
+                {
+                    "key": "logs",
+                    "description": "Raw logs",
+                    "source": "api_logs",
+                    "entityFieldMap": {"thread_id": "thread_id"},
+                    "fields": ["thread_id", "response"],
+                    "defaultLimit": 10,
+                },
+            ],
+            "entityResolvers": [
+                {
+                    "key": "thread-id",
+                    "entityType": "thread_id",
+                    "description": "Resolve thread ids",
+                    "source": "api_logs",
+                    "field": "thread_id",
+                    "match": "prefix",
+                    "limit": 10,
+                },
+            ],
+            "entityTypes": [
+                {
+                    "name": "thread_id",
+                    "description": "Conversation thread identifier",
+                    "examples": ["thread-123"],
+                },
             ],
         },
     )
@@ -111,7 +139,10 @@ def test_app_config_schema_matches_phase_one_shape():
     assert dumped["analytics"]["profile"] == "kaira_v1"
     assert dumped["analytics"]["capabilities"]["pdfExport"] is True
     assert dumped["analytics"]["semanticModel"]["dimensions"][0]["name"] == "agent"
-    assert dumped["chat"]["capabilities"] == ["discovery", "analytics", "report_builder"]
+    assert dumped["chat"]["capabilities"] == ["catalog", "discovery", "analytics", "evidence", "report_builder"]
+    assert dumped["chat"]["dataSurfaces"][0]["key"] == "logs"
+    assert dumped["chat"]["entityResolvers"][0]["entityType"] == "thread_id"
+    assert dumped["chat"]["entityTypes"][0]["name"] == "thread_id"
 
 
 def test_app_config_validates_all_required_keys():
@@ -177,6 +208,11 @@ def test_seeded_apps_expose_explicit_analytics_contracts():
     assert '"slug": "kaira-bot"' in text
     assert '"profile": "kaira_v1"' in text
     assert '"promptReferencesKey": "report-prompt-references"' in text
+    assert '"promptTemplates": [' in text
+    assert 'COMMON_SHERLOCK_CAPABILITIES = ["catalog", "discovery", "analytics", "evidence", "report_builder"]' in text
+    assert '"dataSurfaces": [' in text
+    assert '"entityResolvers": [' in text
+    assert 'COMMON_SHERLOCK_ENTITY_TYPES = [' in text
 
     assert '"slug": "inside-sales"' in text
     assert '"profile": "inside_sales_v1"' in text
