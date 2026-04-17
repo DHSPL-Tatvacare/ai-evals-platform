@@ -246,12 +246,24 @@
   /* Code/prose */
   --bg-code: var(--bg-tertiary);
   --bg-code-block: var(--bg-tertiary);
+  --border-code: var(--border-subtle);
 
   /* Chat-specific */
   --bg-chat-user: transparent;
   --bg-chat-assistant: var(--bg-secondary);
   --bg-chat-input: var(--bg-secondary);
   --border-chat-input: var(--border-default);
+
+  /* Empty-state tiles — used by chat-widget EvidenceBoard */
+  --bg-tile: var(--bg-elevated);
+  --bg-tile-hover: var(--surface-brand-subtle);
+  --border-tile: var(--border-subtle);
+  --border-tile-hover: color-mix(in srgb, var(--interactive-primary) 40%, var(--border-default));
+
+  /* Brand chip — small filled badges referring to tools, tags, etc. */
+  --chip-brand-bg: color-mix(in srgb, var(--interactive-primary) 10%, transparent);
+  --chip-brand-border: color-mix(in srgb, var(--interactive-primary) 22%, transparent);
+  --chip-brand-text: var(--interactive-primary);
 }
 
 [data-theme="dark"] {
@@ -492,6 +504,15 @@ html[data-theme-transitioning] * {
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+@keyframes chat-widget-sweep {
+  0%, 100% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(12deg);
   }
 }
 

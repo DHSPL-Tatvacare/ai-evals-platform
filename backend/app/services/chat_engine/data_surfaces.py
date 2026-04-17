@@ -316,7 +316,10 @@ def _source_field_expression(source: str, field: str):
     if source == 'eval_runs':
         mapping = {
             'run_id': cast(EvalRun.id, SAString),
-            'run_name': cast(EvalRun.batch_metadata['name'].astext, SAString),
+            # EvalRun.batch_metadata is a plain JSON column (not JSONB), so
+            # the ``.astext`` accessor is unavailable. ``json_extract_path_text``
+            # works on both JSON and JSONB and returns TEXT directly.
+            'run_name': cast(func.json_extract_path_text(EvalRun.batch_metadata, 'name'), SAString),
             'eval_type': EvalRun.eval_type,
             'status': EvalRun.status,
             'error_message': EvalRun.error_message,

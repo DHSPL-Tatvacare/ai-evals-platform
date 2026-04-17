@@ -57,3 +57,6 @@ service-account*.json
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
 !/docs/devops-handover.md
+
+# Local scratch / mocks (not for version control)
+custom-user-work/

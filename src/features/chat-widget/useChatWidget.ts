@@ -105,6 +105,7 @@ interface ChatWidgetStore {
   status: 'idle' | 'sending' | 'error';
   lastAppliedSeq: number;
   streamingParts: MessagePart[];
+  streamingStatus: string | null;
   sessions: WidgetSessionSummary[];
   sessionsLoaded: boolean;
   defaults: ChatDefaults | null;
@@ -133,6 +134,7 @@ type RuntimeApplier = {
   onChart: (event: ChartPart & { seq: number }) => void;
   onBlueprint: (event: BlueprintPart & { seq: number }) => void;
   onSaveResult: (event: { seq: number; variant: SaveToastPart['variant']; id: string; title: string; subtitle?: string; linkText?: string; linkHref: string }) => void;
+  onStatus: (event: { seq?: number; text: string }) => void;
   onDone: (event: { seq: number; terminalStatus?: TerminalStatus; content?: string; toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>; chart?: ChartPart | null; blueprint?: Omit<BlueprintPart, 'type'> | null }) => void;
   onError: (event: { seq?: number; terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>; message: string; content?: string }) => void;
 };
@@ -193,6 +195,7 @@ function createRuntimeApplier(
         },
       ],
       streamingParts: [],
+      streamingStatus: null,
       status: status === 'error' ? 'error' : 'idle',
     }));
   };
@@ -200,6 +203,7 @@ function createRuntimeApplier(
   return {
     onToolCallStart: (event) => {
       applySequencedEvent(event.seq, () => {
+        set({ streamingStatus: null });
         commitParts(upsertToolPart(pendingParts, {
           type: 'tool-call',
           toolCallId: event.toolCallId,
@@ -223,7 +227,15 @@ function createRuntimeApplier(
     },
     onContentDelta: (event) => {
       applySequencedEvent(event.seq, () => {
+        if (get().streamingStatus !== null) {
+          set({ streamingStatus: null });
+        }
         commitParts(appendTextPart(pendingParts, event.delta));
+      });
+    },
+    onStatus: (event) => {
+      applySequencedEvent(event.seq, () => {
+        set({ streamingStatus: event.text });
       });
     },
     onChart: (event) => {
@@ -338,6 +350,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
   status: 'idle',
   lastAppliedSeq: 0,
   streamingParts: [],
+  streamingStatus: null,
   sessions: [],
   sessionsLoaded: false,
   defaults: null,
@@ -399,6 +412,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         lastAppliedSeq: 0,
         status: isActive ? 'sending' : 'idle',
         streamingParts: [],
+      streamingStatus: null,
       });
       saveOpenState(true);
 
@@ -430,6 +444,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
               activeTurnId: null,
               messages: [],
               streamingParts: [],
+      streamingStatus: null,
               locked: false,
               status: 'idle',
               lastAppliedSeq: 0,
@@ -467,6 +482,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       locked: true,
       activeTurnId: turnId,
       streamingParts: [],
+      streamingStatus: null,
     }));
 
     await new Promise<void>((resolve, reject) => {
@@ -541,6 +557,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onChart: (event) => applier.onChart({ type: 'chart', ...event }),
           onBlueprint: applier.onBlueprint,
           onSaveResult: applier.onSaveResult,
+          onStatus: applier.onStatus,
           onDone: (event) => applier.onDone({
             ...event,
             chart: event.chart ? { type: 'chart', ...event.chart } : null,
@@ -592,6 +609,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         onChart: (event) => applier.onChart({ type: 'chart', ...event }),
         onBlueprint: applier.onBlueprint,
         onSaveResult: applier.onSaveResult,
+        onStatus: applier.onStatus,
         onDone: (event) => applier.onDone({
           ...event,
           chart: event.chart ? { type: 'chart', ...event.chart } : null,
@@ -626,6 +644,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       view: 'chat',
       sessionsLoaded: false,
       streamingParts: [],
+      streamingStatus: null,
     });
   },
 

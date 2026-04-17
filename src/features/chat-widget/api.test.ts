@@ -56,6 +56,7 @@ test('streamChatMessage parses v2 events including blueprint and save_result pay
   const onChart = vi.fn();
   const onBlueprint = vi.fn();
   const onSaveResult = vi.fn();
+  const onStatus = vi.fn();
   const onDone = vi.fn();
   const onError = vi.fn();
 
@@ -68,6 +69,7 @@ test('streamChatMessage parses v2 events including blueprint and save_result pay
     onChart,
     onBlueprint,
     onSaveResult,
+    onStatus,
     onDone,
     onError,
   });
@@ -104,6 +106,7 @@ test('streamChatMessage parses structured non-OK errors', async () => {
     onChart: vi.fn(),
     onBlueprint: vi.fn(),
     onSaveResult: vi.fn(),
+    onStatus: vi.fn(),
     onDone: vi.fn(),
     onError,
   });
@@ -140,6 +143,7 @@ test('streamChatMessage forwards resume requests without a message body', async 
       onChart: vi.fn(),
       onBlueprint: vi.fn(),
       onSaveResult: vi.fn(),
+      onStatus: vi.fn(),
       onDone: vi.fn(),
       onError: vi.fn(),
     },
@@ -180,6 +184,7 @@ test('streamChatMessage emits EOF fallback when no terminal event arrives', asyn
     onChart: vi.fn(),
     onBlueprint: vi.fn(),
     onSaveResult: vi.fn(),
+    onStatus: vi.fn(),
     onDone: vi.fn(),
     onError,
   });
@@ -215,6 +220,7 @@ test('streamChatMessage surfaces an error after too many malformed payloads', as
     onChart: vi.fn(),
     onBlueprint: vi.fn(),
     onSaveResult: vi.fn(),
+    onStatus: vi.fn(),
     onDone: vi.fn(),
     onError,
   });

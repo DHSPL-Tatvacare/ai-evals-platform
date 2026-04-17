@@ -19,7 +19,6 @@ import { findLastChartParts, isChartPart } from './chatWidgetHelpers';
 import { ChatMessages } from './ChatMessages';
 import { ChatInput } from './ChatInput';
 import { ChatHistory } from './ChatHistory';
-import { PromptChips } from './PromptChips';
 import { DashboardBar } from './components/DashboardBar';
 import type { ChatProvider, SaveToastPart } from './types';
 import type { AppChatConfig } from '@/types/app.types';
@@ -305,14 +304,9 @@ export function ChatWidget() {
             status={status}
             appId={currentApp}
             onRetry={handleRetry}
+            promptTemplates={chatConfig.promptTemplates}
+            onPromptSelect={(prompt) => openWithPrompt(prompt, currentApp)}
           />
-
-          {messages.length === 0 && (chatConfig.promptTemplates?.length ?? 0) > 0 && (
-            <PromptChips
-              templates={chatConfig.promptTemplates ?? []}
-              onSelect={(prompt) => openWithPrompt(prompt, currentApp)}
-            />
-          )}
 
           {dashboardCharts.length >= 2 && status !== 'sending' ? (
             <div className="px-3 py-2">

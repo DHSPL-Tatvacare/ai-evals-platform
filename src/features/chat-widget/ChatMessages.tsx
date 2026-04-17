@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertCircle, RotateCcw } from 'lucide-react';
+import { AlertCircle, ArrowDown, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/authStore';
@@ -15,17 +15,23 @@ import {
 } from './chatWidgetHelpers';
 import { BlueprintCard } from './components/BlueprintCard';
 import { ChatChartCard } from './components/ChatChartCard';
+import { EmptyState } from './components/EmptyState';
 import { SaveToast } from './components/SaveToast';
+import { ThinkingIndicator } from './components/ThinkingIndicator';
 import { ToolGroup } from './components/ToolGroup';
 import { ToolStack } from './components/ToolStack';
+import { phrasesForContext } from './thinkingPhrases';
 import type {
   MessagePart,
+  PromptTemplate,
   ToolCallPart,
   WidgetMessage,
 } from './types';
 
 const PROSE_CLASSES = cn(
   'prose prose-sm max-w-none text-[var(--text-primary)]',
+  // Collapse leading/trailing child margins so the message body doesn't float mid-bubble
+  '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
   // Paragraphs
   '[&_p]:mb-2 [&_p]:leading-relaxed [&_p:last-child]:mb-0',
   // Headings
@@ -35,17 +41,26 @@ const PROSE_CLASSES = cn(
   // Lists
   '[&_ul]:mb-2 [&_ul]:pl-4 [&_ol]:mb-2 [&_ol]:pl-4',
   '[&_li]:mb-1 [&_li]:leading-relaxed',
-  // Strong / code
+  // Strong
   '[&_strong]:text-[var(--text-primary)] [&_strong]:font-semibold',
-  '[&_code]:rounded [&_code]:bg-[var(--bg-primary)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs',
+  // Inline code — render as a proper chip. Kill prose plugin's backtick pseudo-elements.
+  '[&_code]:font-mono [&_code]:text-xs',
+  '[&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5',
+  '[&_code]:bg-[var(--bg-code)] [&_code]:border [&_code]:border-[var(--border-code)]',
+  '[&_code]:text-[var(--text-primary)]',
+  '[&_code:before]:content-none [&_code:after]:content-none',
+  // Fenced code blocks
+  '[&_pre]:my-3 [&_pre]:rounded-lg [&_pre]:bg-[var(--bg-code-block)] [&_pre]:p-3 [&_pre]:text-xs',
+  '[&_pre]:border [&_pre]:border-[var(--border-code)]',
+  '[&_pre_code]:bg-transparent [&_pre_code]:border-0 [&_pre_code]:p-0',
   // Tables — horizontally scrollable wrapper added via component override
-  '[&_table]:text-xs [&_table]:w-full [&_table]:border-collapse',
+  '[&_table]:my-3 [&_table]:text-xs [&_table]:w-full [&_table]:border-collapse',
   '[&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-medium [&_th]:whitespace-nowrap',
   '[&_th]:border-b [&_th]:border-[var(--border-default)] [&_th]:bg-[var(--bg-secondary)]',
   '[&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top',
   '[&_td]:border-b [&_td]:border-[var(--border-default)]',
   // Blockquote
-  '[&_blockquote]:border-l-2 [&_blockquote]:border-[var(--border-default)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--text-muted)]',
+  '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--border-default)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--text-muted)]',
 );
 
 function getUserInitials(displayName?: string): string {
@@ -111,7 +126,7 @@ function TextPartBlock({
           remarkPlugins={[remarkGfm]}
           components={{
             table: ({ children, ...props }) => (
-              <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+              <div className="my-3 overflow-x-auto rounded-lg border border-[var(--border-default)]">
                 <table {...props}>{children}</table>
               </div>
             ),
@@ -257,8 +272,17 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 }, (prevProps, nextProps) => prevProps.message === nextProps.message && prevProps.sessionId === nextProps.sessionId);
 
+function shouldShowInterPartThinking(parts: MessagePart[]): boolean {
+  if (parts.length === 0) {
+    return false;
+  }
+  const last = parts[parts.length - 1];
+  return isToolCallPart(last) && last.state !== 'executing';
+}
+
 function StreamingAssistantMessage({ initials, appId, sessionId }: { initials: string; appId: string; sessionId: string | null }) {
   const streamingParts = useChatWidgetStore((state) => state.streamingParts);
+  const streamingStatus = useChatWidgetStore((state) => state.streamingStatus);
   const appendMessagePart = useChatWidgetStore((state) => state.appendMessagePart);
   const updateMessagePart = useChatWidgetStore((state) => state.updateMessagePart);
 
@@ -266,7 +290,10 @@ function StreamingAssistantMessage({ initials, appId, sessionId }: { initials: s
     return (
       <div className="mr-auto flex w-full gap-2.5">
         <Avatar role="assistant" initials={initials} />
-        <div className="rounded-2xl bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--text-muted)]">Thinking…</div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Sherlock</div>
+          <ThinkingIndicator literalText={streamingStatus ?? undefined} />
+        </div>
       </div>
     );
   }
@@ -289,6 +316,16 @@ function StreamingAssistantMessage({ initials, appId, sessionId }: { initials: s
           appendMessagePart,
           updateMessagePart,
         )}
+        {shouldShowInterPartThinking(streamingParts) ? (() => {
+          const pool = phrasesForContext(streamingParts);
+          return (
+            <ThinkingIndicator
+              key={streamingStatus ?? pool[0]}
+              phrases={pool}
+              literalText={streamingStatus ?? undefined}
+            />
+          );
+        })() : null}
       </div>
     </div>
   );
@@ -299,38 +336,95 @@ interface ChatMessagesProps {
   status: 'idle' | 'sending' | 'error';
   appId: string;
   onRetry: () => void;
+  promptTemplates?: PromptTemplate[];
+  onPromptSelect?: (prompt: string) => void;
 }
 
-export function ChatMessages({ messages, status, appId, onRetry }: ChatMessagesProps) {
+export function ChatMessages({ messages, status, appId, onRetry, promptTemplates, onPromptSelect }: ChatMessagesProps) {
   const displayName = useAuthStore((state) => state.user?.displayName);
   const initials = getUserInitials(displayName);
   const sessionId = useChatWidgetStore((state) => state.sessionId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  // Mirror atBottom in a ref so the ResizeObserver callback reads the current value
+  // without re-binding on every change. State drives the jump-pill re-render.
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
 
+  const setBottom = useCallback((v: boolean) => {
+    atBottomRef.current = v;
+    setAtBottom((prev) => (prev === v ? prev : v));
+  }, []);
+
+  // Track follow-state via a bottom sentinel. IntersectionObserver fires on real
+  // layout transitions — robust to streaming races that plague scrollTop math.
+  // Small positive rootMargin gives a tolerance band so minor jitter doesn't flicker.
   useEffect(() => {
-    const node = scrollRef.current;
-    if (!node || typeof node.scrollTo !== 'function') {
-      return;
-    }
+    const scroller = scrollRef.current;
+    const sentinel = sentinelRef.current;
+    if (!scroller || !sentinel) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries[0]?.isIntersecting ?? false;
+        setBottom(visible);
+      },
+      { root: scroller, rootMargin: '0px 0px 24px 0px', threshold: 0 },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [setBottom]);
 
-    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
-    if (distanceFromBottom < 120 || status === 'sending') {
-      node.scrollTo({ top: node.scrollHeight, behavior: status === 'sending' ? 'auto' : 'smooth' });
+  // Auto-scroll whenever content grows, but only if the user is already at the bottom.
+  // ResizeObserver covers every content mutation: message added, tool chip, text delta, status swap.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content) return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
+
+  // On send, always snap to bottom and re-engage follow — the user clicked send, they want to see it.
+  // The scrollTop assignment triggers the IntersectionObserver to re-confirm atBottom=true.
+  useEffect(() => {
+    if (status !== 'sending') return;
+    const node = scrollRef.current;
+    if (!node) return;
+    atBottomRef.current = true;
+    node.scrollTop = node.scrollHeight;
+  }, [status]);
+
+  const scrollToBottom = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    atBottomRef.current = true;
+    // Instant during streaming to avoid fighting the ResizeObserver; smooth when idle.
+    if (status === 'sending') {
+      node.scrollTop = node.scrollHeight;
+    } else {
+      node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, status]);
+  }, [status]);
 
   const hasEmptyState = messages.length === 0 && status !== 'sending';
+  const showJumpPill = !atBottom && status === 'sending';
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
-      <div className="flex flex-col gap-4">
+    <div className="relative flex min-h-0 flex-1">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div ref={contentRef} className={cn('flex flex-col gap-4', hasEmptyState ? 'h-full' : 'px-3 py-3')}>
         {hasEmptyState ? (
-          <div className="flex min-h-[260px] flex-col items-center justify-center px-6 text-center">
-            <img src="/sherlock-icon.svg" alt="Sherlock" className="mb-4 h-12 w-12 opacity-40 dark:invert" />
-            <p className="max-w-[320px] text-sm leading-relaxed text-[var(--text-muted)]">
-              Ask Sherlock to inspect schema, run queries, build charts, or compose a reusable analytics blueprint.
-            </p>
-          </div>
+          <EmptyState
+            appId={appId}
+            templates={promptTemplates ?? []}
+            onSelect={(prompt) => onPromptSelect?.(prompt)}
+          />
         ) : null}
 
         {messages.map((message) => (
@@ -349,7 +443,28 @@ export function ChatMessages({ messages, status, appId, onRetry }: ChatMessagesP
         ))}
 
         {status === 'sending' ? <StreamingAssistantMessage initials={initials} appId={appId} sessionId={sessionId} /> : null}
+        <div ref={sentinelRef} aria-hidden="true" className="h-px w-full" />
+        </div>
       </div>
+
+      {showJumpPill ? (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label="Jump to latest message"
+          className={cn(
+            'absolute bottom-3 left-1/2 z-[var(--z-sticky)] flex -translate-x-1/2 items-center gap-1.5',
+            'rounded-full px-3 py-1.5 font-mono text-[11px] tracking-[0.04em]',
+            'border bg-[var(--bg-elevated)]/95 backdrop-blur-sm shadow-lg',
+            'border-[color-mix(in_srgb,var(--interactive-primary)_45%,transparent)]',
+            'text-[var(--text-brand)]',
+            'hover:bg-[var(--surface-brand-hover)] transition-colors',
+          )}
+        >
+          <ArrowDown className="h-3 w-3" strokeWidth={2.5} />
+          Jump to latest
+        </button>
+      ) : null}
     </div>
   );
 }

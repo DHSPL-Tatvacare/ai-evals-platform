@@ -553,10 +553,20 @@ def _catalog_scope_clauses(model: Any, *, auth: Any, app_id: str) -> tuple[Any, 
     )
 
 
+# Aliases the LLM tends to use when naming a raw-table column that doesn't
+# match the ORM attribute. e.g. Sherlock calls run_id on eval_runs, but the
+# primary key on EvalRun is ``id``. Keep this list minimal — prefer teaching
+# the semantic model over expanding this map.
+_COLUMN_ALIASES: dict[Any, dict[str, str]] = {
+    EvalRun: {'run_id': 'id'},
+}
+
+
 def _resolve_simple_column(model: Any, column: str):
     if not _SIMPLE_IDENTIFIER_PATTERN.match(column):
         return None
-    return getattr(model, column, None)
+    aliased = _COLUMN_ALIASES.get(model, {}).get(column, column)
+    return getattr(model, aliased, None)
 
 
 def _build_column_expression(model: Any, column: str):

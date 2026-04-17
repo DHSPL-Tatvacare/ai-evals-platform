@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from openai.types.responses import ResponseTextDeltaEvent
@@ -14,7 +16,6 @@ from app.services.chat_engine.openai_agents_adapter import (
 class SherlockContextTests(unittest.TestCase):
     def test_context_holds_platform_state_including_provider(self):
         ctx = SherlockContext(
-            db=MagicMock(),
             auth=MagicMock(),
             app_id='kaira-bot',
             provider='azure_openai',
@@ -25,8 +26,58 @@ class SherlockContextTests(unittest.TestCase):
 
         self.assertEqual(ctx.app_id, 'kaira-bot')
         self.assertEqual(ctx.provider, 'azure_openai')
-        self.assertIsNotNone(ctx.db)
         self.assertIsNotNone(ctx.auth)
+
+    def test_context_does_not_carry_db_session(self):
+        """Tool handlers open their own session inside the handler to avoid
+        concurrent-ops races (the Agents SDK runs tools in parallel)."""
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(SherlockContext)}
+        self.assertNotIn('db', field_names)
+
+
+class ParseToolArgsTests(unittest.TestCase):
+    """The Responses API sends ``"{}"`` for tools with all-optional params;
+    that must be a valid empty-args call, not a 'malformed' error."""
+
+    def test_empty_object_is_valid_empty_args(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertEqual(_parse_tool_args('{}'), {})
+
+    def test_empty_string_is_valid_empty_args(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertEqual(_parse_tool_args(''), {})
+
+    def test_whitespace_only_is_valid_empty_args(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertEqual(_parse_tool_args('   '), {})
+
+    def test_valid_dict_returned_intact(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertEqual(
+            _parse_tool_args('{"app_id":"voice-rx","limit":10}'),
+            {'app_id': 'voice-rx', 'limit': 10},
+        )
+
+    def test_json_null_is_malformed(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertIsNone(_parse_tool_args('null'))
+
+    def test_json_array_is_malformed(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertIsNone(_parse_tool_args('[1,2,3]'))
+
+    def test_parse_error_is_malformed(self):
+        from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
+
+        self.assertIsNone(_parse_tool_args('{not-json'))
 
 
 class BuildToolsTests(unittest.TestCase):
@@ -163,7 +214,6 @@ class StreamingBridgeTests(unittest.IsolatedAsyncioTestCase):
         from app.services.chat_engine.openai_agents_adapter import run_sherlock_sdk_turn
 
         ctx = SherlockContext(
-            db=MagicMock(),
             auth=MagicMock(),
             app_id='kaira-bot',
             provider='openai',
@@ -217,3 +267,115 @@ class StreamingBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(internal), 1)
         self.assertEqual(internal[0]['data']['last_response_id'], 'resp_abc123')
         self.assertEqual(internal[0]['data']['final_output'], 'Pass rate is 91%')
+
+
+class StatusLineTests(unittest.TestCase):
+    """B3: adapter emits a 'status' event after tool_call_end with a
+    friendly sentence that the UI renders verbatim as shimmer text."""
+
+    def test_status_line_known_tool_uses_friendly_noun(self):
+        from app.services.chat_engine.openai_agents_adapter import _status_line_after_tool
+
+        self.assertIn('query', _status_line_after_tool('data_query'))
+        self.assertIn('schema inspection', _status_line_after_tool('catalog_inspect'))
+        self.assertIn('entity resolution', _status_line_after_tool('resolve_entity'))
+
+    def test_status_line_unknown_tool_falls_back(self):
+        from app.services.chat_engine.openai_agents_adapter import _status_line_after_tool
+
+        line = _status_line_after_tool('mystery_tool')
+        self.assertTrue(line.startswith('Reasoning'))
+        self.assertTrue(line.endswith('…'))
+
+
+class StreamPacerTests(unittest.IsolatedAsyncioTestCase):
+    """Server-side pacer that evens out bursty LLM token streams.
+
+    Contract under test:
+      1. A single blob of text is split into multiple paced chunks.
+      2. Non-text events (tool_call_*/status/error) flush buffered text
+         before themselves — ordering is preserved.
+      3. finalize() drains the remainder immediately and stops the ticker.
+      4. Empty-delta calls are no-ops.
+    """
+
+    async def _drain(self, queue: asyncio.Queue) -> list[dict]:
+        out: list[dict] = []
+        while not queue.empty():
+            out.append(queue.get_nowait())
+        return out
+
+    async def test_text_is_split_into_paced_chunks(self):
+        from app.services.chat_engine.openai_agents_adapter import _StreamPacer
+
+        q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pacer = _StreamPacer(q)
+        pacer.start()
+        # Enough text that natural drain can't be a single chunk.
+        text = 'The quick brown fox jumps over the lazy dog. ' * 10
+        await pacer.enqueue_text(text)
+        # Let the ticker run for ~600ms — enough to fully drain at 25ms/tick.
+        await asyncio.sleep(0.6)
+        await pacer.finalize()
+
+        events = await self._drain(q)
+        self.assertTrue(all(e['event'] == 'content_delta' for e in events))
+        self.assertEqual(''.join(e['data']['delta'] for e in events), text)
+        self.assertGreaterEqual(len(events), 2, 'pacer should emit in multiple chunks')
+
+    async def test_non_text_event_flushes_buffered_text_first(self):
+        from app.services.chat_engine.openai_agents_adapter import _StreamPacer
+
+        q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pacer = _StreamPacer(q)
+        pacer.start()
+        # Queue text, then immediately emit a tool_call_start — it MUST
+        # arrive after every text chunk, not interleaved.
+        await pacer.enqueue_text('first half of a sentence ')
+        await pacer.enqueue_other({'event': 'tool_call_start', 'data': {'toolName': 'data_query'}})
+        await pacer.enqueue_text('second half of a sentence')
+        await pacer.finalize()
+
+        events = await self._drain(q)
+        tool_index = next(i for i, e in enumerate(events) if e['event'] == 'tool_call_start')
+        pre = ''.join(e['data']['delta'] for e in events[:tool_index] if e['event'] == 'content_delta')
+        post = ''.join(e['data']['delta'] for e in events[tool_index + 1:] if e['event'] == 'content_delta')
+        self.assertEqual(pre, 'first half of a sentence ')
+        self.assertEqual(post, 'second half of a sentence')
+
+    async def test_finalize_drains_remaining_and_stops_ticker(self):
+        from app.services.chat_engine.openai_agents_adapter import _StreamPacer
+
+        q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pacer = _StreamPacer(q)
+        pacer.start()
+        await pacer.enqueue_text('short burst')
+        # finalize BEFORE ticker would naturally drain — drain must happen anyway.
+        await pacer.finalize()
+
+        events = await self._drain(q)
+        self.assertEqual(''.join(e['data']['delta'] for e in events), 'short burst')
+        self.assertTrue(pacer._task is None or pacer._task.done())
+
+    async def test_empty_delta_is_noop(self):
+        from app.services.chat_engine.openai_agents_adapter import _StreamPacer
+
+        q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pacer = _StreamPacer(q)
+        pacer.start()
+        await pacer.enqueue_text('')
+        await pacer.finalize()
+        self.assertTrue(q.empty())
+
+    async def test_finalize_is_idempotent(self):
+        from app.services.chat_engine.openai_agents_adapter import _StreamPacer
+
+        q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        pacer = _StreamPacer(q)
+        pacer.start()
+        await pacer.enqueue_text('hello')
+        await pacer.finalize()
+        # Second finalize must not raise or re-emit.
+        await pacer.finalize()
+        events = await self._drain(q)
+        self.assertEqual(''.join(e['data']['delta'] for e in events), 'hello')

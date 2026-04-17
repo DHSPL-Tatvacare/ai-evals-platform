@@ -50,6 +50,11 @@ interface StreamDoneEvent {
   blueprint?: Omit<BlueprintPart, 'type'> | null;
 }
 
+interface StreamStatusEvent {
+  seq?: number;
+  text: string;
+}
+
 interface StreamErrorEvent {
   seq?: number;
   terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>;
@@ -117,6 +122,7 @@ export async function streamChatMessage(
     onChart: (event: ChartData & { seq: number }) => void;
     onBlueprint: (event: BlueprintPart & { seq: number }) => void;
     onSaveResult: (event: SaveResultEvent) => void;
+    onStatus: (event: StreamStatusEvent) => void;
     onDone: (data: StreamDoneEvent) => void;
     onError: (error: StreamErrorEvent) => void;
   },
@@ -232,6 +238,11 @@ export async function streamChatMessage(
               break;
             case 'chart':
               callbacks.onChart(data as unknown as ChartData & { seq: number });
+              break;
+            case 'status':
+              if (typeof data.text === 'string') {
+                callbacks.onStatus(data as unknown as StreamStatusEvent);
+              }
               break;
             case 'done':
               terminalReceived = true;

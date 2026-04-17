@@ -13,7 +13,6 @@ from app.services.chat_engine import (
 
 def test_chat_engine_exports_sdk_symbols():
     ctx = SherlockContext(
-        db=MagicMock(),
         auth=MagicMock(),
         app_id='kaira-bot',
         provider='openai',

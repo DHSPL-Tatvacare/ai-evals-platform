@@ -134,7 +134,7 @@ def _build_chart_payload(result: dict[str, Any] | None) -> dict[str, Any] | None
         'title': _chart_title_from_result(result),
         'xKey': x_key,
         'xLabel': str(suggested.get('x_label') or x_key),
-        'yLabel': str(suggested['y_label']) if suggested.get('y_label') else None,
+        'yLabel': str(suggested['y_label']) if suggested.get('y_label') else '',
         'legendPosition': 'right' if chart_type in {'pie', 'donut', 'radar', 'radial_bar'} else 'bottom',
     }
 
@@ -665,7 +665,6 @@ async def _execute_chat_turn(
             return None
 
         sherlock_ctx = SherlockContext(
-            db=db,
             auth=auth,
             app_id=working_session['app_id'],
             provider=provider,
@@ -702,6 +701,13 @@ async def _execute_chat_turn(
                     final_output = event['data'].get('final_output') or ''
                     if final_output:
                         text = final_output
+                    continue
+
+                # Ephemeral: forward status events to SSE but do NOT persist.
+                # Stale on reload; indicator falls back to phrase rotation.
+                if event['event'] == 'status':
+                    if emit is not None:
+                        await emit({'event': 'status', 'data': event['data']})
                     continue
 
                 if event['event'] == 'content_delta':

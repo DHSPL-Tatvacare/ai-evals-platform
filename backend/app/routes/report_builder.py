@@ -412,9 +412,10 @@ async def chat(
 
     composed = None
     if result.get('composed_report'):
+        cr = result['composed_report']
         composed = ComposedReportOut(
-            report_name=result['composed_report']['report_name'],
-            sections=result['composed_report']['sections'],
+            report_name=cr.get('report_name') or cr.get('name') or '',
+            sections=cr.get('sections', []),
         )
 
     chart_out = None
