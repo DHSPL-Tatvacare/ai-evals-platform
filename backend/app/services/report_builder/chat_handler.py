@@ -489,7 +489,7 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
     raw_config = result.scalar_one_or_none()
     app_config = AppConfig.model_validate(raw_config or {})
     capabilities = app_config.chat.capabilities or None
-    tools = resolve_tools(capabilities)
+    tools = resolve_tools(capabilities, app_id=app_id)
 
     # Inject allowed table names into every tool that has a "table" parameter.
     semantic_model = load_semantic_model(app_id, app_config=raw_config)

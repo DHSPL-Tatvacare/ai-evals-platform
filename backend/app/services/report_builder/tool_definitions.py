@@ -304,7 +304,7 @@ EVIDENCE_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "surface_key": {
                     "type": "string",
-                    "description": "Surface key from discover results.",
+                    "description": "Surface key from the app manifest. One of: {{surface_keys}}.",
                 },
                 "entity_type": {
                     "type": "string",
@@ -343,7 +343,7 @@ ANALYTICS_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "table": {
                     "type": "string",
-                    "description": "Canonical table name to check, such as eval_runs or thread_evaluations.",
+                    "description": "Canonical catalog-table name from the app manifest. One of: {{catalog_tables}}.",
                 },
                 "filters": {
                     "type": "object",
@@ -619,10 +619,18 @@ CAPABILITY_TOOLS: dict[str, list[dict[str, Any]]] = {
 DEFAULT_CAPABILITIES = ["catalog", "discovery", "analytics", "evidence", "report_builder"]
 
 
-def resolve_tools(capabilities: list[str] | None = None) -> list[dict[str, Any]]:
-    """
-    Resolve tool definitions for a set of capabilities.
-    If capabilities is None or empty, uses DEFAULT_CAPABILITIES.
+def resolve_tools(
+    capabilities: list[str] | None = None,
+    *,
+    app_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve tool definitions for a set of capabilities.
+
+    When ``app_id`` is given, every tool description is rendered through
+    ``fill_tool_description`` so that manifest tokens like ``{{catalog_tables}}``
+    and ``{{surface_keys}}`` become the real per-app vocabulary.
+    Without ``app_id`` the raw templated strings are returned (kept for the
+    module-level ``TOOLS`` export and for callers that haven't migrated yet).
     """
     caps = capabilities if capabilities else DEFAULT_CAPABILITIES
     tools: list[dict[str, Any]] = []
@@ -632,9 +640,12 @@ def resolve_tools(capabilities: list[str] | None = None) -> list[dict[str, Any]]
             if tool["name"] not in seen:
                 tools.append(tool)
                 seen.add(tool["name"])
+    if app_id is not None:
+        from app.services.chat_engine.tool_description_generator import fill_tool_description
+        tools = [fill_tool_description(t, app_id=app_id) for t in tools]
     return tools
 
 
-# Backwards compat — flat list of all tools + name set
+# Backwards compat — flat list of all tools + name set (raw, un-substituted)
 TOOLS = resolve_tools()
 TOOL_NAMES = {tool["name"] for tool in TOOLS}
