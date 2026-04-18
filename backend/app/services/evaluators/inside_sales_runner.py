@@ -25,7 +25,7 @@ from app.services.evaluators.llm_base import (
 )
 from app.services.evaluators.runner_utils import (
     save_api_log,
-    create_eval_run,
+    promote_eval_run_to_running,
     finalize_eval_run,
 )
 from app.services.evaluators.schema_generator import generate_json_schema
@@ -131,8 +131,10 @@ async def run_inside_sales_evaluation(
     run_name = params.get("run_name", "Inside Sales Eval")
     run_description = params.get("run_description", "")
 
-    # ── Create EvalRun immediately (visible in UI) ───────────────
-    eval_run_id = uuid.uuid4()
+    # Reuse the submit-time placeholder id when present so the queued row
+    # already visible in the Runs list gets promoted in place.
+    _placeholder_id = params.get("eval_run_id")
+    eval_run_id = uuid.UUID(_placeholder_id) if _placeholder_id else uuid.uuid4()
     initial_config_snapshot = build_inside_sales_run_config_snapshot(
         run_name=run_name,
         run_description=run_description,
@@ -142,7 +144,7 @@ async def run_inside_sales_evaluation(
         requested_evaluator_ids=[str(evaluator_id) for evaluator_id in evaluator_ids],
     )
 
-    await create_eval_run(
+    await promote_eval_run_to_running(
         id=eval_run_id,
         tenant_id=tenant_id,
         user_id=user_id,

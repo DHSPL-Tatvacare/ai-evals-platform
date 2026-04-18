@@ -74,23 +74,28 @@ class Settings(BaseSettings):
     AUTH_RATE_LIMIT: str = "10/minute"  # login, signup, refresh
 
     # Background job worker
-    JOB_MAX_CONCURRENT: int = 3
+    JOB_MAX_CONCURRENT: int = 12
     JOB_POLL_INTERVAL_SECONDS: float = 1.0
     JOB_HEARTBEAT_INTERVAL_SECONDS: float = 15.0
     JOB_LEASE_SECONDS: int = 60
-    JOB_STALE_TIMEOUT_MINUTES: int = 15
+    JOB_STALE_TIMEOUT_MINUTES: int = 30
     JOB_MAX_ATTEMPTS: int = 3
     JOB_RETRY_BASE_DELAY_SECONDS: int = 5
-    JOB_RETRY_MAX_DELAY_SECONDS: int = 60
-    JOB_TENANT_MAX_CONCURRENT: int = 2
-    JOB_APP_MAX_CONCURRENT: int = 2
-    JOB_USER_MAX_CONCURRENT: int = 2
+    JOB_RETRY_MAX_DELAY_SECONDS: int = 120
+    JOB_TENANT_MAX_CONCURRENT: int = 8
+    JOB_APP_MAX_CONCURRENT: int = 5
+    JOB_USER_MAX_CONCURRENT: int = 3
     JOB_INTERACTIVE_MAX_CONCURRENT: int = 0
     JOB_STANDARD_MAX_CONCURRENT: int = 0
-    JOB_BULK_MAX_CONCURRENT: int = 2
+    JOB_BULK_MAX_CONCURRENT: int = 4
+    JOB_ANALYTICS_MAX_CONCURRENT: int = 1
     JOB_CLAIM_WINDOW_MULTIPLIER: int = 10
     JOB_CLAIM_WINDOW_MAX: int = 100
     JOB_RUN_EMBEDDED_WORKER: bool = True
+
+    # Logging (used by app/logging_config.py)
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"  # "json" | "console"
 
     class Config:
         env_file = ".env.backend"

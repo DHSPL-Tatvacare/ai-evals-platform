@@ -260,7 +260,8 @@ This section is the complete reference for the current configuration surface. It
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql+asyncpg://evals_user:evals_pass@localhost:5432/ai_evals_platform` | Database connection string |
+| `DATABASE_URL` | `postgresql+asyncpg://evals_user:evals_pass@localhost:5432/ai_evals_platform` | Primary database connection string |
+| `ANALYTICS_DATABASE_URL` | empty | Optional separate analytics database. Falls back to `DATABASE_URL` when empty |
 | `FILE_STORAGE_TYPE` | `local` | `local` or `azure_blob` |
 | `FILE_STORAGE_PATH` | `./backend/uploads` | Local upload directory |
 | `API_PORT` | `8721` | Backend listen port |
@@ -332,23 +333,31 @@ This section is the complete reference for the current configuration surface. It
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `JOB_MAX_CONCURRENT` | `3` | Global worker concurrency ceiling |
+| `JOB_MAX_CONCURRENT` | `12` | Global worker concurrency ceiling |
 | `JOB_POLL_INTERVAL_SECONDS` | `1.0` | Poll interval for worker loop |
 | `JOB_HEARTBEAT_INTERVAL_SECONDS` | `15.0` | Lease heartbeat cadence |
 | `JOB_LEASE_SECONDS` | `60` | Lease duration |
-| `JOB_STALE_TIMEOUT_MINUTES` | `15` | Stale job recovery threshold |
+| `JOB_STALE_TIMEOUT_MINUTES` | `30` | Stale job recovery threshold |
 | `JOB_MAX_ATTEMPTS` | `3` | Default retry budget |
 | `JOB_RETRY_BASE_DELAY_SECONDS` | `5` | Backoff base delay |
-| `JOB_RETRY_MAX_DELAY_SECONDS` | `60` | Backoff cap |
-| `JOB_TENANT_MAX_CONCURRENT` | `2` | Per-tenant concurrency cap |
-| `JOB_APP_MAX_CONCURRENT` | `2` | Per-app concurrency cap |
-| `JOB_USER_MAX_CONCURRENT` | `2` | Per-user concurrency cap |
+| `JOB_RETRY_MAX_DELAY_SECONDS` | `120` | Backoff cap |
+| `JOB_TENANT_MAX_CONCURRENT` | `8` | Per-tenant concurrency cap |
+| `JOB_APP_MAX_CONCURRENT` | `5` | Per-app concurrency cap |
+| `JOB_USER_MAX_CONCURRENT` | `3` | Per-user concurrency cap |
 | `JOB_INTERACTIVE_MAX_CONCURRENT` | `0` | Interactive queue cap; `0` means inherit global cap |
 | `JOB_STANDARD_MAX_CONCURRENT` | `0` | Standard queue cap; `0` means inherit global cap |
-| `JOB_BULK_MAX_CONCURRENT` | `2` | Bulk queue cap |
+| `JOB_BULK_MAX_CONCURRENT` | `4` | Bulk queue cap |
+| `JOB_ANALYTICS_MAX_CONCURRENT` | `1` | Analytics queue cap (populate-analytics, sync-external-source) |
 | `JOB_CLAIM_WINDOW_MULTIPLIER` | `10` | Candidate claim window multiplier |
 | `JOB_CLAIM_WINDOW_MAX` | `100` | Candidate claim window cap |
 | `JOB_RUN_EMBEDDED_WORKER` | `true` | Run worker in-process when not using a dedicated worker service |
+
+### Logging
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LOG_LEVEL` | `INFO` | Log level used by `app/logging_config.py` |
+| `LOG_FORMAT` | `json` | `json` for structured logs or `console` for human-readable output |
 
 ### Production-only or deploy-time variables
 

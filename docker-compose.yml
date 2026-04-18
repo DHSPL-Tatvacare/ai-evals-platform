@@ -9,6 +9,12 @@ x-backend-common: &backend-common
     API_PORT: 8721
     CORS_ORIGINS: http://localhost:5173
     JOB_RUN_EMBEDDED_WORKER: "false"
+    PYTHONUNBUFFERED: "1"
+    # Silence "OPENAI_API_KEY is not set, skipping trace export" from the
+    # OpenAI Agents SDK tracing subsystem. Read once in provider.py; the
+    # SDK reports no-op tracing when disabled. Remove if/when we want to
+    # export traces to OpenAI.
+    OPENAI_AGENTS_DISABLE_TRACING: "1"
   env_file:
     - .env.backend
   volumes:

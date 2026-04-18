@@ -53,7 +53,7 @@ from app.services.evaluators.response_parser import _safe_parse_json
 from app.services.evaluators.parallel_engine import run_parallel
 from app.services.evaluators.runner_utils import (
     save_api_log,
-    create_eval_run,
+    promote_eval_run_to_running,
     finalize_eval_run,
 )
 from app.services.job_worker import (
@@ -124,10 +124,13 @@ async def run_batch_evaluation(
     selected_rule_ids: Optional[list[str]] = None,
     azure_endpoint: str = "",
     api_version: str = "",
+    eval_run_id: Optional[str] = None,
 ) -> dict:
     """Run batch evaluation on threads from a data file."""
     start_time = time.monotonic()
-    run_id = uuid.uuid4()
+    # Reuse the submit-time placeholder id when present so the queued row
+    # already visible in the Runs list gets promoted in place.
+    run_id = uuid.UUID(eval_run_id) if eval_run_id else uuid.uuid4()
 
     # When custom_only is set, force-disable all built-in evaluators
     if custom_only:
@@ -138,9 +141,9 @@ async def run_batch_evaluation(
     contract_config = await load_config_from_db(tenant_id=tenant_id, user_id=user_id) if app_id == "kaira-bot" else None
     contract_snapshot = contract_config.snapshot() if contract_config else None
 
-    # Create eval run record FIRST so failures are always visible in the UI
+    # Promote the submit-time placeholder (if any) to running, or INSERT.
     data_hash = _file_hash(data_path) if data_path else ""
-    await create_eval_run(
+    await promote_eval_run_to_running(
         id=run_id,
         tenant_id=tenant_id,
         user_id=user_id,

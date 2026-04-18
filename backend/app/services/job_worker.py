@@ -66,6 +66,18 @@ RETRY_SAFE_JOB_TYPES = frozenset({
     "generate-evaluator-draft",
     "sync-external-source",
     "populate-analytics",
+    # Evaluation jobs (Phase 0, 2026-04): on transient LLM errors
+    # (timeouts, 429, 5xx, connection errors) the worker retries the job.
+    # promote_eval_run_to_running handles the "row already exists from a
+    # prior attempt" case by UPDATE-if-exists-else-INSERT, so retried
+    # attempts own the same eval_run row (matched by eval_run_id threaded
+    # through params) rather than orphaning a failed row.
+    "evaluate-voice-rx",
+    "evaluate-batch",
+    "evaluate-adversarial",
+    "evaluate-custom",
+    "evaluate-custom-batch",
+    "evaluate-inside-sales",
 })
 
 
@@ -280,6 +292,7 @@ def _can_claim_job(job: Job, counts: dict[str, Counter]) -> bool:
         "interactive": _quota_limit(settings.JOB_INTERACTIVE_MAX_CONCURRENT),
         "standard": _quota_limit(settings.JOB_STANDARD_MAX_CONCURRENT),
         "bulk": _quota_limit(settings.JOB_BULK_MAX_CONCURRENT),
+        "analytics": _quota_limit(settings.JOB_ANALYTICS_MAX_CONCURRENT),
     }
     return counts["queue_class"][queue_class] < class_limit_map.get(queue_class, MAX_CONCURRENT_JOBS)
 
@@ -904,6 +917,7 @@ async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
         selected_rule_ids=params.get("selected_rule_ids"),
         azure_endpoint=params.get("azure_endpoint", ""),
         api_version=params.get("api_version", ""),
+        eval_run_id=params.get("eval_run_id"),
     )
     return result
 
@@ -953,6 +967,7 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
         kaira_timeout=params.get("kaira_timeout", 120),
         azure_endpoint=params.get("azure_endpoint", ""),
         api_version=params.get("api_version", ""),
+        eval_run_id=params.get("eval_run_id"),
     )
     return result
 

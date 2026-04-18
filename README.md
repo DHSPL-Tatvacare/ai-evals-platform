@@ -5,7 +5,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?logo=postgresql&logoColor=white)
 ![Docker + Azure](https://img.shields.io/badge/Docker_+_Azure_App_Service-2496ED?logo=docker&logoColor=white)
 
-AI Evals Platform is a multi-tenant evaluation system for production AI workflows. It gives product, QA, and operations teams a repeatable way to score outputs, review evidence, compare runs, and audit how AI behavior changes over time across clinical transcription, conversational AI, and inside-sales use cases.
+AI Evals Platform is a multi-tenant evaluation system for production AI workflows. It gives product, QA, and operations teams a repeatable way to score outputs, review evidence, compare runs, generate reports, and audit how AI behavior changes over time across clinical transcription, conversational AI, and inside-sales use cases. A constrained analytics agent (Sherlock) sits on top of the stored facts for ad-hoc exploration.
 
 ## Workspaces
 
@@ -18,7 +18,7 @@ AI Evals Platform is a multi-tenant evaluation system for production AI workflow
 ## Stack
 
 - Frontend: React 19, TypeScript, Vite 7, Tailwind CSS 4, Zustand
-- Backend: FastAPI, SQLAlchemy, PostgreSQL, background job worker
+- Backend: FastAPI, SQLAlchemy, PostgreSQL (primary + optional analytics DB), background job worker
 - AI providers: Gemini, OpenAI, Azure OpenAI, Anthropic
 - Deployment: Docker, Azure App Service, Azure Container Registry, Azure Database for PostgreSQL, Azure Blob Storage
 

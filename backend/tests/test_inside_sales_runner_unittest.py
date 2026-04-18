@@ -115,12 +115,12 @@ class InsideSalesRunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
             persist_thread_session,
         ])
 
-        create_eval_run = AsyncMock()
+        promote_eval_run_to_running = AsyncMock()
         finalize_eval_run = AsyncMock()
         update_job_progress = AsyncMock()
 
         with patch.object(runner, '_async_session', fake_session_factory), patch.object(
-            runner, 'create_eval_run', create_eval_run
+            runner, 'promote_eval_run_to_running', promote_eval_run_to_running
         ), patch.object(
             runner, 'finalize_eval_run', finalize_eval_run
         ), patch.object(
@@ -184,7 +184,7 @@ class InsideSalesRunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result["status"], "completed")
-        initial_config = create_eval_run.await_args.kwargs["config"]
+        initial_config = promote_eval_run_to_running.await_args.kwargs["config"]
         self.assertEqual(initial_config["requested_evaluator_ids"], [evaluator_id])
         self.assertEqual(initial_config["selected_call_snapshots"], [])
 

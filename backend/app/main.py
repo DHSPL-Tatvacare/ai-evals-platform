@@ -160,6 +160,9 @@ async def _cleanup_expired_refresh_tokens() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create tables on startup, start background worker."""
+    from app.logging_config import configure_logging
+    configure_logging()
+
     _validate_startup_config()
 
     await bootstrap_database_schema()

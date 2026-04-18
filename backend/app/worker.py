@@ -25,15 +25,31 @@ def _validate_worker_config() -> None:
         raise RuntimeError("JOB_RETRY_BASE_DELAY_SECONDS must be at least 1.")
     if settings.JOB_RETRY_MAX_DELAY_SECONDS < settings.JOB_RETRY_BASE_DELAY_SECONDS:
         raise RuntimeError("JOB_RETRY_MAX_DELAY_SECONDS must be greater than or equal to JOB_RETRY_BASE_DELAY_SECONDS.")
+    if settings.JOB_MAX_CONCURRENT < 1:
+        raise RuntimeError("JOB_MAX_CONCURRENT must be at least 1.")
     if settings.JOB_TENANT_MAX_CONCURRENT < 1:
         raise RuntimeError("JOB_TENANT_MAX_CONCURRENT must be at least 1.")
     if settings.JOB_APP_MAX_CONCURRENT < 1:
         raise RuntimeError("JOB_APP_MAX_CONCURRENT must be at least 1.")
     if settings.JOB_USER_MAX_CONCURRENT < 1:
         raise RuntimeError("JOB_USER_MAX_CONCURRENT must be at least 1.")
+    if settings.JOB_ANALYTICS_MAX_CONCURRENT < 1:
+        raise RuntimeError("JOB_ANALYTICS_MAX_CONCURRENT must be at least 1.")
+    # Ordering invariants: tenant/user caps must fit inside the global and tenant caps.
+    if settings.JOB_TENANT_MAX_CONCURRENT > settings.JOB_MAX_CONCURRENT:
+        raise RuntimeError(
+            "JOB_TENANT_MAX_CONCURRENT must be <= JOB_MAX_CONCURRENT."
+        )
+    if settings.JOB_USER_MAX_CONCURRENT > settings.JOB_TENANT_MAX_CONCURRENT:
+        raise RuntimeError(
+            "JOB_USER_MAX_CONCURRENT must be <= JOB_TENANT_MAX_CONCURRENT."
+        )
 
 async def run_worker() -> None:
     """Run recovery once, then start the worker and recovery loops."""
+    from app.logging_config import configure_logging
+    configure_logging()
+
     _validate_worker_config()
     logger.info("Starting dedicated job worker process")
     await bootstrap_database_schema()

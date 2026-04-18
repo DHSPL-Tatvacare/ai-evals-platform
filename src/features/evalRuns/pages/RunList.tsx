@@ -490,7 +490,12 @@ export default function RunList() {
       header: '',
       width: 'w-16',
       render: (row) => {
-        if (row.kind === 'queued') return null;
+        // Queued synthetic rows use row.id as the jobId (see tableData builder);
+        // real rows carry jobId on the run record. A Cancel action needs a jobId
+        // either way, so we resolve it once here.
+        const jobId = row.jobId ?? (row.kind === 'queued' ? row.id : undefined);
+        const isActive = row.status === 'queued' || row.status === 'pending' || row.isRunning;
+        const canCancel = isActive && !!jobId;
         return (
           <div onClick={(e) => e.stopPropagation()}>
             <Popover
@@ -510,12 +515,12 @@ export default function RunList() {
                 side="bottom"
                 className="w-fit min-w-[140px] rounded-[8px] bg-[var(--bg-elevated)] py-1"
               >
-                {row.isRunning && row.jobId && (
+                {canCancel && (
                   <PermissionGate action="evaluation:cancel">
                     <button
                       type="button"
                       onClick={() => {
-                        handleCancel(row.jobId!);
+                        handleCancel(jobId!);
                         setMenuOpenId(null);
                       }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)]"
@@ -525,20 +530,22 @@ export default function RunList() {
                     </button>
                   </PermissionGate>
                 )}
-                <PermissionGate action="evaluation:delete">
-                  <button
-                    type="button"
-                    disabled={row.isRunning}
-                    onClick={() => {
-                      setDeleteTarget({ id: row.id, label: row.title });
-                      setMenuOpenId(null);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)] disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete
-                  </button>
-                </PermissionGate>
+                {row.kind === 'run' && (
+                  <PermissionGate action="evaluation:delete">
+                    <button
+                      type="button"
+                      disabled={isActive}
+                      onClick={() => {
+                        setDeleteTarget({ id: row.id, label: row.title });
+                        setMenuOpenId(null);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--interactive-secondary)] disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  </PermissionGate>
+                )}
               </PopoverContent>
             </Popover>
           </div>

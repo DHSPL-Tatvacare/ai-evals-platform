@@ -35,7 +35,7 @@ from app.services.evaluators.output_schema_utils import (
     build_visible_breakdown,
 )
 from app.services.evaluators.runner_utils import (
-    save_api_log, create_eval_run, finalize_eval_run,
+    save_api_log, promote_eval_run_to_running, finalize_eval_run,
 )
 from app.services.job_worker import (
     is_job_cancelled, JobCancelledError, safe_error_message, update_job_progress,
@@ -126,10 +126,12 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
 
     entity_ref = session_id if is_session_flow else listing_id
 
-    # Create eval_run record immediately so it's visible in UI
-    eval_run_id = uuid.uuid4()
+    # Reuse the submit-time placeholder id when present so the queued row
+    # already visible in the Runs list gets promoted in place.
+    _placeholder_id = params.get("eval_run_id")
+    eval_run_id = uuid.UUID(_placeholder_id) if _placeholder_id else uuid.uuid4()
 
-    await create_eval_run(
+    await promote_eval_run_to_running(
         id=eval_run_id,
         tenant_id=tenant_id,
         user_id=user_id,

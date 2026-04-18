@@ -783,7 +783,7 @@ class AdversarialConfigPhaseThreeTests(unittest.TestCase):
 
 class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
     async def test_runner_persists_selected_generation_and_rule_filters_in_batch_metadata(self):
-        create_eval_run = AsyncMock()
+        promote_eval_run_to_running = AsyncMock()
         finalize_eval_run = AsyncMock()
         update_job_progress = AsyncMock(side_effect=RuntimeError('stop-after-create'))
 
@@ -793,8 +793,8 @@ class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=get_default_config()),
         ), patch.object(
             adversarial_runner_module,
-            'create_eval_run',
-            new=create_eval_run,
+            'promote_eval_run_to_running',
+            new=promote_eval_run_to_running,
         ), patch.object(
             adversarial_runner_module,
             'finalize_eval_run',
@@ -823,7 +823,7 @@ class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
                     max_turns=14,
                 )
 
-        batch_metadata = create_eval_run.await_args.kwargs['batch_metadata']
+        batch_metadata = promote_eval_run_to_running.await_args.kwargs['batch_metadata']
         self.assertEqual(batch_metadata['selected_goals'], ['meal_logged'])
         self.assertEqual(batch_metadata['selected_traits'], [])
         self.assertEqual(batch_metadata['selected_rule_ids'], ['ask_time_if_missing'])

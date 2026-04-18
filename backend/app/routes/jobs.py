@@ -61,6 +61,18 @@ async def submit_job(
     db.add(job)
     await db.commit()
     await db.refresh(job)
+
+    # Placeholder EvalRun so queued work is visible in the Runs list before
+    # the worker claims the job. Runners reuse params["eval_run_id"] so the
+    # placeholder id is promoted in place instead of duplicated.
+    from app.services.evaluators.runner_utils import create_pending_eval_run_for_job
+    eval_run_id = await create_pending_eval_run_for_job(job, job_params)
+    if eval_run_id is not None:
+        job_params["eval_run_id"] = str(eval_run_id)
+        job.params = job_params
+        await db.commit()
+        await db.refresh(job)
+
     return job
 
 
@@ -153,7 +165,7 @@ async def cancel_job(
         # Still fix any orphaned eval_run (idempotent)
         await db.execute(
             update(EvalRun)
-            .where(EvalRun.job_id == job_id, EvalRun.status == "running")
+            .where(EvalRun.job_id == job_id, EvalRun.status.in_(("pending", "running")))
             .values(status="cancelled", completed_at=datetime.now(timezone.utc))
         )
         await db.commit()
@@ -170,7 +182,7 @@ async def cancel_job(
     # Also cancel any associated eval_run so RunDetail reflects it immediately
     await db.execute(
         update(EvalRun)
-        .where(EvalRun.job_id == job_id, EvalRun.status == "running")
+        .where(EvalRun.job_id == job_id, EvalRun.status.in_(("pending", "running")))
         .values(status="cancelled", completed_at=now)
     )
     await db.commit()

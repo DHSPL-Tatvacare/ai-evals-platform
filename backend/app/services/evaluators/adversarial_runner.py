@@ -42,7 +42,7 @@ from app.services.evaluators.credential_lane_scheduler import (
 from app.services.evaluators.kaira_client import KairaClient
 from app.services.evaluators.models import serialize
 from app.services.evaluators.runner_utils import (
-    save_api_log, create_eval_run, finalize_eval_run,
+    save_api_log, promote_eval_run_to_running, finalize_eval_run,
 )
 from app.services.job_worker import (
     JobCancelledError, is_job_cancelled, safe_error_message, update_job_progress,
@@ -298,10 +298,13 @@ async def run_adversarial_evaluation(
     kaira_timeout: float = 120,
     azure_endpoint: str = "",
     api_version: str = "",
+    eval_run_id: Optional[str] = None,
 ) -> dict:
     """Run adversarial stress test against live Kaira API."""
     start_time = time.monotonic()
-    run_id = uuid.uuid4()
+    # Reuse the submit-time placeholder id when present so the queued row
+    # already visible in the Runs list gets promoted in place.
+    run_id = uuid.UUID(eval_run_id) if eval_run_id else uuid.uuid4()
     resolved_credentials = normalize_kaira_credential_pool(
         kaira_credential_pool,
         fallback_user_id=kaira_test_user_id,
@@ -391,8 +394,8 @@ async def run_adversarial_evaluation(
         "persona_mixing_mode": resolved_persona_mixing_mode,
     }
 
-    # Create eval run record FIRST so failures are always visible in the UI
-    await create_eval_run(
+    # Promote the submit-time placeholder (if any) to running, or INSERT.
+    await promote_eval_run_to_running(
         id=run_id,
         tenant_id=tenant_id,
         user_id=user_id,

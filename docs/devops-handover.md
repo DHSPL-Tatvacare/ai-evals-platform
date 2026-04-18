@@ -112,6 +112,7 @@ These should be present in App Service configuration before the first live deplo
 | Variable | Notes |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL async connection string |
+| `ANALYTICS_DATABASE_URL` | Optional; second PostgreSQL instance for analytics facts. Leave empty to share `DATABASE_URL` |
 | `FILE_STORAGE_TYPE` | Set to `azure_blob` in production |
 | `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage connection string |
 | `AZURE_STORAGE_CONTAINER` | Usually `evals-files` |
@@ -165,7 +166,8 @@ Production uses `GEMINI_SERVICE_ACCOUNT_JSON`, which is decoded by `backend/entr
 | Adversarial tuning | `ADVERSARIAL_MAX_TURNS`, `ADVERSARIAL_TURN_DELAY`, `ADVERSARIAL_CASE_DELAY` |
 | Auth tuning | `JWT_ALGORITHM`, `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`, `AUTH_RATE_LIMIT` |
 | Upload controls | `MAX_UPLOAD_SIZE_MB`, `ALLOWED_UPLOAD_MIMES` |
-| Job tuning | all `JOB_*` variables from `backend/app/config.py` |
+| Job tuning | all `JOB_*` variables from `backend/app/config.py`, including `JOB_ANALYTICS_MAX_CONCURRENT` |
+| Logging | `LOG_LEVEL`, `LOG_FORMAT` (`json` in production) |
 
 ### Deploy-time variables
 
@@ -192,13 +194,14 @@ The API and worker are separate processes in production.
 
 The worker supports:
 
-- queue classes: `interactive`, `standard`, `bulk`
+- queue classes: `interactive`, `standard`, `bulk`, `analytics`
 - priorities
 - heartbeats and leases
 - retry scheduling
 - stale job recovery
 - orphaned eval-run reconciliation
 - per-tenant, per-app, and per-user concurrency controls
+- analytics fan-out jobs (`populate-analytics`) and external-source sync jobs (`sync-external-source`)
 
 ### File handling
 

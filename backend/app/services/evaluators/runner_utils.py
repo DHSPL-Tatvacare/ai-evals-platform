@@ -5,18 +5,44 @@ Extracted from the four runner files to eliminate duplication:
   - create_eval_run     → replaces inline db.add(EvalRun(...)) blocks
   - finalize_eval_run   → replaces terminal-state UPDATE blocks
   - find_primary_field  → replaces _detect_primary_field / inline scan
+
+Submit-time placeholder flow (Phase 0, 2026-04):
+  - create_pending_eval_run_for_job: called from POST /api/jobs, inserts an
+    EvalRun with status='pending' so queued work is visible in the UI before
+    the worker claims the job. Returns the EvalRun id, which is also stored
+    back into job.params['eval_run_id'] so runners reuse the same id.
+  - promote_eval_run_to_running: called from runners. UPDATE-if-placeholder-
+    exists, INSERT-otherwise (backward compat for non-wizard paths).
 """
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import update
 
 from app.models.eval_run import EvalRun, ApiLog
+from app.models.job import Job
 from app.services.evaluators.output_schema_utils import find_primary_field
 
 logger = logging.getLogger(__name__)
+
+# ── Job type → eval type mapping ─────────────────────────────────────
+#
+# Only job types that produce exactly ONE EvalRun appear here. Batch-of-runs
+# types (evaluate-custom-batch fans out to N child run_custom_evaluator calls,
+# each with its own EvalRun) are intentionally absent — a single placeholder
+# would be orphaned. Non-evaluation job types (generate-report,
+# sync-external-source, populate-analytics) also return None.
+#
+# Single source of truth. Don't mirror this mapping elsewhere.
+JOB_TYPE_TO_EVAL_TYPE: dict[str, str] = {
+    "evaluate-voice-rx": "full_evaluation",
+    "evaluate-batch": "batch_thread",
+    "evaluate-adversarial": "batch_adversarial",
+    "evaluate-custom": "custom",
+    "evaluate-inside-sales": "call_quality",
+}
 
 
 def _async_session():
@@ -78,11 +104,17 @@ async def create_eval_run(
     llm_model: Optional[str] = None,
     config: Optional[dict] = None,
     batch_metadata: Optional[dict] = None,
+    status: str = "running",
+    started_at: Optional[datetime] = None,
 ) -> None:
-    """Create an EvalRun in 'running' state.
+    """Create an EvalRun row.
 
-    Call this as early as possible so failures are always visible in the UI.
+    Defaults to status='running' + started_at=now() for the existing runner
+    call sites. Submit-time placeholders pass status='pending' and leave
+    started_at as None (the row is not "running" yet).
     """
+    if started_at is None and status == "running":
+        started_at = datetime.now(timezone.utc)
     async with _async_session() as db:
         db.add(EvalRun(
             id=id,
@@ -94,14 +126,151 @@ async def create_eval_run(
             listing_id=listing_id,
             session_id=session_id,
             evaluator_id=evaluator_id,
-            status="running",
-            started_at=datetime.now(timezone.utc),
+            status=status,
+            started_at=started_at,
             llm_provider=llm_provider,
             llm_model=llm_model,
             config=config or {},
             batch_metadata=batch_metadata,
         ))
         await db.commit()
+
+
+async def promote_eval_run_to_running(
+    *,
+    id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    eval_type: str,
+    job_id,
+    listing_id: Optional[uuid.UUID] = None,
+    session_id: Optional[uuid.UUID] = None,
+    evaluator_id: Optional[uuid.UUID] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    config: Optional[dict] = None,
+    batch_metadata: Optional[dict] = None,
+) -> None:
+    """Promote a pending placeholder EvalRun to running, or INSERT if none exists.
+
+    Runners call this instead of ``create_eval_run`` so that:
+      - If a submit-time placeholder exists (normal wizard flow), its status
+        flips from 'pending' to 'running' and the runner-time fields
+        (llm_provider, llm_model, config, batch_metadata, started_at) are
+        populated. Placeholder row id is preserved.
+      - If no placeholder exists (non-wizard paths, tests, retries after a
+        placeholder-less submit), the row is INSERTed with status='running'.
+      - Retries: if a previous attempt wrote a terminal row with the same id,
+        the UPDATE resets status to 'running' and clears error_message so the
+        new attempt owns the row.
+
+    Match by primary key; tenant_id is added as a belt-and-braces filter.
+    """
+    now = datetime.now(timezone.utc)
+    values: dict[str, Any] = {
+        "status": "running",
+        "started_at": now,
+        "error_message": None,
+        # On retry the prior attempt may have set terminal markers; reset them
+        # so the row cleanly represents "this new attempt is underway".
+        "completed_at": None,
+        "duration_ms": None,
+    }
+    # Only overwrite fields the caller provided — don't null out placeholder data.
+    if listing_id is not None:
+        values["listing_id"] = listing_id
+    if session_id is not None:
+        values["session_id"] = session_id
+    if evaluator_id is not None:
+        values["evaluator_id"] = evaluator_id
+    if llm_provider is not None:
+        values["llm_provider"] = llm_provider
+    if llm_model is not None:
+        values["llm_model"] = llm_model
+    if config is not None:
+        values["config"] = config
+    if batch_metadata is not None:
+        values["batch_metadata"] = batch_metadata
+
+    async with _async_session() as db:
+        result = await db.execute(
+            update(EvalRun)
+            .where(EvalRun.id == id, EvalRun.tenant_id == tenant_id)
+            .values(**values)
+        )
+        if result.rowcount:
+            await db.commit()
+            return
+
+    # No placeholder → fall through to INSERT via the existing helper.
+    await create_eval_run(
+        id=id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        eval_type=eval_type,
+        job_id=job_id,
+        listing_id=listing_id,
+        session_id=session_id,
+        evaluator_id=evaluator_id,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        config=config,
+        batch_metadata=batch_metadata,
+        status="running",
+        started_at=now,
+    )
+
+
+def _uuid_or_none(value) -> Optional[uuid.UUID]:
+    """Coerce a params value to UUID. Accepts UUID, str, or None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+async def create_pending_eval_run_for_job(job: Job, params: dict) -> Optional[uuid.UUID]:
+    """Insert a placeholder EvalRun at job-submit time.
+
+    Called from POST /api/jobs so queued work is visible in the Runs list
+    before the worker claims the job.
+
+    Behavior:
+      - Job types not in JOB_TYPE_TO_EVAL_TYPE (e.g. sync-external-source,
+        populate-analytics, generate-report) → returns None, no row inserted.
+      - Job types that produce an EvalRun → inserts status='pending' with
+        whatever FK fields are derivable from params. Runner-time fields
+        (llm_provider, config, batch_metadata) are filled in later by
+        promote_eval_run_to_running.
+
+    Returns the EvalRun id on success, None if no placeholder was created.
+    Callers must also store this id back into job.params['eval_run_id'] so
+    the runner reuses it.
+    """
+    eval_type = JOB_TYPE_TO_EVAL_TYPE.get(job.job_type)
+    if not eval_type:
+        return None
+
+    eval_run_id = uuid.uuid4()
+    await create_eval_run(
+        id=eval_run_id,
+        tenant_id=job.tenant_id,
+        user_id=job.user_id,
+        app_id=job.app_id or "",
+        eval_type=eval_type,
+        job_id=job.id,
+        listing_id=_uuid_or_none(params.get("listing_id")),
+        session_id=_uuid_or_none(params.get("session_id")),
+        evaluator_id=_uuid_or_none(params.get("evaluator_id")),
+        status="pending",
+    )
+    return eval_run_id
 
 
 async def finalize_eval_run(

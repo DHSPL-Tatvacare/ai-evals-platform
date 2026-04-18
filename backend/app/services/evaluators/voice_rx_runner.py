@@ -53,7 +53,7 @@ from app.services.evaluators.comparison_builder import (
     format_comparison_for_prompt,
 )
 from app.services.evaluators.runner_utils import (
-    save_api_log, create_eval_run, finalize_eval_run,
+    save_api_log, promote_eval_run_to_running, finalize_eval_run,
 )
 from app.services.job_worker import (
     is_job_cancelled, JobCancelledError, safe_error_message, update_job_progress,
@@ -161,10 +161,12 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
     listing_id = params["listing_id"]
     app_id = params.get("app_id", "voice-rx")
 
-    # Create eval_run record immediately
-    eval_run_id = uuid.uuid4()
+    # Reuse placeholder id from submit-time if present (lets the queued row
+    # already visible in the UI get promoted in place); otherwise generate.
+    _placeholder_id = params.get("eval_run_id")
+    eval_run_id = uuid.UUID(_placeholder_id) if _placeholder_id else uuid.uuid4()
 
-    await create_eval_run(
+    await promote_eval_run_to_running(
         id=eval_run_id,
         tenant_id=tenant_id,
         user_id=user_id,
