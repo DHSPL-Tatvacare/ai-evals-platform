@@ -66,11 +66,11 @@ export function EmptyState({ appId, templates, onSelect }: EmptyStateProps) {
         </div>
       </div>
 
-      {/* Pinned starting points */}
+      {/* Starting prompts */}
       {tiles.length > 0 ? (
         <div>
           <div className="mb-2.5 text-[9px] font-medium uppercase tracking-[0.22em] text-[var(--text-muted)]">
-            Pinned starting points
+            Start with these...
           </div>
           <div className="grid grid-cols-2 gap-2">
             {tiles.map((template, i) => {
