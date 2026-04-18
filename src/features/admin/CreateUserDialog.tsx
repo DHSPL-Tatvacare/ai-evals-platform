@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { Button, Input, PasswordStrengthIndicator, Select, validatePasswordStrength } from '@/components/ui';
+import { useRightOverlay } from '@/hooks';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 
@@ -16,6 +17,7 @@ interface CreateUserDialogProps {
 }
 
 export function CreateUserDialog({ isOpen, onClose, onSubmit }: CreateUserDialogProps) {
+  useRightOverlay(isOpen);
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');

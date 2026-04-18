@@ -4,6 +4,7 @@ import { Button } from '@/components/ui';
 import { DynamicFieldsDisplay } from './DynamicFieldsDisplay';
 import { formatDate } from '@/utils';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import type { EvalRun } from '@/types';
 
 interface EvaluatorHistoryDetailsOverlayProps {
@@ -17,6 +18,7 @@ export function EvaluatorHistoryDetailsOverlay({
   run,
   onClose,
 }: EvaluatorHistoryDetailsOverlayProps) {
+  useRightOverlay(isOpen);
   const [copied, setCopied] = useState<'input' | 'output' | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 

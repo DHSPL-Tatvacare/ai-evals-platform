@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 import { Button, ConfirmDialog } from '@/components/ui';
+import { useRightOverlay } from '@/hooks';
 import { cn } from '@/utils';
 
 interface SettingsSlideOverProps {
@@ -34,6 +35,7 @@ export function SettingsSlideOver({
   children,
   footerContent,
 }: SettingsSlideOverProps) {
+  useRightOverlay(isOpen);
   const [isVisible, setIsVisible] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 

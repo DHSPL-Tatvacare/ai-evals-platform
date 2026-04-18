@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui';
+import { useRightOverlay } from '@/hooks';
 import { JsonViewer } from '@/features/structured-outputs/components/JsonViewer';
 
 interface ReadOnlyViewOverlayProps {
@@ -21,6 +22,7 @@ export function ReadOnlyViewOverlay({
   jsonData,
   textContent,
 }: ReadOnlyViewOverlayProps) {
+  useRightOverlay(isOpen);
   if (!isOpen) return null;
 
   return (

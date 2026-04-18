@@ -18,3 +18,4 @@ export { useMessageTags } from './useMessageTags';
 export { useResolvedColor } from './useResolvedColor';
 export { usePoll } from './usePoll';
 export { useTableQueryParams, type TableQueryState } from './useTableQueryParams';
+export { useRightOverlay } from './useRightOverlay';

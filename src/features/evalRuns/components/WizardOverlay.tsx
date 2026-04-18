@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useCallback, useState } from 'react';
 import { X, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { cn } from '@/utils';
 import { Button } from '@/components/ui';
+import { useRightOverlay } from '@/hooks';
 
 export interface WizardStep {
   key: string;
@@ -39,6 +40,7 @@ export function WizardOverlay({
 }: WizardOverlayProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  useRightOverlay(true);
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === steps.length - 1;
 

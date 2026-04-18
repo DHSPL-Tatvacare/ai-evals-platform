@@ -2,6 +2,7 @@ import { useEffect, useRef, useMemo } from 'react';
 import { X, GitFork, Pencil } from 'lucide-react';
 import { Badge, Button, Tabs, VisibilityBadge } from '@/components/ui';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import type { EvalTemplate, EvalTemplateOutputField } from '@/types';
 
 interface TemplatePeekOverlayProps {
@@ -81,6 +82,7 @@ function SchemaJsonView({ data }: { data: Record<string, unknown> }) {
 }
 
 export function TemplatePeekOverlay({ template, onClose }: TemplatePeekOverlayProps) {
+  useRightOverlay(!!template);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape

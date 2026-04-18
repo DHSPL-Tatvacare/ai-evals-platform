@@ -30,7 +30,7 @@ import { SCRIPTS } from "@/constants/scripts";
 import { ModelSelector } from "@/features/settings/components/ModelSelector";
 import { useLLMSettingsStore, getProviderApiKey, hasProviderCredentials, LLM_PROVIDERS } from "@/stores";
 import type { LLMProvider } from "@/types";
-import { useNetworkStatus } from "@/hooks";
+import { useNetworkStatus, useRightOverlay } from "@/hooks";
 import type {
   Listing,
   AIEvaluation,
@@ -89,6 +89,7 @@ export function EvaluationOverlay({
   onStartEvaluation,
   hasAudioBlob,
 }: EvaluationOverlayProps) {
+  useRightOverlay(isOpen);
   const [isVisible, setIsVisible] = useState(false);
 
   const sourceType = (listing.sourceType === 'pending' ? 'upload' : listing.sourceType) || 'upload';

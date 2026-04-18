@@ -8,6 +8,7 @@ import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 
 const ROWS_PER_PAGE = 20;
@@ -29,6 +30,7 @@ export function InviteLinksSection() {
 
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
+  useRightOverlay(showCreateForm);
   const [label, setLabel] = useState('');
   const [roleId, setRoleId] = useState('');
   const [roles, setRoles] = useState<RoleResponse[]>([]);

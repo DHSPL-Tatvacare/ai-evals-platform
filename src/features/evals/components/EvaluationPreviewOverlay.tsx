@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, FileText, Code2, Variable } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import { resolvePrompt, type VariableContext } from '@/services/templates';
 import type { Listing, SchemaDefinition, EvaluationPrerequisites, AIEvaluation } from '@/types';
 
@@ -29,6 +30,7 @@ export function EvaluationPreviewOverlay({
   hasAudioBlob = false,
   aiEval,
 }: EvaluationPreviewOverlayProps) {
+  useRightOverlay(isOpen);
   const [isVisible, setIsVisible] = useState(false);
 
   // Trigger slide-in animation after mount

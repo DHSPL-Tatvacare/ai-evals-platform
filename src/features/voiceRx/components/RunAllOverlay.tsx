@@ -8,6 +8,7 @@ import {
   hasProviderCredentials,
 } from "@/stores";
 import { cn } from "@/utils";
+import { useRightOverlay } from "@/hooks";
 import type { LLMProvider } from "@/types";
 
 export interface RunAllSelection {
@@ -24,6 +25,7 @@ interface RunAllOverlayProps {
 }
 
 export function RunAllOverlay({ open, onClose, onRun, initialSelectedIds }: RunAllOverlayProps) {
+  useRightOverlay(open);
   const evaluators = useEvaluatorsStore((s) => s.evaluators);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(initialSelectedIds ?? evaluators.map((e) => e.id)),

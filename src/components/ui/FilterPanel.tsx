@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/utils';
-import { useUIStore } from '@/stores';
+import { useRightOverlay } from '@/hooks';
 import { Button } from './Button';
 import { Select } from './Select';
 import { Combobox } from './Combobox';
@@ -65,12 +65,7 @@ export function FilterPanel({
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
-  // Register as a right-edge overlay so the chat FAB hides while open.
-  useEffect(() => {
-    if (!open) return;
-    useUIStore.getState().pushRightOverlay();
-    return () => useUIStore.getState().popRightOverlay();
-  }, [open]);
+  useRightOverlay(open);
 
   return (
     <aside

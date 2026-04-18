@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, CheckCircle2, XCircle, Clock, AlertTriangle, Search } from 'lucide-react';
 import { Button, Skeleton, EmptyState } from '@/components/ui';
 import { cn, formatDate } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import { fetchEvalRuns } from '@/services/api/evalRunsApi';
 import type { EvalRun } from '@/types';
 
@@ -24,6 +25,7 @@ export function EvaluatorHistoryListOverlay({
   onClose,
   onSelectRun,
 }: EvaluatorHistoryListOverlayProps) {
+  useRightOverlay(isOpen);
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');

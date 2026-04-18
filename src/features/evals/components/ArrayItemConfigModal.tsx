@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, X, ListPlus } from 'lucide-react';
 import { Button, Input, EmptyState, Select } from '@/components/ui';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import type { ArrayItemSchema, ArrayItemProperty, ArrayItemType } from '@/types';
 
 interface ArrayItemConfigModalProps {
@@ -19,6 +20,7 @@ export function ArrayItemConfigModal({
   initialSchema,
   fieldName,
 }: ArrayItemConfigModalProps) {
+  useRightOverlay(isOpen);
   // Handle escape key
   const handleEscape = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {

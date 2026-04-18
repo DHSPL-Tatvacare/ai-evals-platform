@@ -12,6 +12,7 @@ import { apiRequest } from '@/services/api/client';
 import type { CallFilters, LeadFilters } from '@/services/api/insideSales';
 import type { AppCollectionFilterConfig } from '@/types';
 import { cn } from '@/utils/cn';
+import { useRightOverlay } from '@/hooks';
 
 interface CallFilterPanelProps {
   onClose: () => void;
@@ -134,6 +135,7 @@ function renderFilterControl(
 }
 
 export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPanelProps) {
+  useRightOverlay(true);
   const appConfig = useAppConfig('inside-sales');
   const datasetKey = activeTab === 'leads' ? 'leads' : 'calls';
   const datasetConfig = appConfig.collections.datasets[datasetKey];

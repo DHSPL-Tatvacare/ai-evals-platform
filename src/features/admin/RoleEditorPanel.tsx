@@ -10,6 +10,7 @@ import type {
 } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 
 interface RoleEditorPanelProps {
   role: RoleResponse | null;
@@ -18,6 +19,7 @@ interface RoleEditorPanelProps {
 }
 
 export function RoleEditorPanel({ role, onClose, onSaved }: RoleEditorPanelProps) {
+  useRightOverlay(true);
   const isEdit = role !== null;
 
   const [name, setName] = useState('');

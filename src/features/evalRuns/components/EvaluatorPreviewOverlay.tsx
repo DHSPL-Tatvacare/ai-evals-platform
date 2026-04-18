@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check } from 'lucide-react';
 import { cn } from '@/utils';
+import { useRightOverlay } from '@/hooks';
 import type { EvaluatorDefinition } from '@/types';
 import type { EvaluatorToggles } from './EvaluatorToggleStep';
 
@@ -323,6 +324,7 @@ export function EvaluatorPreviewOverlay({
   evaluator,
   builtinKey,
 }: EvaluatorPreviewOverlayProps) {
+  useRightOverlay(isOpen);
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {

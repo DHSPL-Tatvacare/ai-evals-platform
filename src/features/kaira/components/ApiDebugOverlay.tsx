@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { X, Code, Copy, Check } from 'lucide-react';
 import { Button, EmptyState } from '@/components/ui';
+import { useRightOverlay } from '@/hooks';
 import type { KairaChatRequest, KairaChatResponse } from '@/types';
 
 interface ApiDebugOverlayProps {
@@ -21,6 +22,7 @@ export function ApiDebugOverlay({
   apiRequest,
   apiResponse,
 }: ApiDebugOverlayProps) {
+  useRightOverlay(isOpen);
   const [copiedSection, setCopiedSection] = useState<'request' | 'response' | null>(null);
 
   if (!isOpen) return null;
