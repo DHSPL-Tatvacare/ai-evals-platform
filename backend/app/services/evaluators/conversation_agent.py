@@ -370,6 +370,35 @@ class ConversationAgent:
         # applying selected_persona_tactics before constructing the agent.
         self.persona_catalog: dict[str, AdversarialPersona] = persona_catalog or {}
 
+    def _persona_catalog_for_case(
+        self,
+        test_case: AdversarialTestCase,
+    ) -> dict[str, AdversarialPersona]:
+        """Return the persona catalog narrowed for this test case.
+
+        Respects a per-case ``persona_tactic`` override (set when a saved case
+        was pinned to a specific tactic). For all other cases the run-level
+        catalog is reused unchanged.
+        """
+        pinned_tactic = getattr(test_case, "persona_tactic", None)
+        if not pinned_tactic:
+            return self.persona_catalog
+        narrowed: dict[str, AdversarialPersona] = {}
+        for persona_id, persona in self.persona_catalog.items():
+            filtered_tactics = [
+                tactic for tactic in persona.tactics if tactic.id == pinned_tactic
+            ]
+            if not filtered_tactics and persona.tactics:
+                # Pinned tactic doesn't belong to this persona → keep original
+                # tactics untouched for other personas on the case.
+                narrowed[persona_id] = persona
+                continue
+            narrowed[persona_id] = persona.model_copy(
+                update={"tactics": filtered_tactics},
+                deep=True,
+            )
+        return narrowed
+
     async def run_conversation(
         self,
         test_case: AdversarialTestCase,
@@ -408,17 +437,22 @@ class ConversationAgent:
             ))
             transcript.sync_legacy_fields()
 
-        # Build system prompt with all goals
+        # Build system prompt with all goals. When a test case carries a
+        # pinned persona_tactic (e.g. a Moriarty regression case saved with
+        # tactic='sql_syntax_destructive'), filter the persona_catalog to that
+        # tactic for THIS case only — other cases in the run retain the full
+        # catalog.
         resolved_personas = _resolve_persona_labels(test_case)
+        effective_catalog = self._persona_catalog_for_case(test_case)
         system_prompt = build_multi_goal_system_prompt(
             goals,
             test_case.active_traits,
             test_case.difficulty,
             resolved_personas,
             trait_hints_by_id,
-            persona_catalog=self.persona_catalog,
+            persona_catalog=effective_catalog,
         )
-        active_tactic_ids = _active_tactic_ids(resolved_personas, self.persona_catalog)
+        active_tactic_ids = _active_tactic_ids(resolved_personas, effective_catalog)
 
         for turn_num in range(1, effective_max_turns + 1):
             if not session_state.is_first_message:
