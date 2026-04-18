@@ -47,3 +47,21 @@ def build_visible_breakdown(output: dict, output_schema: list[dict]) -> dict:
         for field in output_schema
         if is_visible_output_field(field) and field["key"] in output
     }
+
+
+def primary_score(output: dict, output_schema: list[dict]) -> float | None:
+    """Extract the numeric primary-metric value from an evaluator output.
+
+    Returns None when the schema has no numeric primary field or the output
+    is missing / non-numeric. Used by runners, analytics extractors, and
+    reports to get a single comparable number per evaluator per item.
+    """
+    if not output or not output_schema:
+        return None
+    primary = find_primary_field(output_schema)
+    if not primary or primary.get("type") != "number":
+        return None
+    value = output.get(primary["key"])
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return float(value)
