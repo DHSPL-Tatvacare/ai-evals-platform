@@ -260,10 +260,6 @@ catalog_tables:
       app_id:
         role: dimension
         type: text
-      name:
-        role: dimension
-        type: text
-        nullable: true
       eval_type:
         role: dimension
         type: text
