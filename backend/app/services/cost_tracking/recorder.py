@@ -150,7 +150,13 @@ async def record_llm_usage(
 
             stmt = pg_insert(LlmUsage).values(**values)
             if idempotency_key is not None:
-                stmt = stmt.on_conflict_do_nothing(index_elements=['idempotency_key'])
+                # The unique index on idempotency_key is partial
+                # (`WHERE idempotency_key IS NOT NULL`), so Postgres requires
+                # the same predicate on ON CONFLICT to match the index.
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=['idempotency_key'],
+                    index_where=LlmUsage.idempotency_key.isnot(None),
+                )
 
             try:
                 await db.execute(stmt)
