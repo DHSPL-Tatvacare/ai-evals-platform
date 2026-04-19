@@ -1,10 +1,15 @@
 """Shared database schema bootstrap for backend and worker entrypoints."""
 
+import logging
+import time
+
 from sqlalchemy import text
 
 from app.constants import SHERLOCK_CHAT_SOURCE
 from app.database import engine
 from app.models import Base
+
+_log = logging.getLogger(__name__)
 
 SCHEMA_BOOTSTRAP_LOCK_KEY_1 = 8721
 SCHEMA_BOOTSTRAP_LOCK_KEY_2 = 1
@@ -68,12 +73,6 @@ SCHEMA_BOOTSTRAP_SQL = (
     "ALTER TABLE analytics_eval_facts ADD COLUMN IF NOT EXISTS query_type TEXT",
     "ALTER TABLE analytics_eval_facts ADD COLUMN IF NOT EXISTS difficulty TEXT",
     "ALTER TABLE analytics_eval_facts ADD COLUMN IF NOT EXISTS total_turns INTEGER",
-    "DROP INDEX IF EXISTS uq_settings_app_scope",
-    """
-    UPDATE jobs
-    SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')
-    WHERE app_id = ''
-    """,
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_priority_created ON jobs (status, priority, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_lease_expires ON jobs (status, lease_expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_next_retry ON jobs (status, next_retry_at)",
@@ -90,8 +89,6 @@ SCHEMA_BOOTSTRAP_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_inside_sales_calls_tenant_app_activity_time ON inside_sales_calls (tenant_id, app_id, COALESCE(call_started_at, created_on) DESC, activity_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_inside_sales_calls_tenant_app_activity_agent ON inside_sales_calls (tenant_id, app_id, COALESCE(call_started_at, created_on), agent_name_normalized, agent_name) WHERE agent_name IS NOT NULL AND agent_name_normalized IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_inside_sales_leads_tenant_app_created_prospect ON inside_sales_leads (tenant_id, app_id, created_on DESC, prospect_id DESC)",
-    "ANALYZE inside_sales_calls",
-    "ANALYZE inside_sales_leads",
     "CREATE INDEX IF NOT EXISTS idx_listings_tenant_user_app_updated ON listings (tenant_id, user_id, app_id, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_evaluators_tenant_user_app_created ON evaluators (tenant_id, user_id, app_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_evaluators_tenant_app_visibility_created ON evaluators (tenant_id, app_id, visibility, created_at DESC)",
@@ -121,9 +118,6 @@ SCHEMA_BOOTSTRAP_SQL = (
         END IF;
     END $$;
     """,
-    "ANALYZE eval_runs",
-    "ANALYZE api_logs",
-    "ANALYZE evaluators",
     "ALTER TABLE analytics_charts ADD COLUMN IF NOT EXISTS source_session_id UUID",
     "ALTER TABLE analytics_dashboards ADD COLUMN IF NOT EXISTS source_session_id UUID",
     "ALTER TABLE report_configs ADD COLUMN IF NOT EXISTS source_session_id UUID",
@@ -230,18 +224,12 @@ INDEX_REPAIR_SQL = (
     ON settings (tenant_id, app_id, key, visibility)
     WHERE visibility = 'SHARED'
     """,
-    # Sherlock data surfaces moved from apps.config.chat.dataSurfaces into
-    # per-app YAML manifests under backend/app/services/chat_engine/manifests/.
-    # Drop the stale DB copy on every boot so the two cannot drift.
-    """
-    UPDATE apps
-    SET config = jsonb_set(config::jsonb, '{chat}', (config->'chat')::jsonb - 'dataSurfaces', true)
-    WHERE config ? 'chat' AND config->'chat' ? 'dataSurfaces'
-    """,
 )
 
 
 async def bootstrap_database_schema() -> None:
+    t0 = time.perf_counter()
+    _log.info("bootstrap_database_schema: start")
     async with engine.begin() as conn:
         await conn.execute(
             text(
@@ -262,3 +250,7 @@ async def bootstrap_database_schema() -> None:
         from app.services.chat_engine.comment_emitter import emit_column_comments
         for statement in emit_column_comments():
             await conn.execute(text(statement))
+    _log.info(
+        "bootstrap_database_schema: done took_ms=%.0f",
+        (time.perf_counter() - t0) * 1000.0,
+    )

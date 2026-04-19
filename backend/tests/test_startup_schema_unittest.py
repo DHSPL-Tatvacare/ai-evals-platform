@@ -71,9 +71,6 @@ class StartupSchemaTests(unittest.TestCase):
             "CREATE INDEX IF NOT EXISTS idx_eval_runs_tenant_user_app_created ON eval_runs (tenant_id, user_id, app_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_eval_runs_tenant_app_visibility_created ON eval_runs (tenant_id, app_id, visibility, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_api_logs_run_id_id ON api_logs (run_id, id DESC)",
-            "ANALYZE eval_runs",
-            "ANALYZE api_logs",
-            "ANALYZE evaluators",
         ]
 
         for snippet in expected_snippets:

@@ -27,99 +27,11 @@ from sqlalchemy import delete, text
 
 from app.config import settings
 from app.database import engine, get_db, async_session
+from app.middleware.gzip_safe import GZipSafeMiddleware
 from app.models.user import RefreshToken
 from app.startup_schema import bootstrap_database_schema
 
 logger = logging.getLogger(__name__)
-
-LEGACY_ROLE_PERMISSION_NORMALIZATION_SQL = (
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'evaluation:run'
-    FROM role_permissions
-    WHERE permission = 'eval:run'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'evaluation:export'
-    FROM role_permissions
-    WHERE permission = 'eval:export'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'asset:create'
-    FROM role_permissions
-    WHERE permission = 'resource:create'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'asset:edit'
-    FROM role_permissions
-    WHERE permission = 'resource:edit'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'asset:delete'
-    FROM role_permissions
-    WHERE permission = 'resource:delete'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'insights:view'
-    FROM role_permissions
-    WHERE permission = 'analytics:view'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'configuration:edit'
-    FROM role_permissions
-    WHERE permission = 'settings:edit'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'invite_link:manage'
-    FROM role_permissions
-    WHERE permission = 'user:invite'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'evaluation:cancel'
-    FROM role_permissions
-    WHERE permission = 'eval:delete'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    INSERT INTO role_permissions (role_id, permission)
-    SELECT role_id, 'evaluation:delete'
-    FROM role_permissions
-    WHERE permission = 'eval:delete'
-    ON CONFLICT ON CONSTRAINT uq_role_permission DO NOTHING
-    """,
-    """
-    DELETE FROM role_permissions
-    WHERE permission IN (
-        'eval:run',
-        'eval:delete',
-        'eval:export',
-        'resource:create',
-        'resource:edit',
-        'resource:delete',
-        'analytics:view',
-        'settings:edit',
-        'user:invite',
-        'tenant:settings',
-        'evaluator:promote'
-    )
-    """,
-)
 
 
 def _validate_startup_config() -> None:
@@ -173,30 +85,6 @@ async def lifespan(app: FastAPI):
     async with async_session() as _validator_db:
         await run_manifest_validator(_validator_db)
 
-    async with engine.begin() as conn:
-        await conn.execute(text(
-            "UPDATE settings SET visibility = 'SHARED' WHERE visibility = 'APP'"
-        ))
-        await conn.execute(text(
-            "UPDATE prompts SET visibility = 'SHARED' WHERE visibility = 'APP'"
-        ))
-        await conn.execute(text(
-            "UPDATE schemas SET visibility = 'SHARED' WHERE visibility = 'APP'"
-        ))
-        await conn.execute(text(
-            "UPDATE evaluators SET visibility = 'SHARED' WHERE visibility = 'APP'"
-        ))
-        await conn.execute(text(
-            "UPDATE eval_runs SET visibility = 'SHARED' WHERE visibility = 'APP'"
-        ))
-        # Normalize stored role permissions to the canonical catalog before auth
-        # loads role grants for requests and seeded roles.
-        for statement in LEGACY_ROLE_PERMISSION_NORMALIZATION_SQL:
-            await conn.execute(text(statement))
-        await conn.execute(text(
-            "DROP INDEX IF EXISTS uq_settings_app_scope"
-        ))
-
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin
     from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
     async with async_session() as session:
@@ -242,6 +130,9 @@ app = FastAPI(
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Compression — skipped for SSE (paths ending in /stream)
+app.add_middleware(GZipSafeMiddleware, minimum_size=1000)
 
 # CORS
 origins = [o.strip() for o in settings.CORS_ORIGINS.split(",")]
