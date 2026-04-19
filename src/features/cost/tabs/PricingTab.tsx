@@ -48,7 +48,7 @@ export function PricingTab({ active }: TabProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col pb-6">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[12px] text-[var(--text-muted)]">
           Active pricing rows live-override bootstrap seed. Super-admin-only edits.

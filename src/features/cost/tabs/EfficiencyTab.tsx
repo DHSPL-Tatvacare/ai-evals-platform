@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Gauge } from 'lucide-react';
 import { useCostStore } from '@/stores/costStore';
 import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
@@ -20,8 +21,22 @@ export function EfficiencyTab({ active }: TabProps) {
   }, [active, loadEfficiency, filtersKey]);
 
   return (
-    <div className="space-y-4 pb-6">
-      <SliceStateBoundary slice={slice} onRetry={() => refresh('efficiency')}>
+    <div className="flex min-h-0 flex-1 flex-col space-y-4 pb-6">
+      <SliceStateBoundary
+        slice={slice}
+        onRetry={() => refresh('efficiency')}
+        emptyIcon={Gauge}
+        emptyTitle="No efficiency data"
+        emptyDescription="Cache, error, and unpriced metrics need at least one LLM call in range."
+        isEmpty={(data) =>
+          data.cacheByPurpose.length === 0 &&
+          data.errorByCode.length === 0 &&
+          data.unpricedCalls.length === 0 &&
+          data.reasoningByModel.length === 0 &&
+          (data.cacheGauge.find((p) => p.label === 'cached_read')?.value ?? 0) === 0 &&
+          (data.errorGauge.find((p) => p.label === 'errors')?.value ?? 0) === 0
+        }
+      >
         {(data) => <EfficiencyContent data={data} />}
       </SliceStateBoundary>
     </div>

@@ -33,7 +33,7 @@ export function CallsTab({ active }: TabProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col pb-6">
       <SliceStateBoundary slice={slice} onRetry={() => refresh('calls')}>
         {(data) => (
           <CallsTable

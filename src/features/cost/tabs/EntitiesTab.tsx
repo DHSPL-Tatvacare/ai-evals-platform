@@ -23,7 +23,7 @@ export function EntitiesTab({ active }: TabProps) {
   }, [active, loadEntities, filtersKey]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col pb-6">
       <SliceStateBoundary slice={slice} onRetry={() => refresh('entities')}>
         {(data) => (
           <EntitiesTable

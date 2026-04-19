@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { PieChart } from 'lucide-react';
 import { useCostStore } from '@/stores/costStore';
 import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
@@ -20,8 +21,20 @@ export function SpendTab({ active }: TabProps) {
   }, [active, loadSpend, filtersKey]);
 
   return (
-    <div className="space-y-4 pb-6">
-      <SliceStateBoundary slice={slice} onRetry={() => refresh('spend')}>
+    <div className="flex min-h-0 flex-1 flex-col space-y-4 pb-6">
+      <SliceStateBoundary
+        slice={slice}
+        onRetry={() => refresh('spend')}
+        emptyIcon={PieChart}
+        emptyTitle="No spend"
+        emptyDescription="No LLM spend was recorded for the selected range."
+        isEmpty={(data) =>
+          data.byApp.length === 0 &&
+          data.byPurpose.length === 0 &&
+          data.topModels.length === 0 &&
+          data.topUsers.length === 0
+        }
+      >
         {(data) => (
           <>
             <div className="grid gap-4 lg:grid-cols-2">

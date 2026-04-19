@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Inbox, Loader2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { EmptyState, Button } from '@/components/ui';
 import type { Slice } from '@/stores/costStore';
 
@@ -8,6 +9,24 @@ interface SliceStateBoundaryProps<T> {
   children: (data: T) => ReactNode;
   onRetry?: () => void;
   loadingLabel?: string;
+  /** When provided and returns true for the ready `data`, render a centered
+   *  empty state instead of the children. Keeps "no data" visuals consistent
+   *  across tabs that don't use DataTable's built-in empty handler. */
+  isEmpty?: (data: T) => boolean;
+  emptyIcon?: LucideIcon;
+  emptyTitle?: string;
+  emptyDescription?: string;
+}
+
+/** Full-height flex wrapper used for every non-content branch so that
+ *  loading / error / empty visuals sit centered in the available viewport
+ *  rather than pinned to the top of the tab panel. */
+function CenteredFill({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-[60vh] flex-1 items-center justify-center px-6">
+      {children}
+    </div>
+  );
 }
 
 export function SliceStateBoundary<T>({
@@ -15,32 +34,55 @@ export function SliceStateBoundary<T>({
   children,
   onRetry,
   loadingLabel = 'Loading…',
+  isEmpty,
+  emptyIcon,
+  emptyTitle = 'No data',
+  emptyDescription,
 }: SliceStateBoundaryProps<T>) {
   if (slice.status === 'idle' || slice.status === 'loading') {
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-[var(--text-secondary)]">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span>{loadingLabel}</span>
-      </div>
+      <CenteredFill>
+        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>{loadingLabel}</span>
+        </div>
+      </CenteredFill>
     );
   }
   if (slice.status === 'error') {
     return (
-      <EmptyState
-        icon={AlertTriangle}
-        title="Couldn't load data"
-        description={slice.error || 'Request failed'}
-      >
-        {onRetry && (
-          <Button variant="secondary" size="sm" onClick={onRetry}>
-            Retry
-          </Button>
-        )}
-      </EmptyState>
+      <CenteredFill>
+        <div className="w-full max-w-sm">
+          <EmptyState
+            icon={AlertTriangle}
+            title="Couldn't load data"
+            description={slice.error || 'Request failed'}
+          >
+            {onRetry && (
+              <Button variant="secondary" size="sm" onClick={onRetry}>
+                Retry
+              </Button>
+            )}
+          </EmptyState>
+        </div>
+      </CenteredFill>
     );
   }
   if (!slice.data) {
     return null;
+  }
+  if (isEmpty && isEmpty(slice.data)) {
+    return (
+      <CenteredFill>
+        <div className="w-full max-w-sm">
+          <EmptyState
+            icon={emptyIcon ?? Inbox}
+            title={emptyTitle}
+            description={emptyDescription}
+          />
+        </div>
+      </CenteredFill>
+    );
   }
   return <>{children(slice.data)}</>;
 }

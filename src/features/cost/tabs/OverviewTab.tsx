@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { useCostStore } from '@/stores/costStore';
 import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import { CostKpiRow } from '../components/CostKpiRow';
@@ -20,8 +21,15 @@ export function OverviewTab({ active }: TabProps) {
   }, [active, loadOverview, filtersKey]);
 
   return (
-    <div className="space-y-4 pb-6">
-      <SliceStateBoundary slice={slice} onRetry={() => refresh('overview')}>
+    <div className="flex min-h-0 flex-1 flex-col space-y-4 pb-6">
+      <SliceStateBoundary
+        slice={slice}
+        onRetry={() => refresh('overview')}
+        emptyIcon={BarChart3}
+        emptyTitle="No usage yet"
+        emptyDescription="No LLM calls were recorded for the selected range."
+        isEmpty={(data) => data.kpis.totalCalls === 0}
+      >
         {(data) => (
           <>
             <CostKpiRow kpis={data.kpis} />
