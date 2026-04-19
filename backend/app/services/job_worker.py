@@ -1068,12 +1068,21 @@ async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uu
 
     await update_job_progress(job_id, 0, 1, "Generating evaluator draft…")
 
+    # Coerce job_id to UUID where possible so usage rows get correct owner
+    # attribution. Handler's job_id is a string; tests may pass other shapes.
+    draft_job_id: uuid.UUID | None = None
+    try:
+        draft_job_id = uuid.UUID(str(job_id)) if job_id is not None else None
+    except (ValueError, TypeError):
+        draft_job_id = None
+
     result = await generate_evaluator_draft(
         prompt=prompt,
         app_id=app_id,
         tenant_id=str(tenant_id),
         user_id=str(user_id),
         rule_catalog=rule_catalog,
+        job_id=draft_job_id,
     )
 
     return result
