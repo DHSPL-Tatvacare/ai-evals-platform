@@ -24,6 +24,7 @@ import {
   getCellValue,
   DistributionBar,
   RunProgressBar,
+  StatPill,
   EvalRunVisibilityPanel,
 } from "../components";
 import AdversarialTable from "../components/AdversarialTable";
@@ -1144,23 +1145,11 @@ function ReviewedStatPill() {
     })
   ).length;
   return (
-    <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
-      <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">Reviewed</p>
-      <p className="text-lg font-bold mt-0.5 leading-tight text-[var(--text-brand)]">{reviewedCount} / {totalItems}</p>
-    </div>
-  );
-}
-
-function StatPill({ label, value, metricKey, color }: { label: string; value: string | number; metricKey?: string; color?: string }) {
-  return (
-    <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-3 py-2">
-      <div className="flex items-center gap-1">
-        <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold">{label}</p>
-        {metricKey && <MetricInfo metricKey={metricKey} />}
-      </div>
-      <p className={`text-lg font-bold mt-0.5 leading-tight${color ? "" : " text-[var(--text-primary)]"}`} style={color ? { color } : undefined}>
-        {value}
-      </p>
-    </div>
+    <StatPill
+      label="Reviewed"
+      metricKey="reviewed_items"
+      value={`${reviewedCount} / ${totalItems}`}
+      color="var(--text-brand)"
+    />
   );
 }

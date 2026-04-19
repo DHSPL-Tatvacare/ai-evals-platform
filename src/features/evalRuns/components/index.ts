@@ -2,6 +2,7 @@ export { default as Tooltip } from './Tooltip';
 export { default as VerdictBadge } from './VerdictBadge';
 export { default as LabelBadge } from './LabelBadge';
 export { default as MetricInfo } from './MetricInfo';
+export { StatPill } from './StatPill';
 export { default as DistributionBar } from './DistributionBar';
 export { default as TrendChart } from './TrendChart';
 export { default as EvalSection, EvalCard, EvalCardHeader, EvalCardBody } from './EvalSection';

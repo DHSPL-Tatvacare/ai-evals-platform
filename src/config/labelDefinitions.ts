@@ -576,6 +576,38 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
       "Count of threads where the conversation goal was achieved (e.g., meal logged, query answered).",
     unit: "threads",
   },
+  calls_evaluated: {
+    key: "calls_evaluated",
+    displayName: "Calls Evaluated",
+    description: "Number of calls successfully evaluated in this run",
+    tooltip:
+      "Shows how many calls produced completed evaluation output in this run. The denominator is the total number of calls included in the run.",
+    unit: "calls",
+  },
+  avg_score: {
+    key: "avg_score",
+    displayName: "Avg Score",
+    description: "Average overall score across evaluated calls",
+    tooltip:
+      "Mean of the overall call-quality scores from successfully evaluated calls in this run. Higher is better.",
+    unit: "score",
+  },
+  failed_calls: {
+    key: "failed_calls",
+    displayName: "Failed",
+    description: "Number of calls whose evaluation did not complete successfully",
+    tooltip:
+      "Count of calls that failed evaluation or did not produce a successful result in this run.",
+    unit: "calls",
+  },
+  reviewed_items: {
+    key: "reviewed_items",
+    displayName: "Reviewed",
+    description: "Number of reviewable items with at least one reviewer decision",
+    tooltip:
+      "Count of reviewable items in the active review scope where the reviewer has marked at least one attribute as accepted or corrected.",
+    unit: "items",
+  },
   // ─── Cross-Run Analytics ───
   cross_runs_analyzed: {
     key: "cross_runs_analyzed",
