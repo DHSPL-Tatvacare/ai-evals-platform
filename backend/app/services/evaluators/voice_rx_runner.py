@@ -41,6 +41,7 @@ from app.services.evaluators.evaluation_constants import (
     CRITIQUE_SYSTEM_PROMPT,
     NORMALIZATION_PROMPT,
     NORMALIZATION_PROMPT_PLAIN,
+    NORMALIZATION_SYSTEM_PROMPT,
     build_normalization_schema,
     build_normalization_schema_plain,
     UPLOAD_EVALUATION_PROMPT,
@@ -793,7 +794,12 @@ async def _normalize_transcript(llm, transcript_input, source_script, target_scr
             transcript_json=json.dumps(transcript_input, indent=2),
         )
         schema = build_normalization_schema(target_display)
-        result = await llm.generate_json(prompt=prompt, json_schema=schema, thinking=thinking)
+        result = await llm.generate_json(
+            prompt=prompt,
+            system_prompt=NORMALIZATION_SYSTEM_PROMPT,
+            json_schema=schema,
+            thinking=thinking,
+        )
 
         norm_segments = result.get("segments", [])
         if not norm_segments:
@@ -829,7 +835,12 @@ async def _normalize_transcript(llm, transcript_input, source_script, target_scr
             transcript_text=text,
         )
         schema = build_normalization_schema_plain(target_display)
-        result = await llm.generate_json(prompt=prompt, json_schema=schema, thinking=thinking)
+        result = await llm.generate_json(
+            prompt=prompt,
+            system_prompt=NORMALIZATION_SYSTEM_PROMPT,
+            json_schema=schema,
+            thinking=thinking,
+        )
 
         normalized_text = result.get("normalized_text", "").strip()
         if not normalized_text:

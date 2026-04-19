@@ -91,11 +91,19 @@ CRITIQUE_SYSTEM_PROMPT = (
 # NORMALIZATION PROMPTS & SCHEMAS
 # ═══════════════════════════════════════════════════════════════
 
+# Generic capability statement — language/script specifics come from runtime params.
+NORMALIZATION_SYSTEM_PROMPT = (
+    "You are an expert multilingual transliteration specialist. "
+    "Transliterate transcripts verbatim into the requested target script without "
+    "editing, paraphrasing, or altering meaning. Preserve speaker labels, "
+    "timestamps, proper nouns, technical/medical terms, and widely-known "
+    "abbreviations. Follow the runtime target script, source script, and source "
+    "language supplied in the user message exactly."
+)
+
 # {source_instruction} is either "from X script" or "auto-detect the source script"
 # {target_script} is always a concrete script name (never "auto")
-NORMALIZATION_PROMPT = """You are an expert multilingual transliteration specialist.
-
-TASK: Transliterate the following transcript into {target_script} script.
+NORMALIZATION_PROMPT = """TASK: Transliterate the following transcript into {target_script} script.
 {source_instruction}
 Source language: {language}
 
@@ -115,9 +123,7 @@ INPUT TRANSCRIPT:
 
 OUTPUT: Return the transliterated transcript in JSON format. ALL text MUST be in {target_script} script."""
 
-NORMALIZATION_PROMPT_PLAIN = """You are an expert multilingual transliteration specialist.
-
-TASK: Transliterate the following transcript text into {target_script} script.
+NORMALIZATION_PROMPT_PLAIN = """TASK: Transliterate the following transcript text into {target_script} script.
 {source_instruction}
 Source language: {language}
 

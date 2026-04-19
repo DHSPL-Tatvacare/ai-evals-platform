@@ -1245,6 +1245,7 @@ async def generate_sql(
             {'role': 'user', 'content': prompt},
         ],
         temperature=0,
+        response_format={'type': 'json_object'},
     )
     raw = resp.choices[0].message.content or ''
 

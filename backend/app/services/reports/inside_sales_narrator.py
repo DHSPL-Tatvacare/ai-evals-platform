@@ -26,6 +26,7 @@ class InsideSalesNarrator:
             response = await self.llm.generate_json(
                 user_prompt,
                 system_prompt=INSIDE_SALES_NARRATIVE_SYSTEM_PROMPT,
+                json_schema=InsideSalesNarrativeOutput.model_json_schema(),
             )
 
             if isinstance(response, str):
