@@ -69,11 +69,6 @@ SCHEMA_BOOTSTRAP_SQL = (
     "ALTER TABLE analytics_eval_facts ADD COLUMN IF NOT EXISTS difficulty TEXT",
     "ALTER TABLE analytics_eval_facts ADD COLUMN IF NOT EXISTS total_turns INTEGER",
     "DROP INDEX IF EXISTS uq_settings_app_scope",
-    """
-    UPDATE jobs
-    SET app_id = COALESCE(NULLIF(params->>'app_id', ''), app_id, '')
-    WHERE app_id = ''
-    """,
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_priority_created ON jobs (status, priority, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_lease_expires ON jobs (status, lease_expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_next_retry ON jobs (status, next_retry_at)",
