@@ -111,6 +111,18 @@
   --color-gap-leakage: #ef4444;
   --color-gap-conflicting: #8b5cf6;
 
+  /* Provider brand colors (cost dashboard, provider tags) */
+  --color-provider-gemini: #4285f4;
+  --color-provider-openai: #10a37f;
+  --color-provider-anthropic: #cc785c;
+  --color-provider-azure: #0078d4;
+
+  /* App category colors (cost dashboard stacked charts, app tags) */
+  --color-app-voicerx: #7f56d9;
+  --color-app-kaira: #2e90fa;
+  --color-app-insidesales: #f79009;
+  --color-app-report: #12b76a;
+
   /* Chat-specific dimensions */
   --chat-avatar-size: 32px;
   --chat-avatar-icon: 16px;
