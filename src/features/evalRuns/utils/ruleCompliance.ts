@@ -1,5 +1,27 @@
 import type { RuleOutcomeStatus } from '@/types/evalRuns';
 
+export const RULE_STATUS_VALUES: readonly RuleOutcomeStatus[] = [
+  'VIOLATED',
+  'FOLLOWED',
+  'NOT_APPLICABLE',
+  'NOT_EVALUATED',
+];
+
+/** Narrow an arbitrary string to a RuleOutcomeStatus, or null if not a valid value. */
+export function toRuleStatus(value: string | null | undefined): RuleOutcomeStatus | null {
+  if (!value) return null;
+  return (RULE_STATUS_VALUES as readonly string[]).includes(value)
+    ? (value as RuleOutcomeStatus)
+    : null;
+}
+
+/** Map a rule status to the ternary `followed` flag used by older rule shapes. */
+export function followedFromRuleStatus(status: RuleOutcomeStatus): boolean | null {
+  if (status === 'FOLLOWED') return true;
+  if (status === 'VIOLATED') return false;
+  return null;
+}
+
 type RuleOutcomeLike = {
   status?: RuleOutcomeStatus;
   followed?: boolean | null;

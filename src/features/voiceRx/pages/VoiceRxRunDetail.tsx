@@ -9,7 +9,8 @@ import { useElapsedTime } from '@/features/evalRuns/hooks';
 import { AppReportTab } from '@/features/analytics/AppReportTab';
 import {
   InlineReviewProvider, useInlineReviewOptional,
-  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip, useInlineReviewNavigationGuard,
+  InlineReviewBadge, InlineReviewControls, DirtyBar, VerdictChip, useInlineReviewNavigationGuard,
+  useReviewOverrides,
 } from '@/features/reviews/inline';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import { fetchEvalRun, deleteEvalRun } from '@/services/api/evalRunsApi';
@@ -307,7 +308,7 @@ function FullEvaluationDetail({ run }: { run: EvalRun }) {
     const dist: Record<string, number> = {};
 
     for (const { aiSeverity, key } of items) {
-      const itemKey = flowType === 'upload' ? `segment:${key}` : `field:${key}`;
+      const itemKey = result.flowType === 'upload' ? `segment:${key}` : `field:${key}`;
       const edit = review.getEdit(itemKey, 'severity');
       const sev = (edit?.decision === 'correct' && edit.reviewedValue != null)
         ? edit.reviewedValue.toUpperCase()
@@ -415,11 +416,12 @@ function FullEvaluationDetail({ run }: { run: EvalRun }) {
 
       {/* Flow-specific detail — dispatched by explicit flowType */}
       {flowType === 'upload' && result.critique.segments ? (
-        <SegmentTable segments={result.critique.segments} />
+        <SegmentTable segments={result.critique.segments} runId={run.id} />
       ) : flowType === 'api' && result.critique.fieldCritiques ? (
         <FieldCritiqueTable
           fieldCritiques={result.critique.fieldCritiques}
           overallAssessment={result.critique.overallAssessment}
+          runId={run.id}
         />
       ) : (
         <p className="text-sm text-[var(--text-muted)] italic">No detail data.</p>
@@ -445,9 +447,10 @@ function FullEvaluationDetail({ run }: { run: EvalRun }) {
 
 /* ── SegmentTable (upload flow) ──────────────────────────── */
 
-function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }) {
+function SegmentTable({ segments, runId }: { segments: Array<Record<string, unknown>>; runId: string }) {
   const review = useInlineReviewOptional();
   const isEditing = review?.isEditing ?? false;
+  const { getOverride } = useReviewOverrides(runId);
 
   return (
     <div>
@@ -472,7 +475,8 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
               const segIdx = String((seg.segmentIndex as number) ?? i);
               const itemKey = `segment:${segIdx}`;
               const edit = review?.getEdit(itemKey, 'severity');
-              const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
+              const aiSeverity = (seg.severity as string) ?? 'NONE';
+              const override = getOverride(itemKey, 'severity');
               const item: ReviewableItem = {
                 itemKey, itemType: 'segment', title: '', subtitle: null,
                 badges: [], evidence: [], attributes: [],
@@ -499,15 +503,12 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
                     </div>
                   </td>
                   <td className="px-3 py-2 align-top">
-                    {hasOverride ? (
-                      <BeforeAfterChip
-                        before={(seg.severity as string) ?? 'NONE'}
-                        after={edit.reviewedValue!}
-                        category="correctness"
-                      />
-                    ) : (
-                      <SeverityBadge severity={seg.severity as string} />
-                    )}
+                    <VerdictChip
+                      aiVerdict={aiSeverity}
+                      humanVerdict={override?.reviewedValue}
+                      category="correctness"
+                      renderBadge={(v) => <SeverityBadge severity={v ?? 'NONE'} />}
+                    />
                   </td>
                   <td className="px-3 py-2 text-xs text-[var(--text-secondary)] max-w-[200px] align-top">
                     {seg.discrepancy as string || '\u2014'}
@@ -547,11 +548,13 @@ function SegmentTable({ segments }: { segments: Array<Record<string, unknown>> }
 
 /* ── FieldCritiqueTable (API flow) ───────────────────────── */
 
-function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
+function FieldCritiqueTable({ fieldCritiques, overallAssessment, runId }: {
   fieldCritiques: FieldCritique[];
   overallAssessment: string;
+  runId: string;
 }) {
   const review = useInlineReviewOptional();
+  const { getOverride } = useReviewOverrides(runId);
   const isEditing = review?.isEditing ?? false;
 
   return (
@@ -579,7 +582,8 @@ function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
             {fieldCritiques.map((fc, i) => {
               const itemKey = `field:${fc.fieldPath}`;
               const edit = review?.getEdit(itemKey, 'severity');
-              const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
+              const aiSeverity = fc.severity ?? 'NONE';
+              const override = getOverride(itemKey, 'severity');
               const item: ReviewableItem = {
                 itemKey, itemType: 'field', title: '', subtitle: null,
                 badges: [], evidence: [], attributes: [],
@@ -606,15 +610,12 @@ function FieldCritiqueTable({ fieldCritiques, overallAssessment }: {
                     </div>
                   </td>
                   <td className="px-3 py-2 align-top">
-                    {hasOverride ? (
-                      <BeforeAfterChip
-                        before={fc.severity ?? 'NONE'}
-                        after={edit.reviewedValue!}
-                        category="correctness"
-                      />
-                    ) : (
-                      <SeverityBadge severity={fc.severity} />
-                    )}
+                    <VerdictChip
+                      aiVerdict={aiSeverity}
+                      humanVerdict={override?.reviewedValue}
+                      category="correctness"
+                      renderBadge={(v) => <SeverityBadge severity={v ?? 'NONE'} />}
+                    />
                   </td>
                   <td className="px-3 py-2 text-xs text-[var(--text-secondary)] max-w-[200px] align-top">
                     {fc.critique || '\u2014'}

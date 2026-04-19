@@ -15,6 +15,7 @@ import {
   finalizeReview,
   discardReviewDraft,
 } from '@/services/api/reviewsApi';
+import { useReviewOverridesStore } from '@/features/reviews/reviewOverridesStore';
 import { notificationService } from '@/services/notifications';
 
 // ---------------------------------------------------------------------------
@@ -357,12 +358,19 @@ export const useReviewModeStore = create<ReviewModeState>()((set, get) => ({
   },
 
   finalize: async () => {
-    const { reviewId, notes, edits } = get();
+    const { reviewId, runId, notes, edits } = get();
     if (!reviewId) return;
     set({ status: 'finalizing' });
     try {
       const payload = toPayload(notes, edits);
       await finalizeReview(reviewId, payload);
+      // Invalidate + preload the shared cache so consumers outside review mode
+      // read the newly-finalized items (without a post-exit fetch flash).
+      if (runId) {
+        const overrides = useReviewOverridesStore.getState();
+        overrides.invalidate(runId);
+        await overrides.ensureLoaded(runId);
+      }
       notificationService.success('Review finalized');
       set({ status: 'exiting' });
       // Delay reset to allow exit animation
@@ -374,11 +382,14 @@ export const useReviewModeStore = create<ReviewModeState>()((set, get) => ({
   },
 
   discardDraft: async () => {
-    const { reviewId } = get();
+    const { reviewId, runId } = get();
     if (!reviewId) return;
     set({ status: 'saving' });
     try {
       await discardReviewDraft(reviewId);
+      // Drafts can carry pending overrides; evict from cache so future reads
+      // reflect the pre-draft state.
+      if (runId) useReviewOverridesStore.getState().invalidate(runId);
       notificationService.success('Draft discarded');
       set({ status: 'exiting' });
       setTimeout(() => get().exitReview(), 500);

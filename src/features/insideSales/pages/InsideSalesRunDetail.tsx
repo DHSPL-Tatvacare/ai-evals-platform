@@ -17,7 +17,8 @@ import { useElapsedTime } from '@/features/evalRuns/hooks';
 import DistributionBar from '@/features/evalRuns/components/DistributionBar';
 import {
   InlineReviewProvider, useInlineReviewOptional,
-  InlineReviewBadge, InlineReviewControls, DirtyBar, BeforeAfterChip, VerdictDropdown, useInlineReviewNavigationGuard,
+  InlineReviewBadge, InlineReviewControls, DirtyBar, VerdictChip, VerdictDropdown, useInlineReviewNavigationGuard,
+  useReviewOverrides,
 } from '@/features/reviews/inline';
 import { fetchEvalRun, fetchRunThreads, deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi } from '@/services/api/jobsApi';
@@ -333,6 +334,7 @@ function ResultsTabContent({
   const navigate = useNavigate();
   const review = useInlineReviewOptional();
   const isEditing = review?.isEditing ?? false;
+  const { getOverride } = useReviewOverrides(runId);
   const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
 
   // Compute human-adjusted stats from review overrides
@@ -463,7 +465,7 @@ function ResultsTabContent({
 
                 const itemKey = `call:${t.thread_id}`;
                 const edit = review?.getEdit(itemKey, 'overall_verdict');
-                const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
+                const override = getOverride(itemKey, 'overall_verdict');
                 const item: ReviewableItem = {
                   itemKey, itemType: 'call', title: `${agent} \u2192 ${lead}`,
                   subtitle: null, badges: [], evidence: [], attributes: [],
@@ -490,11 +492,12 @@ function ResultsTabContent({
                       {score !== null ? score : '\u2014'}
                     </td>
                     <td className="px-3 py-2.5">
-                      {hasOverride ? (
-                        <BeforeAfterChip before={band} after={edit.reviewedValue!} category="status" />
-                      ) : (
-                        <VerdictBadge verdict={band} category="status" />
-                      )}
+                      <VerdictChip
+                        aiVerdict={band}
+                        humanVerdict={override?.reviewedValue}
+                        category="status"
+                        renderBadge={(v) => <VerdictBadge verdict={v ?? band} category="status" />}
+                      />
                     </td>
                     <td className="px-3 py-2.5">
                       {t.success_status ? (

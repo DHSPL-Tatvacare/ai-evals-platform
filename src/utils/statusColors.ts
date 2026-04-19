@@ -47,6 +47,12 @@ export const STATUS_COLORS = {
   correct: 'var(--color-verdict-pass)',
   incorrect: 'var(--color-verdict-fail)',
 
+  // Rule compliance
+  ruleFollowed: 'var(--color-success)',
+  ruleViolated: 'var(--color-error)',
+  ruleNotApplicable: 'var(--text-brand)',
+  ruleNotEvaluated: 'var(--text-muted)',
+
   // Fallback
   default: 'var(--color-verdict-na)',
 } as const;

@@ -8,7 +8,7 @@ import {
 } from "@/config/labelDefinitions";
 import { normalizeLabel } from "@/utils/evalFormatters";
 import Tooltip from "./Tooltip";
-import { BeforeAfterChip } from '@/features/reviews/inline';
+import { VerdictChip } from '@/features/reviews/inline';
 
 interface Props {
   verdict: string;
@@ -30,6 +30,9 @@ function detectCategory(verdict: string): LabelCategory {
   return "correctness";
 }
 
+// Single source of truth for "AI vs human" dispatch lives in VerdictChip.
+// VerdictBadge wraps it and adds the hover tooltip that non-review callers
+// want on the plain AI badge.
 export default function VerdictBadge({
   verdict,
   category,
@@ -37,15 +40,34 @@ export default function VerdictBadge({
   showTooltip = true,
   humanVerdict,
 }: Props) {
+  const resolved = category ?? detectCategory(verdict);
+  return (
+    <VerdictChip
+      aiVerdict={verdict}
+      humanVerdict={humanVerdict}
+      category={resolved}
+      size={size}
+      renderBadge={(value) => (
+        <PlainBadge value={value ?? ''} category={resolved} size={size} showTooltip={showTooltip} />
+      )}
+    />
+  );
+}
+
+function PlainBadge({
+  value,
+  category,
+  size,
+  showTooltip,
+}: {
+  value: string;
+  category: LabelCategory;
+  size: "sm" | "md";
+  showTooltip: boolean;
+}) {
   const [hover, setHover] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
-  const resolved = category ?? detectCategory(verdict);
-  const def = getLabelDefinition(verdict, resolved);
-
-  // When a human override exists and differs from AI, show before→after chip
-  if (humanVerdict && normalizeLabel(humanVerdict) !== normalizeLabel(verdict)) {
-    return <BeforeAfterChip before={def.displayName} after={humanVerdict} category={resolved} size={size} />;
-  }
+  const def = getLabelDefinition(value, category);
 
   const cls =
     size === "sm"

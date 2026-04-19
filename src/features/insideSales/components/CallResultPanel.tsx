@@ -4,7 +4,8 @@ import { scoreColor } from '@/utils/scoreUtils';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import {
   useInlineReviewOptional,
-  InlineReviewBadge, InlineReviewControls, BeforeAfterChip,
+  InlineReviewBadge, InlineReviewControls, VerdictChip,
+  useReviewOverrides,
 } from '@/features/reviews/inline';
 import type { ThreadEvalRow, AppId, ReviewableItem, ReviewableAttribute } from '@/types';
 
@@ -106,6 +107,7 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
                 reasoningItems={reasoningItems}
                 overallScore={overallScore}
                 threadId={thread.thread_id}
+                runId={thread.run_id}
               />
             )}
 
@@ -113,6 +115,7 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
               <ComplianceContent
                 complianceGates={complianceGates}
                 threadId={thread.thread_id}
+                runId={thread.run_id}
               />
             )}
           </div>
@@ -166,14 +169,17 @@ function ScorecardContent({
   reasoningItems,
   overallScore,
   threadId,
+  runId,
 }: {
   dimensions: Array<[string, unknown]>;
   reasoningItems: ReasoningItem[];
   overallScore: number | null;
   threadId: string;
+  runId: string;
 }) {
   const review = useInlineReviewOptional();
   const isEditing = review?.isEditing ?? false;
+  const { getOverride } = useReviewOverrides(runId);
   const maxMap = new Map(reasoningItems.map((r) => [normalizeLabel(r.dimension), r.max]));
 
   return (
@@ -190,7 +196,7 @@ function ScorecardContent({
         const itemKey = `call:${threadId}`;
         const attrKey = `metric:${key}`;
         const edit = review?.getEdit(itemKey, attrKey);
-        const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
+        const override = getOverride(itemKey, attrKey);
         const item: ReviewableItem = {
           itemKey, itemType: 'call', title: label,
           subtitle: null, badges: [], evidence: [], attributes: [],
@@ -205,17 +211,20 @@ function ScorecardContent({
           <div key={key} className="py-2 border-b border-[var(--border-subtle)] last:border-b-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs text-[var(--text-primary)] flex-1 min-w-0">{label}</span>
-              {hasOverride ? (
-                <BeforeAfterChip before={band} after={edit.reviewedValue!} category="status" />
-              ) : (
-                <span
-                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-default"
-                  title={`${band}: ${score}/${dimMax} (${Math.round(ratio * 100)}%)\nStrong \u226580% \u00b7 Good \u226565% \u00b7 Needs Work \u226550% \u00b7 Poor <50%`}
-                  style={{ color: bandColor, background: `color-mix(in srgb, ${bandColor} 12%, transparent)` }}
-                >
-                  {band}
-                </span>
-              )}
+              <VerdictChip
+                aiVerdict={band}
+                humanVerdict={override?.reviewedValue}
+                category="status"
+                renderBadge={() => (
+                  <span
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-default"
+                    title={`${band}: ${score}/${dimMax} (${Math.round(ratio * 100)}%)\nStrong \u226580% \u00b7 Good \u226565% \u00b7 Needs Work \u226550% \u00b7 Poor <50%`}
+                    style={{ color: bandColor, background: `color-mix(in srgb, ${bandColor} 12%, transparent)` }}
+                  >
+                    {band}
+                  </span>
+                )}
+              />
               <span className="text-xs font-bold tabular-nums w-12 text-right" style={{ color: bandColor }}>
                 {score}/{dimMax}
               </span>
@@ -268,12 +277,15 @@ function ScorecardContent({
 function ComplianceContent({
   complianceGates,
   threadId,
+  runId,
 }: {
   complianceGates: Array<[string, unknown]>;
   threadId: string;
+  runId: string;
 }) {
   const review = useInlineReviewOptional();
   const isEditing = review?.isEditing ?? false;
+  const { getOverride } = useReviewOverrides(runId);
 
   return (
     <div>
@@ -306,38 +318,38 @@ function ComplianceContent({
             const itemKey = `call:${threadId}`;
             const attrKey = `rule:${key}`;
             const edit = review?.getEdit(itemKey, attrKey);
-            const hasOverride = edit?.decision === 'correct' && edit.reviewedValue != null;
+            const override = getOverride(itemKey, attrKey);
+            const aiValue = passed ? 'Pass' : 'Fail';
             const item: ReviewableItem = {
               itemKey, itemType: 'call', title: label,
               subtitle: null, badges: [], evidence: [], attributes: [],
             };
             const attr: ReviewableAttribute = {
               key: attrKey, label,
-              originalValue: passed ? 'Pass' : 'Fail',
+              originalValue: aiValue,
               allowedValues: ['Pass', 'Fail'],
             };
 
-            const displayPassed = hasOverride ? edit.reviewedValue === 'Pass' : passed;
+            const displayPassed = override ? override.reviewedValue === 'Pass' : passed;
 
             return (
               <tr key={key} className="border-b border-[var(--border-subtle)]">
                 <td className="text-center py-2 px-2">
-                  {hasOverride ? (
-                    <BeforeAfterChip
-                      before={passed ? 'Pass' : 'Fail'}
-                      after={edit.reviewedValue!}
-                      category="status"
-                    />
-                  ) : (
-                    <span className={cn(
-                      'inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold',
-                      displayPassed
-                        ? 'bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success)]'
-                        : 'bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error)]'
-                    )}>
-                      {displayPassed ? '\u2713' : '\u2717'}
-                    </span>
-                  )}
+                  <VerdictChip
+                    aiVerdict={aiValue}
+                    humanVerdict={override?.reviewedValue}
+                    category="status"
+                    renderBadge={() => (
+                      <span className={cn(
+                        'inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold',
+                        displayPassed
+                          ? 'bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success)]'
+                          : 'bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error)]'
+                      )}>
+                        {displayPassed ? '\u2713' : '\u2717'}
+                      </span>
+                    )}
+                  />
                 </td>
                 <td className="py-2 px-2">
                   <span className={cn(

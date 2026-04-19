@@ -1,9 +1,13 @@
 export { BeforeAfterChip } from './BeforeAfterChip';
 export { InlineReviewBadge } from './InlineReviewBadge';
 export { InlineReviewControls } from './InlineReviewControls';
+export { VerdictChip } from './VerdictChip';
+export type { VerdictChipProps } from './VerdictChip';
 export { VerdictDropdown } from './VerdictDropdown';
 export { DirtyBar } from './DirtyBar';
 export { InlineReviewProvider, useInlineReview, useInlineReviewOptional } from './InlineReviewProvider';
 export { useInlineReviewNavigationGuard } from './useInlineReviewNavigationGuard';
 export type { InlineEditState, InlineReviewContextValue } from './types';
 export { useReviewModeStore } from '@/stores/reviewModeStore';
+export { useReviewOverrides } from '../useReviewOverrides';
+export type { ReviewOverride } from '../useReviewOverrides';

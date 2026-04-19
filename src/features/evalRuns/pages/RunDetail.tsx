@@ -35,9 +35,8 @@ import { STATUS_COLORS } from "@/utils/statusColors";
 import { isActiveStatus } from "@/utils/runStatus";
 import { formatTimestamp, formatDuration, humanize, pct, formatMetric, normalizeLabel } from "@/utils/evalFormatters";
 import { AppReportTab } from '@/features/analytics/AppReportTab';
-import { InlineReviewProvider, useInlineReviewOptional } from '@/features/reviews/inline';
-import { fetchRunReviewContext, fetchReviewDetail } from '@/services/api/reviewsApi';
-import type { ReviewItemRecord } from '@/types/reviews';
+import { InlineReviewProvider, useInlineReviewOptional, useReviewOverrides } from '@/features/reviews/inline';
+import { stripReviewItemPrefix } from '@/features/reviews/keys';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
@@ -831,10 +830,6 @@ function ReviewAwareRunTabs({
   );
 }
 
-function stripReviewItemKeyPrefix(itemKey: string): string {
-  return itemKey.includes(':') ? itemKey.split(':').slice(1).join(':') : itemKey;
-}
-
 function ReviewAwareSummarySection({
   run,
   threadEvals,
@@ -1042,7 +1037,7 @@ function ReviewAwareAdversarialTable({ evaluations, runId }: { evaluations: Adve
     const map = new Map<string, import('@/types').ReviewableItem>();
     for (const item of review.context.items) {
       if (item.itemType !== 'adversarial') continue;
-      const rawKey = stripReviewItemKeyPrefix(item.itemKey);
+      const rawKey = stripReviewItemPrefix(item.itemKey);
       map.set(rawKey, item);
     }
     return map.size > 0 ? map : undefined;
@@ -1056,7 +1051,7 @@ function ReviewAwareAdversarialTable({ evaluations, runId }: { evaluations: Adve
         const edit = review.getEdit(item.itemKey, attr.key);
         return edit && edit.decision !== '';
       });
-      if (hasDecision) set.add(stripReviewItemKeyPrefix(item.itemKey));
+      if (hasDecision) set.add(stripReviewItemPrefix(item.itemKey));
     }
     return set.size > 0 || reviewableItems?.size ? set : undefined;
   }, [review, reviewableItems]);
@@ -1071,46 +1066,15 @@ function ReviewAwareAdversarialTable({ evaluations, runId }: { evaluations: Adve
   );
 }
 
-/** Build humanVerdicts map from review item records (persisted or live). */
-function buildHumanVerdictsFromItems(items: ReviewItemRecord[]): Map<string, Map<string, string>> | undefined {
-  const map = new Map<string, Map<string, string>>();
-  for (const item of items) {
-    if (item.decision === 'correct' && item.reviewedValue != null) {
-      const threadId = stripReviewItemKeyPrefix(item.itemKey);
-      if (!map.has(threadId)) map.set(threadId, new Map());
-      map.get(threadId)!.set(item.attributeKey, item.reviewedValue);
-    }
-  }
-  return map.size > 0 ? map : undefined;
-}
-
 function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors, runId }: { evaluations: ThreadEvalRow[]; evaluatorDescriptors?: import('@/types').EvaluatorDescriptor[]; runId: string }) {
   const review = useInlineReviewOptional();
-
-  // ── Persisted review data (loaded on mount, skipped during active review) ──
-  const isEditing = review?.isEditing ?? false;
-  const [persistedItems, setPersistedItems] = useState<ReviewItemRecord[]>([]);
-  useEffect(() => {
-    if (isEditing) return;
-    let cancelled = false;
-    fetchRunReviewContext(runId)
-      .then((ctx) => {
-        const reviewId = ctx.latestReviewId ?? ctx.draftReviewId;
-        if (!reviewId || cancelled) return;
-        return fetchReviewDetail(reviewId);
-      })
-      .then((detail) => {
-        if (detail && !cancelled) setPersistedItems(detail.items);
-      })
-      .catch(() => { /* no review exists — that's fine */ });
-    return () => { cancelled = true; };
-  }, [runId, isEditing]);
+  const { overrides } = useReviewOverrides(runId);
 
   const reviewableItems = useMemo(() => {
     if (!review?.context) return undefined;
     const map = new Map<string, import('@/types').ReviewableItem>();
     for (const item of review.context.items) {
-      map.set(stripReviewItemKeyPrefix(item.itemKey), item);
+      map.set(stripReviewItemPrefix(item.itemKey), item);
     }
     return map.size > 0 ? map : undefined;
   }, [review]);
@@ -1123,28 +1087,21 @@ function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors, runId }: { ev
         const edit = review.getEdit(item.itemKey, attr.key);
         return edit && edit.decision !== '';
       });
-      if (hasDecision) set.add(stripReviewItemKeyPrefix(item.itemKey));
+      if (hasDecision) set.add(stripReviewItemPrefix(item.itemKey));
     }
     return set.size > 0 || review.context.items.length > 0 ? set : undefined;
   }, [review]);
 
   const humanVerdicts = useMemo(() => {
-    // Live review mode: use store edits (real-time)
-    if (review?.isEditing) {
-      const map = new Map<string, Map<string, string>>();
-      for (const [key, edit] of Object.entries(review.edits)) {
-        if (edit.decision === 'correct' && edit.reviewedValue != null) {
-          const [threadId, attrKey] = key.split('::');
-          const normalizedThreadId = stripReviewItemKeyPrefix(threadId);
-          if (!map.has(normalizedThreadId)) map.set(normalizedThreadId, new Map());
-          map.get(normalizedThreadId)!.set(attrKey, edit.reviewedValue);
-        }
-      }
-      return map.size > 0 ? map : undefined;
+    if (overrides.length === 0) return undefined;
+    const map = new Map<string, Map<string, string>>();
+    for (const override of overrides) {
+      const threadId = stripReviewItemPrefix(override.itemKey);
+      if (!map.has(threadId)) map.set(threadId, new Map());
+      map.get(threadId)!.set(override.attributeKey, override.reviewedValue);
     }
-    // Not in review mode: use persisted data from API
-    return buildHumanVerdictsFromItems(persistedItems);
-  }, [review, persistedItems]);
+    return map;
+  }, [overrides]);
 
   return (
     <EvalTable

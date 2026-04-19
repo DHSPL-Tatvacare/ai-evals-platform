@@ -611,6 +611,43 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
   },
 };
 
+// ─── RULE COMPLIANCE STATUS LABELS ────────────────────────────────────
+
+export const RULE_STATUS_LABELS: Record<string, LabelDefinition> = {
+  "FOLLOWED": {
+    value: "FOLLOWED",
+    displayName: "Followed",
+    description: "Rule was satisfied",
+    tooltip: "The rule's condition applied and the bot adhered to it.",
+    severity: 0,
+    color: STATUS_COLORS.ruleFollowed,
+  },
+  "VIOLATED": {
+    value: "VIOLATED",
+    displayName: "Violated",
+    description: "Rule was not satisfied",
+    tooltip: "The rule's condition applied and the bot did not adhere to it.",
+    severity: 2,
+    color: STATUS_COLORS.ruleViolated,
+  },
+  "NOT APPLICABLE": {
+    value: "NOT APPLICABLE",
+    displayName: "Not Applicable",
+    description: "Rule's condition did not apply",
+    tooltip: "The rule's triggering condition was not met in this turn.",
+    severity: -1,
+    color: STATUS_COLORS.ruleNotApplicable,
+  },
+  "NOT EVALUATED": {
+    value: "NOT EVALUATED",
+    displayName: "Not Evaluated",
+    description: "Rule was not checked",
+    tooltip: "The rule was not evaluated for this turn.",
+    severity: -1,
+    color: STATUS_COLORS.ruleNotEvaluated,
+  },
+};
+
 // ─── HELPER FUNCTIONS ─────────────────────────────────────────────────
 
 export type LabelCategory =
@@ -623,7 +660,8 @@ export type LabelCategory =
   | "recovery"
   | "friction"
   | "category"
-  | "task_completion";
+  | "task_completion"
+  | "rule";
 
 const CATEGORY_MAP: Record<LabelCategory, Record<string, LabelDefinition>> = {
   correctness: CORRECTNESS_VERDICTS,
@@ -636,6 +674,7 @@ const CATEGORY_MAP: Record<LabelCategory, Record<string, LabelDefinition>> = {
   friction: FRICTION_CAUSE_LABELS,
   category: ADVERSARIAL_CATEGORIES,
   task_completion: TASK_COMPLETION_LABELS,
+  rule: RULE_STATUS_LABELS,
 };
 
 /**
