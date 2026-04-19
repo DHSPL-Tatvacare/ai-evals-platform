@@ -35,8 +35,19 @@ const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
 // The expanded widget owns a mutable pos (via drag); the collapsed FAB always renders here.
 const DEFAULT_POS = { bottom: 24, right: 24 };
 const DEFAULT_SIZE = { width: 504, height: 672 };
-const FAB_TRANSITION = { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const };
-const WIDGET_TRANSITION = { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
+type Cubic = [number, number, number, number];
+// Monotonic ease-out, no overshoot — eliminates the scale "bump" on FAB exit.
+const SHARED_EASE: Cubic = [0.22, 1, 0.36, 1];
+const FAB_TRANSITION = { duration: 0.16, ease: SHARED_EASE };
+// Genie collapse uses 3-frame keyframes: rect → waist-pinched → circle-at-corner.
+const GENIE_TRANSITION = {
+  duration: 0.32,
+  times: [0, 0.5, 1],
+  ease: SHARED_EASE,
+};
+const GENIE_CLIP_RECT = 'inset(0% 0% 0% 0% round 16px)';
+const GENIE_CLIP_PINCH = 'inset(25% 35% 0% 35% round 45% 45% 15% 15%)';
+const GENIE_CLIP_CIRCLE = 'inset(85% 48% 0% 48% round 9999px)';
 
 interface WidgetLayout {
   pos: { bottom: number; right: number };
@@ -257,8 +268,15 @@ export function ChatWidget() {
   const needsCredentials = providerDisabled.openai;
   const settingsPath = settingsRouteForApp(currentApp);
 
+  // Genie vector: distance from the clamped widget anchor to the FAB anchor,
+  // in CSS translate space (positive x = rightward, positive y = downward).
+  const widgetBottom = clamp(widgetPos.bottom, 8, viewport.height - size.height - 8);
+  const widgetRight = clamp(widgetPos.right, 8, viewport.width - size.width - 8);
+  const genieDx = widgetRight - DEFAULT_POS.right;
+  const genieDy = widgetBottom - DEFAULT_POS.bottom;
+
   return (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence initial={false}>
       {!open ? (
         <motion.button
           key="sherlock-fab"
@@ -268,7 +286,6 @@ export function ChatWidget() {
           exit={{ opacity: 0, scale: 0.9 }}
           transition={FAB_TRANSITION}
           whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.96 }}
           style={{
             bottom: DEFAULT_POS.bottom,
             right: DEFAULT_POS.right,
@@ -300,10 +317,28 @@ export function ChatWidget() {
           role="dialog"
           aria-modal="false"
           aria-labelledby={titleId}
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={WIDGET_TRANSITION}
+          initial={{
+            opacity: 0,
+            scale: 0.06,
+            x: genieDx,
+            y: genieDy,
+            clipPath: GENIE_CLIP_CIRCLE,
+          }}
+          animate={{
+            opacity: [0, 0.9, 1],
+            scale: [0.06, 0.4, 1],
+            x: [genieDx, genieDx * 0.7, 0],
+            y: [genieDy, genieDy * 0.45, 0],
+            clipPath: [GENIE_CLIP_CIRCLE, GENIE_CLIP_PINCH, GENIE_CLIP_RECT],
+          }}
+          exit={{
+            opacity: [1, 0.95, 0],
+            scale: [1, 0.4, 0.06],
+            x: [0, genieDx * 0.7, genieDx],
+            y: [0, genieDy * 0.45, genieDy],
+            clipPath: [GENIE_CLIP_RECT, GENIE_CLIP_PINCH, GENIE_CLIP_CIRCLE],
+          }}
+          transition={GENIE_TRANSITION}
           onKeyDown={(e) => {
             if (e.key === 'Escape' && view === 'history') {
               e.stopPropagation();
