@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Minus, GripVertical, MessageCirclePlus, History, AlertCircle } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import { useViewportSize } from '@/hooks';
 import { settingsRouteForApp } from '@/config/routes';
@@ -30,8 +31,12 @@ import type { AppChatConfig } from '@/types/app.types';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
+// DEFAULT_POS is the widget's starting drag position AND the FAB's permanent anchor.
+// The expanded widget owns a mutable pos (via drag); the collapsed FAB always renders here.
 const DEFAULT_POS = { bottom: 24, right: 24 };
 const DEFAULT_SIZE = { width: 504, height: 672 };
+const FAB_TRANSITION = { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const };
+const WIDGET_TRANSITION = { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
 
 interface WidgetLayout {
   pos: { bottom: number; right: number };
@@ -109,8 +114,9 @@ export function ChatWidget() {
     }
   }, [messages, appendMessagePart]);
 
-  // Position state (bottom-right corner anchor) — persisted
-  const [pos, setPos] = useState(() => loadLayout().pos);
+  // Position state for the EXPANDED widget only — persisted. The collapsed FAB is anchored
+  // at DEFAULT_POS (screen bottom-right) and does not read this state.
+  const [widgetPos, setWidgetPos] = useState(() => loadLayout().pos);
   // Size state for expanded panel — persisted
   const [size, setSize] = useState(() => loadLayout().size);
 
@@ -118,16 +124,16 @@ export function ChatWidget() {
   const dragRef = useRef<{ startX: number; startY: number; startRight: number; startBottom: number } | null>(null);
 
   const sizeRef = useRef(size);
-  const posRef = useRef(pos);
+  const widgetPosRef = useRef(widgetPos);
   useEffect(() => {
     sizeRef.current = size;
-    posRef.current = pos;
-    saveLayout({ pos, size });
-  }, [pos, size]);
+    widgetPosRef.current = widgetPos;
+    saveLayout({ pos: widgetPos, size });
+  }, [widgetPos, size]);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const currentPos = posRef.current;
+    const currentPos = widgetPosRef.current;
     dragRef.current = { startX: e.clientX, startY: e.clientY, startRight: currentPos.right, startBottom: currentPos.bottom };
 
     const handleMove = (ev: MouseEvent) => {
@@ -137,7 +143,7 @@ export function ChatWidget() {
       const s = sizeRef.current;
       // Drag handlers read the live viewport from window directly — this runs
       // between renders, so subscribing via useViewportSize would be stale.
-      setPos({
+      setWidgetPos({
         right: clamp(dragRef.current.startRight + dx, 8, window.innerWidth - s.width - 8),
         bottom: clamp(dragRef.current.startBottom + dy, 8, window.innerHeight - s.height - 8),
       });
@@ -246,73 +252,82 @@ export function ChatWidget() {
   if (activeModal || rightOverlayOpen) return null;
   if (chatConfig.enabled === false) return null;
 
-  // Collapsed bubble
-  if (!open) {
-    const isStreaming = status === 'sending';
-    return (
-      <button
-        onClick={toggle}
-        style={{
-          bottom: clamp(pos.bottom, 8, viewport.height - 64),
-          right: clamp(pos.right, 8, viewport.width - 64),
-          background: 'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, var(--color-brand-primary-deep) 100%)',
-        }}
-        className={cn(
-          'fixed z-[var(--z-overlay)]',
-          'flex h-14 w-14 items-center justify-center rounded-full',
-          'text-white shadow-lg',
-          'hover:scale-110 hover:shadow-xl',
-          'transition-all duration-200',
-        )}
-        aria-label={isStreaming ? 'Open Sherlock — responding…' : 'Open Sherlock'}
-      >
-        <SherlockIcon className="h-8 w-8" />
-        {isStreaming && (
-          <span
-            className="absolute top-0.5 right-0.5 flex h-3 w-3"
-            aria-hidden="true"
-          >
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-info)] opacity-75" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-[var(--color-info)] border-2 border-white" />
-          </span>
-        )}
-      </button>
-    );
-  }
-
-  // Expanded widget
+  const isStreaming = status === 'sending';
   const canSend = !providerDisabled.openai && status !== 'sending' && !!defaults;
   const needsCredentials = providerDisabled.openai;
   const settingsPath = settingsRouteForApp(currentApp);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby={titleId}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape' && view === 'history') {
-          e.stopPropagation();
-          setView('chat');
-        } else if (e.key === 'Escape') {
-          e.stopPropagation();
-          toggle();
-        }
-      }}
-      style={{
-        bottom: clamp(pos.bottom, 8, viewport.height - size.height - 8),
-        right: clamp(pos.right, 8, viewport.width - size.width - 8),
-        width: Math.min(size.width, viewport.width - 16),
-        height: Math.min(size.height, viewport.height - 16),
-      }}
-      className={cn(
-        'fixed z-[var(--z-overlay)]',
-        'flex flex-col overflow-hidden rounded-2xl bg-[var(--bg-primary)] shadow-2xl',
-        'border border-[var(--border-default)]',
-        'focus:outline-none',
-      )}
-      tabIndex={-1}
-    >
+    <AnimatePresence mode="wait" initial={false}>
+      {!open ? (
+        <motion.button
+          key="sherlock-fab"
+          onClick={toggle}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          transition={FAB_TRANSITION}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.96 }}
+          style={{
+            bottom: DEFAULT_POS.bottom,
+            right: DEFAULT_POS.right,
+            transformOrigin: 'bottom right',
+            background:
+              'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, var(--color-brand-primary-deep) 100%)',
+          }}
+          className={cn(
+            'fixed z-[var(--z-overlay)]',
+            'flex h-14 w-14 items-center justify-center rounded-full',
+            'text-white shadow-lg hover:shadow-xl',
+          )}
+          aria-label={isStreaming ? 'Open Sherlock — responding…' : 'Open Sherlock'}
+        >
+          <SherlockIcon className="h-8 w-8" />
+          {isStreaming && (
+            <span
+              className="absolute top-0.5 right-0.5 flex h-3 w-3"
+              aria-hidden="true"
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-info)] opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-[var(--color-info)] border-2 border-white" />
+            </span>
+          )}
+        </motion.button>
+      ) : (
+        <motion.div
+          key="sherlock-widget"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby={titleId}
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={WIDGET_TRANSITION}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && view === 'history') {
+              e.stopPropagation();
+              setView('chat');
+            } else if (e.key === 'Escape') {
+              e.stopPropagation();
+              toggle();
+            }
+          }}
+          style={{
+            bottom: clamp(widgetPos.bottom, 8, viewport.height - size.height - 8),
+            right: clamp(widgetPos.right, 8, viewport.width - size.width - 8),
+            width: Math.min(size.width, viewport.width - 16),
+            height: Math.min(size.height, viewport.height - 16),
+            transformOrigin: 'bottom right',
+          }}
+          className={cn(
+            'fixed z-[var(--z-overlay)]',
+            'flex flex-col overflow-hidden rounded-2xl bg-[var(--bg-primary)] shadow-2xl',
+            'border border-[var(--border-default)]',
+            'focus:outline-none',
+          )}
+          tabIndex={-1}
+        >
       {/* Resize handles */}
       <div onMouseDown={handleResizeStart('top')} className="absolute top-0 left-4 right-4 h-1.5 cursor-n-resize z-10 group">
         <div className="mx-auto mt-0.5 h-0.5 w-10 rounded-full bg-[var(--border-default)] group-hover:bg-[var(--text-muted)] transition-colors" />
@@ -422,6 +437,8 @@ export function ChatWidget() {
           />
         </>
       )}
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
