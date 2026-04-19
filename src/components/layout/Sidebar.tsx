@@ -11,6 +11,7 @@ import {
   LogOut,
   Users,
   KeyRound,
+  DollarSign,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -30,7 +31,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppConfig, useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
-import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from "@/utils/permissions";
+import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission, useIsOwner } from "@/utils/permissions";
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
 import type { AppId } from '@/types';
@@ -69,7 +70,9 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = userHasAnyPermission(user, ADMIN_ACCESS_PERMISSIONS);
-  const isAdminActive = location.pathname.startsWith('/admin');
+  const isAdminActive = location.pathname === routes.adminUsers;
+  const isOwnerUser = useIsOwner();
+  const isCostActive = location.pathname.startsWith(routes.adminCost);
 
   // Modal management (for batch/adversarial wizards)
   const openModal = useUIStore((s) => s.openModal);
@@ -278,6 +281,20 @@ export function Sidebar({ onNewEval }: SidebarProps) {
               <Users className="h-5 w-5" />
             </Link>
           )}
+          {isOwnerUser && (
+            <Link
+              to={routes.adminCost}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
+                isCostActive
+                  ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
+              )}
+              title="Cost & Usage"
+            >
+              <DollarSign className="h-5 w-5" />
+            </Link>
+          )}
           {user && (
             <button
               onClick={logout}
@@ -406,6 +423,8 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                 isGuideActive={isGuideActive}
                 isAdmin={isAdmin}
                 isAdminActive={isAdminActive}
+                isOwner={isOwnerUser}
+                isCostActive={isCostActive}
                 onLogout={logout}
                 onChangePassword={() => {
                   setUserMenuOpen(false);
@@ -491,6 +510,8 @@ function UserMenu({
   isGuideActive,
   isAdmin,
   isAdminActive,
+  isOwner,
+  isCostActive,
   onLogout,
   onChangePassword,
 }: {
@@ -499,6 +520,8 @@ function UserMenu({
   isGuideActive: boolean;
   isAdmin: boolean;
   isAdminActive: boolean;
+  isOwner: boolean;
+  isCostActive: boolean;
   onLogout: () => void;
   onChangePassword: () => void;
 }) {
@@ -519,6 +542,12 @@ function UserMenu({
         <Link to={routes.adminUsers} className={isAdminActive ? activeLinkClass : menuLinkClass}>
           <Users className="h-4 w-4" />
           Admin
+        </Link>
+      )}
+      {isOwner && (
+        <Link to={routes.adminCost} className={isCostActive ? activeLinkClass : menuLinkClass}>
+          <DollarSign className="h-4 w-4" />
+          Cost & Usage
         </Link>
       )}
       <div className="my-1 border-t border-[var(--border-subtle)]" />

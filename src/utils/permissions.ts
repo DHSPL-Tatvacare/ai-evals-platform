@@ -1,6 +1,13 @@
 import { useAuthStore } from '@/stores/authStore';
 import type { User } from '@/types/auth.types';
 
+/**
+ * Mirrors backend `app.constants.SYSTEM_TENANT_ID`. Super-admin surfaces
+ * (global pricing mutations, models.dev refresh) require the user to be
+ * an Owner of this tenant.
+ */
+export const SYSTEM_TENANT_ID = '00000000-0000-0000-0000-000000000001';
+
 export const ADMIN_ACCESS_PERMISSIONS = [
   'user:create',
   'user:edit',
@@ -50,4 +57,22 @@ export function usePermission(permission: string): boolean {
 /** React hook for app access check (reactive) */
 export function useAppAccess(appSlug: string): boolean {
   return userHasAppAccess(useAuthStore((s) => s.user), appSlug);
+}
+
+export function isOwner(user: User | null | undefined): boolean {
+  return !!user?.isOwner;
+}
+
+export function isSuperAdmin(user: User | null | undefined): boolean {
+  return !!user?.isOwner && user.tenantId === SYSTEM_TENANT_ID;
+}
+
+/** Reactive hook — zero API calls, selector over `authStore` only. */
+export function useIsOwner(): boolean {
+  return useAuthStore((s) => !!s.user?.isOwner);
+}
+
+/** Reactive hook — zero API calls, selector over `authStore` only. */
+export function useIsSuperAdmin(): boolean {
+  return useAuthStore((s) => !!s.user?.isOwner && s.user.tenantId === SYSTEM_TENANT_ID);
 }

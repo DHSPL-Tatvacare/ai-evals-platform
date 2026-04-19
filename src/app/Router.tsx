@@ -20,7 +20,7 @@ import {
   EvalAdversarialDetailV2,
   EvalLogs,
 } from "@/features/evalRuns";
-import { LoginPage, SignupPage, AuthGuard, AdminGuard } from "@/features/auth";
+import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequireOwner } from "@/features/auth";
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
 import { AdminUsersPage } from "@/features/admin";
 import {
@@ -44,6 +44,7 @@ const GuidePage = lazy(() => import("@/features/guide"));
 const AnalyticsLibraryPage = lazy(() => import('@/features/analytics/pages/AnalyticsLibraryPage').then(m => ({ default: m.AnalyticsLibraryPage })));
 const AnalyticsChartDetail = lazy(() => import('@/features/analytics/pages/AnalyticsChartDetail').then(m => ({ default: m.AnalyticsChartDetail })));
 const AnalyticsDashboardDetail = lazy(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
+const CostPage = lazy(() => import('@/features/cost/pages/CostPage').then(m => ({ default: m.CostPage })));
 
 function VoiceRxGuard() {
   return <AppAccessGuard app="voice-rx"><Outlet /></AppAccessGuard>;
@@ -176,6 +177,18 @@ export function Router() {
             element={
               <AdminGuard>
                 <AdminUsersPage />
+              </AdminGuard>
+            }
+          />
+          <Route
+            path={routes.adminCost}
+            element={
+              <AdminGuard>
+                <RequireOwner>
+                  <Suspense fallback={null}>
+                    <CostPage />
+                  </Suspense>
+                </RequireOwner>
               </AdminGuard>
             }
           />

@@ -13,6 +13,7 @@ import { useGlobalSettingsStore } from '@/stores/globalSettingsStore';
 import { useTaskQueueStore } from '@/stores/taskQueueStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useMiniPlayerStore } from '@/stores/miniPlayerStore';
+import { useCostStore } from '@/stores/costStore';
 import { useChatWidgetStore } from '@/features/chat-widget/useChatWidget';
 
 interface AuthStore {
@@ -64,6 +65,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     useTaskQueueStore.getState().reset();
     useUIStore.getState().reset();
     useMiniPlayerStore.getState().reset();
+    useCostStore.getState().reset();
     useChatWidgetStore.getState().resetForSignOut();
 
     set({ accessToken: null, user: null, isAuthenticated: false, isLoading: false });

@@ -14,6 +14,7 @@ export const routes = {
   login: '/login',
   signup: '/signup',
   adminUsers: '/admin/users',
+  adminCost: '/admin/cost',
   profile: '/profile',
   guide: '/guide',
   voiceRx: {
