@@ -1,10 +1,15 @@
 """Shared database schema bootstrap for backend and worker entrypoints."""
 
+import logging
+import time
+
 from sqlalchemy import text
 
 from app.constants import SHERLOCK_CHAT_SOURCE
 from app.database import engine
 from app.models import Base
+
+_log = logging.getLogger(__name__)
 
 SCHEMA_BOOTSTRAP_LOCK_KEY_1 = 8721
 SCHEMA_BOOTSTRAP_LOCK_KEY_2 = 1
@@ -223,6 +228,8 @@ INDEX_REPAIR_SQL = (
 
 
 async def bootstrap_database_schema() -> None:
+    t0 = time.perf_counter()
+    _log.info("bootstrap_database_schema: start")
     async with engine.begin() as conn:
         await conn.execute(
             text(
@@ -243,3 +250,7 @@ async def bootstrap_database_schema() -> None:
         from app.services.chat_engine.comment_emitter import emit_column_comments
         for statement in emit_column_comments():
             await conn.execute(text(statement))
+    _log.info(
+        "bootstrap_database_schema: done took_ms=%.0f",
+        (time.perf_counter() - t0) * 1000.0,
+    )
