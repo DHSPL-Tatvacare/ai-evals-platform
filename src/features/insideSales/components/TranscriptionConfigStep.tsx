@@ -22,7 +22,6 @@ const SCRIPT_OPTIONS: SelectOption[] = [
 
 const MODEL_OPTIONS: SelectOption[] = [
   { value: 'gemini', label: 'Gemini (default)' },
-  { value: 'whisper', label: 'Whisper' },
 ];
 
 export interface TranscriptionConfig {
