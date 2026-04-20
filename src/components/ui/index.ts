@@ -48,3 +48,8 @@ export {
   type FilterControl,
 } from './FilterPanel';
 export { FilterButton } from './FilterButton';
+export { RingGauge, type RingGaugeTone } from './RingGauge';
+export { HBarList, type HBarRowData, type HBarTone } from './HBarList';
+export { TrendDelta, type TrendSemantic } from './TrendDelta';
+export { ProviderTag, AppTag } from './ProviderTag';
+export { appToneFor, providerToneFor } from './providerTokens';

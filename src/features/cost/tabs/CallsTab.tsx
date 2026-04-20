@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Activity, X } from 'lucide-react';
-import { Badge, DataTable, type ColumnDef } from '@/components/ui';
+import { AppTag, Badge, DataTable, ProviderTag, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
-import { ProviderTag, AppTag } from '../components/ProviderTag';
 import { formatDateTime, formatInt, formatTokensCompact, formatUsd, truncateId } from '../utils/format';
 import type { CallDetail, CallRow } from '../types';
 
@@ -19,16 +18,13 @@ export function CallsTab({ active }: TabProps) {
   const loadCallDetail = useCostStore((s) => s.loadCallDetail);
 
   const [activeCall, setActiveCall] = useState<CallDetail | null>(null);
-  const [loadingCall, setLoadingCall] = useState(false);
 
   useEffect(() => {
     if (active) void loadCalls();
   }, [active, loadCalls, filtersKey]);
 
   const openCall = async (id: string) => {
-    setLoadingCall(true);
     const detail = await loadCallDetail(id);
-    setLoadingCall(false);
     if (detail) setActiveCall(detail);
   };
 
@@ -50,8 +46,6 @@ export function CallsTab({ active }: TabProps) {
             pageSize={data.pageSize}
             onPageChange={(p) => loadCalls(p)}
             onRowClick={(row) => openCall(row.id)}
-            activeId={activeCall?.id}
-            loadingId={loadingCall ? '' : undefined}
           />
         )}
       </SliceStateBoundary>
@@ -67,8 +61,6 @@ function CallsTable({
   pageSize,
   onPageChange,
   onRowClick,
-  activeId,
-  loadingId,
 }: {
   rows: CallRow[];
   page: number;
@@ -76,22 +68,14 @@ function CallsTable({
   pageSize: number;
   onPageChange: (page: number) => void;
   onRowClick: (row: CallRow) => void;
-  activeId: string | undefined;
-  loadingId: string | undefined;
 }) {
-  const _ = loadingId ?? activeId;
-  void _;
-
-  // Explicit widths on every column so no single column claims the leftover
-  // horizontal space when the container is wider than the table's minWidth.
-  // Model gets the biggest share since model identifiers are long.
   const columns: ColumnDef<CallRow>[] = [
     {
       key: 'created_at',
       header: 'When',
       width: 'w-40',
       render: (row) => (
-        <span className="whitespace-nowrap text-[var(--text-secondary)]">
+        <span className="whitespace-nowrap font-mono text-[11.5px] text-[var(--text-secondary)]">
           {formatDateTime(row.createdAt)}
         </span>
       ),
@@ -111,9 +95,9 @@ function CallsTable({
     {
       key: 'model',
       header: 'Model',
-      width: 'w-64',
+      width: 'w-56',
       render: (row) => (
-        <span className="truncate text-[13px] text-[var(--text-primary)]" title={row.model}>
+        <span className="truncate font-mono text-[12px] text-[var(--text-primary)]" title={row.model}>
           {row.model}
         </span>
       ),
@@ -121,34 +105,64 @@ function CallsTable({
     {
       key: 'purpose',
       header: 'Purpose',
-      width: 'w-40',
+      width: 'w-36',
       render: (row) => (
         <span className="text-[12px] text-[var(--text-secondary)]">{row.callPurpose ?? '—'}</span>
       ),
     },
     {
-      key: 'status',
-      header: 'Status',
-      width: 'w-24',
-      render: (row) => (
-        <Badge variant={row.status === 'ok' ? 'success' : 'error'} size="sm">
-          {row.status}
-        </Badge>
-      ),
-    },
-    {
-      key: 'tokens',
-      header: 'Tokens',
-      width: 'w-24',
+      key: 'in',
+      header: 'In',
+      width: 'w-20',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
-      render: (row) => formatTokensCompact(row.totalTokens),
+      render: (row) => formatTokensCompact(row.inputTokens),
+    },
+    {
+      key: 'out',
+      header: 'Out',
+      width: 'w-20',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatTokensCompact(row.outputTokens),
+    },
+    {
+      key: 'cache',
+      header: 'Cache R',
+      width: 'w-20',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) =>
+        row.cachedReadTokens > 0 ? formatTokensCompact(row.cachedReadTokens) : '—',
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      width: 'w-20',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) =>
+        row.reasoningTokens > 0 ? formatTokensCompact(row.reasoningTokens) : '—',
+    },
+    {
+      key: 'ms',
+      header: 'ms',
+      width: 'w-16',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => (row.durationMs != null ? formatInt(row.durationMs) : '—'),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 'w-40',
+      render: (row) => <StatusCell row={row} />,
     },
     {
       key: 'cost',
       header: 'Spend',
       width: 'w-24',
-      cellClassName: 'text-right tabular-nums',
+      cellClassName: 'text-right tabular-nums font-semibold',
       headerClassName: 'text-right',
       render: (row) => formatUsd(row.costUsd),
     },
@@ -174,6 +188,30 @@ function CallsTable({
         showCount: true,
       }}
     />
+  );
+}
+
+function StatusCell({ row }: { row: CallRow }) {
+  const cachePct =
+    row.cachedReadTokens > 0 && row.inputTokens > 0
+      ? Math.round((row.cachedReadTokens / row.inputTokens) * 100)
+      : 0;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Badge variant={row.status === 'ok' ? 'success' : 'error'} size="sm">
+        {row.status}
+      </Badge>
+      {cachePct >= 20 && (
+        <span className="inline-flex items-center rounded-[4px] bg-[var(--surface-brand-subtle)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--interactive-primary)]">
+          cache {cachePct}%
+        </span>
+      )}
+      {row.pricingFallback && (
+        <span className="inline-flex items-center rounded-[4px] bg-[var(--surface-warning)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--color-warning-dark)]">
+          no rate
+        </span>
+      )}
+    </div>
   );
 }
 

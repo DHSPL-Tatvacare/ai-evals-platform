@@ -1,10 +1,18 @@
 import { useEffect } from 'react';
 import { PieChart } from 'lucide-react';
+import {
+  Card,
+  DataTable,
+  HBarList,
+  ProviderTag,
+  type ColumnDef,
+  type HBarRowData,
+} from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
-import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
-import { formatInt, formatTokensCompact, formatUsd, formatUsdCompact, truncateId } from '../utils/format';
-import type { GroupedSpend } from '../types';
+import { formatInt, formatTokensCompact, formatUsd, truncateId } from '../utils/format';
+import { toneForApp, toneForPurpose } from '../utils/tones';
+import type { GroupedSpend, SpendBundle } from '../types';
 
 interface TabProps {
   active: boolean;
@@ -35,98 +43,183 @@ export function SpendTab({ active }: TabProps) {
           data.topUsers.length === 0
         }
       >
-        {(data) => (
-          <>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <HorizontalBarCard title="Spend by app" rows={data.byApp} />
-              <HorizontalBarCard title="Spend by purpose" rows={data.byPurpose} />
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <TopTable
-                title="Top models"
-                rows={data.topModels}
-                rowLabel={(row) => row.key}
-              />
-              <TopTable
-                title="Top users"
-                rows={data.topUsers}
-                rowLabel={(row) => truncateId(row.key, 8)}
-              />
-            </div>
-          </>
-        )}
+        {(data) => <SpendContent data={data} />}
       </SliceStateBoundary>
     </div>
   );
 }
 
-function HorizontalBarCard({ title, rows }: { title: string; rows: GroupedSpend[] }) {
+function SpendContent({ data }: { data: SpendBundle }) {
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
-      <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
-      {rows.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No data</p>
-      ) : (
-        <ChartRenderer
-          type="horizontal_bar"
-          data={rows.map((r) => ({ key: r.key, cost: Number(r.costUsd) })) as unknown as Record<string, unknown>[]}
-          xKey="cost"
-          yKey="key"
-          legendPosition="none"
-          height={Math.max(160, rows.length * 28)}
-        />
-      )}
-    </div>
+    <>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ByAppCard rows={data.byApp} />
+        <ByPurposeCard rows={data.byPurpose} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TopModelsCard rows={data.topModels} />
+        <TopUsersCard rows={data.topUsers} />
+      </div>
+    </>
   );
 }
 
-function TopTable({
-  title,
-  rows,
-  rowLabel,
-}: {
-  title: string;
-  rows: GroupedSpend[];
-  rowLabel: (row: GroupedSpend) => string;
-}) {
+function ByAppCard({ rows }: { rows: GroupedSpend[] }) {
+  const total = rows.reduce((s, r) => s + r.costUsd, 0);
+  const max = rows.reduce((m, r) => Math.max(m, r.costUsd), 0);
+  const hbarRows: HBarRowData[] = rows.map((row) => ({
+    key: row.key,
+    label: row.key,
+    pct: max ? row.costUsd / max : 0,
+    tone: toneForApp(row.key),
+    amount: formatUsd(row.costUsd),
+    meta: total ? `${((row.costUsd / total) * 100).toFixed(1)}%` : undefined,
+  }));
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
-      <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
-      {rows.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No data</p>
-      ) : (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-[var(--border-subtle)] text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
-              <th className="py-2 text-left font-medium">Key</th>
-              <th className="py-2 text-right font-medium">Spend</th>
-              <th className="py-2 text-right font-medium">Tokens</th>
-              <th className="py-2 text-right font-medium">Calls</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} className="border-b border-[var(--border-subtle)] last:border-b-0">
-                <td className="py-2 pr-2 text-[var(--text-primary)]" title={row.key}>
-                  {rowLabel(row)}
-                </td>
-                <td className="py-2 pr-2 text-right tabular-nums text-[var(--text-primary)]">
-                  {formatUsd(row.costUsd)}
-                </td>
-                <td className="py-2 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
-                  {formatTokensCompact(row.tokens)}
-                </td>
-                <td className="py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                  {formatInt(row.calls)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p className="mt-3 text-[11px] text-[var(--text-muted)]">
-        Total across table: {formatUsdCompact(rows.reduce((sum, r) => sum + r.costUsd, 0))}
-      </p>
-    </div>
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">By app</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">current range</span>
+      </div>
+      <HBarList rows={hbarRows} />
+    </Card>
   );
+}
+
+function ByPurposeCard({ rows }: { rows: GroupedSpend[] }) {
+  const total = rows.reduce((s, r) => s + r.costUsd, 0);
+  const max = rows.reduce((m, r) => Math.max(m, r.costUsd), 0);
+  const hbarRows: HBarRowData[] = rows.map((row, i) => ({
+    key: row.key,
+    label: row.key,
+    pct: max ? row.costUsd / max : 0,
+    tone: toneForPurpose(i),
+    amount: formatUsd(row.costUsd),
+    meta: total ? `${((row.costUsd / total) * 100).toFixed(1)}%` : undefined,
+  }));
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">By call purpose</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">top {Math.min(rows.length, 8)}</span>
+      </div>
+      <HBarList rows={hbarRows} />
+    </Card>
+  );
+}
+
+function TopModelsCard({ rows }: { rows: GroupedSpend[] }) {
+  const columns: ColumnDef<GroupedSpend>[] = [
+    {
+      key: 'provider',
+      header: 'Provider',
+      width: 'w-28',
+      render: (row) => <ProviderTag value={providerOf(row.key)} />,
+    },
+    {
+      key: 'model',
+      header: 'Model',
+      render: (row) => (
+        <span className="font-mono text-[12px] text-[var(--text-primary)]" title={row.key}>
+          {row.key}
+        </span>
+      ),
+    },
+    {
+      key: 'calls',
+      header: 'Calls',
+      width: 'w-20',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatInt(row.calls),
+    },
+    {
+      key: 'tokens',
+      header: 'Tokens',
+      width: 'w-24',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatTokensCompact(row.tokens),
+    },
+    {
+      key: 'cost',
+      header: 'Cost',
+      width: 'w-28',
+      cellClassName: 'text-right tabular-nums font-semibold',
+      headerClassName: 'text-right',
+      render: (row) => formatUsd(row.costUsd),
+    },
+  ];
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Top models</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">by cost</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No spend recorded</p>
+      ) : (
+        <DataTable columns={columns} data={rows} keyExtractor={(row) => row.key} minWidth="0" />
+      )}
+    </Card>
+  );
+}
+
+function TopUsersCard({ rows }: { rows: GroupedSpend[] }) {
+  const columns: ColumnDef<GroupedSpend>[] = [
+    {
+      key: 'user',
+      header: 'User',
+      render: (row) => (
+        <span className="font-mono text-[12px] text-[var(--text-primary)]" title={row.key}>
+          {truncateId(row.key, 8)}
+        </span>
+      ),
+    },
+    {
+      key: 'calls',
+      header: 'Calls',
+      width: 'w-24',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatInt(row.calls),
+    },
+    {
+      key: 'tokens',
+      header: 'Tokens',
+      width: 'w-24',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatTokensCompact(row.tokens),
+    },
+    {
+      key: 'cost',
+      header: 'Cost',
+      width: 'w-28',
+      cellClassName: 'text-right tabular-nums font-semibold',
+      headerClassName: 'text-right',
+      render: (row) => formatUsd(row.costUsd),
+    },
+  ];
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Top users</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">by cost</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No users in range</p>
+      ) : (
+        <DataTable columns={columns} data={rows} keyExtractor={(row) => row.key} minWidth="0" />
+      )}
+    </Card>
+  );
+}
+
+function providerOf(model: string): string {
+  const lower = model.toLowerCase();
+  if (lower.includes('claude')) return 'anthropic';
+  if (lower.includes('gemini')) return 'gemini';
+  if (lower.includes('gpt') || lower.includes('o1') || lower.includes('o3')) return 'openai';
+  return '—';
 }

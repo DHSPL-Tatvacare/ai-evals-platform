@@ -122,6 +122,17 @@
   --color-app-kaira: #2e90fa;
   --color-app-insidesales: #f79009;
   --color-app-report: #12b76a;
+  --color-app-system: #98a2b3;
+
+  /* Purpose palette — cycling colors for cost dashboard "by purpose" bars */
+  --color-purpose-purple: #7f56d9;
+  --color-purpose-purple-light: #b692f6;
+  --color-purpose-blue: #2e90fa;
+  --color-purpose-blue-light: #84caff;
+  --color-purpose-orange: #f79009;
+  --color-purpose-green: #12b76a;
+  --color-purpose-gray: #475467;
+  --color-purpose-gray-light: #98a2b3;
 
   /* Chat-specific dimensions */
   --chat-avatar-size: 32px;

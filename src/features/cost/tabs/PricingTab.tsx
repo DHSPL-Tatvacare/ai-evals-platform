@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Tag, Plus } from 'lucide-react';
-import { Badge, Button, DataTable, Tabs, type ColumnDef } from '@/components/ui';
+import { Alert, Badge, Button, DataTable, ProviderTag, Tabs, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { usePermission } from '@/utils/permissions';
 import { notificationService } from '@/services/notifications';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
-import { ProviderTag } from '../components/ProviderTag';
 import { formatDateTime, formatInt, formatUsd } from '../utils/format';
 import type { PricingRow, RefreshDiff, SnapshotRow } from '../types';
 import { PricingEditModal } from '../components/PricingEditModal';
@@ -65,6 +64,11 @@ export function PricingTab({ active }: TabProps) {
       >
         {(data) => (
           <>
+            <Alert variant="info" title="Effective-dated pricing" className="mb-3">
+              Adding a new rate creates a new row with <code className="font-mono">effective_from</code>{' '}
+              and sets <code className="font-mono">effective_to</code> on the prior row. Historical
+              rows are never edited — past costs remain reproducible.
+            </Alert>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-[12px] text-[var(--text-muted)]">
                 Active pricing rows live-override bootstrap seed. Edits require the
@@ -166,6 +170,28 @@ function PricingRowsTable({
       ),
     },
     {
+      key: 'effective',
+      header: 'Effective',
+      width: 'w-48',
+      cellClassName: 'whitespace-nowrap',
+      render: (row) => {
+        const from = row.effectiveFrom ? row.effectiveFrom.slice(0, 10) : '—';
+        const to = row.effectiveTo ? row.effectiveTo.slice(0, 10) : 'now';
+        const isFuture = row.effectiveFrom ? new Date(row.effectiveFrom) > new Date() : false;
+        const isExpired = row.effectiveTo !== null;
+        const colorClass = isFuture
+          ? 'text-[var(--interactive-primary)]'
+          : isExpired
+            ? 'text-[var(--text-muted)] italic'
+            : 'text-[var(--text-secondary)]';
+        return (
+          <span className={`font-mono text-[11.5px] ${colorClass}`}>
+            {from} → {to}
+          </span>
+        );
+      },
+    },
+    {
       key: 'input',
       header: 'Input $/1M',
       width: 'w-28',
@@ -211,11 +237,12 @@ function PricingRowsTable({
       key: 'status',
       header: 'Status',
       width: 'w-24',
-      render: (row) => (
-        <Badge variant={row.effectiveTo === null ? 'success' : 'neutral'} size="sm">
-          {row.effectiveTo === null ? 'active' : 'historical'}
-        </Badge>
-      ),
+      render: (row) => {
+        const isFuture = row.effectiveFrom ? new Date(row.effectiveFrom) > new Date() : false;
+        if (isFuture) return <Badge variant="info" size="sm">scheduled</Badge>;
+        if (row.effectiveTo === null) return <Badge variant="success" size="sm">active</Badge>;
+        return <Badge variant="neutral" size="sm">historical</Badge>;
+      },
     },
   ];
 

@@ -1,16 +1,31 @@
 import { useEffect } from 'react';
 import { Database } from 'lucide-react';
-import { DataTable, type ColumnDef } from '@/components/ui';
+import {
+  Card,
+  DataTable,
+  HBarList,
+  type ColumnDef,
+  type HBarRowData,
+} from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
 import { formatDateTime, formatInt, formatTokensCompact, formatUsd, truncateId } from '../utils/format';
-import type { EntityRow, OwnerType } from '../types';
+import { toneForPurpose } from '../utils/tones';
+import type { EntityCostBreakdown, EntityRow, GroupedSpend, OwnerType } from '../types';
 
 interface TabProps {
   active: boolean;
 }
 
 const PAGE_SIZE = 25;
+
+const OWNER_LABEL: Record<string, string> = {
+  sherlock_turn: 'sherlock turn',
+  eval_run: 'eval run',
+  report_run: 'report',
+  job: 'job',
+  standalone: 'standalone',
+};
 
 export function EntitiesTab({ active }: TabProps) {
   const slice = useCostStore((s) => s.entities);
@@ -59,19 +74,17 @@ function EntitiesTable({
   pageSize: number;
   onPageChange: (page: number) => void;
 }) {
-  // Explicit widths on every column so no single column claims the leftover
-  // horizontal space when the viewport is wider than the table's minWidth.
   const columns: ColumnDef<EntityRow>[] = [
     {
       key: 'owner',
       header: 'Owner',
       width: 'w-72',
       render: (row) => (
-        <div className="flex flex-col">
-          <span className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-            {row.ownerType}
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center rounded-[4px] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+            {OWNER_LABEL[row.ownerType] ?? row.ownerType}
           </span>
-          <span className="truncate font-mono text-[11px] text-[var(--text-muted)]">
+          <span className="truncate font-mono text-[11.5px] text-[var(--text-secondary)]">
             {truncateId(row.ownerId)}
           </span>
         </div>
@@ -81,7 +94,7 @@ function EntitiesTable({
       key: 'cost',
       header: 'Spend',
       width: 'w-28',
-      cellClassName: 'text-right tabular-nums',
+      cellClassName: 'text-right tabular-nums font-semibold',
       headerClassName: 'text-right',
       render: (row) => formatUsd(row.costUsd),
     },
@@ -145,9 +158,6 @@ function EntitiesTable({
 function EntityDrillDown({ ownerType, ownerId }: { ownerType: OwnerType; ownerId: string }) {
   const loadEntity = useCostStore((s) => s.loadEntity);
   const filtersKey = useCostStore((s) => s.filtersKey);
-  // Pulling directly from the store selector is both the cache read and the
-  // reactive update path — the store patches `entityCache` once the fetch
-  // resolves, and the selector re-runs.
   const detail = useCostStore(
     (s) => s.entityCache[`${filtersKey}:${ownerType}:${ownerId}`],
   );
@@ -158,36 +168,67 @@ function EntityDrillDown({ ownerType, ownerId }: { ownerType: OwnerType; ownerId
   }, [loadEntity, ownerType, ownerId, detail]);
 
   if (!detail) {
-    return <div className="text-xs text-[var(--text-muted)]">Loading drill-down…</div>;
+    return <div className="py-2 text-xs text-[var(--text-muted)]">Loading drill-down…</div>;
   }
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <DetailList title="By purpose" rows={detail.byPurpose} />
-      <DetailList title="By model" rows={detail.byModel} />
+    <div className="space-y-4 py-2">
+      <DrillSummary detail={detail} />
+      <div className="grid gap-4 md:grid-cols-2">
+        <DrillList title="By purpose" rows={detail.byPurpose} />
+        <DrillList title="By model" rows={detail.byModel} />
+      </div>
     </div>
   );
 }
 
-function DetailList({ title, rows }: { title: string; rows: { key: string; costUsd: number }[] }) {
-  if (!rows.length) {
-    return (
-      <div>
-        <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{title}</h4>
-        <p className="text-xs text-[var(--text-muted)]">No data</p>
+function DrillSummary({ detail }: { detail: EntityCostBreakdown }) {
+  return (
+    <Card className="p-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12.5px]">
+        <SummaryItem label="Spend" value={formatUsd(detail.costUsd)} highlight />
+        <SummaryItem label="Tokens" value={formatTokensCompact(detail.totalTokens)} />
+        <SummaryItem label="Calls" value={formatInt(detail.callCount)} />
+        <SummaryItem label="Purposes" value={String(detail.byPurpose.length)} />
+        <SummaryItem label="Models" value={String(detail.byModel.length)} />
       </div>
-    );
-  }
+    </Card>
+  );
+}
+
+function SummaryItem({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
+      <span
+        className={`tabular-nums ${highlight ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function DrillList({ title, rows }: { title: string; rows: GroupedSpend[] }) {
+  const total = rows.reduce((s, r) => s + r.costUsd, 0);
+  const max = rows.reduce((m, r) => Math.max(m, r.costUsd), 0);
+  const hbarRows: HBarRowData[] = rows.map((row, i) => ({
+    key: row.key,
+    label: row.key,
+    pct: max ? row.costUsd / max : 0,
+    tone: toneForPurpose(i),
+    amount: formatUsd(row.costUsd),
+    meta: total ? `${((row.costUsd / total) * 100).toFixed(0)}%` : undefined,
+  }));
   return (
     <div>
-      <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{title}</h4>
-      <ul className="space-y-1 text-[13px]">
-        {rows.map((r) => (
-          <li key={r.key} className="flex items-center justify-between">
-            <span className="truncate text-[var(--text-secondary)]">{r.key}</span>
-            <span className="tabular-nums font-medium text-[var(--text-primary)]">{formatUsd(r.costUsd)}</span>
-          </li>
-        ))}
-      </ul>
+      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        {title}
+      </h4>
+      {rows.length === 0 ? (
+        <p className="py-2 text-xs text-[var(--text-muted)]">No data</p>
+      ) : (
+        <HBarList rows={hbarRows} />
+      )}
     </div>
   );
 }
