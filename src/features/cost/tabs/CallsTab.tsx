@@ -82,12 +82,19 @@ function CallsTable({
   const _ = loadingId ?? activeId;
   void _;
 
+  // Explicit widths on every column so no single column claims the leftover
+  // horizontal space when the container is wider than the table's minWidth.
+  // Model gets the biggest share since model identifiers are long.
   const columns: ColumnDef<CallRow>[] = [
     {
       key: 'created_at',
       header: 'When',
-      width: 'w-32',
-      render: (row) => <span className="text-[var(--text-secondary)]">{formatDateTime(row.createdAt)}</span>,
+      width: 'w-40',
+      render: (row) => (
+        <span className="whitespace-nowrap text-[var(--text-secondary)]">
+          {formatDateTime(row.createdAt)}
+        </span>
+      ),
     },
     {
       key: 'app',
@@ -98,18 +105,23 @@ function CallsTable({
     {
       key: 'provider',
       header: 'Provider',
-      width: 'w-24',
+      width: 'w-28',
       render: (row) => <ProviderTag value={row.provider} />,
     },
     {
       key: 'model',
       header: 'Model',
-      render: (row) => <span className="text-[13px] text-[var(--text-primary)]">{row.model}</span>,
+      width: 'w-64',
+      render: (row) => (
+        <span className="truncate text-[13px] text-[var(--text-primary)]" title={row.model}>
+          {row.model}
+        </span>
+      ),
     },
     {
       key: 'purpose',
       header: 'Purpose',
-      width: 'w-36',
+      width: 'w-40',
       render: (row) => (
         <span className="text-[12px] text-[var(--text-secondary)]">{row.callPurpose ?? '—'}</span>
       ),

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Tag, Plus } from 'lucide-react';
 import { Badge, Button, DataTable, Tabs, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
-import { useIsSuperAdmin } from '@/utils/permissions';
+import { usePermission } from '@/utils/permissions';
 import { notificationService } from '@/services/notifications';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
 import { ProviderTag } from '../components/ProviderTag';
@@ -22,7 +22,7 @@ export function PricingTab({ active }: TabProps) {
   const loadPricing = useCostStore((s) => s.loadPricing);
   const refresh = useCostStore((s) => s.refreshActive);
   const refreshFromModelsDev = useCostStore((s) => s.refreshFromModelsDev);
-  const isSuperAdmin = useIsSuperAdmin();
+  const canEdit = usePermission('cost:edit');
 
   const [editing, setEditing] = useState<PricingRow | 'new' | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
@@ -33,7 +33,7 @@ export function PricingTab({ active }: TabProps) {
   }, [active, loadPricing]);
 
   const doRefresh = async () => {
-    if (!isSuperAdmin) return;
+    if (!canEdit) return;
     setRefreshBusy(true);
     try {
       const diff = await refreshFromModelsDev();
@@ -67,15 +67,16 @@ export function PricingTab({ active }: TabProps) {
           <>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-[12px] text-[var(--text-muted)]">
-                Active pricing rows live-override bootstrap seed. Super-admin-only edits.
+                Active pricing rows live-override bootstrap seed. Edits require the
+                <code className="ml-1 font-mono">cost:edit</code> permission.
               </div>
               <div className="flex items-center gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
                   icon={Plus}
-                  disabled={!isSuperAdmin}
-                  title={isSuperAdmin ? 'Add a pricing row' : 'Super-admin only'}
+                  disabled={!canEdit}
+                  title={canEdit ? 'Add a pricing row' : 'Requires cost:edit permission'}
                   onClick={() => setEditing('new')}
                 >
                   New row
@@ -84,9 +85,9 @@ export function PricingTab({ active }: TabProps) {
                   variant="secondary"
                   size="sm"
                   icon={RefreshCw}
-                  disabled={!isSuperAdmin}
+                  disabled={!canEdit}
                   isLoading={refreshBusy}
-                  title={isSuperAdmin ? 'Refresh from models.dev' : 'Super-admin only — Owner of system tenant'}
+                  title={canEdit ? 'Refresh from models.dev' : 'Requires cost:edit permission'}
                   onClick={doRefresh}
                 >
                   Refresh from models.dev
@@ -103,7 +104,7 @@ export function PricingTab({ active }: TabProps) {
                     <div className="flex h-full min-h-0 flex-col">
                       <PricingRowsTable
                         rows={data.pricing}
-                        canEdit={isSuperAdmin}
+                        canEdit={canEdit}
                         onEdit={(row) => setEditing(row)}
                       />
                     </div>
@@ -151,13 +152,18 @@ function PricingRowsTable({
     {
       key: 'provider',
       header: 'Provider',
-      width: 'w-28',
+      width: 'w-32',
       render: (row) => <ProviderTag value={row.provider} />,
     },
     {
       key: 'model',
       header: 'Model',
-      render: (row) => <span className="text-[13px] text-[var(--text-primary)]">{row.model}</span>,
+      width: 'w-80',
+      render: (row) => (
+        <span className="truncate text-[13px] text-[var(--text-primary)]" title={row.model}>
+          {row.model}
+        </span>
+      ),
     },
     {
       key: 'input',
@@ -223,7 +229,7 @@ function PricingRowsTable({
       emptyDescription="Seed the DB or refresh from models.dev to populate pricing."
       onRowClick={(row) => {
         if (!canEdit) {
-          notificationService.info('Pricing edits require super-admin (Owner of system tenant).');
+          notificationService.info('Pricing edits require the cost:edit permission.');
           return;
         }
         if (row.effectiveTo !== null) {

@@ -20,7 +20,7 @@ import {
   EvalAdversarialDetailV2,
   EvalLogs,
 } from "@/features/evalRuns";
-import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequireOwner } from "@/features/auth";
+import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from "@/features/auth";
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
 import { AdminUsersPage } from "@/features/admin";
 import {
@@ -183,13 +183,11 @@ export function Router() {
           <Route
             path={routes.adminCost}
             element={
-              <AdminGuard>
-                <RequireOwner>
-                  <Suspense fallback={null}>
-                    <CostPage />
-                  </Suspense>
-                </RequireOwner>
-              </AdminGuard>
+              <RequirePermission action="cost:view">
+                <Suspense fallback={null}>
+                  <CostPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
 

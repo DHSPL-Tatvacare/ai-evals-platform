@@ -217,7 +217,7 @@ class CostTrackingProcessorTests(unittest.TestCase):
         # ResponseSpanData imported inside processor; pass a duck-typed
         # instance that passes isinstance check via actual class below.
         from agents.tracing import ResponseSpanData
-        data = ResponseSpanData(response=response, input=None, usage=None)
+        data = ResponseSpanData(response=response, input=None)
         meta, model, api_surface = _extract_span_metadata(data)
         assert meta is not None
         self.assertEqual(model, 'gpt-4o-mini')

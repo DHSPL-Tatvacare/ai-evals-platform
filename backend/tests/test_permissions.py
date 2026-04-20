@@ -59,11 +59,12 @@ ROUTE_EXPECTATIONS = {
     'routes/rules.py': ["require_permission('configuration:edit')"],
     'routes/adversarial_config.py': ["require_permission('configuration:edit')"],
     'routes/adversarial_test_cases.py': ['require_permission("configuration:edit")'],
-    # Cost & usage (Phase 4) — Owner reads, super-admin writes. No grantable
-    # permission; gating uses require_owner / require_super_admin directly.
+    # Cost & usage — two grantable permissions: cost:view (reads) and cost:edit
+    # (pricing mutations, models.dev refresh, rollup backfill). No owner or
+    # super-admin gating on this surface.
     'routes/cost.py': [
-        'Depends(require_owner)',
-        'Depends(require_super_admin)',
+        "require_permission('cost:view')",
+        "require_permission('cost:edit')",
     ],
 }
 
@@ -80,13 +81,17 @@ def test_permission_enum_has_all_expected_values():
         'asset:edit',
         'asset:delete',
         'asset:share',
+        'review:manage',
         'report:generate',
         'insights:view',
         'configuration:edit',
+        'cost:view',
+        'cost:edit',
         'user:create',
         'invite_link:manage',
         'user:edit',
         'user:deactivate',
+        'user:delete',
         'user:reset_password',
         'role:assign',
     }
@@ -159,9 +164,6 @@ def test_permission_catalog_serialization_exposes_owner_only_surfaces_separately
         'role:lifecycle',
         'tenant:configuration',
         'platform:bootstrap',
-        'cost:access',
-        'cost:pricing',
-        'cost:pricing.refresh',
     }
 
 

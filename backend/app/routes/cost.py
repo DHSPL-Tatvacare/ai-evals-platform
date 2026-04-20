@@ -1,29 +1,33 @@
 """Cost & usage API.
 
-Owner-read / super-admin-write surface over the Phase 1 ``llm_usage`` +
-``model_pricing`` fact tables. Every endpoint is tenant-scoped for Owners
-(they see their own tenant) and tenant-wide for super-admins (they see every
-tenant).
+Two grantable permissions gate this surface:
+
+    cost:view   — read cost/usage data (dashboard, chips, pricing rows,
+                  refresh-history drill-downs).
+    cost:edit   — mutate global pricing rows, trigger models.dev refresh,
+                  run the rollup backfill.
+
+Reads are tenant-scoped for every caller (no cross-tenant peeking via a
+super-admin gate). Mutations touch the global pricing catalog and are
+audit-logged; the rate limit on ``POST /api/cost/pricing/refresh`` remains
+1/hour/user.
 
 Endpoint bundle shapes mirror §9.3 of the hardened spec:
 
-    GET  /api/cost/overview                     — KPI row + spend-by-app
-    GET  /api/cost/spend                        — grouped spend bundle
-    GET  /api/cost/entities                     — paginated expensive entities
-    GET  /api/cost/entity/{owner_type}/{owner_id}  — single entity drill-down
-    POST /api/cost/entity/batch                 — CostChip batch lookup
-    GET  /api/cost/calls                        — paginated raw calls
-    GET  /api/cost/calls/{id}                   — single call drawer
-    GET  /api/cost/efficiency                   — cache / error / unpriced bundle
-    GET  /api/cost/pricing/bundle               — pricing rows + refresh history
-    POST /api/cost/pricing                      — new pricing row (super-admin)
-    PATCH /api/cost/pricing/{id}                — closes current + inserts new (super-admin)
-    POST /api/cost/pricing/refresh              — models.dev refresh (super-admin + 1/hour)
-    GET  /api/cost/pricing/refresh/{snapshot_id} — snapshot drill
-    POST /api/admin/cost-rollup/backfill        — ops (super-admin)
-
-None of these endpoints write to ``llm_usage`` — they only read. Mutations
-are confined to ``model_pricing`` / ``models_dev_*`` under super-admin auth.
+    GET   /api/cost/overview                        — KPI row + spend-by-app
+    GET   /api/cost/spend                           — grouped spend bundle
+    GET   /api/cost/entities                        — paginated expensive entities
+    GET   /api/cost/entity/{owner_type}/{owner_id}  — single entity drill-down
+    POST  /api/cost/entity/batch                    — CostChip batch lookup
+    GET   /api/cost/calls                           — paginated raw calls
+    GET   /api/cost/calls/{id}                      — single call drawer
+    GET   /api/cost/efficiency                      — cache / error / unpriced bundle
+    GET   /api/cost/pricing/bundle                  — pricing rows + refresh history
+    POST  /api/cost/pricing                         — new pricing row (cost:edit)
+    PATCH /api/cost/pricing/{id}                    — close current + insert new (cost:edit)
+    POST  /api/cost/pricing/refresh                 — models.dev refresh (cost:edit + 1/hour)
+    GET   /api/cost/pricing/refresh/{snapshot_id}   — snapshot drill
+    POST  /api/admin/cost-rollup/backfill           — ops (cost:edit)
 """
 from __future__ import annotations
 
@@ -42,12 +46,8 @@ from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import (
-    AuthContext,
-    is_super_admin,
-    require_owner,
-    require_super_admin,
-)
+from app.auth.context import AuthContext
+from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.cost import (
     LlmUsage,
@@ -56,6 +56,7 @@ from app.models.cost import (
     ModelsDevCatalog,
     ModelsDevSnapshot,
 )
+from app.models.user import User
 from app.schemas.base import CamelModel
 from app.services.audit import write_audit_log
 from app.services.cost_tracking.pricing_cache import pricing_cache
@@ -111,17 +112,17 @@ def _parse_range(range_param: str | None) -> tuple[datetime, datetime]:
 
 
 def _tenant_scope_clause(auth: AuthContext):
-    """Owners see their tenant only; super-admins see everything."""
-    if is_super_admin(auth):
-        return None
+    """Every caller — including Owners — is scoped to their own tenant.
+
+    Cross-tenant visibility is intentionally not a cost-permission concern;
+    platform operators who need all-tenant views should use a different
+    tool rather than overload `cost:view`.
+    """
     return LlmUsage.tenant_id == auth.tenant_id
 
 
 def _apply_tenant_scope(stmt, auth: AuthContext, tenant_column):
-    clause = None if is_super_admin(auth) else tenant_column == auth.tenant_id
-    if clause is not None:
-        stmt = stmt.where(clause)
-    return stmt
+    return stmt.where(tenant_column == auth.tenant_id)
 
 
 def _apply_optional_fact_filters(
@@ -432,6 +433,18 @@ class BackfillRequest(CamelModel):
     end: date
 
 
+class UnpricedBackfillRequest(CamelModel):
+    limit: int | None = None
+    all_tenants: bool = False
+
+
+class UnpricedBackfillResponse(CamelModel):
+    scanned: int
+    repriced: int
+    still_unpriced: int
+    days_rolled: int
+
+
 class BackfillResponse(CamelModel):
     days_processed: int
     rows_upserted: int
@@ -451,7 +464,7 @@ async def cost_overview(
     app_id: str | None = Query(None),
     provider: str | None = Query(None),
     model: str | None = Query(None),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> CostOverviewResponse:
     start, end = _parse_range(range)
@@ -667,7 +680,7 @@ async def cost_spend(
     app_id: str | None = Query(None),
     provider: str | None = Query(None),
     model: str | None = Query(None),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> SpendBundleResponse:
     start, end = _parse_range(range)
@@ -706,16 +719,11 @@ async def cost_spend(
         model=model,
         limit=10,
     )
-    top_users = await _grouped_spend(
+    top_users = await _top_users_by_email(
         db,
         auth,
         start,
         end,
-        func.cast(func.coalesce(LlmUsage.user_id, uuid.UUID(int=0)), type_=LlmUsage.user_id.type),
-        rollup_group_column=func.cast(
-            func.coalesce(LlmUsageDailyRollup.user_id, uuid.UUID(int=0)),
-            type_=LlmUsageDailyRollup.user_id.type,
-        ),
         app_id=app_id,
         provider=provider,
         model=model,
@@ -737,7 +745,7 @@ async def cost_efficiency(
     app_id: str | None = Query(None),
     provider: str | None = Query(None),
     model: str | None = Query(None),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> EfficiencyBundleResponse:
     start, end = _parse_range(range)
@@ -889,6 +897,60 @@ async def cost_efficiency(
     )
 
 
+async def _top_users_by_email(
+    db: AsyncSession,
+    auth: AuthContext,
+    start: datetime,
+    end: datetime,
+    *,
+    app_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    limit: int = 10,
+) -> list[GroupedSpend]:
+    """Top-spend users joined with ``users.email`` — no UUID rendering on the UI side.
+
+    Reads ``llm_usage`` directly (rollups don't carry email). The join is
+    left-outer so rows with a deleted/null user_id don't disappear; they
+    collapse under the ``unknown`` bucket via ``coalesce(email, 'unknown')``.
+    """
+    filters: list[Any] = [
+        LlmUsage.created_at >= start,
+        LlmUsage.created_at < end,
+    ]
+    _apply_optional_fact_filters(
+        filters, LlmUsage, app_id=app_id, provider=provider, model=model,
+    )
+
+    email_key = func.coalesce(User.email, 'unknown').label('key')
+    stmt = (
+        select(
+            email_key,
+            _sum_column(LlmUsage.cost_usd, 'cost_usd'),
+            _sum_column(LlmUsage.total_tokens, 'tokens'),
+            func.count(LlmUsage.id).label('calls'),
+        )
+        .select_from(LlmUsage)
+        .join(User, User.id == LlmUsage.user_id, isouter=True)
+        .where(and_(*filters))
+        .group_by(email_key)
+        .order_by(desc('cost_usd'), desc('calls'))
+        .limit(limit)
+    )
+    stmt = _apply_tenant_scope(stmt, auth, LlmUsage.tenant_id)
+
+    rows = (await db.execute(stmt)).all()
+    return [
+        GroupedSpend(
+            key=str(row[0]),
+            cost_usd=_to_float(row[1]),
+            tokens=int(row[2] or 0),
+            calls=int(row[3] or 0),
+        )
+        for row in rows
+    ]
+
+
 async def _grouped_spend(
     db: AsyncSession,
     auth: AuthContext,
@@ -1005,7 +1067,7 @@ async def list_entities(
     sort: Literal['cost_desc', 'calls_desc', 'recent'] = Query('cost_desc'),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=_ENTITIES_PAGE_MAX),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> EntityListResponse:
     start, end = _parse_range(range)
@@ -1076,7 +1138,7 @@ async def entity_drill(
     app_id: str | None = Query(None),
     provider: str | None = Query(None),
     model: str | None = Query(None),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> EntityDrillDown:
     start, end = _parse_range(range)
@@ -1142,7 +1204,7 @@ async def entity_drill(
 @router.post('/entity/batch', response_model=dict[str, ChipSummary])
 async def entity_batch(
     body: BatchLookupRequest,
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, ChipSummary]:
     """Fetch chip summaries for up to 100 entities in one round-trip."""
@@ -1212,7 +1274,7 @@ async def list_calls(
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=_CALLS_PAGE_MAX),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> CallsListResponse:
     start, end = _parse_range(range)
@@ -1244,7 +1306,7 @@ async def list_calls(
 @router.get('/calls/{call_id}', response_model=CallDetail)
 async def call_detail(
     call_id: uuid.UUID,
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> CallDetail:
     stmt = select(LlmUsage).where(LlmUsage.id == call_id)
@@ -1301,7 +1363,7 @@ def _row_to_call_detail(row: LlmUsage) -> CallDetail:
 @router.get('/pricing/bundle', response_model=PricingBundleResponse)
 async def pricing_bundle(
     active_only: bool = Query(True),
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingBundleResponse:
     pricing_stmt = select(ModelPricing)
@@ -1334,7 +1396,7 @@ async def pricing_bundle(
 async def pricing_create(
     body: PricingCreateRequest,
     request: Request,
-    auth: AuthContext = Depends(require_super_admin),
+    auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingRowOut:
     now = datetime.now(timezone.utc)
@@ -1397,7 +1459,7 @@ async def pricing_patch(
     pricing_id: uuid.UUID,
     body: PricingPatchRequest,
     request: Request,
-    auth: AuthContext = Depends(require_super_admin),
+    auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingRowOut:
     existing = (await db.execute(select(ModelPricing).where(ModelPricing.id == pricing_id))).scalars().first()
@@ -1475,7 +1537,7 @@ async def pricing_patch(
 @limiter.limit('1/hour')
 async def pricing_refresh(
     request: Request,
-    auth: AuthContext = Depends(require_super_admin),
+    auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> RefreshDiff:
     """Pull the latest pricing from models.dev.
@@ -1541,10 +1603,42 @@ async def pricing_refresh(
     )
 
 
+@router.post('/pricing/backfill-unpriced', response_model=UnpricedBackfillResponse)
+async def pricing_backfill_unpriced(
+    body: UnpricedBackfillRequest,
+    request: Request,
+    auth: AuthContext = require_permission('cost:edit'),
+    db: AsyncSession = Depends(get_db),
+) -> UnpricedBackfillResponse:
+    """Re-price every ``llm_usage`` row with ``pricing_fallback=true``.
+
+    Scoped to the caller's tenant unless ``all_tenants=true`` is requested
+    (still gated by ``cost:edit``). Rollups for affected days are re-run
+    automatically. Safe to re-run — rows that remain unpriced stay unpriced.
+    """
+    from app.services.cost_tracking.backfill import backfill_unpriced
+
+    tenant_scope = None if body.all_tenants else auth.tenant_id
+    result = await backfill_unpriced(db, tenant_id=tenant_scope, limit=body.limit)
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action='cost.pricing.backfill_unpriced',
+        entity_type='llm_usage',
+        entity_id=uuid.uuid4(),
+        after_state={'all_tenants': body.all_tenants, 'limit': body.limit, **result},
+        request=request,
+    )
+    await db.commit()
+    return UnpricedBackfillResponse(**result)
+
+
 @router.get('/pricing/refresh/{snapshot_id}', response_model=SnapshotRowOut)
 async def pricing_refresh_snapshot(
     snapshot_id: uuid.UUID,
-    auth: AuthContext = Depends(require_owner),
+    auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> SnapshotRowOut:
     row = (await db.execute(select(ModelsDevSnapshot).where(ModelsDevSnapshot.id == snapshot_id))).scalars().first()
@@ -1561,7 +1655,7 @@ async def pricing_refresh_snapshot(
 async def rollup_backfill(
     body: BackfillRequest,
     request: Request,
-    auth: AuthContext = Depends(require_super_admin),
+    auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> BackfillResponse:
     from app.services.cost_tracking.rollup import populate_rollup_range

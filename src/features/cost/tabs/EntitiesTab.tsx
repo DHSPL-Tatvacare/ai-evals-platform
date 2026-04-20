@@ -59,21 +59,28 @@ function EntitiesTable({
   pageSize: number;
   onPageChange: (page: number) => void;
 }) {
+  // Explicit widths on every column so no single column claims the leftover
+  // horizontal space when the viewport is wider than the table's minWidth.
   const columns: ColumnDef<EntityRow>[] = [
     {
       key: 'owner',
       header: 'Owner',
+      width: 'w-72',
       render: (row) => (
         <div className="flex flex-col">
-          <span className="text-[13px] font-medium text-[var(--text-primary)]">{row.ownerType}</span>
-          <span className="text-[11px] text-[var(--text-muted)]">{truncateId(row.ownerId)}</span>
+          <span className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+            {row.ownerType}
+          </span>
+          <span className="truncate font-mono text-[11px] text-[var(--text-muted)]">
+            {truncateId(row.ownerId)}
+          </span>
         </div>
       ),
     },
     {
       key: 'cost',
       header: 'Spend',
-      width: 'w-32',
+      width: 'w-28',
       cellClassName: 'text-right tabular-nums',
       headerClassName: 'text-right',
       render: (row) => formatUsd(row.costUsd),
@@ -97,15 +104,15 @@ function EntitiesTable({
     {
       key: 'first_at',
       header: 'First call',
-      width: 'w-32',
-      cellClassName: 'text-[var(--text-secondary)]',
+      width: 'w-40',
+      cellClassName: 'whitespace-nowrap text-[var(--text-secondary)]',
       render: (row) => formatDateTime(row.firstAt),
     },
     {
       key: 'last_at',
       header: 'Last call',
-      width: 'w-32',
-      cellClassName: 'text-[var(--text-secondary)]',
+      width: 'w-40',
+      cellClassName: 'whitespace-nowrap text-[var(--text-secondary)]',
       render: (row) => formatDateTime(row.lastAt),
     },
   ];

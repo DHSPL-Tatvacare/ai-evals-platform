@@ -164,6 +164,30 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         ),
     ),
     PermissionGroup(
+        id='cost',
+        label='Cost & usage',
+        description='View LLM spend, token usage, and manage global pricing lookups.',
+        permissions=(
+            PermissionCatalogEntry(
+                id='cost:view',
+                label='View cost & usage',
+                description='Access cost dashboards, raw call logs, and current pricing rows.',
+                group_id='cost',
+                group_label='Cost & usage',
+            ),
+            PermissionCatalogEntry(
+                id='cost:edit',
+                label='Edit pricing & refresh catalog',
+                description=(
+                    'Create/edit pricing rows, refresh pricing from models.dev, '
+                    'and run the cost rollup backfill.'
+                ),
+                group_id='cost',
+                group_label='Cost & usage',
+            ),
+        ),
+    ),
+    PermissionGroup(
         id='users',
         label='User management',
         description='Manage users, invite links, and role assignment.',
@@ -236,21 +260,6 @@ OWNER_ONLY_SURFACES: tuple[dict[str, str], ...] = (
         'id': 'platform:bootstrap',
         'label': 'Platform bootstrap actions',
         'description': 'System bootstrapping and platform-only setup actions are not grantable.',
-    },
-    {
-        'id': 'cost:access',
-        'label': 'Cost & usage',
-        'description': 'View cost dashboards, raw call logs, and current pricing (Owner-only).',
-    },
-    {
-        'id': 'cost:pricing',
-        'label': 'Pricing',
-        'description': 'Manage global pricing rows (super-admin only).',
-    },
-    {
-        'id': 'cost:pricing.refresh',
-        'label': 'Refresh pricing from models.dev',
-        'description': 'Refresh the global pricing catalog from models.dev (super-admin only).',
     },
 )
 

@@ -31,7 +31,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppConfig, useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
-import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission, useIsOwner } from "@/utils/permissions";
+import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission, usePermission } from "@/utils/permissions";
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
 import type { AppId } from '@/types';
@@ -71,7 +71,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = userHasAnyPermission(user, ADMIN_ACCESS_PERMISSIONS);
   const isAdminActive = location.pathname === routes.adminUsers;
-  const isOwnerUser = useIsOwner();
+  const canViewCost = usePermission('cost:view');
   const isCostActive = location.pathname.startsWith(routes.adminCost);
 
   // Modal management (for batch/adversarial wizards)
@@ -281,7 +281,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
               <Users className="h-5 w-5" />
             </Link>
           )}
-          {isOwnerUser && (
+          {canViewCost && (
             <Link
               to={routes.adminCost}
               className={cn(
@@ -423,7 +423,7 @@ export function Sidebar({ onNewEval }: SidebarProps) {
                 isGuideActive={isGuideActive}
                 isAdmin={isAdmin}
                 isAdminActive={isAdminActive}
-                isOwner={isOwnerUser}
+                isOwner={canViewCost}
                 isCostActive={isCostActive}
                 onLogout={logout}
                 onChangePassword={() => {

@@ -103,6 +103,35 @@ async def fetch_pricing(
     return PricingRow.from_orm(row)
 
 
+async def fetch_best_available_pricing(
+    db: AsyncSession, provider: str, model: str
+) -> PricingRow | None:
+    """Pricing lookup for backfill / retroactive costing.
+
+    Returns the most recent pricing row for (provider, model) regardless of
+    ``effective_from`` / ``effective_to``. Used when re-pricing historical
+    ``llm_usage`` rows whose original ``created_at`` predates the first
+    pricing snapshot — the live recorder must still use ``fetch_pricing``.
+    """
+    stmt = (
+        select(ModelPricing)
+        .where(
+            ModelPricing.provider == provider,
+            ModelPricing.model == model,
+        )
+        .order_by(
+            ModelPricing.effective_to.is_(None).desc(),
+            ModelPricing.effective_from.desc(),
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    row = result.scalars().first()
+    if row is None:
+        return None
+    return PricingRow.from_orm(row)
+
+
 def compute_cost(
     pricing: PricingRow | None,
     *,

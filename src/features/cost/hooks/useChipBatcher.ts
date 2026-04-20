@@ -1,6 +1,6 @@
 /**
  * Chip batcher — a single module-level queue that coalesces
- * `requestChip(filtersKey, ownerType, ownerId)` calls into one batch POST
+ * `requestChip(filters, filtersKey, ownerType, ownerId)` calls into one batch POST
  * per 50 ms window (or sooner if the queue hits 100 items).
  *
  * Contract (§10.8):
@@ -12,13 +12,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { costApi } from '@/services/api/costApi';
 import { useCostStore } from '@/stores/costStore';
-import type { ChipSummary, OwnerType } from '../types';
+import type { ChipSummary, CostFilters, OwnerType } from '../types';
 
 const WINDOW_MS = 50;
 const MAX_BATCH = 100;
 
 interface PendingEntry {
   filtersKey: string;
+  filters: Pick<CostFilters, 'range' | 'appId' | 'provider' | 'model'>;
   ownerType: OwnerType;
   ownerId: string;
   resolvers: Array<(value: ChipSummary) => void>;
@@ -56,15 +57,14 @@ async function flush() {
     for (const resolve of entry.resolvers) resolve(summary);
   };
 
-  for (const [filtersKey, entries] of byFiltersKey) {
-    // filtersKey is produced by `hashFilters`: `range|appId|provider|model`.
-    const [range, appId] = filtersKey.split('|');
+  for (const entries of byFiltersKey.values()) {
+    const filters = entries[0]?.filters ?? { range: '7d' };
 
     for (let i = 0; i < entries.length; i += MAX_BATCH) {
       const slice = entries.slice(i, i + MAX_BATCH);
       try {
         const response = await costApi.batchChips(
-          { range: range || '7d', appId: appId || undefined },
+          filters,
           slice.map((e) => ({ ownerType: e.ownerType, ownerId: e.ownerId })),
         );
         for (const entry of slice) {
@@ -79,6 +79,7 @@ async function flush() {
 }
 
 export function requestChip(
+  filters: Pick<CostFilters, 'range' | 'appId' | 'provider' | 'model'>,
   filtersKey: string,
   ownerType: OwnerType,
   ownerId: string,
@@ -95,6 +96,7 @@ export function requestChip(
   return new Promise<ChipSummary>((resolve) => {
     pending.set(key, {
       filtersKey,
+      filters,
       ownerType,
       ownerId,
       resolvers: [resolve],
@@ -132,35 +134,37 @@ export function useChipSummary(
   ownerType: OwnerType | null | undefined,
   ownerId: string | null | undefined,
 ): { summary: ChipSummary | null; loading: boolean } {
+  const filters = useCostStore((s) => s.filters);
   const filtersKey = useCostStore((s) => s.filtersKey);
+  const activeKey = ownerType && ownerId ? keyOf(filtersKey, ownerType, ownerId) : null;
   // Initializing state from the cache avoids calling setState inside
   // `useEffect` for the hot path where the value is already memoized.
-  const [summary, setSummary] = useState<ChipSummary | null>(() =>
-    initialSummary(filtersKey, ownerType, ownerId),
-  );
-  const [loading, setLoading] = useState<boolean>(() =>
-    initialSummary(filtersKey, ownerType, ownerId) === null && !!ownerType && !!ownerId,
-  );
+  const [resolved, setResolved] = useState<{ key: string; summary: ChipSummary } | null>(() => {
+    if (!activeKey) return null;
+    const cached = initialSummary(filtersKey, ownerType, ownerId);
+    return cached ? { key: activeKey, summary: cached } : null;
+  });
+  const summary = initialSummary(filtersKey, ownerType, ownerId) ??
+    (activeKey && resolved?.key === activeKey ? resolved.summary : null);
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     cancelledRef.current = false;
-    if (!ownerType || !ownerId) {
+    if (!ownerType || !ownerId || !activeKey) {
       return;
     }
-    const cached = cache.get(keyOf(filtersKey, ownerType, ownerId));
+    const cached = cache.get(activeKey);
     if (cached) {
       return;
     }
-    void requestChip(filtersKey, ownerType, ownerId).then((value) => {
+    void requestChip(filters, filtersKey, ownerType, ownerId).then((value) => {
       if (cancelledRef.current) return;
-      setSummary(value);
-      setLoading(false);
+      setResolved({ key: activeKey, summary: value });
     });
     return () => {
       cancelledRef.current = true;
     };
-  }, [filtersKey, ownerType, ownerId]);
+  }, [activeKey, filters, filtersKey, ownerType, ownerId]);
 
-  return { summary, loading };
+  return { summary, loading: activeKey !== null && summary === null };
 }

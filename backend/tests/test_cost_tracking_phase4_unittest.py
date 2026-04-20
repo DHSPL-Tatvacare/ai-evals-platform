@@ -59,12 +59,20 @@ class SuperAdminGatingTests(unittest.IsolatedAsyncioTestCase):
             await require_super_admin(auth=auth)
 
 
-class OwnerOnlySurfacesTests(unittest.TestCase):
-    def test_cost_surfaces_registered(self):
-        ids = {entry['id'] for entry in OWNER_ONLY_SURFACES}
-        self.assertIn('cost:access', ids)
-        self.assertIn('cost:pricing', ids)
-        self.assertIn('cost:pricing.refresh', ids)
+class CostPermissionCatalogTests(unittest.TestCase):
+    def test_cost_permissions_are_grantable(self):
+        """`cost:view` + `cost:edit` are ordinary grantable permissions; the
+        previous `cost:*` owner-only surfaces were removed when the surface
+        moved off `require_owner` / `require_super_admin` gating."""
+        from app.auth.permission_catalog import VALID_PERMISSIONS
+
+        self.assertIn('cost:view', VALID_PERMISSIONS)
+        self.assertIn('cost:edit', VALID_PERMISSIONS)
+
+        owner_only_ids = {entry['id'] for entry in OWNER_ONLY_SURFACES}
+        self.assertNotIn('cost:access', owner_only_ids)
+        self.assertNotIn('cost:pricing', owner_only_ids)
+        self.assertNotIn('cost:pricing.refresh', owner_only_ids)
 
 
 class ModelsDevRefreshTests(unittest.IsolatedAsyncioTestCase):
