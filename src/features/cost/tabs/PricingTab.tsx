@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Tag, Plus } from 'lucide-react';
+import { RefreshCw, Tag, Plus, DollarSign } from 'lucide-react';
 import { Alert, Badge, Button, DataTable, ProviderTag, Tabs, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { ApiError } from '@/services/api/client';
@@ -22,10 +22,12 @@ export function PricingTab({ active }: TabProps) {
   const loadPricing = useCostStore((s) => s.loadPricing);
   const refresh = useCostStore((s) => s.refreshActive);
   const refreshFromModelsDev = useCostStore((s) => s.refreshFromModelsDev);
+  const backfillUnpricedUsage = useCostStore((s) => s.backfillUnpricedUsage);
   const canEdit = usePermission('cost:edit');
 
   const [editing, setEditing] = useState<PricingRow | 'new' | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
   const [lastDiff, setLastDiff] = useState<RefreshDiff | null>(null);
 
   useEffect(() => {
@@ -41,13 +43,35 @@ export function PricingTab({ active }: TabProps) {
       await loadPricing();
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
-        notificationService.warning('Pricing refresh is rate-limited. Please wait before retrying.');
+        const retryAfterRaw = e.headers?.get('retry-after');
+        const retryAfter = retryAfterRaw ? Number(retryAfterRaw) : NaN;
+        let wait = 'a moment';
+        if (Number.isFinite(retryAfter) && retryAfter > 0) {
+          wait =
+            retryAfter >= 60
+              ? `${Math.ceil(retryAfter / 60)} minute${Math.ceil(retryAfter / 60) === 1 ? '' : 's'}`
+              : `${Math.ceil(retryAfter)} second${Math.ceil(retryAfter) === 1 ? '' : 's'}`;
+        }
+        notificationService.warning(`Pricing refresh is rate-limited. Try again in ${wait}.`);
       } else {
         const msg = e instanceof Error ? e.message : 'Refresh failed';
         notificationService.error(msg);
       }
     } finally {
       setRefreshBusy(false);
+    }
+  };
+
+  const doBackfill = async () => {
+    if (!canEdit) return;
+    setBackfillBusy(true);
+    try {
+      await backfillUnpricedUsage();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Backfill failed';
+      notificationService.error(msg);
+    } finally {
+      setBackfillBusy(false);
     }
   };
 
@@ -89,6 +113,21 @@ export function PricingTab({ active }: TabProps) {
                   onClick={() => setEditing('new')}
                 >
                   New row
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={DollarSign}
+                  disabled={!canEdit || backfillBusy}
+                  isLoading={backfillBusy}
+                  title={
+                    canEdit
+                      ? 'Re-price historical usage rows whose original pricing was missing'
+                      : 'Requires cost:edit permission'
+                  }
+                  onClick={doBackfill}
+                >
+                  Backfill unpriced usage
                 </Button>
                 <Button
                   variant="secondary"

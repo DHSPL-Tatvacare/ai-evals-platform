@@ -235,7 +235,7 @@ export default function EvalTable({
         width: 'min-w-[180px]',
         render: (e) => (
           <Link
-            to={routes.kaira.threadDetail(e.thread_id)}
+            to={routes.kaira.threadDetail(e.thread_id, e.run_id)}
             className="font-mono text-sm text-[var(--text-brand)] hover:underline"
             onClick={(ev) => ev.stopPropagation()}
           >
@@ -354,7 +354,7 @@ export default function EvalTable({
         data={paged}
         keyExtractor={(row) => String(row.id)}
         onRowClick={(row) => {
-          const target = routes.kaira.threadDetail(row.thread_id);
+          const target = routes.kaira.threadDetail(row.thread_id, row.run_id);
           // Threads belonging to this review's scope are still inside the
           // review — dirty edits are shared via reviewModeStore, so there's
           // nothing to save before navigating. Only guard out-of-scope rows

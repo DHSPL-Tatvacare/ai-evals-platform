@@ -18,6 +18,7 @@ import type {
   RefreshDiff,
   SnapshotRow,
   SpendBundle,
+  UnpricedBackfillResponse,
 } from '@/features/cost/types';
 
 function buildQuery(params: Record<string, string | number | undefined | null>): string {
@@ -127,6 +128,15 @@ export const costApi = {
 
   refreshPricing: (): Promise<RefreshDiff> =>
     apiRequest<RefreshDiff>(`/api/cost/pricing/refresh`, { method: 'POST' }),
+
+  backfillUnpriced: (opts: { allTenants?: boolean; limit?: number } = {}): Promise<UnpricedBackfillResponse> =>
+    apiRequest<UnpricedBackfillResponse>(`/api/cost/pricing/backfill-unpriced`, {
+      method: 'POST',
+      body: JSON.stringify({
+        all_tenants: opts.allTenants ?? false,
+        limit: opts.limit ?? null,
+      }),
+    }),
 
   fetchSnapshot: (snapshotId: string): Promise<SnapshotRow> =>
     apiRequest<SnapshotRow>(`/api/cost/pricing/refresh/${encodeURIComponent(snapshotId)}`),

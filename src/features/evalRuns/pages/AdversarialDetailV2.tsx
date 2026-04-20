@@ -23,6 +23,8 @@ import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
 import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
+import { InlineReviewProvider } from '@/features/reviews/inline';
+import { usePermission } from '@/utils/permissions';
 
 /** Normalize adversarial TranscriptTurns into ChatMessage[] so LinkedChatViewer works unmodified. */
 function transcriptToMessages(result: AdversarialResult): ChatMessage[] {
@@ -40,6 +42,7 @@ function transcriptToMessages(result: AdversarialResult): ChatMessage[] {
 export default function AdversarialDetailV2() {
   const { runId, evalId } = useParams<{ runId: string; evalId: string }>();
   const navigate = useNavigate();
+  const canReview = usePermission('review:manage');
   const kairaSettings = useAppSettingsStore((s) => s.settings['kaira-bot']);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const [evalItem, setEvalItem] = useState<AdversarialEvalRow | null>(null);
@@ -189,6 +192,8 @@ export default function AdversarialDetailV2() {
           <RuleComplianceTab
             rules={result.rule_compliance!}
             sourceLabel="Adversarial"
+            threadId={evalId}
+            runId={runId}
           />
         ),
       });
@@ -214,7 +219,7 @@ export default function AdversarialDetailV2() {
     }
 
     return tabList;
-  }, [result, verdict, infraError, hasRules, canonicalCase]);
+  }, [result, verdict, infraError, hasRules, canonicalCase, evalId, runId]);
 
   if (error) {
     return (
@@ -236,6 +241,7 @@ export default function AdversarialDetailV2() {
   const goalVerdicts = canonicalCase?.judge.goalVerdicts ?? [];
 
   return (
+    <InlineReviewProvider runId={runId ?? ''} appId="kaira-bot" enabled={canReview && !!runId}>
     <div className="flex flex-col flex-1 min-h-0">
       <div className="shrink-0 pb-3 space-y-3">
         <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
@@ -454,5 +460,6 @@ export default function AdversarialDetailV2() {
         icon={RotateCcw}
       />
     </div>
+    </InlineReviewProvider>
   );
 }

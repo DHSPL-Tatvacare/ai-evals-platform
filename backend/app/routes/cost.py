@@ -1605,7 +1605,7 @@ async def pricing_refresh(
         action='cost.pricing.refresh',
         entity_type='models_dev_snapshot',
         entity_id=diff['snapshot_id'],
-        after_state=diff,
+        after_state={**diff, 'snapshot_id': str(diff['snapshot_id'])},
         request=request,
     )
     await db.commit()

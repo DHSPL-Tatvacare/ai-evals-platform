@@ -26,6 +26,7 @@ import type {
   PricingPatchPayload,
   RefreshDiff,
   SpendBundle,
+  UnpricedBackfillResponse,
 } from '@/features/cost/types';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -91,6 +92,7 @@ interface CostState {
   createPricing: (payload: PricingCreatePayload) => Promise<void>;
   patchPricing: (pricingId: string, payload: PricingPatchPayload) => Promise<void>;
   refreshFromModelsDev: () => Promise<RefreshDiff>;
+  backfillUnpricedUsage: (opts?: { allTenants?: boolean }) => Promise<UnpricedBackfillResponse>;
 
   reset: () => void;
 }
@@ -343,6 +345,29 @@ export const useCostStore = create<CostState>((set, get) => ({
       );
     }
     return diff;
+  },
+
+  backfillUnpricedUsage: async (opts) => {
+    const result = await costApi.backfillUnpriced({ allTenants: opts?.allTenants ?? false });
+    const { scanned, repriced, stillUnpriced } = result;
+    if (scanned === 0) {
+      notificationService.info('No unpriced usage rows found');
+    } else {
+      notificationService.success(
+        `Backfill · scanned ${scanned} · repriced ${repriced} · still unpriced ${stillUnpriced}`,
+      );
+    }
+    // Invalidate caches so downstream tabs pick up new costs.
+    set({
+      overview: initialSlice<CostOverview>(),
+      spend: initialSlice<SpendBundle>(),
+      efficiency: initialSlice<EfficiencyBundle>(),
+      entities: { ...initialSlice<EntityListPage>(), page: 1 },
+      calls: { ...initialSlice<CallsPage>(), page: 1 },
+      entityCache: {},
+      callDetailCache: {},
+    });
+    return result;
   },
 
   reset: () => {

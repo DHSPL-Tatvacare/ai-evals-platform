@@ -159,7 +159,7 @@ export default function FrictionAnalysis({ friction, runId }: Props) {
                             </span>
                             {runId && (
                               <a
-                                href={routes.kaira.threadDetail(tid)}
+                                href={routes.kaira.threadDetail(tid, runId)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-[var(--text-muted)] hover:text-[var(--text-brand)] transition-colors print:hidden"

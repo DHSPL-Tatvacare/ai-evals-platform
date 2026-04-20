@@ -42,7 +42,8 @@ export const routes = {
     runDetail: (runId: string) => `/kaira/runs/${runId}`,
     adversarialDetail: (runId: string, evalId: string) =>
       `/kaira/runs/${runId}/adversarial/${evalId}`,
-    threadDetail: (threadId: string) => `/kaira/threads/${threadId}`,
+    threadDetail: (threadId: string, runId?: string) =>
+      runId ? `/kaira/threads/${threadId}?runId=${runId}` : `/kaira/threads/${threadId}`,
     logs: "/kaira/logs",
     settings: "/kaira/settings",
     settingsTags: "/kaira/settings/tags",

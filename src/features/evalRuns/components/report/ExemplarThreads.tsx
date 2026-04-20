@@ -115,7 +115,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId }: {
         </span>
         {runId && (
           <a
-            href={routes.kaira.threadDetail(thread.threadId)}
+            href={routes.kaira.threadDetail(thread.threadId, runId)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-[var(--text-muted)] hover:text-[var(--text-brand)] transition-colors print:hidden"

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { History, ChevronLeft, ChevronRight } from 'lucide-react';
 import { EmptyState, Select } from '@/components/ui';
 import { Tabs } from '@/components/ui/Tabs';
@@ -32,6 +32,8 @@ import { usePermission } from '@/utils/permissions';
 export default function ThreadDetailV2() {
   const { threadId } = useParams<{ threadId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const runIdParam = searchParams.get('runId');
   const [history, setHistory] = useState<ThreadEvalRow[]>([]);
   const [selected, setSelected] = useState<number>(0);
   const [error, setError] = useState('');
@@ -42,9 +44,18 @@ export default function ThreadDetailV2() {
   useEffect(() => {
     if (!threadId) return;
     fetchThreadHistory(threadId)
-      .then((r) => setHistory(r.history))
+      .then((r) => {
+        setHistory(r.history);
+        // Preselect the entry that matches ?runId= so navigation from a
+        // specific run lands on that run's evaluation (required for review
+        // mode to apply and for rule-level overrides to render).
+        if (runIdParam) {
+          const idx = r.history.findIndex((h) => h.run_id === runIdParam);
+          if (idx >= 0) setSelected(idx);
+        }
+      })
       .catch((e: Error) => setError(e.message));
-  }, [threadId]);
+  }, [threadId, runIdParam]);
 
   const current = history[selected];
   const result = useMemo(
@@ -76,7 +87,10 @@ export default function ThreadDetailV2() {
   const prevThreadId = siblingIndex > 0 ? siblingThreadIds[siblingIndex - 1] : null;
   const nextThreadId = siblingIndex >= 0 && siblingIndex < siblingThreadIds.length - 1 ? siblingThreadIds[siblingIndex + 1] : null;
 
-  const goToThread = useCallback((id: string) => navigate(routes.kaira.threadDetail(id)), [navigate]);
+  const goToThread = useCallback(
+    (id: string) => navigate(routes.kaira.threadDetail(id, current?.run_id)),
+    [navigate, current?.run_id],
+  );
 
   // Keyboard shortcuts: left/right arrow with Alt key
   useEffect(() => {

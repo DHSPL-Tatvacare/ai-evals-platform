@@ -250,3 +250,10 @@ export interface BackfillResponse {
   rowsUpserted: number;
   tenants: string[];
 }
+
+export interface UnpricedBackfillResponse {
+  scanned: number;
+  repriced: number;
+  stillUnpriced: number;
+  daysRolled: number;
+}

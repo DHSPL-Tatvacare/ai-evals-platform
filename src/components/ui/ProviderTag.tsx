@@ -19,7 +19,7 @@ function BaseTag({ value, className, withDot, token }: TagProps & { token: strin
     <span
       style={style}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium',
         !token && 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
         className,
       )}

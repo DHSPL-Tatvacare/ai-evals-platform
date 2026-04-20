@@ -344,6 +344,33 @@ def build_kaira_items(run: EvalRun) -> list[dict]:
             )
             if attribute:
                 attributes.append(attribute)
+
+        adversarial_result = ae.result or {}
+        for rule in adversarial_result.get("rule_compliance") or []:
+            if not isinstance(rule, dict):
+                continue
+            rule_id = rule.get("rule_id") or rule.get("ruleId")
+            if not rule_id:
+                continue
+            status = rule.get("status")
+            if not status:
+                followed = rule.get("followed")
+                if followed is True:
+                    status = "FOLLOWED"
+                elif followed is False:
+                    status = "VIOLATED"
+            attribute = _review_attribute(
+                key=f"rule:{rule_id}",
+                label=str(rule_id),
+                original_value=status,
+                allowed_values=RULE_STATUS_VALUES,
+                group="rule",
+                source_label="Adversarial",
+                description=rule.get("section") or None,
+                evidence=_truncate_text(rule.get("evidence"), 320),
+            )
+            if attribute:
+                attributes.append(attribute)
         if not attributes:
             continue
 
