@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { History, Loader2 } from 'lucide-react';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Avatar } from '@/components/ui/Avatar';
 import { DiffPill } from '@/components/ui/DiffPill';
 import { BeforeAfterChip } from '@/features/reviews/inline/BeforeAfterChip';
@@ -209,9 +210,21 @@ export function ReviewHistoryTab({ runId }: ReviewHistoryTabProps) {
 
   if (!loaded) {
     return (
-      <div className="flex items-center gap-2 p-6 text-[12px] text-[var(--text-secondary)]">
+      <div className="flex min-h-[320px] items-center justify-center gap-2 text-[12px] text-[var(--text-secondary)]">
         <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />
         Loading review history…
+      </div>
+    );
+  }
+
+  if (finalized.length === 0) {
+    return (
+      <div className="flex h-full min-h-[320px] w-full items-center justify-center py-8">
+        <EmptyState
+          icon={History}
+          title="No finalized reviews yet"
+          description="Once a reviewer finalizes a draft, their changes appear here."
+        />
       </div>
     );
   }
