@@ -421,8 +421,8 @@ export function UnmappedTab({ active }: TabProps) {
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-              Use this when an alias you previously deleted needs to be restored, or when you know the
-              mapping ahead of the first call reaching <code className="font-mono">llm_usage</code>.
+              Drift is auto-detected in the Needs mapping list above. Use this form to add a mapping
+              manually when needed.
             </p>
           </div>
         )}
