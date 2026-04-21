@@ -229,6 +229,7 @@ class SpendBundleResponse(CamelModel):
 class EntityRow(CamelModel):
     owner_type: str
     owner_id: uuid.UUID | None
+    display_name: str | None = None
     cost_usd: float
     total_tokens: int
     call_count: int
@@ -1182,11 +1183,14 @@ async def list_entities(
     total_stmt = select(func.count()).select_from(total_stmt.subquery())
     total = int((await db.execute(total_stmt)).scalar_one() or 0)
 
+    display_names = await _hydrate_entity_display_names(db, rows)
+
     return EntityListResponse(
         items=[
             EntityRow(
                 owner_type=row[0],
                 owner_id=row[1],
+                display_name=display_names.get((row[0], row[1])),
                 cost_usd=_to_float(row[2]),
                 total_tokens=int(row[3] or 0),
                 call_count=int(row[4] or 0),
@@ -1199,6 +1203,77 @@ async def list_entities(
         page=page,
         page_size=page_size,
     )
+
+
+_DISPLAY_NAME_MAX_CHARS = 80
+
+
+async def _hydrate_entity_display_names(
+    db: AsyncSession, rows: 'Any'
+) -> dict[tuple[str, uuid.UUID | None], str]:
+    """Return a ``(owner_type, owner_id) -> display_name`` map for the given
+    aggregate rows. Opaque UUIDs alone tell the admin nothing; look up each
+    owner in its source table and build a human-readable label.
+
+    Polymorphic: one small batch SELECT per owner_type represented in the
+    page. Source tables are tenant-scoped upstream via the aggregate query,
+    so no extra auth check needed here.
+    """
+    from app.models.eval_run import EvalRun
+    from app.models.job import Job
+    from app.models.listing import Listing
+    from app.models.report_run import ReportRun
+    from app.models.sherlock_runtime import SherlockRuntimeTurn
+
+    ids_by_type: dict[str, set[uuid.UUID]] = {}
+    for row in rows:
+        owner_type, owner_id = row[0], row[1]
+        if owner_id is None:
+            continue
+        ids_by_type.setdefault(owner_type, set()).add(owner_id)
+
+    out: dict[tuple[str, uuid.UUID | None], str] = {}
+
+    if sherlock_ids := ids_by_type.get('sherlock_turn'):
+        res = await db.execute(
+            select(SherlockRuntimeTurn.id, SherlockRuntimeTurn.user_message)
+            .where(SherlockRuntimeTurn.id.in_(sherlock_ids))
+        )
+        for turn_id, user_message in res.all():
+            label = (user_message or '').strip().replace('\n', ' ') or 'empty turn'
+            if len(label) > _DISPLAY_NAME_MAX_CHARS:
+                label = label[:_DISPLAY_NAME_MAX_CHARS - 1] + '…'
+            out[('sherlock_turn', turn_id)] = label
+
+    if eval_ids := ids_by_type.get('eval_run'):
+        res = await db.execute(
+            select(EvalRun.id, EvalRun.eval_type, EvalRun.listing_id, Listing.title)
+            .join(Listing, Listing.id == EvalRun.listing_id, isouter=True)
+            .where(EvalRun.id.in_(eval_ids))
+        )
+        for eval_id, eval_type, _listing_id, listing_title in res.all():
+            title = (listing_title or '').strip()
+            label = f'{eval_type} · {title}' if title else str(eval_type or 'eval')
+            if len(label) > _DISPLAY_NAME_MAX_CHARS:
+                label = label[:_DISPLAY_NAME_MAX_CHARS - 1] + '…'
+            out[('eval_run', eval_id)] = label
+
+    if job_ids := ids_by_type.get('job'):
+        res = await db.execute(
+            select(Job.id, Job.job_type).where(Job.id.in_(job_ids))
+        )
+        for job_id, job_type in res.all():
+            out[('job', job_id)] = str(job_type or 'job')
+
+    if report_ids := ids_by_type.get('report_run'):
+        res = await db.execute(
+            select(ReportRun.id, ReportRun.report_id, ReportRun.scope)
+            .where(ReportRun.id.in_(report_ids))
+        )
+        for report_run_id, report_id, scope in res.all():
+            out[('report_run', report_run_id)] = f'{report_id} · {scope}' if scope else str(report_id)
+
+    return out
 
 
 @router.get('/entity/{owner_type}/{owner_id}', response_model=EntityDrillDown)

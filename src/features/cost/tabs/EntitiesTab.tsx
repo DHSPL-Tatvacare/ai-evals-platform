@@ -101,15 +101,26 @@ function EntitiesTable({
     {
       key: 'owner',
       header: 'Owner',
-      width: 'w-72',
       render: (row) => (
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-[4px] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex shrink-0 items-center rounded-[4px] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
             {OWNER_LABEL[row.ownerType] ?? row.ownerType}
           </span>
-          <span className="truncate font-mono text-[11.5px] text-[var(--text-secondary)]">
-            {truncateId(row.ownerId)}
-          </span>
+          <div className="flex min-w-0 flex-col">
+            <span
+              className="truncate text-[12.5px] text-[var(--text-primary)]"
+              title={row.displayName ?? undefined}
+            >
+              {row.displayName ?? (
+                <span className="font-mono text-[var(--text-secondary)]">{truncateId(row.ownerId)}</span>
+              )}
+            </span>
+            {row.displayName && row.ownerId && (
+              <span className="truncate font-mono text-[10.5px] text-[var(--text-muted)]" title={row.ownerId}>
+                {truncateId(row.ownerId)}
+              </span>
+            )}
+          </div>
         </div>
       ),
     },

@@ -79,6 +79,10 @@ export type OwnerType =
 export interface EntityRow {
   ownerType: OwnerType;
   ownerId: string | null;
+  /** Human-readable label resolved server-side — listing title for eval_run,
+   * truncated user_message for sherlock_turn, job_type for job, etc.
+   * ``null`` when the owner source row has been deleted. */
+  displayName: string | null;
   costUsd: number;
   totalTokens: number;
   callCount: number;
