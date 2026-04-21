@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Activity, X } from 'lucide-react';
 import { AppTag, Badge, DataTable, ProviderTag, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
+import { CostSearchInput } from '../components/CostSearchInput';
 import { formatDateTime, formatInt, formatTokensCompact, formatUsd, truncateId } from '../utils/format';
 import type { CallDetail, CallRow } from '../types';
 
@@ -12,7 +13,9 @@ interface TabProps {
 
 export function CallsTab({ active }: TabProps) {
   const slice = useCostStore((s) => s.calls);
+  const searchQuery = useCostStore((s) => s.calls.searchQuery);
   const loadCalls = useCostStore((s) => s.loadCalls);
+  const setCallsSearch = useCostStore((s) => s.setCallsSearch);
   const refresh = useCostStore((s) => s.refreshActive);
   const filtersKey = useCostStore((s) => s.filtersKey);
   const loadCallDetail = useCostStore((s) => s.loadCallDetail);
@@ -28,14 +31,34 @@ export function CallsTab({ active }: TabProps) {
     if (detail) setActiveCall(detail);
   };
 
+  const handleSearchCommit = useCallback((q: string) => setCallsSearch(q), [setCallsSearch]);
+
+  const total = slice.status === 'ready' && slice.data ? slice.data.total : undefined;
+  const countLabel =
+    total !== undefined
+      ? searchQuery
+        ? `${total} match${total === 1 ? '' : 'es'}`
+        : `${total} call${total === 1 ? '' : 's'}`
+      : undefined;
+
   return (
-    <div className="flex h-full min-h-0 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col gap-2 pb-6">
+      <CostSearchInput
+        value={searchQuery}
+        onCommit={handleSearchCommit}
+        placeholder="Search by provider, model, app, purpose, or finish reason (e.g. kaira, gpt-5.4, efficiency)"
+        countLabel={countLabel}
+      />
       <SliceStateBoundary
         slice={slice}
         onRetry={() => refresh('calls')}
         emptyIcon={Activity}
-        emptyTitle="No calls"
-        emptyDescription="No LLM calls match the current filters."
+        emptyTitle={searchQuery ? 'No matches' : 'No calls'}
+        emptyDescription={
+          searchQuery
+            ? `No calls match "${searchQuery}". Clear the search to see all calls.`
+            : 'No LLM calls match the current filters.'
+        }
         isEmpty={(data) => data.items.length === 0}
       >
         {(data) => (

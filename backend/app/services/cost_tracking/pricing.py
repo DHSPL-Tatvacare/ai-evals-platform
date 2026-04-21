@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import ModelPricing
+from app.models.cost import ModelAlias, ModelPricing
 
 
 _ONE_MILLION = Decimal('1000000')
@@ -81,10 +81,59 @@ def _optional_decimal(value: Any) -> Decimal | None:
     return _to_decimal(value)
 
 
+async def _resolve_canonical_model(
+    db: AsyncSession, provider: str, model: str, tenant_id: uuid.UUID | None
+) -> str:
+    """Map an observed model string to its canonical ``model_pricing.model`` key.
+
+    Precedence: tenant-specific alias > system-wide alias > input unchanged.
+    """
+    stmt = (
+        select(ModelAlias)
+        .where(
+            ModelAlias.provider == provider,
+            ModelAlias.observed == model,
+            or_(
+                ModelAlias.tenant_id == tenant_id if tenant_id is not None else False,
+                ModelAlias.tenant_id.is_(None),
+            ),
+        )
+        .order_by(ModelAlias.tenant_id.is_(None).asc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    row = result.scalars().first()
+    if row is None:
+        return model
+    return row.canonical
+
+
 async def fetch_pricing(
+    db: AsyncSession,
+    provider: str,
+    model: str,
+    at: datetime,
+    tenant_id: uuid.UUID | None = None,
+) -> PricingRow | None:
+    """Return the ``model_pricing`` row effective at ``at`` for (provider, model).
+
+    When no exact row exists, falls back to a ``model_aliases`` lookup
+    (tenant-specific first, then system-wide) and retries with the canonical
+    key. Pass ``tenant_id`` for tenant-specific alias resolution.
+    """
+    pricing_row = await _fetch_pricing_row(db, provider, model, at)
+    if pricing_row is not None:
+        return pricing_row
+
+    canonical = await _resolve_canonical_model(db, provider, model, tenant_id)
+    if canonical == model:
+        return None
+    return await _fetch_pricing_row(db, provider, canonical, at)
+
+
+async def _fetch_pricing_row(
     db: AsyncSession, provider: str, model: str, at: datetime
 ) -> PricingRow | None:
-    """Return the ``model_pricing`` row effective at ``at`` for (provider, model)."""
     stmt = (
         select(ModelPricing)
         .where(
@@ -104,7 +153,10 @@ async def fetch_pricing(
 
 
 async def fetch_best_available_pricing(
-    db: AsyncSession, provider: str, model: str
+    db: AsyncSession,
+    provider: str,
+    model: str,
+    tenant_id: uuid.UUID | None = None,
 ) -> PricingRow | None:
     """Pricing lookup for backfill / retroactive costing.
 
@@ -112,7 +164,22 @@ async def fetch_best_available_pricing(
     ``effective_from`` / ``effective_to``. Used when re-pricing historical
     ``llm_usage`` rows whose original ``created_at`` predates the first
     pricing snapshot — the live recorder must still use ``fetch_pricing``.
+
+    Falls back through ``model_aliases`` like :func:`fetch_pricing`.
     """
+    pricing_row = await _fetch_best_available_pricing_row(db, provider, model)
+    if pricing_row is not None:
+        return pricing_row
+
+    canonical = await _resolve_canonical_model(db, provider, model, tenant_id)
+    if canonical == model:
+        return None
+    return await _fetch_best_available_pricing_row(db, provider, canonical)
+
+
+async def _fetch_best_available_pricing_row(
+    db: AsyncSession, provider: str, model: str
+) -> PricingRow | None:
     stmt = (
         select(ModelPricing)
         .where(

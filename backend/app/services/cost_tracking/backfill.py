@@ -58,7 +58,9 @@ async def backfill_unpriced(
     affected_days: set[date] = set()
 
     for row in rows:
-        pricing = await fetch_best_available_pricing(db, row.provider, row.model)
+        pricing = await fetch_best_available_pricing(
+            db, row.provider, row.model, tenant_id=row.tenant_id
+        )
         if pricing is None:
             still_unpriced += 1
             continue
@@ -78,6 +80,92 @@ async def backfill_unpriced(
         if fallback:
             # compute_cost can still return fallback=True if pricing is
             # structurally incomplete (all rates zero). Leave the row alone.
+            still_unpriced += 1
+            continue
+
+        await db.execute(
+            update(LlmUsage)
+            .where(LlmUsage.id == row.id)
+            .values(
+                cost_usd=cost_usd,
+                cost_breakdown=breakdown,
+                pricing_version_id=pricing.id,
+                pricing_fallback=False,
+            )
+        )
+        repriced += 1
+        affected_days.add(row.created_at.date())
+
+    if repriced:
+        await db.flush()
+        for day in sorted(affected_days):
+            try:
+                await populate_rollup_day(db, day)
+            except Exception:
+                _log.exception('rollup refresh failed for %s; continuing', day)
+
+    return {
+        'scanned': scanned,
+        'repriced': repriced,
+        'still_unpriced': still_unpriced,
+        'days_rolled': len(affected_days),
+    }
+
+
+async def backfill_unpriced_for_alias(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    provider: str,
+    observed: str,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Re-price rows that match a single (tenant, provider, observed) tuple.
+
+    Called after an alias is created or updated so historical fallback rows
+    pick up the newly available rate. Narrower than :func:`backfill_unpriced`
+    — scans only the rows that actually care about this alias.
+    """
+    stmt = (
+        select(LlmUsage)
+        .where(
+            LlmUsage.pricing_fallback.is_(True),
+            LlmUsage.tenant_id == tenant_id,
+            LlmUsage.provider == provider,
+            LlmUsage.model == observed,
+        )
+        .order_by(LlmUsage.created_at.asc())
+    )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    scanned = len(rows)
+    repriced = 0
+    still_unpriced = 0
+    affected_days: set[date] = set()
+
+    for row in rows:
+        pricing = await fetch_best_available_pricing(
+            db, row.provider, row.model, tenant_id=row.tenant_id
+        )
+        if pricing is None:
+            still_unpriced += 1
+            continue
+
+        cost_usd, breakdown, fallback = compute_cost(
+            pricing,
+            input_tokens=row.input_tokens,
+            output_tokens=row.output_tokens,
+            cached_read_tokens=row.cached_read_tokens,
+            cached_write_tokens=row.cached_write_tokens,
+            cached_write_ttl=row.cached_write_ttl,
+            reasoning_tokens=row.reasoning_tokens,
+            tool_use_prompt_tokens=row.tool_use_prompt_tokens,
+            audio_seconds=float(row.audio_seconds) if row.audio_seconds is not None else None,
+            server_tool_usage=row.server_tool_usage,
+        )
+        if fallback:
             still_unpriced += 1
             continue
 

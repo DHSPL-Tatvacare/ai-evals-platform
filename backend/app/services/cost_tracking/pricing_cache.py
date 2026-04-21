@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections import OrderedDict
 from datetime import datetime
 
@@ -27,7 +28,10 @@ _log = logging.getLogger(__name__)
 _DEFAULT_TTL_SECONDS = 300
 _MAX_ENTRIES = 1024
 
-_CacheKey = tuple[str, str, int]
+# Cache key: (provider, model, at_minute, tenant_id_str). Tenant is part of
+# the key because alias resolution is tenant-scoped — the canonical mapping
+# for one tenant may differ from another's.
+_CacheKey = tuple[str, str, int, str]
 
 
 class _Entry:
@@ -48,11 +52,17 @@ class PricingCache:
         self._locks: dict[_CacheKey, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
 
-    def _key(self, provider: str, model: str, at: datetime) -> _CacheKey:
+    def _key(
+        self,
+        provider: str,
+        model: str,
+        at: datetime,
+        tenant_id: uuid.UUID | None,
+    ) -> _CacheKey:
         # Bucket by minute so effective-date rollover still hits the DB cleanly
         # without thrashing per-second.
         ts_minute = int(at.replace(second=0, microsecond=0).timestamp())
-        return (provider, model, ts_minute)
+        return (provider, model, ts_minute, str(tenant_id) if tenant_id is not None else '')
 
     def _get_fresh(self, key: _CacheKey) -> PricingRow | None | _MissingType:
         entry = self._entries.get(key)
@@ -71,21 +81,26 @@ class PricingCache:
             self._entries.popitem(last=False)
 
     async def get(
-        self, db: AsyncSession, provider: str, model: str, at: datetime
+        self,
+        db: AsyncSession,
+        provider: str,
+        model: str,
+        at: datetime,
+        tenant_id: uuid.UUID | None = None,
     ) -> PricingRow | None:
         """Return the effective pricing row, loading and caching on miss."""
-        key = self._key(provider, model, at)
+        key = self._key(provider, model, at, tenant_id)
 
         cached = self._get_fresh(key)
         if cached is not _MISSING:
-            return cached
+            return cached  # type: ignore[return-value]
 
         lock = await self._get_lock(key)
         async with lock:
             cached = self._get_fresh(key)
             if cached is not _MISSING:
-                return cached
-            row = await fetch_pricing(db, provider, model, at)
+                return cached  # type: ignore[return-value]
+            row = await fetch_pricing(db, provider, model, at, tenant_id=tenant_id)
             self._put(key, row)
             return row
 

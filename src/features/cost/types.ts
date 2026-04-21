@@ -257,3 +257,39 @@ export interface UnpricedBackfillResponse {
   stillUnpriced: number;
   daysRolled: number;
 }
+
+export interface AliasRow {
+  id: string;
+  tenantId: string | null;
+  provider: string;
+  observed: string;
+  canonical: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+}
+
+export interface UnmappedModelRow {
+  provider: string;
+  model: string;
+  callCount: number;
+  lastSeenAt: string;
+  tenantId: string;
+  suggestedCanonical: string | null;
+}
+
+export interface AliasUpsertPayload {
+  provider: string;
+  observed: string;
+  canonical: string;
+  tenantScope?: 'tenant' | 'system';
+  notes?: string | null;
+}
+
+export interface AliasRepriceResponse {
+  scanned: number;
+  repriced: number;
+  stillUnpriced: number;
+  daysRolled: number;
+}

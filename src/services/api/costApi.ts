@@ -1,5 +1,8 @@
 import { apiRequest } from './client';
 import type {
+  AliasRepriceResponse,
+  AliasRow,
+  AliasUpsertPayload,
   BackfillResponse,
   BatchLookupItem,
   CallDetail,
@@ -18,6 +21,7 @@ import type {
   RefreshDiff,
   SnapshotRow,
   SpendBundle,
+  UnmappedModelRow,
   UnpricedBackfillResponse,
 } from '@/features/cost/types';
 
@@ -59,6 +63,7 @@ export const costApi = {
     pageSize = 25,
     sort: 'cost_desc' | 'calls_desc' | 'recent' = 'cost_desc',
     ownerType?: string,
+    q?: string,
   ): Promise<EntityListPage> =>
     apiRequest<EntityListPage>(
       `/api/cost/entities${applyFiltersQuery(filters, {
@@ -66,6 +71,7 @@ export const costApi = {
         page_size: pageSize,
         sort,
         owner_type: ownerType,
+        q,
       })}`,
     ),
 
@@ -97,7 +103,7 @@ export const costApi = {
     filters: CostFilters,
     page: number,
     pageSize = 50,
-    opts: { ownerType?: string; status?: string } = {},
+    opts: { ownerType?: string; status?: string; q?: string } = {},
   ): Promise<CallsPage> =>
     apiRequest<CallsPage>(
       `/api/cost/calls${applyFiltersQuery(filters, {
@@ -105,6 +111,7 @@ export const costApi = {
         page_size: pageSize,
         owner_type: opts.ownerType,
         status: opts.status,
+        q: opts.q,
       })}`,
     ),
 
@@ -146,4 +153,27 @@ export const costApi = {
       method: 'POST',
       body: JSON.stringify({ start, end }),
     }),
+
+  fetchAliases: (provider?: string): Promise<{ aliases: AliasRow[] }> =>
+    apiRequest<{ aliases: AliasRow[] }>(`/api/cost/aliases${buildQuery({ provider })}`),
+
+  fetchUnmappedModels: (): Promise<{ rows: UnmappedModelRow[] }> =>
+    apiRequest<{ rows: UnmappedModelRow[] }>(`/api/cost/aliases/unmapped`),
+
+  upsertAlias: (payload: AliasUpsertPayload): Promise<AliasRow> =>
+    apiRequest<AliasRow>(`/api/cost/aliases`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAlias: (aliasId: string): Promise<{ ok: boolean }> =>
+    apiRequest<{ ok: boolean }>(`/api/cost/aliases/${encodeURIComponent(aliasId)}`, {
+      method: 'DELETE',
+    }),
+
+  repriceAlias: (aliasId: string): Promise<AliasRepriceResponse> =>
+    apiRequest<AliasRepriceResponse>(
+      `/api/cost/aliases/${encodeURIComponent(aliasId)}/reprice`,
+      { method: 'POST' },
+    ),
 };

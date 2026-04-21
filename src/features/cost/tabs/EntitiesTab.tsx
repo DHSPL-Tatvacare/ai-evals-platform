@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Database } from 'lucide-react';
 import {
   Card,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
+import { CostSearchInput } from '../components/CostSearchInput';
 import { formatDateTime, formatInt, formatTokensCompact, formatUsd, truncateId } from '../utils/format';
 import { toneForPurpose } from '../utils/tones';
 import type { EntityCostBreakdown, EntityRow, GroupedSpend, OwnerType } from '../types';
@@ -29,7 +30,9 @@ const OWNER_LABEL: Record<string, string> = {
 
 export function EntitiesTab({ active }: TabProps) {
   const slice = useCostStore((s) => s.entities);
+  const searchQuery = useCostStore((s) => s.entities.searchQuery);
   const loadEntities = useCostStore((s) => s.loadEntities);
+  const setEntitiesSearch = useCostStore((s) => s.setEntitiesSearch);
   const refresh = useCostStore((s) => s.refreshActive);
   const filtersKey = useCostStore((s) => s.filtersKey);
 
@@ -37,14 +40,34 @@ export function EntitiesTab({ active }: TabProps) {
     if (active) void loadEntities();
   }, [active, loadEntities, filtersKey]);
 
+  const handleSearchCommit = useCallback((q: string) => setEntitiesSearch(q), [setEntitiesSearch]);
+
+  const total = slice.status === 'ready' && slice.data ? slice.data.total : undefined;
+  const countLabel =
+    total !== undefined
+      ? searchQuery
+        ? `${total} match${total === 1 ? '' : 'es'}`
+        : `${total} owner${total === 1 ? '' : 's'}`
+      : undefined;
+
   return (
-    <div className="flex h-full min-h-0 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col gap-2 pb-6">
+      <CostSearchInput
+        value={searchQuery}
+        onCommit={handleSearchCommit}
+        placeholder="Search by owner type, id, app, provider, model, or purpose (e.g. kaira, gpt-5.4, eval_run)"
+        countLabel={countLabel}
+      />
       <SliceStateBoundary
         slice={slice}
         onRetry={() => refresh('entities')}
         emptyIcon={Database}
-        emptyTitle="No entities"
-        emptyDescription="No LLM usage rows match the current filters."
+        emptyTitle={searchQuery ? 'No matches' : 'No entities'}
+        emptyDescription={
+          searchQuery
+            ? `No entities match "${searchQuery}". Clear the search to see all entities.`
+            : 'No LLM usage rows match the current filters.'
+        }
         isEmpty={(data) => data.items.length === 0}
       >
         {(data) => (

@@ -178,6 +178,43 @@ class ModelPricing(Base):
     )
 
 
+class ModelAlias(Base):
+    """Map observed model strings to canonical ``model_pricing.model`` keys.
+
+    Live pricing lookup consults this table when an exact match fails. Rows can
+    be tenant-scoped (a tenant's Azure deployment name maps to a base model) or
+    system-wide (``tenant_id = NULL``; applies to every tenant unless they
+    override with their own row).
+
+    Resolution order: tenant-specific > system-wide > no alias.
+    """
+
+    __tablename__ = 'model_aliases'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('tenants.id', ondelete='CASCADE'),
+        nullable=True,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    observed: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'provider', 'observed', name='uq_model_alias_scope'),
+        Index('idx_model_alias_lookup', 'provider', 'observed', 'tenant_id'),
+    )
+
+
 class LlmUsageDailyRollup(Base):
     """Aggregate cache for overview/spend/efficiency surfaces only.
 

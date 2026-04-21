@@ -55,6 +55,13 @@ function initialSlice<T>(): Slice<T> {
   return { status: 'idle' };
 }
 
+/** Compose a slice-level cache key from the global filtersKey plus an
+ * extra scope like ``searchQuery``. Keeps slice-specific state (e.g. the
+ * Calls text search) from clobbering other tabs' caches. */
+function makeSliceKey(filtersKey: string, extra: string): string {
+  return extra ? `${filtersKey}|q=${extra}` : filtersKey;
+}
+
 function errorMessage(e: unknown, fallback: string): string {
   if (e instanceof ApiError) return e.message || fallback;
   if (e instanceof Error) return e.message;
@@ -67,8 +74,8 @@ interface CostState {
 
   overview: Slice<CostOverview>;
   spend: Slice<SpendBundle>;
-  entities: Slice<EntityListPage> & { page: number };
-  calls: Slice<CallsPage> & { page: number };
+  entities: Slice<EntityListPage> & { page: number; searchQuery: string };
+  calls: Slice<CallsPage> & { page: number; searchQuery: string };
   efficiency: Slice<EfficiencyBundle>;
   pricing: Slice<PricingBundle>;
 
@@ -82,6 +89,8 @@ interface CostState {
   loadEfficiency: () => Promise<void>;
   loadEntities: (page?: number) => Promise<void>;
   loadCalls: (page?: number) => Promise<void>;
+  setEntitiesSearch: (query: string) => void;
+  setCallsSearch: (query: string) => void;
   loadPricing: () => Promise<void>;
 
   refreshActive: (slice: SliceName) => Promise<void>;
@@ -103,8 +112,8 @@ export const useCostStore = create<CostState>((set, get) => ({
 
   overview: initialSlice<CostOverview>(),
   spend: initialSlice<SpendBundle>(),
-  entities: { ...initialSlice<EntityListPage>(), page: 1 },
-  calls: { ...initialSlice<CallsPage>(), page: 1 },
+  entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
+  calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
   efficiency: initialSlice<EfficiencyBundle>(),
   pricing: initialSlice<PricingBundle>(),
 
@@ -120,8 +129,8 @@ export const useCostStore = create<CostState>((set, get) => ({
       filtersKey: nextKey,
       overview: initialSlice(),
       spend: initialSlice(),
-      entities: { ...initialSlice<EntityListPage>(), page: 1 },
-      calls: { ...initialSlice<CallsPage>(), page: 1 },
+      entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
+      calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       efficiency: initialSlice(),
       entityCache: {},
       callDetailCache: {},
@@ -179,21 +188,52 @@ export const useCostStore = create<CostState>((set, get) => ({
   loadEntities: async (page) => {
     const { entities, filters, filtersKey } = get();
     const targetPage = page ?? entities.page ?? 1;
+    const searchQuery = entities.searchQuery;
     const alreadyLoaded =
       entities.status === 'ready' &&
-      entities.filtersKey === filtersKey &&
+      entities.filtersKey === makeSliceKey(filtersKey, searchQuery) &&
       entities.page === targetPage;
     if (entities.status === 'loading' || alreadyLoaded) return;
 
-    set({ entities: { ...entities, status: 'loading', error: undefined, page: targetPage } });
+    const keyed = makeSliceKey(filtersKey, searchQuery);
+    set({
+      entities: {
+        ...entities,
+        status: 'loading',
+        error: undefined,
+        page: targetPage,
+        searchQuery,
+      },
+    });
     try {
-      const data = await costApi.fetchEntities(filters, targetPage);
+      const data = await costApi.fetchEntities(
+        filters,
+        targetPage,
+        undefined,
+        undefined,
+        undefined,
+        searchQuery || undefined,
+      );
       set({
-        entities: { status: 'ready', data, filtersKey, page: targetPage },
+        entities: {
+          status: 'ready',
+          data,
+          filtersKey: keyed,
+          page: targetPage,
+          searchQuery,
+        },
       });
     } catch (e: unknown) {
       const msg = errorMessage(e, 'Failed to load entities');
-      set({ entities: { status: 'error', error: msg, filtersKey, page: targetPage } });
+      set({
+        entities: {
+          status: 'error',
+          error: msg,
+          filtersKey: keyed,
+          page: targetPage,
+          searchQuery,
+        },
+      });
       notificationService.error(msg);
     }
   },
@@ -201,21 +241,83 @@ export const useCostStore = create<CostState>((set, get) => ({
   loadCalls: async (page) => {
     const { calls, filters, filtersKey } = get();
     const targetPage = page ?? calls.page ?? 1;
+    const searchQuery = calls.searchQuery;
     const alreadyLoaded =
       calls.status === 'ready' &&
-      calls.filtersKey === filtersKey &&
+      calls.filtersKey === makeSliceKey(filtersKey, searchQuery) &&
       calls.page === targetPage;
     if (calls.status === 'loading' || alreadyLoaded) return;
 
-    set({ calls: { ...calls, status: 'loading', error: undefined, page: targetPage } });
+    const keyed = makeSliceKey(filtersKey, searchQuery);
+    set({
+      calls: {
+        ...calls,
+        status: 'loading',
+        error: undefined,
+        page: targetPage,
+        searchQuery,
+      },
+    });
     try {
-      const data = await costApi.fetchCalls(filters, targetPage);
-      set({ calls: { status: 'ready', data, filtersKey, page: targetPage } });
+      const data = await costApi.fetchCalls(filters, targetPage, undefined, {
+        q: searchQuery || undefined,
+      });
+      set({
+        calls: {
+          status: 'ready',
+          data,
+          filtersKey: keyed,
+          page: targetPage,
+          searchQuery,
+        },
+      });
     } catch (e: unknown) {
       const msg = errorMessage(e, 'Failed to load calls');
-      set({ calls: { status: 'error', error: msg, filtersKey, page: targetPage } });
+      set({
+        calls: {
+          status: 'error',
+          error: msg,
+          filtersKey: keyed,
+          page: targetPage,
+          searchQuery,
+        },
+      });
       notificationService.error(msg);
     }
+  },
+
+  setEntitiesSearch: (query) => {
+    const current = get().entities.searchQuery;
+    if (current === query) return;
+    const { entities, filtersKey } = get();
+    set({
+      entities: {
+        ...initialSlice<EntityListPage>(),
+        page: 1,
+        searchQuery: query,
+        filtersKey: makeSliceKey(filtersKey, query),
+      },
+      entityCache: {},
+    });
+    void get().loadEntities(1);
+    // suppress unused var
+    void entities;
+  },
+
+  setCallsSearch: (query) => {
+    const current = get().calls.searchQuery;
+    if (current === query) return;
+    const { calls, filtersKey } = get();
+    set({
+      calls: {
+        ...initialSlice<CallsPage>(),
+        page: 1,
+        searchQuery: query,
+        filtersKey: makeSliceKey(filtersKey, query),
+      },
+    });
+    void get().loadCalls(1);
+    void calls;
   },
 
   loadPricing: async () => {
@@ -251,13 +353,23 @@ export const useCostStore = create<CostState>((set, get) => ({
         return;
       case 'entities':
         set({
-          entities: { ...initialSlice<EntityListPage>(), page: state.entities.page },
+          entities: {
+            ...initialSlice<EntityListPage>(),
+            page: state.entities.page,
+            searchQuery: state.entities.searchQuery,
+          },
           entityCache: {},
         });
         await state.loadEntities(state.entities.page);
         return;
       case 'calls':
-        set({ calls: { ...initialSlice<CallsPage>(), page: state.calls.page } });
+        set({
+          calls: {
+            ...initialSlice<CallsPage>(),
+            page: state.calls.page,
+            searchQuery: state.calls.searchQuery,
+          },
+        });
         await state.loadCalls(state.calls.page);
         return;
       case 'pricing':
@@ -362,8 +474,8 @@ export const useCostStore = create<CostState>((set, get) => ({
       overview: initialSlice<CostOverview>(),
       spend: initialSlice<SpendBundle>(),
       efficiency: initialSlice<EfficiencyBundle>(),
-      entities: { ...initialSlice<EntityListPage>(), page: 1 },
-      calls: { ...initialSlice<CallsPage>(), page: 1 },
+      entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
+      calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       entityCache: {},
       callDetailCache: {},
     });
@@ -376,8 +488,8 @@ export const useCostStore = create<CostState>((set, get) => ({
       filtersKey: hashFilters(DEFAULT_FILTERS),
       overview: initialSlice(),
       spend: initialSlice(),
-      entities: { ...initialSlice<EntityListPage>(), page: 1 },
-      calls: { ...initialSlice<CallsPage>(), page: 1 },
+      entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
+      calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       efficiency: initialSlice(),
       pricing: initialSlice(),
       entityCache: {},

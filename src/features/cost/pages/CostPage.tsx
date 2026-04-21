@@ -10,10 +10,11 @@ import { EntitiesTab } from '../tabs/EntitiesTab';
 import { CallsTab } from '../tabs/CallsTab';
 import { EfficiencyTab } from '../tabs/EfficiencyTab';
 import { PricingTab } from '../tabs/PricingTab';
+import { UnmappedTab } from '../tabs/UnmappedTab';
 
-type TabId = 'overview' | 'spend' | 'entities' | 'calls' | 'efficiency' | 'pricing';
+type TabId = 'overview' | 'spend' | 'entities' | 'calls' | 'efficiency' | 'pricing' | 'unmapped';
 
-const TAB_IDS: readonly TabId[] = ['overview', 'spend', 'entities', 'calls', 'efficiency', 'pricing'];
+const TAB_IDS: readonly TabId[] = ['overview', 'spend', 'entities', 'calls', 'efficiency', 'pricing', 'unmapped'];
 
 function isTabId(value: string | null): value is TabId {
   return value !== null && (TAB_IDS as readonly string[]).includes(value);
@@ -45,6 +46,7 @@ export function CostPage() {
       { id: 'calls', label: 'Calls', content: <CallsTab active={activeTab === 'calls'} /> },
       { id: 'efficiency', label: 'Efficiency', content: <EfficiencyTab active={activeTab === 'efficiency'} /> },
       { id: 'pricing', label: 'Pricing', content: <PricingTab active={activeTab === 'pricing'} /> },
+      { id: 'unmapped', label: 'Unmapped', content: <UnmappedTab active={activeTab === 'unmapped'} /> },
     ],
     [activeTab],
   );
@@ -58,7 +60,10 @@ export function CostPage() {
           variant="secondary"
           size="sm"
           icon={RefreshCw}
-          onClick={() => refreshActive(activeTab)}
+          onClick={() => {
+            if (activeTab === 'unmapped') return;
+            refreshActive(activeTab);
+          }}
         >
           Refresh
         </Button>

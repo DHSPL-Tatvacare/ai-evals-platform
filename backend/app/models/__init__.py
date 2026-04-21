@@ -36,6 +36,7 @@ from app.models.sherlock_runtime import SherlockRuntimeSession, SherlockRuntimeE
 from app.models.cost import (
     LlmUsage,
     ModelPricing,
+    ModelAlias,
     LlmUsageDailyRollup,
     ModelsDevCatalog,
     ModelsDevSnapshot,
@@ -57,6 +58,6 @@ __all__ = [
     "AnalyticsJobLog", "AgentToolLog", "AnalyticsQueryCache",
     "AnalyticsChart", "AnalyticsDashboard",
     "SherlockRuntimeSession", "SherlockRuntimeEvent", "SherlockRuntimeTurn",
-    "LlmUsage", "ModelPricing", "LlmUsageDailyRollup",
+    "LlmUsage", "ModelPricing", "ModelAlias", "LlmUsageDailyRollup",
     "ModelsDevCatalog", "ModelsDevSnapshot",
 ]

@@ -41,7 +41,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 from slowapi import Limiter
-from sqlalchemy import and_, case, desc, func, or_, select, update
+from sqlalchemy import Text, and_, case, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,7 @@ from app.database import get_db
 from app.models.cost import (
     LlmUsage,
     LlmUsageDailyRollup,
+    ModelAlias,
     ModelPricing,
     ModelsDevCatalog,
     ModelsDevSnapshot,
@@ -452,11 +453,62 @@ class BackfillResponse(CamelModel):
     tenants: list[uuid.UUID]
 
 
+class AliasRowOut(CamelModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID | None
+    provider: str
+    observed: str
+    canonical: str
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    created_by: uuid.UUID | None = None
+
+
+class AliasUpsertRequest(CamelModel):
+    provider: str
+    observed: str
+    canonical: str
+    tenant_scope: Literal['tenant', 'system'] = 'tenant'
+    notes: str | None = None
+
+
+class UnmappedModelRow(CamelModel):
+    provider: str
+    model: str
+    call_count: int
+    last_seen_at: datetime
+    tenant_id: uuid.UUID
+    suggested_canonical: str | None = None
+
+
+class UnmappedModelsResponse(CamelModel):
+    rows: list[UnmappedModelRow]
+
+
+class AliasesBundleResponse(CamelModel):
+    aliases: list[AliasRowOut]
+
+
+class AliasRepriceResponse(CamelModel):
+    scanned: int
+    repriced: int
+    still_unpriced: int
+    days_rolled: int
+
+
 # ── Overview + Spend + Efficiency bundles ──────────────────────────
 
 
 def _sum_column(column, label: str):
     return func.coalesce(func.sum(column), 0).label(label)
+
+
+def _ilike_escape(raw: str) -> str:
+    """Escape SQL LIKE wildcards so a user typing ``_`` or ``%`` is treated
+    as literal characters, not pattern metacharacters. Call sites must pair
+    this with ``.ilike(..., escape='\\\\')``."""
+    return raw.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
 
 
 @router.get('/overview', response_model=CostOverviewResponse)
@@ -1065,6 +1117,7 @@ async def list_entities(
     provider: str | None = Query(None),
     model: str | None = Query(None),
     owner_type: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
     sort: Literal['cost_desc', 'calls_desc', 'recent'] = Query('cost_desc'),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=_ENTITIES_PAGE_MAX),
@@ -1077,6 +1130,23 @@ async def list_entities(
     base_filters = _apply_optional_fact_filters([window], LlmUsage, app_id=app_id, provider=provider, model=model)
     if owner_type:
         base_filters.append(LlmUsage.owner_type == owner_type)
+
+    trimmed = (q or '').strip()
+    if trimmed:
+        # Entity identity is (owner_type, owner_id) — search those, plus the
+        # fact columns that surface in drill-downs so "kaira" or "gpt-5.4"
+        # still find the right owners even if the owner_id is opaque.
+        pattern = f'%{_ilike_escape(trimmed)}%'
+        base_filters.append(
+            or_(
+                LlmUsage.owner_type.ilike(pattern, escape='\\'),
+                func.cast(LlmUsage.owner_id, Text).ilike(pattern, escape='\\'),
+                LlmUsage.app_id.ilike(pattern, escape='\\'),
+                LlmUsage.provider.ilike(pattern, escape='\\'),
+                LlmUsage.model.ilike(pattern, escape='\\'),
+                LlmUsage.call_purpose.ilike(pattern, escape='\\'),
+            )
+        )
 
     stmt = (
         select(
@@ -1273,6 +1343,7 @@ async def list_calls(
     provider: str | None = Query(None),
     model: str | None = Query(None),
     status: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=_CALLS_PAGE_MAX),
     auth: AuthContext = require_permission('cost:view'),
@@ -1290,6 +1361,24 @@ async def list_calls(
         filters.append(LlmUsage.model == model)
     if status:
         filters.append(LlmUsage.status == status)
+
+    trimmed = (q or '').strip()
+    if trimmed:
+        # ILIKE across the human-readable identity columns displayed in the
+        # table. Case-insensitive substring match; empty string skips the
+        # filter. Columns searched mirror the visible row shape.
+        pattern = f'%{_ilike_escape(trimmed)}%'
+        filters.append(
+            or_(
+                LlmUsage.provider.ilike(pattern, escape='\\'),
+                LlmUsage.model.ilike(pattern, escape='\\'),
+                LlmUsage.app_id.ilike(pattern, escape='\\'),
+                LlmUsage.call_purpose.ilike(pattern, escape='\\'),
+                LlmUsage.model_family.ilike(pattern, escape='\\'),
+                LlmUsage.finish_reason.ilike(pattern, escape='\\'),
+                LlmUsage.error_code.ilike(pattern, escape='\\'),
+            )
+        )
 
     base = select(LlmUsage).where(and_(*filters))
     base = _apply_tenant_scope(base, auth, LlmUsage.tenant_id)
@@ -1666,6 +1755,267 @@ async def pricing_refresh_snapshot(
         raise HTTPException(status_code=404, detail='snapshot not found')
     _ = auth
     return _snapshot_row_out(row)
+
+
+# ── Model aliases: map observed model strings to canonical pricing keys ──
+
+
+def _alias_row_out(row: ModelAlias) -> AliasRowOut:
+    return AliasRowOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        provider=row.provider,
+        observed=row.observed,
+        canonical=row.canonical,
+        notes=row.notes,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        created_by=row.created_by,
+    )
+
+
+def _suggest_canonical(observed: str, catalog_models: list[str]) -> str | None:
+    """Lightweight substring-based suggestion: pick the longest catalog model
+    that appears inside the observed string (case-insensitive). Returns the
+    best candidate or ``None``. No ML, no fuzzy distance — good enough as a
+    seed the admin can override in the UI."""
+    lowered = observed.lower()
+    best: str | None = None
+    for canonical in sorted(catalog_models, key=len, reverse=True):
+        if not canonical:
+            continue
+        if canonical.lower() in lowered:
+            best = canonical
+            break
+    return best
+
+
+@router.get('/aliases', response_model=AliasesBundleResponse)
+async def list_aliases(
+    provider: str | None = Query(None),
+    auth: AuthContext = require_permission('cost:view'),
+    db: AsyncSession = Depends(get_db),
+) -> AliasesBundleResponse:
+    """List aliases visible to the caller: tenant-specific (theirs) + system."""
+    stmt = select(ModelAlias).where(
+        or_(ModelAlias.tenant_id == auth.tenant_id, ModelAlias.tenant_id.is_(None))
+    )
+    if provider:
+        stmt = stmt.where(ModelAlias.provider == provider)
+    stmt = stmt.order_by(
+        ModelAlias.tenant_id.is_(None).asc(),
+        ModelAlias.provider.asc(),
+        ModelAlias.observed.asc(),
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return AliasesBundleResponse(aliases=[_alias_row_out(r) for r in rows])
+
+
+@router.get('/aliases/unmapped', response_model=UnmappedModelsResponse)
+async def list_unmapped_models(
+    auth: AuthContext = require_permission('cost:view'),
+    db: AsyncSession = Depends(get_db),
+) -> UnmappedModelsResponse:
+    """Distinct (tenant, provider, model) from ``llm_usage`` with ``pricing_fallback=true``
+    and no resolving alias. Each row is a candidate that the admin should map."""
+    fallback_stmt = (
+        select(
+            LlmUsage.tenant_id,
+            LlmUsage.provider,
+            LlmUsage.model,
+            func.count().label('call_count'),
+            func.max(LlmUsage.created_at).label('last_seen_at'),
+        )
+        .where(
+            LlmUsage.pricing_fallback.is_(True),
+            LlmUsage.tenant_id == auth.tenant_id,
+        )
+        .group_by(LlmUsage.tenant_id, LlmUsage.provider, LlmUsage.model)
+        .order_by(desc('call_count'))
+    )
+    fallback_rows = (await db.execute(fallback_stmt)).all()
+
+    if not fallback_rows:
+        return UnmappedModelsResponse(rows=[])
+
+    # Exclude (provider, model) combos that already resolve via an alias (tenant
+    # or system). The caller shouldn't see "unmapped" for something already
+    # mapped — the Repriceaction handles the llm_usage update separately.
+    alias_stmt = select(ModelAlias.provider, ModelAlias.observed).where(
+        or_(ModelAlias.tenant_id == auth.tenant_id, ModelAlias.tenant_id.is_(None))
+    )
+    resolved = {(p, m) for (p, m) in (await db.execute(alias_stmt)).all()}
+
+    # Canonical catalog for suggestions: models.dev rows per provider.
+    catalog_stmt = select(ModelsDevCatalog.provider, ModelsDevCatalog.model)
+    catalog_by_provider: dict[str, list[str]] = {}
+    for p, m in (await db.execute(catalog_stmt)).all():
+        catalog_by_provider.setdefault(p, []).append(m)
+
+    out: list[UnmappedModelRow] = []
+    for row in fallback_rows:
+        if (row.provider, row.model) in resolved:
+            continue
+        suggested = _suggest_canonical(row.model, catalog_by_provider.get(row.provider, []))
+        out.append(
+            UnmappedModelRow(
+                provider=row.provider,
+                model=row.model,
+                call_count=int(row.call_count),
+                last_seen_at=row.last_seen_at,
+                tenant_id=row.tenant_id,
+                suggested_canonical=suggested,
+            )
+        )
+    return UnmappedModelsResponse(rows=out)
+
+
+@router.post('/aliases', response_model=AliasRowOut)
+async def upsert_alias(
+    body: AliasUpsertRequest,
+    request: Request,
+    auth: AuthContext = require_permission('cost:edit'),
+    db: AsyncSession = Depends(get_db),
+) -> AliasRowOut:
+    """Create or update an alias row, then re-price affected historical usage.
+
+    ``tenant_scope='tenant'`` → scoped to the caller's tenant (default).
+    ``tenant_scope='system'`` → ``tenant_id=NULL`` (platform-wide default; still
+    gated by ``cost:edit``; individual tenants can override with their own row).
+    """
+    if not body.provider or not body.observed or not body.canonical:
+        raise HTTPException(status_code=400, detail='provider/observed/canonical required')
+
+    target_tenant = None if body.tenant_scope == 'system' else auth.tenant_id
+
+    existing_stmt = select(ModelAlias).where(
+        ModelAlias.provider == body.provider,
+        ModelAlias.observed == body.observed,
+        ModelAlias.tenant_id == target_tenant
+        if target_tenant is not None
+        else ModelAlias.tenant_id.is_(None),
+    )
+    existing = (await db.execute(existing_stmt)).scalars().first()
+
+    if existing is not None:
+        before = _alias_row_out(existing).model_dump(mode='json')
+        existing.canonical = body.canonical
+        existing.notes = body.notes
+        await db.flush()
+        # onupdate=func.now() is server-evaluated; refresh so ``updated_at``
+        # is populated before we serialize for the audit + response.
+        await db.refresh(existing)
+        row = existing
+        action = 'cost.alias.updated'
+    else:
+        row = ModelAlias(
+            tenant_id=target_tenant,
+            provider=body.provider,
+            observed=body.observed,
+            canonical=body.canonical,
+            notes=body.notes,
+            created_by=auth.user_id,
+        )
+        db.add(row)
+        await db.flush()
+        await db.refresh(row)
+        before = None
+        action = 'cost.alias.created'
+
+    after_state = _alias_row_out(row).model_dump(mode='json')
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action=action,
+        entity_type='model_alias',
+        entity_id=row.id,
+        before_state=before,
+        after_state=after_state,
+        request=request,
+    )
+    await db.commit()
+    pricing_cache.invalidate()
+    return _alias_row_out(row)
+
+
+@router.delete('/aliases/{alias_id}')
+async def delete_alias(
+    alias_id: uuid.UUID,
+    request: Request,
+    auth: AuthContext = require_permission('cost:edit'),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    row = (await db.execute(select(ModelAlias).where(ModelAlias.id == alias_id))).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail='alias not found')
+    if row.tenant_id is None:
+        # System aliases are platform-wide defaults. Don't let a single tenant
+        # admin nuke them from a tenant-scoped UI; exposing that requires a
+        # dedicated platform-admin surface.
+        raise HTTPException(status_code=403, detail='system aliases cannot be deleted here')
+    if row.tenant_id != auth.tenant_id:
+        raise HTTPException(status_code=403, detail='cannot delete another tenant\'s alias')
+
+    before = _alias_row_out(row).model_dump(mode='json')
+    await db.delete(row)
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action='cost.alias.deleted',
+        entity_type='model_alias',
+        entity_id=alias_id,
+        before_state=before,
+        after_state=None,
+        request=request,
+    )
+    await db.commit()
+    pricing_cache.invalidate()
+    return {'ok': True}
+
+
+@router.post('/aliases/{alias_id}/reprice', response_model=AliasRepriceResponse)
+async def reprice_alias(
+    alias_id: uuid.UUID,
+    request: Request,
+    auth: AuthContext = require_permission('cost:edit'),
+    db: AsyncSession = Depends(get_db),
+) -> AliasRepriceResponse:
+    """Re-price historical ``llm_usage`` rows that now resolve via this alias.
+
+    Backfill is tenant-scoped (or platform-wide for system aliases, still gated
+    by the caller's ``cost:edit`` permission). Safe to re-run.
+    """
+    row = (await db.execute(select(ModelAlias).where(ModelAlias.id == alias_id))).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail='alias not found')
+
+    # System aliases re-price across the caller's tenant only — other tenants
+    # can trigger their own backfill from their own session.
+    scope_tenant = row.tenant_id or auth.tenant_id
+
+    from app.services.cost_tracking.backfill import backfill_unpriced_for_alias
+
+    result = await backfill_unpriced_for_alias(
+        db,
+        tenant_id=scope_tenant,
+        provider=row.provider,
+        observed=row.observed,
+    )
+
+    await write_audit_log(
+        db,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.user_id,
+        action='cost.alias.repriced',
+        entity_type='model_alias',
+        entity_id=alias_id,
+        after_state={'alias_id': str(alias_id), **result},
+        request=request,
+    )
+    await db.commit()
+    return AliasRepriceResponse(**result)
 
 
 # ── Admin: rollup backfill ──────────────────────────────────────────

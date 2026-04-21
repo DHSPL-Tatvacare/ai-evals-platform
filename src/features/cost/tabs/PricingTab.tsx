@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Tag, Plus, DollarSign } from 'lucide-react';
 import { Alert, Badge, Button, DataTable, ProviderTag, Tabs, type ColumnDef } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
@@ -6,6 +6,7 @@ import { ApiError } from '@/services/api/client';
 import { usePermission } from '@/utils/permissions';
 import { notificationService } from '@/services/notifications';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
+import { CostSearchInput } from '../components/CostSearchInput';
 import { formatDateTime, formatInt, formatUsd } from '../utils/format';
 import type { PricingRow, RefreshDiff, SnapshotRow } from '../types';
 import { PricingEditOverlay } from '../components/PricingEditOverlay';
@@ -196,6 +197,17 @@ function PricingRowsTable({
   canEdit: boolean;
   onEdit: (row: PricingRow) => void;
 }) {
+  const [query, setQuery] = useState('');
+
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) => {
+      const haystack = `${row.provider} ${row.model} ${row.source} ${row.notes ?? ''}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [rows, query]);
+
   const columns: ColumnDef<PricingRow>[] = [
     {
       key: 'provider',
@@ -291,25 +303,42 @@ function PricingRowsTable({
   ];
 
   return (
-    <DataTable
-      columns={columns}
-      data={rows}
-      keyExtractor={(row) => row.id}
-      emptyIcon={Tag}
-      emptyTitle="No pricing rows"
-      emptyDescription="Seed the DB or refresh from models.dev to populate pricing."
-      onRowClick={(row) => {
-        if (!canEdit) {
-          notificationService.info('Pricing edits require the cost:edit permission.');
-          return;
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <CostSearchInput
+        value={query}
+        onCommit={setQuery}
+        debounceMs={0}
+        placeholder="Search by provider, model, source, or notes (e.g. gpt-5.4, azure, manual)"
+        countLabel={
+          query
+            ? `${filteredRows.length} of ${rows.length}`
+            : `${rows.length} row${rows.length === 1 ? '' : 's'}`
         }
-        if (row.effectiveTo !== null) {
-          notificationService.info('This is a historical row; create a new row to update pricing.');
-          return;
+      />
+      <DataTable
+        columns={columns}
+        data={filteredRows}
+        keyExtractor={(row) => row.id}
+        emptyIcon={Tag}
+        emptyTitle={query ? 'No matches' : 'No pricing rows'}
+        emptyDescription={
+          query
+            ? `No pricing rows match "${query}". Clear the search to see all ${rows.length}.`
+            : 'Seed the DB or refresh from models.dev to populate pricing.'
         }
-        onEdit(row);
-      }}
-    />
+        onRowClick={(row) => {
+          if (!canEdit) {
+            notificationService.info('Pricing edits require the cost:edit permission.');
+            return;
+          }
+          if (row.effectiveTo !== null) {
+            notificationService.info('This is a historical row; create a new row to update pricing.');
+            return;
+          }
+          onEdit(row);
+        }}
+      />
+    </div>
   );
 }
 

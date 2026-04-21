@@ -89,7 +89,7 @@ async def record_llm_usage(
         at = now_utc()
 
         async with async_session() as db:
-            pricing = await pricing_cache.get(db, provider, model, at)
+            pricing = await pricing_cache.get(db, provider, model, at, tenant_id=tenant_id)
             cost_usd, breakdown, fallback = compute_cost(
                 pricing,
                 input_tokens=input_tokens,
