@@ -342,6 +342,39 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['min_created_at'], '2026-04-01 00:00:00+00:00')
         self.assertEqual(payload['max_created_at'], '2026-04-14 00:00:00+00:00')
 
+    async def test_data_check_resolves_manifest_column_synonym_filters(self):
+        from app.models.analytics_facts import AnalyticsEvalFact
+
+        db = AsyncMock()
+        result_proxy = Mock()
+        result_proxy.first.return_value = (3, None, None)
+        db.execute.return_value = result_proxy
+
+        with patch(
+            'app.services.chat_engine.catalog_tools._load_catalog_context',
+            new=AsyncMock(return_value=({}, sql_agent.load_semantic_model('kaira-bot', app_config={}))),
+        ), patch(
+            'app.services.chat_engine.catalog_tools._validate_app_access',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.catalog_tools._validate_table_access',
+            return_value=None,
+        ), patch.dict(
+            'app.services.chat_engine.catalog_tools._ORM_REGISTRY_TO_TABLE',
+            {'analytics_eval_facts': AnalyticsEvalFact},
+            clear=False,
+        ):
+            payload = await sql_agent.data_check(
+                table='analytics_eval_facts',
+                filters={'verdict': 'PASS'},
+                db=db,
+                auth=self._auth_context(),
+                app_id='kaira-bot',
+            )
+
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['filters'], {'verdict': 'PASS'})
+
     async def test_data_query_builds_time_series_metadata_and_chart_suggestion(self):
         auth = self._auth_context()
         app_db = AsyncMock()

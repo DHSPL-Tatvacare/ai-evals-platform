@@ -149,25 +149,39 @@ def test_no_legacy_chart_fields_in_active_backend_code():
 
 
 def test_no_legacy_chart_shape_fields_in_active_frontend_code():
-    """Phase-4-gated: ChartSpec / ChartData survive in
-    src/features/chat-widget/types.ts and chatWidgetHelpers.ts (the
-    normalization helper for historical persisted payloads). Everywhere
-    else in active frontend code, they must be gone."""
+    """ChartSpec / ChartData were fully dropped in the migrate-or-drop
+    finish. They must not appear anywhere in active frontend source."""
     ts = _walk(FRONTEND_SRC, suffixes=('.ts', '.tsx'))
-    # The two files intentionally excluded per Phase 2 §2.5 — they are
-    # the Phase-4 migrate-or-drop island.
-    phase4_island = {
-        FRONTEND_SRC / 'features' / 'chat-widget' / 'types.ts',
-        FRONTEND_SRC / 'features' / 'chat-widget' / 'chatWidgetHelpers.ts',
-        FRONTEND_SRC / 'features' / 'chat-widget' / 'chatWidgetHelpers.test.ts',
-    }
     pattern = re.compile(r'\b(ChartSpec|ChartData)\b(?!\w)')
-    hits = [
-        (path, line_no, line)
-        for path, line_no, line in _grep(pattern, ts)
-        if path not in phase4_island
-    ]
-    assert not hits, f"Legacy chart-payload type leaked out of the Phase-4 island:\n{hits}"
+    hits = _grep(pattern, ts)
+    assert not hits, f"Legacy chart-payload types reintroduced:\n{hits}"
+
+
+@pytest.mark.parametrize('tool_name', [
+    'query_eval_runs',
+    'get_run_summary',
+    'compare_runs',
+    'query_threads',
+    'get_app_stats',
+    'get_report_section',
+    'get_thread_detail',
+    'get_rule_compliance',
+    'query_adversarial',
+    'get_cross_run_rule_compliance',
+])
+def test_no_deprecated_sherlock_analytics_tools_in_runtime_code(tool_name):
+    """The old Sherlock analytics tools were deleted, not deprecated.
+    They must not survive in active runtime code as handler-map keys,
+    prompt strings, or summary branches."""
+    py = (
+        _walk(BACKEND_APP / 'services' / 'report_builder', suffixes=('.py',))
+        + _walk(BACKEND_APP / 'services' / 'chat_engine', suffixes=('.py',))
+    )
+    pattern = re.compile(
+        rf'["\']\b{re.escape(tool_name)}\b["\']|\bhandle_{re.escape(tool_name)}\b'
+    )
+    hits = _grep(pattern, py)
+    assert not hits, f"Deprecated Sherlock tool {tool_name!r} reintroduced:\n{hits}"
 
 
 # ── Dead frontend module ────────────────────────────────────────────
@@ -220,9 +234,7 @@ def test_every_bounded_param_gets_an_enum_on_real_schemas():
         'app.services.chat_engine.sql_agent.load_semantic_model',
         return_value=sm,
     ):
-        tools = asyncio.get_event_loop().run_until_complete(
-            _resolve_tools_for_app('kaira-bot', db)
-        )
+        tools = asyncio.run(_resolve_tools_for_app('kaira-bot', db))
 
     bounded = {'dimension', 'entity_type', 'surface_key', 'block_type', 'table'}
     missing: list[str] = []
@@ -355,7 +367,7 @@ def test_agent_tool_log_receives_invalid_argument_status():
         'app.services.report_builder.tool_handlers._log_tool_call',
         new=log_capture,
     ):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             dispatch_tool_call(
                 'lookup',
                 {'dimension': 'never_existed'},

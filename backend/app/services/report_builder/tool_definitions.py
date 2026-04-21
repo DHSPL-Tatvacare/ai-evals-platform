@@ -359,7 +359,7 @@ ANALYTICS_TOOLS: list[dict[str, Any]] = [
         "description": (
             "Answer analytical questions about the application's data. "
             "This tool generates and executes a safe SQL query from a natural-language question and "
-            "returns rows, deterministic result warnings, structured column metadata, and chart suggestions. "
+            "returns rows, deterministic result warnings, structured column metadata, and backend-owned chart metadata. "
             "Use it for aggregations, trends, comparisons, breakdowns, and filtered analysis."
         ),
         "inputSchema": {

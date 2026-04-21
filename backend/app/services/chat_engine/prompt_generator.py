@@ -25,6 +25,6 @@ def render_tools_section(*, app_id: str) -> str:
         "7. resolve_entity(entity_type, search) — resolve a partial ID or name to canonical value.\n"
         "8. get_surface_records(surface_key, ...) — raw evidence by surface key (one of those listed above).\n"
         "9. data_check(table, filters?) — row availability on a declared catalog table.\n"
-        "10. data_query(question) — structured analytics; returns rows, column roles, chart suggestion.\n"
+        "10. data_query(question) — structured analytics; returns rows, column roles, and deterministic result warnings.\n"
         "11. Blueprint tools — blueprint_blocks / blueprint_compose / blueprint_save / blueprint_list.\n"
     )

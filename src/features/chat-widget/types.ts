@@ -26,26 +26,6 @@ export interface SeriesConfig {
   stackId?: string;
 }
 
-export interface ChartSpec {
-  type: string;
-  title: string;
-  xKey: string;
-  yKey?: string;
-  seriesKeys: string[];
-  series?: SeriesConfig[];
-  xLabel: string;
-  yLabel: string;
-  legendPosition?: 'top' | 'bottom' | 'right' | 'none';
-  alternatives?: string[];
-}
-
-export interface ChartData {
-  spec: ChartSpec;
-  data: Record<string, unknown>[];
-  sqlQuery: string;
-  sourceQuestion: string;
-}
-
 // ── Phase 4 chart-contract payload ─────────────────────────────────
 // The backend orchestrator (`_build_chart_payload`) emits one of these
 // discriminated-union variants via the SSE ``chart`` event and persists
@@ -327,10 +307,7 @@ export interface StoredWidgetMetadata {
     summary?: string;
     detail?: ToolCallDetailData | null;
   }>;
-  // ``chart`` on the wire is either the new ``ChartPayload`` union or a
-  // legacy pre-contract ``ChartData`` record. The session-replay path
-  // runs it through ``normalizeLegacyChartPayload`` before use.
-  chart?: ChartPayload | ChartData | null;
+  chart?: ChartPayload | null;
   blueprint?: BlueprintPart | null;
   composedReport?: ComposedReport | null;
   terminalStatus?: TerminalStatus;

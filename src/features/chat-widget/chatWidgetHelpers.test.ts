@@ -4,7 +4,7 @@ import {
   appendTextPart,
   buildComposedReportOutline,
   getToolPartIndex,
-  normalizeLegacyChartPayload,
+  isChartPayload,
   partsFromStoredMessage,
   shouldApplyRuntimeSeq,
   upsertToolPart,
@@ -141,19 +141,16 @@ test('partsFromStoredMessage ignores legacy tool calls without toolCallId', () =
   ).toEqual([{ type: 'text', content: 'Done' }]);
 });
 
-// ── Phase 4.1 — legacy chart payload normalizer ─────────────────────
-
-test('normalizeLegacyChartPayload passes new-shape payloads through', () => {
+test('isChartPayload accepts new-shape chart payloads', () => {
   const payload = {
     kind: 'chart',
     spec: { mark: 'bar', encoding: { x: { field: 'x' }, y: { field: 'y' } } },
     data: [{ x: 'a', y: 1 }],
   };
-  const out = normalizeLegacyChartPayload(payload);
-  expect(out).toBe(payload);
+  expect(isChartPayload(payload)).toBe(true);
 });
 
-test('normalizeLegacyChartPayload wraps legacy bar into Vega-Lite subset', () => {
+test('isChartPayload rejects legacy pre-contract chart payloads', () => {
   const legacy = {
     spec: {
       type: 'bar',
@@ -168,41 +165,18 @@ test('normalizeLegacyChartPayload wraps legacy bar into Vega-Lite subset', () =>
     sqlQuery: 'SELECT ...',
     sourceQuestion: 'show pass rate',
   };
-  const out = normalizeLegacyChartPayload(legacy);
-  expect(out).not.toBeNull();
-  if (out?.kind !== 'chart') throw new Error('expected chart kind');
-  expect(out.spec.mark).toBe('bar');
-  expect(out.spec.encoding?.x?.field).toBe('evaluator');
-  expect(out.spec.encoding?.y?.field).toBe('pass_rate');
-  expect(out.title).toBe('Pass rate');
-  expect(out.sql_query).toBe('SELECT ...');
-  expect(out.source_question).toBe('show pass rate');
+  expect(isChartPayload(legacy)).toBe(false);
 });
 
-test('normalizeLegacyChartPayload folds legacy multi-series into Vega-Lite fold', () => {
-  const legacy = {
-    spec: {
-      type: 'line',
-      title: 'Volume',
-      xKey: 'day',
-      seriesKeys: ['pass', 'fail'],
-      xLabel: 'Day',
-      yLabel: 'Count',
-    },
-    data: [{ day: 'Mon', pass: 10, fail: 2 }],
-    sqlQuery: 'SELECT ...',
-    sourceQuestion: 'show volume',
-  };
-  const out = normalizeLegacyChartPayload(legacy);
-  if (out?.kind !== 'chart') throw new Error('expected chart kind');
-  expect(out.spec.transform).toEqual([
-    { fold: ['pass', 'fail'], as: ['measure', 'value'] },
-  ]);
-  expect(out.spec.encoding?.color?.field).toBe('measure');
-});
-
-test('normalizeLegacyChartPayload returns null for empty or invalid input', () => {
-  expect(normalizeLegacyChartPayload(null)).toBeNull();
-  expect(normalizeLegacyChartPayload({})).toBeNull();
-  expect(normalizeLegacyChartPayload({ spec: {} })).toBeNull();
+test('partsFromStoredMessage drops unsupported legacy chart metadata', () => {
+  expect(
+    partsFromStoredMessage('Done', {
+      chart: {
+        spec: { type: 'bar', xKey: 'x', seriesKeys: [], title: 'Legacy', xLabel: 'X', yLabel: 'Y' },
+        data: [{ x: 'a', y: 1 }],
+        sqlQuery: 'SELECT 1',
+        sourceQuestion: 'legacy',
+      } as never,
+    }),
+  ).toEqual([{ type: 'text', content: 'Done' }]);
 });

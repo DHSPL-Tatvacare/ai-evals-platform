@@ -544,33 +544,6 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
         return f"{len(sections)} sections"
     if name == "blueprint_save":
         return data.get("name", "saved")
-    if name == "query_eval_runs":
-        count = data.get("count", 0)
-        return f"{count} runs"
-    if name == "get_run_summary":
-        return data.get("name", "") or str(data.get("id", ""))[:8]
-    if name == "compare_runs":
-        ra = data.get("run_a", {}).get("id", "?")
-        rb = data.get("run_b", {}).get("id", "?")
-        return f"{ra} vs {rb}"
-    if name == "query_threads":
-        count = data.get("count", 0)
-        return f"{count} threads"
-    if name == "get_app_stats":
-        return f"{data.get('total_runs', 0)} runs"
-    if name == "get_report_section":
-        return data.get("section_type", data.get("title", "done"))
-    if name == "get_thread_detail":
-        return data.get("thread_id", "done")
-    if name == "get_rule_compliance":
-        rules = data.get("rules", [])
-        return f"{len(rules)} rules"
-    if name == "get_cross_run_rule_compliance":
-        rules = data.get("rules", [])
-        runs = data.get("total_runs_analyzed", 0)
-        return f"{len(rules)} rules across {runs} runs"
-    if name == "query_adversarial":
-        return f"{data.get('total', 0)} cases"
     return "done"
 
 
@@ -1166,5 +1139,4 @@ async def run_chat_turn_streaming_background(
         turn=turn,
         entity_recognition=entity_recognition,
     )
-
 

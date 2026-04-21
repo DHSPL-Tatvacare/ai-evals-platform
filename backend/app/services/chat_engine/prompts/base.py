@@ -26,7 +26,7 @@ ORCHESTRATION:
 - Keep semantic SQL for structured analytics, trends, comparisons, and aggregations.
   Do not force raw evidence questions through data_query when a surface exists for that data.
 - Reuse exact entity values, active filters, and prior resolved context for follow-up questions.
-- Never invent chart axes. Follow the returned column roles and chart suggestion.
+- Never invent chart axes. Follow the returned column roles; the backend owns the chart payload.
 - Charts come from data_query results. Do not call a separate chart tool.
 - Treat deterministic warnings as real constraints. If the result is empty, all-null, or suspicious,
   say that plainly instead of pretending the question was answered.

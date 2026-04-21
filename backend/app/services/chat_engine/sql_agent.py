@@ -1582,6 +1582,10 @@ async def data_check(
         _validate_app_access,
         _validate_table_access,
     )
+    from app.services.chat_engine.tool_vocabulary import (
+        build_tool_vocabulary,
+        column_error_payload,
+    )
 
     access_error = _validate_app_access(auth=auth, app_id=app_id)
     if access_error is not None:
@@ -1602,6 +1606,7 @@ async def data_check(
         return validation_error
 
     model = _ORM_REGISTRY_TO_TABLE[table]
+    vocab = build_tool_vocabulary(app_id, semantic_model)
     created_column = getattr(model, 'created_at', None) or getattr(model, 'completed_at', None)
     query = select(func.count().label('row_count')).select_from(model).where(
         *_catalog_scope_clauses(model, auth=auth, app_id=app_id)
@@ -1609,11 +1614,17 @@ async def data_check(
 
     normalized_filters: dict[str, Any] = {}
     for key, value in (filters or {}).items():
-        expression = _build_column_expression(model, key)
+        expression = _build_column_expression(model, key, vocab=vocab)
         if expression is None:
+            resolution = vocab.resolve_column(key, preferred_table=table)
+            if resolution.status != 'unique':
+                return column_error_payload(resolution, preferred_table=table)
             return {
                 'status': 'error',
+                'reason': 'unsupported_filter_column',
                 'error': f'Unsupported filter column for {table}: {key}',
+                'term': key,
+                'preferred_table': table,
             }
         normalized_filters[key] = value
         if isinstance(value, dict):
