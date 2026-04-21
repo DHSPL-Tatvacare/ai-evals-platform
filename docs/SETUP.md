@@ -309,6 +309,7 @@ This section is the complete reference for the current configuration surface. It
 | `ADMIN_TENANT_NAME` | empty | Bootstrap tenant name |
 | `ADMIN_TENANT_ALLOWED_DOMAINS` | empty | Comma-separated allowed signup domains |
 | `AUTH_RATE_LIMIT` | `10/minute` | Rate limit for login, signup, and refresh |
+| `COST_PRICING_REFRESH_RATE_LIMIT` | `5/minute;50/hour` | Rate limit for the `/api/admin/cost/pricing/refresh` endpoint |
 
 ### Kaira and adversarial settings
 

@@ -25,6 +25,7 @@ Across those workspaces, the platform provides:
 - a review universe for human sign-off on runs
 - a reporting pipeline with config/run/artifact persistence
 - an analytics fact layer that powers dashboards and the Sherlock agent
+- a cost tracking plane that records every LLM generation, resolves pricing, and rolls up spend per tenant, app, user, provider, and owner
 - tenant-aware RBAC, invite links, and app-scoped access
 
 ---
@@ -190,6 +191,24 @@ Key properties:
 - Sherlock never writes to `eval_runs` or analytics fact tables. It only reads and optionally binds chart output into `analytics_charts`.
 - Chat streaming is handled by `chat_engine` (routes: `/api/chat-engine`); the frontend surface is `src/features/chat-widget/`.
 
+### Cost tracking
+
+Cost tracking is the observability plane for LLM spend. It is independent of evaluation results but consumes the same execution flow: every model generation produced by `LoggingLLMWrapper` writes a single `llm_usage` row with provider, model, token counts, duration, correlation id, owner type/id, subsystem, and polymorphic ownership keys. Request handlers never write to the usage or rollup tables.
+
+Supporting tables:
+
+- `llm_usage` — append-only fact table of generation calls
+- `model_pricing` / `model_aliases` — tenant-scoped pricing with alias resolution
+- `llm_usage_daily_rollup` — daily aggregate rebuilt by `populate-cost-rollup` jobs
+- `models_dev_catalog` / `models_dev_snapshot` — read-through cache of the models.dev catalog used for pricing refresh
+
+Surfaces:
+
+- User-facing routes under `/api/cost`: overview, spend, efficiency, entity drill-down, calls list, call detail, and pricing bundle
+- Admin-facing routes under `/api/admin`: pricing edits, refresh, backfill-unpriced, and snapshot history
+- Frontend: `src/features/cost/` with `costStore` and `src/services/api/costApi.ts`
+- Non-app subsystems (Sherlock, report_builder, system_library) record usage with a populated `subsystem` field instead of an `app_id`
+
 ---
 
 ## CORE ABSTRACTIONS
@@ -236,6 +255,7 @@ Long-running work is submitted as a job row and executed by the worker. The regi
 | `generate-cross-run-report` | Cross-run analytics reporting |
 | `sync-external-source` | Pull upstream data (LeadSquared, Kaira) into mirror tables |
 | `populate-analytics` | Fan out stored runs into analytics fact tables |
+| `populate-cost-rollup` | Rebuild `llm_usage_daily_rollup` for a date range |
 
 The queue layer supports more than simple FIFO processing. `job_worker.py` includes:
 
@@ -266,9 +286,9 @@ Important Gemini rules:
 
 ### Stores are frontend caches
 
-The React app uses 16 Zustand stores:
+The React app uses 17 Zustand stores:
 
-`authStore`, `appStore`, `appSettingsStore`, `llmSettingsStore`, `globalSettingsStore`, `listingsStore`, `evaluatorsStore`, `evalTemplatesStore`, `chatStore`, `uiStore`, `miniPlayerStore`, `taskQueueStore`, `jobTrackerStore`, `crossRunStore`, `insideSalesStore`, `reviewModeStore`
+`authStore`, `appStore`, `appSettingsStore`, `llmSettingsStore`, `globalSettingsStore`, `listingsStore`, `evaluatorsStore`, `evalTemplatesStore`, `chatStore`, `uiStore`, `miniPlayerStore`, `taskQueueStore`, `jobTrackerStore`, `crossRunStore`, `insideSalesStore`, `reviewModeStore`, `costStore`
 
 These stores cache backend state. PostgreSQL is the source of truth.
 
@@ -294,11 +314,11 @@ System-owned library data is stored under the well-known system tenant and syste
 ```text
 Browser (React SPA)                      Backend (FastAPI)                      Data / Infra
 +-----------------------------------+    +-----------------------------------+  +-----------------------------+
-| 21 feature areas                  |    | 26 route groups                   |  | PostgreSQL (49 tables)      |
-| 16 Zustand stores                 |    | provider layer                    |  | optional analytics DB       |
+| 22 feature areas                  |    | 26 route groups                   |  | PostgreSQL (55 tables)      |
+| 17 Zustand stores                 |    | provider layer                    |  | optional analytics DB       |
 | api client + jobPolling.ts        |<-->| job worker + analytics populator  |  | Azure Blob or local files   |
 | DataTable + UI primitives         |    | reports v1/v2, reviews, Sherlock  |  | Azure App Service / Docker  |
-| routes + Sherlock chat widget     |    | evaluators, auth, RBAC            |  | ACR + GitHub Actions        |
+| routes + Sherlock chat widget     |    | evaluators, auth, RBAC, cost      |  | ACR + GitHub Actions        |
 +-----------------------------------+    +-----------------------------------+  +-----------------------------+
             :5173 dev / :80 prod                      :8721
 ```
@@ -338,6 +358,7 @@ Top-level feature areas under `src/features/`:
 | `analytics` | Dashboards, charts, and summary views |
 | `auth` | Login and signup flow |
 | `chat-widget` | Sherlock chat surface and chart binding UI |
+| `cost` | LLM spend dashboards, pricing admin, and calls drill-down |
 | `credentialPool` | Credential management UI |
 | `csvImport` | CSV ingestion flows |
 | `evalRuns` | Run list and run-detail flows |
@@ -372,17 +393,20 @@ Important shared frontend layers:
 
 The backend currently registers 26 route groups:
 
-`auth`, `listings`, `files`, `prompts`, `schemas`, `evaluators`, `chat`, `chat_engine`, `history`, `settings`, `tags`, `jobs`, `eval_runs`, `threads`, `llm`, `adversarial_config`, `adversarial_test_cases`, `admin`, `reports`, `report_builder`, `report_builder_v2`, `inside_sales`, `apps`, `roles`, `rules`, `eval_templates`, `reviews`, `analytics_library`
+`auth`, `listings`, `files`, `evaluators`, `chat`, `chat_engine`, `history`, `settings`, `tags`, `jobs`, `eval_runs` (+ `threads`), `llm`, `adversarial_config`, `adversarial_test_cases`, `admin`, `reports`, `report_builder` (+ `v2`), `inside_sales`, `apps`, `roles`, `rules`, `eval_templates`, `reviews`, `analytics_library`, `cost` (+ cost admin)
+
+`prompts` and `schemas` are ORM-backed resources but do not have standalone routers; they are managed through `/api/settings` and related surfaces.
 
 ### ORM tables
 
-The SQLAlchemy model layer currently defines 49 tables across five domains:
+The SQLAlchemy model layer currently defines 55 tables across six domains:
 
 - **Core platform:** `tenants`, `users`, `refresh_tokens`, `invite_links`, `apps`, `tenant_configs`, `audit_log`, `api_logs`, `jobs`, `files`
 - **Evaluation:** `listings`, `prompts`, `schemas`, `evaluators`, `eval_templates`, `eval_runs`, `thread_evaluations`, `adversarial_evaluations`, `adversarial_test_cases`, `tags`, `history`, `settings`, `evaluation_analytics`, `chat_sessions`, `chat_messages`, `external_agents`, `lsq_lead_cache`
 - **RBAC:** `roles`, `role_app_access`, `role_permissions`
 - **Inside Sales mirrors:** `inside_sales_calls`, `inside_sales_leads`, `inside_sales_sync_runs`
 - **Reports / reviews / analytics / agent runtime:** `report_configs`, `report_runs`, `report_artifacts`, `eval_reviews`, `eval_review_items`, `analytics_charts`, `analytics_dashboards`, `analytics_jobs`, `analytics_query_cache`, `analytics_run_facts`, `analytics_eval_facts`, `analytics_criterion_facts`, `agent_tool_logs`, `sherlock_runtime_sessions`, `sherlock_runtime_turns`, `sherlock_runtime_events`
+- **Cost tracking:** `llm_usage`, `model_pricing`, `model_aliases`, `llm_usage_daily_rollup`, `models_dev_catalog`, `models_dev_snapshot`
 
 ### Startup and seeding
 

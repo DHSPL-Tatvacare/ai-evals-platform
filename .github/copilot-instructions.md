@@ -11,6 +11,7 @@ Mirror of `AGENTS.md` for GitHub Copilot. Defer to `AGENTS.md` on any rule prece
 5. Evaluation runners call provider wrappers in `llm_base.py`, never provider SDKs directly.
 6. Analytics, reporting, and reviews are separate domains that consume EvalRuns but store their own fact/config/artifact tables.
 7. Sherlock is a constrained analytics agent with its own runtime session/turn/event tables; it never mutates eval data.
+8. Cost tracking is an observability plane. Every LLM generation call records one `llm_usage` row; aggregation and pricing resolution happen downstream, never in request handlers.
 
 ## Reuse These Abstractions
 
@@ -29,14 +30,15 @@ Mirror of `AGENTS.md` for GitHub Copilot. Defer to `AGENTS.md` on any rule prece
 - Filter pills -> `FilterPills` from `src/components/ui/FilterPills.tsx`
 - Tables -> unified `DataTable` in `src/components/ui/DataTable/`
 - Chart hex colors -> `resolveColor()` from `src/utils/statusColors.ts`
+- LLM usage recording -> `LoggingLLMWrapper` + `make_usage_callback()` in `backend/app/services/evaluators/runner_utils.py`
 
 ## Current Registry
 
-- Route groups (26): auth, listings, files, prompts, schemas, evaluators, chat, chat_engine, history, settings, tags, jobs, eval_runs, threads, llm, adversarial_config, adversarial_test_cases, admin, reports, report_builder, report_builder_v2, inside_sales, apps, roles, rules, eval_templates, reviews, analytics_library
-- ORM tables (49): tenants, users, refresh_tokens, listings, eval_runs, thread_evaluations, adversarial_evaluations, api_logs, tags, prompts, lsq_lead_cache, jobs, schemas, chat_sessions, chat_messages, audit_log, evaluation_analytics, files, invite_links, external_agents, apps, tenant_configs, adversarial_test_cases, evaluators, history, settings, roles, role_app_access, role_permissions, eval_templates, analytics_charts, analytics_jobs, analytics_query_cache, analytics_run_facts, analytics_eval_facts, analytics_criterion_facts, analytics_dashboards, agent_tool_logs, report_runs, report_configs, report_artifacts, eval_reviews, eval_review_items, inside_sales_calls, inside_sales_leads, inside_sales_sync_runs, sherlock_runtime_sessions, sherlock_runtime_turns, sherlock_runtime_events
-- Zustand stores (16): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, evaluatorsStore, evalTemplatesStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore, reviewModeStore
+- Route groups (26): auth, listings, files, evaluators, chat, chat_engine, history, settings, tags, jobs, eval_runs (+ threads), llm, adversarial_config, adversarial_test_cases, admin, reports, report_builder (+ v2), inside_sales, apps, roles, rules, eval_templates, reviews, analytics_library, cost (+ cost admin)
+- ORM tables (55): tenants, tenant_configs, users, refresh_tokens, invite_links, apps, roles, role_app_access, role_permissions, audit_log, listings, files, prompts, schemas, evaluators, chat_sessions, chat_messages, history, settings, adversarial_test_cases, tags, jobs, eval_runs, thread_evaluations, adversarial_evaluations, api_logs, eval_reviews, eval_review_items, evaluation_analytics, report_configs, report_runs, report_artifacts, lsq_lead_cache, inside_sales_calls, inside_sales_leads, inside_sales_sync_runs, external_agents, eval_templates, analytics_run_facts, analytics_eval_facts, analytics_criterion_facts, analytics_jobs, agent_tool_logs, analytics_query_cache, analytics_charts, analytics_dashboards, sherlock_runtime_sessions, sherlock_runtime_turns, sherlock_runtime_events, llm_usage, model_pricing, model_aliases, llm_usage_daily_rollup, models_dev_catalog, models_dev_snapshot
+- Zustand stores (17): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, evaluatorsStore, evalTemplatesStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore, reviewModeStore, costStore
 - LLM providers: Gemini, OpenAI, Azure OpenAI, Anthropic
-- Job types (11): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-evaluator-draft, generate-cross-run-report, sync-external-source, populate-analytics
+- Job types (12): evaluate-voice-rx, evaluate-batch, evaluate-adversarial, evaluate-custom, evaluate-custom-batch, evaluate-inside-sales, generate-report, generate-evaluator-draft, generate-cross-run-report, sync-external-source, populate-analytics, populate-cost-rollup
 - Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`
 
 ## Frontend Rules
@@ -82,4 +84,5 @@ Mirror of `AGENTS.md` for GitHub Copilot. Defer to `AGENTS.md` on any rule prece
 - `listing.source_type` matters; do not mix upload and API-flow assumptions.
 - Report generation has two surfaces: legacy `reports` and the v2 `report_builder` / `report_builder_v2` pipeline backed by `report_configs` / `report_runs` / `report_artifacts`.
 - Sherlock sessions are per-user per-app; always filter `sherlock_runtime_*` by tenant/user/app.
+- Cost tracking lives under `/api/cost` (tenant/user views) and a cost-admin sub-router under `/api/admin`. `llm_usage` rows are written by `LoggingLLMWrapper`; rollups rebuild via `populate-cost-rollup` jobs.
 - Do not reintroduce `kaira-evals` as an app ID anywhere in the frontend or backend.
