@@ -1661,7 +1661,6 @@ async def data_query(
     auth: Any,
     app_id: str,
     provider: str | None = None,
-    migration_alias: str | None = None,
 ) -> dict:
     """End-to-end: question → SQL generation → validation → execution → results."""
     from app.database import analytics_session
@@ -1765,11 +1764,6 @@ async def data_query(
                     'warnings': warnings,
                     'applied_filters': copy.deepcopy(parameterized_context.get('active_filters', {})),
                 }
-                if migration_alias:
-                    payload['warnings'] = payload['warnings'] + [{
-                        'code': 'deprecated_alias',
-                        'message': f'The {migration_alias} tool is deprecated. Use data_query instead.',
-                    }]
                 return payload
 
             attempt = 0
@@ -1869,11 +1863,6 @@ async def data_query(
             'warnings': warnings,
             'applied_filters': copy.deepcopy(parameterized_context.get('active_filters', {})),
         }
-        if migration_alias:
-            payload['warnings'] = payload['warnings'] + [{
-                'code': 'deprecated_alias',
-                'message': f'The {migration_alias} tool is deprecated. Use data_query instead.',
-            }]
         return payload
 
     except SQLValidationError as exc:
@@ -1890,29 +1879,6 @@ async def data_query(
             'error': f'Query execution failed: {str(exc)}',
             'question': question,
         }
-
-
-async def analyze(
-    question: str,
-    *,
-    context: dict[str, Any] | None = None,
-    question_context: str | None = None,
-    db: AsyncSession,
-    auth: Any,
-    app_id: str,
-    provider: str | None = None,
-) -> dict:
-    """Deprecated compatibility alias for Sherlock v2 data_query."""
-    return await data_query(
-        question=question,
-        context=context,
-        question_context=question_context,
-        db=db,
-        auth=auth,
-        app_id=app_id,
-        provider=provider,
-        migration_alias='analyze',
-    )
 
 
 def _match_common_query(question: str, semantic_model: dict[str, Any] | None = None) -> str | None:

@@ -392,7 +392,7 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
             pad['errors'].append(f'{tool_name}: {error_text[:200]}')
         return
 
-    if tool_name in {'data_query', 'analyze'} and data.get('status') == 'ok':
+    if tool_name == 'data_query' and data.get('status') == 'ok':
         question = str(data.get('question', '')).strip()
         row_count = data.get('row_count', 0)
         remember_active_filters(pad, data.get('applied_filters'))
@@ -590,7 +590,7 @@ def _build_tool_call_detail(name: str, result_str: str, *, execution_ms: float) 
         error=str(error) if error else None,
     )
 
-    if name in {'data_query', 'analyze'}:
+    if name == 'data_query':
         detail.sql_used = data.get('sql_used')
         detail.row_count = data.get('row_count')
         detail.cache_hit = bool(data.get('cache_hit', False))

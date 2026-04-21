@@ -228,7 +228,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             'app.database.analytics_session',
             return_value=_FakeAnalyticsSession(analytics_db),
         ):
-            await sql_agent.analyze(
+            await sql_agent.data_query(
                 question='show violated rules for run ca540908',
                 db=app_db,
                 auth=auth,
@@ -292,7 +292,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             'app.database.analytics_session',
             return_value=_FakeAnalyticsSession(analytics_db),
         ):
-            result = await sql_agent.analyze(
+            result = await sql_agent.data_query(
                 question='show violated rules for run ca540908',
                 db=app_db,
                 auth=auth,

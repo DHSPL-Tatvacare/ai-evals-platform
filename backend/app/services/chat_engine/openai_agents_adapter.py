@@ -382,9 +382,9 @@ async def _sherlock_tool_handler(ctx: ToolContext[SherlockContext], args: str) -
     detail = _build_tool_call_detail(tool_name, result_str, execution_ms=execution_ms)
     parsed_result = _load_json_object(result_str)
 
-    if tool_name in ('data_query', 'analyze') and parsed_result.get('status') == 'ok':
+    if tool_name == 'data_query' and parsed_result.get('status') == 'ok':
         sc.chart_payload = _build_chart_payload(parsed_result)
-    elif tool_name in ('compose_report', 'blueprint_compose') and parsed_result.get('status') == 'ok':
+    elif tool_name == 'blueprint_compose' and parsed_result.get('status') == 'ok':
         sc.composed_report = parsed_result
 
     _update_scratchpad(sc.working_session, tool_name, result_str, app_id=sc.app_id)
