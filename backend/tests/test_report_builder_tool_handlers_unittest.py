@@ -73,7 +73,10 @@ async def test_handle_data_check_forwards_table_and_filters():
             app_id='kaira-bot',
         )
 
-    assert result['row_count'] == 4
+    # Phase 2: handler returns a §6.2 envelope; data_check raw fields
+    # live under ``envelope.payload``.
+    assert result['status'] == 'ok'
+    assert result['payload']['row_count'] == 4
     assert data_check_mock.await_args.kwargs['table'] == 'eval_runs'
     assert data_check_mock.await_args.kwargs['filters'] == {'eval_type': 'custom'}
 
@@ -95,8 +98,9 @@ async def test_handle_resolve_entity_uses_shared_resolver():
             app_id='kaira-bot',
         )
 
+    # Phase 2: envelope shape — matches live under ``envelope.payload``.
     assert payload['status'] == 'ok'
-    assert payload['matches'][0]['value'] == 'thrd-123'
+    assert payload['payload']['matches'][0]['value'] == 'thrd-123'
     assert resolve_mock.await_args.kwargs['entity_type'] == 'thread_id'
 
 
@@ -140,8 +144,9 @@ async def test_handle_get_surface_records_reuses_resolved_entity_from_scratchpad
             },
         )
 
+    # Phase 2: envelope shape — per-tool fields live under ``envelope.payload``.
     assert payload['status'] == 'ok'
-    assert payload['entity_value'] == 'thrd-123'
+    assert payload['payload']['entity_value'] == 'thrd-123'
     assert fetch_mock.await_args.kwargs['entity_value'] == 'thrd-123'
 
 
@@ -163,6 +168,8 @@ async def test_handle_save_template_persists_source_session_lineage():
         session={'chat_session_id': '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221'},
     )
 
-    assert payload['status'] == 'saved'
+    # Phase 2: envelope-native handler — ``'saved'`` flag sits in payload.
+    assert payload['status'] == 'ok'
+    assert payload['payload']['status'] == 'saved'
     saved_config = db.add.call_args.args[0]
     assert str(getattr(saved_config, 'source_session_id', '')) == '8d7d7d56-5dca-4f6a-a2c6-4cb5f6f8e221'

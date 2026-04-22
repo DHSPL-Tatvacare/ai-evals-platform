@@ -5,6 +5,7 @@ import { CHAT_SESSION_SOURCE, chatSessionsRepository } from '@/services/api/chat
 import { notificationService } from '@/services/notifications';
 import type { AppId } from '@/types';
 import type {
+  Artifact,
   BlueprintPart,
   BuilderSessionData,
   ChatDefaults,
@@ -21,6 +22,8 @@ import type {
 } from './types';
 import {
   appendTextPart,
+  applyArtifactToParts,
+  isArtifact,
   mergeTerminalText,
   partsFromStoredMessage,
   replaceOrAppendPart,
@@ -152,7 +155,7 @@ type RuntimeApplier = {
   onBlueprint: (event: BlueprintPart & { seq: number }) => void;
   onSaveResult: (event: { seq: number; variant: SaveToastPart['variant']; id: string; title: string; subtitle?: string; linkText?: string; linkHref: string }) => void;
   onStatus: (event: { seq?: number; text: string }) => void;
-  onDone: (event: { seq: number; terminalStatus?: TerminalStatus; content?: string; toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>; chart?: ChartPart | null; blueprint?: Omit<BlueprintPart, 'type'> | null; usage?: TurnUsage }) => void;
+  onDone: (event: { seq: number; terminalStatus?: TerminalStatus; content?: string; toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>; artifacts?: Artifact[] | null; usage?: TurnUsage }) => void;
   onError: (event: { seq?: number; terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>; message: string; content?: string }) => void;
 };
 
@@ -328,15 +331,10 @@ function createRuntimeApplier(
           });
         }
 
-        if (event.chart) {
-          finalParts = replaceOrAppendPart(finalParts, (part): part is ChartPart => part.type === 'chart', event.chart);
-        }
-        if (event.blueprint) {
-          finalParts = replaceOrAppendPart(
-            finalParts,
-            (part): part is BlueprintPart => part.type === 'blueprint',
-            { type: 'blueprint', ...event.blueprint },
-          );
+        for (const artifact of event.artifacts ?? []) {
+          if (isArtifact(artifact)) {
+            finalParts = applyArtifactToParts(finalParts, artifact);
+          }
         }
         finalParts = mergeTerminalText(finalParts, event.content);
         finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'done', 'complete', event.usage);
@@ -593,11 +591,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onBlueprint: applier.onBlueprint,
           onSaveResult: applier.onSaveResult,
           onStatus: applier.onStatus,
-          onDone: (event) => applier.onDone({
-            ...event,
-            chart: event.chart ? { type: 'chart', payload: event.chart } : null,
-            blueprint: event.blueprint ?? null,
-          }),
+          onDone: (event) => applier.onDone(event),
           onError: applier.onError,
         },
       ).then((controller) => {
@@ -648,11 +642,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         onBlueprint: applier.onBlueprint,
         onSaveResult: applier.onSaveResult,
         onStatus: applier.onStatus,
-        onDone: (event) => applier.onDone({
-          ...event,
-          chart: event.chart ? { type: 'chart', payload: event.chart } : null,
-          blueprint: event.blueprint ?? null,
-        }),
+        onDone: (event) => applier.onDone(event),
         onError: applier.onError,
       },
     );

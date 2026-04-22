@@ -81,7 +81,7 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             _Result(rows=[('idx_eval_type', 'CREATE INDEX idx_eval_type ON analytics_run_facts (eval_type)')]),
         ]
 
-        payload = await catalog_tools.catalog_inspect(
+        envelope = await catalog_tools.catalog_inspect(
             table='analytics_run_facts',
             column=None,
             db=db,
@@ -91,7 +91,11 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             semantic_model={'tables': {'analytics_run_facts': {}}},
         )
 
-        self.assertEqual(payload['status'], 'ok')
+        # Phase 2: catalog tools return §6.2 envelopes directly.
+        self.assertEqual(envelope['status'], 'ok')
+        self.assertEqual(envelope['outcome']['kind'], 'read')
+        self.assertEqual(envelope['outcome']['capability'], 'analytics')
+        payload = envelope['payload']
         self.assertEqual(payload['primary_key'], ['eval_type'])
         self.assertEqual(payload['columns'][0]['comment_metadata']['role'], 'dimension')
         self.assertTrue(payload['columns'][1]['is_jsonb'])
@@ -113,7 +117,7 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
 
         db.execute.side_effect = _execute
 
-        payload = await catalog_tools.catalog_values(
+        envelope = await catalog_tools.catalog_values(
             table='analytics_eval_facts',
             column='result_status',
             search='pa',
@@ -124,15 +128,16 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             semantic_model={'tables': {'analytics_eval_facts': {}}},
         )
 
-        self.assertEqual(payload['status'], 'ok')
-        self.assertEqual(payload['values'][0]['value'], 'PASS')
+        self.assertEqual(envelope['status'], 'ok')
+        self.assertEqual(envelope['outcome']['kind'], 'read')
+        self.assertEqual(envelope['payload']['values'][0]['value'], 'PASS')
         self.assertIn('analytics_eval_facts.tenant_id', captured['query'])
         self.assertIn('analytics_eval_facts.app_id', captured['query'])
 
     async def test_catalog_values_rejects_disallowed_tables(self):
         db = AsyncMock()
 
-        payload = await catalog_tools.catalog_values(
+        envelope = await catalog_tools.catalog_values(
             table='users',
             column='email',
             db=db,
@@ -142,14 +147,19 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             semantic_model={'tables': {'analytics_eval_facts': {}}},
         )
 
-        self.assertEqual(payload['status'], 'error')
-        self.assertIn('disallowed table', payload['error'])
+        self.assertEqual(envelope['status'], 'error')
+        self.assertEqual(envelope['outcome']['kind'], 'error')
+        self.assertEqual(envelope['outcome']['reason_code'], 'ENTITY_OUT_OF_SCOPE')
+        self.assertTrue(
+            any('not declared in the manifest' in w for w in envelope['outcome']['warnings']),
+            envelope['outcome']['warnings'],
+        )
         db.execute.assert_not_called()
 
     async def test_catalog_inspect_rejects_missing_app_access(self):
         db = AsyncMock()
 
-        payload = await catalog_tools.catalog_inspect(
+        envelope = await catalog_tools.catalog_inspect(
             table='analytics_run_facts',
             column=None,
             db=db,
@@ -159,8 +169,12 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             semantic_model={'tables': {'analytics_run_facts': {}}},
         )
 
-        self.assertEqual(payload['status'], 'error')
-        self.assertIn('App access denied', payload['error'])
+        self.assertEqual(envelope['status'], 'error')
+        self.assertEqual(envelope['outcome']['reason_code'], 'PERMISSION_DENIED')
+        self.assertTrue(
+            any('App access denied' in w for w in envelope['outcome']['warnings']),
+            envelope['outcome']['warnings'],
+        )
         db.execute.assert_not_called()
 
 

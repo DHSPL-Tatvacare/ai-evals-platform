@@ -88,6 +88,13 @@ async def lifespan(app: FastAPI):
     async with async_session() as _validator_db:
         await run_manifest_validator(_validator_db)
 
+    # Phase 3 acceptance gate: raise on unknown pack id in any app config.
+    # Runs here so drift in ``App.config.chat.capabilities`` fails boot
+    # loudly instead of waiting for the first turn that hits that app.
+    from app.services.chat_engine.capability_pack import validate_all_app_pack_ids
+    async with async_session() as _pack_validator_db:
+        await validate_all_app_pack_ids(_pack_validator_db)
+
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin
     from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
     async with async_session() as session:

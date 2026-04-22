@@ -178,8 +178,11 @@ async def test_dispatch_short_circuits_on_invalid_bounded_arg(patch_vocab_source
         )
 
     payload = json.loads(raw)
+    # Phase 2: dispatch_tool_call returns the §6.2 envelope. Boundary
+    # validation errors carry ``outcome.reason_code`` instead of the
+    # bespoke ``reason`` field.
     assert payload['status'] == 'error'
-    assert payload['reason'] == 'unknown_dimension'
+    assert payload['outcome']['reason_code'] == 'ENTITY_NOT_FOUND'
     handler_mock.assert_not_awaited()
 
 

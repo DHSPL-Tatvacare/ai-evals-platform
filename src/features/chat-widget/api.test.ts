@@ -44,7 +44,7 @@ test('streamChatMessage parses v2 events including blueprint and save_result pay
       'event: entity_recognition\ndata: {"seq":3,"entities":[{"text":"adversarial","type":"eval_type","confidence":0.9}],"isPlatformQuery":true}\n\n',
       'event: tool_call_start\ndata: {"seq":4,"toolCallId":"tc_1","toolName":"data_query"}\n\n',
       'event: tool_call_end\ndata: {"seq":5,"toolCallId":"tc_1","toolName":"data_query","summary":"7 rows","detail":{"executionMs":12,"rowCount":7,"cacheHit":false,"error":null},"durationMs":12}\n\n',
-      'event: done\ndata: {"seq":6,"terminalStatus":"degraded","content":"Done","toolCalls":[{"toolCallId":"tc_1","name":"data_query","summary":"7 rows","detail":{"executionMs":12,"rowCount":7,"cacheHit":false,"error":null}}],"chart":null,"blueprint":{"name":"Weekly review","sections":[{"id":"overview","title":"Overview","type":"summary_cards"}]},"warnings":["partial data"]}\n\n',
+      'event: done\ndata: {"seq":6,"terminalStatus":"degraded","content":"Done","toolCalls":[{"toolCallId":"tc_1","name":"data_query","summary":"7 rows","detail":{"executionMs":12,"rowCount":7,"cacheHit":false,"error":null}}],"artifacts":[{"pack_id":"report_builder","contract_id":"report_builder.blueprint.v1","payload":{"name":"Weekly review","sections":[{"id":"overview","title":"Overview","type":"summary_cards"}]},"extras":{}}],"warnings":["partial data"]}\n\n',
     ]),
   );
 
@@ -79,7 +79,16 @@ test('streamChatMessage parses v2 events including blueprint and save_result pay
   expect(onEntityRecognition).toHaveBeenCalledWith(expect.objectContaining({ seq: 3 }));
   expect(onToolCallStart).toHaveBeenCalledWith(expect.objectContaining({ seq: 4, toolCallId: 'tc_1' }));
   expect(onToolCallEnd).toHaveBeenCalledWith(expect.objectContaining({ seq: 5, durationMs: 12 }));
-  expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ seq: 6, terminalStatus: 'degraded' }));
+  expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
+    seq: 6,
+    terminalStatus: 'degraded',
+    artifacts: [
+      expect.objectContaining({
+        pack_id: 'report_builder',
+        contract_id: 'report_builder.blueprint.v1',
+      }),
+    ],
+  }));
   expect(onError).not.toHaveBeenCalled();
   expect(onContentDelta).not.toHaveBeenCalled();
   expect(onChart).not.toHaveBeenCalled();
@@ -122,7 +131,7 @@ test('streamChatMessage forwards resume requests without a message body', async 
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
     createSseResponse([
       'event: session\ndata: {"sessionId":"session-1","provider":"openai","model":"gpt-5.4-mini"}\n\n',
-      'event: done\ndata: {"seq":5,"terminalStatus":"done","content":"Resumed","toolCalls":[],"chart":null,"blueprint":null,"warnings":[]}\n\n',
+      'event: done\ndata: {"seq":5,"terminalStatus":"done","content":"Resumed","toolCalls":[],"artifacts":[],"warnings":[]}\n\n',
     ]),
   );
 

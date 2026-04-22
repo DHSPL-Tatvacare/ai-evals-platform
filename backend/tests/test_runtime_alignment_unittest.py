@@ -2,6 +2,7 @@
 and structured contract-violation logging."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
@@ -19,6 +20,7 @@ from app.services.report_builder.chat_handler import (
     _execute_chat_turn,
     _question_contract_hints,
 )
+from app.services.report_builder.scratchpad_state import default_scratchpad
 from app.services.report_builder.tool_handlers import dispatch_tool_call
 
 
@@ -248,6 +250,328 @@ async def test_execute_chat_turn_emits_terminal_error_when_recognition_fails():
     assert runtime_event.await_args.args[1] == 'error'
 
 
+@pytest.mark.asyncio
+async def test_execute_chat_turn_two_turn_reproducer_persists_final_pie_outcome():
+    """Phase-2 reproducer at the real turn layer.
+
+    Turn 1 asks ``count runs per status`` and lands a bar-chart artifact.
+    Turn 2 asks ``show as pie`` and the outer loop makes two ``data_query``
+    calls in the same turn: first the repeated count phrasing (bar), then a
+    percent-of-total phrasing (pie). The persisted runtime events, assistant
+    metadata, and live chart projection must all reflect the final pie result.
+    """
+    from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
+    from app.services.chat_engine.entity_recognition import EntityRecognitionResult
+
+    tenant_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    auth = SimpleNamespace(tenant_id=tenant_id, user_id=user_id)
+    db = AsyncMock()
+    emit = AsyncMock()
+    session = {
+        'chat_session_id': 'session-1',
+        'app_id': 'kaira-bot',
+        'tenant_id': tenant_id,
+        'user_id': user_id,
+        'messages': [],
+        'scratchpad': default_scratchpad(),
+    }
+
+    bar_envelope = json.dumps({
+        'status': 'ok',
+        'summary': '4 rows',
+        'outcome': {
+            'kind': 'artifact',
+            'capability': 'analytics',
+            'reason_code': None,
+            'warnings': [],
+            'counts': {'rows': 4, 'records': 0, 'affected': 0},
+            'artifact': {
+                'type': 'chart',
+                'contract': 'analytics.chart.v1',
+                'extras': {'rendered_as': 'bar', 'top_n': None},
+            },
+        },
+        'payload': {
+            'row_count': 4,
+            'data': [
+                {'status': 'completed', 'n': 120},
+                {'status': 'failed', 'n': 7},
+                {'status': 'cancelled', 'n': 3},
+                {'status': 'running', 'n': 1},
+            ],
+            'chart': {
+                'kind': 'chart',
+                'spec': {'mark': 'bar'},
+                'title': 'Count runs per status',
+                'data': [],
+            },
+        },
+    })
+    pie_envelope = json.dumps({
+        'status': 'ok',
+        'summary': '4 rows',
+        'outcome': {
+            'kind': 'artifact',
+            'capability': 'analytics',
+            'reason_code': None,
+            'warnings': [],
+            'counts': {'rows': 4, 'records': 0, 'affected': 0},
+            'artifact': {
+                'type': 'chart',
+                'contract': 'analytics.chart.v1',
+                'extras': {'rendered_as': 'pie', 'top_n': None},
+            },
+        },
+        'payload': {
+            'row_count': 4,
+            'data': [
+                {'status': 'completed', 'pct': 91.6},
+                {'status': 'failed', 'pct': 5.3},
+                {'status': 'cancelled', 'pct': 2.3},
+                {'status': 'running', 'pct': 0.8},
+            ],
+            'chart': {
+                'kind': 'chart',
+                'spec': {'mark': 'pie'},
+                'title': 'Runs per status (%)',
+                'data': [],
+            },
+        },
+    })
+
+    runtime_events: list[tuple[str, dict]] = []
+    finalized_metadata: list[dict] = []
+    previous_response_ids: list[str | None] = []
+    assistant_ids = iter(['assistant-1', 'assistant-2'])
+
+    class _SessionCtx:
+        def __init__(self, session_db):
+            self._session_db = session_db
+
+        async def __aenter__(self):
+            return self._session_db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def fake_emit_runtime_event(runtime_session, event_type, payload, emit_fn, _db):
+        seq = len(runtime_events) + 1
+        event = {'event': event_type, 'data': {'seq': seq, **payload}}
+        runtime_events.append((event_type, event['data']))
+        if emit_fn is not None:
+            await emit_fn(event)
+        return event
+
+    async def fake_finalize_assistant_message(*, metadata, **_kwargs):
+        finalized_metadata.append(metadata)
+
+    async def fake_dispatch_tool_call(tool_name, arguments, **_kwargs):
+        assert tool_name == 'data_query'
+        question = arguments['question']
+        if question == 'count runs per status':
+            return bar_envelope
+        if question == 'show runs per status as percent of total':
+            return pie_envelope
+        raise AssertionError(f'unexpected tool question: {question!r}')
+
+    async def fake_run_sherlock_sdk_turn(
+        *,
+        user_message,
+        sherlock_context,
+        previous_response_id=None,
+        **_kwargs,
+    ):
+        previous_response_ids.append(previous_response_id)
+        buffered_events: list[dict] = []
+
+        async def capture(event: dict[str, Any]) -> None:
+            buffered_events.append(event)
+
+        sherlock_context.emit = capture
+
+        if user_message == 'count runs per status':
+            tool_questions = ['count runs per status']
+            final_output = 'Counts by status ready.'
+            next_response_id = 'resp-turn-1'
+        else:
+            outcomes = sherlock_context.working_session['scratchpad']['outcomes']
+            assert any(
+                entry.get('tool') == 'data_query' and entry.get('artifact_type') == 'chart'
+                for entry in outcomes
+            )
+            tool_questions = [
+                'count runs per status',
+                'show runs per status as percent of total',
+            ]
+            final_output = 'Here it is as a pie chart.'
+            next_response_id = 'resp-turn-2'
+
+        for index, question in enumerate(tool_questions, start=1):
+            await _sherlock_tool_handler(
+                SimpleNamespace(
+                    context=sherlock_context,
+                    tool_name='data_query',
+                    tool_call_id=f'{user_message}-tc-{index}',
+                ),
+                json.dumps({'question': question}),
+            )
+            while buffered_events:
+                yield buffered_events.pop(0)
+
+        yield {
+            'event': '_internal_turn_complete',
+            'data': {
+                'last_response_id': next_response_id,
+                'final_output': final_output,
+            },
+        }
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler._resolve_tools_for_app',
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.load_app_config',
+            new=AsyncMock(return_value={}),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.load_entity_registry',
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.recognize_entities',
+            new=AsyncMock(return_value=EntityRecognitionResult(is_platform_query=True, needs_resolution=False)),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler._question_contract_hints',
+            return_value={'context': '', 'needs_discovery': False},
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler._choose_forced_tool_name',
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            'app.services.evaluators.settings_helper.get_llm_settings_from_db',
+            new=AsyncMock(return_value={'api_key': 'test-key'}),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.create_openai_client',
+            return_value=Mock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.assemble_context',
+            new=AsyncMock(return_value='You are Sherlock.'),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.render_entity_recognition_context',
+            return_value='',
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.record_user_message',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.create_assistant_message',
+            new=AsyncMock(side_effect=lambda **_kwargs: next(assistant_ids)),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.mark_turn_active',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.save_runtime_state',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.update_last_response_id',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.touch_sherlock_chat_session',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.mark_turn_terminal',
+            new=AsyncMock(),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.aggregate_turn_usage',
+            new=AsyncMock(return_value=None),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.finalize_assistant_message',
+            new=AsyncMock(side_effect=fake_finalize_assistant_message),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler._emit_runtime_event',
+            new=AsyncMock(side_effect=fake_emit_runtime_event),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler.run_sherlock_sdk_turn',
+            new=fake_run_sherlock_sdk_turn,
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.tool_handlers.dispatch_tool_call',
+            new=AsyncMock(side_effect=fake_dispatch_tool_call),
+        ))
+        stack.enter_context(patch(
+            'app.database.async_session',
+            return_value=_SessionCtx(AsyncMock()),
+        ))
+        await _execute_chat_turn(
+            session,
+            'count runs per status',
+            provider='openai',
+            model='gpt-4.1-mini',
+            db=db,
+            auth=auth,
+            emit=emit,
+            turn=SimpleNamespace(id=str(uuid.uuid4())),
+            entity_recognition=None,
+        )
+        first_turn_event_count = len(runtime_events)
+
+        await _execute_chat_turn(
+            session,
+            'show as pie',
+            provider='openai',
+            model='gpt-4.1-mini',
+            db=db,
+            auth=auth,
+            emit=emit,
+            turn=SimpleNamespace(id=str(uuid.uuid4())),
+            entity_recognition=None,
+        )
+
+    assert previous_response_ids == [None, 'resp-turn-1']
+
+    second_turn_events = runtime_events[first_turn_event_count:]
+    second_turn_tool_ends = [
+        data for event_type, data in second_turn_events
+        if event_type == 'tool_call_end'
+    ]
+    assert len(second_turn_tool_ends) == 2
+    assert [
+        event['outcome']['artifact']['extras']['rendered_as']
+        for event in second_turn_tool_ends
+    ] == ['bar', 'pie']
+
+    second_turn_chart = next(
+        data for event_type, data in second_turn_events
+        if event_type == 'chart'
+    )
+    assert second_turn_chart['spec']['mark'] == 'pie'
+
+    second_turn_metadata = finalized_metadata[-1]
+    assert [
+        item['outcome']['artifact']['extras']['rendered_as']
+        for item in second_turn_metadata['toolCalls']
+    ] == ['bar', 'pie']
+    assert second_turn_metadata['artifacts'][-1]['payload']['spec']['mark'] == 'pie'
+
+
 # ── Contract-violation logging ───────────────────────────────────────
 
 
@@ -287,7 +611,12 @@ async def test_dispatch_emits_structured_contract_violation_log(
         )
 
     payload = json.loads(raw)
-    assert payload['reason'] == 'unknown_dimension'
+    # Phase 2: the dispatcher now wraps boundary errors in the §6.2
+    # envelope. The legacy ``reason`` field moves to
+    # ``outcome.reason_code``; ``unknown_dimension`` maps to the
+    # pack-registered ``ENTITY_NOT_FOUND`` code.
+    assert payload['status'] == 'error'
+    assert payload['outcome']['reason_code'] == 'ENTITY_NOT_FOUND'
     handler_mock.assert_not_awaited()
 
     # Structured log must carry the reason code, tool name, and tenant id

@@ -57,6 +57,11 @@ interface EvaluatorsTableProps {
   canShareOwned?: boolean;
   canManageSeededDefaults?: boolean;
   loading?: boolean;
+  /**
+   * When true, skips the internal title/description header row so the table can
+   * be embedded inside an outer shell (e.g. PageSurface).
+   */
+  hideHeader?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -119,6 +124,7 @@ export function EvaluatorsTable({
   canShareOwned = false,
   canManageSeededDefaults = false,
   loading = false,
+  hideHeader = false,
 }: EvaluatorsTableProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -398,28 +404,38 @@ export function EvaluatorsTable({
       : 'No evaluators are available yet.';
 
   const toolbar = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center justify-end gap-2">
+      {hideHeader && onRestoreDefaults ? (
+        <Button variant="secondary" onClick={onRestoreDefaults} isLoading={isRestoringDefaults}>
+          Restore Defaults
+        </Button>
+      ) : null}
+      {hideHeader && canCreate ? (
+        <Button onClick={onCreate}>Create Evaluator</Button>
+      ) : null}
       <FilterButton activeCount={activeFilterCount} onClick={() => setFilterPanelOpen(true)} />
     </div>
   );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-3 pb-4 border-b border-[var(--border-default)] md:flex-row md:items-start md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>
+      {!hideHeader && (
+        <div className="flex flex-col gap-3 pb-4 border-b border-[var(--border-default)] md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {headerActions}
+            {onRestoreDefaults ? (
+              <Button variant="secondary" onClick={onRestoreDefaults} isLoading={isRestoringDefaults}>
+                Restore Defaults
+              </Button>
+            ) : null}
+            {canCreate ? <Button onClick={onCreate}>Create Evaluator</Button> : null}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {headerActions}
-          {onRestoreDefaults ? (
-            <Button variant="secondary" onClick={onRestoreDefaults} isLoading={isRestoringDefaults}>
-              Restore Defaults
-            </Button>
-          ) : null}
-          {canCreate ? <Button onClick={onCreate}>Create Evaluator</Button> : null}
-        </div>
-      </div>
+      )}
 
       {toolbar}
 

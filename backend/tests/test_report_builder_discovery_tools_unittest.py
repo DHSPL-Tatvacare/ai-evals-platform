@@ -53,8 +53,10 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
             session={'scratchpad': {'discovery': cached}},
         )
 
-        self.assertEqual(result['app_id'], 'inside-sales')
-        self.assertTrue(result['cache_hit'])
+        # Phase 2: envelope shape — cached body sits under ``envelope.payload``.
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['payload']['app_id'], 'inside-sales')
+        self.assertTrue(result['payload']['cache_hit'])
 
     async def test_handle_lookup_resolves_dimension_values(self):
         db = AsyncMock()
@@ -87,8 +89,8 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['dimension'], 'agent')
-        self.assertEqual(result['values'][0]['value'], 'Pareekshith Bompally')
+        self.assertEqual(result['payload']['dimension'], 'agent')
+        self.assertEqual(result['payload']['values'][0]['value'], 'Pareekshith Bompally')
 
     async def test_handle_discover_builds_dimension_metric_and_volume_payload(self):
         db = AsyncMock()
@@ -157,14 +159,20 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
                 session={'scratchpad': {}},
             )
 
+        # Phase 2 envelope — discovery data lives under ``envelope.payload``.
+        # Surfaces are sourced from the app manifest (canonical), entity
+        # resolvers come from the mocked ``app_config.chat.entityResolvers``.
         self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['dimensions'][0]['name'], 'direction')
-        self.assertEqual(result['metrics'][0]['name'], 'pass_rate')
-        self.assertEqual(result['volume']['runs'], 4)
-        self.assertEqual(result['volume']['evaluations'], 10)
-        self.assertEqual(result['time_range']['earliest'], '2026-01-01')
-        self.assertEqual(result['surfaces'][0]['key'], 'logs')
-        self.assertEqual(result['entity_types'], ['thread_id'])
+        body = result['payload']
+        self.assertEqual(body['dimensions'][0]['name'], 'direction')
+        self.assertEqual(body['metrics'][0]['name'], 'pass_rate')
+        self.assertEqual(body['volume']['runs'], 4)
+        self.assertEqual(body['volume']['evaluations'], 10)
+        self.assertEqual(body['time_range']['earliest'], '2026-01-01')
+        # Manifest is the source of truth for data surfaces (see CLAUDE.md).
+        surface_keys = [s['key'] for s in body['surfaces']]
+        self.assertIn('logs', surface_keys)
+        self.assertEqual(body['entity_types'], ['thread_id'])
 
 
 if __name__ == '__main__':

@@ -722,10 +722,25 @@ def _validate_output_alias_contract(
 
 
 def _sql_validation_reason(exc: SQLValidationError) -> str:
+    """Map a ``SQLValidationError`` to a Phase-2 analytics-pack reason code.
+
+    Returns one of the ``SQL_*`` codes from
+    ``reason_codes.ANALYTICS_SQL_REASON_CODES``. No free-form prose —
+    the outer agent reasons over the stable literal.
+    """
+    from app.services.chat_engine import reason_codes
+
     message = str(exc)
     if 'must not be relabeled as a different known concept' in message:
-        return 'invalid_output_alias_contract'
-    return 'sql_validation_failed'
+        return reason_codes.SQL_INVALID_OUTPUT_ALIAS_CONTRACT
+    if 'references columns not declared in the manifest' in message:
+        return reason_codes.SQL_UNKNOWN_COLUMN
+    if 'references disallowed tables' in message:
+        return reason_codes.SQL_UNKNOWN_TABLE
+    if ('Only SELECT queries are allowed' in message
+            or 'disallowed pattern' in message):
+        return reason_codes.SQL_SECURITY_REJECTED
+    return reason_codes.SQL_VALIDATION_FAILED
 
 
 def _semantic_dimension_lookup(semantic_model: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -2017,14 +2032,17 @@ async def data_query(
         logger.warning('SQL agent: validation failed: %s', exc)
         return {
             'status': 'error',
-            'reason': _sql_validation_reason(exc),
+            'reason_code': _sql_validation_reason(exc),
             'error': f'Generated query failed validation: {exc}',
             'question': question,
         }
     except Exception as exc:
+        from app.services.chat_engine import reason_codes
+
         logger.warning('SQL agent: execution failed: %s', exc)
         return {
             'status': 'error',
+            'reason_code': reason_codes.SQL_EXECUTION_ERROR,
             'error': f'Query execution failed: {str(exc)}',
             'question': question,
         }

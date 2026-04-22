@@ -71,6 +71,9 @@ def default_scratchpad() -> dict[str, Any]:
         'analysis_history': [],
         'last_evidence': None,
         'last_data_check': None,
+        # Phase 2: structured per-tool outcome log (plan §6 step 6).
+        # Each entry: {tool, reason_code, artifact_type, counts}.
+        'outcomes': [],
     }
 
 
@@ -270,8 +273,10 @@ def _chart_summary_from_result(result: dict[str, Any]) -> dict[str, Any] | None:
         except ValueError:
             # Picker refused despite gate approval — fall back to table kind
             # so the scratchpad hint matches what the orchestrator will emit.
+            from app.services.chat_engine import reason_codes as _rc
+
             summary['kind'] = 'table'
-            summary['reason_code'] = 'CG_EMIT_FAILED'
+            summary['reason_code'] = _rc.CG_EMIT_FAILED
     return summary
 
 

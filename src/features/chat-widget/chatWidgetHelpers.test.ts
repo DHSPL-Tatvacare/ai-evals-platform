@@ -171,12 +171,47 @@ test('isChartPayload rejects legacy pre-contract chart payloads', () => {
 test('partsFromStoredMessage drops unsupported legacy chart metadata', () => {
   expect(
     partsFromStoredMessage('Done', {
-      chart: {
-        spec: { type: 'bar', xKey: 'x', seriesKeys: [], title: 'Legacy', xLabel: 'X', yLabel: 'Y' },
-        data: [{ x: 'a', y: 1 }],
-        sqlQuery: 'SELECT 1',
-        sourceQuestion: 'legacy',
-      } as never,
+      // Phase 1: persisted metadata carries ``artifacts[]``; an unknown-
+      // pack or malformed-payload artifact is dropped silently so the
+      // message renders as text-only.
+      artifacts: [
+        {
+          pack_id: 'analytics',
+          contract_id: 'analytics.chart.v1',
+          payload: {
+            spec: { type: 'bar', xKey: 'x' },
+            data: [{ x: 'a', y: 1 }],
+          },
+        },
+      ] as never,
     }),
   ).toEqual([{ type: 'text', content: 'Done' }]);
+});
+
+test('partsFromStoredMessage renders an analytics.chart.v1 artifact as a chart part', () => {
+  const parts = partsFromStoredMessage('Done', {
+    artifacts: [
+      {
+        pack_id: 'analytics',
+        contract_id: 'analytics.chart.v1',
+        payload: {
+          kind: 'chart',
+          spec: { mark: 'bar', encoding: { x: { field: 'x' }, y: { field: 'y' } } },
+          data: [{ x: 'a', y: 1 }],
+        },
+      },
+    ],
+  });
+
+  expect(parts).toEqual([
+    { type: 'text', content: 'Done' },
+    {
+      type: 'chart',
+      payload: {
+        kind: 'chart',
+        spec: { mark: 'bar', encoding: { x: { field: 'x' }, y: { field: 'y' } } },
+        data: [{ x: 'a', y: 1 }],
+      },
+    },
+  ]);
 });

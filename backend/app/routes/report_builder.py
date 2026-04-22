@@ -161,15 +161,13 @@ def _build_terminal_stream_event(
             },
         }
 
-    blueprint = metadata.get('blueprint')
-    if isinstance(blueprint, dict):
-        blueprint = {key: value for key, value in blueprint.items() if key != 'type'}
-    else:
-        blueprint = None
-
-    chart = metadata.get('chart')
-    if not isinstance(chart, dict):
-        chart = None
+    # Phase 1: resume snapshots carry the same ``artifacts[]`` contract
+    # the live ``done`` event produces. Callers dispatch on ``pack_id`` +
+    # ``contract_id`` to render analytics charts, report-builder
+    # blueprints, and any future pack outputs uniformly.
+    artifacts = metadata.get('artifacts')
+    if not isinstance(artifacts, list):
+        artifacts = []
 
     warnings = metadata.get('warnings')
     if not isinstance(warnings, list):
@@ -185,8 +183,7 @@ def _build_terminal_stream_event(
             'terminalStatus': terminal_status,
             'content': content,
             'toolCalls': tool_calls,
-            'chart': chart,
-            'blueprint': blueprint,
+            'artifacts': artifacts,
             'warnings': warnings,
         },
     }

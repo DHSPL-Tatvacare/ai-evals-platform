@@ -451,7 +451,44 @@ WHERE tenant_id = :t AND app_id = :a;
 
 ---
 
-## 12. Out of scope for this spec
+## 12. Alignment with the Sherlock rewrite (`docs/plans/sherlock-future-plan.md`)
+
+This spec is **analytics-pack-local** under the rewrite's two-layer model (§4.1–4.2, §6.4). It adds tables, a manifest block, and a signal extractor; it touches no harness-core file. That makes most of it parallelizable with the rewrite's phases. There is one gated piece.
+
+### 12.1 Component-by-component dependency
+
+| Component (this spec) | Rewrite dependency | When to land |
+|---|---|---|
+| §3 — four new `analytics_lead_*_facts` tables + migration | None (pack-local schema) | Parallel with any rewrite phase |
+| §4.1, §4.2, §4.3 — `inside_sales_sync.py` Layer 2 side-effects and new `activities` source_family | None (not Sherlock code; lives in the sync service) | Parallel; blocked only by sync-plan PRs 0/2/4/5, not by the rewrite |
+| §4.4 — `SignalExtractor` in `fact_populator.py`, registered in the `populate-analytics` job | None (the populate-analytics job is not Sherlock runtime) | Parallel |
+| §4.5 — `inside_sales_runner.py` output-schema extension with `result.signals` | None | Parallel |
+| §5 — `signal_taxonomy.py` controlled vocabulary | None | Parallel |
+| §6 — `inside-sales.yaml` manifest block for the four new tables | **Rewrite Phase 4** (manifest → `comment_emitter` → SQL agent collapse) | After Phase 4 |
+| §7 — scheduler workload `source_family` extension | None | Parallel |
+
+### 12.2 Why the manifest block is gated on rewrite Phase 4
+
+Rewrite Phase 4 extends `comment_emitter` to serialize additional manifest fields (`synonyms`, `allowed_values`, `ordering`, `measure_kind`, `chartable`, `unit`) and deletes the parallel `manifest.lookup_column()` path from `sql_agent._column_role_hints`. Four new manifest table blocks added **before** Phase 4 will be authored against today's taxonomy surface and will need to be revised as soon as Phase 4 expands the serialized field set. Waiting costs nothing: the Layer 2 tables accumulate history from the moment §3/§4 ship, and Sherlock simply cannot answer questions against the new tables until §6 lands.
+
+### 12.3 No rework required for the rewrite envelope
+
+This spec produces nothing that travels through the §6.2 tool-result envelope directly — it populates tables that the existing analytics pack's `data_query` already queries via SQL. Once the manifest block is in, rewrite Phase 2's `outcome` / `reason_code` / `artifact` shape flows through unchanged. No new reason codes are introduced here.
+
+### 12.4 Harness invariants this spec respects
+
+- No app name (`inside-sales`, `kaira-bot`) is introduced into harness-core files (§10 of this spec; rewrite Rule 3).
+- The manifest YAML is the authoring surface; the `TOOLS` block in `prompts/base.py` and `apps.config.chat.dataSurfaces` are not hand-edited (rewrite §6.4; CLAUDE.md invariant).
+- No new tool is added to Sherlock; the new data is reached via the existing `data_query` + manifest-driven SQL generator.
+
+### 12.5 Build order with the rewrite in flight
+
+1. In parallel with rewrite Phases 1–3: ship everything in §3, §4.1–4.5, §5, §7. Layer 2 begins accumulating immediately.
+2. Wait for rewrite Phase 4 to land. Then ship §6 (manifest block). At that point Sherlock can answer the queries in §8 end-to-end.
+
+---
+
+## 13. Out of scope for this spec
 
 - Retention policy and scheduled prune for Layer 2 tables.
 - Webhook-driven stage ingestion (schema-ready, not built).

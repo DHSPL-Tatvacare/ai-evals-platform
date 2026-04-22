@@ -188,7 +188,15 @@ const TEXT_FILTER_KEYS = ['q'];
 
 /* ── Component ───────────────────────────────────────────── */
 
-export default function RunList() {
+interface RunListProps {
+  /**
+   * When true, skips the internal PageShell wrapper so the page can be embedded
+   * inside an outer shell (e.g. PageSurface). Used by the Kaira prototype.
+   */
+  embedded?: boolean;
+}
+
+export default function RunList({ embedded = false }: RunListProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -602,8 +610,8 @@ export default function RunList() {
     </div>
   );
 
-  return (
-    <PageShell title="All Runs" filterSlot={toolbar}>
+  const body = (
+    <>
       <DataTable
         columns={columns}
         data={tableData}
@@ -649,6 +657,21 @@ export default function RunList() {
         variant="danger"
         isLoading={isDeleting}
       />
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex justify-end">{toolbar}</div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <PageShell title="All Runs" filterSlot={toolbar}>
+      {body}
     </PageShell>
   );
 }

@@ -33,6 +33,7 @@ export { LLMConfigSection } from './LLMConfigSection';
 export { PasswordStrengthIndicator, validatePasswordStrength } from './PasswordStrengthIndicator';
 export { FilterPills } from './FilterPills';
 export { PageShell } from './PageShell';
+export { PageSurface } from './PageSurface';
 export {
   DataTable,
   type ColumnDef,

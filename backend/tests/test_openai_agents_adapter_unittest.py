@@ -68,19 +68,27 @@ class ParseToolArgsTests(unittest.TestCase):
         )
 
     def test_json_null_is_malformed(self):
+        """Phase 3: strict SDK rejects malformed args; the parser raises
+        and the handler projects the raise into a ``MALFORMED_ARGS``
+        envelope (see ``MalformedArgsDispatcherTests`` below)."""
         from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
 
-        self.assertIsNone(_parse_tool_args('null'))
+        with self.assertRaises(ValueError):
+            _parse_tool_args('null')
 
     def test_json_array_is_malformed(self):
         from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
 
-        self.assertIsNone(_parse_tool_args('[1,2,3]'))
+        with self.assertRaises(ValueError):
+            _parse_tool_args('[1,2,3]')
 
     def test_parse_error_is_malformed(self):
+        import json as _json
+
         from app.services.chat_engine.openai_agents_adapter import _parse_tool_args
 
-        self.assertIsNone(_parse_tool_args('{not-json'))
+        with self.assertRaises(_json.JSONDecodeError):
+            _parse_tool_args('{not-json')
 
 
 class BuildToolsTests(unittest.TestCase):
@@ -112,7 +120,11 @@ class BuildToolsTests(unittest.TestCase):
         self.assertEqual(tools[0].name, 'data_query')
         self.assertEqual(tools[1].name, 'blueprint_save')
 
-    def test_tool_schemas_use_non_strict_mode(self):
+    def test_tool_schemas_use_strict_mode(self):
+        """Phase 3 (plan §Phase-3 step 4): strict schemas. Malformed args
+        fail at the Agents SDK boundary; the handler's defensive catch
+        projects any slipped-through raise into a ``MALFORMED_ARGS``
+        envelope (see ``MalformedArgsDispatcherTests``)."""
         tool_defs = [
             {
                 'name': 'discover',
@@ -127,7 +139,7 @@ class BuildToolsTests(unittest.TestCase):
 
         tools = build_sherlock_tools(tool_defs)
 
-        self.assertFalse(tools[0].strict_json_schema)
+        self.assertTrue(tools[0].strict_json_schema)
 
 
 class ClientFactoryTests(unittest.TestCase):
@@ -271,43 +283,12 @@ class StreamingBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(internal[0]['data']['last_response_id'], 'resp_abc123')
         self.assertEqual(internal[0]['data']['final_output'], 'Pass rate is 91%')
 
-    async def test_legacy_tool_aliases_are_canonicalized_in_runtime_events(self):
-        from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
-
-        class _SessionCtx:
-            def __init__(self, session):
-                self._session = session
-
-            async def __aenter__(self):
-                return self._session
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        tool_db = AsyncMock()
-        sc = SherlockContext(
-            auth=MagicMock(),
-            app_id='kaira-bot',
-            provider='openai',
-            working_session={'scratchpad': default_scratchpad(), 'app_id': 'kaira-bot'},
-            emit=AsyncMock(),
-            tool_call_log=[],
-        )
-        ctx = SimpleNamespace(context=sc, tool_name='analyze', tool_call_id='tc_1')
-
-        with patch('app.database.async_session', return_value=_SessionCtx(tool_db)), patch(
-            'app.services.report_builder.tool_handlers.dispatch_tool_call',
-            new=AsyncMock(return_value=json.dumps({'status': 'ok', 'row_count': 3, 'question': 'show rows'})),
-        ) as dispatch_mock:
-            result = await _sherlock_tool_handler(ctx, '{"question":"show rows"}')
-
-        self.assertEqual(json.loads(result)['row_count'], 3)
-        self.assertEqual(dispatch_mock.await_args.args[0], 'data_query')
-        self.assertEqual(sc.tool_call_log[0]['name'], 'data_query')
-        emitted_names = [call.args[0]['data']['name'] for call in sc.emit.await_args_list[:2]]
-        self.assertEqual(emitted_names, ['data_query', 'data_query'])
-
-    async def test_fatal_alias_contract_error_aborts_tool_turn(self):
+    async def test_sql_alias_contract_error_returns_envelope_without_raising(self):
+        """Phase 2: ``invalid_output_alias_contract`` no longer raises
+        ``RuntimeError`` from the dispatcher. The outer agent observes
+        ``outcome.reason_code = 'SQL_INVALID_OUTPUT_ALIAS_CONTRACT'`` and
+        is expected to replan on its own.
+        """
         from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
 
         class _SessionCtx:
@@ -331,22 +312,32 @@ class StreamingBridgeTests(unittest.IsolatedAsyncioTestCase):
         )
         ctx = SimpleNamespace(context=sc, tool_name='data_query', tool_call_id='tc_1')
 
-        payload = json.dumps({
+        envelope_payload = json.dumps({
             'status': 'error',
-            'reason': 'invalid_output_alias_contract',
-            'error': 'Generated query failed validation: bad alias',
-            'question': 'show pass rate by rule_id',
+            'summary': 'query failed',
+            'outcome': {
+                'kind': 'error',
+                'capability': 'analytics',
+                'reason_code': 'SQL_INVALID_OUTPUT_ALIAS_CONTRACT',
+                'warnings': ['Generated query failed validation: bad alias'],
+                'counts': {'rows': 0, 'records': 0, 'affected': 0},
+            },
+            'payload': {'question': 'show pass rate by rule_id'},
         })
 
         with patch('app.database.async_session', return_value=_SessionCtx(tool_db)), patch(
             'app.services.report_builder.tool_handlers.dispatch_tool_call',
-            new=AsyncMock(return_value=payload),
+            new=AsyncMock(return_value=envelope_payload),
         ):
-            with self.assertRaisesRegex(RuntimeError, 'bad alias'):
-                await _sherlock_tool_handler(ctx, '{"question":"show pass rate by rule_id"}')
+            result = await _sherlock_tool_handler(ctx, '{"question":"show pass rate by rule_id"}')
 
+        self.assertEqual(json.loads(result)['outcome']['reason_code'], 'SQL_INVALID_OUTPUT_ALIAS_CONTRACT')
         emitted_events = [call.args[0]['event'] for call in sc.emit.await_args_list]
-        self.assertEqual(emitted_events, ['tool_call_start', 'tool_call_end'])
+        # tool_call_start, tool_call_end, status — status event fires after
+        # tool_call_end now that the fatal raise is gone.
+        self.assertEqual(emitted_events[:2], ['tool_call_start', 'tool_call_end'])
+        self.assertIn('status', emitted_events)
+        self.assertEqual(sc.artifacts, [])
 
     async def test_run_sherlock_sdk_turn_propagates_runner_errors(self):
         from app.services.chat_engine.openai_agents_adapter import run_sherlock_sdk_turn
@@ -383,6 +374,265 @@ class StreamingBridgeTests(unittest.IsolatedAsyncioTestCase):
                     client=MagicMock(),
                 ):
                     pass
+
+
+class PackDispatchTests(unittest.IsolatedAsyncioTestCase):
+    """Phase 2: the harness dispatcher extracts ``Artifact`` triples from
+    the §6.2 ``ToolEnvelope`` emitted by handlers. Pack ownership is
+    broadened so the analytics pack claims ``discover``, ``lookup``,
+    ``data_query`` + catalog tools, and the report-builder pack claims
+    the blueprint tools. Tools whose envelope carries no ``outcome.artifact``
+    slot (most read-only tools) add nothing to ``sc.artifacts``.
+    """
+
+    def test_sherlock_context_has_artifacts_not_legacy_fields(self):
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(SherlockContext)}
+        self.assertIn('artifacts', field_names)
+        self.assertNotIn('chart_payload', field_names)
+        self.assertNotIn('composed_report', field_names)
+
+    def test_resolve_pack_for_returns_pack_ids_for_claimed_tools(self):
+        from app.services.chat_engine.artifact import (
+            CAPABILITY_PACK_REGISTRY,
+            resolve_pack_for,
+        )
+
+        self.assertEqual(resolve_pack_for('data_query'), 'analytics')
+        self.assertEqual(resolve_pack_for('blueprint_compose'), 'report_builder')
+        # Phase 2 extends pack ownership: the analytics pack claims every
+        # analytics-family tool, not just ``data_query``.
+        self.assertEqual(resolve_pack_for('lookup'), 'analytics')
+        self.assertEqual(resolve_pack_for('discover'), 'analytics')
+        self.assertEqual(resolve_pack_for('blueprint_list'), 'report_builder')
+        self.assertIsNone(resolve_pack_for('mystery_tool'))
+        self.assertEqual(set(CAPABILITY_PACK_REGISTRY), {'analytics', 'report_builder'})
+
+    async def _run_dispatcher(self, tool_name: str, envelope_payload: dict):
+        from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
+
+        class _SessionCtx:
+            def __init__(self, session):
+                self._session = session
+
+            async def __aenter__(self):
+                return self._session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        tool_db = AsyncMock()
+        sc = SherlockContext(
+            auth=MagicMock(),
+            app_id='kaira-bot',
+            provider='openai',
+            working_session={'scratchpad': default_scratchpad(), 'app_id': 'kaira-bot'},
+            emit=AsyncMock(),
+            tool_call_log=[],
+        )
+        ctx = SimpleNamespace(context=sc, tool_name=tool_name, tool_call_id='tc_1')
+
+        with patch('app.database.async_session', return_value=_SessionCtx(tool_db)), patch(
+            'app.services.report_builder.tool_handlers.dispatch_tool_call',
+            new=AsyncMock(return_value=json.dumps(envelope_payload)),
+        ):
+            await _sherlock_tool_handler(ctx, '{}')
+        return sc
+
+    async def test_data_query_ok_appends_analytics_chart_artifact(self):
+        envelope = {
+            'status': 'ok',
+            'summary': '1 rows',
+            'outcome': {
+                'kind': 'artifact',
+                'capability': 'analytics',
+                'reason_code': None,
+                'warnings': [],
+                'counts': {'rows': 1, 'records': 0, 'affected': 0},
+                'artifact': {
+                    'type': 'chart',
+                    'contract': 'analytics.chart.v1',
+                    'extras': {'rendered_as': 'bar', 'top_n': None},
+                },
+            },
+            'payload': {
+                'chart': {'kind': 'chart', 'spec': {}, 'data': [], 'title': 't'},
+                'row_count': 1,
+                'data': [],
+            },
+        }
+        sc = await self._run_dispatcher('data_query', envelope)
+
+        self.assertEqual(len(sc.artifacts), 1)
+        artifact = sc.artifacts[0]
+        self.assertEqual(artifact.pack_id, 'analytics')
+        self.assertEqual(artifact.contract_id, 'analytics.chart.v1')
+        self.assertEqual(artifact.payload['kind'], 'chart')
+        self.assertEqual(artifact.extras, {'rendered_as': 'bar', 'top_n': None})
+
+    async def test_blueprint_compose_ok_appends_report_builder_artifact(self):
+        envelope = {
+            'status': 'ok',
+            'summary': "blueprint composed",
+            'outcome': {
+                'kind': 'artifact',
+                'capability': 'report_builder',
+                'reason_code': None,
+                'warnings': [],
+                'counts': {'rows': 0, 'records': 0, 'affected': 0},
+                'artifact': {
+                    'type': 'blueprint',
+                    'contract': 'report_builder.blueprint.v1',
+                    'extras': {},
+                },
+            },
+            'payload': {
+                'blueprint': {'name': 'Weekly review', 'sections': []},
+            },
+        }
+        sc = await self._run_dispatcher('blueprint_compose', envelope)
+
+        self.assertEqual(len(sc.artifacts), 1)
+        artifact = sc.artifacts[0]
+        self.assertEqual(artifact.pack_id, 'report_builder')
+        self.assertEqual(artifact.contract_id, 'report_builder.blueprint.v1')
+        self.assertEqual(artifact.payload['name'], 'Weekly review')
+
+    async def test_data_query_error_does_not_append_artifact(self):
+        envelope = {
+            'status': 'error',
+            'summary': 'query failed',
+            'outcome': {
+                'kind': 'error',
+                'capability': 'analytics',
+                'reason_code': 'SQL_EXECUTION_ERROR',
+                'warnings': ['boom'],
+                'counts': {'rows': 0, 'records': 0, 'affected': 0},
+            },
+            'payload': {'question': 'q'},
+        }
+        sc = await self._run_dispatcher('data_query', envelope)
+
+        self.assertEqual(sc.artifacts, [])
+
+    async def test_unrelated_tool_does_not_append_artifact(self):
+        # ``lookup`` is claimed by analytics pack but produces a read
+        # envelope with no ``outcome.artifact`` slot.
+        envelope = {
+            'status': 'ok',
+            'summary': '3 records',
+            'outcome': {
+                'kind': 'read',
+                'capability': 'analytics',
+                'reason_code': None,
+                'warnings': [],
+                'counts': {'rows': 0, 'records': 3, 'affected': 0},
+            },
+            'payload': {'dimension': 'agent', 'values': []},
+        }
+        sc = await self._run_dispatcher('lookup', envelope)
+
+        self.assertEqual(sc.artifacts, [])
+
+    def test_dispatcher_has_no_tool_name_literals(self):
+        import re
+        from pathlib import Path
+
+        adapter_src = Path('backend/app/services/chat_engine/openai_agents_adapter.py').read_text()
+        pattern = re.compile(r"tool_name\s*==\s*['\"](data_query|blueprint_compose)['\"]")
+        self.assertIsNone(
+            pattern.search(adapter_src),
+            'harness dispatcher must not hard-code analytics / report-builder tool names',
+        )
+
+
+class MalformedArgsDispatcherTests(unittest.IsolatedAsyncioTestCase):
+    """Phase 2: malformed LLM args surface as a §6.2 ``MALFORMED_ARGS``
+    envelope and flow through the same tool_call_start / tool_call_end /
+    scratchpad / tool_call_log path as any other tool result. The outer
+    agent observes ``outcome.reason_code`` and replans.
+    """
+
+    async def _run_with_raw_args(self, raw_args: str, tool_name: str = 'data_query'):
+        from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
+
+        class _SessionCtx:
+            def __init__(self, session):
+                self._session = session
+
+            async def __aenter__(self):
+                return self._session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        tool_db = AsyncMock()
+        sc = SherlockContext(
+            auth=MagicMock(),
+            app_id='kaira-bot',
+            provider='openai',
+            working_session={'scratchpad': default_scratchpad(), 'app_id': 'kaira-bot'},
+            emit=AsyncMock(),
+            tool_call_log=[],
+        )
+        ctx = SimpleNamespace(context=sc, tool_name=tool_name, tool_call_id='tc_bad')
+
+        dispatch_mock = AsyncMock()
+        with patch('app.database.async_session', return_value=_SessionCtx(tool_db)), patch(
+            'app.services.report_builder.tool_handlers.dispatch_tool_call',
+            new=dispatch_mock,
+        ):
+            raw_result = await _sherlock_tool_handler(ctx, raw_args)
+
+        return sc, dispatch_mock, raw_result
+
+    async def test_non_object_json_returns_malformed_args_envelope(self):
+        sc, dispatch_mock, raw_result = await self._run_with_raw_args('[1, 2, 3]')
+
+        # The handler must not have dispatched the tool at all.
+        dispatch_mock.assert_not_awaited()
+
+        parsed = json.loads(raw_result)
+        self.assertEqual(parsed['status'], 'error')
+        self.assertEqual(parsed['outcome']['kind'], 'error')
+        self.assertEqual(parsed['outcome']['capability'], 'harness')
+        self.assertEqual(parsed['outcome']['reason_code'], 'MALFORMED_ARGS')
+        # Plan-pinned: no bespoke {"status":"error","message":...} dict.
+        self.assertNotIn('message', parsed)
+        # Envelope must carry the counts skeleton, not an ad-hoc blob.
+        self.assertEqual(
+            parsed['outcome']['counts'],
+            {'rows': 0, 'records': 0, 'affected': 0},
+        )
+
+    async def test_malformed_args_flow_through_tool_call_events(self):
+        sc, _dispatch_mock, _raw = await self._run_with_raw_args('not-json')
+
+        emitted = [call.args[0]['event'] for call in sc.emit.await_args_list]
+        # Full life-cycle: start → end → status, same as any other tool call.
+        self.assertEqual(emitted[0], 'tool_call_start')
+        self.assertIn('tool_call_end', emitted)
+        self.assertIn('status', emitted)
+
+        end_event = next(
+            call.args[0] for call in sc.emit.await_args_list
+            if call.args[0]['event'] == 'tool_call_end'
+        )
+        outcome = end_event['data']['outcome']
+        self.assertEqual(outcome['reason_code'], 'MALFORMED_ARGS')
+        self.assertEqual(outcome['kind'], 'error')
+        self.assertEqual(outcome['capability'], 'harness')
+
+    async def test_malformed_args_log_carries_outcome_for_persistence(self):
+        sc, _dispatch_mock, _raw = await self._run_with_raw_args('[]')
+
+        self.assertEqual(len(sc.tool_call_log), 1)
+        entry = sc.tool_call_log[0]
+        self.assertEqual(entry['name'], 'data_query')
+        # The runtime-event persistence path lifts ``outcome`` off this log
+        # entry into the ``sherlock_runtime_events.data`` column.
+        self.assertEqual(entry['outcome']['reason_code'], 'MALFORMED_ARGS')
 
 
 class StatusLineTests(unittest.TestCase):

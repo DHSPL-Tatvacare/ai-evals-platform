@@ -1,5 +1,7 @@
 import type {
+  Artifact,
   BlueprintPart,
+  BlueprintSection,
   ChartPart,
   ChartPayload,
   ComposedReport,
@@ -100,6 +102,64 @@ export function isChartPayload(raw: unknown): raw is ChartPayload {
   }
 }
 
+// Phase 1 — harness-owned artifact triple. Pack-produced results land in
+// message metadata / the ``done`` event as ``{pack_id, contract_id,
+// payload, extras?}`` records; the frontend dispatches on ``pack_id`` +
+// ``contract_id`` to render chart / blueprint / future pack outputs.
+export function isArtifact(raw: unknown): raw is Artifact {
+  if (!raw || typeof raw !== 'object') {
+    return false;
+  }
+  const obj = raw as Record<string, unknown>;
+  return typeof obj.pack_id === 'string'
+    && typeof obj.contract_id === 'string'
+    && 'payload' in obj;
+}
+
+function blueprintPartFromArtifactPayload(payload: unknown): BlueprintPart | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const obj = payload as Record<string, unknown>;
+  const rawSections = Array.isArray(obj.sections) ? obj.sections : [];
+  const sections: BlueprintSection[] = rawSections
+    .filter((section): section is Record<string, unknown> => !!section && typeof section === 'object')
+    .map((section) => ({
+      id: typeof section.id === 'string' ? section.id : '',
+      type: typeof section.type === 'string' ? section.type : '',
+      title: typeof section.title === 'string' ? section.title : (typeof section.type === 'string' ? section.type : ''),
+      variant: typeof section.variant === 'string' ? section.variant : undefined,
+    }));
+  const rawName = (typeof obj.report_name === 'string' && obj.report_name)
+    || (typeof obj.name === 'string' && obj.name)
+    || 'Untitled';
+  return {
+    type: 'blueprint',
+    name: rawName,
+    sections,
+  };
+}
+
+export function applyArtifactToParts(parts: MessagePart[], artifact: Artifact): MessagePart[] {
+  if (artifact.pack_id === 'analytics' && artifact.contract_id === 'analytics.chart.v1') {
+    if (isChartPayload(artifact.payload)) {
+      return replaceOrAppendPart(parts, isChartPart, {
+        type: 'chart',
+        payload: artifact.payload,
+      });
+    }
+    return parts;
+  }
+  if (artifact.pack_id === 'report_builder' && artifact.contract_id === 'report_builder.blueprint.v1') {
+    const blueprintPart = blueprintPartFromArtifactPayload(artifact.payload);
+    if (blueprintPart) {
+      return replaceOrAppendPart(parts, isBlueprintPart, blueprintPart);
+    }
+    return parts;
+  }
+  return parts;
+}
+
 export function buildComposedReportOutline(report: ComposedReport): string {
   const lines = report.sections.map((section) => {
     const title = section.title?.trim() || section.type;
@@ -141,19 +201,10 @@ export function partsFromStoredMessage(
     parts = appendTextPart(parts, content);
   }
 
-  if (isChartPayload(metadata?.chart)) {
-    parts = replaceOrAppendPart(parts, isChartPart, {
-      type: 'chart',
-      payload: metadata.chart,
-    });
-  }
-
-  if (metadata?.blueprint) {
-    parts = replaceOrAppendPart(parts, isBlueprintPart, metadata.blueprint);
-  }
-
-  if (metadata?.composedReport) {
-    parts = replaceOrAppendPart(parts, isBlueprintPart, blueprintFromComposedReport(metadata.composedReport));
+  for (const artifact of metadata?.artifacts ?? []) {
+    if (isArtifact(artifact)) {
+      parts = applyArtifactToParts(parts, artifact);
+    }
   }
 
   return parts;

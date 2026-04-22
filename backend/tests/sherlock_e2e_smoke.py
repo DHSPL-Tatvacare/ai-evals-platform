@@ -180,8 +180,18 @@ async def execute_turn(
                 result.terminal_status = evt.data.get('terminalStatus', 'done')
                 result.content = evt.data.get('content', result.content)
                 result.warnings = evt.data.get('warnings', [])
-                if evt.data.get('chart'):
-                    result.chart = evt.data['chart']
+                # Phase 1: ``done`` event carries opaque artifact triples.
+                # Project out the analytics chart payload for smoke-test
+                # assertions; other pack artifacts are ignored here.
+                for artifact in evt.data.get('artifacts') or []:
+                    if not isinstance(artifact, dict):
+                        continue
+                    if (
+                        artifact.get('pack_id') == 'analytics'
+                        and artifact.get('contract_id') == 'analytics.chart.v1'
+                    ):
+                        result.chart = artifact.get('payload')
+                        break
             elif evt.event_type == 'error':
                 result.terminal_status = evt.data.get('terminalStatus', 'error')
                 result.error_message = evt.data.get('message', '')

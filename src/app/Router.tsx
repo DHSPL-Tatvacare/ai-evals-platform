@@ -15,7 +15,6 @@ import {
 } from "@/features/kairaBotSettings";
 import {
   EvalDashboard,
-  EvalRunList,
   EvalRunDetail,
   EvalThreadDetailV2,
   EvalAdversarialDetailV2,
@@ -37,7 +36,7 @@ import {
 } from "@/features/insideSales";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { KairaBotHomePage } from "./pages/kaira";
+import { KairaBotHomePage, KairaRunsPage, KairaEvaluatorsPage } from "./pages/kaira";
 import { routes } from "@/config/routes";
 import { landingRouteForApp } from "@/config/sidebarNav";
 
@@ -136,9 +135,9 @@ export function Router() {
             <Route path={routes.kaira.dashboard} element={<EvalDashboard />} />
             <Route
               path={routes.kaira.evaluators}
-              element={<AppEvaluatorsPage />}
+              element={<KairaEvaluatorsPage />}
             />
-            <Route path={routes.kaira.runs} element={<EvalRunList />} />
+            <Route path={routes.kaira.runs} element={<KairaRunsPage />} />
             <Route path="/kaira/runs/:runId" element={<EvalRunDetail />} />
             <Route
               path="/kaira/runs/:runId/adversarial/:evalId"

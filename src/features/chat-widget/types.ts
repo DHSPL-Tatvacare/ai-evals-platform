@@ -299,6 +299,18 @@ export interface WidgetSessionSummary {
   status: string;
 }
 
+// Phase 1 — harness-owned artifact triple. Pack-produced results flow
+// through the message metadata and the ``done`` SSE event as opaque
+// ``Artifact`` records. The frontend dispatches on ``packId`` +
+// ``contractId`` (e.g. ``analytics.chart.v1``, ``report_builder.blueprint.v1``)
+// to render chart / blueprint / future pack outputs uniformly.
+export interface Artifact {
+  pack_id: string;
+  contract_id: string;
+  payload: unknown;
+  extras?: Record<string, unknown>;
+}
+
 export interface StoredWidgetMetadata {
   parts?: MessagePart[];
   toolCalls?: Array<{
@@ -307,8 +319,6 @@ export interface StoredWidgetMetadata {
     summary?: string;
     detail?: ToolCallDetailData | null;
   }>;
-  chart?: ChartPayload | null;
-  blueprint?: BlueprintPart | null;
-  composedReport?: ComposedReport | null;
+  artifacts?: Artifact[] | null;
   terminalStatus?: TerminalStatus;
 }

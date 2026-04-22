@@ -2,6 +2,7 @@ import { apiRequest } from '@/services/api/client';
 import { useAuthStore } from '@/stores/authStore';
 import { logger } from '@/services/logger/logger';
 import type {
+  Artifact,
   BlueprintPart,
   BuilderSessionData,
   ChatDefaults,
@@ -47,8 +48,11 @@ interface StreamDoneEvent {
   content?: string;
   warnings?: string[];
   toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>;
-  chart?: ChartPayload | null;
-  blueprint?: Omit<BlueprintPart, 'type'> | null;
+  // Phase 1 — pack-produced results arrive as opaque ``Artifact`` triples
+  // (``{pack_id, contract_id, payload, extras?}``). The frontend dispatches
+  // on ``pack_id`` + ``contract_id`` to render analytics charts,
+  // report-builder blueprints, and any future pack outputs uniformly.
+  artifacts?: Artifact[] | null;
   // Optional token + cost summary aggregated server-side from the turn's
   // llm_usage rows (Phase 2 backend). Absent when no rows were recorded —
   // consumers must handle absence without layout shift.

@@ -18,12 +18,20 @@ interface AppEvaluatorsPageProps {
   extraHeaderActions?: ReactNode;
   extraEmptyStateActions?: ReactNode;
   onOpenEvaluator?: (evaluator: EvaluatorDefinition) => void;
+  /**
+   * When true, EvaluatorsTable skips its internal title/description header so
+   * the page can be embedded inside an outer shell (e.g. PageSurface). The
+   * Create / Restore buttons move into the toolbar row. Used by the Kaira
+   * prototype.
+   */
+  embedded?: boolean;
 }
 
 export function AppEvaluatorsPage({
   extraHeaderActions,
   extraEmptyStateActions,
   onOpenEvaluator,
+  embedded = false,
 }: AppEvaluatorsPageProps) {
   const appId = useCurrentAppId();
   const appConfig = useCurrentAppConfig();
@@ -171,6 +179,7 @@ export function AppEvaluatorsPage({
         description={`Manage private and shared evaluators for ${appMetadata.name}.`}
         headerActions={extraHeaderActions}
         emptyStateActions={extraEmptyStateActions}
+        hideHeader={embedded}
         onOpen={onOpenEvaluator}
         canCreate={canCreate}
         canEditOwned={canEdit}

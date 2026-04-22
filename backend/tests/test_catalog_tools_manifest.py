@@ -33,10 +33,14 @@ def test_build_catalog_allowlist_for_kaira_bot():
 
 
 def test_validate_table_access_rejects_table_not_in_manifest():
+    # Phase 2: rejection surfaces as a §6.2 envelope with a typed reason_code.
     err = _validate_table_access(app_id="kaira-bot", table="thread_evaluations", column=None)
     assert err is not None
-    assert "not declared in the manifest" in err["error"]
-    assert "kaira-bot.yaml" in err["error"]
+    assert err["status"] == "error"
+    assert err["outcome"]["reason_code"] == "ENTITY_OUT_OF_SCOPE"
+    warnings = err["outcome"]["warnings"]
+    assert any("not declared in the manifest" in w for w in warnings)
+    assert any("kaira-bot.yaml" in w for w in warnings)
 
 
 def test_validate_table_access_accepts_declared_table():
@@ -47,4 +51,6 @@ def test_validate_table_access_accepts_declared_table():
 def test_validate_table_access_rejects_invalid_column():
     err = _validate_table_access(app_id="kaira-bot", table="eval_runs", column="bad col name!")
     assert err is not None
-    assert "Invalid column expression" in err["error"]
+    assert err["status"] == "error"
+    assert err["outcome"]["reason_code"] == "ENTITY_NOT_FOUND"
+    assert any("Invalid column expression" in w for w in err["outcome"]["warnings"])

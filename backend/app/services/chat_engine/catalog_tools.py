@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analytics_facts import AnalyticsCriterionFact, AnalyticsEvalFact, AnalyticsRunFact
 from app.models.eval_run import EvalRun
 from app.services.access_control import readable_scope_clause
+from app.services.chat_engine import reason_codes
+from app.services.chat_engine.artifact import ToolEnvelope, build_envelope, error_envelope
 from app.services.chat_engine.data_surfaces import app_access_clause_for_surfaces
 from app.services.chat_engine.manifest import get_manifest
 from app.services.chat_engine.sql_agent import load_app_config, load_semantic_model
@@ -135,7 +137,7 @@ async def catalog_inspect(
     app_id: str,
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> ToolEnvelope:
     access_error = _validate_app_access(auth=auth, app_id=app_id)
     if access_error is not None:
         return access_error
@@ -241,21 +243,29 @@ async def catalog_inspect(
             column_payload['sample_hint'] = 'use catalog_sample to inspect structure'
         columns.append(column_payload)
 
-    return {
-        'status': 'ok',
+    indexes = [
+        {
+            'name': _row_value(row, 'indexname', 0),
+            'columns': _extract_index_columns(str(_row_value(row, 'indexdef', 1) or '')),
+            'definition': _row_value(row, 'indexdef', 1),
+        }
+        for row in index_result.all()
+    ]
+    payload = {
         'table': table,
         'column': column or None,
         'primary_key': [value for value in primary_key if value],
-        'indexes': [
-            {
-                'name': _row_value(row, 'indexname', 0),
-                'columns': _extract_index_columns(str(_row_value(row, 'indexdef', 1) or '')),
-                'definition': _row_value(row, 'indexdef', 1),
-            }
-            for row in index_result.all()
-        ],
+        'indexes': indexes,
         'columns': columns,
     }
+    return build_envelope(
+        status='ok',
+        summary=f'{table} · {len(columns)} cols',
+        kind='read',
+        capability='analytics',
+        counts={'rows': 0, 'records': len(columns), 'affected': 0},
+        payload=payload,
+    )
 
 
 async def catalog_relations(
@@ -266,7 +276,7 @@ async def catalog_relations(
     app_id: str,
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> ToolEnvelope:
     access_error = _validate_app_access(auth=auth, app_id=app_id)
     if access_error is not None:
         return access_error
@@ -328,11 +338,14 @@ async def catalog_relations(
             'join_expression': f'{source_table}.{source_column} = {target_table}.{target_column}',
         })
 
-    return {
-        'status': 'ok',
-        'table': table,
-        'relations': relations,
-    }
+    return build_envelope(
+        status='ok',
+        summary=f'{table} · {len(relations)} relations',
+        kind='read',
+        capability='analytics',
+        counts={'rows': 0, 'records': len(relations), 'affected': 0},
+        payload={'table': table, 'relations': relations},
+    )
 
 
 async def catalog_values(
@@ -346,7 +359,7 @@ async def catalog_values(
     limit: int = 20,
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> ToolEnvelope:
     access_error = _validate_app_access(auth=auth, app_id=app_id)
     if access_error is not None:
         return access_error
@@ -371,11 +384,13 @@ async def catalog_values(
     vocab = build_tool_vocabulary(app_id, active_semantic_model)
     expression = _build_column_expression(model, column, vocab=vocab)
     if expression is None:
-        return {
-            'status': 'error',
-            'error': f'Unsupported column expression for {table}: {column}',
-            'reason': 'unknown_column',
-        }
+        return error_envelope(
+            capability='analytics',
+            reason_code=reason_codes.ENTITY_NOT_FOUND,
+            summary=f'unknown column {column!r} on {table}',
+            warnings=[f'Unsupported column expression for {table}: {column}'],
+            payload={'table': table, 'column': column, 'reason': 'unknown_column'},
+        )
 
     value_expr = cast(expression, SAString)
     count_expr = func.count()
@@ -393,20 +408,27 @@ async def catalog_values(
     query = query.group_by(value_expr).order_by(desc(count_expr), asc(value_expr)).limit(_normalize_limit(limit, default=20, maximum=100))
 
     result = await db.execute(query)
-    return {
-        'status': 'ok',
-        'table': table,
-        'column': column,
-        'search': search or None,
-        'values': [
-            {
-                'value': _serialize_value(_row_value(row, 'value', 0)),
-                'count': int(_row_value(row, 'n', 1) or 0),
-            }
-            for row in result.all()
-            if _row_value(row, 'value', 0) not in (None, '')
-        ],
-    }
+    values = [
+        {
+            'value': _serialize_value(_row_value(row, 'value', 0)),
+            'count': int(_row_value(row, 'n', 1) or 0),
+        }
+        for row in result.all()
+        if _row_value(row, 'value', 0) not in (None, '')
+    ]
+    return build_envelope(
+        status='ok',
+        summary=f'{column} · {len(values)} values',
+        kind='read',
+        capability='analytics',
+        counts={'rows': 0, 'records': len(values), 'affected': 0},
+        payload={
+            'table': table,
+            'column': column,
+            'search': search or None,
+            'values': values,
+        },
+    )
 
 
 async def catalog_sample(
@@ -419,7 +441,7 @@ async def catalog_sample(
     limit: int = 5,
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> ToolEnvelope:
     access_error = _validate_app_access(auth=auth, app_id=app_id)
     if access_error is not None:
         return access_error
@@ -463,22 +485,30 @@ async def catalog_sample(
                 if _row_value(row, column, 0) not in (None, '')
             ]
             json_structure, sample_values = detect_jsonb_structure(json_values)
-            return {
-                'status': 'ok',
-                'table': table,
-                'column': column,
-                'json_structure': json_structure,
-                'sample_values': sample_values,
-                'sample_count': len(json_values),
-            }
+            return build_envelope(
+                status='ok',
+                summary=f'{column} · JSON structure',
+                kind='read',
+                capability='analytics',
+                counts={'rows': 0, 'records': len(json_values), 'affected': 0},
+                payload={
+                    'table': table,
+                    'column': column,
+                    'json_structure': json_structure,
+                    'sample_values': sample_values,
+                    'sample_count': len(json_values),
+                },
+            )
 
         expression = _build_column_expression(model, column, vocab=vocab)
         if expression is None:
-            return {
-                'status': 'error',
-                'error': f'Unsupported column expression for {table}: {column}',
-                'reason': 'unknown_column',
-            }
+            return error_envelope(
+                capability='analytics',
+                reason_code=reason_codes.ENTITY_NOT_FOUND,
+                summary=f'unknown column {column!r} on {table}',
+                warnings=[f'Unsupported column expression for {table}: {column}'],
+                payload={'table': table, 'column': column, 'reason': 'unknown_column'},
+            )
         query = (
             select(expression.label('value'))
             .select_from(model)
@@ -489,15 +519,18 @@ async def catalog_sample(
             .limit(normalized_limit)
         )
         result = await db.execute(query)
-        return {
-            'status': 'ok',
-            'table': table,
-            'column': column,
-            'sample_rows': [
-                {'value': _serialize_value(_row_value(row, 'value', 0))}
-                for row in result.all()
-            ],
-        }
+        sample_rows = [
+            {'value': _serialize_value(_row_value(row, 'value', 0))}
+            for row in result.all()
+        ]
+        return build_envelope(
+            status='ok',
+            summary=f'{table} · {len(sample_rows)} samples',
+            kind='read',
+            capability='analytics',
+            counts={'rows': 0, 'records': len(sample_rows), 'affected': 0},
+            payload={'table': table, 'column': column, 'sample_rows': sample_rows},
+        )
 
     query = (
         select(model)
@@ -505,15 +538,18 @@ async def catalog_sample(
         .limit(normalized_limit)
     )
     result = await db.execute(query)
-    return {
-        'status': 'ok',
-        'table': table,
-        'column': None,
-        'sample_rows': [
-            _serialize_record(row)
-            for row in result.scalars().all()
-        ],
-    }
+    sample_rows = [
+        _serialize_record(row)
+        for row in result.scalars().all()
+    ]
+    return build_envelope(
+        status='ok',
+        summary=f'{table} · {len(sample_rows)} samples',
+        kind='read',
+        capability='analytics',
+        counts={'rows': 0, 'records': len(sample_rows), 'affected': 0},
+        payload={'table': table, 'column': None, 'sample_rows': sample_rows},
+    )
 
 
 def detect_jsonb_structure(json_values: list[Any]) -> tuple[dict[str, Any], dict[str, list[Any]]]:
@@ -542,36 +578,48 @@ def _validate_table_access(
     app_id: str | None = None,
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
+) -> ToolEnvelope | None:
     if app_id is not None:
         allowed_tables = build_catalog_allowlist(app_id=app_id)
         if table not in allowed_tables:
-            return {
-                'status': 'error',
-                'error': (
-                    f"Table {table!r} is not declared in the manifest for {app_id}. "
-                    f"Declared tables: {', '.join(allowed_tables)}. "
-                    f"To add it, edit backend/app/services/chat_engine/manifests/{app_id}.yaml."
-                ),
-            }
+            msg = (
+                f"Table {table!r} is not declared in the manifest for {app_id}. "
+                f"Declared tables: {', '.join(allowed_tables)}. "
+                f"To add it, edit backend/app/services/chat_engine/manifests/{app_id}.yaml."
+            )
+            return error_envelope(
+                capability='analytics',
+                reason_code=reason_codes.ENTITY_OUT_OF_SCOPE,
+                summary=f'table {table!r} not declared',
+                warnings=[msg],
+                payload={'table': table, 'reason': 'unknown_table', 'available_tables': allowed_tables},
+            )
     else:
         allowed_tables = build_catalog_allowlist(
             app_config=app_config, semantic_model=semantic_model,
         )
         if table not in allowed_tables:
-            return {
-                'status': 'error',
-                'error': f'Unknown or disallowed table: {table}. Valid tables are: {", ".join(sorted(allowed_tables))}',
-            }
+            msg = f'Unknown or disallowed table: {table}. Valid tables are: {", ".join(sorted(allowed_tables))}'
+            return error_envelope(
+                capability='analytics',
+                reason_code=reason_codes.ENTITY_OUT_OF_SCOPE,
+                summary=f'table {table!r} disallowed',
+                warnings=[msg],
+                payload={'table': table, 'reason': 'unknown_table', 'available_tables': sorted(allowed_tables)},
+            )
     if column and not _SIMPLE_IDENTIFIER_PATTERN.match(column.split('->', 1)[0].strip()):
-        return {
-            'status': 'error',
-            'error': f'Invalid column expression: {column}',
-        }
+        msg = f'Invalid column expression: {column}'
+        return error_envelope(
+            capability='analytics',
+            reason_code=reason_codes.ENTITY_NOT_FOUND,
+            summary='invalid column expression',
+            warnings=[msg],
+            payload={'table': table, 'column': column, 'reason': 'invalid_column'},
+        )
     return None
 
 
-def _validate_app_access(*, auth: Any, app_id: str) -> dict[str, Any] | None:
+def _validate_app_access(*, auth: Any, app_id: str) -> ToolEnvelope | None:
     if getattr(auth, 'is_owner', False):
         return None
     if not hasattr(auth, 'app_access'):
@@ -580,10 +628,13 @@ def _validate_app_access(*, auth: Any, app_id: str) -> dict[str, Any] | None:
     app_access = getattr(auth, 'app_access', frozenset()) or frozenset()
     if app_id in app_access:
         return None
-    return {
-        'status': 'error',
-        'error': f'App access denied for {app_id}',
-    }
+    return error_envelope(
+        capability='harness',
+        reason_code=reason_codes.PERMISSION_DENIED,
+        summary=f'app access denied for {app_id}',
+        warnings=[f'App access denied for {app_id}'],
+        payload={'app_id': app_id, 'reason': 'app_access_denied'},
+    )
 
 
 def _catalog_scope_clauses(model: Any, *, auth: Any, app_id: str) -> tuple[Any, ...]:

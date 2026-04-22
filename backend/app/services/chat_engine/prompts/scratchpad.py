@@ -12,6 +12,10 @@ _MAX_ANALYSIS_PREVIEW_ROWS = 2
 _MAX_FILTERS = 8
 _MAX_SCHEMA_TABLES = 4
 _MAX_SCHEMA_COLUMNS = 6
+# Phase 2: outer agent sees the most recent deterministic tool outcomes
+# as a compact per-tool record (reason_code + artifact_type + counts) so
+# cross-turn reasoning is driven by typed codes, not re-parsed prose.
+_MAX_OUTCOMES = 8
 
 
 def render(session: dict[str, Any]) -> str:
@@ -30,6 +34,7 @@ def render(session: dict[str, Any]) -> str:
     last_data_check = pad.get('last_data_check')
     last_analysis = pad.get('last_analysis')
     last_evidence = pad.get('last_evidence')
+    outcomes = pad.get('outcomes', [])
 
     has_discovered_schema = False
     if isinstance(discovered_schema, dict):
@@ -43,10 +48,37 @@ def render(session: dict[str, Any]) -> str:
             )
         )
 
-    if not findings and not composed and not errors and not discovery and not lookups and not resolved_entities and not active_filters and not has_discovered_schema and not last_data_check and not last_analysis and not last_evidence:
+    if not findings and not composed and not errors and not discovery and not lookups and not resolved_entities and not active_filters and not has_discovered_schema and not last_data_check and not last_analysis and not last_evidence and not outcomes:
         return ''
 
     lines = ['SESSION STATE:']
+
+    # Phase 2: the outer agent reasons over the structured outcome log
+    # (deterministic ``reason_code`` + artifact shape + counts) first,
+    # before prose findings. This is the carry-forward contract §Phase-2
+    # step 6 calls for: typed codes cross turns, not re-parsed text.
+    if isinstance(outcomes, list) and outcomes:
+        lines.append('Recent tool outcomes (deterministic):')
+        for entry in outcomes[-_MAX_OUTCOMES:]:
+            if not isinstance(entry, dict):
+                continue
+            tool = str(entry.get('tool') or 'tool')
+            reason_code = entry.get('reason_code')
+            artifact_type = entry.get('artifact_type')
+            counts = entry.get('counts') or {}
+            parts = []
+            if reason_code:
+                parts.append(f'reason_code={reason_code}')
+            if artifact_type:
+                parts.append(f'artifact={artifact_type}')
+            rows = counts.get('rows') if isinstance(counts, dict) else None
+            records = counts.get('records') if isinstance(counts, dict) else None
+            if rows:
+                parts.append(f'rows={rows}')
+            if records:
+                parts.append(f'records={records}')
+            tail = f" ({', '.join(parts)})" if parts else ''
+            lines.append(f'- {tool}{tail}')
 
     if findings:
         lines.append('Findings so far:')

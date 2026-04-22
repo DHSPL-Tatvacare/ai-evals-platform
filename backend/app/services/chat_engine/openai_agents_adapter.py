@@ -41,7 +41,11 @@ from agents.tool_context import ToolContext
 from openai.types.responses import ResponseTextDeltaEvent
 
 from app.services.cost_tracking.tracing import install_cost_tracking_processor
-from app.services.report_builder.chart_contract import ChartPayload
+from app.services.chat_engine.artifact import (
+    CAPABILITY_PACK_REGISTRY,
+    Artifact,
+    resolve_pack_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,8 +215,12 @@ class SherlockContext:
     working_session: dict[str, Any]
     emit: EventEmitter
     tool_call_log: list[dict[str, Any]] = field(default_factory=list)
-    chart_payload: ChartPayload | None = None
-    composed_report: dict[str, Any] | None = None
+    # Phase 1: pack-produced results land here as opaque ``Artifact`` triples.
+    # Harness Core does not inspect ``payload``/``extras`` — only the owning
+    # capability pack does. ``chart_payload`` / ``composed_report`` were
+    # removed in favour of this generic container so the harness stops
+    # treating analytics + report-builder as Sherlock-wide state.
+    artifacts: list[Artifact] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     streamed_text_parts: list[str] = field(default_factory=list)
 
@@ -236,7 +244,19 @@ def create_openai_client(
 
 
 def build_sherlock_tools(tool_defs: list[dict[str, Any]]) -> list[FunctionTool]:
-    """Create FunctionTool instances from Sherlock's JSON tool definitions."""
+    """Create FunctionTool instances from Sherlock's JSON tool definitions.
+
+    Phase 3 contract (plan §Phase-3 step 4): tools run in **strict**
+    schema mode. The Agents SDK validates model-generated arguments
+    against the tool's ``inputSchema`` BEFORE ``_sherlock_tool_handler``
+    runs, so malformed / non-object JSON never reaches the handler on
+    the happy path. ``_parse_tool_args`` is narrowed to the
+    ``""`` / ``"{}"`` no-args recovery only (the Responses API emits
+    that for tools with no required params). The handler still wraps any
+    post-SDK parse failure in a ``MALFORMED_ARGS`` envelope via
+    ``_finalize_tool_call`` so the outer agent can observe the reason
+    code instead of an uncaught stack trace.
+    """
 
     tools: list[FunctionTool] = []
     for tool_def in tool_defs:
@@ -246,7 +266,7 @@ def build_sherlock_tools(tool_defs: list[dict[str, Any]]) -> list[FunctionTool]:
                 description=tool_def.get('description', ''),
                 params_json_schema=tool_def.get('inputSchema', {}),
                 on_invoke_tool=_sherlock_tool_handler,
-                strict_json_schema=False,
+                strict_json_schema=True,
             )
         )
     return tools
@@ -303,37 +323,28 @@ def _load_json_object(raw: str) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _parse_tool_args(raw: str) -> dict[str, Any] | None:
+def _parse_tool_args(raw: str) -> dict[str, Any]:
     """Parse a tool-call argument JSON string.
 
-    Returns:
-        dict   — parsed object (including the valid empty-args case `{}`)
-        None   — malformed: parse error, or valid JSON but not an object
-                 (e.g. ``null``, ``[1,2]``, ``"string"``).
-
-    Empty or whitespace-only input is treated as a valid no-args call
-    (returns ``{}``). This matters because the Responses API emits ``"{}"``
-    for tools whose schema has no required fields — previously that was
-    misclassified as malformed and caused an infinite retry loop.
+    Phase 3 contract (plan §Phase-3 step 4): strict Agents SDK schemas
+    reject malformed / non-object JSON at the SDK boundary before this
+    helper runs. The recovery path is therefore narrowed to the
+    ``""`` / ``"{}"`` / whitespace no-args contract ONLY — the Responses
+    API emits empty args for tools whose schema has no required fields.
+    Anything else is a contract violation: we raise ``ValueError`` /
+    ``json.JSONDecodeError``, and the handler surrounds this call with
+    a try/except that projects those errors into a harness-owned
+    ``MALFORMED_ARGS`` envelope so the outer agent can observe the
+    typed reason code (defensive belt+suspenders, not the happy path).
     """
     if raw is None or not raw.strip():
         return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
-def _fatal_tool_result_error(tool_name: str, result: dict[str, Any]) -> str | None:
-    if tool_name != 'data_query':
-        return None
-    if result.get('status') != 'error':
-        return None
-    if result.get('reason') != 'invalid_output_alias_contract':
-        return None
-    error_text = str(result.get('error') or '').strip()
-    return error_text or 'Generated query failed validation.'
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f'Expected tool arguments to be a JSON object; got {type(parsed).__name__}'
+        )
+    return parsed
 
 
 async def _sherlock_tool_handler(ctx: ToolContext[SherlockContext], args: str) -> str:
@@ -346,23 +357,47 @@ async def _sherlock_tool_handler(ctx: ToolContext[SherlockContext], args: str) -
     """
 
     from app.database import async_session
-    from app.services.report_builder.chat_handler import (
-        _build_chart_payload,
-        _build_tool_call_detail,
-        _summarize_tool_result,
-        _tool_call_warning,
-        _update_scratchpad,
-    )
     from app.services.report_builder.tool_handlers import dispatch_tool_call
 
     sc = ctx.context
     tool_name = ctx.tool_name
-    arguments = _parse_tool_args(args)
-    if arguments is None:
-        logger.warning('Tool %s received malformed JSON args: %r', tool_name, args[:500])
-        return json.dumps({'status': 'error', 'message': 'Malformed tool arguments'})
-
     tool_call_id = ctx.tool_call_id or f'tc_{uuid.uuid4().hex[:12]}'
+
+    # Phase 3: strict Agents SDK schemas reject malformed args BEFORE this
+    # handler runs, so the happy path never sees a bad parse. The try/except
+    # below is defensive — if any non-object JSON still slips past the SDK,
+    # we surface it as a §6.2 ``MALFORMED_ARGS`` envelope and route it
+    # through the same tool_call_start / *_end / scratchpad / log path as
+    # any other tool result so ``sherlock_runtime_events`` persists
+    # ``data.outcome.reason_code = 'MALFORMED_ARGS'`` and the outer agent
+    # can reason over it. This preserves the Phase 2 invariant that
+    # malformed args are observed, not thrown.
+    try:
+        arguments = _parse_tool_args(args)
+    except (json.JSONDecodeError, ValueError):
+        from app.services.chat_engine import reason_codes
+        from app.services.chat_engine.artifact import error_envelope
+
+        logger.warning('Tool %s received malformed JSON args: %r', tool_name, args[:500])
+        start = time.monotonic()
+        envelope = error_envelope(
+            capability='harness',
+            reason_code=reason_codes.MALFORMED_ARGS,
+            summary='Malformed tool arguments',
+            warnings=['Expected a JSON object for tool arguments'],
+            payload={},
+        )
+        result_str = json.dumps(envelope, default=str)
+        execution_ms = (time.monotonic() - start) * 1000
+        await _finalize_tool_call(
+            sc=sc,
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            result_str=result_str,
+            execution_ms=execution_ms,
+            emitted_start=False,
+        )
+        return result_str
 
     await sc.emit({
         'event': 'tool_call_start',
@@ -390,52 +425,129 @@ async def _sherlock_tool_handler(ctx: ToolContext[SherlockContext], args: str) -
             raise
     execution_ms = (time.monotonic() - start) * 1000
 
+    await _finalize_tool_call(
+        sc=sc,
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        result_str=result_str,
+        execution_ms=execution_ms,
+        emitted_start=True,
+    )
+
+    # Phase 2: SQL-agent failures (including the former
+    # ``invalid_output_alias_contract`` fatal) now surface as a typed
+    # ``outcome.reason_code`` in the returned envelope. The dispatcher no
+    # longer raises — the outer agent observes the code and replans.
+
+    return result_str
+
+
+async def _finalize_tool_call(
+    *,
+    sc: SherlockContext,
+    tool_name: str,
+    tool_call_id: str,
+    result_str: str,
+    execution_ms: float,
+    emitted_start: bool,
+) -> None:
+    """Common tool-call exit path: pack outcome dispatch, scratchpad, logs,
+    and the tool_call_end + status events.
+
+    The malformed-args branch and the normal handler path both land here so
+    the §6.2 envelope flows through a single egress: ``sherlock_runtime_events``
+    rows, ``tool_call_log`` entries, and SSE events all carry ``outcome``.
+    ``emitted_start=False`` covers the malformed case where no tool_call_start
+    was sent — we still emit it (paired with end) so the runtime sequence
+    stays well-formed.
+    """
+
+    from app.services.report_builder.chat_handler import (
+        _build_tool_call_detail,
+        _summarize_tool_result,
+        _tool_call_warning,
+        _update_scratchpad,
+    )
+
+    if not emitted_start:
+        await sc.emit({
+            'event': 'tool_call_start',
+            'data': {'toolName': tool_name, 'toolCallId': tool_call_id, 'name': tool_name},
+        })
+
     detail = _build_tool_call_detail(tool_name, result_str, execution_ms=execution_ms)
     parsed_result = _load_json_object(result_str)
 
-    if tool_name == 'data_query' and parsed_result.get('status') == 'ok':
-        sc.chart_payload = _build_chart_payload(parsed_result)
-    elif tool_name == 'blueprint_compose' and parsed_result.get('status') == 'ok':
-        sc.composed_report = parsed_result
+    # Phase 1: pack dispatch replaces hard-coded per-tool branches. The
+    # harness knows nothing about which tools produce artifacts or what
+    # shape they take — ``resolve_pack_for`` returns ``None`` for tools
+    # that no pack claims, and the dispatcher simply skips them.
+    pack_id = resolve_pack_for(tool_name)
+    if pack_id is not None:
+        pack = CAPABILITY_PACK_REGISTRY[pack_id]
+        outcome = pack.build_outcome(tool_name, parsed_result)
+        if outcome.artifact is not None:
+            sc.artifacts.append(outcome.artifact)
 
     _update_scratchpad(sc.working_session, tool_name, result_str, app_id=sc.app_id)
 
-    summary = _summarize_tool_result(tool_name, result_str)
-    sc.tool_call_log.append(
-        {
-            'tool_call_id': tool_call_id,
-            'name': tool_name,
-            'summary': summary,
-            'detail': detail,
-            'duration_ms': execution_ms,
+    # Phase 2 Gate (plan §Phase-2 acceptance gate 4): project the §6.2
+    # envelope's ``outcome`` block onto the ``tool_call_end`` SSE event so
+    # ``sherlock_runtime_events`` persists a generic
+    # ``data.outcome.reason_code`` — the outer agent (and any replay
+    # consumer) observes the same deterministic decision the backend
+    # made, without unpacking pack-specific payloads.
+    outcome_block = parsed_result.get('outcome') if isinstance(parsed_result, dict) else None
+    outcome_for_event: dict[str, Any] | None = None
+    if isinstance(outcome_block, dict):
+        outcome_for_event = {
+            'kind': outcome_block.get('kind'),
+            'capability': outcome_block.get('capability'),
+            'reason_code': outcome_block.get('reason_code'),
+            'warnings': list(outcome_block.get('warnings') or []),
+            'counts': dict(outcome_block.get('counts') or {}),
         }
-    )
+        if isinstance(outcome_block.get('artifact'), dict):
+            outcome_for_event['artifact'] = {
+                'type': outcome_block['artifact'].get('type'),
+                'contract': outcome_block['artifact'].get('contract'),
+                'extras': dict(outcome_block['artifact'].get('extras') or {}),
+            }
+
+    summary = _summarize_tool_result(tool_name, result_str)
+    tool_call_log_entry: dict[str, Any] = {
+        'tool_call_id': tool_call_id,
+        'name': tool_name,
+        'summary': summary,
+        'detail': detail,
+        'duration_ms': execution_ms,
+    }
+    if outcome_for_event is not None:
+        tool_call_log_entry['outcome'] = outcome_for_event
+    sc.tool_call_log.append(tool_call_log_entry)
     warning = _tool_call_warning(tool_name, detail)
     if warning:
         sc.warnings.append(warning)
-    fatal_error = _fatal_tool_result_error(tool_name, parsed_result)
 
+    tool_call_end_payload: dict[str, Any] = {
+        'toolName': tool_name,
+        'toolCallId': tool_call_id,
+        'name': tool_name,
+        'summary': summary,
+        'detail': detail.model_dump(by_alias=True, mode='json'),
+        'durationMs': execution_ms,
+    }
+    if outcome_for_event is not None:
+        tool_call_end_payload['outcome'] = outcome_for_event
     await sc.emit({
         'event': 'tool_call_end',
-        'data': {
-            'toolName': tool_name,
-            'toolCallId': tool_call_id,
-            'name': tool_name,
-            'summary': summary,
-            'detail': detail.model_dump(by_alias=True, mode='json'),
-            'durationMs': execution_ms,
-        },
+        'data': tool_call_end_payload,
     })
-
-    if fatal_error:
-        raise RuntimeError(fatal_error)
 
     await sc.emit({
         'event': 'status',
         'data': {'text': _status_line_after_tool(tool_name)},
     })
-
-    return result_str
 
 
 async def run_sherlock_sdk_turn(

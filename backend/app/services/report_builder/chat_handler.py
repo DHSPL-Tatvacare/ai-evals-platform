@@ -270,21 +270,32 @@ def _table_columns(typed: "TypedResultSet") -> list[dict[str, Any]]:
     ]
 
 
-def _build_chart_payload(result: dict[str, Any] | None) -> ChartPayload | None:
-    """Turn a ``data_query`` result into a discriminated-union chart payload.
+def _build_analytics_chart_outcome(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Run the deterministic chart pipeline and return envelope-ready fields.
 
-    Returns one of:
-        ``{kind: 'chart',   spec, data, title, sql_query, source_question, ...}``
-        ``{kind: 'kpi',     kpi,  ...}``
-        ``{kind: 'summary', summary, ...}``
-        ``{kind: 'table',   columns, data, ...}``
-        ``{kind: 'empty',   reason_code, ...}``
-        ``None`` when the result is not OK or cannot be typed.
+    Returns a dict with:
+        ``chart_payload``: the ``ChartPayload`` discriminated union (same
+            shape as legacy ``_build_chart_payload``), used as the
+            ``analytics.chart.v1`` artifact payload.
+        ``reason_code``: gate's ``CG_*`` code (or ``None`` for pure
+            chart success with no degradation), plus ``CG_EMIT_FAILED``
+            when emitter raised.
+        ``rendered_as``: the Vega-Lite mark the picker chose
+            (``bar | grouped_bar | ... | pie``), or ``None`` for non-chart
+            fallbacks.
+        ``top_n``: gate-suggested row cap when the picker degraded a
+            high-cardinality result; ``None`` otherwise.
+        ``warnings``: list (empty or one-element) for SSE emission.
+        ``artifact_type``: the payload ``kind`` -- ``chart | kpi |
+            summary | table | empty`` -- surfaced in
+            ``outcome.artifact.type``.
+        ``row_count``: rows the gate saw (pre-truncation).
 
-    The orchestrator reconstructs a ``TypedResultSet`` from the JSON-safe
-    ``typed_columns + data`` fields, runs the chartability gate, and
-    either emits a validated Vega-Lite spec or degrades to a
-    fallback kind with the corresponding reason code.
+    Returns ``None`` when ``result`` is not an ``ok`` payload or cannot
+    be typed; the handler then emits an error envelope without an
+    artifact slot. This is the Phase-2 single source that both
+    ``_build_chart_payload`` (legacy callers) and ``handle_data_query``
+    (envelope path) consume.
     """
     if not isinstance(result, dict) or result.get('status') != 'ok':
         return None
@@ -301,39 +312,74 @@ def _build_chart_payload(result: dict[str, Any] | None) -> ChartPayload | None:
         return None
 
     gate = evaluate_gate(typed)
+    row_count = len(typed.rows)
     base: dict[str, Any] = {
         'title': _chart_title_from_result(result),
         'source_question': result.get('question', ''),
         'sql_query': result.get('sql_used', ''),
     }
 
+    warnings: list[str] = [gate.warning] if gate.warning else []
+
     if gate.fallback == 'empty':
-        return {'kind': 'empty', 'reason_code': gate.reason_code, **base}
+        return {
+            'chart_payload': {'kind': 'empty', 'reason_code': gate.reason_code, **base},
+            'reason_code': gate.reason_code,
+            'rendered_as': None,
+            'top_n': None,
+            'warnings': warnings,
+            'artifact_type': 'empty',
+            'row_count': row_count,
+        }
 
     if gate.fallback == 'kpi':
         return {
-            'kind': 'kpi',
+            'chart_payload': {
+                'kind': 'kpi',
+                'reason_code': gate.reason_code,
+                'kpi': _kpi_from_single_value(typed),
+                **base,
+            },
             'reason_code': gate.reason_code,
-            'kpi': _kpi_from_single_value(typed),
-            **base,
+            'rendered_as': None,
+            'top_n': None,
+            'warnings': warnings,
+            'artifact_type': 'kpi',
+            'row_count': row_count,
         }
 
     if gate.fallback == 'summary':
         return {
-            'kind': 'summary',
+            'chart_payload': {
+                'kind': 'summary',
+                'reason_code': gate.reason_code,
+                'summary': _summary_from_single_row(typed),
+                **base,
+            },
             'reason_code': gate.reason_code,
-            'summary': _summary_from_single_row(typed),
-            **base,
+            'rendered_as': None,
+            'top_n': None,
+            'warnings': warnings,
+            'artifact_type': 'summary',
+            'row_count': row_count,
         }
 
     if gate.fallback == 'table':
         return {
-            'kind': 'table',
+            'chart_payload': {
+                'kind': 'table',
+                'reason_code': gate.reason_code,
+                'warning': gate.warning,
+                'columns': _table_columns(typed),
+                'data': typed.rows,
+                **base,
+            },
             'reason_code': gate.reason_code,
-            'warning': gate.warning,
-            'columns': _table_columns(typed),
-            'data': typed.rows,
-            **base,
+            'rendered_as': None,
+            'top_n': None,
+            'warnings': warnings,
+            'artifact_type': 'table',
+            'row_count': row_count,
         }
 
     # chartable — either 'chart' or 'chart_with_warning'
@@ -347,24 +393,56 @@ def _build_chart_payload(result: dict[str, Any] | None) -> ChartPayload | None:
         picked = pick_chart(chart_typed)
         emitted = emit_vl(chart_typed, picked)
     except (ValueError, ValidationError) as exc:
+        from app.services.chat_engine import reason_codes as _rc
+
         logger.warning('sherlock chart: emitter failed, degrading to table: %s', exc)
         return {
-            'kind': 'table',
-            'reason_code': 'CG_EMIT_FAILED',
-            'warning': f'Could not render chart: {exc}',
-            'columns': _table_columns(typed),
-            'data': typed.rows,
-            **base,
+            'chart_payload': {
+                'kind': 'table',
+                'reason_code': _rc.CG_EMIT_FAILED,
+                'warning': f'Could not render chart: {exc}',
+                'columns': _table_columns(typed),
+                'data': typed.rows,
+                **base,
+            },
+            'reason_code': _rc.CG_EMIT_FAILED,
+            'rendered_as': None,
+            'top_n': None,
+            'warnings': [f'Could not render chart: {exc}'],
+            'artifact_type': 'table',
+            'row_count': row_count,
         }
 
     return {
-        'kind': 'chart',
+        'chart_payload': {
+            'kind': 'chart',
+            'reason_code': gate.reason_code,
+            'warning': gate.warning,
+            'spec': emitted['spec'],
+            'data': emitted['data'],
+            **base,
+        },
         'reason_code': gate.reason_code,
-        'warning': gate.warning,
-        'spec': emitted['spec'],
-        'data': emitted['data'],
-        **base,
+        'rendered_as': picked.mark,
+        'top_n': gate.top_n,
+        'warnings': warnings,
+        'artifact_type': 'chart',
+        'row_count': row_count,
     }
+
+
+def _build_chart_payload(result: dict[str, Any] | None) -> ChartPayload | None:
+    """Legacy shim: return just the ``ChartPayload`` half of the outcome.
+
+    Retained so existing tests and any remaining callers continue to
+    work; new code (``handle_data_query``, artifact extraction) should
+    go through ``_build_analytics_chart_outcome`` which also exposes the
+    picker's chosen mark and the gate's ``top_n`` for envelope extras.
+    """
+    outcome = _build_analytics_chart_outcome(result)
+    if outcome is None:
+        return None
+    return outcome['chart_payload']
 
 
 async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
@@ -627,27 +705,59 @@ def _question_contract_hints(
 
 
 def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str, *, app_id: str = '') -> None:
-    """Capture compact tool outcomes for the next turn's prompt."""
+    """Capture structured tool outcomes for the next turn's prompt.
+
+    Phase 2: the handler's result is a §6.2 ``ToolEnvelope``. This
+    function appends a structured record ``{tool, reason_code,
+    artifact_type, counts}`` to the scratchpad's ``outcomes`` list and
+    peels ``envelope.payload`` for the existing handler-specific
+    findings/discovery/lookups bookkeeping.
+    """
     pad = session.setdefault('scratchpad', default_scratchpad())
 
     try:
-        data = json.loads(result_str)
+        envelope = json.loads(result_str)
     except (json.JSONDecodeError, TypeError):
         return
 
-    error = data.get('error')
-    errors = data.get('errors')
-    if data.get('status') == 'error' or error or errors:
+    outcome = envelope.get('outcome') if isinstance(envelope, dict) else None
+    payload = envelope.get('payload') if isinstance(envelope, dict) else None
+    if not isinstance(payload, dict):
+        payload = {}
+
+    # ------------------------------------------------------------------
+    # Structured outcome record — plan §6 step 6. The outer agent sees
+    # the full envelope through the tool result JSON; the scratchpad
+    # record is the compact per-tool summary that crosses turns.
+    # ------------------------------------------------------------------
+    if isinstance(outcome, dict):
+        artifact_block = outcome.get('artifact') if isinstance(outcome.get('artifact'), dict) else None
+        outcomes_log = pad.setdefault('outcomes', [])
+        outcomes_log.append({
+            'tool': tool_name,
+            'reason_code': outcome.get('reason_code'),
+            'artifact_type': (artifact_block or {}).get('type'),
+            'counts': dict(outcome.get('counts') or {}),
+        })
+        # Bound the buffer so a long session does not balloon the prompt.
+        if len(outcomes_log) > 50:
+            pad['outcomes'] = outcomes_log[-50:]
+
+    status = envelope.get('status') if isinstance(envelope, dict) else None
+    warnings = outcome.get('warnings') if isinstance(outcome, dict) else None
+    if status == 'error':
         error_text = ''
-        if error:
-            error_text = str(error)
-        elif isinstance(errors, list) and errors:
-            error_text = '; '.join(str(item) for item in errors)
-        elif errors:
-            error_text = str(errors)
+        if isinstance(warnings, list) and warnings:
+            error_text = '; '.join(str(item) for item in warnings)
         if error_text:
             pad['errors'].append(f'{tool_name}: {error_text[:200]}')
         return
+
+    # Backwards compatibility: downstream code reads ``data.<field>`` from
+    # the handler's raw shape. Phase 2 unwraps the envelope payload so
+    # those helpers keep working without rewriting the whole file.
+    data: dict[str, Any] = dict(payload)
+    data['status'] = status
 
     if tool_name == 'data_query' and data.get('status') == 'ok':
         question = str(data.get('question', '')).strip()
@@ -756,20 +866,30 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
 
 
 def _summarize_tool_result(name: str, result_str: str) -> str:
-    """Extract a short label from a tool result for the UI badge."""
+    """Extract a short human-readable label for the UI badge.
+
+    Phase 2 — reads the §6.2 envelope shape: status from
+    ``envelope.status``; per-tool fields from ``envelope.payload``.
+    Kept UI-only; the outer agent reads the full envelope directly and
+    does not depend on this prose.
+    """
     try:
-        data = json.loads(result_str)
+        envelope = json.loads(result_str)
     except (json.JSONDecodeError, TypeError):
         return "done"
 
+    if not isinstance(envelope, dict):
+        return "done"
+    status = envelope.get('status')
+    payload = envelope.get('payload') if isinstance(envelope.get('payload'), dict) else {}
+    data = payload or {}
+
     if name == "data_query":
-        row_count = data.get("row_count", 0)
-        status = data.get("status", "")
-        if status == "error" or data.get("error"):
+        if status == "error":
             return "query failed"
-        return f"{row_count} rows"
+        return f"{data.get('row_count', 0)} rows"
     if name == 'data_check':
-        if data.get('status') == 'error' or data.get('error'):
+        if status == 'error':
             return 'check failed'
         return f"{data.get('row_count', 0)} rows"
     if name == 'discover':
@@ -791,55 +911,69 @@ def _summarize_tool_result(name: str, result_str: str) -> str:
             return f"{data.get('column', 'json')} · JSON structure"
         return f"{data.get('table', 'table')} · {len(data.get('sample_rows', []))} samples"
     if name == 'blueprint_blocks':
-        blocks = data.get('blocks', [])
-        return f"{len(blocks)} blocks"
+        return f"{len(data.get('blocks', []))} blocks"
     if name == 'blueprint_list':
-        blueprints = data.get('blueprints', [])
-        return f"{len(blueprints)} blueprints"
+        return f"{len(data.get('blueprints', []))} blueprints"
     if name == "blueprint_compose":
-        sections = data.get("sections", [])
-        return f"{len(sections)} sections"
+        return f"{len(data.get('sections', []))} sections"
     if name == "blueprint_save":
         return data.get("name", "saved")
     return "done"
 
 
 def _build_tool_call_detail(name: str, result_str: str, *, execution_ms: float) -> ToolCallDetailOut:
-    """Build structured tool metadata for the chat widget."""
-    try:
-        data = json.loads(result_str)
-    except (json.JSONDecodeError, TypeError):
-        data = {}
+    """Build structured tool metadata for the chat widget.
 
-    error = data.get('error')
-    if not error and isinstance(data.get('errors'), list) and data['errors']:
-        error = '; '.join(str(item) for item in data['errors'])
+    Phase 2 — reads the §6.2 envelope: the error surface is
+    ``outcome.warnings`` (on ``status: error``); per-tool numeric
+    fields come from ``envelope.payload``.
+    """
+    try:
+        envelope = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        envelope = {}
+
+    outcome = envelope.get('outcome') if isinstance(envelope, dict) else {}
+    payload = envelope.get('payload') if isinstance(envelope, dict) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    error: str | None = None
+    if isinstance(envelope, dict) and envelope.get('status') == 'error':
+        warnings = (outcome or {}).get('warnings') if isinstance(outcome, dict) else None
+        if isinstance(warnings, list) and warnings:
+            error = '; '.join(str(item) for item in warnings)
 
     detail = ToolCallDetailOut(
         execution_ms=round(execution_ms, 2),
-        error=str(error) if error else None,
+        error=error,
     )
 
     if name == 'data_query':
-        detail.sql_used = data.get('sql_used')
-        detail.row_count = data.get('row_count')
-        detail.cache_hit = bool(data.get('cache_hit', False))
+        detail.sql_used = payload.get('sql_used')
+        detail.row_count = payload.get('row_count')
+        detail.cache_hit = bool(payload.get('cache_hit', False))
     elif name == 'data_check':
-        detail.row_count = data.get('row_count')
+        detail.row_count = payload.get('row_count')
     elif name == 'catalog_values':
-        detail.row_count = len(data.get('values', []))
+        detail.row_count = len(payload.get('values', []))
     elif name == 'catalog_sample':
-        detail.row_count = data.get('sample_count') or len(data.get('sample_rows', []))
+        detail.row_count = payload.get('sample_count') or len(payload.get('sample_rows', []))
     elif name == 'resolve_entity':
-        detail.row_count = len(data.get('matches', []))
+        detail.row_count = len(payload.get('matches', []))
     elif name == 'get_surface_records':
-        detail.row_count = data.get('record_count')
+        detail.row_count = payload.get('record_count')
 
     return detail
 
 
 async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str, Any]]:
     """Resolve tools from App.config.chat.capabilities.
+
+    Phase 3: ``App.config.chat.capabilities`` values are pack ids. The
+    ``resolve_pack_ids_for_app`` validator raises on any id missing from
+    ``CAPABILITY_PACK_REGISTRY`` — the boot-time guard that caps the
+    "unknown pack id" acceptance gate.
 
     Injects hard enums drawn from the canonical vocabulary onto every
     bounded parameter (``table``, ``dimension``, ``entity_type``,
@@ -850,6 +984,7 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
     from sqlalchemy import select
     from app.models.app import App
     from app.schemas.app_config import AppConfig
+    from app.services.chat_engine.capability_pack import resolve_pack_ids_for_app
     from app.services.chat_engine.tool_vocabulary import build_tool_vocabulary
 
     result = await db.execute(
@@ -857,8 +992,11 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
     )
     raw_config = result.scalar_one_or_none()
     app_config = AppConfig.model_validate(raw_config or {})
-    capabilities = app_config.chat.capabilities or None
-    tools = resolve_tools(capabilities, app_id=app_id)
+    pack_ids = resolve_pack_ids_for_app(
+        app_config.chat.capabilities or None,
+        app_id=app_id,
+    )
+    tools = resolve_tools(pack_ids, app_id=app_id)
 
     semantic_model = load_semantic_model(app_id, app_config=raw_config)
     vocab = build_tool_vocabulary(app_id, semantic_model)
@@ -878,13 +1016,24 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
         'block_type': sorted(vocab.block_types.keys()),
     }
 
+    def _is_string_typed(prop: dict[str, Any]) -> bool:
+        # Phase 3: strict-schema optional fields use ``["string", "null"]``
+        # unions so the LLM can still omit them; enum injection must
+        # cover both the plain-string and nullable-string shapes.
+        t = prop.get('type')
+        if t == 'string':
+            return True
+        if isinstance(t, list) and 'string' in t:
+            return True
+        return False
+
     tools = copy.deepcopy(tools)
     for tool in tools:
         props = (tool.get('inputSchema') or {}).get('properties', {})
         for param_name, allowed in enums.items():
             if not allowed:
                 continue
-            if param_name in props and props[param_name].get('type') == 'string':
+            if param_name in props and _is_string_typed(props[param_name]):
                 props[param_name]['enum'] = allowed
                 props[param_name]['description'] = (
                     f"{props[param_name].get('description', '').rstrip()} "
@@ -894,7 +1043,7 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
         sections = props.get('sections') or {}
         section_items = sections.get('items') or {}
         section_props = section_items.get('properties') or {}
-        if 'type' in section_props and section_props['type'].get('type') == 'string' and enums['block_type']:
+        if 'type' in section_props and _is_string_typed(section_props['type']) and enums['block_type']:
             section_props['type']['enum'] = enums['block_type']
 
     return tools
@@ -988,9 +1137,13 @@ async def _execute_chat_turn(
 
     working_session = _copy_working_session(session)
     runtime_session = _runtime_session_from_state(working_session, provider, model)
-    composed_report: dict | None = None
-    tool_call_log: list[dict[str, Any]] = []
+    # Phase 1: harness persists pack-produced results as opaque artifact
+    # triples. The analytics chart payload is still projected out so the
+    # live SSE ``chart`` event keeps its discriminated-union shape; the
+    # ``done`` event and persisted metadata use ``artifacts[]`` instead.
+    artifacts_serialized: list[dict[str, Any]] = []
     chart_payload: dict | None = None
+    tool_call_log: list[dict[str, Any]] = []
     streamed_text_parts: list[str] = []
     warnings: list[str] = []
     text = ''
@@ -1163,8 +1316,20 @@ async def _execute_chat_turn(
             pass
 
         tool_call_log = sherlock_ctx.tool_call_log
-        chart_payload = sherlock_ctx.chart_payload
-        composed_report = sherlock_ctx.composed_report
+        # Phase 1: pack-produced results arrive as ``Artifact`` triples on
+        # ``sherlock_ctx.artifacts``. Harness Core never inspects the inner
+        # payload; only this orchestrator projects out the analytics chart
+        # for the live SSE ``chart`` event. The ``done`` event and
+        # persisted metadata carry the opaque artifact list directly.
+        artifacts_serialized = [a.as_dict() for a in sherlock_ctx.artifacts]
+        chart_payload = next(
+            (
+                a.payload
+                for a in reversed(sherlock_ctx.artifacts)
+                if a.pack_id == 'analytics' and a.contract_id == 'analytics.chart.v1'
+            ),
+            None,
+        )
         warnings.extend(sherlock_ctx.warnings)
         if streamed_text_parts and not text:
             text = ''.join(streamed_text_parts)
@@ -1190,11 +1355,11 @@ async def _execute_chat_turn(
             )
 
         if chart_payload is not None:
-            # Phase 3: chart_payload is a finished discriminated union
-            # ({kind, spec?, data?, kpi?, summary?, columns?, title,
-            # source_question, sql_query, reason_code?, warning?}). Pass
-            # it through unchanged so live SSE, persisted metadata, and
-            # the ``done`` event all see the same object.
+            # Live SSE ``chart`` event is projected from the analytics
+            # artifact carried on ``sherlock_ctx.artifacts``. The event
+            # shape stays the same discriminated-union chart payload the
+            # UI already consumes; the ``done`` event and persisted
+            # metadata use the new ``artifacts[]`` contract.
             await _emit_runtime_event(
                 runtime_session,
                 'chart',
@@ -1203,32 +1368,32 @@ async def _execute_chat_turn(
                 db,
             )
 
-        # Persisted copy is the same discriminated union — no reshape.
-        persisted_chart = chart_payload
+        # Phase 2 Gate (plan §Phase-2 acceptance gate 5): every persisted
+        # tool-call entry surfaces the envelope's ``outcome`` block so
+        # assistant metadata and the SSE ``done`` event expose the same
+        # deterministic ``reason_code`` + artifact extras the outer agent
+        # observed live, not just the UI prose summary.
+        def _serialize_tool_call_entry(tc: dict[str, Any]) -> dict[str, Any]:
+            entry: dict[str, Any] = {
+                'toolCallId': tc['tool_call_id'],
+                'name': tc['name'],
+                'summary': tc['summary'],
+                'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
+            }
+            if tc.get('outcome') is not None:
+                entry['outcome'] = tc['outcome']
+            return entry
 
         metadata = {
             'terminalStatus': terminal_status,
             'warnings': warnings,
             'entityRecognition': entity_recognition_payload,
-            'toolCalls': [
-                {
-                    'toolCallId': tc['tool_call_id'],
-                    'name': tc['name'],
-                    'summary': tc['summary'],
-                    'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
-                }
-                for tc in tool_call_log
-            ],
-            'composedReport': {
-                'reportName': composed_report.get('report_name') or composed_report.get('name'),
-                'sections': composed_report.get('sections', []),
-            } if composed_report else None,
-            'blueprint': {
-                'type': 'blueprint',
-                'name': composed_report.get('report_name') or composed_report.get('name'),
-                'sections': composed_report.get('sections', []),
-            } if composed_report else None,
-            'chart': persisted_chart,
+            'toolCalls': [_serialize_tool_call_entry(tc) for tc in tool_call_log],
+            # Phase 1: persisted metadata carries opaque artifact triples
+            # instead of top-level ``chart`` / ``composedReport`` / ``blueprint``
+            # keys. Consumers dispatch on ``pack_id`` + ``contract_id`` to
+            # render chart / blueprint / future pack outputs uniformly.
+            'artifacts': artifacts_serialized,
         }
         await finalize_assistant_message(
             runtime_session=runtime_session,
@@ -1241,24 +1406,12 @@ async def _execute_chat_turn(
         done_payload = {
             'terminalStatus': terminal_status,
             'content': text,
-            'toolCalls': [
-                {
-                    'toolCallId': tc['tool_call_id'],
-                    'name': tc['name'],
-                    'summary': tc['summary'],
-                    'detail': tc['detail'].model_dump(by_alias=True, mode='json') if tc.get('detail') else None,
-                }
-                for tc in tool_call_log
-            ],
-            'composedReport': {
-                'reportName': composed_report.get('report_name') or composed_report.get('name'),
-                'sections': composed_report.get('sections', []),
-            } if composed_report else None,
-            'blueprint': {
-                'name': composed_report.get('report_name') or composed_report.get('name'),
-                'sections': composed_report.get('sections', []),
-            } if composed_report else None,
-            'chart': persisted_chart,
+            'toolCalls': [_serialize_tool_call_entry(tc) for tc in tool_call_log],
+            # Phase 1: ``done`` event carries opaque artifact triples —
+            # the frontend dispatches on ``pack_id`` + ``contract_id`` to
+            # render analytics charts, report-builder blueprints, and any
+            # future pack artifacts uniformly.
+            'artifacts': artifacts_serialized,
             'warnings': warnings,
             'entityRecognition': entity_recognition_payload,
         }
@@ -1314,8 +1467,7 @@ async def _execute_chat_turn(
                         }
                         for tc in tool_call_log
                     ],
-                    'composedReport': None,
-                    'chart': None,
+                    'artifacts': artifacts_serialized,
                     'entityRecognition': entity_recognition_payload,
                 },
                 status='error',
@@ -1353,8 +1505,7 @@ async def _execute_chat_turn(
         "role": "assistant",
         "content": text,
         "tool_calls": tool_call_log,
-        "composed_report": composed_report,
-        "chart": chart_payload,
+        "artifacts": artifacts_serialized,
         "terminal_status": terminal_status,
         "warnings": warnings,
         "entity_recognition": entity_recognition_payload,
