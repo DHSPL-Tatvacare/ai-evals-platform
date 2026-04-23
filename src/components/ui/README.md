@@ -20,7 +20,7 @@ Standardized, theme-aware UI primitives. All components use CSS variables from `
 | Positioned popup | `<Popover>` | `import { Popover } from '@/components/ui'` |
 | Status indicator | `<Badge>` | `import { Badge } from '@/components/ui'` |
 | Alert message | `<Alert>` | `import { Alert } from '@/components/ui'` |
-| Loading spinner | `<Spinner>` | `import { Spinner } from '@/components/ui'` |
+| Loading placeholder | `<LoadingState>` | `import { LoadingState } from '@/components/ui'` |
 | Loading placeholder | `<Skeleton>` | `import { Skeleton } from '@/components/ui'` |
 | Text input | `<Input>` | `import { Input } from '@/components/ui'` |
 | Toggle switch | `<Switch>` | `import { Switch } from '@/components/ui'` |

@@ -14,42 +14,8 @@ _TEMPORAL_NAME_PATTERN = re.compile(
 _ISO_DATE_PATTERN = re.compile(
     r'^\d{4}[-/]\d{2}([-/]\d{2})?([T ]\d{2}:\d{2}(:\d{2})?)?',
 )
-_FOLLOWUP_REFERENCE_PHRASES = (
-    'latest run',
-    'this run',
-    'that run',
-    'same run',
-    'latest evaluation',
-    'latest result',
-    'that result',
-    'this result',
-    'same result',
-    'those results',
-    'these results',
-    'failures',
-    'violations',
-)
-_FOLLOWUP_REFERENCE_WORDS = (
-    'that',
-    'this',
-    'it',
-    'those',
-    'these',
-    'same',
-    'previous',
-    'above',
-    'below',
-)
-_CARRY_FORWARD_PREFIXES = (
-    'now ',
-    'and ',
-    'also ',
-    'what about ',
-    'show that ',
-    'break that ',
-    'group that ',
-    'show me that ',
-)
+_RUN_SCOPE_FILTER_KEYS = {'run_name', 'run_reference'}
+_EMPTY_REASON_CODES = {'CG_EMPTY'}
 
 
 def default_scratchpad() -> dict[str, Any]:
@@ -167,6 +133,7 @@ def _infer_column_types(
 def build_analysis_snapshot(
     result: dict[str, Any],
     dimensions: list[dict[str, Any]] | None = None,
+    app_scope_terms: list[str] | None = None,
 ) -> dict[str, Any]:
     rows = result.get('data', [])
     if not isinstance(rows, list):
@@ -220,6 +187,7 @@ def build_analysis_snapshot(
         'chart_summary': _chart_summary_from_result(result),
         'warnings': result.get('warnings', []),
         'applied_filters': result.get('applied_filters', {}),
+        'scope_recheck_hint': _build_scope_recheck_hint(result, app_scope_terms=app_scope_terms),
     }
 
 
@@ -296,6 +264,78 @@ def _gate_to_kind(fallback: str) -> str:
         return 'table'
     # 'chart' or 'chart_with_warning'
     return 'chart'
+
+
+def _build_scope_recheck_hint(
+    result: dict[str, Any],
+    *,
+    app_scope_terms: list[str] | None,
+) -> str | None:
+    normalized_scope_terms = {
+        _normalize_scope_text(term)
+        for term in (app_scope_terms or [])
+        if _normalize_scope_text(term)
+    }
+    if not normalized_scope_terms:
+        return None
+
+    chart_summary = _chart_summary_from_result(result)
+    if not isinstance(chart_summary, dict):
+        return None
+    if str(chart_summary.get('reason_code') or '').strip() not in _EMPTY_REASON_CODES:
+        return None
+
+    matched = _matching_run_scope_alias(
+        result.get('applied_filters'),
+        normalized_scope_terms=normalized_scope_terms,
+    )
+    if not matched:
+        return None
+
+    return (
+        f"The last result was empty after filtering run_name/run_reference to '{matched}', "
+        'which also matches the current app alias. If the next turn only changes chart shape or presentation, '
+        'rerun the analysis without that inferred run-name filter unless the user explicitly asks for a run name.'
+    )
+
+
+def _matching_run_scope_alias(
+    filters: Any,
+    *,
+    normalized_scope_terms: set[str],
+) -> str | None:
+    if not isinstance(filters, dict):
+        return None
+    for key, value in filters.items():
+        if str(key).strip().lower() not in _RUN_SCOPE_FILTER_KEYS:
+            continue
+        normalized_value = _normalize_filter_value(value)
+        if normalized_value and normalized_value in normalized_scope_terms:
+            return normalized_value
+    return None
+
+
+def _normalize_filter_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        normalized = _normalize_scope_text(value)
+        return normalized or None
+    if isinstance(value, list):
+        for item in value:
+            normalized = _normalize_filter_value(item)
+            if normalized:
+                return normalized
+        return None
+    if isinstance(value, dict):
+        for key in ('value', 'text', 'search', 'contains', 'equals'):
+            if key in value:
+                normalized = _normalize_filter_value(value.get(key))
+                if normalized:
+                    return normalized
+    return None
+
+
+def _normalize_scope_text(text: str) -> str:
+    return ' '.join(part for part in re.split(r'[^a-z0-9]+', str(text or '').strip().lower()) if part)
 
 
 def push_analysis_snapshot(scratchpad: dict[str, Any], snapshot: dict[str, Any], *, max_entries: int = 5) -> None:
@@ -469,6 +509,7 @@ def _looks_like_run_snapshot(snapshot: dict[str, Any]) -> bool:
 
 
 def select_analysis_snapshot(question: str, scratchpad: dict[str, Any] | None) -> dict[str, Any] | None:
+    del question
     if not isinstance(scratchpad, dict):
         return None
 
@@ -481,25 +522,125 @@ def select_analysis_snapshot(question: str, scratchpad: dict[str, Any] | None) -
         snapshots.append(last_analysis)
     if not snapshots:
         return None
-
-    normalized = question.lower()
-    if any(phrase in normalized for phrase in ('latest run', 'this run', 'that run', 'same run')):
-        for snapshot in reversed(snapshots):
-            if _looks_like_run_snapshot(snapshot):
-                return snapshot
-
     return snapshots[-1]
 
 
 def should_apply_analysis_context(question: str, last_analysis: dict[str, Any] | None) -> bool:
-    if not last_analysis:
-        return False
-    normalized = f" {question.lower().strip()} "
-    if any(phrase in normalized for phrase in _FOLLOWUP_REFERENCE_PHRASES):
-        return True
-    if any(question.lower().strip().startswith(prefix) for prefix in _CARRY_FORWARD_PREFIXES):
-        return True
-    return any(f' {word} ' in normalized for word in _FOLLOWUP_REFERENCE_WORDS)
+    del question
+    return isinstance(last_analysis, dict)
+
+
+def build_previous_turn_context(scratchpad: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(scratchpad, dict):
+        return None
+
+    last_analysis = scratchpad.get('last_analysis')
+    last_evidence = scratchpad.get('last_evidence')
+    last_data_check = scratchpad.get('last_data_check')
+    outcomes = scratchpad.get('outcomes', [])
+    resolved_entities = scratchpad.get('resolved_entities', {})
+    active_filters = scratchpad.get('active_filters', {})
+
+    has_context = any(
+        isinstance(value, dict) and value
+        for value in (last_analysis, last_evidence, last_data_check)
+    ) or bool(outcomes)
+    if not has_context:
+        return None
+
+    previous_turn: dict[str, Any] = {}
+
+    recent_tools = [
+        str(entry.get('tool'))
+        for entry in (outcomes if isinstance(outcomes, list) else [])
+        if isinstance(entry, dict) and entry.get('tool')
+    ]
+    if recent_tools:
+        previous_turn['recent_tools'] = recent_tools[-3:]
+
+    latest_outcome = next(
+        (
+            entry for entry in reversed(outcomes if isinstance(outcomes, list) else [])
+            if isinstance(entry, dict)
+        ),
+        None,
+    )
+    if isinstance(latest_outcome, dict):
+        reason_code = latest_outcome.get('reason_code')
+        previous_turn['result_status'] = str(reason_code) if reason_code else 'ok'
+        artifact_type = latest_outcome.get('artifact_type')
+        if artifact_type:
+            previous_turn['artifact_type'] = str(artifact_type)
+
+    if isinstance(last_analysis, dict) and last_analysis:
+        question = str(last_analysis.get('question', '')).strip()
+        if question:
+            previous_turn['user_goal'] = question
+        chart_summary = last_analysis.get('chart_summary')
+        previous_turn['result_kind'] = (
+            str(chart_summary.get('kind'))
+            if isinstance(chart_summary, dict) and chart_summary.get('kind')
+            else 'analysis'
+        )
+        pack_context: dict[str, Any] = {}
+        row_count = last_analysis.get('row_count')
+        if row_count is not None:
+            pack_context['row_count'] = row_count
+        columns = [str(column) for column in last_analysis.get('columns', []) if column]
+        if columns:
+            pack_context['columns'] = columns[:_MAX_ANALYSIS_COLUMNS]
+        if isinstance(chart_summary, dict) and chart_summary:
+            pack_context['chart_summary'] = {
+                key: value
+                for key, value in chart_summary.items()
+                if key in {'kind', 'mark', 'reason_code'}
+            }
+        scope_recheck_hint = str(last_analysis.get('scope_recheck_hint') or '').strip()
+        if scope_recheck_hint:
+            pack_context['scope_recheck_hint'] = scope_recheck_hint
+        if pack_context:
+            previous_turn['pack_context'] = pack_context
+    elif isinstance(last_evidence, dict) and last_evidence:
+        previous_turn['result_kind'] = 'evidence'
+        surface_key = str(last_evidence.get('surface_key') or '').strip()
+        if surface_key:
+            previous_turn['user_goal'] = f'evidence lookup on {surface_key}'
+            previous_turn['pack_context'] = {
+                'surface_key': surface_key,
+                'record_count': last_evidence.get('record_count'),
+            }
+    elif isinstance(last_data_check, dict) and last_data_check:
+        previous_turn['result_kind'] = 'data_check'
+        table = str(last_data_check.get('table') or '').strip()
+        if table:
+            previous_turn['user_goal'] = f'data check on {table}'
+            previous_turn['pack_context'] = {
+                'table': table,
+                'row_count': last_data_check.get('row_count'),
+            }
+
+    if isinstance(active_filters, dict) and active_filters:
+        previous_turn['active_filters'] = copy_filters(active_filters)
+
+    if isinstance(resolved_entities, dict) and resolved_entities:
+        compact_entities: dict[str, list[str]] = {}
+        for entity_type, payload in resolved_entities.items():
+            if not isinstance(payload, dict):
+                continue
+            matches = payload.get('matches', [])
+            if not isinstance(matches, list) or not matches:
+                continue
+            values = [
+                str(item.get('value'))
+                for item in matches[:3]
+                if isinstance(item, dict) and item.get('value') not in (None, '')
+            ]
+            if values:
+                compact_entities[str(entity_type)] = values
+        if compact_entities:
+            previous_turn['active_entities'] = compact_entities
+
+    return previous_turn or None
 
 
 def build_followup_analysis_context(last_analysis: dict[str, Any] | None) -> str | None:
@@ -525,6 +666,10 @@ def build_followup_analysis_context(last_analysis: dict[str, Any] | None) -> str
             f'- Result preview: {json.dumps(preview_rows[:_MAX_ANALYSIS_PREVIEW_ROWS], ensure_ascii=True, sort_keys=True)}'
         )
 
+    scope_recheck_hint = str(last_analysis.get('scope_recheck_hint') or '').strip()
+    if scope_recheck_hint:
+        lines.append(f'- Scope recheck: {scope_recheck_hint}')
+
     lines.append('- Reuse exact values from this context when the new question refers to the same run, result, or breakdown.')
     return '\n'.join(lines)
 
@@ -541,6 +686,10 @@ def build_data_query_context(
     if isinstance(discovered_schema, dict) and any(discovered_schema.values()):
         context['discovered_schema'] = discovered_schema
 
+    previous_turn = build_previous_turn_context(scratchpad)
+    if previous_turn:
+        context['previous_turn'] = previous_turn
+
     last_analysis = select_analysis_snapshot(question, scratchpad)
     if should_apply_analysis_context(question, last_analysis):
         if isinstance(last_analysis, dict):
@@ -550,6 +699,9 @@ def build_data_query_context(
                 'preview_rows': last_analysis.get('preview_rows', []),
                 'sql_used': last_analysis.get('sql_used'),
             }
+            scope_recheck_hint = str(last_analysis.get('scope_recheck_hint') or '').strip()
+            if scope_recheck_hint:
+                context['prior_analysis']['scope_recheck_hint'] = scope_recheck_hint
         active_filters = scratchpad.get('active_filters')
         if isinstance(active_filters, dict) and active_filters:
             context['active_filters'] = copy_filters(active_filters)

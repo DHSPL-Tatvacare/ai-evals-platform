@@ -438,8 +438,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
     return len(rows)
 
 
-async def _create_sync_run(
-    db: AsyncSession,
+def _build_sync_run(
     *,
     request: InsideSalesSyncRequest,
     user_id: uuid.UUID,
@@ -449,7 +448,7 @@ async def _create_sync_run(
     job_id: uuid.UUID | None,
     is_scheduled_run: bool,
 ) -> SourceSyncRun:
-    sync_run = SourceSyncRun(
+    return SourceSyncRun(
         tenant_id=tenant_id,
         app_id=request.app_id,
         source_system=request.source_system,
@@ -469,25 +468,16 @@ async def _create_sync_run(
         job_id=job_id,
         is_scheduled_run=is_scheduled_run,
     )
-    db.add(sync_run)
-    await db.commit()
-    # NOTE: deliberately no `db.refresh(sync_run)` here. Refresh would autobegin
-    # a fresh transaction on this session — and the caller immediately enters
-    # `async with db.begin():`, which would then raise
-    # "A transaction is already begun on this Session". Since
-    # `async_sessionmaker(expire_on_commit=False)` and `id` has a Python-side
-    # `default=uuid.uuid4`, all attributes are usable post-commit without refresh.
-    return sync_run
 
 
 async def _save_sync_run_progress(
-    db: AsyncSession,
     *,
     sync_run: SourceSyncRun,
     counters: SyncCounters,
     page_count: int,
     extra_details: dict[str, Any] | None = None,
 ) -> None:
+    """Mutate attached ``sync_run`` in-place. Flush happens on tx commit."""
     sync_run.records_scanned = counters.scanned
     sync_run.records_upserted = counters.upserted
     sync_run.records_failed = counters.failed
@@ -505,10 +495,10 @@ async def _complete_sync_run(
     counters: SyncCounters,
     extra_details: dict[str, Any] | None = None,
 ) -> None:
+    _ = db
     sync_run.status = "completed"
     sync_run.completed_at = _utc_now()
     await _save_sync_run_progress(
-        db,
         sync_run=sync_run,
         counters=counters,
         page_count=int((sync_run.details or {}).get("pagesProcessed", 0)),
@@ -524,11 +514,11 @@ async def _fail_sync_run(
     error_message: str,
     extra_details: dict[str, Any] | None = None,
 ) -> None:
+    _ = db
     sync_run.status = "failed"
     sync_run.error_message = error_message
     sync_run.completed_at = _utc_now()
     await _save_sync_run_progress(
-        db,
         sync_run=sync_run,
         counters=counters,
         page_count=int((sync_run.details or {}).get("pagesProcessed", 0)),
@@ -608,7 +598,7 @@ async def _sync_calls_family(
 
         counters.upserted += await upsert_call_source_rows(db, rows)
         sync_run.details = dict(sync_run.details or {}, pagesProcessed=pages_processed)
-        await _save_sync_run_progress(db, sync_run=sync_run, counters=counters, page_count=pages_processed)
+        await _save_sync_run_progress(sync_run=sync_run, counters=counters, page_count=pages_processed)
         await update_job_progress(
             job_id,
             pages_processed,
@@ -677,7 +667,7 @@ async def _sync_leads_family(
         counters.upserted = await upsert_lead_source_rows(db, [row])
         pages_processed = 1
         sync_run.details = dict(sync_run.details or {}, pagesProcessed=pages_processed)
-        await _save_sync_run_progress(db, sync_run=sync_run, counters=counters, page_count=pages_processed)
+        await _save_sync_run_progress(sync_run=sync_run, counters=counters, page_count=pages_processed)
         await update_job_progress(
             job_id,
             1,
@@ -741,7 +731,7 @@ async def _sync_leads_family(
 
         counters.upserted += await upsert_lead_source_rows(db, rows)
         sync_run.details = dict(sync_run.details or {}, pagesProcessed=pages_processed)
-        await _save_sync_run_progress(db, sync_run=sync_run, counters=counters, page_count=pages_processed)
+        await _save_sync_run_progress(sync_run=sync_run, counters=counters, page_count=pages_processed)
         await update_job_progress(
             job_id,
             pages_processed,
@@ -772,9 +762,20 @@ async def run_inside_sales_source_sync(
 ) -> dict:
     """Sync LeadSquared source records into Inside Sales source tables.
 
-    When `params.is_scheduled_run` is True, the runner additionally prunes
-    rows whose `created_on < now - 7d` (scoped to tenant/app/source-family)
-    inside the same transaction as the upsert. On-demand runs never prune.
+    Lifecycle is split into three isolated transactions on separate sessions:
+
+      1. ``init``  — create the ``source_sync_runs`` row (status=running).
+      2. ``work``  — fetch + upsert in one transaction, then mark completed.
+      3. ``fail``  — on any exception, reopen a fresh session to mark failed.
+
+    This avoids the SQLAlchemy 2.x "A transaction is already begun on this
+    Session" error that can arise when autobegun SELECTs, explicit commits,
+    and ``async with session.begin()`` are interleaved on the same session.
+
+    When ``params.is_scheduled_run`` is True, the window is forced to
+    ``[now - 7d, now]`` regardless of request params, and rows older than
+    7 days are pruned atomically with the upsert. On-demand runs never
+    prune.
     """
     request = parse_inside_sales_sync_request(params)
     is_scheduled_run = bool(params.get("is_scheduled_run"))
@@ -785,38 +786,63 @@ async def run_inside_sales_source_sync(
         job_uuid = None
 
     async with _async_session_factory() as db:
-        latest_successful = await get_latest_successful_sync_run(
-            db,
-            tenant_id=tenant_id,
-            app_id=request.app_id,
-            source_family=request.source_family,
-        )
+        # Phase 1 — resolve window + persist the ``source_sync_runs`` row
+        # inside an explicit transaction. Running the SELECT before
+        # ``session.begin()`` would autobegin and then collide with the
+        # explicit begin — exactly the bug the fake session in the unit
+        # tests replicates.
+        async with db.begin():
+            latest_successful = await get_latest_successful_sync_run(
+                db,
+                tenant_id=tenant_id,
+                app_id=request.app_id,
+                source_family=request.source_family,
+            )
 
-        watermark_from = None
-        watermark_to = None
-        sync_date_from = _format_sync_datetime(request.date_from)
-        sync_date_to = _format_sync_datetime(request.date_to)
-        if request.sync_mode in {"full", "date_range", "targeted"}:
-            watermark_from = _to_watermark(sync_date_from)
-            watermark_to = _to_watermark(sync_date_to)
-        elif request.sync_mode == "incremental":
-            resolved_date_from, resolved_date_to = _resolve_incremental_window(request, latest_successful)
-            watermark_from = _to_watermark(resolved_date_from)
-            watermark_to = _to_watermark(resolved_date_to)
-            sync_date_from = resolved_date_from
-            sync_date_to = resolved_date_to
+            watermark_from: str | None = None
+            watermark_to: str | None = None
+            sync_date_from = _format_sync_datetime(request.date_from)
+            sync_date_to = _format_sync_datetime(request.date_to)
+            if request.sync_mode in {"full", "date_range", "targeted"}:
+                watermark_from = _to_watermark(sync_date_from)
+                watermark_to = _to_watermark(sync_date_to)
+            elif request.sync_mode == "incremental":
+                resolved_date_from, resolved_date_to = _resolve_incremental_window(
+                    request, latest_successful
+                )
+                watermark_from = _to_watermark(resolved_date_from)
+                watermark_to = _to_watermark(resolved_date_to)
+                sync_date_from = resolved_date_from
+                sync_date_to = resolved_date_to
 
-        sync_run = await _create_sync_run(
-            db,
-            request=request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            watermark_from=watermark_from,
-            watermark_to=watermark_to,
-            job_id=job_uuid,
-            is_scheduled_run=is_scheduled_run,
-        )
+            # Scheduled fires always cover the 7-day hot window; overrides
+            # whatever sync_mode / watermark was resolved above. Prune then
+            # happens inside the upsert tx below.
+            if is_scheduled_run:
+                now = _utc_now()
+                sync_date_to = now.strftime("%Y-%m-%d %H:%M:%S")
+                sync_date_from = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                watermark_from = _to_watermark(sync_date_from)
+                watermark_to = _to_watermark(sync_date_to)
 
+            sync_run = _build_sync_run(
+                request=request,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                watermark_from=watermark_from,
+                watermark_to=watermark_to,
+                job_id=job_uuid,
+                is_scheduled_run=is_scheduled_run,
+            )
+            db.add(sync_run)
+            await db.flush()
+
+        # Phase 2 — do the work inside a fresh ``begin()`` block. On success
+        # the context manager commits; on exception it rolls back and we
+        # drop into Phase 3 to mark the row as failed in yet another
+        # fresh ``begin()`` block.
+        pruned = 0
+        result: dict[str, Any]
         try:
             async with db.begin():
                 if request.source_family == "calls":
@@ -848,10 +874,6 @@ async def run_inside_sales_source_sync(
                     failed=int(result["records_failed"]),
                 )
 
-                # Scheduled fires prune `created_on < now-7d` scoped to tenant/app/
-                # source_family inside the same transaction as the upsert. On-demand
-                # fires never prune — users explicitly asked for older data.
-                pruned = 0
                 if is_scheduled_run:
                     from app.services.inside_sales_queries import prune_rows_older_than
 
@@ -875,29 +897,41 @@ async def run_inside_sales_source_sync(
                     extra_details=extra_details,
                 )
         except Exception as exc:
-            async with db.begin():
-                counters = SyncCounters(
-                    scanned=sync_run.records_scanned,
-                    upserted=sync_run.records_upserted,
-                    failed=sync_run.records_failed,
-                )
-                await _fail_sync_run(
-                    db,
-                    sync_run=sync_run,
-                    counters=counters,
-                    error_message=str(exc),
+            # Phase 3 — mark failed on the same session, fresh begin().
+            try:
+                async with db.begin():
+                    counters = SyncCounters(
+                        scanned=sync_run.records_scanned,
+                        upserted=sync_run.records_upserted,
+                        failed=sync_run.records_failed,
+                    )
+                    await _fail_sync_run(
+                        db,
+                        sync_run=sync_run,
+                        counters=counters,
+                        error_message=str(exc) or f"{type(exc).__name__}: sync failed",
+                    )
+            except Exception as fail_exc:
+                _log.error(
+                    "inside_sales.sync.fail_marker_failed",
+                    extra={
+                        "syncRunId": str(sync_run.id) if sync_run is not None else None,
+                        "jobId": str(job_id) if job_id is not None else None,
+                        "primaryError": str(exc),
+                        "markerError": str(fail_exc),
+                    },
                 )
             raise
 
-        return {
-            "sync_run_id": str(sync_run.id),
-            "app_id": request.app_id,
-            "source_system": request.source_system,
-            "source_family": request.source_family,
-            "sync_mode": request.sync_mode,
-            "watermark_from": sync_run.watermark_from,
-            "watermark_to": sync_run.watermark_to,
-            "is_scheduled_run": is_scheduled_run,
-            "pruned_rows": pruned,
-            **result,
-        }
+    return {
+        "sync_run_id": str(sync_run.id),
+        "app_id": request.app_id,
+        "source_system": request.source_system,
+        "source_family": request.source_family,
+        "sync_mode": request.sync_mode,
+        "watermark_from": sync_run.watermark_from,
+        "watermark_to": sync_run.watermark_to,
+        "is_scheduled_run": is_scheduled_run,
+        "pruned_rows": pruned,
+        **result,
+    }

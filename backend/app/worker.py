@@ -9,6 +9,7 @@ from app.startup_schema import bootstrap_database_schema
 from app.services.job_worker import (
     recover_stale_jobs,
     recover_stale_eval_runs,
+    recover_stale_source_sync_runs,
     recovery_loop,
     worker_loop,
 )
@@ -62,6 +63,7 @@ async def run_worker() -> None:
 
     await recover_stale_jobs()
     await recover_stale_eval_runs()
+    await recover_stale_source_sync_runs()
 
     worker_task = asyncio.create_task(worker_loop())
     recovery_task = asyncio.create_task(recovery_loop())

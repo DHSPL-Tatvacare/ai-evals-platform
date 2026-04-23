@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.report_builder.scratchpad_state import build_previous_turn_context
+
 _MAX_FINDINGS = 15
 _MAX_ERRORS = 5
 _MAX_DISCOVERY_DIMENSIONS = 6
@@ -34,6 +36,7 @@ def render(session: dict[str, Any]) -> str:
     last_analysis = pad.get('last_analysis')
     last_evidence = pad.get('last_evidence')
     outcomes = pad.get('outcomes', [])
+    previous_turn = build_previous_turn_context(pad)
 
     has_discovered_schema = False
     if isinstance(discovered_schema, dict):
@@ -78,6 +81,23 @@ def render(session: dict[str, Any]) -> str:
                 parts.append(f'records={records}')
             tail = f" ({', '.join(parts)})" if parts else ''
             lines.append(f'- {tool}{tail}')
+
+    if isinstance(previous_turn, dict) and previous_turn:
+        lines.append('Previous turn context:')
+        user_goal = str(previous_turn.get('user_goal') or '').strip()
+        if user_goal:
+            lines.append(f'- User goal: {user_goal}')
+        recent_tools = previous_turn.get('recent_tools')
+        if isinstance(recent_tools, list) and recent_tools:
+            rendered_tools = ', '.join(str(tool) for tool in recent_tools if tool)
+            if rendered_tools:
+                lines.append(f'- Recent tools: {rendered_tools}')
+        result_kind = str(previous_turn.get('result_kind') or '').strip()
+        if result_kind:
+            lines.append(f'- Result kind: {result_kind}')
+        result_status = str(previous_turn.get('result_status') or '').strip()
+        if result_status:
+            lines.append(f'- Result status: {result_status}')
 
     if findings:
         lines.append('Findings so far:')
@@ -239,6 +259,9 @@ def render(session: dict[str, Any]) -> str:
                 lines.append(f'- Last result rendered as a table{reason_text}.')
             elif kind == 'empty':
                 lines.append('- Last result was empty.')
+        scope_recheck_hint = str(last_analysis.get('scope_recheck_hint') or '').strip()
+        if scope_recheck_hint:
+            lines.append(f'- Scope recheck: {scope_recheck_hint}')
 
     if last_evidence:
         lines.append('Latest evidence context:')

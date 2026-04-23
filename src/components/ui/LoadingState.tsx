@@ -9,10 +9,41 @@ interface LoadingStateProps {
   className?: string;
 }
 
+const FRAME = 48;
+const GAP = 3;
+const DURATION = 3.7;
+const TIMES = [0, 0.27, 0.54, 0.81, 1];
+
+// Three split parameters — vertical, top-row horizontal, bottom-row horizontal.
+// Values replicated from motion.dev's "Independent transforms" demo: each cycle
+// pushes to an extreme, inverts, settles to neutral, and holds briefly. Top and
+// bottom rows move on opposite horizontal phase; vy kicks in after the first
+// horizontal beat, so x and y read as independent axes.
+const VY  = [0.50, 0.65, 0.35, 0.50, 0.50];
+const HXT = [0.50, 0.75, 0.25, 0.50, 0.50];
+const HXB = [0.50, 0.10, 0.90, 0.50, 0.50];
+
+const x2 = (xs: number[]) => xs.map((v) => +(2 * v).toFixed(4));
+const inv2 = (xs: number[]) => xs.map((v) => +(2 * (1 - v)).toFixed(4));
+
+interface CellDef {
+  origin: '0% 0%' | '100% 0%' | '0% 100%' | '100% 100%';
+  scaleX: number[];
+  scaleY: number[];
+}
+
+const CELLS: ReadonlyArray<CellDef> = [
+  { origin: '0% 0%',     scaleX: x2(HXT),   scaleY: x2(VY) },
+  { origin: '100% 0%',   scaleX: inv2(HXT), scaleY: x2(VY) },
+  { origin: '0% 100%',   scaleX: x2(HXB),   scaleY: inv2(VY) },
+  { origin: '100% 100%', scaleX: inv2(HXB), scaleY: inv2(VY) },
+];
+
 /**
- * Unified loading surface — centered horizontally + vertically, animated 4
- * shape-shifting blocks, optional message. Canonical screen loader for the
- * platform.
+ * Unified loading surface — 4 brand-colored cells in a 2×2 grid. Each cell's
+ * transform-origin is pinned to its outer corner and scales inward. Three
+ * shared split parameters drive all 4 cells in lockstep, so gutters stay
+ * perfectly uniform at every frame while x and y read as independent axes.
  */
 export function LoadingState({ message = 'Loading…', fill = true, className }: LoadingStateProps) {
   return (
@@ -24,30 +55,24 @@ export function LoadingState({ message = 'Loading…', fill = true, className }:
       )}
     >
       <div
-        className="relative h-12 w-12"
+        className="grid grid-cols-2 grid-rows-2"
+        style={{ width: FRAME, height: FRAME, gap: GAP }}
         aria-label="Loading"
         role="status"
       >
-        {QUADRANTS.map((q, i) => (
+        {CELLS.map((c, idx) => (
           <motion.span
-            key={i}
-            className="absolute block rounded-[3px]"
-            style={{
-              top: q.anchorTop,
-              bottom: q.anchorBottom,
-              left: q.anchorLeft,
-              right: q.anchorRight,
-              background: q.color,
-            }}
-            animate={{
-              width: q.widthKeyframes,
-              height: q.heightKeyframes,
-            }}
+            key={idx}
+            className="block rounded-[2px] bg-[var(--color-brand-primary)]"
+            style={{ transformOrigin: c.origin }}
+            initial={false}
+            animate={{ scaleX: c.scaleX, scaleY: c.scaleY }}
             transition={{
-              duration: 2.8,
+              duration: DURATION,
+              times: TIMES,
+              ease: 'easeInOut',
               repeat: Infinity,
-              ease: [0.45, 0, 0.3, 1],
-              delay: i * 0.35,
+              repeatType: 'loop',
             }}
           />
         ))}
@@ -58,50 +83,3 @@ export function LoadingState({ message = 'Loading…', fill = true, className }:
     </div>
   );
 }
-
-// Each block anchors to its corner (so width/height grow/shrink from that
-// corner, not from the center) and independently morphs width and height at
-// different phases. The overall 48×48 container stays constant — blocks shift
-// relative proportions within it without rotating or repositioning.
-const QUADRANTS = [
-  {
-    // top-left
-    anchorTop: 0,
-    anchorLeft: 0,
-    anchorBottom: 'auto' as const,
-    anchorRight: 'auto' as const,
-    color: 'var(--color-brand-primary)',
-    widthKeyframes: ['22px', '18px', '26px', '20px', '22px'],
-    heightKeyframes: ['22px', '26px', '18px', '24px', '22px'],
-  },
-  {
-    // top-right
-    anchorTop: 0,
-    anchorRight: 0,
-    anchorBottom: 'auto' as const,
-    anchorLeft: 'auto' as const,
-    color: 'var(--color-accent-indigo)',
-    widthKeyframes: ['20px', '26px', '18px', '24px', '20px'],
-    heightKeyframes: ['24px', '20px', '26px', '18px', '24px'],
-  },
-  {
-    // bottom-left
-    anchorBottom: 0,
-    anchorLeft: 0,
-    anchorTop: 'auto' as const,
-    anchorRight: 'auto' as const,
-    color: 'var(--color-accent-teal)',
-    widthKeyframes: ['24px', '18px', '22px', '26px', '24px'],
-    heightKeyframes: ['20px', '24px', '20px', '18px', '20px'],
-  },
-  {
-    // bottom-right
-    anchorBottom: 0,
-    anchorRight: 0,
-    anchorTop: 'auto' as const,
-    anchorLeft: 'auto' as const,
-    color: 'var(--color-accent-amber)',
-    widthKeyframes: ['18px', '22px', '26px', '20px', '18px'],
-    heightKeyframes: ['22px', '22px', '20px', '26px', '22px'],
-  },
-];

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Crown, ShieldAlert } from 'lucide-react';
-import { Button, Badge, Spinner, ConfirmDialog, EmptyState } from '@/components/ui';
+import { Button, Badge, LoadingState, ConfirmDialog, EmptyState } from '@/components/ui';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 import { useAuthStore } from '@/stores/authStore';
@@ -61,11 +61,7 @@ export function RolesTab() {
   };
 
   if (isLoading) {
-    return (
-      <div className="flex h-40 items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   const isOwner = currentUser?.isOwner;

@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { useCurrentAppId, usePoll } from '@/hooks';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { apiLogsForApp, runDetailForApp, threadDetailForApp } from '@/config/routes';
-import { Search, X, Trash2 } from 'lucide-react';
-import { ConfirmDialog, Badge, ModelBadge, PageSurface } from '@/components/ui';
+import { X, Trash2 } from 'lucide-react';
+import { Button, ConfirmDialog, Badge, ModelBadge, PageHeaderSearch, PageSurface } from '@/components/ui';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef } from '@/components/ui/DataTable';
@@ -443,30 +443,28 @@ export default function Logs() {
           </button>
         </div>
       )}
-      <button
+      <Button
         onClick={() => setConfirmDelete(true)}
         disabled={deleting || logs.length === 0}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[var(--color-error)] bg-[var(--surface-error)] border border-[var(--border-error)] rounded hover:opacity-80 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+        variant="danger-outline"
+        size="sm"
+        icon={Trash2}
+        iconOnly
+        aria-label={runIdFilter ? 'Delete run logs' : 'Delete all logs'}
+        title={runIdFilter ? 'Delete run logs' : 'Delete all logs'}
+        isLoading={deleting}
       >
-        <Trash2 className="h-3 w-3" />
         {runIdFilter ? 'Delete Run Logs' : 'Delete All Logs'}
-      </button>
+      </Button>
     </>
   );
-
-  // ── Search input ────────────────────────────────────────────────
-
-  const searchInput = (
-    <div className="relative">
-      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
-      <input
-        type="text"
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="Search logs..."
-        className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--border-focus)] focus:ring-1 focus:ring-[var(--border-focus)] transition-colors"
-      />
-    </div>
+  const headerFilters = (
+    <PageHeaderSearch
+      value={searchQuery}
+      onChange={setSearchQuery}
+      placeholder="Search logs…"
+      label="Search logs"
+    />
   );
 
   // ── Render ──────────────────────────────────────────────────────
@@ -477,6 +475,8 @@ export default function Logs() {
         icon={icon}
         title={title}
         subtitle={subtitle}
+        back={runIdFilter ? { to: apiLogsForApp(appId), label: 'Logs' } : undefined}
+        filters={headerFilters}
         actions={headerActions}
       >
         {error ? (
@@ -487,9 +487,6 @@ export default function Logs() {
           </div>
         ) : (
           <>
-            <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-              {searchInput}
-            </div>
             {isMultiRun ? (
               <DataTable
                 columns={multiRunColumns}

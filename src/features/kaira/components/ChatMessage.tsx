@@ -8,9 +8,8 @@
 import { memo, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertCircle, RefreshCw, Eye, Clock, Copy, RotateCcw } from 'lucide-react';
+import { AlertCircle, RefreshCw, Eye, Clock, Copy, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '@/utils';
-import { Spinner } from '@/components/ui';
 import type { KairaChatMessage } from '@/types';
 import { actionParser } from '@/services/actions';
 import { ActionButtons } from './ActionButtons';
@@ -223,7 +222,7 @@ export const ChatMessage = memo(function ChatMessage({
       {/* Message content */}
       {isPending ? (
         <div className="flex items-center gap-2 text-[var(--text-muted)]">
-          <Spinner size="sm" />
+          <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-[13px]">Thinking...</span>
         </div>
       ) : isError ? (

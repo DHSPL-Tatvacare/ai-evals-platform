@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft,
   PhoneIncoming,
   PhoneOutgoing,
   Clock,
+  Info,
   User,
   Users,
   Phone as PhoneIcon,
@@ -14,7 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { Button, Tabs, EmptyState } from '@/components/ui';
+import { Button, LoadingState, PageSurface, Tabs, Tooltip, EmptyState } from '@/components/ui';
+import { PAGE_METADATA } from '@/config/pageMetadata';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
 import { CallResultPanel } from '../components/CallResultPanel';
@@ -105,25 +106,19 @@ export function InsideSalesCallDetail() {
 
   if (!call) {
     return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="shrink-0 pb-4">
-          <button
-            onClick={() => navigate(routes.insideSales.listing)}
-            className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Calls
-          </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center">
-          <EmptyState
-            icon={PhoneIcon}
-            title="Call not found"
-            description="This call may not be loaded. Go back to the listing and try again."
-            action={{ label: 'Back to Calls', onClick: () => navigate(routes.insideSales.listing) }}
-          />
-        </div>
-      </div>
+      <PageSurface
+        icon={PAGE_METADATA.callDetail.icon}
+        title="Call"
+        back={{ to: routes.insideSales.listing, label: 'Calls' }}
+      >
+        <EmptyState
+          icon={PhoneIcon}
+          title="Call not found"
+          description="This call may not be loaded. Go back to the listing and try again."
+          action={{ label: 'Back to Calls', onClick: () => navigate(routes.insideSales.listing) }}
+          fill
+        />
+      </PageSurface>
     );
   }
 
@@ -135,131 +130,135 @@ export function InsideSalesCallDetail() {
     ? 'No recording available'
     : undefined;
 
-  return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* Back button */}
-      <div className="shrink-0">
-        <button
-          onClick={() => navigate(routes.insideSales.listing)}
-          className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Calls
-        </button>
-      </div>
+  const leadName = leadData && (leadData.firstName || leadData.lastName)
+    ? [leadData.firstName, leadData.lastName].filter(Boolean).join(' ')
+    : null;
+  const titleText = leadName
+    ? `${call.agentName || 'Unknown Agent'} → ${leadName}`
+    : call.agentName || 'Unknown Agent';
 
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
-            {call.agentName || 'Unknown Agent'}
-            {leadData && (leadData.firstName || leadData.lastName) && (
-              <span className="text-[var(--text-muted)] font-normal">
-                {'→ '}
-                {[leadData.firstName, leadData.lastName].filter(Boolean).join(' ')}
-              </span>
-            )}
-            {leadLoading && (
-              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
-            )}
-          </h1>
-          <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1">
-            {leadData?.phone && (
-              <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] font-mono">
-                <PhoneIcon className="h-3 w-3 text-[var(--text-muted)]" />
-                {leadData.phone}
-              </span>
-            )}
-            {leadData?.email && (
-              <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
-                <Mail className="h-3 w-3 text-[var(--text-muted)]" />
-                {leadData.email}
-              </span>
-            )}
-            {leadData?.cached && (
-              <span className="text-[10px] text-[var(--text-muted)]">(cached)</span>
-            )}
-            {leadData && (
-              <button
-                onClick={() => fetchLead(call.prospectId, true)}
-                disabled={leadLoading}
-                title="Refresh lead data from LSQ"
-                className={cn(
-                  'rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors',
-                  leadLoading && 'animate-spin'
-                )}
-              >
-                <RefreshCw className="h-3 w-3" />
-              </button>
-            )}
-            {leadData && <span className="text-[var(--border-default)]">·</span>}
-            <span
-              className={cn(
-                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
-                isInbound ? 'bg-purple-500/15 text-purple-400' : 'bg-blue-500/15 text-blue-400'
-              )}
-            >
-              {isInbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}
-              {isInbound ? 'Inbound' : 'Outbound'}
-            </span>
-            <span
-              className={cn(
-                'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-                isAnswered ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-              )}
-            >
-              {isAnswered ? 'Answered' : 'Missed'}
-            </span>
-          </div>
+  const metaTooltip = (
+    <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
+      <div className="flex items-center gap-2">
+        <Calendar className="h-3 w-3 text-[var(--text-muted)]" />
+        <span>{formatDateTime(call.callStartTime)}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <User className="h-3 w-3 text-[var(--text-muted)]" />
+        <span>{call.agentName || '—'}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Users className="h-3 w-3 text-[var(--text-muted)]" />
+        <span className="font-mono">{call.prospectId || '—'}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Clock className="h-3 w-3 text-[var(--text-muted)]" />
+        <span>{call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <PhoneIcon className="h-3 w-3 text-[var(--text-muted)]" />
+        <span className="font-mono">{call.callSessionId ? call.callSessionId.slice(-8) : '—'}</span>
+      </div>
+      {leadData?.phone && (
+        <div className="flex items-center gap-2">
+          <PhoneIcon className="h-3 w-3 text-[var(--text-muted)]" />
+          <span className="font-mono">{leadData.phone}</span>
         </div>
-        <span title={disabledReason} className={disabledReason ? 'cursor-not-allowed' : undefined}>
-          <Button size="sm" disabled={!!disabledReason} onClick={() => setEvalOpen(true)} className="shrink-0">
-            Evaluate
-          </Button>
-        </span>
-      </div>
+      )}
+      {leadData?.email && (
+        <div className="flex items-center gap-2">
+          <Mail className="h-3 w-3 text-[var(--text-muted)]" />
+          <span>{leadData.email}</span>
+        </div>
+      )}
+      {leadData?.cached && (
+        <div className="text-[10px] text-[var(--text-muted)]">(cached from LSQ)</div>
+      )}
+    </div>
+  );
 
-      {/* Metadata grid */}
-      <div className="shrink-0 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <MetaCard icon={Calendar} label="Date" value={formatDateTime(call.callStartTime)} />
-        <MetaCard icon={User} label="Agent" value={call.agentName || '—'} />
-        <MetaCard icon={Users} label="Prospect ID" value={call.prospectId || '—'} mono />
-        <MetaCard icon={Clock} label="Duration" value={call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'} />
-        <MetaCard icon={PhoneIcon} label="Session" value={call.callSessionId ? call.callSessionId.slice(-8) : '—'} mono />
-      </div>
+  const subtitle = (
+    <>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+          isInbound ? 'bg-purple-500/15 text-purple-400' : 'bg-blue-500/15 text-blue-400'
+        )}
+      >
+        {isInbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}
+        {isInbound ? 'Inbound' : 'Outbound'}
+      </span>
+      <span
+        className={cn(
+          'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+          isAnswered ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+        )}
+      >
+        {isAnswered ? 'Answered' : 'Missed'}
+      </span>
+      <Tooltip content={metaTooltip} closeDelay={150}>
+        <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+      </Tooltip>
+      {leadData && (
+        <button
+          onClick={() => fetchLead(call.prospectId, true)}
+          disabled={leadLoading}
+          title="Refresh lead data from LSQ"
+          className={cn(
+            'rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors',
+            leadLoading && 'animate-spin'
+          )}
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+      )}
+    </>
+  );
 
-      {/* Eval history */}
+  const actions = (
+    <>
       {evalHistory.length > 0 && (
-        <div className="shrink-0 flex items-center justify-between gap-3 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)] px-3 py-1.5">
+        <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)]">
           <button
             disabled={evalIdx >= evalHistory.length - 1}
             onClick={() => setEvalIdx((i) => i + 1)}
-            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded transition-colors cursor-pointer disabled:cursor-default"
+            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
+            title="Older evaluation"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
-          <span className="text-xs text-[var(--text-secondary)] tabular-nums">
-            Run {evalHistory.length - evalIdx} of {evalHistory.length}
-            {evalHistory[evalIdx]?.created_at && (
-              <span className="text-[var(--text-muted)] ml-2">
-                · {new Date(evalHistory[evalIdx].created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
-              </span>
-            )}
+          <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            {evalHistory.length - evalIdx}/{evalHistory.length}
           </span>
           <button
             disabled={evalIdx <= 0}
             onClick={() => setEvalIdx((i) => i - 1)}
-            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded transition-colors cursor-pointer disabled:cursor-default"
+            className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
+            title="Newer evaluation"
           >
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
-        </div>
+        </span>
       )}
+      <span title={disabledReason} className={disabledReason ? 'cursor-not-allowed' : undefined}>
+        <Button size="sm" disabled={!!disabledReason} onClick={() => setEvalOpen(true)}>
+          Evaluate
+        </Button>
+      </span>
+    </>
+  );
 
+  return (
+    <PageSurface
+      icon={PAGE_METADATA.callDetail.icon}
+      title={titleText}
+      subtitle={subtitle}
+      back={{ to: routes.insideSales.listing, label: 'Calls' }}
+      actions={actions}
+      showHeader={!evalLoading}
+    >
       {evalLoading ? (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
-        </div>
+        <LoadingState />
       ) : evalHistory.length > 0 ? (
         <div className="flex flex-col flex-1 min-h-0">
           <CallResultPanel
@@ -276,13 +275,17 @@ export function InsideSalesCallDetail() {
                 id: 'transcript',
                 label: 'Transcript',
                 content: (
-                  <div className="flex flex-col gap-4 py-4">
+                  <div className="flex min-h-0 flex-1 flex-col gap-4 py-4">
                     {call.recordingUrl && (
                       <AudioPlayer audioUrl={call.recordingUrl} appId="inside-sales" />
                     )}
-                    <div className="flex items-center justify-center py-8">
-                      <EmptyState icon={PhoneIcon} title="No transcript yet" description="Transcription will be available after evaluation." compact />
-                    </div>
+                    <EmptyState
+                      icon={PhoneIcon}
+                      title="No transcript yet"
+                      description="Transcription will be available after evaluation."
+                      compact
+                      fill
+                    />
                   </div>
                 ),
               },
@@ -290,9 +293,13 @@ export function InsideSalesCallDetail() {
                 id: 'scorecard',
                 label: 'Scorecard',
                 content: (
-                  <div className="flex items-center justify-center py-16">
-                    <EmptyState icon={PhoneIcon} title="Not yet evaluated" description="Run an evaluation to see the scorecard." compact />
-                  </div>
+                  <EmptyState
+                    icon={PhoneIcon}
+                    title="Not yet evaluated"
+                    description="Run an evaluation to see the scorecard."
+                    compact
+                    fill
+                  />
                 ),
               },
             ]}
@@ -308,30 +315,6 @@ export function InsideSalesCallDetail() {
           preSelectedCallIds={[call.activityId]}
         />
       )}
-    </div>
-  );
-}
-
-function MetaCard({
-  icon: Icon,
-  label,
-  value,
-  mono,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[var(--text-muted)] mb-1">
-        <Icon className="h-3 w-3" />
-        <span className="text-[10px] font-medium uppercase tracking-wide">{label}</span>
-      </div>
-      <div className={cn('text-xs text-[var(--text-primary)] truncate', mono && 'font-mono')}>
-        {value}
-      </div>
-    </div>
+    </PageSurface>
   );
 }

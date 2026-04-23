@@ -23,7 +23,8 @@ import type {
   ProseBlock,
   CoverBlock,
 } from '@/types/platformReports';
-import { Button, EmptyState, LLMConfigSection, Tabs } from '@/components/ui';
+import { Button, EmptyState, LLMConfigSection, LoadingState, PageSurface, Tabs } from '@/components/ui';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { reportsApi } from '@/services/api/reportsApi';
 import { useCrossRunStore, hasProviderCredentials, LLM_PROVIDERS, useLLMSettingsStore } from '@/stores';
 import { notificationService } from '@/services/notifications';
@@ -443,7 +444,7 @@ function ReportDocumentBlockView({ block }: { block: PlatformDocumentBlock }) {
 
 function ReportDocumentPreview({ document, report }: { document: PlatformReportDocument; report: PlatformRunReportPayload }) {
   return (
-    <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/95 p-3 shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
+    <div className="overflow-hidden rounded-lg border border-white/10 bg-white/95 p-3 shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
       <div
         className="mx-auto space-y-4 rounded-[24px] p-3 md:p-4"
         style={buildDocumentStyle(report)}
@@ -1062,6 +1063,7 @@ function CrossRunSummaryCard({ summary }: { summary: PlatformCrossRunNarrative }
 
 export function PlatformCrossRunDashboard({ appId }: { appId: AppId }) {
   const appConfig = useAppConfig(appId);
+  const { icon: pageIcon, title: pageTitle } = usePageMetadata('dashboard');
   const loadAnalytics = useCrossRunStore((s) => s.loadAnalytics);
   const refreshAnalytics = useCrossRunStore((s) => s.refreshAnalytics);
   const entry = useCrossRunStore((s) => s.entries[appId]);
@@ -1156,54 +1158,48 @@ export function PlatformCrossRunDashboard({ appId }: { appId: AppId }) {
     </div>
   ), [appConfig.analytics.capabilities.crossRunAiSummary, appId, credentialsReady, generatingSummary, model, provider, refreshAnalytics, showModelPicker]);
 
-  if (!entry || entry.status === 'loading') {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" />
-      </div>
-    );
-  }
+  const isLoading = !entry || entry.status === 'loading';
+  const subtitle = analytics
+    ? `Updated ${analytics.metadata.computedAt ? new Date(analytics.metadata.computedAt).toLocaleString() : '—'}`
+    : undefined;
 
-  if (!analytics) {
-    return (
-      <div className="flex min-h-[60vh] flex-1 items-center justify-center px-4">
+  return (
+    <PageSurface
+      icon={pageIcon}
+      title={pageTitle}
+      subtitle={subtitle}
+      actions={headerActions}
+      showHeader={!isLoading}
+    >
+      {isLoading ? (
+        <LoadingState />
+      ) : !analytics ? (
         <EmptyState
           icon={BarChart3}
           title="No analytics yet"
           description="Generate at least one report, then refresh cross-run analytics."
           className="w-full max-w-md"
+          fill
         />
-      </div>
-    );
-  }
+      ) : (
+        <div className="space-y-6">
+          {generatingSummary && (
+            <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--color-info)]" />
+              Generating AI summary...
+            </div>
+          )}
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">Dashboard</h1>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Updated {analytics.metadata.computedAt ? new Date(analytics.metadata.computedAt).toLocaleString() : '—'}
-          </p>
-        </div>
-        {headerActions}
-      </div>
+          {summary && <CrossRunSummaryCard summary={summary} />}
 
-      {generatingSummary && (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <Loader2 className="h-4 w-4 animate-spin text-[var(--color-info)]" />
-          Generating AI summary...
+          {analytics.sections.map((section) => (
+            <section key={section.id} className="space-y-4">
+              <SectionHeader title={section.title} description={section.description ?? undefined} />
+              <SectionContent section={section} />
+            </section>
+          ))}
         </div>
       )}
-
-      {summary && <CrossRunSummaryCard summary={summary} />}
-
-      {analytics.sections.map((section) => (
-        <section key={section.id} className="space-y-4">
-          <SectionHeader title={section.title} description={section.description ?? undefined} />
-          <SectionContent section={section} />
-        </section>
-      ))}
-    </div>
+    </PageSurface>
   );
 }

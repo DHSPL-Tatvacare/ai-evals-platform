@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, ChevronDown, ChevronUp, Clock, Sparkles, AlertCircle, RefreshCw, GitCompare, Link2 } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, Clock, Sparkles, AlertCircle, RefreshCw, GitCompare, Link2, Loader2 } from 'lucide-react';
 import { Card, Button, Badge, ModelBadge } from '@/components/ui';
 import { JsonViewer } from './JsonViewer';
 import type { StructuredOutput, StructuredOutputReference } from '@/types';
@@ -168,7 +168,7 @@ export function OutputCard({
               </div>
             ) : (
               <div className="flex items-center gap-2 rounded-lg bg-[var(--bg-surface)] p-4">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-brand-accent)] border-t-transparent" />
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--color-brand-accent)]" />
                 <span className="text-sm text-[var(--text-muted)]">Processing...</span>
               </div>
             )}

@@ -7,9 +7,37 @@ interface FilterButtonProps {
   onClick: () => void;
   label?: string;
   className?: string;
+  iconOnly?: boolean;
 }
 
-export function FilterButton({ activeCount, onClick, label = 'Filters', className }: FilterButtonProps) {
+export function FilterButton({
+  activeCount,
+  onClick,
+  label = 'Filters',
+  className,
+  iconOnly = false,
+}: FilterButtonProps) {
+  if (iconOnly) {
+    return (
+      <div className={cn('relative', className)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={Filter}
+          iconOnly
+          onClick={onClick}
+          aria-label={label}
+          title={label}
+        />
+        {activeCount > 0 && (
+          <span className="pointer-events-none absolute -right-1 -top-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[var(--interactive-primary)] px-1 text-[10px] font-semibold leading-4 text-[var(--text-on-color)]">
+            {activeCount}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Button
       variant="secondary"

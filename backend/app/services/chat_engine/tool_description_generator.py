@@ -81,7 +81,8 @@ def _format_chart_capabilities() -> str:
     return (
         'Chart capabilities: the deterministic chart picker can emit one of '
         + ', '.join(sorted(marks))
-        + ' (or no chart when the chartability gate rejects the result set).'
+        + ' (or no chart when the chartability gate rejects the result set). '
+        + 'If a prior chart request came back empty because of an inferred filter, rerun data_query with a clarified or relaxed question instead of answering from the empty slice.'
     )
 
 

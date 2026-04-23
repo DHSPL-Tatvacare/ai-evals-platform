@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
-import { Mic } from 'lucide-react';
 import { useLLMSettingsStore, useGlobalSettingsStore, useVoiceRxSettings, useAppSettingsStore } from '@/stores';
-import { Card, Tabs } from '@/components/ui';
+import { Card, PageSurface, Tabs } from '@/components/ui';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CollapsibleSection } from '../../settings/components/CollapsibleSection';
 import { SettingsSaveBar } from '../../settings/components/SettingsSaveBar';
@@ -35,6 +35,7 @@ const defaultVoiceRxPrefs = {
 
 export function VoiceRxSettingsPage() {
   const toast = useToast();
+  const { icon, title } = usePageMetadata('settings');
 
   const llmApiKey = useLLMSettingsStore((s) => s.apiKey);
   const llmProvider = useLLMSettingsStore((s) => s.provider);
@@ -162,18 +163,11 @@ export function VoiceRxSettingsPage() {
   ];
 
   return (
-    <div className="pb-20">
-      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[var(--border-default)]">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-brand-accent)]/10">
-          <Mic className="h-5 w-5 text-[var(--text-brand)]" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Voice Rx Settings</h1>
-          <p className="text-[13px] text-[var(--text-muted)]">Configure audio evaluation settings</p>
-        </div>
+    <PageSurface icon={icon} title={title}>
+      <div className="pb-20">
+        <Tabs tabs={tabs} />
+        <SettingsSaveBar isDirty={isDirty} isSaving={isSaving} onSave={handleSave} onDiscard={handleDiscard} />
       </div>
-      <Tabs tabs={tabs} />
-      <SettingsSaveBar isDirty={isDirty} isSaving={isSaving} onSave={handleSave} onDiscard={handleDiscard} />
-    </div>
+    </PageSurface>
   );
 }

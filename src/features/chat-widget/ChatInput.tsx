@@ -55,9 +55,10 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
         <button
           onClick={onStop}
           className={cn(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
-            'bg-[var(--color-danger)] text-white',
-            'hover:opacity-90',
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors',
+            'border-[var(--border-error)] bg-[var(--surface-error)] text-[var(--color-error)]',
+            'hover:bg-[color-mix(in_srgb,var(--surface-error)_70%,var(--bg-primary))]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]',
           )}
           title="Stop"
           aria-label="Stop"

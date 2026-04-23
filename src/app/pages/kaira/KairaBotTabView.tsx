@@ -5,7 +5,7 @@
 
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useRef } from "react";
-import { Spinner, Tabs } from "@/components/ui";
+import { LoadingState, Tabs } from "@/components/ui";
 import { ChatView } from "@/features/kaira/components/ChatView";
 import { TraceAnalysisView } from "@/features/kaira/components";
 import { KairaBotEvaluatorsView } from "@/features/kaira/components/KairaBotEvaluatorsView";
@@ -135,13 +135,7 @@ export function KairaBotTabView() {
     (sessions.length === 0 || currentSession !== null);
 
   if (!isReady) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-center flex-1">
-          <Spinner size="lg" />
-        </div>
-      </div>
-    );
+    return <LoadingState />;
   }
 
   const tabs = [

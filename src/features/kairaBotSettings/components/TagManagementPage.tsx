@@ -4,11 +4,12 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Tag, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Tag, Trash2, Edit2, Check, X, Loader2 } from 'lucide-react';
 import { cn } from '@/utils';
 import { tagRegistryRepository, chatMessagesRepository, type TagRegistryItem } from '@/services/storage';
 import { notificationService } from '@/services/notifications';
-import { Spinner, Alert, EmptyState } from '@/components/ui';
+import { Alert, EmptyState, LoadingState, PageSurface } from '@/components/ui';
+import { usePageMetadata } from '@/config/pageMetadata';
 
 interface EditingTag {
   originalName: string;
@@ -16,6 +17,7 @@ interface EditingTag {
 }
 
 export function TagManagementPage() {
+  const { icon, title } = usePageMetadata('tags');
   const [tags, setTags] = useState<TagRegistryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingTag, setEditingTag] = useState<EditingTag | null>(null);
@@ -104,34 +106,21 @@ export function TagManagementPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-4xl mx-auto p-6">
-        <Alert variant="error">{error}</Alert>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Tag Management</h1>
-        <p className="text-[14px] text-[var(--text-muted)]">
-          Manage tags used for annotating Kaira Bot messages. Renaming or deleting tags will update all messages.
-        </p>
-      </div>
+    <PageSurface icon={icon} title={title} showHeader={!isLoading}>
+      {isLoading ? (
+        <LoadingState />
+      ) : error ? (
+        <div className="max-w-4xl mx-auto w-full">
+          <Alert variant="error">{error}</Alert>
+        </div>
+      ) : (
+        <div className="max-w-4xl mx-auto w-full space-y-6">
+          <p className="text-[14px] text-[var(--text-muted)]">
+            Manage tags used for annotating Kaira Bot messages. Renaming or deleting tags will update all messages.
+          </p>
 
-      {/* Tags List */}
-      {tags.length === 0 ? (
+          {tags.length === 0 ? (
         <EmptyState
           icon={Tag}
           title="No tags yet"
@@ -236,7 +225,7 @@ export function TagManagementPage() {
                             title="Delete tag"
                           >
                             {isDeleting ? (
-                              <Spinner size="sm" />
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <Trash2 className="h-4 w-4" />
                             )}
@@ -251,6 +240,8 @@ export function TagManagementPage() {
           </table>
         </div>
       )}
-    </div>
+        </div>
+      )}
+    </PageSurface>
   );
 }

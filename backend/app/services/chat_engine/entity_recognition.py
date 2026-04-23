@@ -1,6 +1,8 @@
 """Structured-output entity recognition before the Sherlock tool loop."""
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from typing import Any
 
@@ -9,28 +11,29 @@ from pydantic import BaseModel, Field
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import make_usage_callback
 from app.services.evaluators.settings_helper import get_llm_settings_from_db
-from app.services.report_builder.scratchpad_state import build_resolved_entity_context
-
-_CARRY_FORWARD_REFERENCES = (
-    'that',
-    'this',
-    'it',
-    'those',
-    'these',
-    'same',
-    'latest',
-    'previous',
-    'above',
-    'below',
+from app.services.report_builder.scratchpad_state import (
+    build_previous_turn_context,
+    build_resolved_entity_context,
+)
+_APP_SCOPE_SPLIT_PATTERN = re.compile(r'[^a-z0-9]+')
+_RUN_NAME_ENTITY_TYPES = {'run_name', 'run_reference'}
+_EXPLICIT_RUN_NAME_PATTERNS = (
+    re.compile(r'\brun[ _-]?name\b', re.IGNORECASE),
+    re.compile(r'\bruns?\s+(named|called)\b', re.IGNORECASE),
+    re.compile(r'\bnamed\s+["\']?[a-z0-9]', re.IGNORECASE),
+    re.compile(r'\bcalled\s+["\']?[a-z0-9]', re.IGNORECASE),
 )
 
-_ENTITY_RECOGNITION_SYSTEM_PROMPT = """You classify whether a user question is about analytics in the current application.
+_ENTITY_RECOGNITION_SYSTEM_PROMPT = """You classify whether a user question is within Sherlock's scope for the current application.
 
 Rules:
 - Return JSON only.
-- is_platform_query=true when the question is about the current application's runs, evaluations, trends, logs, rules, metrics, threads, reports, analytics, or evidence.
-- is_platform_query=false for general knowledge, personal chat, creative writing, web search, coding help unrelated to the current app, or questions not about the app's data.
-- needs_resolution=true when the question is vague, refers to entities by partial name/ID, or needs schema/data lookup before analysis.
+- Sherlock's in-scope domain includes the current application's runs, evaluations, trends, logs, rules, metrics, threads, reports, raw evidence, and related investigation/workflow questions grounded in the app's data.
+- is_platform_query=true when the user is asking Sherlock to inspect, explain, summarize, compare, verify, or organize something about the current app and its data.
+- If previous_turn context is present, interpret terse corrections, refinements, rendering requests, and continuations relative to that previous turn before deciding the message is out of scope.
+- Only set is_platform_query=false when the new turn clearly leaves the current app's data/workflow context even after considering previous_turn.
+- is_platform_query=false for general knowledge, personal chat, creative writing, web search, coding help unrelated to the current app, or requests not grounded in the current app's data/surfaces.
+- needs_resolution=true when the question is vague, refers to entities by partial name/ID, or needs schema/data lookup before analysis or evidence retrieval.
 - Only emit entity types from the provided registry.
 - Keep entities concise and preserve the user's original text where possible.
 """
@@ -60,6 +63,7 @@ async def recognize_entities(
     user_id: str,
     app_id: str | None = None,
     turn_id: str | None = None,
+    app_scope_terms: list[str] | None = None,
 ) -> EntityRecognitionResult:
     llm = await _create_entity_recognition_provider(
         provider=provider,
@@ -74,6 +78,7 @@ async def recognize_entities(
             question=question,
             scratchpad=scratchpad,
             entity_registry=entity_registry,
+            app_scope_terms=app_scope_terms,
         ),
         system_prompt=_ENTITY_RECOGNITION_SYSTEM_PROMPT,
         json_schema=EntityRecognitionResult.model_json_schema(),
@@ -82,12 +87,12 @@ async def recognize_entities(
         EntityRecognitionResult.model_validate(payload),
         entity_registry=entity_registry,
     )
-    return _apply_entity_carry_forward(
+    result = _filter_app_scope_alias_entities(
         question=question,
-        scratchpad=scratchpad,
-        entity_registry=entity_registry,
         result=result,
+        app_scope_terms=app_scope_terms,
     )
+    return result
 
 
 def render_entity_recognition_context(result: EntityRecognitionResult) -> str:
@@ -95,10 +100,10 @@ def render_entity_recognition_context(result: EntityRecognitionResult) -> str:
     if not result.is_platform_query:
         lines.extend([
             'Scope signal for this question:',
-            '- This turn is out of scope for app analytics.',
+            '- This turn is out of scope for the current app and its data/workflow context.',
             '- Reply in Sherlock\'s voice.',
             '- For greetings or light banter, keep it warm and brief, then steer back to the app.',
-            '- For other out-of-scope asks, refuse briefly, do not answer the topic itself, and redirect to app analytics.',
+            '- For other out-of-scope asks, refuse briefly, do not answer the topic itself, and redirect to the current app.',
             '- Do not use tools on this turn.',
         ])
         if result.out_of_scope_reason:
@@ -169,6 +174,7 @@ def _build_entity_recognition_prompt(
     question: str,
     scratchpad: dict[str, Any] | None,
     entity_registry: list[dict[str, Any]],
+    app_scope_terms: list[str] | None = None,
 ) -> str:
     registry_lines = []
     for item in entity_registry:
@@ -180,69 +186,22 @@ def _build_entity_recognition_prompt(
         registry_lines.append(line)
 
     scratchpad_context = build_resolved_entity_context(scratchpad) or 'No prior resolved entities.'
+    previous_turn = build_previous_turn_context(scratchpad)
+    previous_turn_text = (
+        json.dumps(previous_turn, ensure_ascii=True, sort_keys=True, indent=2)
+        if isinstance(previous_turn, dict) and previous_turn
+        else 'No previous turn context.'
+    )
     registry_text = '\n'.join(registry_lines) if registry_lines else '- none'
+    app_scope_line = _render_app_scope_prompt_line(app_scope_terms)
     return (
         f"Question:\n{question.strip()}\n\n"
+        f"{app_scope_line}\n\n"
+        f"Previous turn context:\n{previous_turn_text}\n\n"
         f"Prior session context:\n{scratchpad_context}\n\n"
         f"Entity type registry:\n{registry_text}\n\n"
-        "Extract typed entities, decide if the question is about the current application's analytics/data, "
-        "and mark needs_resolution when the agent should discover schema or exact values first."
-    )
-
-
-def _apply_entity_carry_forward(
-    *,
-    question: str,
-    scratchpad: dict[str, Any] | None,
-    entity_registry: list[dict[str, Any]],
-    result: EntityRecognitionResult,
-) -> EntityRecognitionResult:
-    if not _should_carry_forward(question):
-        return result
-    if not isinstance(scratchpad, dict):
-        return result
-
-    allowed_types = {
-        str(item.get('name', '')).strip().lower()
-        for item in entity_registry
-        if str(item.get('name', '')).strip()
-    }
-    existing_types = {entity.type.lower() for entity in result.entities}
-    resolved_entities = scratchpad.get('resolved_entities', {})
-    if not isinstance(resolved_entities, dict):
-        return result
-
-    carried_entities = list(result.entities)
-    for entity_type, payload in resolved_entities.items():
-        normalized_type = str(entity_type).strip().lower()
-        if not normalized_type or normalized_type in existing_types or normalized_type not in allowed_types:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        matches = payload.get('matches', [])
-        if not isinstance(matches, list) or not matches:
-            continue
-        first_match = matches[0]
-        if not isinstance(first_match, dict):
-            continue
-        value = first_match.get('value')
-        if value in (None, ''):
-            continue
-        carried_entities.append(
-            RecognizedEntity(
-                text=str(value),
-                type=str(entity_type),
-                confidence=0.99,
-            )
-        )
-
-    if len(carried_entities) == len(result.entities):
-        return result
-    return EntityRecognitionResult(
-        entities=carried_entities,
-        is_platform_query=result.is_platform_query,
-        needs_resolution=result.needs_resolution,
-        out_of_scope_reason=result.out_of_scope_reason,
+        "Extract typed entities, decide if the question is within Sherlock's current-app scope, "
+        "and mark needs_resolution when Sherlock should discover schema, resolve exact values, or inspect evidence first."
     )
 
 
@@ -279,6 +238,80 @@ def _filter_to_registered_types(
     )
 
 
-def _should_carry_forward(question: str) -> bool:
-    normalized = f" {question.lower().strip()} "
-    return any(f' {token} ' in normalized for token in _CARRY_FORWARD_REFERENCES)
+def derive_app_scope_terms(app_id: str | None, app_display_name: str | None = None) -> list[str]:
+    candidates = [str(app_id or '').strip(), str(app_display_name or '').strip()]
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        normalized = _normalize_scope_text(raw)
+        if not normalized:
+            continue
+        pieces = [piece for piece in normalized.split() if len(piece) >= 3]
+        for term in (normalized, *pieces):
+            if term and term not in seen:
+                seen.add(term)
+                terms.append(term)
+    return terms
+
+
+def _normalize_scope_text(text: str) -> str:
+    return ' '.join(part for part in _APP_SCOPE_SPLIT_PATTERN.split(str(text or '').strip().lower()) if part)
+
+
+def _render_app_scope_prompt_line(app_scope_terms: list[str] | None) -> str:
+    normalized_terms = [term for term in (app_scope_terms or []) if term]
+    if not normalized_terms:
+        return 'Current application aliases: none provided.'
+    rendered = ', '.join(dict.fromkeys(normalized_terms))
+    return (
+        'Current application aliases: '
+        f'{rendered}. Treat these as the current app scope, not as run_name/run_reference values, '
+        'unless the user explicitly asks about a run name.'
+    )
+
+
+def _filter_app_scope_alias_entities(
+    *,
+    question: str,
+    result: EntityRecognitionResult,
+    app_scope_terms: list[str] | None,
+) -> EntityRecognitionResult:
+    normalized_scope_terms = {
+        _normalize_scope_text(term)
+        for term in (app_scope_terms or [])
+        if _normalize_scope_text(term)
+    }
+    if not normalized_scope_terms or _has_explicit_run_name_intent(question):
+        return result
+
+    filtered_entities = [
+        entity
+        for entity in result.entities
+        if not _entity_is_app_scope_alias(entity=entity, normalized_scope_terms=normalized_scope_terms)
+    ]
+    if len(filtered_entities) == len(result.entities):
+        return result
+    return EntityRecognitionResult(
+        entities=filtered_entities,
+        is_platform_query=result.is_platform_query,
+        needs_resolution=result.needs_resolution,
+        out_of_scope_reason=result.out_of_scope_reason,
+    )
+
+
+def _entity_is_app_scope_alias(
+    *,
+    entity: RecognizedEntity,
+    normalized_scope_terms: set[str],
+) -> bool:
+    entity_type = entity.type.strip().lower()
+    if entity_type not in _RUN_NAME_ENTITY_TYPES:
+        return False
+    entity_text = _normalize_scope_text(entity.text)
+    if not entity_text:
+        return False
+    return entity_text in normalized_scope_terms
+
+
+def _has_explicit_run_name_intent(question: str) -> bool:
+    return any(pattern.search(question) for pattern in _EXPLICIT_RUN_NAME_PATTERNS)

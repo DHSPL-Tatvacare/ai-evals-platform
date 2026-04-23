@@ -37,11 +37,6 @@
     display: block !important;
   }
 
-  .run-detail-container {
-    height: auto !important;
-    overflow: visible !important;
-  }
-
   .run-detail-tabs,
   .run-detail-header,
   .section-rail,

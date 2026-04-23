@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Search, Library, Check, Eye } from 'lucide-react';
+import { X, Search, Library, Check, Eye, Loader2 } from 'lucide-react';
 import { Button, Input, EmptyState } from '@/components/ui';
 import { evaluatorsRepository } from '@/services/storage';
 import { cn } from '@/utils';
@@ -130,7 +130,7 @@ export function BatchCustomEvaluatorPicker({
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-brand-accent)] border-t-transparent" />
+              <Loader2 className="h-6 w-6 animate-spin text-[var(--color-brand-accent)]" />
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState

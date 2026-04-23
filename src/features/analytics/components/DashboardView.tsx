@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ArrowLeft } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import { analyticsLibraryForApp } from '@/config/routes';
+import { useCurrentAppId } from '@/hooks';
 import { cn } from '@/utils/cn';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
+import { LoadingState, PageSurface } from '@/components/ui';
+import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
+import { PAGE_METADATA } from '@/config/pageMetadata';
 import { ChartRenderer } from './ChartRenderer';
 import { deriveChartLayout } from '../chartLayout';
 import { useMeasuredWidth } from '../useMeasuredWidth';
@@ -66,12 +71,14 @@ function DashboardEntryChart({ entry }: { entry: DashboardChartEntry }) {
 
 interface DashboardViewProps {
   dashboardId: string;
-  onBack: () => void;
+  onBack?: () => void;
 }
 
-export function DashboardView({ dashboardId, onBack }: DashboardViewProps) {
+export function DashboardView({ dashboardId }: DashboardViewProps) {
+  const appId = useCurrentAppId();
   const [data, setData] = useState<DashboardDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const back = { to: analyticsLibraryForApp(appId), label: 'Analytics' };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,28 +95,35 @@ export function DashboardView({ dashboardId, onBack }: DashboardViewProps) {
   useEffect(() => { void load(); }, [load]);
 
   if (loading || !data) {
-    return <div className="flex items-center justify-center h-64 text-sm text-[var(--text-muted)]">Loading dashboard...</div>;
+    return (
+      <PageSurface
+        icon={PAGE_METADATA.analyticsDashboard.icon}
+        title="Dashboard"
+        back={back}
+        showHeader={false}
+      >
+        <LoadingState message="Loading dashboard…" />
+      </PageSurface>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
-        <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-1 rounded hover:bg-[var(--bg-tertiary)]">
-            <ArrowLeft className="h-4 w-4 text-[var(--text-muted)]" />
-          </button>
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">{data.dashboard.title}</h2>
-        </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6">
+    <PageSurface
+      icon={PAGE_METADATA.analyticsDashboard.icon}
+      title={data.dashboard.title}
+      back={back}
+      actions={
+        <ActionIconButton
+          icon={RefreshCw}
+          label="Refresh"
+          tooltip="Refresh"
+          onClick={() => void load()}
+          disabled={loading}
+          spinning={loading}
+        />
+      }
+    >
+      <div className="flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {data.charts
             .sort((a, b) => a.order - b.order)
@@ -133,6 +147,6 @@ export function DashboardView({ dashboardId, onBack }: DashboardViewProps) {
             ))}
         </div>
       </div>
-    </div>
+    </PageSurface>
   );
 }

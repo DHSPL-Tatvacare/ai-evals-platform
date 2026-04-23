@@ -169,6 +169,20 @@ class PageActionSpec(CamelModel):
     requires: str | None = None
 
 
+EvaluatorDetailBandColor = Literal["emerald", "blue", "amber", "red"]
+
+
+class EvaluatorDetailBand(CamelModel):
+    color: EvaluatorDetailBandColor
+    label: str
+    range: str
+    description: str
+
+
+class EvaluatorDetailConfig(CamelModel):
+    interpretation_bands: list[EvaluatorDetailBand] = Field(default_factory=list)
+
+
 class AppConfig(CamelModel):
     display_name: str
     icon: str
@@ -186,3 +200,4 @@ class AppConfig(CamelModel):
     page_icons: dict[PageType, str] = Field(default_factory=dict)
     page_titles: dict[PageType, str] = Field(default_factory=dict)
     page_actions: dict[PageType, list[PageActionSpec]] = Field(default_factory=dict)
+    evaluator_detail: EvaluatorDetailConfig = Field(default_factory=EvaluatorDetailConfig)

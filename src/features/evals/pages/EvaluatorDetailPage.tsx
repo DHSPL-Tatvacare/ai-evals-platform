@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, GitFork, Pencil, Shield, Star } from 'lucide-react';
-import { Button, EmptyState, Tabs } from '@/components/ui';
+import { GitFork, Info, Pencil, Shield, Star } from 'lucide-react';
+import { Button, EmptyState, LoadingState, PageSurface, Tabs, Tooltip } from '@/components/ui';
 import { CreateEvaluatorWizard } from '@/features/evals/components/CreateEvaluatorWizard';
-import { routes } from '@/config/routes';
+import { isSystemEvaluator } from '@/features/evals/utils/evaluatorMetadata';
+import { evaluatorsListForApp } from '@/config/routes';
+import { resolvePageMetadata } from '@/config/pageMetadata';
 import { notificationService } from '@/services/notifications';
+import { useCurrentAppConfig, useCurrentAppId } from '@/hooks';
 import { useEvaluatorsStore } from '@/stores';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/utils';
-import { isSystemEvaluator } from '@/features/evals/utils/evaluatorMetadata';
-import type { EvaluatorDefinition, EvaluatorOutputField } from '@/types';
+import type {
+  EvaluatorDefinition,
+  EvaluatorDetailBand,
+  EvaluatorDetailBandColor,
+  EvaluatorOutputField,
+} from '@/types';
 
 function getDimensionCount(schema: EvaluatorOutputField[]): number {
   return schema.filter((field) => field.type === 'number' && !field.isMainMetric).length;
@@ -65,12 +72,18 @@ function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
   );
 }
 
-export function InsideSalesEvaluatorDetail() {
+export function EvaluatorDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [editEvaluator, setEditEvaluator] = useState<EvaluatorDefinition | undefined>();
   const currentUser = useAuthStore((state) => state.user);
+  const appId = useCurrentAppId();
+  const appConfig = useCurrentAppConfig();
+  const { icon: pageIcon } = resolvePageMetadata('evaluatorDetail', appConfig);
+  const backTarget = evaluatorsListForApp(appId);
+  const back = backTarget ? { to: backTarget, label: 'Evaluators' } : undefined;
+  const bands = appConfig.evaluatorDetail?.interpretationBands ?? [];
 
   const {
     evaluators,
@@ -83,10 +96,10 @@ export function InsideSalesEvaluatorDetail() {
   } = useEvaluatorsStore();
 
   useEffect(() => {
-    if (!isLoaded || currentAppId !== 'inside-sales' || currentListingId !== null) {
-      loadAppEvaluators('inside-sales');
+    if (!isLoaded || currentAppId !== appId || currentListingId !== null) {
+      loadAppEvaluators(appId);
     }
-  }, [currentAppId, currentListingId, isLoaded, loadAppEvaluators]);
+  }, [appId, currentAppId, currentListingId, isLoaded, loadAppEvaluators]);
 
   const evaluator = useMemo(
     () => evaluators.find((entry) => entry.id === id),
@@ -118,26 +131,31 @@ export function InsideSalesEvaluatorDetail() {
 
   if (!isLoaded) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
-      </div>
+      <PageSurface icon={pageIcon} title="Evaluator" back={back} showHeader={false}>
+        <LoadingState />
+      </PageSurface>
     );
   }
 
   if (!evaluator) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <PageSurface icon={pageIcon} title="Evaluator" back={back}>
         <EmptyState
           icon={Pencil}
           title="Evaluator not found"
           description="This evaluator does not exist or is no longer available."
-          action={{
-            label: 'Back to Evaluators',
-            onClick: () => navigate(routes.insideSales.evaluators),
-          }}
+          action={
+            backTarget
+              ? {
+                  label: 'Back to Evaluators',
+                  onClick: () => navigate(backTarget),
+                }
+              : undefined
+          }
           className="w-full max-w-md"
+          fill
         />
-      </div>
+      </PageSurface>
     );
   }
 
@@ -203,15 +221,16 @@ export function InsideSalesEvaluatorDetail() {
           </div>
         )}
 
-        <div className="space-y-2">
-          <h3 className="text-xs font-semibold text-[var(--text-primary)]">Interpretation Bands</h3>
-          <div className="grid grid-cols-2 gap-2">
-            <ThresholdCard color="emerald" label="Strong" range="80-100" description="Ready for independent calling" />
-            <ThresholdCard color="blue" label="Good" range="65-79" description="Minor coaching points" />
-            <ThresholdCard color="amber" label="Needs Work" range="50-64" description="Structured coaching required" />
-            <ThresholdCard color="red" label="Poor" range="Below 50" description="Re-training recommended" />
+        {bands.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-[var(--text-primary)]">Interpretation Bands</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {bands.map((band) => (
+                <ThresholdCard key={band.label} band={band} />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {passThreshold !== null && excellentThreshold !== null && (
           <div className="text-xs text-[var(--text-muted)]">
@@ -224,58 +243,59 @@ export function InsideSalesEvaluatorDetail() {
     ),
   };
 
+  const metaTooltip = (
+    <div className="flex flex-col gap-1 text-xs text-[var(--text-secondary)]">
+      <div><span className="text-[var(--text-muted)]">Dimensions </span>{getDimensionCount(schema)}</div>
+      <div><span className="text-[var(--text-muted)]">Total pts </span>{getTotalPoints(schema)}</div>
+      {passThreshold !== null && (
+        <div><span className="text-[var(--text-muted)]">Pass ≥ </span>{passThreshold}</div>
+      )}
+      {excellentThreshold !== null && (
+        <div><span className="text-[var(--text-muted)]">Excellent ≥ </span>{excellentThreshold}</div>
+      )}
+      <div><span className="text-[var(--text-muted)]">Compliance gates </span>{getComplianceCount(schema)}</div>
+    </div>
+  );
+
+  const subtitle = (
+    <>
+      <TypeBadge evaluator={evaluator} />
+      <Tooltip content={metaTooltip} closeDelay={150}>
+        <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+      </Tooltip>
+    </>
+  );
+
+  const actions = !canEdit ? (
+    <Button variant="secondary" size="sm" onClick={handleFork}>
+      <GitFork className="h-3.5 w-3.5" />
+      Fork & Edit
+    </Button>
+  ) : (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={() => {
+        setEditEvaluator(evaluator);
+        setShowCreateWizard(true);
+      }}
+    >
+      <Pencil className="h-3.5 w-3.5" />
+      Edit
+    </Button>
+  );
+
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="shrink-0">
-          <button
-            onClick={() => navigate(routes.insideSales.evaluators)}
-            className="flex items-center gap-1 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Evaluators
-          </button>
-        </div>
-
-        <div className="shrink-0 flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-[var(--text-primary)]">{evaluator.name}</h1>
-              <TypeBadge evaluator={evaluator} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {!canEdit ? (
-              <Button variant="secondary" size="sm" onClick={handleFork}>
-                <GitFork className="h-3.5 w-3.5" />
-                Fork & Edit
-              </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setEditEvaluator(evaluator);
-                  setShowCreateWizard(true);
-                }}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 flex flex-wrap gap-4 text-xs text-[var(--text-muted)]">
-          <span>{getDimensionCount(schema)} dimensions</span>
-          <span>{getTotalPoints(schema)} total pts</span>
-          {passThreshold !== null && <span>Pass ≥ {passThreshold}</span>}
-          {excellentThreshold !== null && <span>Excellent ≥ {excellentThreshold}</span>}
-          <span>{getComplianceCount(schema)} compliance gates</span>
-        </div>
-
+      <PageSurface
+        icon={pageIcon}
+        title={evaluator.name}
+        subtitle={subtitle}
+        back={back}
+        actions={actions}
+      >
         <Tabs tabs={[scoringTab, complianceTab]} defaultTab="scoring" fillHeight />
-      </div>
+      </PageSurface>
 
       {showCreateWizard ? (
         <CreateEvaluatorWizard
@@ -285,7 +305,7 @@ export function InsideSalesEvaluatorDetail() {
             setEditEvaluator(undefined);
           }}
           onSave={handleSave}
-          context={{ appId: 'inside-sales' }}
+          context={{ appId }}
           editEvaluator={editEvaluator}
         />
       ) : null}
@@ -293,29 +313,19 @@ export function InsideSalesEvaluatorDetail() {
   );
 }
 
-function ThresholdCard({
-  color,
-  label,
-  range,
-  description,
-}: {
-  color: string;
-  label: string;
-  range: string;
-  description: string;
-}) {
-  const colorMap: Record<string, string> = {
-    emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
-    blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
-    amber: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
-    red: 'bg-red-500/10 border-red-500/20 text-red-400',
-  };
+const BAND_COLOR_CLASSES: Record<EvaluatorDetailBandColor, string> = {
+  emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
+  blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
+  amber: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
+  red: 'bg-red-500/10 border-red-500/20 text-red-400',
+};
 
+function ThresholdCard({ band }: { band: EvaluatorDetailBand }) {
   return (
-    <div className={cn('rounded-md border p-2.5', colorMap[color])}>
-      <div className="text-xs font-semibold">{label}</div>
-      <div className="text-[11px] font-mono">{range}</div>
-      <div className="mt-0.5 text-[10px] opacity-80">{description}</div>
+    <div className={cn('rounded-md border p-2.5', BAND_COLOR_CLASSES[band.color])}>
+      <div className="text-xs font-semibold">{band.label}</div>
+      <div className="text-[11px] font-mono">{band.range}</div>
+      <div className="mt-0.5 text-[10px] opacity-80">{band.description}</div>
     </div>
   );
 }

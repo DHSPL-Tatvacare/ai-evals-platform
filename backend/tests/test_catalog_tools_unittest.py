@@ -134,6 +134,24 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('analytics_eval_facts.tenant_id', captured['query'])
         self.assertIn('analytics_eval_facts.app_id', captured['query'])
 
+    async def test_catalog_values_accepts_none_search(self):
+        db = AsyncMock()
+        db.execute.return_value = _Result(rows=[('PASS', 7)])
+
+        envelope = await catalog_tools.catalog_values(
+            table='analytics_eval_facts',
+            column='result_status',
+            search=None,
+            db=db,
+            auth=SimpleNamespace(),
+            app_id='inside-sales',
+            app_config={},
+            semantic_model={'tables': {'analytics_eval_facts': {}}},
+        )
+
+        self.assertEqual(envelope['status'], 'ok')
+        self.assertIsNone(envelope['payload']['search'])
+
     async def test_catalog_values_rejects_disallowed_tables(self):
         db = AsyncMock()
 

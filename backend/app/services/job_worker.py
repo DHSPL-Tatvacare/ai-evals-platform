@@ -436,6 +436,80 @@ async def recover_stale_jobs(
             logger.info(f"Recovered {len(stale_jobs)} stale job(s)")
 
 
+async def recover_stale_source_sync_runs(
+    stale_minutes: int | None = None,
+    *,
+    now: datetime | None = None,
+):
+    """Reconcile ``source_sync_runs`` rows stuck in ``running``.
+
+    Two cases this catches:
+      1. Linked job is terminal (``failed`` / ``cancelled`` / ``completed``)
+         but the sync_run was never transitioned — e.g. the worker crashed
+         after the job marker but before the runner's ``except`` block
+         reached ``_fail_sync_run``.
+      2. No linked job (``job_id IS NULL``) and the row has been in
+         ``running`` longer than ``stale_minutes`` — typically legacy rows
+         written before the ``job_id`` column existed.
+
+    Kept generic on purpose (``source_sync_runs`` is a platform table, not
+    app-specific); any app that populates it gets reconciled for free.
+    """
+    from app.models.source_records import SourceSyncRun
+
+    stale_minutes = stale_minutes or settings.JOB_STALE_TIMEOUT_MINUTES
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=stale_minutes)
+
+    async with async_session() as db:
+        # Case 1: linked job already terminal
+        linked_terminal_stmt = (
+            select(SourceSyncRun)
+            .join(Job, SourceSyncRun.job_id == Job.id)
+            .where(
+                SourceSyncRun.status == "running",
+                Job.status.in_(("failed", "cancelled", "completed")),
+            )
+        )
+        # Case 2: unlinked + old
+        unlinked_stale_stmt = select(SourceSyncRun).where(
+            SourceSyncRun.status == "running",
+            SourceSyncRun.job_id.is_(None),
+            SourceSyncRun.started_at < cutoff,
+        )
+        recovered: list[SourceSyncRun] = []
+
+        rows = (await db.execute(linked_terminal_stmt)).scalars().all()
+        for sync_run in rows:
+            linked_job = await db.get(Job, sync_run.job_id) if sync_run.job_id else None
+            job_status = linked_job.status if linked_job is not None else None
+            job_error = linked_job.error_message if linked_job is not None else None
+            sync_run.status = "cancelled" if job_status == "cancelled" else "failed"
+            sync_run.completed_at = now
+            sync_run.error_message = (
+                job_error
+                if job_error
+                else "Reconciled after job reached terminal state without sync_run update."
+            )
+            recovered.append(sync_run)
+
+        rows = (await db.execute(unlinked_stale_stmt)).scalars().all()
+        for sync_run in rows:
+            sync_run.status = "failed"
+            sync_run.completed_at = now
+            sync_run.error_message = (
+                sync_run.error_message
+                or f"Reconciled after being stuck in 'running' for >{stale_minutes} minutes."
+            )
+            recovered.append(sync_run)
+
+        if recovered:
+            await db.commit()
+            logger.info(
+                "Recovered %d stale source_sync_runs row(s)", len(recovered)
+            )
+
+
 async def recover_stale_eval_runs():
     """Reconcile eval_runs stuck in 'running' whose job is already terminal.
 
@@ -964,6 +1038,7 @@ async def recovery_loop():
         try:
             await recover_stale_jobs()
             await recover_stale_eval_runs()
+            await recover_stale_source_sync_runs()
             await cascade_dependency_failures()
         except Exception as e:
             logger.error(f"Recovery loop error: {e}")

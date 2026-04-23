@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useId, useMemo } from 'react';
 import { Link2, Copy, Check, Trash2, Plus, Search, SearchX, X } from 'lucide-react';
-import { Button, Badge, Spinner, ConfirmDialog, EmptyState, Select, Pagination } from '@/components/ui';
+import { Button, Badge, LoadingState, ConfirmDialog, EmptyState, Select, Pagination } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
@@ -150,11 +150,7 @@ export function InviteLinksSection() {
   const inputClass = 'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
 
   if (isLoading) {
-    return (
-      <div className="flex h-40 items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   return (

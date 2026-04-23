@@ -17,6 +17,7 @@ import type {
   EvaluatorVisibilityFilter,
   EvaluatorContext,
 } from '@/types';
+import { RotateCcw } from 'lucide-react';
 
 interface AppEvaluatorsPageProps {
   onOpenEvaluator?: (evaluator: EvaluatorDefinition) => void;
@@ -28,7 +29,8 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
   const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
   const { icon, title } = usePageMetadata('evaluators');
-  const pageActions = useAppPageActions('evaluators');
+  const headerPageActions = useAppPageActions('evaluators', { displayMode: 'icon' });
+  const emptyStatePageActions = useAppPageActions('evaluators');
   const canCreate = usePermission('asset:create');
   const canEdit = usePermission('asset:edit');
   const canDelete = usePermission('asset:delete');
@@ -165,9 +167,18 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
 
   const headerActions = (
     <>
-      {pageActions}
+      {headerPageActions}
       {showRestore && (
-        <Button variant="secondary" onClick={handleRestoreDefaults} isLoading={isSeeding}>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={RotateCcw}
+          iconOnly
+          onClick={handleRestoreDefaults}
+          isLoading={isSeeding}
+          aria-label="Restore defaults"
+          title="Restore defaults"
+        >
           Restore Defaults
         </Button>
       )}
@@ -198,7 +209,7 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
         isRestoringDefaults={isSeeding}
         title="Evaluators"
         description={`Manage private and shared evaluators for ${appMetadata.name}.`}
-        emptyStateActions={pageActions.length > 0 ? <>{pageActions}</> : undefined}
+        emptyStateActions={emptyStatePageActions.length > 0 ? <>{emptyStatePageActions}</> : undefined}
         hideHeader
         onOpen={defaultOpenEvaluator}
         canCreate={canCreate}

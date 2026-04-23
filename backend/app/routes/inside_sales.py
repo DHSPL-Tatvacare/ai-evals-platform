@@ -7,7 +7,7 @@ without silently changing route responsibilities.
 
 import math
 import uuid as _uuid
-from datetime import datetime as _dt, timezone as _tz
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -24,17 +24,13 @@ from app.schemas.inside_sales import (
     CallRecord,
     CollectionRefreshRequest,
     CollectionRefreshResponse,
+    CollectionSyncStatus,
     LeadCallRecord,
     LeadDetailFullResponse,
     LeadDetailResponse,
     LeadEvalHistoryEntry,
     LeadListRecord,
     LeadListResponse,
-)
-from app.services.inside_sales_boundary import (
-    find_or_enqueue_ondemand_sync,
-    is_inside_hot_window,
-    validate_ondemand_window,
 )
 from app.services.inside_sales_dataset_resolver import (
     InsideSalesCallFilters,
@@ -46,11 +42,12 @@ from app.services.inside_sales_eval_linkage import (
 )
 from app.services.inside_sales_queries import (
     get_collection_freshness,
+    get_collection_sync_status,
     list_call_agent_names_from_source,
     list_calls_from_source,
     list_leads_from_source,
 )
-from app.services.inside_sales_sync import build_manual_refresh_job_params, get_latest_successful_sync_run
+from app.services.inside_sales_sync import build_manual_refresh_job_params
 from app.services.job_worker import get_job_submission_metadata
 from app.services.lsq_client import (
     LsqRateLimitError,
@@ -307,43 +304,23 @@ async def refresh_collection(
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Explicit refresh trigger for synced source collections. Enqueues sync work only."""
-    family = _validate_source_family(source_family)
-    if body.date_from and body.date_to:
-        now = _dt.now(_tz.utc)
-        if not is_inside_hot_window(body.date_from, body.date_to, now):
-            validate_ondemand_window(body.date_from, body.date_to, now)
-            job = await find_or_enqueue_ondemand_sync(
-                db,
-                tenant_id=auth.tenant_id,
-                app_id="inside-sales",
-                source_family=family,
-                date_from=body.date_from,
-                date_to=body.date_to,
-                user_id=auth.user_id,
-                event_codes=body.event_codes,
-            )
-            await db.commit()
-            await db.refresh(job)
-            return CollectionRefreshResponse(
-                job_id=str(job.id),
-                source_family=family,
-                sync_mode=str((job.params or {}).get("sync_mode") or "date_range"),
-                status=job.status,
-            )
+    """Explicit refresh trigger for synced source collections.
 
-    latest_successful = await get_latest_successful_sync_run(
-        db,
-        tenant_id=auth.tenant_id,
-        app_id="inside-sales",
-        source_family=family,  # type: ignore[arg-type]
-    )
+    The refresh always targets the 7-day hot window (``[now-7d, now]``).
+    ``body.date_from`` / ``body.date_to`` are ignored — older data is out of
+    scope for the mirror and will not be fetched here. ``event_codes`` is
+    still honored for call refreshes.
+    """
+    family = _validate_source_family(source_family)
+    now = _dt.now(_tz.utc)
+    hot_date_to = now.strftime("%Y-%m-%d %H:%M:%S")
+    hot_date_from = (now - _td(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         job_params = build_manual_refresh_job_params(
             source_family=family,  # type: ignore[arg-type]
-            has_successful_sync=latest_successful is not None,
-            date_from=body.date_from,
-            date_to=body.date_to,
+            has_successful_sync=False,  # always explicit date_range, never incremental
+            date_from=hot_date_from,
+            date_to=hot_date_to,
             event_codes=body.event_codes,
         )
     except ValueError as exc:
@@ -380,6 +357,29 @@ async def refresh_collection(
         sync_mode=str(normalized_params["sync_mode"]),
         status=job.status,
     )
+
+
+@router.get("/collections/{source_family}/status", response_model=CollectionSyncStatus)
+async def get_collection_status(
+    source_family: str,
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Durable freshness signal for the collection.
+
+    Read from ``source_sync_runs`` so the UI can render correct state after a
+    page reload, independent of whatever ephemeral state the frontend store
+    happens to hold. Returns last success, last attempt (any status), and
+    whether a sync is currently running.
+    """
+    family = _validate_source_family(source_family)
+    status = await get_collection_sync_status(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id="inside-sales",
+        source_family=family,
+    )
+    return CollectionSyncStatus(**status)
 
 
 @router.get("/coverage")

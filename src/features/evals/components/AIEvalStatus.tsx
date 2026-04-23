@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { Badge, ModelBadge } from '@/components/ui';
 import type { AIEvaluation, EvaluationStatistics } from '@/types';
 
@@ -15,7 +15,7 @@ export function AIEvalStatus({ evaluation }: AIEvalStatusProps) {
       case 'failed':
         return <XCircle className="h-4 w-4 text-[var(--color-error)]" />;
       case 'processing':
-        return <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-info)] border-t-transparent" />;
+        return <Loader2 className="h-4 w-4 animate-spin text-[var(--color-info)]" />;
       default:
         return <AlertTriangle className="h-4 w-4 text-[var(--text-muted)]" />;
     }

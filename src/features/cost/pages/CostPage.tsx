@@ -59,11 +59,15 @@ export function CostPage() {
       icon={icon}
       title={title}
       subtitle="LLM spend and token usage for this tenant, plus pricing history"
+      filters={<CostFiltersBar />}
       actions={
         <Button
           variant="secondary"
           size="sm"
           icon={RefreshCw}
+          iconOnly
+          aria-label="Refresh cost data"
+          title="Refresh cost data"
           onClick={() => {
             if (activeTab === 'unmapped') return;
             refreshActive(activeTab);
@@ -73,9 +77,6 @@ export function CostPage() {
         </Button>
       }
     >
-      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-        <CostFiltersBar />
-      </div>
       <Tabs
         tabs={tabs}
         defaultTab={activeTab}

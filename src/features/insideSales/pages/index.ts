@@ -1,8 +1,5 @@
 export { InsideSalesListing } from './InsideSalesListing';
-export { InsideSalesEvaluatorDetail } from './InsideSalesEvaluatorDetail';
-export { InsideSalesRunList } from './InsideSalesRunList';
 export { InsideSalesRunDetail } from './InsideSalesRunDetail';
-export { InsideSalesDashboard } from './InsideSalesDashboard';
 export { InsideSalesCallDetail } from './InsideSalesCallDetail';
 export { InsideSalesSettings } from './InsideSalesSettings';
 export { InsideSalesLeadDetail } from './InsideSalesLeadDetail';

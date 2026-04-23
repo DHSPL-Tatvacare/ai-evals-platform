@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Loader2,
@@ -7,9 +7,11 @@ import {
   Phone,
   Search,
   ClipboardCheck,
+  Info,
   Lock,
 } from 'lucide-react';
-import { Button, Tabs, EmptyState } from '@/components/ui';
+import { Button, LoadingState, PageSurface, Tabs, Tooltip, EmptyState } from '@/components/ui';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { EvalRunVisibilityPanel, StatPill } from '@/features/evalRuns/components';
 import VerdictBadge from '@/features/evalRuns/components/VerdictBadge';
 import { RunProgressBar } from '@/features/evalRuns/components/RunProgressBar';
@@ -160,25 +162,26 @@ export function InsideSalesRunDetail() {
     });
   }, [threads, searchQuery]);
 
+  const { icon: pageIcon } = usePageMetadata('runDetail');
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" />
-      </div>
+      <PageSurface icon={pageIcon} title="Run" back={{ to: routes.insideSales.runs, label: 'Runs' }} showHeader={false}>
+        <LoadingState />
+      </PageSurface>
     );
   }
 
   if (error || !run) {
     return (
-      <div className="space-y-3">
-        <Link to={routes.insideSales.runs} className="inline-flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text-brand)]">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to Runs
-        </Link>
-        <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-3 text-sm text-[var(--color-error)] flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          {error || 'Run not found'}
+      <PageSurface icon={pageIcon} title="Run" back={{ to: routes.insideSales.runs, label: 'Runs' }}>
+        <div className="flex h-full items-center justify-center">
+          <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-3 text-sm text-[var(--color-error)] flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {error || 'Run not found'}
+          </div>
         </div>
-      </div>
+      </PageSurface>
     );
   }
 
@@ -221,69 +224,174 @@ export function InsideSalesRunDetail() {
     ),
   };
 
-  // If callId is present, show call eval detail instead of run overview
+  // If callId is present, show call eval detail inside the same PageSurface shell
   const selectedThread = callId ? threads.find((t) => t.thread_id === callId) : null;
 
-  if (callId && selectedThread) {
-    return (
-      <InlineReviewProvider runId={runId!} appId="inside-sales" enabled={canReview}>
-        <CallEvalDetail run={run} thread={selectedThread} siblings={threads} />
-      </InlineReviewProvider>
+  const runMetaTooltip = (
+    <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
+      <div className="flex items-center gap-2">
+        <span className="text-[var(--text-muted)]">ID</span>
+        <span className="font-mono text-[var(--text-primary)]">{run.id.slice(0, 8)}</span>
+      </div>
+      {run.startedAt && (
+        <div>
+          <span className="text-[var(--text-muted)]">Started </span>
+          {timeAgo(run.startedAt)}
+        </div>
+      )}
+      {run.durationMs != null && (
+        <div>
+          <span className="text-[var(--text-muted)]">Duration </span>
+          {formatDuration(Math.round(run.durationMs / 1000))}
+        </div>
+      )}
+      {run.llmModel && (
+        <div>
+          <span className="text-[var(--text-muted)]">Model </span>
+          {run.llmModel}
+        </div>
+      )}
+    </div>
+  );
+
+  const runSubtitle = (
+    <>
+      <VerdictBadge verdict={run.status} category="status" />
+      <Tooltip content={runMetaTooltip} closeDelay={150}>
+        <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+      </Tooltip>
+    </>
+  );
+
+  const runActions = (
+    <RunHeaderActions
+      logsHref={`${routes.insideSales.logs}?run_id=${run.id}`}
+      isActive={isActive}
+      cancelling={cancelling}
+      deleting={isDeleting}
+      onCancel={handleCancel}
+      onDelete={handleDelete}
+      hideActions={isInReview}
+      visibilityContent={isInReview || !isReviewable ? null : (
+        <EvalRunVisibilityPanel
+          runId={run.id}
+          visibility={run.visibility ?? 'private'}
+          ownerId={run.userId}
+          mode="inline"
+          onUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
+        />
+      )}
+      reviewContent={isInReview || !isReviewable ? null : <StartReviewButton runId={run.id} />}
+    />
+  );
+
+  // Call-variant header computations — only meaningful when selectedThread is set.
+  let callTitle = 'Call';
+  let callSubtitle: ReactNode = null;
+  let callActions: ReactNode = null;
+  if (selectedThread) {
+    const callResult = selectedThread.result as unknown as Record<string, unknown> | undefined;
+    const callMeta = callResult?.call_metadata as Record<string, unknown> | undefined;
+    const evals = callResult?.evaluations as Array<Record<string, unknown>> | undefined;
+    const evalOutput = evals?.[0]?.output as Record<string, unknown> | undefined;
+    const complianceGates = evalOutput
+      ? Object.entries(evalOutput).filter(([, v]) => typeof v === 'boolean')
+      : [];
+    const allPassed = complianceGates.every(([, v]) => v === true);
+    const overallScore = getOverallScore(selectedThread);
+    const agent = (callMeta?.agent as string) || '—';
+    const lead = (callMeta?.lead as string) || '—';
+
+    callTitle = `${agent} → ${lead}`;
+
+    const callMetaTooltip = (
+      <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
+        <div>
+          <span className="text-[var(--text-muted)]">Run </span>
+          <span className="font-mono text-[var(--text-primary)]">{run.id.slice(0, 12)}</span>
+        </div>
+        <div>
+          <span className="text-[var(--text-muted)]">Agent </span>
+          {agent}
+        </div>
+        {typeof callMeta?.duration === 'number' && (
+          <div>
+            <span className="text-[var(--text-muted)]">Duration </span>
+            {formatDuration(callMeta.duration)}
+          </div>
+        )}
+        <div>
+          <span className="text-[var(--text-muted)]">Score </span>
+          <span style={{ color: scoreColor(overallScore) }}>
+            {overallScore !== null ? `${overallScore}/100` : '—'}
+          </span>
+        </div>
+        <div>
+          <span className="text-[var(--text-muted)]">Band </span>
+          {overallScore !== null ? getScoreBand(overallScore) : '—'}
+        </div>
+        {complianceGates.length > 0 && (
+          <div>
+            <span className="text-[var(--text-muted)]">Compliance </span>
+            <span style={{ color: allPassed ? 'var(--color-success)' : 'var(--color-error)' }}>
+              {allPassed ? 'Pass' : 'Fail'}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+
+    callSubtitle = (
+      <>
+        <span
+          className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+          style={{ color: scoreColor(overallScore) }}
+        >
+          {overallScore !== null ? `${overallScore}/100` : '—'}
+        </span>
+        {complianceGates.length > 0 && (
+          <span
+            className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{
+              color: allPassed ? 'var(--color-success)' : 'var(--color-error)',
+              backgroundColor: allPassed ? 'var(--surface-success)' : 'var(--surface-error)',
+            }}
+          >
+            {allPassed ? 'Compliance Pass' : 'Compliance Fail'}
+          </span>
+        )}
+        <Tooltip content={callMetaTooltip} closeDelay={150}>
+          <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+        </Tooltip>
+      </>
+    );
+
+    callActions = (
+      <CallNavActions run={run} thread={selectedThread} siblings={threads} />
     );
   }
 
   return (
     <InlineReviewProvider runId={runId!} appId="inside-sales" enabled={canReview}>
-      <div className="space-y-4">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-          <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)]">Runs</Link>
-          <span>/</span>
-          <span className="font-mono text-[var(--text-secondary)]">{run.id.slice(0, 12)}</span>
-        </div>
+      <PageSurface
+        icon={pageIcon}
+        title={selectedThread ? callTitle : getRunName(run)}
+        subtitle={selectedThread ? callSubtitle : runSubtitle}
+        back={{ to: routes.insideSales.runs, label: 'Runs' }}
+        actions={selectedThread ? callActions : runActions}
+      >
+        {selectedThread ? (
+          <CallEvalDetail thread={selectedThread} />
+        ) : (
+          <div className="flex flex-col gap-4">
+            {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
 
-        {/* Header */}
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">{getRunName(run)}</h1>
-            <VerdictBadge verdict={run.status} category="status" />
-            <RunHeaderActions
-              logsHref={`${routes.insideSales.logs}?run_id=${run.id}`}
-              isActive={isActive}
-              cancelling={cancelling}
-              deleting={isDeleting}
-              onCancel={handleCancel}
-              onDelete={handleDelete}
-              hideActions={isInReview}
-              visibilityContent={isInReview || !isReviewable ? null : (
-                <EvalRunVisibilityPanel
-                  runId={run.id}
-                  visibility={run.visibility ?? 'private'}
-                  ownerId={run.userId}
-                  mode="inline"
-                  onUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
-                />
-              )}
-              reviewContent={isInReview || !isReviewable ? null : <StartReviewButton runId={run.id} />}
-            />
+            <ReviewAwareTabs tabs={[resultsTab, reportTab]} defaultTab="results" />
+
+            <ReviewDirtyBar />
           </div>
-          <div className="flex items-center gap-3 mt-1 text-[11px] text-[var(--text-muted)]">
-            <span className="font-mono">{run.id.slice(0, 8)}</span>
-            {run.startedAt && <span>{timeAgo(run.startedAt)}</span>}
-            {run.durationMs && <span>{formatDuration(Math.round(run.durationMs / 1000))}</span>}
-            {run.llmModel && <span>{run.llmModel}</span>}
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
-
-        {/* Tabs */}
-        <ReviewAwareTabs tabs={[resultsTab, reportTab]} defaultTab="results" />
-
-        {/* Dirty bar for unsaved review changes */}
-        <ReviewDirtyBar />
-      </div>
+        )}
+      </PageSurface>
     </InlineReviewProvider>
   );
 }
@@ -577,9 +685,9 @@ function ReviewAwareTabs(props: Parameters<typeof Tabs>[0]) {
   );
 }
 
-/* ── Call Eval Detail (split-pane, mirrors ThreadDetailV2 layout) ── */
+/* ── Call-variant header actions (prev/next thread nav) ─── */
 
-function CallEvalDetail({
+function CallNavActions({
   run,
   thread,
   siblings,
@@ -590,10 +698,8 @@ function CallEvalDetail({
 }) {
   const navigate = useNavigate();
   const review = useInlineReviewOptional();
-  const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
+  const { confirmNavigation } = useInlineReviewNavigationGuard();
 
-  // Calls in this run's review context — same-scope navigation does not
-  // need the dirty-state guard (edits persist in the shared store).
   const reviewContextItems = review?.context?.items;
   const inScopeCallIds = useMemo(() => {
     const set = new Set<string>();
@@ -604,27 +710,9 @@ function CallEvalDetail({
     }
     return set;
   }, [reviewContextItems]);
-  const reviewableItem = useMemo(
-    () => reviewContextItems?.find(
-      (item) => item.itemType === 'call' && stripReviewItemPrefix(item.itemKey) === thread.thread_id,
-    ) ?? null,
-    [reviewContextItems, thread.thread_id],
-  );
 
-  const result = thread.result as unknown as Record<string, unknown> | undefined;
-  const meta = result?.call_metadata as Record<string, unknown> | undefined;
-  const evals = result?.evaluations as Array<Record<string, unknown>> | undefined;
-  const evalOutput = evals?.[0]?.output as Record<string, unknown> | undefined;
-  const overallScore = getOverallScore(thread);
+  if (siblings.length <= 1) return null;
 
-  // Compliance gates (boolean fields)
-  const complianceGates = evalOutput
-    ? Object.entries(evalOutput).filter(([, v]) => typeof v === 'boolean')
-    : [];
-
-  const allPassed = complianceGates.every(([, v]) => v === true);
-
-  // Thread navigation
   const currentIdx = siblings.findIndex((s) => s.thread_id === thread.thread_id);
   const prevThread = currentIdx > 0 ? siblings[currentIdx - 1] : null;
   const nextThread = currentIdx < siblings.length - 1 ? siblings[currentIdx + 1] : null;
@@ -638,72 +726,50 @@ function CallEvalDetail({
   };
 
   return (
+    <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)]">
+      <button
+        disabled={!prevThread}
+        onClick={() => prevThread && goToThread(prevThread.thread_id)}
+        className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
+        title="Previous call"
+      >
+        <ArrowLeft size={14} />
+      </button>
+      <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)] text-[var(--text-secondary)]">
+        {currentIdx + 1}/{siblings.length}
+      </span>
+      <button
+        disabled={!nextThread}
+        onClick={() => nextThread && goToThread(nextThread.thread_id)}
+        className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
+        title="Next call"
+      >
+        <ArrowLeft size={14} className="rotate-180" />
+      </button>
+    </span>
+  );
+}
+
+/* ── Call Eval Detail body (review-checks + CallResultPanel) ─── */
+
+function CallEvalDetail({
+  thread,
+}: {
+  thread: ThreadEvalRow;
+}) {
+  const review = useInlineReviewOptional();
+  const { guardModal } = useInlineReviewNavigationGuard();
+
+  const reviewContextItems = review?.context?.items;
+  const reviewableItem = useMemo(
+    () => reviewContextItems?.find(
+      (item) => item.itemType === 'call' && stripReviewItemPrefix(item.itemKey) === thread.thread_id,
+    ) ?? null,
+    [reviewContextItems, thread.thread_id],
+  );
+
+  return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Header */}
-      <div className="shrink-0 pb-3 space-y-2">
-        {/* Row 1: breadcrumb + thread nav */}
-        <div className="flex items-center justify-between gap-4">
-          <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] min-w-0">
-            <Link to={routes.insideSales.runs} className="hover:text-[var(--text-brand)] shrink-0">Runs</Link>
-            <span>/</span>
-              <button
-                onClick={() => navigate(routes.insideSales.runDetail(run.id))}
-                className="hover:text-[var(--text-brand)] font-mono shrink-0"
-              >
-              {run.id.slice(0, 12)}
-            </button>
-            <span>/</span>
-            <span className="font-mono text-[var(--text-primary)] font-medium truncate">
-              {(meta?.agent as string) || '—'} → {(meta?.lead as string) || '—'}
-            </span>
-          </nav>
-
-          {/* Thread navigation */}
-          {siblings.length > 1 && (
-            <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)] shrink-0">
-              <button
-                disabled={!prevThread}
-                onClick={() => prevThread && goToThread(prevThread.thread_id)}
-                className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
-              >
-                <ArrowLeft size={14} />
-              </button>
-              <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)]">
-                {currentIdx + 1}/{siblings.length}
-              </span>
-              <button
-                disabled={!nextThread}
-                onClick={() => nextThread && goToThread(nextThread.thread_id)}
-                className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
-              >
-                <ArrowLeft size={14} className="rotate-180" />
-              </button>
-            </span>
-          )}
-        </div>
-
-        {/* Row 2: summary bar */}
-        <div className="overflow-x-auto scrollbar-thin">
-          <div className="w-fit mx-auto">
-            <div className="inline-flex items-stretch rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-sm">
-              <SummaryPill label="Score" value={overallScore !== null ? `${overallScore}/100` : '—'} color={scoreColor(overallScore)} />
-              <SummaryPill
-                label="Score Band"
-                value={overallScore !== null ? getScoreBand(overallScore) : '—'}
-                color={scoreColor(overallScore)}
-              />
-              <SummaryPill
-                label="Compliance"
-                value={complianceGates.length > 0 ? (allPassed ? 'Pass' : 'Fail') : '—'}
-                color={complianceGates.length > 0 ? (allPassed ? 'var(--color-success)' : 'var(--color-error)') : undefined}
-              />
-              <SummaryPill label="Agent" value={(meta?.agent as string) || '—'} />
-              <SummaryPill label="Duration" value={typeof meta?.duration === 'number' ? formatDuration(meta.duration) : '—'} />
-            </div>
-          </div>
-        </div>
-      </div>
-
       {reviewableItem && reviewableItem.attributes.length > 0 && (
         <div className="shrink-0 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <div className="border-b border-[var(--border-subtle)] px-4 py-3">
@@ -781,17 +847,6 @@ function CallEvalDetail({
 
       <CallResultPanel thread={thread} />
       {guardModal}
-    </div>
-  );
-}
-
-/* ── Summary Pill ───────────────────────────────────────── */
-
-function SummaryPill({ label, value, color }: { label: string; value: ReactNode; color?: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-2 border-l border-[var(--border-subtle)] first:border-l-0">
-      <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] leading-none">{label}</span>
-      <span className="leading-none font-semibold text-sm" style={typeof value === 'string' ? { color: color || 'var(--text-primary)' } : undefined}>{value}</span>
     </div>
   );
 }

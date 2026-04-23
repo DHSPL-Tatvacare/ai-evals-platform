@@ -311,6 +311,20 @@ export interface PageActionSpec {
   requires?: string;
 }
 
+export type EvaluatorDetailBandColor = 'emerald' | 'blue' | 'amber' | 'red';
+
+export interface EvaluatorDetailBand {
+  color: EvaluatorDetailBandColor;
+  label: string;
+  range: string;
+  description: string;
+}
+
+export interface EvaluatorDetailConfig {
+  /** Ordered interpretation bands rendered in the Compliance & Thresholds tab. Empty = hide section. */
+  interpretationBands: EvaluatorDetailBand[];
+}
+
 export interface AppConfig {
   displayName: string;
   icon: string;
@@ -333,6 +347,8 @@ export interface AppConfig {
   pageTitles?: Partial<Record<PageType, string>>;
   /** Per-app extra header actions keyed by page type. Resolved via `PAGE_ACTION_COMPONENTS` registry. */
   pageActions?: Partial<Record<PageType, PageActionSpec[]>>;
+  /** Per-app copy/labels for the shared evaluator-detail page. Missing = neutral default. */
+  evaluatorDetail?: EvaluatorDetailConfig;
 }
 
 export interface RuleCatalogEntry {
@@ -544,6 +560,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    evaluatorDetail: { interpretationBands: [] },
   },
   'kaira-bot': {
     displayName: APPS['kaira-bot'].name,
@@ -669,6 +686,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    evaluatorDetail: { interpretationBands: [] },
   },
   'inside-sales': {
     displayName: APPS['inside-sales'].name,
@@ -944,6 +962,14 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { id: 'csv-import', kind: 'csvImport', requires: 'asset:create' },
       ],
     },
+    evaluatorDetail: {
+      interpretationBands: [
+        { color: 'emerald', label: 'Strong', range: '80-100', description: 'Ready for independent calling' },
+        { color: 'blue', label: 'Good', range: '65-79', description: 'Minor coaching points' },
+        { color: 'amber', label: 'Needs Work', range: '50-64', description: 'Structured coaching required' },
+        { color: 'red', label: 'Poor', range: 'Below 50', description: 'Re-training recommended' },
+      ],
+    },
   },
 };
 
@@ -1109,6 +1135,12 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
     pageActions: {
       ...(fallback.pageActions ?? {}),
       ...(config.pageActions ?? {}),
+    },
+    evaluatorDetail: {
+      interpretationBands:
+        config.evaluatorDetail?.interpretationBands
+        ?? fallback.evaluatorDetail?.interpretationBands
+        ?? [],
     },
   };
 }

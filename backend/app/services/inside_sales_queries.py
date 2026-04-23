@@ -446,6 +446,64 @@ async def list_leads_from_source(
     )
 
 
+async def get_collection_sync_status(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    source_family: str,
+) -> dict[str, Any]:
+    """Durable freshness signal read straight from ``source_sync_runs``.
+
+    Returns the most recent success, the most recent attempt, and whether a
+    sync is in progress right now — three independent signals the UI needs
+    to decide between "up-to-date", "refreshing", "last sync failed", and
+    "never synced".
+    """
+    latest_successful = await db.scalar(
+        select(SourceSyncRun)
+        .where(
+            SourceSyncRun.tenant_id == tenant_id,
+            SourceSyncRun.app_id == app_id,
+            SourceSyncRun.source_family == source_family,
+            SourceSyncRun.status == "completed",
+        )
+        .order_by(SourceSyncRun.completed_at.desc(), SourceSyncRun.created_at.desc())
+        .limit(1)
+    )
+    latest_attempt = await db.scalar(
+        select(SourceSyncRun)
+        .where(
+            SourceSyncRun.tenant_id == tenant_id,
+            SourceSyncRun.app_id == app_id,
+            SourceSyncRun.source_family == source_family,
+        )
+        .order_by(SourceSyncRun.started_at.desc().nullslast(), SourceSyncRun.created_at.desc())
+        .limit(1)
+    )
+    in_progress = await db.scalar(
+        select(SourceSyncRun.id)
+        .where(
+            SourceSyncRun.tenant_id == tenant_id,
+            SourceSyncRun.app_id == app_id,
+            SourceSyncRun.source_family == source_family,
+            SourceSyncRun.status == "running",
+        )
+        .limit(1)
+    )
+    return {
+        "lastSuccessAt": latest_successful.completed_at if latest_successful else None,
+        "lastAttemptAt": (
+            (latest_attempt.started_at or latest_attempt.created_at)
+            if latest_attempt
+            else None
+        ),
+        "lastStatus": latest_attempt.status if latest_attempt else None,
+        "lastError": latest_attempt.error_message if latest_attempt else None,
+        "syncInProgress": in_progress is not None,
+    }
+
+
 async def get_collection_freshness(
     db: AsyncSession,
     *,

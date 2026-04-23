@@ -246,27 +246,26 @@ export function ScheduledJobsListPage() {
       title={title}
       subtitle="Tenant-scoped cron schedules that enqueue platform jobs."
       actions={headerActions}
+      showHeader={!isLoading}
     >
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <div className="py-16">
-          <EmptyState
-            icon={CalendarClock}
-            title="Failed to load schedules"
-            description={error}
-            action={{ label: 'Retry', onClick: load }}
-          />
-        </div>
+        <EmptyState
+          icon={CalendarClock}
+          title="Failed to load schedules"
+          description={error}
+          action={{ label: 'Retry', onClick: load }}
+          fill
+        />
       ) : schedules.length === 0 ? (
-        <div className="py-16">
-          <EmptyState
-            icon={CalendarClock}
-            title="No schedules yet"
-            description="Create your first scheduled job to enqueue workloads on a cron cadence."
-            action={{ label: 'Create Schedule', onClick: () => { setEditing(null); setOverlayOpen(true); } }}
-          />
-        </div>
+        <EmptyState
+          icon={CalendarClock}
+          title="No schedules yet"
+          description="Create your first scheduled job to enqueue workloads on a cron cadence."
+          action={{ label: 'Create Schedule', onClick: () => { setEditing(null); setOverlayOpen(true); } }}
+          fill
+        />
       ) : (
         <DataTable
           data={schedules}

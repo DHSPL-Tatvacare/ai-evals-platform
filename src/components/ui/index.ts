@@ -2,6 +2,7 @@ export { Button } from './Button';
 export { Input } from './Input';
 export { Modal } from './Modal';
 export { Tabs } from './Tabs';
+export { useTabsHeaderActions } from './TabsHeaderActionsContext';
 export { Card } from './Card';
 export { Badge, type BadgeVariant } from './Badge';
 export { VisibilityBadge } from './VisibilityBadge';
@@ -9,7 +10,6 @@ export { VisibilityToggle } from './VisibilityToggle';
 export { StarToggle } from './StarToggle';
 export { RoleBadge } from './RoleBadge';
 export { Pagination } from './Pagination';
-export { Spinner } from './Spinner';
 export { Skeleton, SkeletonText, SkeletonCard, SkeletonTableRow, SkeletonMessage } from './Skeleton';
 export { ModelBadge, type ModelBadgeVariant, detectProvider, type LLMProvider } from './ModelBadge';
 export { SegmentAudioPlayer } from './SegmentAudioPlayer';
@@ -32,7 +32,6 @@ export { Switch } from './Switch';
 export { LLMConfigSection } from './LLMConfigSection';
 export { PasswordStrengthIndicator, validatePasswordStrength } from './PasswordStrengthIndicator';
 export { FilterPills } from './FilterPills';
-export { PageShell } from './PageShell';
 export { PageSurface } from './PageSurface';
 export { LoadingState } from './LoadingState';
 export {
@@ -50,6 +49,7 @@ export {
   type FilterControl,
 } from './FilterPanel';
 export { FilterButton } from './FilterButton';
+export { PageHeaderSearch } from './PageHeaderSearch';
 export { RingGauge, type RingGaugeTone } from './RingGauge';
 export { HBarList, type HBarRowData, type HBarTone } from './HBarList';
 export { TrendDelta, type TrendSemantic } from './TrendDelta';

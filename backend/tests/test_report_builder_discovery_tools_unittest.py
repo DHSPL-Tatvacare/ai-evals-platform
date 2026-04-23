@@ -92,6 +92,39 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['payload']['dimension'], 'agent')
         self.assertEqual(result['payload']['values'][0]['value'], 'Pareekshith Bompally')
 
+    async def test_handle_lookup_accepts_none_search(self):
+        db = AsyncMock()
+        db.execute.return_value = _Result(rows=[('Pareekshith Bompally', 12)])
+        semantic_model = {
+            'tables': {
+                'analytics_eval_facts': {
+                    'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
+                },
+            },
+            'dimensions': [
+                {
+                    'name': 'agent',
+                    'table': 'analytics_eval_facts',
+                    'expression': "context->>'agent'",
+                },
+            ],
+        }
+
+        with patch(
+            'app.services.report_builder.tool_handlers._load_active_semantic_model',
+            new=AsyncMock(return_value=semantic_model),
+        ):
+            result = await tool_handlers.handle_lookup(
+                dimension='agent',
+                search=None,
+                db=db,
+                auth=self._auth(),
+                app_id='inside-sales',
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertIsNone(result['payload']['search'])
+
     async def test_handle_discover_builds_dimension_metric_and_volume_payload(self):
         db = AsyncMock()
         db.execute.side_effect = [

@@ -2,10 +2,9 @@ import { Suspense } from "react";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { MainLayout } from "@/components/layout";
+import { LoadingState } from "@/components/ui";
 import {
   VoiceRxSettingsPage,
-  VoiceRxDashboard,
-  VoiceRxRunList,
   VoiceRxRunDetail,
 } from "@/features/voiceRx";
 import {
@@ -13,27 +12,24 @@ import {
   TagManagementPage,
 } from "@/features/kairaBotSettings";
 import {
-  EvalDashboard,
   EvalLogs,
   EvalRunList,
   EvalRunDetail,
   EvalThreadDetailV2,
   EvalAdversarialDetailV2,
 } from "@/features/evalRuns";
-import { AppEvaluatorsPage } from "@/features/evals";
+import { AppEvaluatorsPage, EvaluatorDetailPage } from "@/features/evals";
 import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from "@/features/auth";
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
 import { AdminUsersPage } from "@/features/admin";
 import {
   InsideSalesListing,
-  InsideSalesEvaluatorDetail,
-  InsideSalesRunList,
   InsideSalesRunDetail,
-  InsideSalesDashboard,
   InsideSalesCallDetail,
   InsideSalesSettings,
   InsideSalesLeadDetail,
 } from "@/features/insideSales";
+import { AnalyticsDashboardPage } from "@/features/analytics/AnalyticsDashboardPage";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { KairaBotHomePage } from "./pages/kaira";
@@ -46,6 +42,8 @@ const AnalyticsChartDetail = lazyWithRetry(() => import('@/features/analytics/pa
 const AnalyticsDashboardDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
 const CostPage = lazyWithRetry(() => import('@/features/cost/pages/CostPage').then(m => ({ default: m.CostPage })));
 const ScheduledJobsListPage = lazyWithRetry(() => import('@/features/admin/scheduledJobs/pages/ScheduledJobsListPage').then(m => ({ default: m.ScheduledJobsListPage })));
+
+const ROUTE_FALLBACK = <LoadingState />;
 
 function VoiceRxGuard() {
   return <AppAccessGuard app="voice-rx"><Outlet /></AppAccessGuard>;
@@ -72,7 +70,7 @@ export function Router() {
           path={routes.guide}
           element={
             <AuthGuard>
-              <Suspense fallback={null}>
+              <Suspense fallback={ROUTE_FALLBACK}>
                 <GuidePage />
               </Suspense>
             </AuthGuard>
@@ -96,18 +94,18 @@ export function Router() {
             <Route path="/listing/:id" element={<ListingPage />} />
             <Route
               path={routes.voiceRx.dashboard}
-              element={<VoiceRxDashboard />}
+              element={<AnalyticsDashboardPage appId="voice-rx" />}
             />
             <Route
               path={routes.voiceRx.evaluators}
               element={<AppEvaluatorsPage />}
             />
             <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
-            <Route path={routes.voiceRx.runs} element={<VoiceRxRunList />} />
+            <Route path={routes.voiceRx.runs} element={<EvalRunList />} />
             <Route path={routes.voiceRx.logs} element={<EvalLogs />} />
-            <Route path={routes.voiceRx.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
-            <Route path="/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
-            <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
+            <Route path={routes.voiceRx.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
             <Route
               path={routes.voiceRx.settings}
               element={<RequirePermission action="configuration:edit"><VoiceRxSettingsPage /></RequirePermission>}
@@ -132,7 +130,7 @@ export function Router() {
             />
 
             {/* Kaira Evals routes */}
-            <Route path={routes.kaira.dashboard} element={<EvalDashboard />} />
+            <Route path={routes.kaira.dashboard} element={<AnalyticsDashboardPage appId="kaira-bot" />} />
             <Route
               path={routes.kaira.evaluators}
               element={<AppEvaluatorsPage />}
@@ -148,27 +146,27 @@ export function Router() {
               element={<EvalThreadDetailV2 />}
             />
             <Route path={routes.kaira.logs} element={<EvalLogs />} />
-            <Route path={routes.kaira.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
-            <Route path="/kaira/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
-            <Route path="/kaira/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
+            <Route path={routes.kaira.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/kaira/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/kaira/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
           </Route>
 
           {/* Inside Sales routes */}
           <Route element={<InsideSalesGuard />}>
             <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
             <Route path={routes.insideSales.evaluators} element={<AppEvaluatorsPage />} />
-            <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluatorDetail />} />
-            <Route path={routes.insideSales.runs} element={<InsideSalesRunList />} />
+            <Route path="/inside-sales/evaluators/:id" element={<EvaluatorDetailPage />} />
+            <Route path={routes.insideSales.runs} element={<EvalRunList />} />
             <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
             <Route path="/inside-sales/leads/:prospectId" element={<InsideSalesLeadDetail />} />
-            <Route path={routes.insideSales.dashboard} element={<InsideSalesDashboard />} />
+            <Route path={routes.insideSales.dashboard} element={<AnalyticsDashboardPage appId="inside-sales" />} />
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
             <Route path={routes.insideSales.settings} element={<RequirePermission action="configuration:edit"><InsideSalesSettings /></RequirePermission>} />
-            <Route path={routes.insideSales.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
-            <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={null}><AnalyticsChartDetail /></Suspense>} />
-            <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={null}><AnalyticsDashboardDetail /></Suspense>} />
+            <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
+            <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
           </Route>
 
           {/* Admin routes */}
@@ -184,7 +182,7 @@ export function Router() {
             path={routes.adminCost}
             element={
               <RequirePermission action="cost:view">
-                <Suspense fallback={null}>
+                <Suspense fallback={ROUTE_FALLBACK}>
                   <CostPage />
                 </Suspense>
               </RequirePermission>
@@ -194,7 +192,7 @@ export function Router() {
             path={routes.adminScheduledJobs}
             element={
               <RequirePermission action="schedule:manage">
-                <Suspense fallback={null}>
+                <Suspense fallback={ROUTE_FALLBACK}>
                   <ScheduledJobsListPage />
                 </Suspense>
               </RequirePermission>

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, AlertTriangle, FileText } from 'lucide-react';
-import { Button, Tabs, EmptyState } from '@/components/ui';
+import { useParams } from 'react-router-dom';
+import { AlertTriangle, FileText, Info } from 'lucide-react';
+import { Button, LoadingState, PageSurface, Tabs, Tooltip, EmptyState } from '@/components/ui';
+import { PAGE_METADATA } from '@/config/pageMetadata';
 import { useAppConfig } from '@/hooks';
 import { CallResultPanel } from '../components/CallResultPanel';
 import { NewInsideSalesEvalOverlay } from '../components/NewInsideSalesEvalOverlay';
@@ -135,7 +136,6 @@ export function InsideSalesLeadDetail() {
   const appConfig = useAppConfig('inside-sales');
   const drilldownSections = appConfig.collections.drilldowns.lead?.sections ?? [];
   const { prospectId } = useParams<{ prospectId: string }>();
-  const navigate = useNavigate();
 
   const [lead, setLead] = useState<LeadDetailFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,27 +162,37 @@ export function InsideSalesLeadDetail() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--color-brand-accent)]" />
-      </div>
+      <PageSurface
+        icon={PAGE_METADATA.leadDetail.icon}
+        title="Lead"
+        back={{ to: routes.insideSales.listing, label: 'Leads' }}
+        showHeader={false}
+      >
+        <LoadingState />
+      </PageSurface>
     );
   }
 
   if (error || !lead) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <PageSurface
+        icon={PAGE_METADATA.leadDetail.icon}
+        title="Lead"
+        back={{ to: routes.insideSales.listing, label: 'Leads' }}
+      >
         <EmptyState
           icon={AlertTriangle}
           title="Failed to load lead"
           description={error ?? 'Lead not found.'}
           action={{ label: 'Retry', onClick: load }}
+          fill
         />
-      </div>
+      </PageSurface>
     );
   }
 
   const displayName = [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.phone;
-  const subtitle = [lead.phone, lead.city, lead.condition].filter(Boolean).join(' · ');
+  const secondaryInfo = [lead.phone, lead.city, lead.condition].filter(Boolean).join(' · ');
 
   const frt = formatFrt(lead.frtSeconds);
   const tile5 = lead.preferredCallTime
@@ -208,13 +218,12 @@ export function InsideSalesLeadDetail() {
   );
 
   const evaluationsTab = evalHistory.length === 0 ? (
-    <div className="flex min-h-[240px] items-center justify-center">
-      <EmptyState
-        icon={FileText}
-        title="Not yet evaluated"
-        description="Select a call from the timeline and click Evaluate."
-      />
-    </div>
+    <EmptyState
+      icon={FileText}
+      title="Not yet evaluated"
+      description="Select a call from the timeline and click Evaluate."
+      fill
+    />
   ) : (
     <div className="flex flex-col gap-3">
       {evalHistory.length > 1 && (
@@ -240,57 +249,66 @@ export function InsideSalesLeadDetail() {
     </div>
   );
 
+  const metaTooltip = secondaryInfo ? (
+    <div className="text-xs text-[var(--text-secondary)]">{secondaryInfo}</div>
+  ) : null;
+
+  const subtitle = (
+    <>
+      <StageBadge stage={lead.prospectStage} truncate={false} />
+      <MqlScoreBadge score={lead.mqlScore} signals={lead.mqlSignals} />
+      {metaTooltip && (
+        <Tooltip content={metaTooltip} closeDelay={150}>
+          <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+        </Tooltip>
+      )}
+    </>
+  );
+
+  const actions = (
+    <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
+      <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
+        Evaluate
+      </Button>
+    </span>
+  );
+
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-y-auto pr-1">
-      <div className="flex flex-col gap-4 pb-4">
-        <button
-          onClick={() => navigate(routes.insideSales.listing)}
-          className="flex w-fit items-center gap-1.5 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
-        </button>
-
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-lg font-semibold text-[var(--text-primary)]">{displayName}</h1>
-              <StageBadge stage={lead.prospectStage} truncate={false} />
-              <MqlScoreBadge score={lead.mqlScore} signals={lead.mqlSignals} />
-            </div>
-            <p className="text-xs text-[var(--text-muted)]">{subtitle}</p>
+    <PageSurface
+      icon={PAGE_METADATA.leadDetail.icon}
+      title={displayName}
+      subtitle={subtitle}
+      back={{ to: routes.insideSales.listing, label: 'Leads' }}
+      actions={actions}
+    >
+      <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+        <div className="flex flex-col gap-4 pb-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            {drilldownSections.map((section) => (
+              <DrilldownSectionCard key={section.id} lead={lead} section={section} />
+            ))}
           </div>
-          <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
-            <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
-              Evaluate
-            </Button>
-          </span>
-        </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {drilldownSections.map((section) => (
-            <DrilldownSectionCard key={section.id} lead={lead} section={section} />
-          ))}
-        </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <KpiTile label="FRT" value={frt.text} sub="SLA: 1h" valueClass={frt.color} />
+            <KpiTile label="Total Dials" value={String(lead.totalDials)} />
+            <KpiTile label="Connect Rate" value={lead.connectRate !== null ? `${Math.round(lead.connectRate)}%` : '—'} />
+            <KpiTile
+              label="Counseling"
+              value={lead.historyTruncated ? '?' : String(lead.counselingCount)}
+              sub={lead.historyTruncated ? 'History incomplete' : 'calls ≥ 10 min'}
+            />
+            <KpiTile label={tile5.label} value={tile5.value} />
+          </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <KpiTile label="FRT" value={frt.text} sub="SLA: 1h" valueClass={frt.color} />
-          <KpiTile label="Total Dials" value={String(lead.totalDials)} />
-          <KpiTile label="Connect Rate" value={lead.connectRate !== null ? `${Math.round(lead.connectRate)}%` : '—'} />
-          <KpiTile
-            label="Counseling"
-            value={lead.historyTruncated ? '?' : String(lead.counselingCount)}
-            sub={lead.historyTruncated ? 'History incomplete' : 'calls ≥ 10 min'}
+          <Tabs
+            tabs={[
+              { id: 'timeline', label: 'Call Timeline', content: timelineTab },
+              { id: 'evaluations', label: 'Evaluations', content: evaluationsTab },
+            ]}
+            defaultTab="timeline"
           />
-          <KpiTile label={tile5.label} value={tile5.value} />
         </div>
-
-        <Tabs
-          tabs={[
-            { id: 'timeline', label: 'Call Timeline', content: timelineTab },
-            { id: 'evaluations', label: 'Evaluations', content: evaluationsTab },
-          ]}
-          defaultTab="timeline"
-        />
       </div>
 
       {evalOpen && evaluatableCall && (
@@ -299,6 +317,6 @@ export function InsideSalesLeadDetail() {
           preSelectedCallIds={[evaluatableCall.activityId]}
         />
       )}
-    </div>
+    </PageSurface>
   );
 }

@@ -1,9 +1,10 @@
 import { type ReactNode, useState, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Inbox } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Inbox, Info } from 'lucide-react';
 import { cn } from '@/utils';
 import { EmptyState } from './EmptyState';
 import { Pagination } from './Pagination';
+import { Tooltip } from './Tooltip';
 
 export type SortOrder = 'asc' | 'desc';
 
@@ -14,7 +15,8 @@ export interface SortState {
 
 export interface ColumnDef<T> {
   key: string;
-  header: string;
+  header: ReactNode;
+  headerTooltip?: ReactNode;
   width?: string;
   render: (row: T) => ReactNode;
   headerClassName?: string;
@@ -161,19 +163,24 @@ export function DataTable<T>({
                       key={col.key}
                       onClick={col.sortable ? () => handleHeaderClick(col) : undefined}
                       className={cn(
-                        'px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]',
+                        'px-3 py-2 align-middle text-left text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]',
                         col.sortable &&
                           'cursor-pointer select-none hover:text-[var(--text-secondary)]',
                         col.width,
                         col.headerClassName,
                       )}
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        {col.header}
-                        {SortIcon && (
-                          <SortIcon
-                            className={cn(
-                              'h-3 w-3',
+                      >
+                        <span className="inline-flex min-w-max items-center gap-1 whitespace-nowrap">
+                          <span className="shrink-0">{col.header}</span>
+                          {col.headerTooltip ? (
+                            <Tooltip content={col.headerTooltip} position="bottom" maxWidth={240}>
+                              <Info className="h-3 w-3 shrink-0 cursor-default text-[var(--text-muted)]" />
+                            </Tooltip>
+                          ) : null}
+                          {SortIcon && (
+                            <SortIcon
+                              className={cn(
+                              'h-3 w-3 shrink-0',
                               isSorted
                                 ? 'text-[var(--text-secondary)]'
                                 : 'text-[var(--text-muted)] opacity-60',

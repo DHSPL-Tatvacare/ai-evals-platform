@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 import json
 import logging
 import re
@@ -33,6 +34,7 @@ from app.services.cost_tracking import (
 )
 from app.services.chat_engine.entity_recognition import (
     EntityRecognitionResult,
+    derive_app_scope_terms,
     recognize_entities,
     render_entity_recognition_context,
 )
@@ -530,7 +532,7 @@ async def _render_pending_jobs_block(
         .order_by(Job.created_at.desc())
         .limit(10)
     )
-    pending_jobs = list((await db.execute(pending_stmt)).scalars().all())
+    pending_jobs = await _result_scalars_all(await db.execute(pending_stmt))
 
     terminal_where = [*session_clause, Job.status.in_(terminal_statuses)]
     if last_observed is not None:
@@ -543,7 +545,7 @@ async def _render_pending_jobs_block(
         .order_by(Job.completed_at.asc())
         .limit(10)
     )
-    terminal_jobs = list((await db.execute(terminal_stmt)).scalars().all())
+    terminal_jobs = await _result_scalars_all(await db.execute(terminal_stmt))
 
     if not pending_jobs and not terminal_jobs:
         return ''
@@ -620,6 +622,16 @@ async def _render_pending_jobs_block(
             )
 
     return '\n'.join(sections)
+
+
+async def _result_scalars_all(result: Any) -> list[Any]:
+    scalars = result.scalars()
+    if inspect.isawaitable(scalars):
+        scalars = await scalars
+    rows = scalars.all()
+    if inspect.isawaitable(rows):
+        rows = await rows
+    return list(rows)
 
 
 def _copy_working_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -705,7 +717,7 @@ def _question_contract_hints(
     question: str,
     app_id: str,
     semantic_model: dict[str, Any],
-    app_config: dict[str, Any] | None,
+    app_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Aggregate question-analysis hints from every active pack.
 
@@ -720,9 +732,9 @@ def _question_contract_hints(
         resolve_pack_ids_for_app,
     )
 
-    parsed = AppConfig.model_validate(app_config or {})
+    parsed = AppConfig.model_validate(app_config) if app_config else None
     pack_ids = resolve_pack_ids_for_app(
-        parsed.chat.capabilities or None,
+        parsed.chat.capabilities if parsed is not None else None,
         app_id=app_id,
     )
     return collect_question_hints(
@@ -873,6 +885,7 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
         question = str(data.get('question', '')).strip()
         row_count = data.get('row_count', 0)
         remember_active_filters(pad, data.get('applied_filters'))
+        app_scope_terms = derive_app_scope_terms(app_id)
         # Load dimension metadata for chart classifier
         dimensions: list[dict[str, Any]] | None = None
         if app_id:
@@ -882,7 +895,14 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
                 dimensions = _normalize_dimensions(semantic_model)
             except Exception:
                 pass
-        push_analysis_snapshot(pad, build_analysis_snapshot(data, dimensions=dimensions))
+        push_analysis_snapshot(
+            pad,
+            build_analysis_snapshot(
+                data,
+                dimensions=dimensions,
+                app_scope_terms=app_scope_terms,
+            ),
+        )
         if question:
             pad['findings'].append(f'{question} ({row_count} rows)')
         return
@@ -1262,6 +1282,7 @@ async def _execute_chat_turn(
         tools = await _resolve_tools_for_app(session["app_id"], db)
         app_config = await load_app_config(db, working_session['app_id'])
         semantic_model = load_semantic_model(working_session['app_id'], app_config=app_config)
+        app_scope_terms = derive_app_scope_terms(working_session.get('app_id'))
         if entity_recognition is None:
             entity_registry = load_entity_registry(
                 working_session['app_id'],
@@ -1278,6 +1299,7 @@ async def _execute_chat_turn(
                 user_id=working_session['user_id'],
                 app_id=working_session.get('app_id'),
                 turn_id=turn.id if turn is not None else None,
+                app_scope_terms=app_scope_terms,
             )
         entity_recognition_payload = _serialize_entity_recognition(entity_recognition)
         question_contract_hints = _question_contract_hints(

@@ -118,6 +118,13 @@ function matchesOwnedPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
+function stripTemplateSuffix(template: string | null | undefined, suffix: string): string | null {
+  if (!template || !template.endsWith(suffix)) {
+    return null;
+  }
+  return template.slice(0, -suffix.length);
+}
+
 export function syncAppNavigation(appId: string, navigation?: Partial<AppNavigationConfig> | null): void {
   if (!isKnownAppId(appId)) {
     return;
@@ -184,6 +191,14 @@ export function evaluatorDetailForApp(appId: string, id: string): string | null 
   return fillPathTemplate(navigationForApp(appId).evaluatorDetailPath, { id });
 }
 
+/** Resolve the evaluators list path for a given appId. Derived from the evaluator-detail template. */
+export function evaluatorsListForApp(appId: string): string | null {
+  const template = navigationForApp(appId).evaluatorDetailPath;
+  if (!template) return null;
+  const stripped = template.replace(/\/:id$/, '');
+  return stripped === template ? null : stripped;
+}
+
 export function adversarialDetailForApp(appId: string, runId: string, evalId: string): string | null {
   return fillPathTemplate(navigationForApp(appId).adversarialDetailPath, { runId, evalId });
 }
@@ -212,6 +227,16 @@ export function analyticsChartForApp(appId: string, chartId: string): string {
     fillPathTemplate(navigationForApp(appId).analyticsChartPath, { chartId }) ??
     fillPathTemplate(fallbackNavigation().analyticsChartPath, { chartId }) ??
     routes.voiceRx.analyticsChart(chartId)
+  );
+}
+
+export function analyticsLibraryForApp(appId: string): string {
+  return (
+    stripTemplateSuffix(navigationForApp(appId).analyticsChartPath, '/charts/:chartId') ??
+    stripTemplateSuffix(navigationForApp(appId).analyticsDashboardPath, '/dashboards/:dashboardId') ??
+    stripTemplateSuffix(fallbackNavigation().analyticsChartPath, '/charts/:chartId') ??
+    stripTemplateSuffix(fallbackNavigation().analyticsDashboardPath, '/dashboards/:dashboardId') ??
+    routes.voiceRx.analytics
   );
 }
 

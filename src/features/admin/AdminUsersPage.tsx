@@ -4,12 +4,11 @@ import {
   Button,
   Badge,
   LoadingState,
+  PageHeaderSearch,
   PageSurface,
   ConfirmDialog,
   Tabs,
-  FilterButton,
-  FilterPanel,
-  type FilterFieldConfig,
+  useTabsHeaderActions,
 } from '@/components/ui';
 import { PAGE_METADATA } from '@/config/pageMetadata';
 import { DataTable, type ColumnDef, type SortState } from '@/components/ui/DataTable';
@@ -27,15 +26,6 @@ import { RolesTab } from './RolesTab';
 import { AuditLogTab } from './AuditLogTab';
 
 const DEFAULT_PAGE_SIZE = 25;
-
-const FILTER_FIELDS: FilterFieldConfig[] = [
-  {
-    key: 'q',
-    label: 'Search',
-    control: 'text',
-    placeholder: 'Search by name, email, or role',
-  },
-];
 
 function compareUsers(a: AdminUser, b: AdminUser, key: string): number {
   switch (key) {
@@ -62,7 +52,6 @@ function UsersTab() {
   const [deletingUser, setDeletingUser] = useState<AdminUser | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [search, setSearch] = useState('');
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [sortState, setSortState] = useState<SortState>({ key: 'displayName', order: 'asc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -149,8 +138,6 @@ function UsersTab() {
   };
 
   const isOwner = currentUser?.isOwner;
-  const activeFilterCount = search.trim().length > 0 ? 1 : 0;
-
   const columns = useMemo((): ColumnDef<AdminUser>[] => [
     {
       key: 'displayName',
@@ -238,26 +225,32 @@ function UsersTab() {
     },
   ], [currentUser?.id, isOwner]);
 
+  const headerActions = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        <PageHeaderSearch
+          value={search}
+          onChange={setSearch}
+          placeholder="Search users…"
+          label="Search users"
+        />
+        <PermissionGate action="user:create">
+          <Button size="sm" onClick={() => setIsCreateOpen(true)} icon={Plus}>
+            Add User
+          </Button>
+        </PermissionGate>
+      </div>
+    ),
+    [search],
+  );
+  useTabsHeaderActions('users', headerActions);
+
   if (isLoading) {
     return <LoadingState />;
   }
 
-  const toolbar = (
-    <div className="flex items-center gap-2">
-      <FilterButton activeCount={activeFilterCount} onClick={() => setFilterPanelOpen(true)} />
-      <div className="flex-1" />
-      <PermissionGate action="user:create">
-        <Button size="sm" onClick={() => setIsCreateOpen(true)} icon={Plus}>
-          Add User
-        </Button>
-      </PermissionGate>
-    </div>
-  );
-
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4" style={{ height: 'calc(100vh - 220px)' }}>
-      {toolbar}
-
       <DataTable
         columns={columns}
         data={paged}
@@ -286,17 +279,6 @@ function UsersTab() {
             ? `No users match "${search}"`
             : 'Add your first team member to get started'
         }
-      />
-
-      <FilterPanel
-        open={filterPanelOpen}
-        onClose={() => setFilterPanelOpen(false)}
-        fields={FILTER_FIELDS}
-        values={{ q: search }}
-        onChange={(patch) => {
-          if (typeof patch.q === 'string') setSearch(patch.q);
-        }}
-        onClear={() => setSearch('')}
       />
 
       {/* Dialogs */}

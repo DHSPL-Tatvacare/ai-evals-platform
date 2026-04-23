@@ -2169,6 +2169,7 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "evaluatorDetail": {"interpretationBands": []},
         },
     },
     {
@@ -2344,6 +2345,7 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "evaluatorDetail": {"interpretationBands": []},
         },
     },
     {
@@ -2517,6 +2519,14 @@ APP_SEEDS = [
             "pageActions": {
                 "evaluators": [
                     {"id": "csv-import", "kind": "csvImport", "requires": "asset:create"},
+                ],
+            },
+            "evaluatorDetail": {
+                "interpretationBands": [
+                    {"color": "emerald", "label": "Strong", "range": "80-100", "description": "Ready for independent calling"},
+                    {"color": "blue", "label": "Good", "range": "65-79", "description": "Minor coaching points"},
+                    {"color": "amber", "label": "Needs Work", "range": "50-64", "description": "Structured coaching required"},
+                    {"color": "red", "label": "Poor", "range": "Below 50", "description": "Re-training recommended"},
                 ],
             },
         },

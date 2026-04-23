@@ -81,6 +81,7 @@ interface InsideSalesState {
   setFilters: (filters: Partial<CallFilters>) => void;
   clearFilters: () => void;
   setPage: (page: number) => void;
+  setPageSize: (pageSize: number) => void;
   toggleCallSelection: (activityId: string) => void;
   replaceCallSelection: (activityIds: string[]) => void;
   selectAllOnPage: () => void;
@@ -161,6 +162,15 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   }),
 
   setPage: (page) => set({ page }),
+
+  setPageSize: (pageSize) =>
+    set({
+      pageSize,
+      page: 1,
+      _callsCache: {},
+      _lastFetchKey: '',
+      _pendingFetchKey: null,
+    }),
 
   toggleCallSelection: (activityId) =>
     set((s) => {
@@ -338,6 +348,7 @@ interface LeadsState {
   setLeadFilters: (updates: Partial<LeadFilters>) => void;
   clearLeadFilters: () => void;
   setLeadsPage: (page: number) => void;
+  setLeadsPageSize: (pageSize: number) => void;
   loadLeads: (force?: boolean) => Promise<void>;
   refreshLeads: () => Promise<string | null>;
   pollLeadsRefresh: () => Promise<boolean>;
@@ -378,6 +389,15 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
     }),
 
   setLeadsPage: (page) => set({ leadsPage: page }),
+
+  setLeadsPageSize: (leadsPageSize) =>
+    set({
+      leadsPageSize,
+      leadsPage: 1,
+      _lastLeadsFetchKey: '',
+      _pendingLeadsFetchKey: null,
+      _leadsCache: {},
+    }),
 
   loadLeads: async (force?: boolean) => {
     const { leadFilters, leadsPage, leadsPageSize, _lastLeadsFetchKey, _pendingLeadsFetchKey, _leadsCache } = get();

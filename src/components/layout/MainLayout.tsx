@@ -1,12 +1,12 @@
 import { type ReactNode, useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { useLocation, Outlet } from 'react-router-dom';
 import { useListingsLoader, useKeyboardShortcuts } from '@/hooks';
 import { useAppStore, useMiniPlayerStore, useUIStore } from '@/stores';
 import { useAuthStore } from '@/stores/authStore';
 import { OfflineBanner, ShortcutsHelpModal } from '@/components/feedback';
-import { Spinner } from '@/components/ui';
 import { MiniPlayerConnector } from '@/features/transcript';
 import { cn } from '@/utils';
 import { firstAccessibleAppId, inferAppIdFromPath } from '@/config/routes';
@@ -98,26 +98,6 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   const miniPlayerOpen = useMiniPlayerStore((s) => s.isOpen);
 
-  const surfaceRoutes = [
-    '/kaira/runs',
-    '/kaira/evaluators',
-    '/kaira/threads',
-    '/kaira/logs',
-    '/kaira/analytics',
-    '/runs',
-    '/evaluators',
-    '/logs',
-    '/analytics',
-    '/inside-sales/runs',
-    '/inside-sales/evaluators',
-    '/inside-sales/logs',
-    '/inside-sales/analytics',
-    '/admin/cost',
-    '/admin/scheduled-jobs',
-    '/admin/users',
-  ];
-  const isSurfaceRoute = surfaceRoutes.some((p) => location.pathname.startsWith(p));
-
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-secondary)]">
       <Sidebar onVoiceRxUpload={triggerVoiceRxUpload} />
@@ -125,10 +105,8 @@ export function MainLayout({ children }: MainLayoutProps) {
         <ReviewBorderGlow />
         <main
           className={cn(
-            'flex-1 flex flex-col min-h-0 overflow-y-auto',
-            isSurfaceRoute
-              ? cn('py-2 pr-2', miniPlayerOpen ? 'pb-20' : 'pb-2')
-              : cn('px-6 pt-6', miniPlayerOpen ? 'pb-20' : 'pb-6'),
+            'flex-1 flex flex-col min-h-0 overflow-y-auto py-2 pr-2',
+            miniPlayerOpen ? 'pb-20' : 'pb-2',
           )}
         >
           {children ?? <Outlet />}
@@ -155,7 +133,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       {isUploading && (
         <div className="fixed bottom-6 right-6 z-[var(--z-popover)] w-72 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-lg">
           <div className="flex items-center gap-3">
-            <Spinner size="sm" />
+            <Loader2 className="h-4 w-4 animate-spin text-[var(--text-brand)]" />
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium text-[var(--text-primary)]">
                 Processing files...

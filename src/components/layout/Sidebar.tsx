@@ -13,7 +13,7 @@ import {
   LogOut,
   KeyRound,
 } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
   Popover,
@@ -294,6 +294,7 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
                   to={item.to}
                   icon={item.icon}
                   title={item.label}
+                  end={item.end}
                 />
               ))}
             </div>
@@ -522,32 +523,39 @@ function CollapsedNavLink({
   to,
   icon: Icon,
   title,
+  end,
 }: {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   title: string;
+  end?: boolean;
 }) {
-  const location = useLocation();
-  const isActive = location.pathname.startsWith(to);
   return (
-    <Link
+    <NavLink
       to={to}
-      className={cn(
-        "relative flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
-        isActive
-          ? "text-[var(--text-brand)]"
-          : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
-      )}
+      end={end}
+      className={({ isActive }) =>
+        cn(
+          'relative flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors',
+          isActive
+            ? 'text-[var(--text-brand)]'
+            : 'text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
+        )
+      }
       title={title}
     >
-      {isActive && (
-        <motion.span
-          layoutId="sidebar-active-pill-collapsed"
-          className="absolute inset-0 rounded-[6px] bg-[var(--color-brand-accent)]/20"
-          transition={{ type: "spring", stiffness: 500, damping: 40 }}
-        />
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <motion.span
+              layoutId="sidebar-active-pill-collapsed"
+              className="absolute inset-0 rounded-[6px] bg-[var(--color-brand-accent)]/20"
+              transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+            />
+          )}
+          <Icon className="relative h-5 w-5" />
+        </>
       )}
-      <Icon className="relative h-5 w-5" />
-    </Link>
+    </NavLink>
   );
 }

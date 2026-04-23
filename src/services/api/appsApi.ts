@@ -14,6 +14,9 @@ import {
   type AppConfig,
   type AppId,
   type AppSummary,
+  type EvaluatorDetailBand,
+  type EvaluatorDetailBandColor,
+  type EvaluatorDetailConfig,
   type PageActionSpec,
 } from '@/types';
 
@@ -228,7 +231,43 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     pageIcons: normalizeStringMap(config.pageIcons ?? config.page_icons),
     pageTitles: normalizeStringMap(config.pageTitles ?? config.page_titles),
     pageActions: normalizePageActions(config.pageActions ?? config.page_actions),
+    evaluatorDetail: normalizeEvaluatorDetail(config.evaluatorDetail ?? config.evaluator_detail),
   };
+}
+
+const EVALUATOR_DETAIL_BAND_COLORS: readonly EvaluatorDetailBandColor[] = [
+  'emerald',
+  'blue',
+  'amber',
+  'red',
+];
+
+function normalizeEvaluatorDetail(value: unknown): EvaluatorDetailConfig | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  const rawBands = raw.interpretationBands ?? raw.interpretation_bands;
+  if (!Array.isArray(rawBands)) return { interpretationBands: [] };
+  const bands: EvaluatorDetailBand[] = [];
+  for (const entry of rawBands) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const band = entry as Record<string, unknown>;
+    if (
+      typeof band.color !== 'string'
+      || !EVALUATOR_DETAIL_BAND_COLORS.includes(band.color as EvaluatorDetailBandColor)
+      || typeof band.label !== 'string'
+      || typeof band.range !== 'string'
+      || typeof band.description !== 'string'
+    ) {
+      continue;
+    }
+    bands.push({
+      color: band.color as EvaluatorDetailBandColor,
+      label: band.label,
+      range: band.range,
+      description: band.description,
+    });
+  }
+  return { interpretationBands: bands };
 }
 
 function normalizeStringMap(value: unknown): Record<string, string> | undefined {

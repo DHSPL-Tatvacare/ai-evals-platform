@@ -171,6 +171,22 @@ export interface CollectionCoverage {
   lastScheduledSyncStatus: string | null;
 }
 
+export interface CollectionSyncStatus {
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  lastStatus: 'running' | 'completed' | 'failed' | 'cancelled' | null;
+  lastError: string | null;
+  syncInProgress: boolean;
+}
+
+export async function fetchCollectionStatus(
+  sourceFamily: InsideSalesCollectionFamily,
+): Promise<CollectionSyncStatus> {
+  return apiRequest<CollectionSyncStatus>(
+    `/api/inside-sales/collections/${encodeURIComponent(sourceFamily)}/status`,
+  );
+}
+
 export async function fetchCoverage(
   sourceFamily: InsideSalesCollectionFamily,
 ): Promise<CollectionCoverage> {

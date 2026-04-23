@@ -15,10 +15,22 @@ interface EmptyStateProps {
   compact?: boolean;
   /** Suppress the dashed border wrapper — use when rendered inside another bordered container. */
   bordered?: boolean;
+  /** Fill available space and center the state in both axes. */
+  fill?: boolean;
 }
 
-export function EmptyState({ icon: Icon, title, description, action, children, className, compact, bordered = true }: EmptyStateProps) {
-  return (
+export function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  action,
+  children,
+  className,
+  compact,
+  bordered = true,
+  fill = false,
+}: EmptyStateProps) {
+  const content = (
     <div
       className={cn(
         'flex flex-col items-center justify-center gap-3 rounded-lg',
@@ -58,4 +70,10 @@ export function EmptyState({ icon: Icon, title, description, action, children, c
       {children}
     </div>
   );
+
+  if (fill) {
+    return <div className="flex min-h-0 flex-1 items-center justify-center">{content}</div>;
+  }
+
+  return content;
 }

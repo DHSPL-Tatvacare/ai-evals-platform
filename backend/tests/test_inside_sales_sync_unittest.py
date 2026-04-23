@@ -346,11 +346,11 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
     """PR4: persist `is_scheduled_run` + `job_id` on `source_sync_runs` and
     route prune only through scheduled runs."""
 
-    def test_create_sync_run_signature_accepts_provenance(self):
+    def test_sync_run_builder_signature_accepts_provenance(self):
         import inspect as _inspect
         from app.services import inside_sales_sync as svc
 
-        sig = _inspect.signature(svc._create_sync_run)
+        sig = _inspect.signature(svc._build_sync_run)
         self.assertIn("job_id", sig.parameters)
         self.assertIn("is_scheduled_run", sig.parameters)
 

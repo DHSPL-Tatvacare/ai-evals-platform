@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePoll } from '@/hooks';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Loader2, AlertTriangle, Clock, Calendar, Cpu, ArrowLeft, ChevronRight, ClipboardCheck, Lock } from 'lucide-react';
-import { Button, ConfirmDialog, Tabs } from '@/components/ui';
+import { useParams, useNavigate } from 'react-router-dom';
+import { AlertTriangle, Clock, Calendar, Cpu, ChevronRight, ClipboardCheck, Info, Lock, ListChecks } from 'lucide-react';
+import { Button, ConfirmDialog, LoadingState, PageSurface, Tabs, Tooltip } from '@/components/ui';
 import { EvalRunVisibilityPanel, VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
 import { RunHeaderActions } from '@/features/evalRuns/components/RunHeaderActions';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
@@ -108,104 +108,25 @@ export function VoiceRxRunDetail() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--text-muted)]" />
-      </div>
+      <PageSurface icon={ListChecks} title="Run" back={{ to: routes.voiceRx.runs, label: 'Runs' }} showHeader={false}>
+        <LoadingState />
+      </PageSurface>
     );
   }
 
   if (error || !run) {
     return (
-      <div className="space-y-3">
-        <Link to={routes.voiceRx.runs} className="inline-flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text-brand)]">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to Runs
-        </Link>
-        <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-3 text-sm text-[var(--color-error)] flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          {error || 'Run not found'}
+      <PageSurface icon={ListChecks} title="Run" back={{ to: routes.voiceRx.runs, label: 'Runs' }}>
+        <div className="flex h-full items-center justify-center">
+          <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-3 text-sm text-[var(--color-error)] flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {error || 'Run not found'}
+          </div>
         </div>
-      </div>
+      </PageSurface>
     );
   }
 
-  return (
-    <InlineReviewProvider runId={run.id} appId="voice-rx" enabled={canReview}>
-      <div className="space-y-4">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-          <Link to={routes.voiceRx.runs} className="hover:text-[var(--text-brand)]">Runs</Link>
-          <span>/</span>
-          <span className="font-mono text-[var(--text-secondary)]">{run.id.slice(0, 12)}</span>
-        </div>
-
-        {/* Header */}
-        <RunHeader
-          run={run}
-          onDelete={() => setDeleteOpen(true)}
-          onCancel={handleCancel}
-          cancelling={cancelling}
-          isActive={isActive}
-          onVisibilityUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
-        />
-
-        {/* Start Review button */}
-        <StartReviewButton runId={run.id} />
-
-        {/* Progress bar for active runs */}
-        {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
-
-        <ReviewAwareTabs
-          defaultTab="results"
-          tabs={[
-            {
-              id: 'results',
-              label: 'Results',
-              content: run.evalType === 'full_evaluation' ? (
-                <FullEvaluationDetail run={run} />
-              ) : run.evalType === 'custom' ? (
-                <CustomEvalDetail run={run} />
-              ) : (
-                <p className="text-sm text-[var(--text-muted)]">
-                  Unknown evaluation type: {run.evalType}
-                </p>
-              ),
-            },
-            ...(run.evalType === 'full_evaluation' && runId ? [{
-              id: 'report',
-              label: 'Report',
-              content: <AppReportTab appId="voice-rx" runId={runId} />,
-            }] : []),
-          ]}
-        />
-
-        {/* Dirty bar for unsaved review changes */}
-        <ReviewDirtyBar />
-
-        <ConfirmDialog
-          isOpen={deleteOpen}
-          onClose={() => setDeleteOpen(false)}
-          onConfirm={handleDelete}
-          title="Delete Run"
-          description="Delete this evaluator run? This cannot be undone."
-          confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
-          variant="danger"
-          isLoading={isDeleting}
-        />
-      </div>
-    </InlineReviewProvider>
-  );
-}
-
-/* ── RunHeader ───────────────────────────────────────────── */
-
-function RunHeader({ run, onDelete, onCancel, cancelling, isActive, onVisibilityUpdated }: {
-  run: EvalRun;
-  onDelete: () => void;
-  onCancel?: () => void;
-  cancelling?: boolean;
-  isActive?: boolean;
-  onVisibilityUpdated: (visibility: NonNullable<EvalRun['visibility']>) => void;
-}) {
   const config = run.config as Record<string, unknown> | undefined;
   const summary = run.summary as Record<string, unknown> | undefined;
   const evalName =
@@ -214,67 +135,131 @@ function RunHeader({ run, onDelete, onCancel, cancelling, isActive, onVisibility
     run.evalType ??
     'Evaluation';
 
-  return (
-    <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-2.5">
+  const metaTooltip = (
+    <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
       <div className="flex items-center gap-2">
-        <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">{evalName}</h1>
-        <VerdictBadge verdict={run.status} category="status" />
-        <RunHeaderActions
-          logsHref={`${routes.voiceRx.logs}?run_id=${run.id}`}
-          isActive={!!isActive}
-          cancelling={!!cancelling}
-          deleting={false}
-          onCancel={() => onCancel?.()}
-          onDelete={onDelete}
-          visibilityContent={(
-            <EvalRunVisibilityPanel
-              runId={run.id}
-              visibility={run.visibility ?? 'private'}
-              ownerId={run.userId}
-              mode="inline"
-              onUpdated={onVisibilityUpdated}
-            />
-          )}
-        />
+        <span className="text-[var(--text-muted)]">ID</span>
+        <span className="font-mono text-[var(--text-primary)]">{run.id.slice(0, 12)}</span>
       </div>
-      <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">
-        <span className="font-mono">{run.id.slice(0, 12)}</span>
-        {run.createdAt && (
-          <span className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {formatTimestamp(run.createdAt)}
-          </span>
-        )}
-        {run.durationMs != null && (
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatDuration(run.durationMs / 1000)}
-          </span>
-        )}
-        {run.llmModel && (
-          <span className="flex items-center gap-1">
-            <Cpu className="h-3 w-3" />
-            {run.llmProvider}/{run.llmModel}
-          </span>
-        )}
-      </div>
-      {/* Step-specific error display */}
-      {run.status === 'failed' && (
-        <div className="mt-2 bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-2.5 text-sm">
-          <div className="flex items-center gap-2 text-[var(--color-error)]">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <strong className="text-xs">
-              {(run.result as Record<string, unknown>)?.failedStep
-                ? `Failed during ${(run.result as Record<string, unknown>).failedStep}`
-                : 'Evaluation failed'}
-            </strong>
-          </div>
-          {run.errorMessage && (
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">{run.errorMessage}</p>
-          )}
+      {run.createdAt && (
+        <div className="flex items-center gap-2">
+          <Calendar className="h-3 w-3 text-[var(--text-muted)]" />
+          <span>{formatTimestamp(run.createdAt)}</span>
+        </div>
+      )}
+      {run.durationMs != null && (
+        <div className="flex items-center gap-2">
+          <Clock className="h-3 w-3 text-[var(--text-muted)]" />
+          <span>{formatDuration(run.durationMs / 1000)}</span>
+        </div>
+      )}
+      {run.llmModel && (
+        <div className="flex items-center gap-2">
+          <Cpu className="h-3 w-3 text-[var(--text-muted)]" />
+          <span>{run.llmProvider}/{run.llmModel}</span>
         </div>
       )}
     </div>
+  );
+
+  const subtitle = (
+    <>
+      <VerdictBadge verdict={run.status} category="status" />
+      <Tooltip content={metaTooltip} closeDelay={150}>
+        <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
+      </Tooltip>
+    </>
+  );
+
+  const actions = (
+    <RunHeaderActions
+      logsHref={`${routes.voiceRx.logs}?run_id=${run.id}`}
+      isActive={isActive}
+      cancelling={cancelling}
+      deleting={false}
+      onCancel={handleCancel}
+      onDelete={() => setDeleteOpen(true)}
+      visibilityContent={(
+        <EvalRunVisibilityPanel
+          runId={run.id}
+          visibility={run.visibility ?? 'private'}
+          ownerId={run.userId}
+          mode="inline"
+          onUpdated={(visibility) => setRun((current) => (current ? { ...current, visibility } : current))}
+        />
+      )}
+    />
+  );
+
+  return (
+    <InlineReviewProvider runId={run.id} appId="voice-rx" enabled={canReview}>
+      <PageSurface
+        icon={ListChecks}
+        title={evalName}
+        subtitle={subtitle}
+        back={{ to: routes.voiceRx.runs, label: 'Runs' }}
+        actions={actions}
+      >
+        <div className="flex flex-col gap-4">
+          {run.status === 'failed' && (
+            <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-2.5 text-sm">
+              <div className="flex items-center gap-2 text-[var(--color-error)]">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <strong className="text-xs">
+                  {(run.result as Record<string, unknown>)?.failedStep
+                    ? `Failed during ${(run.result as Record<string, unknown>).failedStep}`
+                    : 'Evaluation failed'}
+                </strong>
+              </div>
+              {run.errorMessage && (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{run.errorMessage}</p>
+              )}
+            </div>
+          )}
+
+          <StartReviewButton runId={run.id} />
+
+          {isActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
+
+          <ReviewAwareTabs
+            defaultTab="results"
+            tabs={[
+              {
+                id: 'results',
+                label: 'Results',
+                content: run.evalType === 'full_evaluation' ? (
+                  <FullEvaluationDetail run={run} />
+                ) : run.evalType === 'custom' ? (
+                  <CustomEvalDetail run={run} />
+                ) : (
+                  <p className="text-sm text-[var(--text-muted)]">
+                    Unknown evaluation type: {run.evalType}
+                  </p>
+                ),
+              },
+              ...(run.evalType === 'full_evaluation' && runId ? [{
+                id: 'report',
+                label: 'Report',
+                content: <AppReportTab appId="voice-rx" runId={runId} />,
+              }] : []),
+            ]}
+          />
+
+          <ReviewDirtyBar />
+
+          <ConfirmDialog
+            isOpen={deleteOpen}
+            onClose={() => setDeleteOpen(false)}
+            onConfirm={handleDelete}
+            title="Delete Run"
+            description="Delete this evaluator run? This cannot be undone."
+            confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+            variant="danger"
+            isLoading={isDeleting}
+          />
+        </div>
+      </PageSurface>
+    </InlineReviewProvider>
   );
 }
 

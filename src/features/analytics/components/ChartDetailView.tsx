@@ -1,9 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ArrowLeft, RefreshCw, Trash2, Globe2, Lock, Pencil, Check, X } from 'lucide-react';
+import { RefreshCw, Trash2, Globe2, Lock, Pencil, Check, X } from 'lucide-react';
+import { analyticsLibraryForApp } from '@/config/routes';
+import { useCurrentAppId } from '@/hooks';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
-import { Badge, VisibilityBadge } from '@/components/ui';
+import { Badge, LoadingState, PageSurface, VisibilityBadge } from '@/components/ui';
 import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
+import { PAGE_METADATA } from '@/config/pageMetadata';
 import { ChartRenderer } from './ChartRenderer';
 import { deriveChartLayout } from '../chartLayout';
 import { useMeasuredWidth } from '../useMeasuredWidth';
@@ -20,6 +23,7 @@ interface ChartDetailViewProps {
 }
 
 export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDetailViewProps) {
+  const appId = useCurrentAppId();
   const [data, setData] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -120,112 +124,104 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
     if (e.key === 'Escape') handleCancelEdit();
   };
 
-  const currentTitle = editing ? editTitle : chart.title;
-  const currentDesc = editing ? editDesc : chart.description;
+  const subtitle = (
+    <>
+      <Badge variant="info" size="sm">{chart.chartConfig.renderer.type.replace(/_/g, ' ')}</Badge>
+      <VisibilityBadge visibility={visibility} compact />
+    </>
+  );
+
+  const actions = editing ? (
+    <>
+      <ActionIconButton
+        icon={Check}
+        label="Save"
+        tooltip="Save changes"
+        onClick={() => void handleSaveEdit()}
+        disabled={saving || !editTitle.trim()}
+        spinning={saving}
+      />
+      <ActionIconButton
+        icon={X}
+        label="Cancel"
+        tooltip="Cancel editing"
+        onClick={handleCancelEdit}
+      />
+    </>
+  ) : (
+    <>
+      <ActionIconButton
+        icon={Pencil}
+        label="Edit title and description"
+        tooltip="Edit"
+        onClick={handleStartEdit}
+      />
+      <ActionIconButton
+        icon={isShared ? Globe2 : Lock}
+        label={isShared ? 'Shared — click to make private' : 'Private — click to share'}
+        tooltip={isShared ? 'Shared — click to make private' : 'Private — click to share'}
+        onClick={() => void handleToggleVisibility()}
+        disabled={toggling}
+        spinning={toggling}
+      />
+      <ActionIconButton
+        icon={RefreshCw}
+        label="Refresh data"
+        tooltip="Refresh data"
+        onClick={() => void load()}
+        disabled={loading}
+        spinning={loading}
+      />
+      <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
+      <ActionIconButton
+        icon={Trash2}
+        label="Delete chart"
+        tooltip="Delete chart"
+        onClick={() => void handleDelete()}
+        disabled={deleting}
+        variant="danger"
+        spinning={deleting}
+      />
+    </>
+  );
+  const back = { to: analyticsLibraryForApp(appId), label: 'Analytics' };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
-        <div className="flex items-center gap-3 min-w-0">
-          <ActionIconButton icon={ArrowLeft} label="Back" onClick={onBack} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              {editing ? (
-                <input
-                  ref={titleRef}
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="text-base font-semibold text-[var(--text-primary)] bg-transparent border-b border-[var(--border-default)] focus:border-[var(--color-brand-primary)] outline-none min-w-[200px]"
-                />
-              ) : (
-                <h2 className="text-base font-semibold text-[var(--text-primary)] truncate">{currentTitle}</h2>
-              )}
-              <Badge variant="info" size="sm">{chart.chartConfig.renderer.type.replace(/_/g, ' ')}</Badge>
-              <VisibilityBadge visibility={visibility} compact />
-            </div>
-            {editing ? (
-              <input
-                value={editDesc}
-                onChange={(e) => setEditDesc(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Add a description..."
-                className="text-xs text-[var(--text-muted)] bg-transparent border-b border-[var(--border-default)] focus:border-[var(--color-brand-primary)] outline-none mt-1 w-full max-w-[600px]"
-              />
-            ) : (
-              <p className="text-xs text-[var(--text-muted)] mt-0.5 truncate max-w-[600px]">
-                {currentDesc || chart.sourceQuestion}
-              </p>
-            )}
-          </div>
+    <PageSurface
+      icon={PAGE_METADATA.analyticsChart.icon}
+      title={editing ? editTitle : chart.title}
+      subtitle={subtitle}
+      back={back}
+      actions={actions}
+    >
+      {editing && (
+        <div className="mb-4 flex flex-col gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+          <label className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Title</label>
+          <input
+            ref={titleRef}
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="bg-transparent text-sm font-semibold text-[var(--text-primary)] outline-none"
+          />
+          <label className="mt-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Description</label>
+          <input
+            value={editDesc}
+            onChange={(e) => setEditDesc(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Add a description..."
+            className="bg-transparent text-xs text-[var(--text-secondary)] outline-none"
+          />
         </div>
-
-        <div className="ml-auto flex items-center gap-1.5 shrink-0">
-          {editing ? (
-            <>
-              <ActionIconButton
-                icon={Check}
-                label="Save"
-                tooltip="Save changes"
-                onClick={() => void handleSaveEdit()}
-                disabled={saving || !editTitle.trim()}
-                spinning={saving}
-              />
-              <ActionIconButton
-                icon={X}
-                label="Cancel"
-                tooltip="Cancel editing"
-                onClick={handleCancelEdit}
-              />
-            </>
-          ) : (
-            <>
-              <ActionIconButton
-                icon={Pencil}
-                label="Edit title and description"
-                tooltip="Edit"
-                onClick={handleStartEdit}
-              />
-              <ActionIconButton
-                icon={isShared ? Globe2 : Lock}
-                label={isShared ? 'Shared — click to make private' : 'Private — click to share'}
-                tooltip={isShared ? 'Shared — click to make private' : 'Private — click to share'}
-                onClick={() => void handleToggleVisibility()}
-                disabled={toggling}
-                spinning={toggling}
-              />
-              <ActionIconButton
-                icon={RefreshCw}
-                label="Refresh data"
-                tooltip="Refresh data"
-                onClick={() => void load()}
-                disabled={loading}
-                spinning={loading}
-              />
-
-              <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
-
-              <ActionIconButton
-                icon={Trash2}
-                label="Delete chart"
-                tooltip="Delete chart"
-                onClick={() => void handleDelete()}
-                disabled={deleting}
-                variant="danger"
-                spinning={deleting}
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Chart body */}
-      <div className="flex-1 overflow-y-auto p-6">
+      )}
+      {!editing && (chart.description || chart.sourceQuestion) && (
+        <p className="mb-4 text-xs text-[var(--text-muted)]">{chart.description || chart.sourceQuestion}</p>
+      )}
+      <div className="flex-1 overflow-y-auto">
         {loading || !data ? (
-          <div className="flex items-center justify-center h-64 text-sm text-[var(--text-muted)]">Loading chart...</div>
+          <LoadingState message="Loading chart…" />
         ) : data.length === 0 ? (
-          <div className="flex items-center justify-center h-64 text-sm text-[var(--text-muted)]">
+          <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
             No data returned. The underlying query may have expired or returned empty results.
           </div>
         ) : (
@@ -295,6 +291,6 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
           </div>
         )}
       </div>
-    </div>
+    </PageSurface>
   );
 }

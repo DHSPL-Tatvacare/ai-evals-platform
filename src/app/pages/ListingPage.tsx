@@ -1,7 +1,8 @@
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Tabs, Skeleton, Alert } from '@/components/ui';
+import { Tabs, Alert, LoadingState, PageSurface } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { FeatureErrorBoundary } from '@/components/feedback';
 import { TranscriptView } from '@/features/transcript';
 import { StructuredOutputsView } from '@/features/structured-outputs';
@@ -256,35 +257,23 @@ export function ListingPage() {
 
   // Hook must be called before any early returns
   const metrics = useListingMetrics(listing, aiEval);
+  const { icon } = usePageMetadata('listingDetail');
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
-        {/* Match actual page layout to prevent layout shift */}
-        <div className="shrink-0 pb-4">
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-7 w-56" />
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-9 w-36 rounded-lg" />
-              <Skeleton className="h-9 w-36 rounded-lg" />
-              <Skeleton className="h-9 w-20 rounded-lg" />
-            </div>
-          </div>
-          <Skeleton className="h-5 w-72 mt-2" />
-        </div>
-        <div>
-          <Skeleton className="h-10 w-80" />
-          <Skeleton className="h-64 w-full mt-4 rounded-xl" />
-        </div>
-      </div>
+      <PageSurface icon={icon} title="Listing" showHeader={false}>
+        <LoadingState />
+      </PageSurface>
     );
   }
 
   if (error || !listing) {
     return (
-      <Alert variant="error">
-        {error || 'Listing not found'}
-      </Alert>
+      <PageSurface icon={icon} title="Listing">
+        <div className="flex h-full items-center justify-center">
+          <Alert variant="error">{error || 'Listing not found'}</Alert>
+        </div>
+      </PageSurface>
     );
   }
 
@@ -341,54 +330,52 @@ export function ListingPage() {
   // Determine if evaluation is possible (need transcript or API response)
   const canEvaluate = hasEvalData && hasAudioBlob;
 
+  const sourceBadge = listing.sourceType !== 'pending' ? (
+    <span
+      className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
+        listing.sourceType === 'upload'
+          ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+          : 'bg-[var(--color-accent-purple)]/10 text-[var(--color-accent-purple)]'
+      }`}
+    >
+      {listing.sourceType === 'upload' ? 'Upload Flow' : 'API Flow'}
+    </span>
+  ) : null;
+
   return (
     <FeatureErrorBoundary featureName="Listing">
-      <div className="flex flex-col h-[calc(100vh-var(--header-height))]">
-        {/* Sticky header */}
-        <div className="shrink-0 pb-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
-              {listing.title}
-              {listing.sourceType !== 'pending' && (
-                <span className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
-                  listing.sourceType === 'upload'
-                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                    : 'bg-[var(--color-accent-purple)]/10 text-[var(--color-accent-purple)]'
-                }`}>
-                  {listing.sourceType === 'upload' ? 'Upload Flow' : 'API Flow'}
-                </span>
-              )}
-            </h1>
-            <ListingActionMenu
-              listing={listing}
-              appId={appId}
-              onFetchFromApi={handleFetchFromApi}
-              onRefetchFromApi={() => setShowRefetchConfirm(true)}
-              onAddTranscript={handleAddTranscript}
-              onOpenEvalModal={handleOpenEvalModal}
-              isFetching={isFetching}
-              isAddingTranscript={isAddingTranscript}
-              isAnyOperationInProgress={isAnyOperationInProgress}
-              isEvaluating={isEvaluating}
-              canEvaluate={canEvaluate}
-              hasExistingEval={!!aiEval}
-            />
-          </div>
-          <MetricsBar
-            metrics={metrics}
+      <PageSurface
+        icon={icon}
+        title={listing.title}
+        subtitle={sourceBadge}
+        actions={
+          <ListingActionMenu
+            listing={listing}
+            appId={appId}
+            onFetchFromApi={handleFetchFromApi}
+            onRefetchFromApi={() => setShowRefetchConfirm(true)}
+            onAddTranscript={handleAddTranscript}
+            onOpenEvalModal={handleOpenEvalModal}
+            isFetching={isFetching}
+            isAddingTranscript={isAddingTranscript}
+            isAnyOperationInProgress={isAnyOperationInProgress}
+            isEvaluating={isEvaluating}
+            canEvaluate={canEvaluate}
+            hasExistingEval={!!aiEval}
           />
-          {/* Evaluator Metrics */}
+        }
+      >
+        <div className="shrink-0 pb-4">
+          <MetricsBar metrics={metrics} />
           <EvaluatorMetrics evaluators={evaluators} />
         </div>
-        {/* Tabs fill remaining height */}
-        <Tabs 
-          tabs={tabs} 
+        <Tabs
+          tabs={tabs}
           defaultTab={activeTab}
           onChange={handleTabChange}
           fillHeight
         />
 
-        {/* Refetch confirmation dialog */}
         <ConfirmDialog
           isOpen={showRefetchConfirm}
           onClose={() => setShowRefetchConfirm(false)}
@@ -400,7 +387,6 @@ export function ListingPage() {
           isLoading={isFetching}
         />
 
-        {/* Evaluation Modal */}
         <EvaluationOverlay
           isOpen={isEvalModalOpen}
           onClose={handleCloseEvalModal}
@@ -409,7 +395,7 @@ export function ListingPage() {
           hasAudioBlob={hasAudioBlob}
           initialVariant={evalVariant}
         />
-      </div>
+      </PageSurface>
     </FeatureErrorBoundary>
   );
 }

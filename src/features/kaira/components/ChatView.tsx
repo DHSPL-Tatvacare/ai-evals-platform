@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect } from "react";
 import { MessageSquare } from "lucide-react";
-import { Spinner, Alert, EmptyState, DebugFab } from "@/components/ui";
+import { LoadingState, Alert, EmptyState, DebugFab } from "@/components/ui";
 import { useKairaChat } from "@/hooks";
 import { useKairaBotSettings } from "@/stores";
 import { ChatMessageList } from "./ChatMessageList";
@@ -154,11 +154,7 @@ export function ChatView({ sessionId }: ChatViewProps = {}) {
     isLoadingSessions ||
     (isLoadingMessages && messages.length === 0)
   ) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   // No current session - show empty state with new chat button

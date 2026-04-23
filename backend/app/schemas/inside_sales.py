@@ -101,6 +101,22 @@ class CollectionRefreshResponse(CamelModel):
     status: str
 
 
+class CollectionSyncStatus(CamelModel):
+    """Durable freshness signal for a collection. Read from ``source_sync_runs``.
+
+    ``lastSuccessAt`` is the most recent ``completed`` sync. ``lastAttemptAt``
+    is the most recent attempt regardless of outcome. ``lastStatus`` /
+    ``lastError`` describe that attempt so the UI can render failure state
+    after a page reload (frontend cache is not durable across reloads).
+    ``syncInProgress`` is true when any sync is currently ``running``.
+    """
+    last_success_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    last_status: str | None = None  # 'running' | 'completed' | 'failed' | 'cancelled'
+    last_error: str | None = None
+    sync_in_progress: bool = False
+
+
 class LeadEvalHistoryEntry(CamelModel):
     """One evaluation record for a lead's call history."""
     id: str
