@@ -18,12 +18,13 @@ from typing import Any, Mapping, Sequence
 from pydantic import BaseModel
 
 from app.services.chat_engine import reason_codes
-from app.services.chat_engine.artifact import Outcome, _CapabilityPackBridge
+from app.services.chat_engine.artifact import Artifact, Outcome
 from app.services.chat_engine.capability_pack import (
     CapabilityPack,
     TypedArgumentError,
     register_pack,
 )
+from app.services.report_builder.chart_contract import ChartPayload
 
 
 # ---------------------------------------------------------------------------
@@ -42,15 +43,13 @@ class ChartArtifactExtras(BaseModel):
     top_n: int | None = None
 
 
-class ChartPayloadRef(BaseModel):
-    """Placeholder stand-in for the full ``ChartPayload`` Pydantic model.
-
-    Phase 6 replaces this with the real discriminated-union payload from
-    ``chat_handler._build_chart_payload``. Phase 3 only needs the type
-    reference to satisfy the Protocol.
-    """
-
-    kind: str
+# Gap 8: ``artifact_contracts['analytics.chart.v1']`` points at the real
+# Phase 6 ``ChartPayload`` discriminated-union type from
+# ``chart_contract.py`` — no more placeholder stand-in. ``ChartPayload`` is
+# an ``Annotated[Union[...], Field(discriminator='kind')]`` TypeAlias, so
+# ``artifact_contracts`` holds it as an opaque ``Any``; validation against
+# this payload happens at the chat-handler boundary via the module-level
+# ``CHART_PAYLOAD_ADAPTER`` (plan §737), not here.
 
 
 # ---------------------------------------------------------------------------
@@ -482,31 +481,34 @@ class AnalyticsPack:
     """Concrete ``CapabilityPack`` — analytics domain.
 
     Phase 3 preserves the existing tool specs and handlers verbatim; only
-    the plumbing changes. Description generation now runs through the
-    §6.3.1 token-substitution contract. Outcome construction delegates to
-    the Phase 1/2 ``_CapabilityPackBridge`` so envelope-shape logic stays
-    in one place.
+    the plumbing changes. Description generation runs through the §6.3.1
+    token-substitution contract. Outcome construction is pack-local — no
+    harness-level bridge indirection (plan §6.3 rule 5).
     """
 
     pack_id: str = 'analytics'
     reason_codes: frozenset[str] = reason_codes.ANALYTICS_REASON_CODES
 
-    artifact_contracts: Mapping[str, type] = {
-        'analytics.chart.v1': ChartPayloadRef,
+    # Contract id -> type of ``payload`` carried inside
+    # ``ToolEnvelope.payload``. Pack-owned (plan §6.3 rule 5); the harness
+    # never reads this map.
+    artifact_contracts: Mapping[str, Any] = {
+        'analytics.chart.v1': ChartPayload,
     }
     artifact_extras_contracts: Mapping[str, type] = {
         'analytics.chart.v1': ChartArtifactExtras,
     }
 
+    # Contract id -> the key inside ``ToolEnvelope.payload`` that carries
+    # this contract's data. Used by ``build_outcome`` to lift the payload
+    # into an ``Artifact`` triple for the harness.
+    _CONTRACT_PAYLOAD_KEYS: Mapping[str, str] = {
+        'analytics.chart.v1': 'chart',
+    }
+
     _tool_names: frozenset[str] = frozenset({
         spec['name'] for spec in _ANALYTICS_TOOL_SPECS
     })
-
-    def __init__(self) -> None:
-        self._bridge = _CapabilityPackBridge(
-            pack_id=self.pack_id,
-            tool_names=self._tool_names,
-        )
 
     def tool_specs(self) -> Sequence[Mapping[str, Any]]:
         return _ANALYTICS_TOOL_SPECS
@@ -549,9 +551,39 @@ class AnalyticsPack:
         return render_pack_tool_descriptions(self, app_id=app_id)
 
     def build_outcome(self, tool_name: str, raw_result: Any) -> Outcome:
-        if isinstance(raw_result, dict):
-            return self._bridge.build_outcome(tool_name, raw_result)
-        return Outcome()
+        """Build the harness-level ``Outcome`` triple from a parsed envelope.
+
+        Pack-local (plan §6.3 rule 5). Claims only tools this pack owns;
+        extracts the pack-declared payload key from ``ToolEnvelope.payload``
+        to populate ``Artifact.payload``.
+        """
+        if tool_name not in self._tool_names or not isinstance(raw_result, dict):
+            return Outcome()
+        outcome_block = raw_result.get('outcome') or {}
+        artifact_meta = outcome_block.get('artifact') if isinstance(outcome_block, dict) else None
+        if not isinstance(artifact_meta, dict):
+            return Outcome()
+        contract_id = artifact_meta.get('contract')
+        if not isinstance(contract_id, str) or not contract_id:
+            return Outcome()
+        payload_key = self._CONTRACT_PAYLOAD_KEYS.get(contract_id)
+        if payload_key is None:
+            return Outcome()
+        payload_block = raw_result.get('payload') or {}
+        payload = payload_block.get(payload_key) if isinstance(payload_block, dict) else None
+        if payload is None:
+            return Outcome()
+        extras = artifact_meta.get('extras') or {}
+        if not isinstance(extras, dict):
+            extras = {}
+        return Outcome(
+            artifact=Artifact(
+                pack_id=self.pack_id,
+                contract_id=contract_id,
+                payload=payload,
+                extras=extras,
+            )
+        )
 
     def describe_job(self, job: Any) -> str:
         """Phase 7: analytics-pack rendering of a pending platform job.

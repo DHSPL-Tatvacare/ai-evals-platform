@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 from pydantic import BaseModel
 
 from app.services.chat_engine import reason_codes
-from app.services.chat_engine.artifact import Outcome, _CapabilityPackBridge
+from app.services.chat_engine.artifact import Artifact, Outcome
 from app.services.chat_engine.capability_pack import (
     CapabilityPack,
     TypedArgumentError,
@@ -250,15 +250,15 @@ class ReportBuilderPack:
         'report_builder.blueprint.v1': BlueprintArtifactExtras,
     }
 
+    # Contract id -> the key inside ``ToolEnvelope.payload`` that carries
+    # this contract's data. Pack-owned (plan §6.3 rule 5).
+    _CONTRACT_PAYLOAD_KEYS: Mapping[str, str] = {
+        'report_builder.blueprint.v1': 'blueprint',
+    }
+
     _tool_names: frozenset[str] = frozenset({
         spec['name'] for spec in _REPORT_BUILDER_TOOL_SPECS
     })
-
-    def __init__(self) -> None:
-        self._bridge = _CapabilityPackBridge(
-            pack_id=self.pack_id,
-            tool_names=self._tool_names,
-        )
 
     def tool_specs(self) -> Sequence[Mapping[str, Any]]:
         return _REPORT_BUILDER_TOOL_SPECS
@@ -296,9 +296,38 @@ class ReportBuilderPack:
         return render_pack_tool_descriptions(self, app_id=app_id)
 
     def build_outcome(self, tool_name: str, raw_result: Any) -> Outcome:
-        if isinstance(raw_result, dict):
-            return self._bridge.build_outcome(tool_name, raw_result)
-        return Outcome()
+        """Build the harness-level ``Outcome`` triple from a parsed envelope.
+
+        Pack-local (plan §6.3 rule 5). Mirrors the analytics pack's
+        extraction logic but claims only report-builder-owned tools.
+        """
+        if tool_name not in self._tool_names or not isinstance(raw_result, dict):
+            return Outcome()
+        outcome_block = raw_result.get('outcome') or {}
+        artifact_meta = outcome_block.get('artifact') if isinstance(outcome_block, dict) else None
+        if not isinstance(artifact_meta, dict):
+            return Outcome()
+        contract_id = artifact_meta.get('contract')
+        if not isinstance(contract_id, str) or not contract_id:
+            return Outcome()
+        payload_key = self._CONTRACT_PAYLOAD_KEYS.get(contract_id)
+        if payload_key is None:
+            return Outcome()
+        payload_block = raw_result.get('payload') or {}
+        payload = payload_block.get(payload_key) if isinstance(payload_block, dict) else None
+        if payload is None:
+            return Outcome()
+        extras = artifact_meta.get('extras') or {}
+        if not isinstance(extras, dict):
+            extras = {}
+        return Outcome(
+            artifact=Artifact(
+                pack_id=self.pack_id,
+                contract_id=contract_id,
+                payload=payload,
+                extras=extras,
+            )
+        )
 
     def describe_job(self, job: Any) -> str:
         """Phase 7: report-builder-pack rendering of a pending platform job."""

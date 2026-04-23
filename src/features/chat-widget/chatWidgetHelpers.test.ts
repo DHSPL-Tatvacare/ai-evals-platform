@@ -5,8 +5,10 @@ import {
   buildComposedReportOutline,
   getToolPartIndex,
   isChartPayload,
+  jobBadgeFromOutcome,
   partsFromStoredMessage,
   shouldApplyRuntimeSeq,
+  upsertJobBadgePart,
   upsertToolPart,
 } from './chatWidgetHelpers';
 
@@ -213,5 +215,93 @@ test('partsFromStoredMessage renders an analytics.chart.v1 artifact as a chart p
         data: [{ x: 'a', y: 1 }],
       },
     },
+  ]);
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 7 audit fixes (Gaps 4 + 5): JobBadge synthesis + persistence.
+// ──────────────────────────────────────────────────────────────────────
+
+test('jobBadgeFromOutcome returns null when outcome has no job slot', () => {
+  expect(jobBadgeFromOutcome(undefined, 'data_query', 'ok')).toBeNull();
+  expect(jobBadgeFromOutcome({ kind: 'read' }, 'data_query', 'ok')).toBeNull();
+  expect(jobBadgeFromOutcome({ job: {} }, 'x', 'y')).toBeNull();
+  expect(jobBadgeFromOutcome({ job: { id: 'only-id' } }, 'x', 'y')).toBeNull();
+  expect(jobBadgeFromOutcome({ job: { status: 'queued' } }, 'x', 'y')).toBeNull();
+});
+
+test('jobBadgeFromOutcome produces a JobBadgePart when envelope carries a job', () => {
+  const badge = jobBadgeFromOutcome(
+    { job: { id: 'job-abc-123', status: 'queued' } },
+    'generate_report',
+    'Running slow query',
+  );
+  expect(badge).toEqual({
+    type: 'job-badge',
+    jobId: 'job-abc-123',
+    jobType: 'generate_report',
+    status: 'queued',
+    summary: 'Running slow query',
+  });
+});
+
+test('upsertJobBadgePart updates status on same jobId, preserves existing resultHref', () => {
+  const initial = [
+    { type: 'job-badge' as const, jobId: 'j1', jobType: 'q', status: 'queued' as const, resultHref: '/jobs/j1' },
+  ];
+  const next = upsertJobBadgePart(initial, {
+    type: 'job-badge',
+    jobId: 'j1',
+    jobType: 'q',
+    status: 'running',
+    summary: 'Crunching data',
+  });
+  expect(next).toEqual([
+    {
+      type: 'job-badge',
+      jobId: 'j1',
+      jobType: 'q',
+      status: 'running',
+      summary: 'Crunching data',
+      resultHref: '/jobs/j1',
+    },
+  ]);
+});
+
+test('partsFromStoredMessage rehydrates a JobBadgePart from stored tool outcome', () => {
+  const parts = partsFromStoredMessage('Working on it', {
+    toolCalls: [
+      {
+        toolCallId: 'tc_1',
+        name: 'generate_report',
+        summary: 'Submitting',
+        detail: { executionMs: 120 },
+        outcome: {
+          kind: 'job_submitted',
+          capability: 'analytics',
+          job: { id: 'job-1', status: 'running' },
+        },
+      },
+    ],
+  });
+  // Tool part first, then the synthesized badge, then the text.
+  expect(parts).toEqual([
+    {
+      type: 'tool-call',
+      toolCallId: 'tc_1',
+      toolName: 'generate_report',
+      summary: 'Submitting',
+      detail: { executionMs: 120 },
+      state: 'completed',
+      durationMs: 120,
+    },
+    {
+      type: 'job-badge',
+      jobId: 'job-1',
+      jobType: 'generate_report',
+      status: 'running',
+      summary: 'Submitting',
+    },
+    { type: 'text', content: 'Working on it' },
   ]);
 });

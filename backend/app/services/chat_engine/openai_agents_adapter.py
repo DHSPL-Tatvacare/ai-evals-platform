@@ -41,10 +41,10 @@ from agents.tool_context import ToolContext
 from openai.types.responses import ResponseTextDeltaEvent
 
 from app.services.cost_tracking.tracing import install_cost_tracking_processor
-from app.services.chat_engine.artifact import (
+from app.services.chat_engine.artifact import Artifact
+from app.services.chat_engine.capability_pack import (
     CAPABILITY_PACK_REGISTRY,
-    Artifact,
-    resolve_pack_for,
+    resolve_pack_id_for_tool,
 )
 
 logger = logging.getLogger(__name__)
@@ -470,9 +470,9 @@ async def _finalize_tool_call(
 
     # Phase 1: pack dispatch replaces hard-coded per-tool branches. The
     # harness knows nothing about which tools produce artifacts or what
-    # shape they take — ``resolve_pack_for`` returns ``None`` for tools
-    # that no pack claims, and the dispatcher simply skips them.
-    pack_id = resolve_pack_for(tool_name)
+    # shape they take — ``resolve_pack_id_for_tool`` returns ``None`` for
+    # tools that no pack claims, and the dispatcher simply skips them.
+    pack_id = resolve_pack_id_for_tool(tool_name)
     if pack_id is not None:
         pack = CAPABILITY_PACK_REGISTRY[pack_id]
         outcome = pack.build_outcome(tool_name, parsed_result)
@@ -502,6 +502,15 @@ async def _finalize_tool_call(
                 'type': outcome_block['artifact'].get('type'),
                 'contract': outcome_block['artifact'].get('contract'),
                 'extras': dict(outcome_block['artifact'].get('extras') or {}),
+            }
+        # Phase 7 audit fix: ``outcome.job`` MUST flow end-to-end
+        # (tool_call_log, persisted toolCalls, SSE tool_call_end, done
+        # event) so the widget can render a live job badge and replayed
+        # messages can reconstruct it (plan §770-813).
+        if isinstance(outcome_block.get('job'), dict):
+            outcome_for_event['job'] = {
+                'id': outcome_block['job'].get('id'),
+                'status': outcome_block['job'].get('status'),
             }
 
     summary = _summarize_tool_result(tool_name, result_str)

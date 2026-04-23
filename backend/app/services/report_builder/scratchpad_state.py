@@ -53,9 +53,14 @@ _CARRY_FORWARD_PREFIXES = (
 
 
 def default_scratchpad() -> dict[str, Any]:
+    # Audit fix: ``composed_report`` used to live here as Sherlock-wide
+    # runtime state, leaking report-builder domain into the generic
+    # scratchpad (plan Phase 1 §485-512 — Sherlock Core is pack-agnostic).
+    # Blueprint preview state is now reconstructed from assistant-message
+    # ``BlueprintPart`` artifacts on the frontend and from tool-outcome
+    # envelopes in message history; Sherlock Core no longer stores it.
     return {
         'findings': [],
-        'composed_report': None,
         'errors': [],
         'discovery': None,
         'lookups': {},

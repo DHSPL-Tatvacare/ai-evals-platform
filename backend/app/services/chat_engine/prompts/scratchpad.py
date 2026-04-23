@@ -24,7 +24,6 @@ def render(session: dict[str, Any]) -> str:
         return ''
 
     findings = pad.get('findings', [])
-    composed = pad.get('composed_report')
     errors = pad.get('errors', [])
     discovery = pad.get('discovery')
     lookups = pad.get('lookups', {})
@@ -48,7 +47,7 @@ def render(session: dict[str, Any]) -> str:
             )
         )
 
-    if not findings and not composed and not errors and not discovery and not lookups and not resolved_entities and not active_filters and not has_discovered_schema and not last_data_check and not last_analysis and not last_evidence and not outcomes:
+    if not findings and not errors and not discovery and not lookups and not resolved_entities and not active_filters and not has_discovered_schema and not last_data_check and not last_analysis and not last_evidence and not outcomes:
         return ''
 
     lines = ['SESSION STATE:']
@@ -85,11 +84,11 @@ def render(session: dict[str, Any]) -> str:
         for finding in findings[-_MAX_FINDINGS:]:
             lines.append(f'- {finding}')
 
-    if composed:
-        name = composed.get('name', 'Untitled')
-        sections = composed.get('sections', [])
-        section_text = ', '.join(sections) if sections else 'no sections'
-        lines.append(f'Current composed report: "{name}" ({section_text})')
+    # Audit fix: ``composed_report`` used to be rendered here. That was
+    # report-builder pack state leaking into the Sherlock-wide scratchpad
+    # prompt. Blueprint preview memory now reaches the agent through the
+    # prior-turn tool outcome envelope (visible via the Responses API
+    # ``previous_response_id``); the generic scratchpad stays pack-agnostic.
 
     if discovery:
         dimensions = discovery.get('dimensions', [])

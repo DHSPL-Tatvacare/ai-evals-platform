@@ -380,20 +380,26 @@ class PackDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('chart_payload', field_names)
         self.assertNotIn('composed_report', field_names)
 
-    def test_resolve_pack_for_returns_pack_ids_for_claimed_tools(self):
-        from app.services.chat_engine.artifact import (
+    def test_resolve_pack_id_for_tool_returns_pack_ids_for_claimed_tools(self):
+        # Post-audit: pack registry + tool->pack lookup both live in
+        # ``capability_pack.py`` (plan §6.3 — one pack registry, one
+        # contract owner). The old ``artifact.resolve_pack_for`` bridge was
+        # removed.
+        from app.services.chat_engine.capability_pack import (
             CAPABILITY_PACK_REGISTRY,
-            resolve_pack_for,
+            ensure_packs_registered,
+            resolve_pack_id_for_tool,
         )
 
-        self.assertEqual(resolve_pack_for('data_query'), 'analytics')
-        self.assertEqual(resolve_pack_for('blueprint_compose'), 'report_builder')
+        ensure_packs_registered()
+        self.assertEqual(resolve_pack_id_for_tool('data_query'), 'analytics')
+        self.assertEqual(resolve_pack_id_for_tool('blueprint_compose'), 'report_builder')
         # Phase 2 extends pack ownership: the analytics pack claims every
         # analytics-family tool, not just ``data_query``.
-        self.assertEqual(resolve_pack_for('lookup'), 'analytics')
-        self.assertEqual(resolve_pack_for('discover'), 'analytics')
-        self.assertEqual(resolve_pack_for('blueprint_list'), 'report_builder')
-        self.assertIsNone(resolve_pack_for('mystery_tool'))
+        self.assertEqual(resolve_pack_id_for_tool('lookup'), 'analytics')
+        self.assertEqual(resolve_pack_id_for_tool('discover'), 'analytics')
+        self.assertEqual(resolve_pack_id_for_tool('blueprint_list'), 'report_builder')
+        self.assertIsNone(resolve_pack_id_for_tool('mystery_tool'))
         self.assertEqual(set(CAPABILITY_PACK_REGISTRY), {'analytics', 'report_builder'})
 
     async def _run_dispatcher(self, tool_name: str, envelope_payload: dict):

@@ -170,6 +170,17 @@ def resolve_pack_for_tool(tool_name: str) -> CapabilityPack | None:
     return CAPABILITY_PACK_REGISTRY.get(pack_id)
 
 
+def resolve_pack_id_for_tool(tool_name: str) -> str | None:
+    """Return the ``pack_id`` of the pack that owns ``tool_name``, or ``None``.
+
+    Convenience wrapper for call sites that need the id string rather than
+    the pack object (e.g. envelope capability field, event routing).
+    """
+
+    ensure_packs_registered()
+    return _TOOL_TO_PACK_ID.get(tool_name)
+
+
 def resolve_pack_ids_for_app(capabilities: list[str] | None, app_id: str) -> list[str]:
     """Validate ``capabilities`` and return the canonical pack id list.
 

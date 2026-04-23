@@ -24,10 +24,12 @@ import {
   appendTextPart,
   applyArtifactToParts,
   isArtifact,
+  jobBadgeFromOutcome,
   mergeTerminalText,
   partsFromStoredMessage,
   replaceOrAppendPart,
   shouldApplyRuntimeSeq,
+  upsertJobBadgePart,
   upsertToolPart,
 } from './chatWidgetHelpers';
 
@@ -149,13 +151,52 @@ let activeAbortController: { abort: () => void } | null = null;
 
 type RuntimeApplier = {
   onToolCallStart: (event: { seq: number; toolCallId: string; toolName: string }) => void;
-  onToolCallEnd: (event: { seq: number; toolCallId: string; toolName: string; summary?: string; detail?: ToolCallDetailData | null; durationMs?: number }) => void;
+  onToolCallEnd: (event: {
+    seq: number;
+    toolCallId: string;
+    toolName: string;
+    summary?: string;
+    detail?: ToolCallDetailData | null;
+    durationMs?: number;
+    // Phase 7 audit fix (Gap 4): the §6.2 envelope projection the backend
+    // emits on tool_call_end. Carries ``job`` end-to-end so the widget
+    // can render a live pending-job badge (Gap 5).
+    outcome?: {
+      kind?: string;
+      capability?: string;
+      reason_code?: string | null;
+      job?: { id?: string; status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' };
+      artifact?: { type?: string; contract?: string; extras?: Record<string, unknown> };
+    };
+  }) => void;
   onContentDelta: (event: { seq: number; delta: string }) => void;
   onChart: (event: ChartPart & { seq: number }) => void;
   onBlueprint: (event: BlueprintPart & { seq: number }) => void;
   onSaveResult: (event: { seq: number; variant: SaveToastPart['variant']; id: string; title: string; subtitle?: string; linkText?: string; linkHref: string }) => void;
   onStatus: (event: { seq?: number; text: string }) => void;
-  onDone: (event: { seq: number; terminalStatus?: TerminalStatus; content?: string; toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>; artifacts?: Artifact[] | null; usage?: TurnUsage }) => void;
+  onDone: (event: {
+    seq: number;
+    terminalStatus?: TerminalStatus;
+    content?: string;
+    toolCalls: Array<{
+      toolCallId?: string;
+      name: string;
+      summary?: string;
+      detail?: ToolCallDetailData | null;
+      // Phase 7 audit fix (Gap 4): envelope projection persisted alongside
+      // each tool call so ``partsFromStoredMessage`` can rehydrate a
+      // ``JobBadgePart`` after reload/replay (Gap 5).
+      outcome?: {
+        kind?: string;
+        capability?: string;
+        reason_code?: string | null;
+        job?: { id?: string; status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' };
+        artifact?: { type?: string; contract?: string; extras?: Record<string, unknown> };
+      };
+    }>;
+    artifacts?: Artifact[] | null;
+    usage?: TurnUsage;
+  }) => void;
   onError: (event: { seq?: number; terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>; message: string; content?: string }) => void;
 };
 
@@ -240,7 +281,7 @@ function createRuntimeApplier(
     },
     onToolCallEnd: (event) => {
       applySequencedEvent(event.seq, () => {
-        commitParts(upsertToolPart(pendingParts, {
+        let next = upsertToolPart(pendingParts, {
           type: 'tool-call',
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -248,7 +289,19 @@ function createRuntimeApplier(
           summary: typeof event.summary === 'string' ? event.summary : undefined,
           detail: event.detail ?? null,
           durationMs: event.durationMs ?? (typeof event.detail?.executionMs === 'number' ? event.detail.executionMs : undefined),
-        }));
+        });
+        // Phase 7 audit fix (Gap 5): if the tool submitted a platform
+        // job, emit a ``JobBadgePart`` so the widget renders a live badge
+        // on the same assistant message.
+        const badge = jobBadgeFromOutcome(
+          event.outcome as import('./types').StoredToolCallOutcome | undefined,
+          event.toolName,
+          typeof event.summary === 'string' ? event.summary : undefined,
+        );
+        if (badge) {
+          next = upsertJobBadgePart(next, badge);
+        }
+        commitParts(next);
       });
     },
     onContentDelta: (event) => {
@@ -329,6 +382,17 @@ function createRuntimeApplier(
             detail: toolCall.detail ?? null,
             durationMs: typeof toolCall.detail?.executionMs === 'number' ? toolCall.detail.executionMs : undefined,
           });
+          // Phase 7 audit fix (Gap 5): rehydrate a ``JobBadgePart`` from
+          // the persisted envelope ``outcome.job`` so the final message
+          // carries the same badge that was shown during streaming.
+          const badge = jobBadgeFromOutcome(
+            toolCall.outcome as import('./types').StoredToolCallOutcome | undefined,
+            toolCall.name,
+            toolCall.summary,
+          );
+          if (badge) {
+            finalParts = upsertJobBadgePart(finalParts, badge);
+          }
         }
 
         for (const artifact of event.artifacts ?? []) {

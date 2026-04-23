@@ -17,7 +17,7 @@ decision the backend made. Phase 3 will formalize the full
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -288,109 +288,16 @@ class Outcome:
 
 
 # ---------------------------------------------------------------------------
-# Pack bridge — Phase-2 contract: envelope-in, outcome-out
+# Pack bridge REMOVED (post-Phase 3 cleanup).
+#
+# Harness Core now delegates all pack dispatch to the single registry in
+# ``capability_pack.py`` (plan §6.3 — one pack registry, one contract
+# owner). Each concrete ``CapabilityPack`` implements ``build_outcome``
+# directly from its own contract-payload-keys mapping. Call sites that
+# need a pack-id-by-tool lookup use ``capability_pack.resolve_pack_id_for_tool``.
+#
+# The deleted surface was: ``_CONTRACT_PAYLOAD_KEYS`` dict,
+# ``_CapabilityPackBridge`` class, ``_ANALYTICS_PACK`` / ``_REPORT_BUILDER_PACK``
+# module-level instances, ``CAPABILITY_PACK_REGISTRY`` dict, and the
+# module-level ``resolve_pack_for`` function.
 # ---------------------------------------------------------------------------
-
-
-# Mapping: contract_id -> which envelope.payload field carries the
-# pack-internal data the Artifact.payload should hold. Owning pack declares
-# this so Harness Core stays ignorant of payload shape.
-_CONTRACT_PAYLOAD_KEYS: dict[str, str] = {
-    'analytics.chart.v1': 'chart',
-    'report_builder.blueprint.v1': 'blueprint',
-}
-
-
-class _CapabilityPackBridge:
-    """Phase-1 bridge extended in Phase 2 to read from the envelope.
-
-    A pack claims a set of tool names; when the dispatcher receives a
-    parsed envelope for one of those tools, the bridge extracts the
-    ``Artifact`` triple declared by ``envelope.outcome.artifact``.
-    """
-
-    def __init__(self, pack_id: str, tool_names: frozenset[str]) -> None:
-        self.pack_id = pack_id
-        self._tool_names = tool_names
-
-    def owns(self, tool_name: str) -> bool:
-        return tool_name in self._tool_names
-
-    def build_outcome(self, tool_name: str, parsed_envelope: dict[str, Any]) -> Outcome:
-        if not isinstance(parsed_envelope, dict):
-            return Outcome()
-        outcome_block = parsed_envelope.get('outcome') or {}
-        artifact_meta = outcome_block.get('artifact')
-        if not isinstance(artifact_meta, dict):
-            return Outcome()
-        contract_id = artifact_meta.get('contract')
-        if not isinstance(contract_id, str) or not contract_id:
-            return Outcome()
-        # Harness Core does not know which pack owns which contract; the
-        # pack that claimed the tool must own the contract too. Phase 2
-        # enforces a strict match at egress.
-        payload_key = _CONTRACT_PAYLOAD_KEYS.get(contract_id)
-        if payload_key is None:
-            return Outcome()
-        payload_block = parsed_envelope.get('payload') or {}
-        payload = payload_block.get(payload_key)
-        if payload is None:
-            return Outcome()
-        extras = artifact_meta.get('extras') or {}
-        if not isinstance(extras, dict):
-            extras = {}
-        return Outcome(
-            artifact=Artifact(
-                pack_id=self.pack_id,
-                contract_id=contract_id,
-                payload=payload,
-                extras=extras,
-            )
-        )
-
-
-_ANALYTICS_PACK = _CapabilityPackBridge(
-    pack_id='analytics',
-    tool_names=frozenset({
-        'discover',
-        'lookup',
-        'resolve_entity',
-        'get_surface_records',
-        'data_check',
-        'data_query',
-        'catalog_inspect',
-        'catalog_relations',
-        'catalog_values',
-        'catalog_sample',
-    }),
-)
-
-_REPORT_BUILDER_PACK = _CapabilityPackBridge(
-    pack_id='report_builder',
-    tool_names=frozenset({
-        'blueprint_blocks',
-        'blueprint_compose',
-        'blueprint_save',
-        'blueprint_list',
-    }),
-)
-
-
-CAPABILITY_PACK_REGISTRY: Mapping[str, _CapabilityPackBridge] = {
-    _ANALYTICS_PACK.pack_id: _ANALYTICS_PACK,
-    _REPORT_BUILDER_PACK.pack_id: _REPORT_BUILDER_PACK,
-}
-
-
-def resolve_pack_for(tool_name: str) -> str | None:
-    """Return the pack_id that claims ``tool_name`` or ``None`` otherwise.
-
-    Every Sherlock tool should be claimed by exactly one pack by Phase 3.
-    Unknown tools return ``None`` and the dispatcher skips artifact
-    extraction for them (still persists the envelope verbatim).
-    """
-
-    for pack in CAPABILITY_PACK_REGISTRY.values():
-        if pack.owns(tool_name):
-            return pack.pack_id
-    return None

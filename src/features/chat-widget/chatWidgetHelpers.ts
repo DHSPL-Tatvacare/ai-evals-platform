@@ -4,8 +4,11 @@ import type {
   BlueprintSection,
   ChartPart,
   ComposedReport,
+  JobBadgePart,
+  JobBadgeStatus,
   MessagePart,
   SaveToastPart,
+  StoredToolCallOutcome,
   StoredWidgetMetadata,
   ToolCallPart,
   WidgetMessage,
@@ -26,6 +29,52 @@ export function isBlueprintPart(part: MessagePart): part is BlueprintPart {
 
 export function isSaveToastPart(part: MessagePart): part is SaveToastPart {
   return part.type === 'save-toast';
+}
+
+export function isJobBadgePart(part: MessagePart): part is JobBadgePart {
+  return part.type === 'job-badge';
+}
+
+// Phase 7 audit fix (Gap 5): synthesize a ``JobBadgePart`` from a tool
+// outcome. Returns ``null`` when the outcome has no ``job`` slot — i.e.
+// the tool didn't submit a platform job and no badge is needed.
+export function jobBadgeFromOutcome(
+  outcome: StoredToolCallOutcome | undefined | null,
+  toolName: string | undefined,
+  summary: string | undefined,
+): JobBadgePart | null {
+  const job = outcome?.job;
+  const jobId = typeof job?.id === 'string' ? job.id : undefined;
+  const status = job?.status as JobBadgeStatus | undefined;
+  if (!jobId || !status) {
+    return null;
+  }
+  return {
+    type: 'job-badge',
+    jobId,
+    jobType: toolName,
+    status,
+    summary,
+  };
+}
+
+export function upsertJobBadgePart(parts: MessagePart[], next: JobBadgePart): MessagePart[] {
+  const index = parts.findIndex((part) => isJobBadgePart(part) && part.jobId === next.jobId);
+  if (index === -1) {
+    return [...parts, next];
+  }
+  const updated = [...parts];
+  const existing = updated[index] as JobBadgePart;
+  // Preserve any client-side overlay (e.g. resultHref once the polling
+  // resolves) unless the incoming event supplies a fresh value.
+  updated[index] = {
+    ...existing,
+    ...next,
+    summary: next.summary ?? existing.summary,
+    jobType: next.jobType ?? existing.jobType,
+    resultHref: next.resultHref ?? existing.resultHref,
+  };
+  return updated;
 }
 
 export function getToolPartIndex(parts: MessagePart[], toolCallId: string): number {
@@ -177,6 +226,13 @@ export function partsFromStoredMessage(
       state: toolCall.detail?.error ? 'error' : 'completed',
       durationMs: toolCall.detail?.executionMs,
     });
+    // Phase 7 audit fix (Gap 5): rehydrate a ``JobBadgePart`` from the
+    // persisted outcome so reload/replay shows the same badge the live
+    // turn did.
+    const badge = jobBadgeFromOutcome(toolCall.outcome, toolCall.name, toolCall.summary);
+    if (badge) {
+      parts = upsertJobBadgePart(parts, badge);
+    }
   }
 
   if (content) {

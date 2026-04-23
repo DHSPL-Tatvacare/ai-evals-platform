@@ -1066,9 +1066,9 @@ def _map_error_reason_code(tool_name: str, raw: dict[str, Any]) -> str:
 
 
 def _capability_for(tool_name: str) -> str:
-    from app.services.chat_engine.artifact import resolve_pack_for
+    from app.services.chat_engine.capability_pack import resolve_pack_id_for_tool
 
-    return resolve_pack_for(tool_name) or 'harness'
+    return resolve_pack_id_for_tool(tool_name) or 'harness'
 
 
 def _wrap_handler_result_as_envelope(tool_name: str, raw: Any) -> dict[str, Any]:

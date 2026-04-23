@@ -419,14 +419,20 @@ def _build_chart_payload(result: dict[str, Any] | None) -> dict[str, Any] | None
 
 
 async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
-    """Build the report-builder system prompt from layered context modules.
+    """Build the report-builder system prompt's *cacheable-prefix + per-turn*
+    sections. The per-turn pending-jobs block is NOT assembled here — the
+    caller appends it last, AFTER ``recognition_context`` and
+    ``question_contract_hints`` (plan §770 ordering):
 
-    Phase 7 binding ordering (plan §770, Rule 10 KV-cache stability):
-    ``[persona + voice + scope (cacheable)] + [TOOLS section (cacheable)] +
-    [app_context + user_context + scratchpad (per-turn)] +
-    [pending-jobs block (per-turn)]``. The cacheable prefix (``base`` +
-    ``tools_section``) MUST remain byte-identical turn-over-turn for any
-    given session; all dynamic content lands AFTER it.
+        [persona + voice + scope]            — cacheable
+        [TOOLS section]                      — cacheable (memoized Phase 3)
+        [app_context + user_context
+         + scratchpad + entity/hints]        — per-turn
+        [pending-jobs block]                 — per-turn, bound last
+        [user message]                       — appended by SDK
+
+    The cacheable prefix MUST remain byte-identical turn-over-turn per
+    session; all dynamic content lands AFTER it.
     """
     from app.services.chat_engine.prompts import base, app_context, scratchpad, user_context
     from app.services.chat_engine.prompt_generator import render_tools_section
@@ -444,7 +450,6 @@ async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
         await app_context.render(session, db),
         await user_context.render(session, db),
         scratchpad.render(session),
-        await _render_pending_jobs_block(session, db),
     ]
     return '\n\n'.join(part for part in parts if part)
 
@@ -452,20 +457,33 @@ async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
 async def _render_pending_jobs_block(
     session: dict[str, Any], db: AsyncSession
 ) -> str:
-    """Phase 7: per-turn pending-jobs section for this chat session.
+    """Phase 7 per-turn block. Plan §770-813 + audit fixes Gaps 3, 6, 7.
 
-    Loads jobs filtered by ``submission_context.surface == 'sherlock'`` and
-    ``submission_context.session_id == <chat_session_id>``, then delegates
-    the one-line rendering to the owning pack's ``describe_job``. Pack id
-    lives in ``submission_context.pack_id`` (written by ``submit_pack_job``);
-    unresolved packs fall back to the harness default renderer.
+    Responsibilities:
 
-    This block MUST NOT appear in the cacheable prefix — plan §770 Rule 10
-    pins it as per-turn content that lands after TOOLS + per-turn state.
+    1. **Pending** (``queued`` / ``running`` / ``retryable_failed``) Sherlock
+       jobs for this session are always shown as one-line pack-rendered
+       descriptions. They're in flight; the agent needs to know.
+    2. **Newly completed** (``completed`` / ``failed`` / ``cancelled``) jobs
+       since ``SherlockRuntimeSession.last_job_observed_at`` appear as
+       synthetic §6.2 envelopes with ``outcome.kind == 'job_completed'``,
+       ``outcome.job == {id, status}``, and ``payload`` carrying the job's
+       output/error. The agent observes them as structured tool-result-style
+       data, not just prose (plan §776-782).
+    3. After rendering, advance ``last_job_observed_at`` to the max
+       ``completed_at`` of surfaced terminal jobs so the same row is never
+       re-observed on subsequent turns.
+
+    The block is appended AFTER ``recognition_context`` /
+    ``question_contract_hints`` by the caller (plan Rule 10: pending-jobs
+    is the last per-turn section before the user message).
     """
-    from sqlalchemy import select
+    import json as _json
+
+    from sqlalchemy import select, update as sa_update
 
     from app.models.job import Job
+    from app.models.sherlock_runtime import SherlockRuntimeSession
     from app.services.chat_engine.capability_pack import (
         CAPABILITY_PACK_REGISTRY,
         SHERLOCK_SUBMISSION_SURFACE,
@@ -481,49 +499,126 @@ async def _render_pending_jobs_block(
     if tenant_id is None or user_id is None:
         return ''
 
+    runtime_row = await db.scalar(
+        select(SherlockRuntimeSession).where(
+            SherlockRuntimeSession.chat_session_id == chat_session_id
+        )
+    )
+    last_observed = getattr(runtime_row, 'last_job_observed_at', None)
+
+    terminal_statuses = ('completed', 'failed', 'cancelled')
+    pending_statuses = ('queued', 'running', 'retryable_failed')
+
     # JSONB containment matches the surface+session_id keys; GIN index on
     # ``submission_context`` keeps this bounded to the session's jobs.
-    stmt = (
-        select(Job)
-        .where(
-            Job.tenant_id == tenant_id,
-            Job.user_id == user_id,
-            Job.submission_context.is_not(None),
-            Job.submission_context.op('@>')(
-                {
-                    'surface': SHERLOCK_SUBMISSION_SURFACE,
-                    'session_id': str(chat_session_id),
-                }
-            ),
-        )
-        .order_by(Job.created_at.desc())
-        .limit(20)
+    session_clause = (
+        Job.tenant_id == tenant_id,
+        Job.user_id == user_id,
+        Job.submission_context.is_not(None),
+        Job.submission_context.op('@>')(
+            {
+                'surface': SHERLOCK_SUBMISSION_SURFACE,
+                'session_id': str(chat_session_id),
+            }
+        ),
     )
-    result = await db.execute(stmt)
-    jobs = list(result.scalars().all())
-    if not jobs:
+
+    pending_stmt = (
+        select(Job)
+        .where(*session_clause, Job.status.in_(pending_statuses))
+        .order_by(Job.created_at.desc())
+        .limit(10)
+    )
+    pending_jobs = list((await db.execute(pending_stmt)).scalars().all())
+
+    terminal_where = [*session_clause, Job.status.in_(terminal_statuses)]
+    if last_observed is not None:
+        # Sherlock only surfaces terminal jobs completed after the
+        # watermark — prevents replaying the whole session's job history.
+        terminal_where.append(Job.completed_at > last_observed)
+    terminal_stmt = (
+        select(Job)
+        .where(*terminal_where)
+        .order_by(Job.completed_at.asc())
+        .limit(10)
+    )
+    terminal_jobs = list((await db.execute(terminal_stmt)).scalars().all())
+
+    if not pending_jobs and not terminal_jobs:
         return ''
 
-    lines: list[str] = ['## Pending pack jobs for this session']
-    for job in jobs:
+    def _pack_describe(job: Any) -> str:
         pack_id = None
         ctx = getattr(job, 'submission_context', None) or {}
         if isinstance(ctx, dict):
             pack_id = ctx.get('pack_id')
         pack = CAPABILITY_PACK_REGISTRY.get(pack_id) if pack_id else None
         describe = getattr(pack, 'describe_job', None) if pack is not None else None
-        line: str
         try:
             raw = describe(job) if callable(describe) else render_job_line(job)
-            line = str(raw) if raw is not None else render_job_line(job)
+            return str(raw) if raw is not None else render_job_line(job)
         except Exception:  # pragma: no cover — defensive; renderer must not crash assembly
             logger.warning(
                 'describe_job failed pack=%s job_id=%s', pack_id, getattr(job, 'id', None),
                 exc_info=True,
             )
-            line = render_job_line(job)
-        lines.append(line)
-    return '\n'.join(lines)
+            return render_job_line(job)
+
+    sections: list[str] = []
+
+    if pending_jobs:
+        sections.append('## Pack jobs still in flight (this session)')
+        for job in pending_jobs:
+            sections.append(_pack_describe(job))
+
+    if terminal_jobs:
+        sections.append(
+            '## Newly completed pack jobs (synthetic job_completed envelopes)'
+        )
+        for job in terminal_jobs:
+            ctx = getattr(job, 'submission_context', None) or {}
+            pack_id = (ctx.get('pack_id') if isinstance(ctx, dict) else None) or 'harness'
+            job_status = getattr(job, 'status', 'completed') or 'completed'
+            payload: dict[str, Any] = {
+                'job_type': getattr(job, 'job_type', None),
+                'result': getattr(job, 'result', None),
+            }
+            error_message = getattr(job, 'error_message', None)
+            if error_message:
+                payload['error_message'] = error_message
+            envelope = {
+                'status': 'ok' if job_status == 'completed' else 'error',
+                'summary': _pack_describe(job),
+                'outcome': {
+                    'kind': 'job_completed',
+                    'capability': pack_id,
+                    'reason_code': None,
+                    'warnings': [],
+                    'counts': {'rows': 0, 'records': 0, 'affected': 0},
+                    'job': {'id': str(getattr(job, 'id', '')), 'status': job_status},
+                },
+                'payload': payload,
+            }
+            sections.append('```json')
+            sections.append(_json.dumps(envelope, default=str, indent=2))
+            sections.append('```')
+
+    # Advance watermark to the max completed_at of surfaced terminal jobs
+    # so the same rows don't reappear next turn. Pending jobs don't move
+    # the watermark — they'll be re-queried and re-shown until terminal.
+    if terminal_jobs:
+        max_completed = max(
+            (j.completed_at for j in terminal_jobs if j.completed_at is not None),
+            default=None,
+        )
+        if max_completed is not None:
+            await db.execute(
+                sa_update(SherlockRuntimeSession)
+                .where(SherlockRuntimeSession.chat_session_id == chat_session_id)
+                .values(last_job_observed_at=max_completed)
+            )
+
+    return '\n'.join(sections)
 
 
 def _copy_working_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -846,16 +941,12 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
             pad['findings'].append(f"{surface_key} evidence ({int(data.get('record_count', 0) or 0)} records)")
         return
 
-    if tool_name == 'blueprint_compose' and data.get('status') == 'ok':
-        pad['composed_report'] = {
-            'name': data.get('name') or 'Untitled',
-            'sections': [
-                section.get('type')
-                for section in data.get('sections', [])
-                if isinstance(section, dict) and section.get('type')
-            ],
-        }
-        return
+    # Audit fix: used to set ``pad['composed_report']`` here on
+    # ``blueprint_compose`` success. That wrote report-builder-pack state
+    # into the Sherlock-wide scratchpad, violating Phase 1's pack-agnostic
+    # core (plan §485-512). The preview now reaches the agent through the
+    # prior turn's tool outcome envelope + message history; the widget
+    # reconstructs the preview card from persisted ``BlueprintPart`` parts.
 
     if tool_name == 'blueprint_save':
         name = data.get('name')
@@ -1219,12 +1310,19 @@ async def _execute_chat_turn(
             azure_endpoint=creds.get('azure_endpoint', '') if azure else '',
             api_version=creds.get('api_version', '2025-04-01-preview') if azure else '',
         )
+        # Plan §770 binding ordering + audit fix Gap 6: the per-turn
+        # pending-jobs block is the LAST section before the user message.
+        # ``assemble_context`` owns cacheable + per-turn state; the caller
+        # appends entity/hints next, and the pending-jobs block last.
         system = await assemble_context(working_session, db)
         recognition_context = render_entity_recognition_context(entity_recognition)
         if question_contract_hints['context']:
             system = f'{system}\n\n{question_contract_hints["context"]}'
         if recognition_context:
             system = f'{system}\n\n{recognition_context}'
+        pending_jobs_block = await _render_pending_jobs_block(working_session, db)
+        if pending_jobs_block:
+            system = f'{system}\n\n{pending_jobs_block}'
 
         await _emit_runtime_event(
             runtime_session,

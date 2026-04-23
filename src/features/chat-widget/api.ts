@@ -36,10 +36,22 @@ interface StreamToolCallStartEvent {
   toolName: string;
 }
 
+// Phase 7 audit fix (Gap 4): ``outcome`` is the §6.2 envelope projection
+// the backend emits on tool_call_end / done. Carrying ``job`` end-to-end
+// lets the widget render a live pending-job badge (Gap 5).
+interface StreamToolCallOutcome {
+  kind?: string;
+  capability?: string;
+  reason_code?: string | null;
+  job?: { id?: string; status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' };
+  artifact?: { type?: string; contract?: string; extras?: Record<string, unknown> };
+}
+
 interface StreamToolCallEndEvent extends StreamToolCallStartEvent {
   summary?: string;
   detail?: ToolCallDetailData | null;
   durationMs?: number;
+  outcome?: StreamToolCallOutcome;
 }
 
 interface StreamDoneEvent {
@@ -47,7 +59,13 @@ interface StreamDoneEvent {
   terminalStatus?: TerminalStatus;
   content?: string;
   warnings?: string[];
-  toolCalls: Array<{ toolCallId?: string; name: string; summary?: string; detail?: ToolCallDetailData | null }>;
+  toolCalls: Array<{
+    toolCallId?: string;
+    name: string;
+    summary?: string;
+    detail?: ToolCallDetailData | null;
+    outcome?: StreamToolCallOutcome;
+  }>;
   // Phase 1 — pack-produced results arrive as opaque ``Artifact`` triples
   // (``{pack_id, contract_id, payload, extras?}``). The frontend dispatches
   // on ``pack_id`` + ``contract_id`` to render analytics charts,

@@ -292,6 +292,19 @@ export interface Artifact {
   extras?: Record<string, unknown>;
 }
 
+// Phase 7 audit fix (Gap 4): ``outcome`` is the §6.2 envelope projection
+// the backend emits on tool_call_end / done. Persisted with each tool
+// call so ``partsFromStoredMessage`` can reconstruct a ``JobBadgePart``
+// from ``outcome.job`` after reload/replay (Gap 5).
+export interface StoredToolCallOutcome {
+  kind?: string;
+  capability?: string;
+  reasonCode?: string | null;
+  reason_code?: string | null;
+  job?: { id?: string; status?: JobBadgeStatus };
+  artifact?: { type?: string; contract?: string; extras?: Record<string, unknown> };
+}
+
 export interface StoredWidgetMetadata {
   parts?: MessagePart[];
   toolCalls?: Array<{
@@ -299,6 +312,7 @@ export interface StoredWidgetMetadata {
     name: string;
     summary?: string;
     detail?: ToolCallDetailData | null;
+    outcome?: StoredToolCallOutcome;
   }>;
   artifacts?: Artifact[] | null;
   terminalStatus?: TerminalStatus;
