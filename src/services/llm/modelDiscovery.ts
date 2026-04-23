@@ -33,7 +33,7 @@ interface DiscoverCredentials {
   deployments?: string;
 }
 
-const DISCOVER_TIMEOUT_MS = 15_000;
+const DISCOVER_TIMEOUT_MS = 45_000;
 
 export async function discoverModels(
   provider: string,

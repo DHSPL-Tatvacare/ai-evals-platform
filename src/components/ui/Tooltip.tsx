@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface TooltipProps {
   content: ReactNode;
@@ -83,23 +84,30 @@ export function Tooltip({ content, children, position = 'top', maxWidth = 300, c
       >
         {children}
       </div>
-      {isVisible && (
-        <div
-          ref={tooltipRef}
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-          style={{
-            position: 'fixed',
-            left: coords.x,
-            top: coords.y,
-            maxWidth,
-            zIndex: 'var(--z-tooltip)',
-          }}
-          className="px-3 py-2 text-[12px] leading-relaxed text-[var(--text-primary)] bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-md shadow-lg"
-        >
-          {content}
-        </div>
-      )}
+      {isVisible &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              left: coords.x,
+              top: coords.y,
+              maxWidth,
+              zIndex: 'var(--z-tooltip)',
+            }}
+            // `normal-case tracking-normal font-normal` cancels any ancestor
+            // uppercase/tracking (e.g. table headers) that would otherwise
+            // deform the tooltip content now that it renders in a portal.
+            className="normal-case tracking-normal font-normal whitespace-normal break-words px-3 py-2 text-[12px] leading-relaxed text-[var(--text-primary)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-md shadow-lg"
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

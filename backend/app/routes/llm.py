@@ -223,7 +223,7 @@ async def _discover_gemini_models(
         try:
             from google import genai
             client = genai.Client(api_key=api_key_override)
-            return _parse_gemini_model_list(client)
+            return await asyncio.to_thread(_parse_gemini_model_list, client)
         except Exception as e:
             logger.error("Gemini discovery with override key failed: %s", e)
             return []
@@ -265,7 +265,7 @@ async def _discover_gemini_models(
         else:
             return []
 
-        return _parse_gemini_model_list(client)
+        return await asyncio.to_thread(_parse_gemini_model_list, client)
 
     except Exception as e:
         logger.error("Model discovery failed: %s", e)

@@ -56,3 +56,11 @@ export { HBarList, type HBarRowData, type HBarTone } from './HBarList';
 export { TrendDelta, type TrendSemantic } from './TrendDelta';
 export { ProviderTag, AppTag } from './ProviderTag';
 export { appToneFor, providerToneFor } from './providerTokens';
+export {
+  SectionBlock,
+  type SectionBlockTone,
+  type SectionBlockSurface,
+} from './SectionBlock';
+export { MetricChip, type MetricChipTone } from './MetricChip';
+export { RecordWorkspace, type RecordWorkspaceTab } from './RecordWorkspace';
+export { RecordNavigator } from './RecordNavigator';
