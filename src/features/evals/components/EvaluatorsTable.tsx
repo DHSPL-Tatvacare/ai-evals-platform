@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo, useState } from 'react';
-import { MoreVertical, PlayCircle, Square, Trash2 } from 'lucide-react';
+import { MoreVertical, PlayCircle, RotateCcw, Square, Trash2 } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -14,7 +14,6 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover
 import { useAuthStore } from '@/stores/authStore';
 import { evaluatorShowsInHeader } from '@/features/evals/utils/evaluatorMetadata';
 import { EvaluatorExpandRow } from './EvaluatorExpandRow';
-import { cn } from '@/utils';
 import type { BadgeVariant } from '@/components/ui/Badge';
 import type { EvalRun, EvaluatorDefinition, EvaluatorVisibilityFilter } from '@/types';
 
@@ -113,8 +112,8 @@ export function EvaluatorsTable({
   onRestoreDefaults,
   onToggleHeader,
   isRestoringDefaults = false,
-  title = 'Evaluators',
-  description = 'Manage shared and private evaluators in one place.',
+  title,
+  description,
   headerActions,
   emptyStateActions,
   onOpen,
@@ -404,33 +403,54 @@ export function EvaluatorsTable({
       ? 'You have not created any private evaluators yet.'
       : 'No evaluators are available yet.';
 
-  const toolbar = (
-    <div className={cn('flex items-center gap-2', hideHeader && 'justify-end')}>
-      <FilterButton activeCount={activeFilterCount} onClick={() => setFilterPanelOpen(true)} />
-    </div>
+  const filterButton = (
+    <FilterButton
+      activeCount={activeFilterCount}
+      onClick={() => setFilterPanelOpen(true)}
+      iconOnly
+    />
   );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {!hideHeader && (
         <div className="flex flex-col gap-3 pb-4 border-b border-[var(--border-default)] md:flex-row md:items-start md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {(title || description) && (
+            <div>
+              {title && <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>}
+              {description && <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>}
+            </div>
+          )}
+          {/* When title/description are omitted (e.g. inside a tabs view), the buttons
+              stay right-aligned via ml-auto so the row reads as a toolbar. Secondary
+              controls (Run All, Restore Defaults, Filters) use iconOnly so "Create
+              Evaluator" stands out as the primary CTA. */}
+          <div className="flex flex-wrap items-center gap-2 md:ml-auto">
             {headerActions}
             {onRestoreDefaults ? (
-              <Button variant="secondary" onClick={onRestoreDefaults} isLoading={isRestoringDefaults}>
+              <Button
+                variant="secondary"
+                icon={RotateCcw}
+                iconOnly
+                onClick={onRestoreDefaults}
+                isLoading={isRestoringDefaults}
+                aria-label="Restore defaults"
+                title="Restore defaults"
+              >
                 Restore Defaults
               </Button>
             ) : null}
+            {filterButton}
             {canCreate ? <Button onClick={onCreate}>Create Evaluator</Button> : null}
           </div>
         </div>
       )}
 
-      {toolbar}
+      {/* When the header is hidden (outer PageSurface owns the CTAs) we still need
+          the filter affordance above the table. */}
+      {hideHeader && (
+        <div className="flex items-center justify-end gap-2">{filterButton}</div>
+      )}
 
       <DataTable
         loading={loading}

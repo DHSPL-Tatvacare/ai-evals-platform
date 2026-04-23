@@ -2,6 +2,29 @@ import { apiRequest } from './client';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+export interface LeadPlanPurchase {
+  planName: string | null;
+  durationOrQuantity: string | null;
+  programPrice: string | null;
+  invoiceAmount: string | null;
+  paymentId: string | null;
+  paymentDateAndTime: string | null;
+  planAssignedAt: string | null;
+  signUpDate: string | null;
+  programStartDate: string | null;
+  programEndDate: string | null;
+  planIncludesCgm: string | null;
+  cgm: string | null;
+  cgmBrand: string | null;
+  sensorCount: string | null;
+  transmitterCount: string | null;
+  bcaDevice: string | null;
+  nutraceuticalsSold: string | null;
+  salesTeam: string | null;
+  deviceAwbNumber: string | null;
+  leadConversionDate: string | null;
+}
+
 export interface LeadListRecord {
   prospectId: string;
   firstName: string;
@@ -27,6 +50,8 @@ export interface LeadListRecord {
   lastActivityOn: string | null;
   source: string | null;
   sourceCampaign: string | null;
+  planName: string | null;
+  plan: LeadPlanPurchase;
 }
 
 export interface LeadListResponse {
@@ -75,7 +100,8 @@ export interface CallFilters {
   dateFrom: string;
   dateTo: string;
   agents: string[];
-  prospectId: string;
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  prospectId: string[];
   direction: string;
   status: string;
   hasRecording: boolean;
@@ -138,6 +164,7 @@ export interface LeadDetailFullResponse {
   callHistory: LeadCallRecord[];
   historyTruncated: boolean;
   evalHistory: LeadEvalHistoryEntry[];
+  plan: LeadPlanPurchase;
 }
 
 // ── API functions ──────────────────────────────────────────────────────────
@@ -145,12 +172,19 @@ export interface LeadDetailFullResponse {
 export interface LeadFilters {
   dateFrom: string;
   dateTo: string;
-  agents: string;
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  agents: string[];
   stage: string[];
   mqlMin: string;
   condition: string[];
-  city: string;
-  prospectId: string;
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  city: string[];
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  prospectId: string[];
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  phone: string[];
+  /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
+  planName: string[];
   q: string;
 }
 
@@ -187,6 +221,29 @@ export async function fetchCollectionStatus(
   );
 }
 
+export type SuggestionField =
+  | 'prospect_id'
+  | 'phone'
+  | 'agent_name'
+  | 'city'
+  | 'stage'
+  | 'plan_name';
+
+export async function fetchCollectionSuggestions(
+  sourceFamily: InsideSalesCollectionFamily,
+  field: SuggestionField,
+  q: string,
+  limit = 20,
+): Promise<string[]> {
+  const params = new URLSearchParams({ field, limit: String(limit) });
+  const trimmed = (q ?? '').trim();
+  if (trimmed) params.set('q', trimmed);
+  const res = await apiRequest<{ values: string[] }>(
+    `/api/inside-sales/collections/${encodeURIComponent(sourceFamily)}/suggestions?${params.toString()}`,
+  );
+  return res.values ?? [];
+}
+
 export async function fetchCoverage(
   sourceFamily: InsideSalesCollectionFamily,
 ): Promise<CollectionCoverage> {
@@ -211,8 +268,8 @@ function buildCallSearchParams(
   if (scope !== 'page') {
     params.set('scope', scope);
   }
-  if (filters.agents.length > 0) params.set('agents', filters.agents.join(','));
-  if (filters.prospectId) params.set('prospect_id', filters.prospectId);
+  if (filters.agents && filters.agents.length > 0) params.set('agents', filters.agents.join(','));
+  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
   if (filters.direction) params.set('direction', filters.direction);
   if (filters.status) params.set('status', filters.status);
   if (filters.hasRecording) params.set('has_recording', 'true');
@@ -252,13 +309,16 @@ export async function fetchLeads(
     page: String(page),
     page_size: String(pageSize),
   });
-  if (filters.agents.trim()) params.set('agents', filters.agents);
-  if (filters.stage.length > 0) params.set('stage', filters.stage.join(','));
+  const q = (filters.q ?? '').trim();
+  if (filters.agents && filters.agents.length > 0) params.set('agents', filters.agents.join(','));
+  if (filters.stage && filters.stage.length > 0) params.set('stage', filters.stage.join(','));
   if (filters.mqlMin) params.set('mql_min', filters.mqlMin);
-  if (filters.condition.length > 0) params.set('condition', filters.condition.join(','));
-  if (filters.city.trim()) params.set('city', filters.city);
-  if (filters.prospectId) params.set('prospect_id', filters.prospectId);
-  if (filters.q.trim()) params.set('q', filters.q.trim());
+  if (filters.condition && filters.condition.length > 0) params.set('condition', filters.condition.join(','));
+  if (filters.city && filters.city.length > 0) params.set('city', filters.city.join(','));
+  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
+  if (filters.phone && filters.phone.length > 0) params.set('phone', filters.phone.join(','));
+  if (filters.planName && filters.planName.length > 0) params.set('plan_name', filters.planName.join(','));
+  if (q) params.set('q', q);
 
   return apiRequest<LeadListResponse>(`/api/inside-sales/leads?${params.toString()}`);
 }

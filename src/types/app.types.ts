@@ -142,11 +142,21 @@ export interface AppCollectionFilterConfig {
   key: string;
   label: string;
   pillLabel?: string | null;
-  control: 'date-range' | 'text' | 'multi-select' | 'segmented' | 'number-range' | 'toggle';
+  control:
+    | 'date-range'
+    | 'text'
+    | 'multi-select'
+    | 'segmented'
+    | 'number-range'
+    | 'toggle'
+    /** Multi-select backed by a server suggestions endpoint. */
+    | 'async-multi-select';
   fields?: string[];
   placeholder?: string;
   description?: string;
   optionSource?: 'agents';
+  /** For `async-multi-select`: which suggestion field on the backend. */
+  suggestionField?: 'prospect_id' | 'phone' | 'agent_name' | 'city' | 'stage' | 'plan_name';
   options?: Array<{
     value: string;
     label: string;
@@ -298,7 +308,8 @@ export type PageType =
   | 'leadDetail'
   | 'cost'
   | 'scheduledJobs'
-  | 'adminUsers';
+  | 'adminUsers'
+  | 'chat';
 
 export interface PageActionSpec {
   /** Stable id for telemetry. */
@@ -753,22 +764,31 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         leads: {
           filters: [
             { key: 'dateRange', label: 'Date Range', pillLabel: 'Date', control: 'date-range', fields: ['dateFrom', 'dateTo'] },
-            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect', control: 'text', fields: ['prospectId'], placeholder: 'Paste or type prospect ID...' },
+            {
+              key: 'prospectId',
+              label: 'Prospect ID',
+              pillLabel: 'Prospect',
+              control: 'async-multi-select',
+              fields: ['prospectId'],
+              suggestionField: 'prospect_id',
+              placeholder: 'Type to search prospect IDs...',
+            },
+            {
+              key: 'phone',
+              label: 'Mobile Number',
+              pillLabel: 'Mobile',
+              control: 'async-multi-select',
+              fields: ['phone'],
+              suggestionField: 'phone',
+              placeholder: 'Type to search mobiles (e.g. 98xxx)...',
+            },
             {
               key: 'stage',
               label: 'Stage',
-              control: 'multi-select',
+              control: 'async-multi-select',
               fields: ['stage'],
-              options: [
-                { value: 'New Lead', label: 'New Lead' },
-                { value: 'Call Back', label: 'Call Back' },
-                { value: 'RNR', label: 'RNR' },
-                { value: 'Interested in future plan', label: 'Interested in future plan' },
-                { value: 'Not Interested', label: 'Not Interested' },
-                { value: 'Converted', label: 'Converted' },
-                { value: 'Invalid / Junk', label: 'Invalid / Junk' },
-                { value: 'Re-enquired', label: 'Re-enquired' },
-              ],
+              suggestionField: 'stage',
+              placeholder: 'Type to search stages...',
             },
             {
               key: 'mqlMin',
@@ -798,17 +818,28 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
             {
               key: 'city',
               label: 'City',
-              control: 'text',
+              control: 'async-multi-select',
               fields: ['city'],
-              placeholder: 'Type one or more cities, comma-separated...',
+              suggestionField: 'city',
+              placeholder: 'Type to search cities...',
             },
             {
               key: 'agents',
               label: 'Agent',
               pillLabel: 'Agent',
-              control: 'text',
+              control: 'async-multi-select',
               fields: ['agents'],
-              placeholder: 'Type one or more lead owners, comma-separated...',
+              suggestionField: 'agent_name',
+              placeholder: 'Type to search agents...',
+            },
+            {
+              key: 'planName',
+              label: 'Plan',
+              pillLabel: 'Plan',
+              control: 'async-multi-select',
+              fields: ['planName'],
+              suggestionField: 'plan_name',
+              placeholder: 'Type to search plans...',
             },
           ],
           emptyState: {
@@ -823,12 +854,20 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
               key: 'agents',
               label: 'Agent',
               pillLabel: 'Agent',
-              control: 'multi-select',
+              control: 'async-multi-select',
               fields: ['agents'],
-              optionSource: 'agents',
-              placeholder: 'Select agents...',
+              suggestionField: 'agent_name',
+              placeholder: 'Type to search agents...',
             },
-            { key: 'prospectId', label: 'Prospect ID', pillLabel: 'Prospect', control: 'text', fields: ['prospectId'], placeholder: 'Paste or type prospect ID...' },
+            {
+              key: 'prospectId',
+              label: 'Prospect ID',
+              pillLabel: 'Prospect',
+              control: 'async-multi-select',
+              fields: ['prospectId'],
+              suggestionField: 'prospect_id',
+              placeholder: 'Type to search prospect IDs...',
+            },
             {
               key: 'direction',
               label: 'Direction',

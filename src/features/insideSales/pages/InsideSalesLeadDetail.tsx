@@ -104,6 +104,57 @@ function formatLeadFieldValue(lead: LeadDetailFullResponse, field: AppDrilldownF
   }
 }
 
+/** Clean-key → human label for the plan-purchase surface.
+ *
+ * Kept as a local constant so the order of fields in the card is stable and
+ * matches how a sales ops person would read a purchase:
+ * plan → duration/price → payment → dates → CGM/device → fulfilment.
+ */
+const PLAN_FIELD_LABELS: Array<[keyof LeadDetailFullResponse['plan'], string]> = [
+  ['planName', 'Plan Name'],
+  ['durationOrQuantity', 'Duration'],
+  ['programPrice', 'Program Price'],
+  ['invoiceAmount', 'Invoice Amount'],
+  ['paymentId', 'Payment ID'],
+  ['paymentDateAndTime', 'Payment Date & Time'],
+  ['planAssignedAt', 'Plan Assigned At'],
+  ['signUpDate', 'Sign Up Date'],
+  ['programStartDate', 'Program Start'],
+  ['programEndDate', 'Program End'],
+  ['leadConversionDate', 'Lead Conversion Date'],
+  ['planIncludesCgm', 'Plan Includes CGM'],
+  ['cgm', 'CGM'],
+  ['cgmBrand', 'CGM Brand'],
+  ['sensorCount', 'Sensor Count'],
+  ['transmitterCount', 'Transmitter Count'],
+  ['bcaDevice', 'BCA Device'],
+  ['nutraceuticalsSold', 'Nutraceuticals Sold'],
+  ['salesTeam', 'Sales Team'],
+  ['deviceAwbNumber', 'Device AWB Number'],
+];
+
+function PlanPurchasedCard({ plan }: { plan: LeadDetailFullResponse['plan'] }) {
+  const hasAny = PLAN_FIELD_LABELS.some(([key]) => plan[key] !== null && plan[key] !== '');
+  if (!hasAny) return null;
+  return (
+    <section className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+      <div className="mb-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          Plan Purchased
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {PLAN_FIELD_LABELS.map(([key, label]) => {
+          const raw = plan[key];
+          const value = raw === null || raw === '' ? '—' : String(raw);
+          const mono = key === 'paymentId' || key === 'deviceAwbNumber';
+          return <ProfileField key={key} label={label} value={value} mono={mono} />;
+        })}
+      </div>
+    </section>
+  );
+}
+
 function DrilldownSectionCard({
   lead,
   section,
@@ -288,6 +339,8 @@ export function InsideSalesLeadDetail() {
               <DrilldownSectionCard key={section.id} lead={lead} section={section} />
             ))}
           </div>
+
+          <PlanPurchasedCard plan={lead.plan} />
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <KpiTile label="FRT" value={frt.text} sub="SLA: 1h" valueClass={frt.color} />

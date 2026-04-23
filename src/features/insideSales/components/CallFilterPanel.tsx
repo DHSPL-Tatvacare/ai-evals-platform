@@ -4,18 +4,19 @@
 
 import { useEffect, useId, useState } from 'react';
 import { X } from 'lucide-react';
-import { Button, Combobox } from '@/components/ui';
+import { Button, Combobox, RightSlideOverShell } from '@/components/ui';
 import { useAppConfig } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import { apiRequest } from '@/services/api/client';
 import { fetchCoverage } from '@/services/api/insideSales';
-import type { CallFilters, LeadFilters } from '@/services/api/insideSales';
+import type { CallFilters, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
 import type { AppCollectionFilterConfig } from '@/types';
 import { cn } from '@/utils/cn';
-import { useRightOverlay } from '@/hooks';
+import { useCollectionSuggestions } from '../hooks/useCollectionSuggestions';
 
 interface CallFilterPanelProps {
+  isOpen: boolean;
   onClose: () => void;
   activeTab?: 'leads' | 'calls';
 }
@@ -27,15 +28,75 @@ function readDateValue(value: unknown): string {
   return typeof value === 'string' ? value.split(' ')[0] : '';
 }
 
+/** Multi-select combobox backed by `/api/inside-sales/collections/{family}/suggestions`.
+ *
+ * Kept inline in this file because it's the only consumer of the hook today.
+ * If a second surface adopts it, promote to `components/ui/` with a
+ * more generic prop shape.
+ */
+function AsyncMultiSelectControl({
+  filter,
+  values,
+  setPatch,
+  family,
+}: {
+  filter: AppCollectionFilterConfig;
+  values: CallFilters | LeadFilters;
+  setPatch: (patch: Partial<CallFilters> | Partial<LeadFilters>) => void;
+  family: InsideSalesCollectionFamily;
+}) {
+  const field = filter.suggestionField;
+  const fields = filter.fields ?? [filter.key];
+  const raw = Reflect.get(values, fields[0]) as unknown;
+  const selected = Array.isArray(raw) ? (raw as string[]) : [];
+
+  const { options, loading, onSearchChange } = useCollectionSuggestions(
+    family,
+    // Invariant: `suggestionField` is required for `async-multi-select`
+    // entries. Fall through to `agent_name` as a last resort so the UI
+    // still loads rather than crashes on a stale app config.
+    field ?? 'agent_name',
+    { debounceMs: 250, limit: 20 },
+  );
+
+  // Options from server, plus anything the user has already selected so
+  // the selected labels render even when the user clears their search.
+  const merged = Array.from(new Set([...(selected ?? []), ...(options ?? [])]));
+  const comboOptions = merged.map((value) => ({ value, label: value }));
+
+  return (
+    <Combobox
+      multi
+      value={selected}
+      onChange={(next) => setPatch({ [fields[0]]: next } as Partial<CallFilters> | Partial<LeadFilters>)}
+      options={comboOptions}
+      onSearchChange={onSearchChange}
+      loading={loading}
+      placeholder={filter.placeholder}
+      size="sm"
+    />
+  );
+}
+
 function renderFilterControl(
   filter: AppCollectionFilterConfig,
   values: CallFilters | LeadFilters,
   setPatch: (patch: Partial<CallFilters> | Partial<LeadFilters>) => void,
   agentOptions: Array<{ value: string; label: string }>,
+  family: InsideSalesCollectionFamily,
 ) {
   const fields = filter.fields ?? [filter.key];
 
   switch (filter.control) {
+    case 'async-multi-select':
+      return (
+        <AsyncMultiSelectControl
+          filter={filter}
+          values={values}
+          setPatch={setPatch}
+          family={family}
+        />
+      );
     case 'date-range':
       return (
         <div className="flex gap-2">
@@ -154,9 +215,8 @@ function BoundarySyncNotice({
   );
 }
 
-export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPanelProps) {
+export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFilterPanelProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(true, { onClose, labelledBy: titleId });
   const appConfig = useAppConfig('inside-sales');
   const datasetKey = activeTab === 'leads' ? 'leads' : 'calls';
   const datasetConfig = appConfig.collections.datasets[datasetKey];
@@ -184,6 +244,7 @@ export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPane
   };
 
   useEffect(() => {
+    if (!isOpen) return;
     const needsAgentOptions = datasetConfig?.filters.some((filter) => filter.optionSource === 'agents');
     if (!needsAgentOptions || datasetKey !== 'calls') {
       return;
@@ -197,9 +258,10 @@ export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPane
     apiRequest<{ agents: string[] }>(`/api/inside-sales/agents?${params.toString()}`)
       .then((data) => setAgentOptions(data.agents.map((agent) => ({ value: agent, label: agent }))))
       .catch(() => setAgentOptions([]));
-  }, [callFilters.dateFrom, callFilters.dateTo, datasetConfig?.filters, datasetKey]);
+  }, [isOpen, callFilters.dateFrom, callFilters.dateTo, datasetConfig?.filters, datasetKey]);
 
   useEffect(() => {
+    if (!isOpen) return;
     let cancelled = false;
     fetchCoverage(datasetKey)
       .then((coverage) => {
@@ -215,17 +277,18 @@ export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPane
     return () => {
       cancelled = true;
     };
-  }, [datasetKey]);
+  }, [isOpen, datasetKey]);
 
   return (
-    <div className="fixed inset-0 z-[var(--z-dropdown)]" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-
-      <div
-        {...ariaProps}
-        className="absolute top-0 right-0 bottom-0 w-[380px] bg-[var(--bg-primary)] border-l border-[var(--border-default)] shadow-xl flex flex-col"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[380px]"
+      zIndexClassName="z-[var(--z-dropdown)]"
+      panelClassName="bg-[var(--bg-primary)] border-l border-[var(--border-default)]"
+      backdropClassName="bg-black/40 backdrop-blur-sm"
+    >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)]">
           <h2 id={titleId} className="text-sm font-semibold text-[var(--text-primary)]">Filters</h2>
           <button
@@ -240,7 +303,7 @@ export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPane
           {datasetConfig.filters.map((filter) => (
             <div key={filter.key} className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">{filter.label}</label>
-              {renderFilterControl(filter, values, setPatch, agentOptions)}
+              {renderFilterControl(filter, values, setPatch, agentOptions, datasetKey)}
             </div>
           ))}
           <BoundarySyncNotice dateFrom={values.dateFrom} hotFromDate={hotFromDate} />
@@ -254,7 +317,6 @@ export function CallFilterPanel({ onClose, activeTab = 'calls' }: CallFilterPane
             Apply
           </Button>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }

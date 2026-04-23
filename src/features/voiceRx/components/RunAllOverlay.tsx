@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect, useId } from "react";
+import { useState, useMemo, useId } from "react";
 import { Search, X, PlayCircle } from "lucide-react";
-import { Button, LLMConfigSection } from "@/components/ui";
+import { Button, LLMConfigSection, RightSlideOverShell } from "@/components/ui";
 import {
   useEvaluatorsStore,
   LLM_PROVIDERS,
@@ -8,7 +8,6 @@ import {
   hasProviderCredentials,
 } from "@/stores";
 import { cn } from "@/utils";
-import { useRightOverlay } from "@/hooks";
 import type { LLMProvider } from "@/types";
 
 export interface RunAllSelection {
@@ -26,13 +25,11 @@ interface RunAllOverlayProps {
 
 export function RunAllOverlay({ open, onClose, onRun, initialSelectedIds }: RunAllOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(open, { onClose, labelledBy: titleId });
   const evaluators = useEvaluatorsStore((s) => s.evaluators);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(initialSelectedIds ?? evaluators.map((e) => e.id)),
   );
   const [search, setSearch] = useState("");
-  const [isVisible, setIsVisible] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(
     LLM_PROVIDERS[0].value,
   );
@@ -64,23 +61,6 @@ export function RunAllOverlay({ open, onClose, onRun, initialSelectedIds }: RunA
     setLastIds(syncKey);
     setSelected(new Set(initialSelectedIds ?? evaluators.map((e) => e.id)));
   }
-
-  // Slide-in animation
-  useEffect(() => {
-    if (open) {
-      requestAnimationFrame(() => setIsVisible(true));
-    }
-    return () => setIsVisible(false);
-  }, [open]);
-
-  // Body scroll lock (Escape handled by useRightOverlay)
-  useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "unset";
-    };
-  }, [open]);
 
   const filteredEvaluators = useMemo(() => {
     if (!search) return evaluators;
@@ -118,29 +98,13 @@ export function RunAllOverlay({ open, onClose, onRun, initialSelectedIds }: RunA
     setSelected(new Set());
   }
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0",
-        )}
-        onClick={onClose}
-      />
-
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-sm)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full",
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-sm)] max-w-[85vw]"
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div>
@@ -285,7 +249,6 @@ export function RunAllOverlay({ open, onClose, onRun, initialSelectedIds }: RunA
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }

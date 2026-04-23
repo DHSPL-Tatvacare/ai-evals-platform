@@ -17,6 +17,12 @@ interface ComboboxBaseProps {
   className?: string;
   disabled?: boolean;
   size?: 'sm' | 'md';
+  /** Called whenever the user types in the search box. Use this to drive
+   *  server-side option loading. When set, the client-side filter is
+   *  bypassed and the provided `options` are rendered as-is. */
+  onSearchChange?: (query: string) => void;
+  /** Show a loading row inside the dropdown. Intended for async sources. */
+  loading?: boolean;
 }
 
 interface SingleComboboxProps extends ComboboxBaseProps {
@@ -41,7 +47,10 @@ export function Combobox(props: ComboboxProps) {
     disabled = false,
     size = 'md',
     multi = false,
+    onSearchChange,
+    loading = false,
   } = props;
+  const isAsync = typeof onSearchChange === 'function';
 
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -64,7 +73,16 @@ export function Combobox(props: ComboboxProps) {
       ? [(props as SingleComboboxProps).value]
       : [];
 
+  useEffect(() => {
+    if (!isAsync) return;
+    // Relay every keystroke out to the parent; the parent is responsible for
+    // debouncing + fetching fresh options.
+    onSearchChange?.(search);
+  }, [isAsync, onSearchChange, search]);
+
   const filtered = useMemo(() => {
+    // Async mode: options arrive server-filtered, don't re-filter here.
+    if (isAsync) return options;
     if (!search.trim()) return options;
     const q = search.toLowerCase().trim();
     return options.filter(
@@ -74,7 +92,7 @@ export function Combobox(props: ComboboxProps) {
         o.searchText?.toLowerCase().includes(q) ||
         o.meta?.toLowerCase().includes(q),
     );
-  }, [options, search]);
+  }, [isAsync, options, search]);
 
   const selectedLabel = useMemo(() => {
     if (selectedValues.length === 0) return null;
@@ -306,8 +324,12 @@ export function Combobox(props: ComboboxProps) {
               className="overflow-y-auto py-1"
               style={{ maxHeight: Math.min(position.maxHeight, 280) }}
             >
-              {filtered.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No matches found</div>
+              {loading ? (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Loading…</div>
+              ) : filtered.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
+                  {isAsync && !search.trim() ? 'Type to search' : 'No matches found'}
+                </div>
               ) : (
                 filtered.map((opt, i) => {
                   const selected = selectedValues.includes(opt.value);

@@ -1,10 +1,10 @@
 import { type ReactNode, useId } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/utils';
-import { useRightOverlay } from '@/hooks';
 import { Button } from './Button';
 import { Select } from './Select';
 import { Combobox } from './Combobox';
+import { RightSlideOverShell } from './RightSlideOverShell';
 
 export type FilterControl =
   | 'text'
@@ -57,17 +57,15 @@ export function FilterPanel({
   widthPx = 400,
 }: FilterPanelProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(open, { onClose, labelledBy: titleId });
 
   return (
-    <aside
-      {...ariaProps}
-      aria-hidden={!open}
-      className={cn(
-        'fixed right-0 top-0 bottom-0 z-[var(--z-overlay)] flex flex-col border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-2xl transition-transform duration-200 ease-out',
-        open ? 'translate-x-0' : 'pointer-events-none translate-x-full',
-      )}
-      style={{ width: `${widthPx}px` }}
+    <RightSlideOverShell
+      isOpen={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName=""
+      panelStyle={{ width: `${widthPx}px` }}
+      panelClassName="bg-[var(--bg-primary)] border-l border-[var(--border-default)]"
     >
       <header className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
         <h2 id={titleId} className="text-[14px] font-semibold text-[var(--text-primary)]">{title}</h2>
@@ -102,7 +100,7 @@ export function FilterPanel({
           </Button>
         </footer>
       )}
-    </aside>
+    </RightSlideOverShell>
   );
 }
 

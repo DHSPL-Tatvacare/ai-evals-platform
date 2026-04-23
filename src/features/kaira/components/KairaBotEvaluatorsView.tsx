@@ -197,7 +197,14 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
   };
 
   const headerActions = canRun && session && evaluators.length > 0 ? (
-    <Button variant="secondary" onClick={() => { setRunSingleEvaluatorId(undefined); setRunAllOpen(true); }} icon={PlayCircle}>
+    <Button
+      variant="secondary"
+      icon={PlayCircle}
+      iconOnly
+      onClick={() => { setRunSingleEvaluatorId(undefined); setRunAllOpen(true); }}
+      aria-label="Run all"
+      title="Run all"
+    >
       Run All
     </Button>
   ) : null;
@@ -235,8 +242,6 @@ export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps)
         onRestoreDefaults={isOwner ? handleRestoreDefaults : undefined}
         onToggleHeader={handleToggleHeader}
         isRestoringDefaults={isSeeding}
-        title="Evaluators"
-        description="Manage private and shared evaluators for Kaira and run selected evaluators against the current session."
         headerActions={headerActions}
         canCreate={canCreate}
         canEditOwned={canEdit}

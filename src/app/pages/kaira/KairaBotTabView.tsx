@@ -5,17 +5,19 @@
 
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useRef } from "react";
-import { LoadingState, Tabs } from "@/components/ui";
+import { LoadingState, PageSurface, Tabs } from "@/components/ui";
 import { ChatView } from "@/features/kaira/components/ChatView";
 import { TraceAnalysisView } from "@/features/kaira/components";
 import { KairaBotEvaluatorsView } from "@/features/kaira/components/KairaBotEvaluatorsView";
 import { useKairaChat } from "@/hooks";
 import { routes } from "@/config/routes";
+import { usePageMetadata } from "@/config/pageMetadata";
 
 export function KairaBotTabView() {
   const [searchParams] = useSearchParams();
   const { chatId: chatIdFromUrl } = useParams<{ chatId?: string }>();
   const navigate = useNavigate();
+  const { icon, title } = usePageMetadata("chat");
 
   const {
     currentSession,
@@ -161,13 +163,16 @@ export function KairaBotTabView() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    // Tabs act as the page header here, so suppress PageSurface's header row
+    // to avoid a duplicate title stacked above them.
+    <PageSurface icon={icon} title={title} showHeader={false}>
       <Tabs
         tabs={tabs}
         defaultTab={activeTab}
         onChange={handleTabChange}
         fillHeight
+        className="flex-1 min-h-0"
       />
-    </div>
+    </PageSurface>
   );
 }

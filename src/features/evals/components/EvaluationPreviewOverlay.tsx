@@ -1,8 +1,7 @@
-import { useState, useEffect, useId } from 'react';
+import { useId } from 'react';
 import { X, FileText, Code2, Variable } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, RightSlideOverShell } from '@/components/ui';
 import { cn } from '@/utils';
-import { useRightOverlay } from '@/hooks';
 import { resolvePrompt, type VariableContext } from '@/services/templates';
 import type { Listing, SchemaDefinition, EvaluationPrerequisites, AIEvaluation } from '@/types';
 
@@ -31,25 +30,6 @@ export function EvaluationPreviewOverlay({
   aiEval,
 }: EvaluationPreviewOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
-  const [isVisible, setIsVisible] = useState(false);
-
-  // Trigger slide-in animation after mount
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => setIsVisible(true));
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
 
   // Build variable context for proper resolution
   const variableContext: VariableContext = {
@@ -67,25 +47,13 @@ export function EvaluationPreviewOverlay({
   const variables = Array.from(new Set(variableMatches.map(v => v.replace(/[{}]/g, ''))));
 
   return (
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0"
-        )}
-      />
-
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-lg)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full"
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-lg)] max-w-[85vw]"
+      closeOnBackdropClick={false}
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <h2 id={titleId} className="text-lg font-semibold text-[var(--text-primary)]">
@@ -191,7 +159,6 @@ export function EvaluationPreviewOverlay({
             Close
           </Button>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }

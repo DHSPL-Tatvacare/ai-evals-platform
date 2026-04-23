@@ -1,8 +1,7 @@
 import { useState, useEffect, useId } from 'react';
 import { X, CheckCircle2, XCircle, Clock, AlertTriangle, Search } from 'lucide-react';
-import { Button, Skeleton, EmptyState } from '@/components/ui';
+import { Button, Skeleton, EmptyState, RightSlideOverShell } from '@/components/ui';
 import { cn, formatDate } from '@/utils';
-import { useRightOverlay } from '@/hooks';
 import { fetchEvalRuns } from '@/services/api/evalRunsApi';
 import type { EvalRun } from '@/types';
 
@@ -26,35 +25,18 @@ export function EvaluatorHistoryListOverlay({
   onSelectRun,
 }: EvaluatorHistoryListOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       loadRuns();
     }
   }, [isOpen, evaluatorId, listingId, statusFilter, page]);
-
-  // Trigger slide-in animation after mount
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => setIsVisible(true));
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -92,28 +74,14 @@ export function EvaluatorHistoryListOverlay({
     setPage(prev => prev + 1);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0"
-        )}
-      />
-
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-md)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full"
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-md)] max-w-[85vw]"
+      closeOnBackdropClick={false}
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div>
@@ -212,8 +180,7 @@ export function EvaluatorHistoryListOverlay({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }
 

@@ -18,6 +18,7 @@ import {
   Badge,
   Combobox,
   LLMConfigSection,
+  RightSlideOverShell,
 } from "@/components/ui";
 import type { ComboboxOption } from "@/components/ui";
 import { cn } from "@/utils";
@@ -30,7 +31,7 @@ import { SCRIPTS } from "@/constants/scripts";
 import { ModelSelector } from "@/features/settings/components/ModelSelector";
 import { useLLMSettingsStore, getProviderApiKey, hasProviderCredentials, LLM_PROVIDERS } from "@/stores";
 import type { LLMProvider } from "@/types";
-import { useNetworkStatus, useRightOverlay } from "@/hooks";
+import { useNetworkStatus } from "@/hooks";
 import type {
   Listing,
   AIEvaluation,
@@ -90,8 +91,6 @@ export function EvaluationOverlay({
   hasAudioBlob,
 }: EvaluationOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
-  const [isVisible, setIsVisible] = useState(false);
 
   const sourceType = (listing.sourceType === 'pending' ? 'upload' : listing.sourceType) || 'upload';
   const geminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
@@ -153,21 +152,6 @@ export function EvaluationOverlay({
       setSyncing(false);
     }
   }, [listing.id]);
-
-  // Trigger slide-in animation after mount
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => setIsVisible(true));
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = "unset"; };
-  }, [isOpen]);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -263,29 +247,13 @@ export function EvaluationOverlay({
     ];
   }, [isOnline, credentialsOk, isServiceAccount, effectiveApiKey, hasAudioBlob, listing.transcript?.segments?.length, sourceType]);
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0",
-        )}
-        onClick={onClose}
-      />
-
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-md)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full",
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-md)] max-w-[85vw]"
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <h2 id={titleId} className="text-lg font-semibold text-[var(--text-primary)]">
@@ -742,7 +710,6 @@ export function EvaluationOverlay({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }

@@ -170,6 +170,12 @@ SCHEMA_BOOTSTRAP_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_jobs_scheduled_job_created ON jobs (scheduled_job_id, created_at)",
     "ALTER TABLE source_sync_runs ADD COLUMN IF NOT EXISTS job_id UUID",
     "ALTER TABLE source_sync_runs ADD COLUMN IF NOT EXISTS is_scheduled_run BOOLEAN NOT NULL DEFAULT FALSE",
+    # Plan-purchase surface for synced leads. Only the name is materialized
+    # as a column (filter dropdown + table column need indexed access). The
+    # remaining plan/CGM/payment fields are derived at API-response time
+    # from ``raw_payload``.
+    "ALTER TABLE source_lead_records ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255)",
+    "CREATE INDEX IF NOT EXISTS idx_source_lead_records_tenant_app_plan_name ON source_lead_records (tenant_id, app_id, plan_name)",
     """
     DO $$
     BEGIN

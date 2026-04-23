@@ -5,8 +5,7 @@
 
 import { useState, useId } from 'react';
 import { X, Code, Copy, Check } from 'lucide-react';
-import { Button, EmptyState } from '@/components/ui';
-import { useRightOverlay } from '@/hooks';
+import { Button, EmptyState, RightSlideOverShell } from '@/components/ui';
 import type { KairaChatRequest, KairaChatResponse } from '@/types';
 
 interface ApiDebugOverlayProps {
@@ -23,10 +22,7 @@ export function ApiDebugOverlay({
   apiResponse,
 }: ApiDebugOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
   const [copiedSection, setCopiedSection] = useState<'request' | 'response' | null>(null);
-
-  if (!isOpen) return null;
 
   const hasData = apiRequest || apiResponse;
 
@@ -37,14 +33,13 @@ export function ApiDebugOverlay({
   };
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-[var(--z-overlay)] bg-black/30 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-
-      <div {...ariaProps} className="fixed inset-y-0 right-0 z-[calc(var(--z-overlay)+1)] w-[60vw] max-w-[900px] bg-[var(--bg-primary)] shadow-2xl animate-in slide-in-from-right duration-300">
-        <div className="h-full flex flex-col">
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[60vw] max-w-[900px]"
+      panelClassName="bg-[var(--bg-primary)]"
+    >
           {/* Header */}
           <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
             <h2 id={titleId} className="text-[16px] font-semibold text-[var(--text-primary)]">
@@ -131,8 +126,6 @@ export function ApiDebugOverlay({
               Close
             </Button>
           </div>
-        </div>
-      </div>
-    </>
+    </RightSlideOverShell>
   );
 }

@@ -1,10 +1,7 @@
-import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { type ReactNode, useCallback, useId, useState } from 'react';
 import { X } from 'lucide-react';
 
-import { Button, ConfirmDialog } from '@/components/ui';
-import { useRightOverlay } from '@/hooks';
-import { cn } from '@/utils';
+import { Button, ConfirmDialog, RightSlideOverShell } from '@/components/ui';
 
 interface SettingsSlideOverProps {
   isOpen: boolean;
@@ -36,19 +33,7 @@ export function SettingsSlideOver({
   footerContent,
 }: SettingsSlideOverProps) {
   const titleId = useId();
-  const [isVisible, setIsVisible] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    requestAnimationFrame(() => setIsVisible(true));
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = 'unset';
-      setIsVisible(false);
-      setShowCloseConfirm(false);
-    };
-  }, [isOpen]);
 
   const handleClose = useCallback(() => {
     if (isDirty && !isSubmitting) {
@@ -60,7 +45,7 @@ export function SettingsSlideOver({
 
   // Escape dismisses the confirm dialog first, then attempts to close the
   // slide-over (which re-opens the confirm when there are unsaved changes).
-  // Routed through useRightOverlay so only the topmost surface fires.
+  // Routed through the shell's onEscape so only the topmost surface fires.
   const handleEscape = useCallback(() => {
     if (showCloseConfirm) {
       setShowCloseConfirm(false);
@@ -69,28 +54,16 @@ export function SettingsSlideOver({
     handleClose();
   }, [showCloseConfirm, handleClose]);
 
-  const ariaProps = useRightOverlay(isOpen, { onClose: handleEscape, labelledBy: titleId });
-
-  if (!isOpen) return null;
-
-  return createPortal(
+  return (
     <>
-      <div
-        className={cn(
-          'fixed inset-0 z-[var(--z-overlay)] bg-[var(--bg-overlay)] backdrop-blur-[2px] transition-opacity duration-300',
-          isVisible ? 'opacity-100' : 'opacity-0',
-        )}
-        onClick={handleClose}
-      />
-
-      <div
-        {...ariaProps}
-        className={cn(
-          'fixed inset-y-0 right-0 z-[calc(var(--z-overlay)+1)] bg-[var(--bg-primary)] shadow-2xl flex flex-col',
-          'transform transition-transform duration-300 ease-out',
-          widthClassName,
-          isVisible ? 'translate-x-0' : 'translate-x-full',
-        )}
+      <RightSlideOverShell
+        isOpen={isOpen}
+        onClose={handleClose}
+        onEscape={handleEscape}
+        labelledBy={titleId}
+        widthClassName={widthClassName}
+        panelClassName="bg-[var(--bg-primary)]"
+        zIndexClassName="z-[var(--z-overlay)]"
       >
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
           <div>
@@ -135,7 +108,7 @@ export function SettingsSlideOver({
             )}
           </div>
         </div>
-      </div>
+      </RightSlideOverShell>
 
       <ConfirmDialog
         isOpen={showCloseConfirm}
@@ -146,7 +119,6 @@ export function SettingsSlideOver({
         confirmLabel="Discard"
         variant="danger"
       />
-    </>,
-    document.body,
+    </>
   );
 }

@@ -222,7 +222,7 @@ function LeadsTableContent({
     return () => clearTimeout(id);
   }, [searchInput, leadFilters.q]);
 
-  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${leadFilters.agents}|${leadFilters.stage.join(',')}|${leadFilters.condition.join(',')}|${leadFilters.mqlMin}|${leadFilters.city}|${leadFilters.prospectId}|${leadFilters.q.trim()}|${leadsPageSize}|${leadsPage}`;
+  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.prospectId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
 
   const appConfig = useAppConfig('inside-sales');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
@@ -234,7 +234,7 @@ function LeadsTableContent({
     () => buildCollectionFilterPills(leadDatasetConfig, leadFilters),
     [leadDatasetConfig, leadFilters],
   );
-  const filterButtonCount = Math.max(0, activeFilterCount - (leadFilters.q.trim().length > 0 ? 1 : 0));
+  const filterButtonCount = Math.max(0, activeFilterCount - ((leadFilters.q ?? '').trim().length > 0 ? 1 : 0));
 
   useEffect(() => {
     useLeadsStore.getState().loadLeads();
@@ -267,6 +267,20 @@ function LeadsTableContent({
       headerTooltip: 'Current CRM stage for the lead.',
       width: 'w-[140px]',
       render: (lead) => <StageBadge stage={lead.prospectStage} />,
+    },
+    {
+      key: 'plan',
+      header: 'Plan',
+      headerTooltip: 'Care plan purchased by this lead. Populated for converted / payment-received leads.',
+      width: 'min-w-[180px]',
+      render: (lead) => (
+        <span
+          className="truncate text-[var(--text-secondary)]"
+          title={lead.planName ?? undefined}
+        >
+          {lead.planName ?? '—'}
+        </span>
+      ),
     },
     {
       key: 'mql',
@@ -362,14 +376,13 @@ function LeadsTableContent({
       )}
 
       {leadsError ? (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <EmptyState
-            icon={Phone}
-            title="Failed to load leads"
-            description={leadsError}
-            action={{ label: 'Retry', onClick: () => useLeadsStore.getState().loadLeads() }}
-          />
-        </div>
+        <EmptyState
+          icon={Phone}
+          title="Failed to load leads"
+          description={leadsError}
+          action={{ label: 'Retry', onClick: () => useLeadsStore.getState().loadLeads() }}
+          fill
+        />
       ) : (
         <DataTable
           columns={columns}
@@ -481,10 +494,10 @@ export function InsideSalesListing() {
   const filterKey = [
     filters.dateFrom,
     filters.dateTo,
-    filters.agents.join(','),
-    filters.prospectId,
-    filters.direction,
-    filters.status,
+    (filters.agents ?? []).join(','),
+    (filters.prospectId ?? []).join(','),
+    filters.direction ?? '',
+    filters.status ?? '',
     filters.hasRecording ? 'recording' : '',
     filters.durationMin,
     filters.durationMax,
@@ -830,14 +843,13 @@ export function InsideSalesListing() {
       )}
 
       {error ? (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <EmptyState
-            icon={Phone}
-            title="Failed to load calls"
-            description={error}
-            action={{ label: 'Retry', onClick: () => useInsideSalesStore.getState().loadCalls() }}
-          />
-        </div>
+        <EmptyState
+          icon={Phone}
+          title="Failed to load calls"
+          description={error}
+          action={{ label: 'Retry', onClick: () => useInsideSalesStore.getState().loadCalls() }}
+          fill
+        />
       ) : (
         <DataTable
           columns={callColumns}
@@ -900,9 +912,11 @@ export function InsideSalesListing() {
         className="flex-1 min-h-0"
       />
 
-      {filterPanelOpen && (
-        <CallFilterPanel activeTab={activeTab} onClose={() => setFilterPanelOpen(false)} />
-      )}
+      <CallFilterPanel
+        isOpen={filterPanelOpen}
+        activeTab={activeTab}
+        onClose={() => setFilterPanelOpen(false)}
+      />
     </PageSurface>
   );
 }

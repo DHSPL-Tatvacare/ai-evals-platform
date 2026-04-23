@@ -58,6 +58,7 @@ export const PAGE_METADATA: Record<PageType, PageMetadataEntry> = {
   cost:               { icon: DollarSign,      title: 'Cost' },
   scheduledJobs:      { icon: CalendarClock,   title: 'Scheduled Jobs' },
   adminUsers:         { icon: Users,           title: 'Admin Users' },
+  chat:               { icon: MessagesSquare,  title: 'Chat' },
 };
 
 const LUCIDE_REGISTRY = LucideIcons as unknown as Record<string, LucideIcon>;

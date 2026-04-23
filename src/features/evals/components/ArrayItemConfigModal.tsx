@@ -1,8 +1,7 @@
 import { useState, useEffect, useId } from 'react';
 import { Plus, Trash2, X, ListPlus } from 'lucide-react';
-import { Button, Input, EmptyState, Select } from '@/components/ui';
+import { Button, Input, EmptyState, Select, RightSlideOverShell } from '@/components/ui';
 import { cn } from '@/utils';
-import { useRightOverlay } from '@/hooks';
 import type { ArrayItemSchema, ArrayItemProperty, ArrayItemType } from '@/types';
 
 interface ArrayItemConfigModalProps {
@@ -21,13 +20,6 @@ export function ArrayItemConfigModal({
   fieldName,
 }: ArrayItemConfigModalProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
-
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
 
   const [itemType, setItemType] = useState<ArrayItemType>('string');
   const [properties, setProperties] = useState<ArrayItemProperty[]>([]);
@@ -81,29 +73,14 @@ export function ArrayItemConfigModal({
     itemType !== 'object' ||
     (properties.length > 0 && properties.every((p) => p.key.trim()));
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[var(--z-dropdown)] flex">
-      {/* Backdrop */}
-      <div 
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isOpen ? "opacity-100" : "opacity-0"
-        )}
-        onClick={onClose}
-      />
-      
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-md)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isOpen ? "translate-x-0" : "translate-x-full"
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-md)] max-w-[85vw]"
+      zIndexClassName="z-[var(--z-dropdown)]"
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div>
@@ -280,7 +257,6 @@ export function ArrayItemConfigModal({
             Save Configuration
           </Button>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }

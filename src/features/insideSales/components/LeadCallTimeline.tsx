@@ -1,8 +1,9 @@
 /**
  * Call Timeline tab content — table of all calls for a lead.
  */
-import { Play } from 'lucide-react';
+import { Phone, Play } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { EmptyState } from '@/components/ui';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
@@ -50,9 +51,12 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
 
   if (callHistory.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center py-12 text-xs text-[var(--text-muted)]">
-        No call activity found.
-      </div>
+      <EmptyState
+        icon={Phone}
+        title="No call activity yet"
+        description="Calls to this lead will appear here once they're synced from LSQ."
+        fill
+      />
     );
   }
 

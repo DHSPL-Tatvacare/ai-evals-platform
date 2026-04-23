@@ -31,6 +31,7 @@ from app.schemas.inside_sales import (
     LeadEvalHistoryEntry,
     LeadListRecord,
     LeadListResponse,
+    LeadPlanPurchase,
 )
 from app.services.inside_sales_dataset_resolver import (
     InsideSalesCallFilters,
@@ -45,6 +46,7 @@ from app.services.inside_sales_queries import (
     get_collection_sync_status,
     list_call_agent_names_from_source,
     list_calls_from_source,
+    list_collection_suggestions,
     list_leads_from_source,
 )
 from app.services.inside_sales_sync import build_manual_refresh_job_params
@@ -53,6 +55,7 @@ from app.services.lsq_client import (
     LsqRateLimitError,
     LsqRequestError,
     normalize_activity,
+    extract_lead_plan_fields,
     fetch_lead_by_id,
     fetch_lead_activities_for_prospect,
     normalize_lead,
@@ -120,7 +123,7 @@ async def list_calls(
     page_size: int = Query(50, ge=1, le=500),
     scope: str = Query("page", pattern="^(page|all)$"),
     agents: str | None = Query(None, description="Comma-separated agent names"),
-    prospect_id: str | None = Query(None, description="Prospect ID substring"),
+    prospect_id: str | None = Query(None, description="Comma-separated prospect IDs; each is substring-matched"),
     direction: str | None = Query(None),
     status: str | None = Query(None),
     duration_min: int | None = Query(None, description="Min call duration in seconds (inclusive)"),
@@ -145,7 +148,7 @@ async def list_calls(
             date_from=date_from,
             date_to=date_to,
             agents=_parse_csv_query(agents),
-            prospect_id=prospect_id,
+            prospect_ids=_parse_csv_query(prospect_id),
             direction=direction,
             status=status,
             duration_min=duration_min,
@@ -256,8 +259,10 @@ async def list_leads(
     stage: str | None = Query(None, description="Comma-separated stage values"),
     mql_min: int | None = Query(None, ge=0, le=5, description="Minimum MQL score"),
     condition: str | None = Query(None, description="Comma-separated condition values"),
-    city: str | None = Query(None, description="City substring filter"),
-    prospect_id: str | None = Query(None, description="Filter by exact prospect ID"),
+    city: str | None = Query(None, description="Comma-separated cities; each is substring-matched"),
+    prospect_id: str | None = Query(None, description="Comma-separated prospect IDs; each is substring-matched"),
+    phone: str | None = Query(None, description="Comma-separated mobiles; digits-only compare per value"),
+    plan_name: str | None = Query(None, description="Comma-separated plan names; each is substring-matched"),
     q: str | None = Query(None, description="Substring search across first name, last name, phone"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
@@ -275,7 +280,9 @@ async def list_leads(
             mql_min=mql_min,
             condition=_parse_csv_query(condition),
             city=_parse_csv_query(city),
-            prospect_id=prospect_id,
+            prospect_ids=_parse_csv_query(prospect_id),
+            phones=_parse_csv_query(phone),
+            plan_names=_parse_csv_query(plan_name),
             q=q,
         ),
         page=page,
@@ -357,6 +364,38 @@ async def refresh_collection(
         sync_mode=str(normalized_params["sync_mode"]),
         status=job.status,
     )
+
+
+@router.get("/collections/{source_family}/suggestions")
+async def get_collection_suggestions(
+    source_family: str,
+    field: str = Query(..., description="Column to pull distinct values from"),
+    q: str = Query("", description="Optional substring filter on the values"),
+    limit: int = Query(20, ge=1, le=50),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Type-ahead suggestions for filter inputs.
+
+    Reads distinct values of ``field`` from the synced DB mirror, scoped to
+    ``tenant_id`` / ``app_id`` / ``source_family``. Never hits LSQ. The
+    ``field`` argument is whitelisted in ``list_collection_suggestions`` —
+    it cannot be steered to read arbitrary columns.
+    """
+    family = _validate_source_family(source_family)
+    try:
+        values = await list_collection_suggestions(
+            db,
+            tenant_id=auth.tenant_id,
+            app_id="inside-sales",
+            source_family=family,
+            field=field,
+            query=q,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"values": values}
 
 
 @router.get("/collections/{source_family}/status", response_model=CollectionSyncStatus)
@@ -553,4 +592,7 @@ async def get_lead_detail(
         call_history=call_history_records,
         history_truncated=history_truncated,
         eval_history=eval_history_list,
+        # Plan-purchase surface. Built from the same raw LSQ payload we
+        # already fetched (via GET Leads.GetById) — no extra round trips.
+        plan=LeadPlanPurchase.model_validate(extract_lead_plan_fields(raw)),
     )

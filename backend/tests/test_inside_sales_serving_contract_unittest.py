@@ -35,7 +35,7 @@ def test_calls_contract_keeps_serving_and_selection_roles_separate():
         "date_from",
         "date_to",
         "agents",
-        "prospect_id",
+        "prospect_ids",
         "direction",
         "status",
         "duration_min",

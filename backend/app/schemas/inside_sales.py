@@ -53,6 +53,35 @@ class LeadDetailResponse(CamelModel):
     cached: bool = False
 
 
+class LeadPlanPurchase(CamelModel):
+    """Plan-purchase surface derived from LSQ ``mx_*`` fields.
+
+    All optional — a lead in a pre-converted stage will have these null.
+    Values are stored on the ``source_lead_records.raw_payload`` JSONB
+    blob and extracted at API-response time.
+    """
+    plan_name: Optional[str] = None
+    duration_or_quantity: Optional[str] = None
+    program_price: Optional[str] = None
+    invoice_amount: Optional[str] = None
+    payment_id: Optional[str] = None
+    payment_date_and_time: Optional[str] = None
+    plan_assigned_at: Optional[str] = None
+    sign_up_date: Optional[str] = None
+    program_start_date: Optional[str] = None
+    program_end_date: Optional[str] = None
+    plan_includes_cgm: Optional[str] = None
+    cgm: Optional[str] = None
+    cgm_brand: Optional[str] = None
+    sensor_count: Optional[str] = None
+    transmitter_count: Optional[str] = None
+    bca_device: Optional[str] = None
+    nutraceuticals_sold: Optional[str] = None
+    sales_team: Optional[str] = None
+    device_awb_number: Optional[str] = None
+    lead_conversion_date: Optional[str] = None
+
+
 class LeadListRecord(CamelModel):
     prospect_id: str
     first_name: Optional[str] = None
@@ -78,6 +107,8 @@ class LeadListRecord(CamelModel):
     last_activity_on: Optional[str] = None
     source: Optional[str] = None
     source_campaign: Optional[str] = None
+    plan_name: Optional[str] = None
+    plan: LeadPlanPurchase = Field(default_factory=LeadPlanPurchase)
 
 
 class LeadListResponse(CamelModel):
@@ -177,3 +208,5 @@ class LeadDetailFullResponse(CamelModel):
     history_truncated: bool = False
     # Eval history
     eval_history: list[LeadEvalHistoryEntry] = Field(default_factory=list)
+    # Plan-purchase surface. Null fields for pre-converted leads.
+    plan: LeadPlanPurchase = Field(default_factory=LeadPlanPurchase)

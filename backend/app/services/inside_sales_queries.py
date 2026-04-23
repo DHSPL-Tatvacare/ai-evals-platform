@@ -22,6 +22,7 @@ from app.services.inside_sales_eval_linkage import (
     extract_inside_sales_eval_score,
     fetch_latest_eval_overlays,
 )
+from app.services.lsq_client import extract_lead_plan_fields
 
 INSIDE_SALES_STALE_AFTER = timedelta(minutes=30)
 
@@ -88,9 +89,10 @@ def _build_call_filter_clauses(
     if agent_names:
         clauses.append(SourceCallRecord.agent_name_normalized.in_(agent_names))
 
-    if filters.prospect_id:
+    call_prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
+    if call_prospect_ids:
         clauses.append(
-            SourceCallRecord.prospect_id.ilike(f"%{filters.prospect_id.strip()}%")
+            or_(*(SourceCallRecord.prospect_id.ilike(f"%{pid}%") for pid in call_prospect_ids))
         )
 
     if filters.direction:
@@ -211,9 +213,33 @@ def _build_lead_filter_clauses(
             or_(*(SourceLeadRecord.city_normalized.ilike(f"%{city}%") for city in cities))
         )
 
-    if filters.prospect_id:
+    prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
+    if prospect_ids:
         clauses.append(
-            SourceLeadRecord.prospect_id.ilike(f"%{filters.prospect_id.strip()}%")
+            or_(*(SourceLeadRecord.prospect_id.ilike(f"%{pid}%") for pid in prospect_ids))
+        )
+
+    phones = tuple(p.strip() for p in filters.phones if p.strip())
+    if phones:
+        # Digits-only compare so UI input like "+91 98-xxx" matches a stored
+        # "+919800000000". Keep raw ilike as fallback for non-digit chars.
+        phone_clauses = []
+        phone_col = func.regexp_replace(
+            func.coalesce(SourceLeadRecord.phone, ""), r"\D", "", "g"
+        )
+        for value in phones:
+            digits = "".join(ch for ch in value if ch.isdigit())
+            if digits:
+                phone_clauses.append(phone_col.ilike(f"%{digits}%"))
+            else:
+                phone_clauses.append(SourceLeadRecord.phone.ilike(f"%{value}%"))
+        if phone_clauses:
+            clauses.append(or_(*phone_clauses))
+
+    plan_names = tuple(name.strip() for name in filters.plan_names if name.strip())
+    if plan_names:
+        clauses.append(
+            or_(*(SourceLeadRecord.plan_name.ilike(f"%{name}%") for name in plan_names))
         )
 
     if filters.mql_min is not None:
@@ -329,6 +355,11 @@ def map_lead_listing_row(lead: SourceLeadRecord) -> dict[str, Any]:
         "lastActivityOn": _format_optional_response_datetime(lead.last_activity_on),
         "source": lead.source,
         "sourceCampaign": lead.source_campaign,
+        "planName": lead.plan_name,
+        # Full plan-purchase surface. Read from ``raw_payload`` rather than
+        # per-field columns — every plan attribute other than ``plan_name``
+        # is derived at response time.
+        "plan": extract_lead_plan_fields(lead.raw_payload),
     }
 
 
@@ -539,6 +570,79 @@ async def get_collection_freshness(
         "syncInProgress": sync_in_progress is not None,
         "stale": stale,
     }
+
+
+_SUGGESTION_FIELDS: dict[tuple[str, str], Any] = {
+    ("leads", "prospect_id"): SourceLeadRecord.prospect_id,
+    ("leads", "phone"): SourceLeadRecord.phone,
+    ("leads", "agent_name"): SourceLeadRecord.agent_name,
+    ("leads", "city"): SourceLeadRecord.city,
+    ("leads", "stage"): SourceLeadRecord.prospect_stage,
+    ("leads", "plan_name"): SourceLeadRecord.plan_name,
+    ("calls", "prospect_id"): SourceCallRecord.prospect_id,
+    ("calls", "agent_name"): SourceCallRecord.agent_name,
+}
+
+
+def _suggestion_model_for(source_family: str) -> Any:
+    if source_family == "leads":
+        return SourceLeadRecord
+    if source_family == "calls":
+        return SourceCallRecord
+    raise ValueError(f"unsupported source_family for suggestions: {source_family!r}")
+
+
+async def list_collection_suggestions(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    source_family: str,
+    field: str,
+    query: str,
+    limit: int,
+) -> list[str]:
+    """Distinct values of ``field`` for the collection, prefix-filtered by
+    ``query``, tenant/app-scoped. Used to feed type-ahead filter dropdowns.
+
+    ``field`` is validated against a fixed whitelist so this can never be
+    steered into reading arbitrary columns.
+    """
+    column = _SUGGESTION_FIELDS.get((source_family, field))
+    if column is None:
+        raise ValueError(
+            f"unsupported suggestion field: source_family={source_family!r}, field={field!r}"
+        )
+    model = _suggestion_model_for(source_family)
+
+    stmt = (
+        select(column)
+        .where(
+            model.tenant_id == tenant_id,
+            model.app_id == app_id,
+            column.is_not(None),
+            column != "",
+        )
+        .distinct()
+        .order_by(column)
+        .limit(limit)
+    )
+
+    needle = (query or "").strip()
+    if needle:
+        if field == "phone":
+            digits = "".join(ch for ch in needle if ch.isdigit())
+            if digits:
+                stmt = stmt.where(
+                    func.regexp_replace(column, r"\D", "", "g").ilike(f"%{digits}%")
+                )
+            else:
+                stmt = stmt.where(column.ilike(f"%{needle}%"))
+        else:
+            stmt = stmt.where(column.ilike(f"%{needle}%"))
+
+    result = await db.execute(stmt)
+    return [value for value in result.scalars().all() if value]
 
 
 async def prune_rows_older_than(

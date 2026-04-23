@@ -267,7 +267,9 @@ async def run_inside_sales_evaluation(
                 date_from=call_selection.get("date_from", ""),
                 date_to=call_selection.get("date_to", ""),
                 agents=tuple(agent_list),
-                prospect_id=call_selection.get("prospect_id"),
+                prospect_ids=(
+                    (pid,) if (pid := call_selection.get("prospect_id")) else ()
+                ),
                 direction=call_selection.get("direction"),
                 status=call_selection.get("status"),
                 duration_min=parsed_duration_min,

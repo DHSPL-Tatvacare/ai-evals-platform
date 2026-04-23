@@ -186,7 +186,14 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
   };
 
   const headerActions = canRun && evaluators.length > 0 ? (
-    <Button variant="secondary" onClick={() => { setRunSingleEvaluatorId(undefined); setRunAllOpen(true); }} icon={PlayCircle}>
+    <Button
+      variant="secondary"
+      icon={PlayCircle}
+      iconOnly
+      onClick={() => { setRunSingleEvaluatorId(undefined); setRunAllOpen(true); }}
+      aria-label="Run all"
+      title="Run all"
+    >
       Run All
     </Button>
   ) : null;
@@ -218,8 +225,6 @@ export function EvaluatorsView({ listing }: EvaluatorsViewProps) {
         onRestoreDefaults={supportsListingSeedDefaults && isOwner ? handleRestoreDefaults : undefined}
         onToggleHeader={handleToggleHeader}
         isRestoringDefaults={isSeeding}
-        title="Evaluators"
-        description="Run private and shared evaluators against this listing without leaving the transcript workflow."
         headerActions={headerActions}
         canCreate={canCreate}
         canEditOwned={canEdit}

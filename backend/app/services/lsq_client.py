@@ -96,8 +96,73 @@ _LEAD_FIELDS_CSV = (
     "mx_Preferred_Time_for_Call_with_Health_Counsellor,"
     "mx_RNR_Count,mx_Answered_Call_Count,mx_Lead_Status,"
     "CreatedOn,ProspectActivityDate_Min,ProspectActivityDate_Max,"
-    "OwnerIdName,Source,SourceCampaign"
+    "OwnerIdName,Source,SourceCampaign,"
+    # Plan-purchase surface. These fields populate ``raw_payload`` on
+    # sync so the leads list API can derive the ``plan`` object without
+    # making a per-lead call to LSQ.
+    "LeadConversionDate,"
+    "mx_Plan_Name,mx_Duration_or_Quantity,mx_program_price,mx1_Invoice_amount,"
+    "mx_Payment_ID,mx_Payment_Date_and_Time,mx_Assign_plan_Date_Time,"
+    "mx_Sign_Up_Date,mx_Program_Start_Date,mx_Program_End_Date,"
+    "mx_Plan_includes_CGM,mx_CGM,mx_CGM_Brand,"
+    "mx_Sensor_Count,mx_Transmitter_count,"
+    "mx_BCA_Device,mx_Nutraceuticals_Sold,mx_Sales_Team,"
+    "mx_AWB_number_of_Device"
 )
+
+# Mapping from raw LSQ field names to the clean camelCase keys exposed on
+# our API. Kept here (not in inside_sales_queries) because the source of
+# truth for the field names is the LSQ payload shape.
+#
+# Anything listed here is considered part of the "plan purchased" surface
+# and will appear in the structured ``plan`` object returned by the leads
+# API + lead-detail API.
+LEAD_PLAN_FIELDS: list[tuple[str, str]] = [
+    ("planName", "mx_Plan_Name"),
+    ("durationOrQuantity", "mx_Duration_or_Quantity"),
+    ("programPrice", "mx_program_price"),
+    ("invoiceAmount", "mx1_Invoice_amount"),
+    ("paymentId", "mx_Payment_ID"),
+    ("paymentDateAndTime", "mx_Payment_Date_and_Time"),
+    ("planAssignedAt", "mx_Assign_plan_Date_Time"),
+    ("signUpDate", "mx_Sign_Up_Date"),
+    ("programStartDate", "mx_Program_Start_Date"),
+    ("programEndDate", "mx_Program_End_Date"),
+    ("planIncludesCgm", "mx_Plan_includes_CGM"),
+    ("cgm", "mx_CGM"),
+    ("cgmBrand", "mx_CGM_Brand"),
+    ("sensorCount", "mx_Sensor_Count"),
+    ("transmitterCount", "mx_Transmitter_count"),
+    ("bcaDevice", "mx_BCA_Device"),
+    ("nutraceuticalsSold", "mx_Nutraceuticals_Sold"),
+    ("salesTeam", "mx_Sales_Team"),
+    ("deviceAwbNumber", "mx_AWB_number_of_Device"),
+    ("leadConversionDate", "LeadConversionDate"),
+]
+
+
+def extract_lead_plan_fields(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract the ``plan`` object from a raw LSQ lead payload.
+
+    Pure function: reads the raw payload, returns a new dict keyed by
+    clean camelCase names. Empty / whitespace / null values become
+    ``None`` so the UI can reliably render em-dashes.
+    """
+    if not raw:
+        return {entry[0]: None for entry in LEAD_PLAN_FIELDS}
+
+    def _clean(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    out: dict[str, Any] = {}
+    for clean_key, raw_key in LEAD_PLAN_FIELDS:
+        out[clean_key] = _clean(raw.get(raw_key))
+    return out
 
 LSQ_BASE_URL = os.getenv("LSQ_BASE_URL", "https://api-in21.leadsquared.com/v2")
 LSQ_ACCESS_KEY = os.getenv("LSQ_ACCESS_KEY", "")
@@ -567,6 +632,10 @@ def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
         "lastActivityOn": (raw.get("ProspectActivityDate_Max") or "").split(".")[0] or None,
         "source": raw.get("Source"),
         "sourceCampaign": raw.get("SourceCampaign"),
+        # Plan-purchase surface. ``planName`` lands in its own indexed
+        # column; the rest of the plan object is derived from raw_payload
+        # via ``extract_lead_plan_fields`` at API-response time.
+        "planName": raw.get("mx_Plan_Name"),
         # MQL input fields (passed through for compute_mql_score)
         "mx_Age_Group": raw.get("mx_Age_Group"),
         "mx_City": raw.get("mx_City"),

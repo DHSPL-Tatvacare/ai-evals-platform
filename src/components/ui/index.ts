@@ -1,6 +1,7 @@
 export { Button } from './Button';
 export { Input } from './Input';
 export { Modal } from './Modal';
+export { RightSlideOverShell } from './RightSlideOverShell';
 export { Tabs } from './Tabs';
 export { useTabsHeaderActions } from './TabsHeaderActionsContext';
 export { Card } from './Card';

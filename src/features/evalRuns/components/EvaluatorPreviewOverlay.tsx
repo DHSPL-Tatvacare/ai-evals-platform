@@ -4,11 +4,10 @@
  * Renders in a portal so it stacks above parent overlays like BatchCustomEvaluatorPicker.
  */
 
-import { useState, useEffect, useId } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useId } from 'react';
 import { X, Copy, Check } from 'lucide-react';
 import { cn } from '@/utils';
-import { useRightOverlay } from '@/hooks';
+import { RightSlideOverShell } from '@/components/ui';
 import type { EvaluatorDefinition } from '@/types';
 import type { EvaluatorToggles } from './EvaluatorToggleStep';
 
@@ -325,21 +324,6 @@ export function EvaluatorPreviewOverlay({
   builtinKey,
 }: EvaluatorPreviewOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    let frameId = 0;
-    if (isOpen) {
-      frameId = requestAnimationFrame(() => setIsVisible(true));
-    } else {
-      frameId = requestAnimationFrame(() => setIsVisible(false));
-    }
-
-    return () => cancelAnimationFrame(frameId);
-  }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const isBuiltin = !!builtinKey;
   const builtin = builtinKey ? BUILTIN_EVALUATOR_DETAILS[builtinKey] : null;
@@ -349,27 +333,15 @@ export function EvaluatorPreviewOverlay({
   const promptText = isBuiltin ? builtin!.prompt : evaluator?.prompt ?? '';
   const typeBadge = isBuiltin ? 'Built-in' : 'Custom';
 
-  const content = (
-    <div className="fixed inset-0 z-[var(--z-dropdown)] flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          'absolute inset-0 bg-black/20 backdrop-blur-[2px] transition-opacity duration-300',
-          isVisible ? 'opacity-100' : 'opacity-0',
-        )}
-        onClick={onClose}
-      />
-
-      {/* Panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          'ml-auto relative z-10 h-full w-[var(--overlay-width-md)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden',
-          'flex flex-col',
-          'transform transition-transform duration-300 ease-out',
-          isVisible ? 'translate-x-0' : 'translate-x-full',
-        )}
-      >
+  return (
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-md)] max-w-[85vw]"
+      zIndexClassName="z-[var(--z-dropdown)]"
+      backdropClassName="bg-black/20 backdrop-blur-[2px]"
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3 min-w-0">
@@ -501,9 +473,6 @@ export function EvaluatorPreviewOverlay({
             )}
           </section>
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
-
-  return createPortal(content, document.body);
 }

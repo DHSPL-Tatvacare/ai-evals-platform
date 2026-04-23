@@ -11,11 +11,22 @@ interface EmptyStateProps {
   /** Custom content rendered below the description (alternative to `action`) */
   children?: ReactNode;
   className?: string;
-  /** Compact variant with smaller icon and less padding — for tables & inline sections */
+  /**
+   * Compact variant with smaller icon and less padding — for tables & inline
+   * sections. When `compact` is true, the component renders inline (no fill
+   * wrapper) even if `fill` is requested.
+   */
   compact?: boolean;
   /** Suppress the dashed border wrapper — use when rendered inside another bordered container. */
   bordered?: boolean;
-  /** Fill available space and center the state in both axes. */
+  /**
+   * Fill available space and center the state in both axes. Opt-in because
+   * most call sites want inline rendering inside their containers.
+   *
+   * When `fill` is true the wrapper uses `flex-1` (activates inside flex
+   * columns) AND a `min-h-[...]` fallback so centering still works even
+   * when the ancestor chain does not hand down a bounded height.
+   */
   fill?: boolean;
 }
 
@@ -30,6 +41,8 @@ export function EmptyState({
   bordered = true,
   fill = false,
 }: EmptyStateProps) {
+  const shouldFill = fill;
+
   const content = (
     <div
       className={cn(
@@ -71,8 +84,20 @@ export function EmptyState({
     </div>
   );
 
-  if (fill) {
-    return <div className="flex min-h-0 flex-1 items-center justify-center">{content}</div>;
+  if (shouldFill) {
+    // `flex-1` activates when the parent is a flex column that gives us room.
+    // The `min-h-[...]` floor is the safety net — centering still works even
+    // when the ancestor chain does not hand down a bounded height.
+    return (
+      <div
+        className={cn(
+          'flex flex-1 items-center justify-center self-stretch w-full',
+          compact ? 'min-h-[200px]' : 'min-h-[360px]',
+        )}
+      >
+        {content}
+      </div>
+    );
   }
 
   return content;

@@ -126,6 +126,10 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prospect_stage: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
     prospect_stage_normalized: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Plan-purchase surface. ``plan_name`` is indexed (filter dropdown + table
+    # column). The remaining plan/CGM/payment fields are read out of
+    # ``raw_payload`` at API-response time — no per-field columns.
+    plan_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     city: Mapped[str | None] = mapped_column(String(120), nullable=True)
     city_normalized: Mapped[str | None] = mapped_column(String(120), nullable=True)
     age_group: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -166,6 +170,7 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
         Index("idx_source_lead_records_tenant_app_city", "tenant_id", "app_id", "city_normalized"),
         Index("idx_source_lead_records_tenant_app_condition", "tenant_id", "app_id", "condition_normalized"),
         Index("idx_source_lead_records_tenant_app_mql", "tenant_id", "app_id", "mql_score"),
+        Index("idx_source_lead_records_tenant_app_plan_name", "tenant_id", "app_id", "plan_name"),
     )
 
 

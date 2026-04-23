@@ -1,10 +1,8 @@
-import { useState, useEffect, useId } from 'react';
+import { useState, useId } from 'react';
 import { X, Copy, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, RightSlideOverShell } from '@/components/ui';
 import { DynamicFieldsDisplay } from './DynamicFieldsDisplay';
 import { formatDate } from '@/utils';
-import { cn } from '@/utils';
-import { useRightOverlay } from '@/hooks';
 import type { EvalRun } from '@/types';
 
 interface EvaluatorHistoryDetailsOverlayProps {
@@ -19,24 +17,7 @@ export function EvaluatorHistoryDetailsOverlay({
   onClose,
 }: EvaluatorHistoryDetailsOverlayProps) {
   const titleId = useId();
-  const ariaProps = useRightOverlay(isOpen, { onClose, labelledBy: titleId });
   const [copied, setCopied] = useState<'input' | 'output' | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  // Trigger slide-in animation after mount
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => setIsVisible(true));
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
 
   const handleCopy = async (data: unknown, type: 'input' | 'output') => {
     try {
@@ -61,28 +42,14 @@ export function EvaluatorHistoryDetailsOverlay({
 
   const outputSchema = (run.config as Record<string, unknown>)?.output_schema;
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div
-        className={cn(
-          "absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity duration-300",
-          isVisible ? "opacity-100" : "opacity-0"
-        )}
-      />
-
-      {/* Slide-in panel */}
-      <div
-        {...ariaProps}
-        className={cn(
-          "ml-auto relative z-10 h-full w-[var(--overlay-width-md)] max-w-[85vw] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden",
-          "flex flex-col",
-          "transform transition-transform duration-300 ease-out",
-          isVisible ? "translate-x-0" : "translate-x-full"
-        )}
-      >
+    <RightSlideOverShell
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      widthClassName="w-[var(--overlay-width-md)] max-w-[85vw]"
+      closeOnBackdropClick={false}
+    >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
@@ -229,7 +196,6 @@ export function EvaluatorHistoryDetailsOverlay({
             </section>
           )}
         </div>
-      </div>
-    </div>
+    </RightSlideOverShell>
   );
 }
