@@ -91,7 +91,7 @@ export function ChatChartCard({ part, appId, sessionId, onSaved }: ChatChartCard
           chartConfig: {
             canonical: {
               kind: 'chart',
-              spec: chartPayload.spec as unknown as VegaLiteSpec,
+              spec: chartPayload.spec,
             },
             renderer: {
               type: props.type,

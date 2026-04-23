@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
-import { Spinner } from '@/components/ui';
+import { LoadingState } from '@/components/ui';
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -10,7 +10,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <Spinner size="lg" />
+        <LoadingState fill={false} />
       </div>
     );
   }

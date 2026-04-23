@@ -167,6 +167,7 @@ export function AppEvaluatorsPage({
 
   const surfaceActions = surface ? (
     <>
+      {extraHeaderActions}
       {showRestore && (
         <Button variant="secondary" onClick={handleRestoreDefaults} isLoading={isSeeding}>
           Restore Defaults

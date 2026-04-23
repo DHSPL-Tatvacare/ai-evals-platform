@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Upload } from 'lucide-react';
+import { FileText, Upload } from 'lucide-react';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { Button } from '@/components/ui';
 import { AppEvaluatorsPage } from '@/features/evals';
@@ -26,6 +26,7 @@ export function InsideSalesEvaluators() {
   return (
     <>
       <AppEvaluatorsPage
+        surface={{ icon: FileText, title: 'Evaluators' }}
         extraHeaderActions={renderImportButton()}
         extraEmptyStateActions={renderImportButton()}
         onOpenEvaluator={(evaluator) => navigate(routes.insideSales.evaluatorDetail(evaluator.id))}

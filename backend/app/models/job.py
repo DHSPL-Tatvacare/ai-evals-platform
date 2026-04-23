@@ -41,6 +41,11 @@ class Job(Base, TenantUserMixin):
     dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dead_letter_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     params: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Phase 7: generic submission-surface metadata. Jobs submitted through the
+    # Sherlock harness carry ``{surface: 'sherlock', session_id, turn_id}`` so
+    # the next turn's context loader can find them without a Sherlock-specific
+    # FK on the platform jobs schema.
+    submission_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     progress: Mapped[dict] = mapped_column(JSON, default=lambda: {"current": 0, "total": 0, "message": ""})
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

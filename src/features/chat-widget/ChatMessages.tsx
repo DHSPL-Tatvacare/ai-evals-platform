@@ -15,6 +15,7 @@ import {
 import { BlueprintCard } from './components/BlueprintCard';
 import { ChatChartCard } from './components/ChatChartCard';
 import { EmptyState } from './components/EmptyState';
+import { JobBadge } from './components/JobBadge';
 import { SaveToast } from './components/SaveToast';
 import { ThinkingIndicator } from './components/ThinkingIndicator';
 import { ToolGroup } from './components/ToolGroup';
@@ -291,6 +292,23 @@ function renderAssistantParts(
 
     if (isSaveToastPart(part)) {
       blocks.push(<SaveToast key={`${message.id}-toast-${index}`} part={part} />);
+      continue;
+    }
+
+    if (part.type === 'job-badge') {
+      blocks.push(
+        <JobBadge
+          key={`${message.id}-job-${part.jobId}`}
+          part={part}
+          onStatusChange={(next) => {
+            updateMessagePart(
+              message.id,
+              (candidate) => candidate === part,
+              { ...part, status: next.status, resultHref: next.resultHref ?? part.resultHref },
+            );
+          }}
+        />,
+      );
     }
   }
 

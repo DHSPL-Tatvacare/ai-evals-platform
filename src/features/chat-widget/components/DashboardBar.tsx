@@ -146,7 +146,7 @@ export function DashboardBar({
           chartConfig: {
             canonical: {
               kind: 'chart',
-              spec: payload.spec as unknown as VegaLiteSpec,
+              spec: payload.spec,
             },
             renderer: {
               type: props.type,

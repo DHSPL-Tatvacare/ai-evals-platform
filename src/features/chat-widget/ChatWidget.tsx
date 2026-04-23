@@ -36,9 +36,11 @@ const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
 // The expanded widget owns a mutable pos (via drag); the collapsed FAB always renders here.
 const DEFAULT_POS = { bottom: 24, right: 24 };
 const DEFAULT_SIZE = { width: 504, height: 672 };
-type Cubic = [number, number, number, number];
-const SHARED_EASE: Cubic = [0.22, 1, 0.36, 1];
-const SCALE_TRANSITION = { duration: 0.18, ease: SHARED_EASE };
+// Open/close transitions are anchored to the FAB's bottom-right corner so the
+// widget appears to bloom from where the FAB sits. No shape interpolation —
+// scale + opacity only, fast spring for the bloom and a quick fade for the FAB.
+const FAB_FADE = { duration: 0.12, ease: [0.4, 0, 1, 1] as [number, number, number, number] };
+const WIDGET_BLOOM = { type: 'spring' as const, stiffness: 480, damping: 36, mass: 0.7 };
 
 interface WidgetLayout {
   pos: { bottom: number; right: number };
@@ -262,15 +264,15 @@ export function ChatWidget() {
   const settingsPath = settingsRouteForApp(currentApp);
 
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="wait">
       {!open ? (
         <motion.button
           key="sherlock-fab"
           onClick={toggle}
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.85 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={SCALE_TRANSITION}
+          exit={{ opacity: 0, scale: 0.85 }}
+          transition={FAB_FADE}
           whileHover={{ scale: 1.08 }}
           style={{
             bottom: DEFAULT_POS.bottom,
@@ -303,10 +305,10 @@ export function ChatWidget() {
           role="dialog"
           aria-modal="false"
           aria-labelledby={titleId}
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.85 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={SCALE_TRANSITION}
+          exit={{ opacity: 0, scale: 0.85 }}
+          transition={WIDGET_BLOOM}
           onKeyDown={(e) => {
             if (e.key === 'Escape' && view === 'history') {
               e.stopPropagation();

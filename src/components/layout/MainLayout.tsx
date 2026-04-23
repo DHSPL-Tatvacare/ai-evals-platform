@@ -98,7 +98,15 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   const miniPlayerOpen = useMiniPlayerStore((s) => s.isOpen);
 
-  const surfaceRoutes = ['/kaira/runs', '/kaira/evaluators', '/kaira/threads'];
+  const surfaceRoutes = [
+    '/kaira/runs',
+    '/kaira/evaluators',
+    '/kaira/threads',
+    '/runs',
+    '/evaluators',
+    '/inside-sales/runs',
+    '/inside-sales/evaluators',
+  ];
   const isSurfaceRoute = surfaceRoutes.some((p) => location.pathname.startsWith(p));
 
   return (

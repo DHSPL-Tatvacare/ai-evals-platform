@@ -8,7 +8,7 @@ import {
   VoiceRxRunList,
   VoiceRxRunDetail,
 } from "@/features/voiceRx";
-import { AppEvaluatorsPage } from '@/features/evals';
+import { VoiceRxEvaluatorsPage } from "./pages/voiceRx";
 import {
   KairaBotSettingsPage,
   TagManagementPage,
@@ -97,7 +97,7 @@ export function Router() {
             />
             <Route
               path={routes.voiceRx.evaluators}
-              element={<AppEvaluatorsPage />}
+              element={<VoiceRxEvaluatorsPage />}
             />
             <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
             <Route path={routes.voiceRx.runs} element={<VoiceRxRunList />} />

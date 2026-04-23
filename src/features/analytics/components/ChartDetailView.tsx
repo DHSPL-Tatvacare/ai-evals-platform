@@ -8,7 +8,9 @@ import { ChartRenderer } from './ChartRenderer';
 import { deriveChartLayout } from '../chartLayout';
 import { useMeasuredWidth } from '../useMeasuredWidth';
 import { vegaLiteToRecharts } from '../vegaLiteToRecharts';
+import { toValidatedChartPayload } from '../chartReplayValidation';
 import type { SavedChart } from '../types';
+import type { VegaLiteSpec } from '@/features/chat-widget/types';
 
 interface ChartDetailViewProps {
   chart: SavedChart;
@@ -229,10 +231,15 @@ export function ChartDetailView({ chart, onBack, onDelete, onUpdate }: ChartDeta
         ) : (
           <div ref={chartBodyRef} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] p-6">
             {(() => {
+              // Phase 6 §743: replay path must validate through the
+              // generated chart-contract validator before rendering. A
+              // failed validation falls back to the stored renderer
+              // instead of silently trusting a shape-checked payload.
               let replayProps: { type: string; data: Record<string, unknown>[]; xKey: string; yKey?: string; seriesKeys?: string[]; xLabel?: string; yLabel?: string } | null = null;
-              if (chart.chartConfig.canonical?.kind === 'chart') {
+              const validated = toValidatedChartPayload(chart.chartConfig.canonical, data);
+              if (validated !== null) {
                 try {
-                  replayProps = vegaLiteToRecharts(chart.chartConfig.canonical.spec, data);
+                  replayProps = vegaLiteToRecharts(validated.spec as unknown as VegaLiteSpec, validated.data);
                 } catch {
                   replayProps = null;
                 }

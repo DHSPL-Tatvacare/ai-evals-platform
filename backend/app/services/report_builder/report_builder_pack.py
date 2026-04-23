@@ -300,6 +300,12 @@ class ReportBuilderPack:
             return self._bridge.build_outcome(tool_name, raw_result)
         return Outcome()
 
+    def describe_job(self, job: Any) -> str:
+        """Phase 7: report-builder-pack rendering of a pending platform job."""
+        from app.services.chat_engine.capability_pack import render_job_line
+
+        return render_job_line(job)
+
     # ---- accessors used by the tool-description generator ----
 
     def output_schema(self, tool_name: str) -> type[BaseModel] | None:

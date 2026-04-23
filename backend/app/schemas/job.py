@@ -14,6 +14,10 @@ class JobCreate(CamelModel):
     params: dict = {}
     status: str = "queued"
     progress: dict = {"current": 0, "total": 0, "message": ""}
+    # Phase 7: generic submission-surface metadata round-tripped verbatim.
+    # Sherlock sets ``{surface, session_id, turn_id}`` via
+    # ``submit_pack_job``; other surfaces MAY leave it ``None``.
+    submission_context: Optional[dict] = None
 
 
 class JobUpdate(CamelModel):
@@ -36,6 +40,7 @@ class JobResponse(CamelORMModel):
     attempt_count: int
     max_attempts: int
     params: dict
+    submission_context: Optional[dict] = None
     result: Optional[dict] = None
     progress: dict
     error_message: Optional[str] = None

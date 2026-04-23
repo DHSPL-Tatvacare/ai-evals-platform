@@ -8,6 +8,8 @@ import { deriveChartLayout } from '../chartLayout';
 import { useMeasuredWidth } from '../useMeasuredWidth';
 import { vegaLiteToRecharts } from '../vegaLiteToRecharts';
 import type { DashboardDataResponse, SavedChart } from '../types';
+import { toValidatedChartPayload } from '../chartReplayValidation';
+import type { VegaLiteSpec } from '@/features/chat-widget/types';
 
 type DashboardChartEntry = DashboardDataResponse['charts'][number];
 
@@ -19,10 +21,14 @@ function DashboardEntryChart({ entry }: { entry: DashboardChartEntry }) {
 
   const surface = entry.width === 'full' ? 'dashboard-full' : 'dashboard-half';
   const renderer = config.renderer;
+  // Phase 6 §743: validate the stored canonical through the generated
+  // validator before replay. Invalid payloads drop to the renderer
+  // fallback rather than getting trusted on a shape check.
   let replayed = null as ReturnType<typeof vegaLiteToRecharts> | null;
-  if (config.canonical?.kind === 'chart') {
+  const validated = toValidatedChartPayload(config.canonical, rows);
+  if (validated !== null) {
     try {
-      replayed = vegaLiteToRecharts(config.canonical.spec, rows);
+      replayed = vegaLiteToRecharts(validated.spec as unknown as VegaLiteSpec, validated.data);
     } catch {
       replayed = null;
     }

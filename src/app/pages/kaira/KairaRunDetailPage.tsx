@@ -1,4 +1,4 @@
-import { FileText } from 'lucide-react';
+import { ListChecks } from 'lucide-react';
 import { routes } from '@/config/routes';
 import { EvalRunDetail } from '@/features/evalRuns';
 
@@ -6,7 +6,7 @@ export function KairaRunDetailPage() {
   return (
     <EvalRunDetail
       surface={{
-        icon: FileText,
+        icon: ListChecks,
         back: { to: routes.kaira.runs, label: 'Runs' },
       }}
     />

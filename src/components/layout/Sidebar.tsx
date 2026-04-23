@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Plus,
   PanelLeftClose,
@@ -254,143 +255,164 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
     );
   };
 
-  // Collapsed sidebar
-  if (sidebarCollapsed) {
-    return (
-      <>
-        <aside className="flex h-screen w-14 flex-col bg-[var(--bg-secondary)]">
-          <div className="flex h-14 items-center justify-center">
-            <button
-              onClick={toggleSidebar}
-              className="rounded-md p-2 text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-              title="Expand sidebar"
-            >
-              <PanelLeft className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="flex-1 flex flex-col items-center py-3 gap-2">
-            {renderNewAction('collapsed')}
-
-            <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
-            {navItems.map((item) => (
-              <CollapsedNavLink
-                key={item.to}
-                to={item.to}
-                icon={item.icon}
-                title={item.label}
-              />
-            ))}
-          </div>
-          {user && (
-            <div className="p-2">
-              <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    className="flex h-9 w-9 items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--interactive-secondary)]"
-                    title={user.displayName}
-                  >
-                    <UserAvatar displayName={user.displayName} />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent side="right" align="end" className="w-[220px] p-1">
-                  <UserMenu
-                    settingsPath={settingsPath}
-                    isSettingsActive={isSettingsActive}
-                    canEditConfiguration={canEditConfiguration}
-                    isGuideActive={isGuideActive}
-                    onLogout={logout}
-                    onChangePassword={() => {
-                      setUserMenuOpen(false);
-                      setIsChangePasswordOpen(true);
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-          )}
-        </aside>
-        <ChangePasswordDialog
-          isOpen={isChangePasswordOpen}
-          onClose={() => setIsChangePasswordOpen(false)}
-        />
-      </>
-    );
-  }
+  // App content key for the AnimatePresence crossfade — changes when the user
+  // switches apps or enters/leaves admin view.
+  const appContentKey = isAdminView
+    ? 'admin'
+    : isInsideSales
+      ? 'inside-sales'
+      : isKairaBot
+        ? 'kaira-bot'
+        : 'voice-rx';
 
   return (
-    <aside className="flex h-screen w-[280px] flex-col bg-[var(--bg-secondary)]">
-      <div className="flex h-14 items-center justify-between px-4">
-        <AppSwitcher />
-        <div className="flex items-center gap-1">
-          {renderNewAction('expanded')}
-          <button
-            onClick={toggleSidebar}
-            className="ml-1 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-            title="Collapse sidebar"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Conditional content based on app */}
-      {isAdminView ? (
-        <AdminSidebarContent items={adminNavItems} />
-      ) : isInsideSales ? (
-        <InsideSalesSidebarContent />
-      ) : isKairaBot ? (
-        <KairaSidebarContent
-          searchPlaceholder={appMetadata.searchPlaceholder}
-        />
-      ) : (
-        <VoiceRxSidebarContent
-          searchPlaceholder={appMetadata.searchPlaceholder}
-        />
-      )}
-
-      {/* Bottom: single user row → popover with all options */}
-      {user && (
-        <div className="mt-auto p-2">
-          <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
-            <PopoverTrigger asChild>
+    <>
+      <motion.aside
+        animate={{ width: sidebarCollapsed ? 56 : 280 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+        initial={false}
+        className="flex h-screen flex-col bg-[var(--bg-secondary)] overflow-hidden"
+      >
+        {sidebarCollapsed ? (
+          <>
+            <div className="flex h-14 items-center justify-center">
               <button
-                className="flex w-full items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-[var(--interactive-secondary)]"
+                onClick={toggleSidebar}
+                className="rounded-md p-2 text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                title="Expand sidebar"
               >
-                <UserAvatar displayName={user.displayName} />
-                <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-[12px] font-medium leading-tight text-[var(--text-primary)]">
-                    {user.displayName}
-                  </div>
-                  <div className="truncate text-[11px] leading-tight text-[var(--text-muted)]">
-                    {user.tenantName}
-                    {user.roleName && (
-                      <span className="ml-1 text-[var(--text-brand)]">{user.roleName}</span>
-                    )}
-                  </div>
-                </div>
+                <PanelLeft className="h-5 w-5" />
               </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-[220px] p-1">
-              <UserMenu
-                settingsPath={settingsPath}
-                isSettingsActive={isSettingsActive}
-                canEditConfiguration={canEditConfiguration}
-                isGuideActive={isGuideActive}
-                onLogout={logout}
-                onChangePassword={() => {
-                  setUserMenuOpen(false);
-                  setIsChangePasswordOpen(true);
-                }}
-              />
-            </PopoverContent>
-          </Popover>
-        </div>
-      )}
+            </div>
+            <div className="flex-1 flex flex-col items-center py-3 gap-2">
+              {renderNewAction('collapsed')}
+
+              <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
+              {navItems.map((item) => (
+                <CollapsedNavLink
+                  key={item.to}
+                  to={item.to}
+                  icon={item.icon}
+                  title={item.label}
+                />
+              ))}
+            </div>
+            {user && (
+              <div className="p-2">
+                <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      className="flex h-9 w-9 items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--interactive-secondary)]"
+                      title={user.displayName}
+                    >
+                      <UserAvatar displayName={user.displayName} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="right" align="end" className="w-[220px] p-1">
+                    <UserMenu
+                      settingsPath={settingsPath}
+                      isSettingsActive={isSettingsActive}
+                      canEditConfiguration={canEditConfiguration}
+                      isGuideActive={isGuideActive}
+                      onLogout={logout}
+                      onChangePassword={() => {
+                        setUserMenuOpen(false);
+                        setIsChangePasswordOpen(true);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex h-14 items-center justify-between px-4 shrink-0">
+              <AppSwitcher />
+              <div className="flex items-center gap-1">
+                {renderNewAction('expanded')}
+                <button
+                  onClick={toggleSidebar}
+                  className="ml-1 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                  title="Collapse sidebar"
+                >
+                  <PanelLeftClose className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Conditional content based on app — crossfades on app switch */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={appContentKey}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="flex flex-1 flex-col min-h-0"
+              >
+                {isAdminView ? (
+                  <AdminSidebarContent items={adminNavItems} />
+                ) : isInsideSales ? (
+                  <InsideSalesSidebarContent />
+                ) : isKairaBot ? (
+                  <KairaSidebarContent
+                    searchPlaceholder={appMetadata.searchPlaceholder}
+                  />
+                ) : (
+                  <VoiceRxSidebarContent
+                    searchPlaceholder={appMetadata.searchPlaceholder}
+                  />
+                )}
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Bottom: single user row → popover with all options */}
+            {user && (
+              <div className="mt-auto p-2 shrink-0">
+                <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      className="flex w-full items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-[var(--interactive-secondary)]"
+                    >
+                      <UserAvatar displayName={user.displayName} />
+                      <div className="min-w-0 flex-1 text-left">
+                        <div className="truncate text-[12px] font-medium leading-tight text-[var(--text-primary)]">
+                          {user.displayName}
+                        </div>
+                        <div className="truncate text-[11px] leading-tight text-[var(--text-muted)]">
+                          {user.tenantName}
+                          {user.roleName && (
+                            <span className="ml-1 text-[var(--text-brand)]">{user.roleName}</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-[220px] p-1">
+                    <UserMenu
+                      settingsPath={settingsPath}
+                      isSettingsActive={isSettingsActive}
+                      canEditConfiguration={canEditConfiguration}
+                      isGuideActive={isGuideActive}
+                      onLogout={logout}
+                      onChangePassword={() => {
+                        setUserMenuOpen(false);
+                        setIsChangePasswordOpen(true);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+          </>
+        )}
+      </motion.aside>
       <ChangePasswordDialog
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
       />
-    </aside>
+    </>
   );
 }
 
@@ -511,14 +533,21 @@ function CollapsedNavLink({
     <Link
       to={to}
       className={cn(
-        "flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
+        "relative flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors",
         isActive
-          ? "bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]"
+          ? "text-[var(--text-brand)]"
           : "text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]",
       )}
       title={title}
     >
-      <Icon className="h-5 w-5" />
+      {isActive && (
+        <motion.span
+          layoutId="sidebar-active-pill-collapsed"
+          className="absolute inset-0 rounded-[6px] bg-[var(--color-brand-accent)]/20"
+          transition={{ type: "spring", stiffness: 500, damping: 40 }}
+        />
+      )}
+      <Icon className="relative h-5 w-5" />
     </Link>
   );
 }

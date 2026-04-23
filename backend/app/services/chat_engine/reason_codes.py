@@ -24,12 +24,17 @@ MALFORMED_ARGS = 'MALFORMED_ARGS'
 TOOL_TIMEOUT = 'TOOL_TIMEOUT'
 TOOL_UNAVAILABLE = 'TOOL_UNAVAILABLE'
 PERMISSION_DENIED = 'PERMISSION_DENIED'
+# Phase 7: emitted by ``capability_pack.submit_pack_job`` when the platform
+# jobs pipeline refuses the submission (unknown job_type, missing metadata,
+# etc.). Shared because any pack that uses ``submit_pack_job`` may surface it.
+JOB_SUBMISSION_FAILED = 'JOB_SUBMISSION_FAILED'
 
 HARNESS_SHARED_REASON_CODES: frozenset[str] = frozenset({
     MALFORMED_ARGS,
     TOOL_TIMEOUT,
     TOOL_UNAVAILABLE,
     PERMISSION_DENIED,
+    JOB_SUBMISSION_FAILED,
 })
 
 # ---------------------------------------------------------------------------

@@ -177,13 +177,29 @@ export interface DashboardBarPart {
   charts: ChartPart[];
 }
 
+// Phase 7 — async jobs as first-class harness outcomes.
+// A ``JobBadgePart`` is emitted for every assistant message that submitted
+// a platform job via ``capability_pack.submit_pack_job``. The widget polls
+// via ``pollJobUntilComplete`` and transitions the badge through queued /
+// running / completed | failed | cancelled without a page reload.
+export type JobBadgeStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export interface JobBadgePart {
+  type: 'job-badge';
+  jobId: string;
+  jobType?: string;
+  status: JobBadgeStatus;
+  summary?: string;
+  resultHref?: string;
+}
+
 export type MessagePart =
   | TextPart
   | ToolCallPart
   | ChartPart
   | BlueprintPart
   | SaveToastPart
-  | DashboardBarPart;
+  | DashboardBarPart
+  | JobBadgePart;
 
 export interface TurnUsage {
   inputTokens: number;

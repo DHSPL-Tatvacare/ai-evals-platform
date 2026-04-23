@@ -21,9 +21,18 @@ Binding rules (§6.3):
 
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
-from app.services.chat_engine.artifact import Outcome
+from app.services.chat_engine.artifact import (
+    Outcome,
+    ToolEnvelopeModel,
+    build_envelope,
+    error_envelope,
+)
+
+_log = logging.getLogger(__name__)
 
 
 class TypedArgumentError(ValueError):
@@ -79,6 +88,17 @@ class CapabilityPack(Protocol):
         Packs own the mapping from their native result shape into
         kind / reason_code / counts / artifact (including artifact.extras,
         validated against ``artifact_extras_contracts`` at egress).
+        """
+        ...
+
+    def describe_job(self, job: Any) -> str:
+        """Phase 7: render one line describing a platform job the pack owns.
+
+        The chat handler's ``assemble_context`` calls this for every job in
+        this session's pending-jobs block. Packs MAY override to include
+        domain-specific detail (query name, artifact path, ...); the default
+        implementation in ``render_job_line`` is fine for packs that submit
+        generic work.
         """
         ...
 
@@ -212,3 +232,138 @@ async def validate_all_app_pack_ids(db: Any) -> None:
             'Sherlock capability-pack validation failed:\n  - '
             + '\n  - '.join(errors),
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Async jobs as first-class harness outcomes
+# ---------------------------------------------------------------------------
+
+
+SHERLOCK_SUBMISSION_SURFACE = 'sherlock'
+"""Value written to ``jobs.submission_context.surface`` by ``submit_pack_job``.
+
+The chat handler's ``assemble_context`` filters on this literal to select
+jobs that should appear in the per-turn pending-jobs block. Other surfaces
+MAY write their own surface literal; the jobs pipeline treats the field as
+opaque.
+"""
+
+
+async def submit_pack_job(
+    *,
+    db: Any,
+    pack_id: str,
+    capability: str,
+    job_type: str,
+    params: Mapping[str, Any],
+    summary: str,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    session_id: uuid.UUID | str,
+    turn_id: uuid.UUID | str | None,
+    preview_payload: Mapping[str, Any] | None = None,
+) -> ToolEnvelopeModel:
+    """Phase 7 harness helper — submit a platform job and return a §6.2 envelope.
+
+    Packs call this when a tool needs async work. The returned envelope has
+    ``outcome.kind = 'job_submitted'`` and ``outcome.job = {id, status}``; the
+    outer agent observes it, finishes the turn, and stops (no polling).
+
+    The platform jobs pipeline records the job verbatim with
+    ``submission_context = {surface: 'sherlock', session_id, turn_id}`` so
+    ``assemble_context`` can surface completion on subsequent turns without
+    adding Sherlock-specific foreign keys to the jobs schema.
+    """
+
+    from app.models.job import Job
+    from app.services.job_worker import get_job_submission_metadata
+
+    job_params = dict(params)
+    try:
+        metadata = get_job_submission_metadata(job_type, job_params)
+    except ValueError as exc:
+        _log.warning('submit_pack_job rejected job_type=%s: %s', job_type, exc)
+        return error_envelope(
+            capability=capability,  # type: ignore[arg-type]
+            reason_code='JOB_SUBMISSION_FAILED',
+            summary=f'Unable to submit {job_type}: {exc}',
+            payload={'job_type': job_type},
+        )
+
+    # Injected auth context (mirrors routes/jobs.py:94-97). Runners read
+    # these back from params; Sherlock jobs are no different.
+    job_params['tenant_id'] = str(tenant_id)
+    job_params['user_id'] = str(user_id)
+    resolved_app_id = metadata['app_id'] or app_id or ''
+    if resolved_app_id:
+        job_params['app_id'] = resolved_app_id
+
+    submission_context = {
+        'surface': SHERLOCK_SUBMISSION_SURFACE,
+        'session_id': str(session_id),
+        'turn_id': str(turn_id) if turn_id is not None else None,
+        'pack_id': pack_id,
+    }
+
+    job = Job(
+        job_type=job_type,
+        params=job_params,
+        status='queued',
+        progress={'current': 0, 'total': 0, 'message': ''},
+        submission_context=submission_context,
+        app_id=resolved_app_id,
+        priority=metadata['priority'],
+        queue_class=metadata['queue_class'],
+        max_attempts=metadata['max_attempts'],
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    _log.info(
+        'submit_pack_job pack=%s tool_job_type=%s job_id=%s session=%s turn=%s',
+        pack_id, job_type, job.id, session_id, turn_id,
+    )
+
+    return build_envelope(
+        status='ok',
+        summary=summary,
+        kind='job_submitted',
+        capability=capability,  # type: ignore[arg-type]
+        job={'id': str(job.id), 'status': 'queued'},
+        payload=dict(preview_payload or {}),
+    )
+
+
+def render_job_line(job: Any) -> str:
+    """Default one-line rendering for the per-turn pending-jobs block.
+
+    Packs override ``describe_job`` in their CapabilityPack implementation
+    to add domain-specific detail; callers that don't override fall back
+    here. Format is stable so the context section is deterministic across
+    turns (Rule 10 — cacheable-prefix integrity).
+    """
+
+    job_id = getattr(job, 'id', None) or (job.get('id') if isinstance(job, dict) else None)
+    job_type = getattr(job, 'job_type', None) or (
+        job.get('job_type') if isinstance(job, dict) else None
+    )
+    status = getattr(job, 'status', None) or (
+        job.get('status') if isinstance(job, dict) else None
+    ) or 'unknown'
+    progress = getattr(job, 'progress', None) or (
+        job.get('progress') if isinstance(job, dict) else None
+    ) or {}
+    msg = ''
+    if isinstance(progress, dict):
+        current = progress.get('current') or 0
+        total = progress.get('total') or 0
+        message = progress.get('message') or ''
+        if total:
+            msg = f' ({current}/{total}{" " + message if message else ""})'
+        elif message:
+            msg = f' ({message})'
+    return f'- job {job_id} type={job_type} status={status}{msg}'

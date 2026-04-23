@@ -1,6 +1,6 @@
 import type {
+  ChartPayloadChart,
   SeriesConfig,
-  VegaLiteSpec,
 } from '@/features/chat-widget/types';
 
 export interface SavedChartRendererConfig {
@@ -16,10 +16,15 @@ export interface SavedChartRendererConfig {
   colorMap?: Record<string, string>;
 }
 
-export interface SavedChartCanonicalConfig {
-  kind: 'chart';
-  spec: VegaLiteSpec;
-}
+/**
+ * Phase 6 §741, §743 — the stored canonical is the ``kind`` + ``spec``
+ * projection of the generated ``ChartPayloadChart``. The accompanying
+ * ``data`` rows arrive separately from the chart-data route, so
+ * replay-time validation runs on the assembled
+ * ``{ kind, spec, data }`` triple via ``toValidatedChartPayload`` in
+ * ``chartReplayValidation.ts`` — not on a bespoke local shape.
+ */
+export type SavedChartCanonicalConfig = Pick<ChartPayloadChart, 'kind' | 'spec'>;
 
 export interface SavedChartConfig {
   canonical?: SavedChartCanonicalConfig | null;

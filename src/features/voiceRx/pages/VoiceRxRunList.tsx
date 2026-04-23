@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { usePoll, useTableQueryParams } from '@/hooks';
 import {
   FlaskConical,
+  ListChecks,
   Search,
   Clock,
   MoreVertical,
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui';
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef, SortState } from '@/components/ui/DataTable';
-import { PageShell } from '@/components/ui/PageShell';
+import { PageSurface } from '@/components/ui/PageSurface';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { fetchEvalRunsPaged, deleteEvalRun } from '@/services/api/evalRunsApi';
@@ -511,52 +512,55 @@ export function VoiceRxRunList() {
   );
 
   return (
-    <PageShell title="All Runs" filterSlot={toolbar}>
-      <DataTable
-        columns={columns}
-        data={tableData}
-        keyExtractor={(row) => row.id}
-        onRowClick={handleRowClick}
-        loading={loading}
-        emptyIcon={activeFilterCount > 0 ? Search : FlaskConical}
-        emptyTitle={activeFilterCount > 0 ? 'No matching runs' : 'No evaluator runs yet'}
-        emptyDescription={
-          activeFilterCount > 0
-            ? 'Try changing the filters or search query.'
-            : 'Run an evaluator on a recording to see results here.'
-        }
-        sortState={sortState}
-        onSortChange={setSort}
-        pagination={{
-          page: state.page,
-          totalPages,
-          pageSize: state.pageSize,
-          totalItems,
-          showCount: true,
-          onPageChange: setPage,
-          onPageSizeChange: setPageSize,
-        }}
-      />
+    <PageSurface icon={ListChecks} title="All Runs">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex justify-end">{toolbar}</div>
+        <DataTable
+          columns={columns}
+          data={tableData}
+          keyExtractor={(row) => row.id}
+          onRowClick={handleRowClick}
+          loading={loading}
+          emptyIcon={activeFilterCount > 0 ? Search : FlaskConical}
+          emptyTitle={activeFilterCount > 0 ? 'No matching runs' : 'No evaluator runs yet'}
+          emptyDescription={
+            activeFilterCount > 0
+              ? 'Try changing the filters or search query.'
+              : 'Run an evaluator on a recording to see results here.'
+          }
+          sortState={sortState}
+          onSortChange={setSort}
+          pagination={{
+            page: state.page,
+            totalPages,
+            pageSize: state.pageSize,
+            totalItems,
+            showCount: true,
+            onPageChange: setPage,
+            onPageSizeChange: setPageSize,
+          }}
+        />
 
-      <FilterPanel
-        open={filterPanelOpen}
-        onClose={() => setFilterPanelOpen(false)}
-        fields={FILTER_FIELDS}
-        values={state.filters}
-        onChange={setFilters}
-        onClear={clearFilters}
-      />
+        <FilterPanel
+          open={filterPanelOpen}
+          onClose={() => setFilterPanelOpen(false)}
+          fields={FILTER_FIELDS}
+          values={state.filters}
+          onChange={setFilters}
+          onClear={clearFilters}
+        />
 
-      <ConfirmDialog
-        isOpen={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={handleDelete}
-        title="Delete Run"
-        description={`Delete run "${deleteTarget?.label ?? ''}"? This cannot be undone.`}
-        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
-        variant="danger"
-        isLoading={isDeleting}
-      />
-    </PageShell>
+        <ConfirmDialog
+          isOpen={!!deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+          title="Delete Run"
+          description={`Delete run "${deleteTarget?.label ?? ''}"? This cannot be undone.`}
+          confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+          variant="danger"
+          isLoading={isDeleting}
+        />
+      </div>
+    </PageSurface>
   );
 }

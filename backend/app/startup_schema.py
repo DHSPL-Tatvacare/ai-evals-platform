@@ -139,6 +139,12 @@ SCHEMA_BOOTSTRAP_SQL = (
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dead_letter_reason TEXT",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS depends_on_job_id UUID",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS scheduled_job_id UUID",
+    # Phase 7: generic submission-surface metadata. Sherlock writes
+    # {surface, session_id, turn_id}; the platform jobs pipeline treats it
+    # as an opaque JSON blob. Indexed via GIN so the chat handler can filter
+    # on (surface, session_id) without scanning the whole jobs table.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_context JSONB",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_submission_context_gin ON jobs USING GIN (submission_context jsonb_path_ops)",
     """
     DO $$
     BEGIN

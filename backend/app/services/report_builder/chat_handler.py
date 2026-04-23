@@ -419,7 +419,15 @@ def _build_chart_payload(result: dict[str, Any] | None) -> dict[str, Any] | None
 
 
 async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
-    """Build the report-builder system prompt from layered context modules."""
+    """Build the report-builder system prompt from layered context modules.
+
+    Phase 7 binding ordering (plan §770, Rule 10 KV-cache stability):
+    ``[persona + voice + scope (cacheable)] + [TOOLS section (cacheable)] +
+    [app_context + user_context + scratchpad (per-turn)] +
+    [pending-jobs block (per-turn)]``. The cacheable prefix (``base`` +
+    ``tools_section``) MUST remain byte-identical turn-over-turn for any
+    given session; all dynamic content lands AFTER it.
+    """
     from app.services.chat_engine.prompts import base, app_context, scratchpad, user_context
     from app.services.chat_engine.prompt_generator import render_tools_section
 
@@ -436,8 +444,86 @@ async def assemble_context(session: dict[str, Any], db: AsyncSession) -> str:
         await app_context.render(session, db),
         await user_context.render(session, db),
         scratchpad.render(session),
+        await _render_pending_jobs_block(session, db),
     ]
     return '\n\n'.join(part for part in parts if part)
+
+
+async def _render_pending_jobs_block(
+    session: dict[str, Any], db: AsyncSession
+) -> str:
+    """Phase 7: per-turn pending-jobs section for this chat session.
+
+    Loads jobs filtered by ``submission_context.surface == 'sherlock'`` and
+    ``submission_context.session_id == <chat_session_id>``, then delegates
+    the one-line rendering to the owning pack's ``describe_job``. Pack id
+    lives in ``submission_context.pack_id`` (written by ``submit_pack_job``);
+    unresolved packs fall back to the harness default renderer.
+
+    This block MUST NOT appear in the cacheable prefix — plan §770 Rule 10
+    pins it as per-turn content that lands after TOOLS + per-turn state.
+    """
+    from sqlalchemy import select
+
+    from app.models.job import Job
+    from app.services.chat_engine.capability_pack import (
+        CAPABILITY_PACK_REGISTRY,
+        SHERLOCK_SUBMISSION_SURFACE,
+        render_job_line,
+    )
+
+    chat_session_id = session.get('chat_session_id')
+    if not chat_session_id:
+        return ''
+
+    tenant_id = session.get('tenant_id')
+    user_id = session.get('user_id')
+    if tenant_id is None or user_id is None:
+        return ''
+
+    # JSONB containment matches the surface+session_id keys; GIN index on
+    # ``submission_context`` keeps this bounded to the session's jobs.
+    stmt = (
+        select(Job)
+        .where(
+            Job.tenant_id == tenant_id,
+            Job.user_id == user_id,
+            Job.submission_context.is_not(None),
+            Job.submission_context.op('@>')(
+                {
+                    'surface': SHERLOCK_SUBMISSION_SURFACE,
+                    'session_id': str(chat_session_id),
+                }
+            ),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(20)
+    )
+    result = await db.execute(stmt)
+    jobs = list(result.scalars().all())
+    if not jobs:
+        return ''
+
+    lines: list[str] = ['## Pending pack jobs for this session']
+    for job in jobs:
+        pack_id = None
+        ctx = getattr(job, 'submission_context', None) or {}
+        if isinstance(ctx, dict):
+            pack_id = ctx.get('pack_id')
+        pack = CAPABILITY_PACK_REGISTRY.get(pack_id) if pack_id else None
+        describe = getattr(pack, 'describe_job', None) if pack is not None else None
+        line: str
+        try:
+            raw = describe(job) if callable(describe) else render_job_line(job)
+            line = str(raw) if raw is not None else render_job_line(job)
+        except Exception:  # pragma: no cover — defensive; renderer must not crash assembly
+            logger.warning(
+                'describe_job failed pack=%s job_id=%s', pack_id, getattr(job, 'id', None),
+                exc_info=True,
+            )
+            line = render_job_line(job)
+        lines.append(line)
+    return '\n'.join(lines)
 
 
 def _copy_working_session(session: dict[str, Any]) -> dict[str, Any]:
