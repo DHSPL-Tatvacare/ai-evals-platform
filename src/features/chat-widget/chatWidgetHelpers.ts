@@ -4,6 +4,8 @@ import type {
   BlueprintSection,
   ChartPart,
   ComposedReport,
+  ContractStubNotePart,
+  ContractStubNoteVariant,
   JobBadgePart,
   JobBadgeStatus,
   MessagePart,
@@ -33,6 +35,43 @@ export function isSaveToastPart(part: MessagePart): part is SaveToastPart {
 
 export function isJobBadgePart(part: MessagePart): part is JobBadgePart {
   return part.type === 'job-badge';
+}
+
+export function isContractStubNotePart(part: MessagePart): part is ContractStubNotePart {
+  return part.type === 'contract-stub-note';
+}
+
+const CONTRACT_STUB_VARIANTS: readonly ContractStubNoteVariant[] = ['plain', 'warning', 'success'];
+
+function isStubVariant(value: unknown): value is ContractStubNoteVariant {
+  return typeof value === 'string' && (CONTRACT_STUB_VARIANTS as readonly string[]).includes(value);
+}
+
+function contractStubNotePartFromArtifact(artifact: Artifact): ContractStubNotePart | null {
+  const payload = artifact.payload;
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const obj = payload as Record<string, unknown>;
+  const title = typeof obj.title === 'string' ? obj.title : null;
+  const body = typeof obj.body === 'string' ? obj.body : null;
+  const variant = isStubVariant(obj.variant) ? obj.variant : null;
+  const sourceText = typeof obj.source_text === 'string' ? obj.source_text : null;
+  if (title === null || body === null || variant === null || sourceText === null) {
+    return null;
+  }
+  const extras = (artifact.extras ?? {}) as Record<string, unknown>;
+  const renderedVariant = isStubVariant(extras.rendered_variant) ? extras.rendered_variant : variant;
+  const truncated = typeof extras.truncated === 'boolean' ? extras.truncated : false;
+  return {
+    type: 'contract-stub-note',
+    title,
+    body,
+    variant,
+    sourceText,
+    renderedVariant,
+    truncated,
+  };
 }
 
 // Phase 7 audit fix (Gap 5): synthesize a ``JobBadgePart`` from a tool
@@ -188,6 +227,13 @@ export function applyArtifactToParts(parts: MessagePart[], artifact: Artifact): 
     }
     return parts;
   }
+  if (artifact.pack_id === 'contract_stub' && artifact.contract_id === 'contract_stub.note.v1') {
+    const stubPart = contractStubNotePartFromArtifact(artifact);
+    if (stubPart) {
+      return replaceOrAppendPart(parts, isContractStubNotePart, stubPart);
+    }
+    return parts;
+  }
   return parts;
 }
 
@@ -214,6 +260,10 @@ export function partsFromStoredMessage(
   let parts: MessagePart[] = [];
 
   for (const toolCall of metadata?.toolCalls ?? []) {
+    // Replay shim: pre-Phase-2 persisted sessions may store a tool call
+    // without ``toolCallId``. New turns always emit it; this guard keeps
+    // old rows renderable and is tracked in docs/plans/sherlock-shim-ledger.md
+    // (deletion trigger: drop historical chat-widget sessions).
     if (!toolCall.toolCallId) {
       continue;
     }

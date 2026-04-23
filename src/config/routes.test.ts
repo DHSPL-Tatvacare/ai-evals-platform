@@ -1,6 +1,8 @@
 import { afterEach, test, expect } from 'vitest';
 
 import {
+  adversarialDetailForApp,
+  evaluatorDetailForApp,
   analyticsChartForApp,
   firstAccessibleRoute,
   homeRouteForApp,
@@ -62,6 +64,16 @@ test('threadDetailForApp fills all required template params and returns null whe
     threadDetailForApp('inside-sales', 'thread-9', 'run-7'),
   ).toBe('/inside-sales/runs/run-7/calls/thread-9');
   expect(threadDetailForApp('inside-sales', 'thread-9')).toBeNull();
+});
+
+test('evaluatorDetailForApp only returns configured evaluator detail paths', () => {
+  expect(evaluatorDetailForApp('inside-sales', 'eval-9')).toBe('/inside-sales/evaluators/eval-9');
+  expect(evaluatorDetailForApp('kaira-bot', 'eval-9')).toBeNull();
+});
+
+test('adversarialDetailForApp uses app-owned adversarial detail paths when present', () => {
+  expect(adversarialDetailForApp('kaira-bot', 'run-7', 'eval-9')).toBe('/kaira/runs/run-7/adversarial/eval-9');
+  expect(adversarialDetailForApp('inside-sales', 'run-7', 'eval-9')).toBeNull();
 });
 
 test('analyticsChartForApp uses app-owned analytics chart paths', () => {

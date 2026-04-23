@@ -1,5 +1,4 @@
 export { InsideSalesListing } from './InsideSalesListing';
-export { InsideSalesEvaluators } from './InsideSalesEvaluators';
 export { InsideSalesEvaluatorDetail } from './InsideSalesEvaluatorDetail';
 export { InsideSalesRunList } from './InsideSalesRunList';
 export { InsideSalesRunDetail } from './InsideSalesRunDetail';

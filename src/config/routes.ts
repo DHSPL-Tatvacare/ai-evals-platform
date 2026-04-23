@@ -180,6 +180,19 @@ export function runDetailForApp(appId: string, runId: string): string {
   );
 }
 
+export function evaluatorDetailForApp(appId: string, id: string): string | null {
+  return fillPathTemplate(navigationForApp(appId).evaluatorDetailPath, { id });
+}
+
+export function adversarialDetailForApp(appId: string, runId: string, evalId: string): string | null {
+  return fillPathTemplate(navigationForApp(appId).adversarialDetailPath, { runId, evalId });
+}
+
+/** Resolve the runs list path for a given appId. */
+export function runsForApp(appId: string): string {
+  return navigationForApp(appId).runsPath ?? fallbackNavigation().runsPath ?? routes.voiceRx.runs;
+}
+
 /** Resolve the API logs path for a given appId. */
 export function apiLogsForApp(appId: string): string {
   return navigationForApp(appId).logsPath ?? fallbackNavigation().logsPath ?? routes.voiceRx.logs;

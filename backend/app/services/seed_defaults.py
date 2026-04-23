@@ -2076,6 +2076,8 @@ APP_SEEDS = [
                 "runsPath": "/runs",
                 "runDetailPath": "/runs/:runId",
                 "threadDetailPath": None,
+                "evaluatorDetailPath": None,
+                "adversarialDetailPath": None,
             },
             "analytics": {
                 "profile": "voice_rx_v1",
@@ -2139,7 +2141,11 @@ APP_SEEDS = [
             },
             "chat": {
                 "enabled": True,
-                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
+                # Phase 8: voice-rx is the live test surface for the
+                # ``contract_stub`` proof pack. Keep the existing packs and
+                # append the stub so the harness-reusability demo runs on a
+                # real app without touching other app configs.
+                "capabilities": [*COMMON_SHERLOCK_CAPABILITIES, "contract_stub"],
                 "entityTypes": [
                     *COMMON_SHERLOCK_ENTITY_TYPES,
                     {
@@ -2160,6 +2166,9 @@ APP_SEEDS = [
                 ],
                 "entityResolvers": COMMON_RUN_RESOLVERS,
             },
+            "pageIcons": {},
+            "pageTitles": {},
+            "pageActions": {},
         },
     },
     {
@@ -2216,6 +2225,8 @@ APP_SEEDS = [
                 "runsPath": "/kaira/runs",
                 "runDetailPath": "/kaira/runs/:runId",
                 "threadDetailPath": "/kaira/threads/:threadId",
+                "evaluatorDetailPath": None,
+                "adversarialDetailPath": "/kaira/runs/:runId/adversarial/:evalId",
             },
             "analytics": {
                 "profile": "kaira_v1",
@@ -2330,6 +2341,9 @@ APP_SEEDS = [
                     },
                 ],
             },
+            "pageIcons": {},
+            "pageTitles": {},
+            "pageActions": {},
         },
     },
     {
@@ -2387,6 +2401,8 @@ APP_SEEDS = [
                 "runsPath": "/inside-sales/runs",
                 "runDetailPath": "/inside-sales/runs/:runId",
                 "threadDetailPath": "/inside-sales/runs/:runId/calls/:threadId",
+                "evaluatorDetailPath": "/inside-sales/evaluators/:id",
+                "adversarialDetailPath": None,
             },
             "analytics": {
                 "profile": "inside_sales_v1",
@@ -2494,6 +2510,13 @@ APP_SEEDS = [
                         "match": "prefix",
                         "limit": 10,
                     },
+                ],
+            },
+            "pageIcons": {},
+            "pageTitles": {},
+            "pageActions": {
+                "evaluators": [
+                    {"id": "csv-import", "kind": "csvImport", "requires": "asset:create"},
                 ],
             },
         },

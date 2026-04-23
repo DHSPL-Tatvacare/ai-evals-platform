@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
-import { getBuilderSession, getChatDefaults, streamChatMessage } from './api';
+import { cancelChatTurn, getBuilderSession, getChatDefaults, streamChatMessage } from './api';
 import { CHAT_SESSION_SOURCE, chatSessionsRepository } from '@/services/api/chatApi';
 import { notificationService } from '@/services/notifications';
 import type { AppId } from '@/types';
@@ -135,6 +135,7 @@ interface ChatWidgetStore {
   send: (text: string, appId: string) => Promise<void>;
   resumeActiveTurn: (appId: string) => Promise<void>;
   retryLastMessage: (appId: string) => Promise<void>;
+  stopActiveTurn: (appId: string) => Promise<void>;
   newChat: () => void;
   restoreSession: (currentAppId: string) => Promise<void>;
   loadDefaults: () => Promise<void>;
@@ -147,7 +148,7 @@ interface ChatWidgetStore {
 }
 
 /** In-flight stream controller, kept outside React state so callers can abort synchronously. */
-let activeAbortController: { abort: () => void } | null = null;
+let activeAbortController: AbortController | null = null;
 
 type RuntimeApplier = {
   onToolCallStart: (event: { seq: number; toolCallId: string; toolName: string }) => void;
@@ -370,6 +371,10 @@ function createRuntimeApplier(
         let finalParts = [...pendingParts];
 
         for (const toolCall of event.toolCalls ?? []) {
+          // See chatWidgetHelpers.partsFromStoredMessage: the wire contract
+          // allows ``toolCallId`` to be absent while the replay shim in
+          // docs/plans/sherlock-shim-ledger.md is alive. Drop any entry
+          // without one so the dedup by ``toolCallId`` stays consistent.
           if (!toolCall.toolCallId) {
             continue;
           }
@@ -402,6 +407,7 @@ function createRuntimeApplier(
         }
         finalParts = mergeTerminalText(finalParts, event.content);
         finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'done', 'complete', event.usage);
+        activeAbortController = null;
         set({ activeTurnId: null });
         resolveSend?.();
       });
@@ -412,6 +418,7 @@ function createRuntimeApplier(
         finalParts = mergeTerminalText(finalParts, event.content);
         finalParts = appendTextPart(finalParts, finalParts.length > 0 ? `\n\n${event.message}` : event.message);
         finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'error', 'error');
+        activeAbortController = null;
         set({ activeTurnId: null });
         rejectSend?.(Object.assign(new Error(event.message), { terminalStatus: event.terminalStatus, content: event.content }));
       });
@@ -582,7 +589,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      let abortController: { abort: () => void } | null = null;
+      let abortController: AbortController | null = null;
       activeAbortController?.abort();
       activeAbortController = null;
 
@@ -678,7 +685,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
     const applier = createRuntimeApplier(set, get);
     set({ status: 'sending', locked: true });
 
-    await streamChatMessage(
+    const controller = await streamChatMessage(
       {
         appId,
         sessionId,
@@ -710,6 +717,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         onError: applier.onError,
       },
     );
+    activeAbortController = controller;
   },
 
   retryLastMessage: async (appId) => {
@@ -719,6 +727,24 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       return;
     }
     await get().send(textPart.content, appId);
+  },
+
+  stopActiveTurn: async (appId) => {
+    const { sessionId, activeTurnId, status } = get();
+    if (!sessionId || !activeTurnId || status !== 'sending') {
+      return;
+    }
+    set({ streamingStatus: 'Stopping…', locked: true });
+    try {
+      const response = await cancelChatTurn(appId, sessionId, activeTurnId);
+      if (response.result === 'already_terminal') {
+        await get().selectSession(appId as AppId, sessionId);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      notificationService.error(`Could not stop Sherlock turn: ${message}`);
+      set({ streamingStatus: null });
+    }
   },
 
   abortActiveStream: () => {

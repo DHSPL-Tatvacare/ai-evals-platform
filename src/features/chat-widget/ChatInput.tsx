@@ -1,14 +1,16 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
+  onStop?: () => void;
   disabled: boolean;
+  showStop?: boolean;
   placeholder?: string;
 }
 
-export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, disabled, showStop = false, placeholder }: ChatInputProps) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -49,18 +51,33 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
           'min-h-[36px] max-h-[120px]',
         )}
       />
-      <button
-        onClick={handleSend}
-        disabled={!value.trim() || disabled}
-        className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
-          'bg-[var(--color-brand-primary)] text-white',
-          'hover:bg-[var(--color-brand-primary-hover)]',
-          'disabled:opacity-40 disabled:cursor-not-allowed',
-        )}
-      >
-        <Send className="h-4 w-4" />
-      </button>
+      {showStop ? (
+        <button
+          onClick={onStop}
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
+            'bg-[var(--color-danger)] text-white',
+            'hover:opacity-90',
+          )}
+          title="Stop"
+          aria-label="Stop"
+        >
+          <Square className="h-3.5 w-3.5 fill-current" />
+        </button>
+      ) : (
+        <button
+          onClick={handleSend}
+          disabled={!value.trim() || disabled}
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
+            'bg-[var(--color-brand-primary)] text-white',
+            'hover:bg-[var(--color-brand-primary-hover)]',
+            'disabled:opacity-40 disabled:cursor-not-allowed',
+          )}
+        >
+          <Send className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }

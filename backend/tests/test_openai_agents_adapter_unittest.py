@@ -400,7 +400,13 @@ class PackDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolve_pack_id_for_tool('discover'), 'analytics')
         self.assertEqual(resolve_pack_id_for_tool('blueprint_list'), 'report_builder')
         self.assertIsNone(resolve_pack_id_for_tool('mystery_tool'))
-        self.assertEqual(set(CAPABILITY_PACK_REGISTRY), {'analytics', 'report_builder'})
+        # Phase 8: the registry now also carries the ``contract_stub`` proof
+        # pack. Assert the core packs are still present without hard-pinning
+        # the full set (new packs are allowed via the registry).
+        self.assertGreaterEqual(
+            set(CAPABILITY_PACK_REGISTRY),
+            {'analytics', 'report_builder'},
+        )
 
     async def _run_dispatcher(self, tool_name: str, envelope_payload: dict):
         from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler

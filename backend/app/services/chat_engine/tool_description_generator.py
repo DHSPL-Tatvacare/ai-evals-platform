@@ -86,7 +86,7 @@ def _format_chart_capabilities() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Legacy manifest-token substitution (kept so existing tests keep passing)
+# Manifest-token substitution
 # ---------------------------------------------------------------------------
 
 
@@ -102,15 +102,14 @@ def fill_tool_description(
     tool_spec: dict[str, Any],
     *,
     app_id: str,
-    pack: 'CapabilityPack | None' = None,
+    pack: 'CapabilityPack',
 ) -> dict[str, Any]:
     """Return a deep copy of ``tool_spec`` with every supported token substituted.
 
-    ``pack`` is optional for backward compatibility with callers that
-    only need manifest-token substitution. Phase 3 callers pass the
-    owning pack so ``{{output_schema}}``, ``{{reason_codes}}``,
-    ``{{chart_capabilities}}``, and ``{{limitations}}`` resolve to
-    deterministic strings.
+    The owning ``pack`` is required — it supplies the
+    ``{{output_schema}}``, ``{{reason_codes}}``, and ``{{limitations}}``
+    deterministic strings. Manifest tokens (``{{catalog_tables}}``,
+    ``{{surface_keys}}``) come from the app manifest.
     """
     manifest = get_manifest(app_id)
     catalog_tables = ', '.join(sorted(manifest.catalog_tables.keys()))
@@ -119,20 +118,15 @@ def fill_tool_description(
     filled = copy.deepcopy(tool_spec)
     tool_name = filled.get('name', '')
 
-    # Pack-owned substitutions.
-    output_schema_str = ''
-    reason_codes_str = ''
-    limitations_str = ''
+    output_model = getattr(pack, 'output_schema', lambda _n: None)(tool_name)
+    output_schema_str = _format_output_schema(output_model)
+    reason_codes_str = _format_reason_codes(
+        getattr(pack, 'tool_reason_codes', lambda _n: ())(tool_name),
+    )
+    limitations_str = _format_limitations(
+        getattr(pack, 'tool_limitations', lambda _n: ())(tool_name),
+    )
     chart_capabilities_str = _format_chart_capabilities()
-    if pack is not None:
-        output_model = getattr(pack, 'output_schema', lambda _n: None)(tool_name)
-        output_schema_str = _format_output_schema(output_model)
-        reason_codes_str = _format_reason_codes(
-            getattr(pack, 'tool_reason_codes', lambda _n: ())(tool_name),
-        )
-        limitations_str = _format_limitations(
-            getattr(pack, 'tool_limitations', lambda _n: ())(tool_name),
-        )
 
     def _apply(text: str) -> str:
         t = _substitute_manifest(

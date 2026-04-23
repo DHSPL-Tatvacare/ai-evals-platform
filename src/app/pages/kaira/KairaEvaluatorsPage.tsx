@@ -1,6 +1,0 @@
-import { FileText } from 'lucide-react';
-import { AppEvaluatorsPage } from '@/features/evals';
-
-export function KairaEvaluatorsPage() {
-  return <AppEvaluatorsPage surface={{ icon: FileText, title: 'Evaluators' }} />;
-}

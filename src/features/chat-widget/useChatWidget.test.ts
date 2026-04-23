@@ -3,9 +3,10 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { useChatWidgetStore } from './useChatWidget';
-import { getBuilderSession, streamChatMessage } from './api';
+import { cancelChatTurn, getBuilderSession, streamChatMessage } from './api';
 
 vi.mock('./api', () => ({
+  cancelChatTurn: vi.fn(),
   getBuilderSession: vi.fn(),
   getChatDefaults: vi.fn(),
   streamChatMessage: vi.fn(),
@@ -111,5 +112,70 @@ describe('useChatWidgetStore restoreSession', () => {
     expect('message' in request).toBe(false);
     expect('provider' in request).toBe(false);
     expect('resumeFromSeq' in request).toBe(false);
+  });
+
+  test('stopActiveTurn calls the cancel endpoint for the active turn', async () => {
+    vi.mocked(cancelChatTurn).mockResolvedValue({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      result: 'cancelled',
+      turnStatus: 'interrupted',
+      message: 'Cancelled by user',
+    });
+
+    useChatWidgetStore.setState({
+      sessionId: 'session-1',
+      activeTurnId: 'turn-1',
+      status: 'sending',
+    } as never);
+
+    await useChatWidgetStore.getState().stopActiveTurn('kaira-bot');
+
+    expect(vi.mocked(cancelChatTurn)).toHaveBeenCalledWith('kaira-bot', 'session-1', 'turn-1');
+    expect(vi.mocked(getBuilderSession)).not.toHaveBeenCalled();
+    expect(useChatWidgetStore.getState().streamingStatus).toBe('Stopping…');
+  });
+
+  test('stopActiveTurn refreshes the session when the turn is already terminal', async () => {
+    vi.mocked(cancelChatTurn).mockResolvedValue({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      result: 'already_terminal',
+      turnStatus: 'interrupted',
+      message: 'Turn already finished',
+    });
+    vi.mocked(getBuilderSession).mockResolvedValue({
+      sessionId: 'session-1',
+      provider: 'openai',
+      model: 'gpt-5.4',
+      activeTurnId: null,
+      lastEventSeq: 0,
+      currentTurnStatus: 'interrupted',
+      messages: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'Cancelled by user',
+          status: 'error',
+          createdAt: '2026-04-14T00:00:01.000Z',
+          metadata: { terminalStatus: 'interrupted', lastError: 'Cancelled by user' },
+        },
+      ],
+    } as never);
+
+    useChatWidgetStore.setState({
+      sessionId: 'session-1',
+      activeTurnId: 'turn-1',
+      status: 'sending',
+      open: true,
+    } as never);
+
+    await useChatWidgetStore.getState().stopActiveTurn('kaira-bot');
+
+    expect(vi.mocked(getBuilderSession)).toHaveBeenCalledWith('kaira-bot', 'session-1');
+    const state = useChatWidgetStore.getState();
+    expect(state.activeTurnId).toBeNull();
+    expect(state.status).toBe('idle');
+    expect(state.messages[0]?.parts).toEqual([{ type: 'text', content: 'Cancelled by user' }]);
   });
 });

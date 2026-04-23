@@ -93,6 +93,8 @@ class AppNavigationConfig(CamelModel):
     runs_path: str | None = None
     run_detail_path: str | None = None
     thread_detail_path: str | None = None
+    evaluator_detail_path: str | None = None
+    adversarial_detail_path: str | None = None
 
 
 class AppChatPromptTemplate(CamelModel):
@@ -136,6 +138,37 @@ class AppChatConfig(CamelModel):
     entity_types: list[AppChatEntityTypeConfig] = Field(default_factory=list)
 
 
+PageType = Literal[
+    "runs",
+    "runDetail",
+    "threadDetail",
+    "adversarialDetail",
+    "evaluators",
+    "evaluatorDetail",
+    "logs",
+    "dashboard",
+    "analytics",
+    "analyticsChart",
+    "analyticsDashboard",
+    "settings",
+    "tags",
+    "listing",
+    "listingDetail",
+    "callDetail",
+    "leadDetail",
+    "cost",
+    "scheduledJobs",
+    "adminUsers",
+]
+
+
+class PageActionSpec(CamelModel):
+    id: str
+    kind: str
+    config: dict[str, object] = Field(default_factory=dict)
+    requires: str | None = None
+
+
 class AppConfig(CamelModel):
     display_name: str
     icon: str
@@ -150,3 +183,6 @@ class AppConfig(CamelModel):
     navigation: AppNavigationConfig = Field(default_factory=AppNavigationConfig)
     analytics: AppAnalyticsConfig = Field(default_factory=AppAnalyticsConfig)
     chat: AppChatConfig = Field(default_factory=AppChatConfig)
+    page_icons: dict[PageType, str] = Field(default_factory=dict)
+    page_titles: dict[PageType, str] = Field(default_factory=dict)
+    page_actions: dict[PageType, list[PageActionSpec]] = Field(default_factory=dict)

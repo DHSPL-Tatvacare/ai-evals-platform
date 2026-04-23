@@ -113,6 +113,8 @@ export interface AppNavigationConfig {
   runsPath: string | null;
   runDetailPath: string | null;
   threadDetailPath: string | null;
+  evaluatorDetailPath: string | null;
+  adversarialDetailPath: string | null;
   analyticsChartPath: string | null;
   analyticsDashboardPath: string | null;
   reportWizardPath: string | null;
@@ -276,6 +278,39 @@ export interface AppChatConfig {
   entityResolvers?: AppChatEntityResolverConfig[];
 }
 
+export type PageType =
+  | 'runs'
+  | 'runDetail'
+  | 'threadDetail'
+  | 'adversarialDetail'
+  | 'evaluators'
+  | 'evaluatorDetail'
+  | 'logs'
+  | 'dashboard'
+  | 'analytics'
+  | 'analyticsChart'
+  | 'analyticsDashboard'
+  | 'settings'
+  | 'tags'
+  | 'listing'
+  | 'listingDetail'
+  | 'callDetail'
+  | 'leadDetail'
+  | 'cost'
+  | 'scheduledJobs'
+  | 'adminUsers';
+
+export interface PageActionSpec {
+  /** Stable id for telemetry. */
+  id: string;
+  /** Handler key — registry entry in `src/features/pageActions/registry.ts` maps this to a React component. */
+  kind: string;
+  /** Config passed to the action component (kind-specific). */
+  config?: Record<string, unknown>;
+  /** Permission gate. Optional — unset means visible to all. */
+  requires?: string;
+}
+
 export interface AppConfig {
   displayName: string;
   icon: string;
@@ -292,6 +327,12 @@ export interface AppConfig {
   collections: AppCollectionsConfig;
   analytics: AppAnalyticsConfig;
   chat: AppChatConfig;
+  /** Per-app override of PAGE_METADATA icons. Lucide icon referenced by name. Missing keys fall through to PAGE_METADATA. */
+  pageIcons?: Partial<Record<PageType, string>>;
+  /** Per-app override of page titles (only used where PAGE_METADATA title is non-empty). */
+  pageTitles?: Partial<Record<PageType, string>>;
+  /** Per-app extra header actions keyed by page type. Resolved via `PAGE_ACTION_COMPONENTS` registry. */
+  pageActions?: Partial<Record<PageType, PageActionSpec[]>>;
 }
 
 export interface RuleCatalogEntry {
@@ -422,6 +463,8 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/runs',
       runDetailPath: '/runs/:runId',
       threadDetailPath: null,
+      evaluatorDetailPath: null,
+      adversarialDetailPath: null,
       analyticsChartPath: '/analytics/charts/:chartId',
       analyticsDashboardPath: '/analytics/dashboards/:dashboardId',
       reportWizardPath: '/reports/generate',
@@ -498,6 +541,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       dataSurfaces: [],
       entityResolvers: [],
     },
+    pageIcons: {},
+    pageTitles: {},
+    pageActions: {},
   },
   'kaira-bot': {
     displayName: APPS['kaira-bot'].name,
@@ -552,6 +598,8 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/kaira/runs',
       runDetailPath: '/kaira/runs/:runId',
       threadDetailPath: '/kaira/threads/:threadId',
+      evaluatorDetailPath: null,
+      adversarialDetailPath: '/kaira/runs/:runId/adversarial/:evalId',
       analyticsChartPath: '/kaira/analytics/charts/:chartId',
       analyticsDashboardPath: '/kaira/analytics/dashboards/:dashboardId',
       reportWizardPath: '/kaira/reports/generate',
@@ -618,6 +666,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       dataSurfaces: [],
       entityResolvers: [],
     },
+    pageIcons: {},
+    pageTitles: {},
+    pageActions: {},
   },
   'inside-sales': {
     displayName: APPS['inside-sales'].name,
@@ -672,6 +723,8 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       runsPath: '/inside-sales/runs',
       runDetailPath: '/inside-sales/runs/:runId',
       threadDetailPath: '/inside-sales/runs/:runId/calls/:threadId',
+      evaluatorDetailPath: '/inside-sales/evaluators/:id',
+      adversarialDetailPath: null,
       analyticsChartPath: '/inside-sales/analytics/charts/:chartId',
       analyticsDashboardPath: '/inside-sales/analytics/dashboards/:dashboardId',
       reportWizardPath: '/inside-sales/reports/generate',
@@ -884,6 +937,13 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       dataSurfaces: [],
       entityResolvers: [],
     },
+    pageIcons: {},
+    pageTitles: {},
+    pageActions: {
+      evaluators: [
+        { id: 'csv-import', kind: 'csvImport', requires: 'asset:create' },
+      ],
+    },
   },
 };
 
@@ -1037,6 +1097,18 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
       capabilities: config.chat?.capabilities ?? fallback.chat.capabilities,
       dataSurfaces: config.chat?.dataSurfaces ?? fallback.chat.dataSurfaces,
       entityResolvers: config.chat?.entityResolvers ?? fallback.chat.entityResolvers,
+    },
+    pageIcons: {
+      ...(fallback.pageIcons ?? {}),
+      ...(config.pageIcons ?? {}),
+    },
+    pageTitles: {
+      ...(fallback.pageTitles ?? {}),
+      ...(config.pageTitles ?? {}),
+    },
+    pageActions: {
+      ...(fallback.pageActions ?? {}),
+      ...(config.pageActions ?? {}),
     },
   };
 }

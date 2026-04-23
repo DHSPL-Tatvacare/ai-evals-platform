@@ -25,13 +25,13 @@ import {
 } from '@/components/ui';
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef, SortState } from '@/components/ui/DataTable';
-import { PageShell } from '@/components/ui/PageShell';
 import { PageSurface } from '@/components/ui/PageSurface';
-import type { LucideIcon } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { isActiveStatus } from '@/utils/runStatus';
 import { inferAppIdFromPath, runDetailForApp, apiLogsForApp } from '@/config/routes';
+import { usePageMetadata } from '@/config/pageMetadata';
+import { useAppPageActions } from '@/features/pageActions/registry';
 import { timeAgo, formatDuration } from '@/utils/evalFormatters';
 import { useStableEvalRunUpdate } from '../hooks';
 import { useJobTrackerStore } from '@/stores';
@@ -190,25 +190,11 @@ const TEXT_FILTER_KEYS = ['q'];
 
 /* ── Component ───────────────────────────────────────────── */
 
-interface RunListSurface {
-  icon: LucideIcon;
-  title: string;
-  subtitle?: string;
-  actions?: React.ReactNode;
-}
-
-interface RunListProps {
-  /**
-   * When provided, the page renders inside the unified PageSurface shell with
-   * the given icon/title/actions. When omitted, the page falls back to the
-   * legacy PageShell layout (other apps). Used by the Kaira prototype.
-   */
-  surface?: RunListSurface;
-}
-
-export default function RunList({ surface }: RunListProps = {}) {
+export default function RunList() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { icon, title } = usePageMetadata('runs');
+  const pageActions = useAppPageActions('runs');
 
   const {
     state,
@@ -670,25 +656,12 @@ export default function RunList({ surface }: RunListProps = {}) {
     </>
   );
 
-  if (surface) {
-    return (
-      <PageSurface
-        icon={surface.icon}
-        title={surface.title}
-        subtitle={surface.subtitle}
-        actions={surface.actions}
-      >
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="flex justify-end">{toolbar}</div>
-          {body}
-        </div>
-      </PageSurface>
-    );
-  }
-
   return (
-    <PageShell title="All Runs" filterSlot={toolbar}>
-      {body}
-    </PageShell>
+    <PageSurface icon={icon} title={title} actions={pageActions}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex justify-end">{toolbar}</div>
+        {body}
+      </div>
+    </PageSurface>
   );
 }

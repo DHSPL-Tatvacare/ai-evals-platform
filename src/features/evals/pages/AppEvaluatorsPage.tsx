@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, ConfirmDialog, PageSurface } from '@/components/ui';
+import { evaluatorDetailForApp } from '@/config/routes';
 import { useCurrentAppConfig, useCurrentAppId, useCurrentAppMetadata } from '@/hooks';
 import { CreateEvaluatorWizard, EvaluatorsTable } from '@/features/evals/components';
 import { filterEvaluatorsByVisibility } from '@/services/api/evaluatorsApi';
@@ -9,40 +10,25 @@ import { useEvaluatorsStore } from '@/stores';
 import { useAuthStore } from '@/stores/authStore';
 import { usePermission } from '@/utils/permissions';
 import { evaluatorShowsInHeader, getEvaluatorMainMetricField, setEvaluatorHeaderVisibility } from '@/features/evals/utils/evaluatorMetadata';
+import { usePageMetadata } from '@/config/pageMetadata';
+import { useAppPageActions } from '@/features/pageActions/registry';
 import type {
   EvaluatorDefinition,
   EvaluatorVisibilityFilter,
   EvaluatorContext,
 } from '@/types';
 
-interface AppEvaluatorsPageSurface {
-  icon: LucideIcon;
-  title: string;
-  subtitle?: string;
-}
-
 interface AppEvaluatorsPageProps {
-  extraHeaderActions?: ReactNode;
-  extraEmptyStateActions?: ReactNode;
   onOpenEvaluator?: (evaluator: EvaluatorDefinition) => void;
-  /**
-   * When provided, the page renders inside the unified PageSurface shell with
-   * the given icon/title, and the Create / Restore buttons move into the
-   * PageSurface header actions slot. When omitted, the page falls back to the
-   * legacy in-table header (other apps). Used by the Kaira prototype.
-   */
-  surface?: AppEvaluatorsPageSurface;
 }
 
-export function AppEvaluatorsPage({
-  extraHeaderActions,
-  extraEmptyStateActions,
-  onOpenEvaluator,
-  surface,
-}: AppEvaluatorsPageProps) {
+export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = {}) {
+  const navigate = useNavigate();
   const appId = useCurrentAppId();
   const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
+  const { icon, title } = usePageMetadata('evaluators');
+  const pageActions = useAppPageActions('evaluators');
   const canCreate = usePermission('asset:create');
   const canEdit = usePermission('asset:edit');
   const canDelete = usePermission('asset:delete');
@@ -164,10 +150,22 @@ export function AppEvaluatorsPage({
   };
 
   const showRestore = supportsAppLevelSeedDefaults && isOwner;
+  const defaultOpenEvaluator = useMemo(() => {
+    if (onOpenEvaluator || !appConfig.navigation.evaluatorDetailPath) {
+      return onOpenEvaluator;
+    }
 
-  const surfaceActions = surface ? (
+    return (evaluator: EvaluatorDefinition) => {
+      const detailPath = evaluatorDetailForApp(appId, evaluator.id);
+      if (detailPath) {
+        navigate(detailPath);
+      }
+    };
+  }, [appConfig.navigation.evaluatorDetailPath, appId, navigate, onOpenEvaluator]);
+
+  const headerActions = (
     <>
-      {extraHeaderActions}
+      {pageActions}
       {showRestore && (
         <Button variant="secondary" onClick={handleRestoreDefaults} isLoading={isSeeding}>
           Restore Defaults
@@ -175,44 +173,41 @@ export function AppEvaluatorsPage({
       )}
       {canCreate && <Button onClick={handleOpenCreate}>Create Evaluator</Button>}
     </>
-  ) : null;
-
-  const table = (
-    <EvaluatorsTable
-      evaluators={filteredEvaluators}
-      loading={!isLoaded}
-      filter={filter}
-      onFilterChange={setFilter}
-      onCreate={handleOpenCreate}
-      onEdit={canEdit ? (evaluator) => {
-        setEditingEvaluator(evaluator);
-        setIsWizardOpen(true);
-      } : undefined}
-      onFork={canCreate ? handleFork : undefined}
-      onDelete={canDelete ? (evaluator) => {
-        setEvaluatorToDelete(evaluator);
-        setDeleteConfirmOpen(true);
-      } : undefined}
-      onVisibilityChange={canShare ? handleVisibilityChange : undefined}
-      onRestoreDefaults={showRestore ? handleRestoreDefaults : undefined}
-      onToggleHeader={handleToggleHeader}
-      isRestoringDefaults={isSeeding}
-      title="Evaluators"
-      description={`Manage private and shared evaluators for ${appMetadata.name}.`}
-      headerActions={extraHeaderActions}
-      emptyStateActions={extraEmptyStateActions}
-      hideHeader={Boolean(surface)}
-      onOpen={onOpenEvaluator}
-      canCreate={canCreate}
-      canEditOwned={canEdit}
-      canDeleteOwned={canDelete}
-      canShareOwned={canShare}
-      canManageSeededDefaults={isOwner}
-    />
   );
 
-  const dialogs = (
-    <>
+  return (
+    <PageSurface icon={icon} title={title} actions={headerActions}>
+      <EvaluatorsTable
+        evaluators={filteredEvaluators}
+        loading={!isLoaded}
+        filter={filter}
+        onFilterChange={setFilter}
+        onCreate={handleOpenCreate}
+        onEdit={canEdit ? (evaluator) => {
+          setEditingEvaluator(evaluator);
+          setIsWizardOpen(true);
+        } : undefined}
+        onFork={canCreate ? handleFork : undefined}
+        onDelete={canDelete ? (evaluator) => {
+          setEvaluatorToDelete(evaluator);
+          setDeleteConfirmOpen(true);
+        } : undefined}
+        onVisibilityChange={canShare ? handleVisibilityChange : undefined}
+        onRestoreDefaults={showRestore ? handleRestoreDefaults : undefined}
+        onToggleHeader={handleToggleHeader}
+        isRestoringDefaults={isSeeding}
+        title="Evaluators"
+        description={`Manage private and shared evaluators for ${appMetadata.name}.`}
+        emptyStateActions={pageActions.length > 0 ? <>{pageActions}</> : undefined}
+        hideHeader
+        onOpen={defaultOpenEvaluator}
+        canCreate={canCreate}
+        canEditOwned={canEdit}
+        canDeleteOwned={canDelete}
+        canShareOwned={canShare}
+        canManageSeededDefaults={isOwner}
+      />
+
       {isWizardOpen ? (
         <CreateEvaluatorWizard
           isOpen={isWizardOpen}
@@ -238,27 +233,6 @@ export function AppEvaluatorsPage({
         confirmLabel="Delete"
         variant="danger"
       />
-    </>
-  );
-
-  if (surface) {
-    return (
-      <PageSurface
-        icon={surface.icon}
-        title={surface.title}
-        subtitle={surface.subtitle}
-        actions={surfaceActions}
-      >
-        {table}
-        {dialogs}
-      </PageSurface>
-    );
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      {table}
-      {dialogs}
-    </div>
+    </PageSurface>
   );
 }

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { usePoll, useTableQueryParams } from '@/hooks';
 import {
   FlaskConical,
-  ListChecks,
   Search,
   Clock,
   MoreVertical,
@@ -21,6 +20,7 @@ import {
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef, SortState } from '@/components/ui/DataTable';
 import { PageSurface } from '@/components/ui/PageSurface';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { fetchEvalRunsPaged, deleteEvalRun } from '@/services/api/evalRunsApi';
@@ -184,8 +184,10 @@ const TEXT_FILTER_KEYS = ['q'];
 
 /* ── Component ───────────────────────────────────────────── */
 
+// TODO(phase-5): merge into shared EvalRunList via runs column-config registry.
 export function VoiceRxRunList() {
   const navigate = useNavigate();
+  const { icon, title } = usePageMetadata('runs');
 
   const {
     state,
@@ -512,7 +514,7 @@ export function VoiceRxRunList() {
   );
 
   return (
-    <PageSurface icon={ListChecks} title="All Runs">
+    <PageSurface icon={icon} title={title}>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex justify-end">{toolbar}</div>
         <DataTable

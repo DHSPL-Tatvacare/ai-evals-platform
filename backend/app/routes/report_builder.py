@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json as json_mod
 import logging
 import time
@@ -22,16 +23,21 @@ from app.services.report_builder.schemas import (
     BuilderRuntimeEventOut,
     BuilderRuntimeEventsResponse,
     BuilderSessionSnapshotResponse,
+    BuilderTurnCancelResponse,
 )
 from app.services.report_builder.runtime_store import (
     SherlockRuntimeSession,
     SherlockSessionNotFoundError,
+    append_runtime_event,
+    finalize_assistant_message,
     get_sherlock_runtime_session,
     get_sherlock_runtime_session_snapshot,
     list_sherlock_runtime_events,
     resolve_sherlock_runtime_session,
+    save_runtime_state,
+    touch_sherlock_chat_session,
 )
-from app.services.report_builder.turn_store import get_or_create_turn, get_turn
+from app.services.report_builder.turn_store import get_or_create_turn, get_turn, mark_turn_terminal
 
 router = APIRouter(prefix='/api/report-builder', tags=['report-builder'])
 v2_router = APIRouter(prefix='/api/report-builder/v2', tags=['report-builder'])
@@ -116,6 +122,97 @@ def _track_background_task(turn_id: str, task: asyncio.Task) -> None:
 def _has_live_turn_task(turn_id: str) -> bool:
     task = _SHERLOCK_BACKGROUND_TASKS_BY_TURN.get(turn_id)
     return task is not None and not task.done()
+
+
+def _find_assistant_message(
+    snapshot: dict[str, Any],
+    *,
+    assistant_message_id: str | None,
+) -> dict[str, Any] | None:
+    messages = snapshot.get('messages')
+    if not isinstance(messages, list):
+        return None
+    if assistant_message_id:
+        match = next(
+            (
+                message
+                for message in reversed(messages)
+                if isinstance(message, dict) and message.get('id') == assistant_message_id
+            ),
+            None,
+        )
+        if match is not None:
+            return match
+    return next(
+        (
+            message
+            for message in reversed(messages)
+            if isinstance(message, dict) and message.get('role') == 'assistant'
+        ),
+        None,
+    )
+
+
+async def _force_interrupt_turn(
+    *,
+    runtime_session: SherlockRuntimeSession,
+    turn,
+    auth: AuthContext,
+    db,
+    reason: str,
+) -> None:
+    snapshot = await get_sherlock_runtime_session_snapshot(
+        session_id=runtime_session.chat_session_id,
+        app_id=runtime_session.app_id,
+        auth=auth,
+        db=db,
+    )
+    assistant_message = _find_assistant_message(
+        snapshot,
+        assistant_message_id=turn.assistant_message_id,
+    )
+    content = str(assistant_message.get('content') or '') if assistant_message else ''
+    metadata = dict(assistant_message.get('metadata') or {}) if assistant_message else {}
+    metadata['terminalStatus'] = 'interrupted'
+    metadata['lastError'] = reason
+
+    await save_runtime_state(
+        runtime_session=runtime_session,
+        message_state=list(runtime_session.message_state),
+        scratchpad=dict(runtime_session.scratchpad),
+        status='interrupted',
+        last_error=reason,
+        db=db,
+    )
+    if turn.assistant_message_id:
+        await finalize_assistant_message(
+            runtime_session=runtime_session,
+            message_id=turn.assistant_message_id,
+            content=content or reason,
+            metadata=metadata,
+            status='error',
+            error_message=reason,
+            db=db,
+        )
+    seq = await append_runtime_event(
+        runtime_session=runtime_session,
+        event_type='error',
+        payload={
+            'terminalStatus': 'interrupted',
+            'message': reason,
+            'recoverable': False,
+        },
+        db=db,
+    )
+    await touch_sherlock_chat_session(runtime_session=runtime_session, db=db)
+    await mark_turn_terminal(
+        turn_id=turn.id,
+        status='interrupted',
+        last_event_seq=seq,
+        last_error=reason,
+        db=db,
+    )
+    await db.commit()
 
 
 def _build_terminal_stream_event(
@@ -336,6 +433,91 @@ async def get_builder_runtime_events_v2(
         session_id=payload['session_id'],
         last_event_seq=payload['last_event_seq'],
         events=[BuilderRuntimeEventOut(**event) for event in payload['events']],
+    )
+
+
+@v2_router.post('/sessions/{session_id}/turns/{turn_id}/cancel', response_model=BuilderTurnCancelResponse)
+async def cancel_builder_turn_v2(
+    session_id: str,
+    turn_id: str,
+    app_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    db=Depends(get_db),
+):
+    reason = 'Cancelled by user'
+    runtime_session = await get_sherlock_runtime_session(
+        session_id=session_id,
+        app_id=app_id,
+        auth=auth,
+        db=db,
+    )
+    if runtime_session is None:
+        return _session_not_found_response()
+
+    turn = await get_turn(
+        runtime_session=runtime_session,
+        turn_id=turn_id,
+        db=db,
+    )
+    if turn is None:
+        return JSONResponse(status_code=404, content={'error': 'turn_not_found'})
+
+    if _is_terminal_turn_status(turn.status):
+        return BuilderTurnCancelResponse(
+            session_id=session_id,
+            turn_id=turn_id,
+            result='already_terminal',
+            turn_status=turn.status,
+            message='Turn already finished',
+        )
+
+    if _has_live_turn_task(turn.id):
+        task = _SHERLOCK_BACKGROUND_TASKS_BY_TURN.get(turn.id)
+        if task is not None and not task.done():
+            task.cancel(reason)
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        refreshed = await get_turn(
+            runtime_session=runtime_session,
+            turn_id=turn_id,
+            db=db,
+        )
+        return BuilderTurnCancelResponse(
+            session_id=session_id,
+            turn_id=turn_id,
+            result='cancelled',
+            turn_status=refreshed.status if refreshed is not None else 'interrupted',
+            message=reason,
+        )
+
+    await _force_interrupt_turn(
+        runtime_session=runtime_session,
+        turn=turn,
+        auth=auth,
+        db=db,
+        reason=reason,
+    )
+    refreshed_turn = await get_turn(
+        runtime_session=runtime_session,
+        turn_id=turn_id,
+        db=db,
+    )
+    if refreshed_turn is not None:
+        snapshot = await get_sherlock_runtime_session_snapshot(
+            session_id=runtime_session.chat_session_id,
+            app_id=runtime_session.app_id,
+            auth=auth,
+            db=db,
+        )
+        terminal_event = _build_terminal_stream_event(snapshot=snapshot, turn=refreshed_turn)
+        await _publish_turn_event(refreshed_turn.id, terminal_event)
+        await _close_turn_stream(refreshed_turn.id)
+    return BuilderTurnCancelResponse(
+        session_id=session_id,
+        turn_id=turn_id,
+        result='forced_interrupted',
+        turn_status='interrupted',
+        message='Turn had no live worker task; marked interrupted',
     )
 
 

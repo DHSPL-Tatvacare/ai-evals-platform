@@ -97,6 +97,7 @@ export function ChatWidget() {
   const pendingPrompt = useChatWidgetStore((s) => s.pendingPrompt);
   const consumePendingPrompt = useChatWidgetStore((s) => s.consumePendingPrompt);
   const retryLastMessage = useChatWidgetStore((s) => s.retryLastMessage);
+  const stopActiveTurn = useChatWidgetStore((s) => s.stopActiveTurn);
   const newChat = useChatWidgetStore((s) => s.newChat);
   const loadDefaults = useChatWidgetStore((s) => s.loadDefaults);
   const restoreSession = useChatWidgetStore((s) => s.restoreSession);
@@ -249,6 +250,10 @@ export function ChatWidget() {
   const handleRetry = useCallback(
     () => void retryLastMessage(currentApp),
     [currentApp, retryLastMessage],
+  );
+  const handleStop = useCallback(
+    () => void stopActiveTurn(currentApp),
+    [currentApp, stopActiveTurn],
   );
   const canEditConfiguration = usePermission('configuration:edit');
 
@@ -437,7 +442,9 @@ export function ChatWidget() {
 
           <ChatInput
             onSend={handleSend}
+            onStop={handleStop}
             disabled={!canSend}
+            showStop={isStreaming}
             placeholder={
               !defaults
                 ? 'Loading...'

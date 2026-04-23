@@ -8,7 +8,6 @@ import {
   VoiceRxRunList,
   VoiceRxRunDetail,
 } from "@/features/voiceRx";
-import { VoiceRxEvaluatorsPage } from "./pages/voiceRx";
 import {
   KairaBotSettingsPage,
   TagManagementPage,
@@ -16,13 +15,17 @@ import {
 import {
   EvalDashboard,
   EvalLogs,
+  EvalRunList,
+  EvalRunDetail,
+  EvalThreadDetailV2,
+  EvalAdversarialDetailV2,
 } from "@/features/evalRuns";
+import { AppEvaluatorsPage } from "@/features/evals";
 import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from "@/features/auth";
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
 import { AdminUsersPage } from "@/features/admin";
 import {
   InsideSalesListing,
-  InsideSalesEvaluators,
   InsideSalesEvaluatorDetail,
   InsideSalesRunList,
   InsideSalesRunDetail,
@@ -33,7 +36,7 @@ import {
 } from "@/features/insideSales";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { KairaBotHomePage, KairaRunsPage, KairaEvaluatorsPage, KairaRunDetailPage, KairaThreadDetailPage, KairaAdversarialDetailPage } from "./pages/kaira";
+import { KairaBotHomePage } from "./pages/kaira";
 import { routes } from "@/config/routes";
 import { landingRouteForApp } from "@/config/sidebarNav";
 
@@ -97,7 +100,7 @@ export function Router() {
             />
             <Route
               path={routes.voiceRx.evaluators}
-              element={<VoiceRxEvaluatorsPage />}
+              element={<AppEvaluatorsPage />}
             />
             <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
             <Route path={routes.voiceRx.runs} element={<VoiceRxRunList />} />
@@ -132,17 +135,17 @@ export function Router() {
             <Route path={routes.kaira.dashboard} element={<EvalDashboard />} />
             <Route
               path={routes.kaira.evaluators}
-              element={<KairaEvaluatorsPage />}
+              element={<AppEvaluatorsPage />}
             />
-            <Route path={routes.kaira.runs} element={<KairaRunsPage />} />
-            <Route path="/kaira/runs/:runId" element={<KairaRunDetailPage />} />
+            <Route path={routes.kaira.runs} element={<EvalRunList />} />
+            <Route path="/kaira/runs/:runId" element={<EvalRunDetail />} />
             <Route
               path="/kaira/runs/:runId/adversarial/:evalId"
-              element={<KairaAdversarialDetailPage />}
+              element={<EvalAdversarialDetailV2 />}
             />
             <Route
               path="/kaira/threads/:threadId"
-              element={<KairaThreadDetailPage />}
+              element={<EvalThreadDetailV2 />}
             />
             <Route path={routes.kaira.logs} element={<EvalLogs />} />
             <Route path={routes.kaira.analytics} element={<Suspense fallback={null}><AnalyticsLibraryPage /></Suspense>} />
@@ -153,7 +156,7 @@ export function Router() {
           {/* Inside Sales routes */}
           <Route element={<InsideSalesGuard />}>
             <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
-            <Route path={routes.insideSales.evaluators} element={<InsideSalesEvaluators />} />
+            <Route path={routes.insideSales.evaluators} element={<AppEvaluatorsPage />} />
             <Route path="/inside-sales/evaluators/:id" element={<InsideSalesEvaluatorDetail />} />
             <Route path={routes.insideSales.runs} element={<InsideSalesRunList />} />
             <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />

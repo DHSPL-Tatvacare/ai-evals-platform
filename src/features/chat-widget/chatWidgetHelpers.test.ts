@@ -129,7 +129,9 @@ test('buildComposedReportOutline formats a readable section list', () => {
   ).toBe('Weekly Review\n- Summary Cards (summary_cards)\n- Compliance Table (compliance_table)');
 });
 
-test('partsFromStoredMessage ignores legacy tool calls without toolCallId', () => {
+test('partsFromStoredMessage skips tool calls without toolCallId (pre-Phase-2 replay shim)', () => {
+  // Tracked in docs/plans/sherlock-shim-ledger.md: the guard protects
+  // historical stored sessions where toolCallId was absent.
   expect(
     partsFromStoredMessage('Done', {
       toolCalls: [
@@ -152,8 +154,10 @@ test('isChartPayload accepts new-shape chart payloads', () => {
   expect(isChartPayload(payload)).toBe(true);
 });
 
-test('isChartPayload rejects legacy pre-contract chart payloads', () => {
-  const legacy = {
+test('isChartPayload rejects non-contract chart payload shapes', () => {
+  // Strict ajv validator — any payload missing the discriminated-union
+  // shape is rejected, regardless of origin.
+  const nonContract = {
     spec: {
       type: 'bar',
       title: 'Pass rate',
@@ -167,15 +171,15 @@ test('isChartPayload rejects legacy pre-contract chart payloads', () => {
     sqlQuery: 'SELECT ...',
     sourceQuestion: 'show pass rate',
   };
-  expect(isChartPayload(legacy)).toBe(false);
+  expect(isChartPayload(nonContract)).toBe(false);
 });
 
-test('partsFromStoredMessage drops unsupported legacy chart metadata', () => {
+test('partsFromStoredMessage drops artifacts whose payload fails the chart validator', () => {
   expect(
     partsFromStoredMessage('Done', {
-      // Phase 1: persisted metadata carries ``artifacts[]``; an unknown-
-      // pack or malformed-payload artifact is dropped silently so the
-      // message renders as text-only.
+      // Phase 1: persisted metadata carries ``artifacts[]``; an
+      // artifact whose payload fails the strict ajv validator is
+      // dropped silently so the message still renders as text.
       artifacts: [
         {
           pack_id: 'analytics',

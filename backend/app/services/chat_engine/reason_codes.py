@@ -130,6 +130,7 @@ REPORT_BUILDER_REASON_CODES: frozenset[str] = (
 # Pack id -> pack-owned reason code set (registry for closure test)
 # ---------------------------------------------------------------------------
 
+
 PACK_REASON_CODES: dict[str, frozenset[str]] = {
     'analytics': ANALYTICS_REASON_CODES,
     'report_builder': REPORT_BUILDER_REASON_CODES,
@@ -157,3 +158,22 @@ def _assert_disjoint_pack_ownership() -> None:
 
 
 _assert_disjoint_pack_ownership()
+
+
+def register_pack_reason_codes(pack_id: str, codes: frozenset[str]) -> None:
+    """Register one pack's full reason-code set and enforce disjointness.
+
+    Future packs should self-register from their own module at import time so
+    Harness Core does not need a new hardcoded registry entry per pack.
+    """
+
+    existing = PACK_REASON_CODES.get(pack_id)
+    if existing is not None:
+        if existing == codes:
+            return
+        raise RuntimeError(
+            f"reason-code registry collision for pack '{pack_id}': existing "
+            f"codes differ from the new registration."
+        )
+    PACK_REASON_CODES[pack_id] = codes
+    _assert_disjoint_pack_ownership()

@@ -9,11 +9,13 @@ import { useChatWidgetStore } from './useChatWidget';
 import {
   isBlueprintPart,
   isChartPart,
+  isContractStubNotePart,
   isSaveToastPart,
   isToolCallPart,
 } from './chatWidgetHelpers';
 import { BlueprintCard } from './components/BlueprintCard';
 import { ChatChartCard } from './components/ChatChartCard';
+import { ContractStubNoteCard } from './components/ContractStubNoteCard';
 import { EmptyState } from './components/EmptyState';
 import { JobBadge } from './components/JobBadge';
 import { SaveToast } from './components/SaveToast';
@@ -292,6 +294,13 @@ function renderAssistantParts(
 
     if (isSaveToastPart(part)) {
       blocks.push(<SaveToast key={`${message.id}-toast-${index}`} part={part} />);
+      continue;
+    }
+
+    if (isContractStubNotePart(part)) {
+      blocks.push(
+        <ContractStubNoteCard key={`${message.id}-stub-${index}`} part={part} />,
+      );
       continue;
     }
 

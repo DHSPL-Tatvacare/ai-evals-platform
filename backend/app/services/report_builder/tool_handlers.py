@@ -1387,6 +1387,14 @@ async def dispatch_tool_call(
     arguments = dict(arguments or {})
     start = time.monotonic()
     handler = TOOL_HANDLER_MAP.get(tool_name)
+    if handler is None:
+        # Plan §6.3 rule 3: every pack owns its own ``tool_handlers()``.
+        # Generic fallback — any pack registered in
+        # ``CAPABILITY_PACK_REGISTRY`` can contribute handlers without
+        # editing this dispatcher. No pack-specific branch.
+        pack = resolve_pack_for_tool(tool_name)
+        if pack is not None:
+            handler = pack.tool_handlers().get(tool_name)
     if not handler:
         await _log_tool_call(
             tool_name, arguments, auth, app_id,

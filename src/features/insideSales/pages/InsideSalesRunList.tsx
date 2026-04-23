@@ -20,6 +20,7 @@ import {
 import { DataTable } from '@/components/ui/DataTable';
 import type { ColumnDef, SortState } from '@/components/ui/DataTable';
 import { PageSurface } from '@/components/ui/PageSurface';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import { fetchEvalRunsPaged, deleteEvalRun } from '@/services/api/evalRunsApi';
@@ -120,7 +121,9 @@ interface TableRow {
 
 /* ── Component ───────────────────────────────────────────── */
 
+// TODO(phase-5): merge into shared EvalRunList via runs column-config registry.
 export function InsideSalesRunList() {
+  const { icon, title } = usePageMetadata('runs');
   const navigate = useNavigate();
 
   const {
@@ -423,7 +426,7 @@ export function InsideSalesRunList() {
   );
 
   return (
-    <PageSurface icon={ListChecks} title="Runs">
+    <PageSurface icon={icon} title={title}>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex justify-end">{toolbar}</div>
         <DataTable

@@ -1,11 +1,23 @@
+import type { AppId } from '@/types';
 import type { Run } from '@/types';
-import type { KairaBotSettings } from '@/stores/appSettingsStore';
+import type { AppSpecificSettings, KairaBotSettings } from '@/stores/appSettingsStore';
 
 interface GlobalTimeouts {
   textOnly: number;
   withSchema: number;
   withAudio: number;
   withAudioAndSchema: number;
+}
+
+export function getAdversarialRetrySettings(
+  appId: AppId,
+  settings: AppSpecificSettings,
+): KairaBotSettings | null {
+  if (appId !== 'kaira-bot') {
+    return null;
+  }
+
+  return settings['kaira-bot'];
 }
 
 export function buildAdversarialRetryParams(args: {

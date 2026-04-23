@@ -21,8 +21,11 @@ Binding rules (§6.3):
 
 from __future__ import annotations
 
+import importlib
 import logging
 import uuid
+from functools import cache
+from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from app.services.chat_engine.artifact import (
@@ -116,6 +119,7 @@ validator (``resolve_pack_ids_for_app``) raises on unknown ids.
 """
 
 _TOOL_TO_PACK_ID: dict[str, str] = {}
+_IMPORTED_PACK_MODULES: set[str] = set()
 
 
 def register_pack(pack: CapabilityPack) -> None:
@@ -136,28 +140,35 @@ def register_pack(pack: CapabilityPack) -> None:
             _TOOL_TO_PACK_ID[name] = pack.pack_id
 
 
-_REQUIRED_PACK_IDS: tuple[str, ...] = ('analytics', 'report_builder')
+@cache
+def _discover_pack_modules() -> tuple[str, ...]:
+    """Return every concrete capability-pack module in ``app.services``.
+
+    Phase 8's extension proof should not require editing Harness Core when a
+    new pack lands. The convention is intentionally narrow: any module under
+    ``app.services`` ending in ``*_pack.py`` (except this registry module) is
+    imported for its ``register_pack(...)`` side effect.
+    """
+
+    services_root = Path(__file__).resolve().parents[1]
+    app_root = services_root.parent
+    modules: list[str] = []
+    for path in services_root.rglob('*_pack.py'):
+        if path.name == 'capability_pack.py':
+            continue
+        relpath = path.relative_to(app_root).with_suffix('')
+        modules.append('app.' + '.'.join(relpath.parts))
+    return tuple(sorted(modules))
 
 
 def ensure_packs_registered() -> None:
-    """Import the concrete pack modules so their ``register_pack`` calls run.
+    """Import every concrete pack module so its ``register_pack`` call runs."""
 
-    Import-at-call keeps ``capability_pack.py`` cycle-free: the concrete
-    packs reference ``tool_handlers``, which references chat_engine
-    artifact + reason_codes. The registry is idempotent.
-
-    Checks each required pack id individually; a partially-populated
-    registry (e.g. ``analytics`` imported by a pack-local module before
-    ``report_builder``) still completes on the next call.
-    """
-
-    if all(pid in CAPABILITY_PACK_REGISTRY for pid in _REQUIRED_PACK_IDS):
-        return
-    # Intentional side-effect: each module calls ``register_pack`` at import.
-    if 'analytics' not in CAPABILITY_PACK_REGISTRY:
-        import app.services.report_builder.analytics_pack  # noqa: F401
-    if 'report_builder' not in CAPABILITY_PACK_REGISTRY:
-        import app.services.report_builder.report_builder_pack  # noqa: F401
+    for module_name in _discover_pack_modules():
+        if module_name in _IMPORTED_PACK_MODULES:
+            continue
+        importlib.import_module(module_name)
+        _IMPORTED_PACK_MODULES.add(module_name)
 
 
 def resolve_pack_for_tool(tool_name: str) -> CapabilityPack | None:
@@ -204,6 +215,104 @@ def resolve_pack_ids_for_app(capabilities: list[str] | None, app_id: str) -> lis
             f"{sorted(CAPABILITY_PACK_REGISTRY)}."
         )
     return list(capabilities)
+
+
+# ---------------------------------------------------------------------------
+# Generic harness → pack extension hooks (Phase 9 §3.A)
+# ---------------------------------------------------------------------------
+#
+# These helpers let Harness Core collect optional contributions from the
+# active packs without knowing any pack's id or private helper surface. A
+# pack that has nothing to add returns an empty structure; Harness Core
+# merges everything uniformly.
+
+
+def _iter_active_packs(pack_ids: Sequence[str]) -> list['CapabilityPack']:
+    ensure_packs_registered()
+    return [
+        CAPABILITY_PACK_REGISTRY[pid]
+        for pid in pack_ids
+        if pid in CAPABILITY_PACK_REGISTRY
+    ]
+
+
+def collect_question_hints(
+    *,
+    pack_ids: Sequence[str],
+    question: str,
+    app_id: str,
+    semantic_model: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Collect per-turn question-analysis hints from every active pack.
+
+    Harness Core calls this while assembling the outer-agent prompt.
+    Each pack that defines ``question_hints(question, app_id, semantic_model)``
+    contributes ``{context, needs_discovery}``; the aggregate joins the
+    non-empty ``context`` strings and OR's the ``needs_discovery`` flags.
+    Packs without the hook (or with nothing to say) return
+    ``{context: '', needs_discovery: False}``.
+    """
+
+    contexts: list[str] = []
+    needs_discovery = False
+    for pack in _iter_active_packs(pack_ids):
+        hook = getattr(pack, 'question_hints', None)
+        if hook is None:
+            continue
+        try:
+            hint = hook(
+                question=question,
+                app_id=app_id,
+                semantic_model=semantic_model,
+            )
+        except TypeError:
+            # Packs that declare question_hints with positional args fall
+            # through; harness-core never hand-edits their signature.
+            continue
+        if not isinstance(hint, Mapping):
+            continue
+        context = hint.get('context')
+        if isinstance(context, str) and context.strip():
+            contexts.append(context)
+        if bool(hint.get('needs_discovery')):
+            needs_discovery = True
+    return {
+        'context': '\n\n'.join(contexts),
+        'needs_discovery': needs_discovery,
+    }
+
+
+def collect_tool_schema_enums(
+    *,
+    pack_ids: Sequence[str],
+    app_id: str,
+    semantic_model: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    """Collect bounded tool-arg enums contributed by every active pack.
+
+    The outer-agent tool schema uses these lists to hard-bound string
+    parameters (``table``, ``dimension``, ``surface_key``, ...). Each pack
+    owns the vocabulary behind its own tool args; harness-core merges the
+    per-param lists (de-duplicated, sorted) without knowing which pack
+    contributed which value.
+    """
+
+    merged: dict[str, set[str]] = {}
+    for pack in _iter_active_packs(pack_ids):
+        hook = getattr(pack, 'tool_schema_enums', None)
+        if hook is None:
+            continue
+        contributed = hook(app_id=app_id, semantic_model=semantic_model)
+        if not isinstance(contributed, Mapping):
+            continue
+        for param_name, values in contributed.items():
+            if not isinstance(values, (list, tuple, set, frozenset)):
+                continue
+            bucket = merged.setdefault(str(param_name), set())
+            for value in values:
+                if isinstance(value, str) and value:
+                    bucket.add(value)
+    return {name: sorted(values) for name, values in merged.items()}
 
 
 async def validate_all_app_pack_ids(db: Any) -> None:

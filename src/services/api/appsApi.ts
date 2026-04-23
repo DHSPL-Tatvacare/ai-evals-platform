@@ -14,6 +14,7 @@ import {
   type AppConfig,
   type AppId,
   type AppSummary,
+  type PageActionSpec,
 } from '@/types';
 
 interface ApiAppSummary {
@@ -224,6 +225,49 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
         ?? (rawChat.entity_resolvers as AppConfig['chat']['entityResolvers'] | undefined)
         ?? APP_CONFIG_FALLBACKS[appId].chat.entityResolvers,
     },
+    pageIcons: normalizeStringMap(config.pageIcons ?? config.page_icons),
+    pageTitles: normalizeStringMap(config.pageTitles ?? config.page_titles),
+    pageActions: normalizePageActions(config.pageActions ?? config.page_actions),
+  };
+}
+
+function normalizeStringMap(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string',
+  );
+  return Object.fromEntries(entries);
+}
+
+function normalizePageActions(value: unknown): AppConfig['pageActions'] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const out: Record<string, PageActionSpec[]> = {};
+  for (const [pageType, specs] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(specs)) continue;
+    const normalized = specs
+      .map((spec) => normalizePageActionSpec(spec))
+      .filter((spec): spec is PageActionSpec => spec !== null);
+    if (normalized.length > 0) {
+      out[pageType] = normalized;
+    }
+  }
+  return out as AppConfig['pageActions'];
+}
+
+function normalizePageActionSpec(value: unknown): PageActionSpec | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.id !== 'string' || typeof raw.kind !== 'string') return null;
+  const config =
+    typeof raw.config === 'object' && raw.config !== null
+      ? (raw.config as Record<string, unknown>)
+      : undefined;
+  const requires = typeof raw.requires === 'string' ? raw.requires : undefined;
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    ...(config !== undefined ? { config } : {}),
+    ...(requires !== undefined ? { requires } : {}),
   };
 }
 

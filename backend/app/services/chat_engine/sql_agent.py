@@ -446,15 +446,6 @@ async def _expand_run_id_prefixes(
     return updated
 
 
-def _parameterize_uuids(text_value: str, uuid_params: dict[str, str] | None = None) -> tuple[str, dict[str, str]]:
-    """Convenience wrapper kept for backward compat with tests."""
-    registry = UUIDParamRegistry()
-    if uuid_params:
-        for uuid_value in uuid_params.values():
-            registry.register(uuid_value)
-    return registry.parameterize_text(text_value), registry.params
-
-
 def _build_cache_key(sql: str, params: dict[str, Any]) -> str:
     serialized_params = json.dumps(
         {key: str(value) for key, value in sorted(params.items())},

@@ -192,6 +192,21 @@ export interface JobBadgePart {
   resultHref?: string;
 }
 
+// Phase 8 — contract-stub proof pack. Renders the
+// ``contract_stub.note.v1`` artifact produced by ``stub_make_note``.
+// Dispatched purely on ``pack_id + contract_id`` (no payload-shape
+// inference) so the harness artifact lane stays generic.
+export type ContractStubNoteVariant = 'plain' | 'warning' | 'success';
+export interface ContractStubNotePart {
+  type: 'contract-stub-note';
+  title: string;
+  body: string;
+  variant: ContractStubNoteVariant;
+  sourceText: string;
+  renderedVariant: ContractStubNoteVariant;
+  truncated: boolean;
+}
+
 export type MessagePart =
   | TextPart
   | ToolCallPart
@@ -199,7 +214,8 @@ export type MessagePart =
   | BlueprintPart
   | SaveToastPart
   | DashboardBarPart
-  | JobBadgePart;
+  | JobBadgePart
+  | ContractStubNotePart;
 
 export interface TurnUsage {
   inputTokens: number;

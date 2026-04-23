@@ -509,8 +509,9 @@ async def _render_pending_jobs_block(
     terminal_statuses = ('completed', 'failed', 'cancelled')
     pending_statuses = ('queued', 'running', 'retryable_failed')
 
-    # JSONB containment matches the surface+session_id keys; GIN index on
-    # ``submission_context`` keeps this bounded to the session's jobs.
+    # JSONB containment matches the surface+session_id keys; the GIN
+    # ``jsonb_path_ops`` index on ``submission_context`` (created in
+    # startup_schema.py) keeps this bounded to the session's jobs.
     session_clause = (
         Job.tenant_id == tenant_id,
         Job.user_id == user_id,
@@ -704,16 +705,31 @@ def _question_contract_hints(
     question: str,
     app_id: str,
     semantic_model: dict[str, Any],
+    app_config: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Phase 4 §662: delegate to ``AnalyticsPack.question_hints``.
+    """Aggregate question-analysis hints from every active pack.
 
-    Harness / chat_handler never reads ``tool_vocabulary`` directly; the
-    vocabulary-backed analysis is pack-owned.
+    Harness-core never reaches into a specific pack; it resolves the
+    app's active pack ids from ``app_config.chat.capabilities`` and asks
+    each pack (generically) for its question-hint contribution via
+    ``capability_pack.collect_question_hints``.
     """
-    from app.services.report_builder.analytics_pack import _ANALYTICS_PACK
+    from app.schemas.app_config import AppConfig
+    from app.services.chat_engine.capability_pack import (
+        collect_question_hints,
+        resolve_pack_ids_for_app,
+    )
 
-    return _ANALYTICS_PACK.question_hints(
-        question=question, app_id=app_id, semantic_model=semantic_model,
+    parsed = AppConfig.model_validate(app_config or {})
+    pack_ids = resolve_pack_ids_for_app(
+        parsed.chat.capabilities or None,
+        app_id=app_id,
+    )
+    return collect_question_hints(
+        pack_ids=pack_ids,
+        question=question,
+        app_id=app_id,
+        semantic_model=semantic_model,
     )
 
 
@@ -1074,8 +1090,10 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
     from sqlalchemy import select
     from app.models.app import App
     from app.schemas.app_config import AppConfig
-    from app.services.chat_engine.capability_pack import resolve_pack_ids_for_app
-    from app.services.report_builder.analytics_pack import _ANALYTICS_PACK
+    from app.services.chat_engine.capability_pack import (
+        collect_tool_schema_enums,
+        resolve_pack_ids_for_app,
+    )
 
     result = await db.execute(
         select(App.config).where(App.slug == app_id, App.is_active.is_(True))
@@ -1090,10 +1108,11 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
 
     semantic_model = load_semantic_model(app_id, app_config=raw_config)
 
-    # Phase 4 §662 item-3: the analytics pack owns the vocabulary; Harness
-    # Core asks the pack for the bounded tool-schema enums instead of
-    # assembling them from the vocabulary module itself.
-    enums = _ANALYTICS_PACK.tool_schema_enums(
+    # Harness Core asks every active pack (generically) for the bounded
+    # tool-schema enums that apply to its tool args. No pack id is named
+    # here — ``collect_tool_schema_enums`` merges what the packs return.
+    enums = collect_tool_schema_enums(
+        pack_ids=pack_ids,
         app_id=app_id,
         semantic_model=semantic_model,
     )
@@ -1121,12 +1140,19 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
                     f"{props[param_name].get('description', '').rstrip()} "
                     f"Must be one of: {', '.join(allowed)}."
                 ).strip()
-        # Nested: blueprint_compose.sections[*].type is a block_type.
+        # Nested: a pack may bound a nested property by reusing one of the
+        # aggregated enum lists — e.g. analytics binds
+        # ``blueprint_compose.sections[*].type`` to ``block_type``.
         sections = props.get('sections') or {}
         section_items = sections.get('items') or {}
         section_props = section_items.get('properties') or {}
-        if 'type' in section_props and _is_string_typed(section_props['type']) and enums['block_type']:
-            section_props['type']['enum'] = enums['block_type']
+        block_type_enum = enums.get('block_type') or []
+        if (
+            'type' in section_props
+            and _is_string_typed(section_props['type'])
+            and block_type_enum
+        ):
+            section_props['type']['enum'] = block_type_enum
 
     return tools
 
@@ -1258,6 +1284,7 @@ async def _execute_chat_turn(
             question=user_message,
             app_id=working_session['app_id'],
             semantic_model=semantic_model,
+            app_config=app_config,
         )
 
         await record_user_message(runtime_session=runtime_session, content=user_message, db=db)
@@ -1525,6 +1552,24 @@ async def _execute_chat_turn(
     except (Exception, asyncio.CancelledError) as exc:
         terminal_status = 'interrupted' if isinstance(exc, asyncio.CancelledError) else 'error'
         error_text = str(exc)
+        # Plan §Phase-2 ("observation must include outcome") + §4.1
+        # (harness owns runtime-event emission): the agent AND any replay
+        # consumer must see that the turn errored. Two things block that
+        # today: (1) the root failure is swallowed into ``error_text`` with
+        # no log line, so ops can't tell what broke; (2) the aborted-but-
+        # unrolled-back transaction makes every recovery-path DB write
+        # raise ``InFailedSQLTransactionError``, which propagates out of
+        # the except block and kills ``_turn_task`` before any ``error``
+        # SSE event is emitted. Rolling back once here restores the
+        # invariant "every turn ends with a terminal event (done | error)".
+        if not isinstance(exc, asyncio.CancelledError):
+            logger.exception(
+                'Sherlock turn failed: %s: %s', type(exc).__name__, error_text,
+            )
+        try:
+            await db.rollback()
+        except Exception:
+            logger.debug('rollback after turn failure failed', exc_info=True)
         await save_runtime_state(
             runtime_session=runtime_session,
             message_state=[],

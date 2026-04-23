@@ -9,6 +9,7 @@ from pydantic import model_validator
 from app.schemas.base import CamelModel
 
 RuntimeOperation = Literal['send', 'resume']
+CancelTurnResult = Literal['cancelled', 'forced_interrupted', 'already_terminal']
 
 
 class BuilderChatRequest(CamelModel):
@@ -73,3 +74,11 @@ class BuilderRuntimeEventsResponse(CamelModel):
     session_id: str
     last_event_seq: int
     events: list[BuilderRuntimeEventOut] = []
+
+
+class BuilderTurnCancelResponse(CamelModel):
+    session_id: str
+    turn_id: str
+    result: CancelTurnResult
+    turn_status: str
+    message: str

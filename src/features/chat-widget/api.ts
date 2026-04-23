@@ -23,6 +23,14 @@ interface ChatRequest {
   model: string;
 }
 
+interface CancelTurnResponse {
+  sessionId: string;
+  turnId: string;
+  result: 'cancelled' | 'forced_interrupted' | 'already_terminal';
+  turnStatus: string;
+  message: string;
+}
+
 interface StreamSessionEvent {
   sessionId: string;
   provider: BuilderSessionData['provider'];
@@ -136,6 +144,17 @@ export async function getBuilderSession(appId: string, sessionId: string): Promi
 
 export async function getChatDefaults(): Promise<ChatDefaults> {
   return apiRequest<ChatDefaults>('/api/chat-engine/defaults');
+}
+
+export async function cancelChatTurn(
+  appId: string,
+  sessionId: string,
+  turnId: string,
+): Promise<CancelTurnResponse> {
+  return apiRequest<CancelTurnResponse>(
+    `/api/report-builder/v2/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/cancel?app_id=${encodeURIComponent(appId)}`,
+    { method: 'POST' },
+  );
 }
 
 export async function streamChatMessage(

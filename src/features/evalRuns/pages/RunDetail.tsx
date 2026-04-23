@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { usePoll } from "@/hooks";
+import { usePoll, useCurrentAppId } from "@/hooks";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangle, Cpu, Thermometer, Calendar, FileText, UserRoundPen, Lock, Info, RotateCcw, Layers } from "lucide-react";
 import { EmptyState, ConfirmDialog, LoadingState, Tooltip } from "@/components/ui";
 import { PermissionGate } from "@/components/auth/PermissionGate";
 import { PageSurface } from "@/components/ui/PageSurface";
-import type { LucideIcon } from "lucide-react";
 import { RunHeaderActions, ActionIconButton } from "../components/RunHeaderActions";
 import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
 import {
@@ -18,7 +17,9 @@ import { ApiError } from "@/services/api/client";
 import { jobsApi, type Job } from "@/services/api/jobsApi";
 import { notificationService } from "@/services/notifications";
 import { useJobTrackerStore } from "@/stores";
-import { routes } from "@/config/routes";
+import { apiLogsForApp, runsForApp } from "@/config/routes";
+import { usePageMetadata } from "@/config/pageMetadata";
+import { useAppPageActions } from "@/features/pageActions/registry";
 import {
   VerdictBadge,
   MetricInfo,
@@ -45,7 +46,11 @@ import { ReviewHistoryTab } from '@/features/reviews/ReviewHistoryTab';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { useAppSettingsStore, useGlobalSettingsStore } from '@/stores';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
-import { buildAdversarialRetryParams, canSubmitAdversarialRun } from '../utils/adversarialRunParams';
+import {
+  buildAdversarialRetryParams,
+  canSubmitAdversarialRun,
+  getAdversarialRetrySettings,
+} from '../utils/adversarialRunParams';
 import { getCanonicalAdversarialCase } from '../utils/adversarialCanonical';
 import { usePermission } from '@/utils/permissions';
 
@@ -111,24 +116,15 @@ function AdversarialErrorBanner({ errors, total }: { errors: number; total: numb
   );
 }
 
-interface RunDetailSurface {
-  icon: LucideIcon;
-  back?: { to: string; label?: string };
-}
-
-interface RunDetailProps {
-  /**
-   * When provided, the page renders inside the unified PageSurface shell with
-   * the given icon + back navigation. Title/subtitle/actions are computed
-   * internally from the run data. Used by the Kaira drilldown prototype.
-   */
-  surface?: RunDetailSurface;
-}
-
-export default function RunDetail({ surface }: RunDetailProps = {}) {
+export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
-  const kairaSettings = useAppSettingsStore((s) => s.settings['kaira-bot']);
+  const appId = useCurrentAppId();
+  const { icon } = usePageMetadata('runDetail');
+  const extraActions = useAppPageActions('runDetail');
+  const adversarialRetrySettings = useAppSettingsStore((s) =>
+    getAdversarialRetrySettings(appId, s.settings),
+  );
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const [run, setRun] = useState<Run | null>(null);
   const [threadEvals, setThreadEvals] = useState<ThreadEvalRow[]>([]);
@@ -150,10 +146,10 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
   const [showRetryConfirm, setShowRetryConfirm] = useState(false);
   const lastProgressRef = useRef(-1);
   const { submit: submitAdversarialRetry, isSubmitting: retryingFailedCases } = useSubmitAndRedirect({
-    appId: 'kaira-bot',
+    appId,
     label: 'Adversarial Retry',
     successMessage: 'Adversarial retry submitted. It will appear in the runs list shortly.',
-    fallbackRoute: routes.kaira.runs,
+    fallbackRoute: runsForApp(appId),
     onClose: () => {},
   });
 
@@ -178,12 +174,12 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
     setConfirmDelete(false);
     try {
       await deleteRun(runId);
-      navigate(routes.kaira.runs, { replace: true });
+      navigate(runsForApp(appId), { replace: true });
     } catch (e: unknown) {
       notificationService.error(e instanceof Error ? e.message : 'Unknown error', "Delete failed");
       setDeleting(false);
     }
-  }, [runId, run, navigate]);
+  }, [runId, run, navigate, appId]);
 
   const handleCancel = useCallback(async () => {
     if (!activeJob) return;
@@ -201,10 +197,10 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
 
   const handleRetryFailedCases = useCallback(async () => {
     if (!run) return;
-    if (!canSubmitAdversarialRun(kairaSettings, run)) {
+    if (!adversarialRetrySettings || !canSubmitAdversarialRun(adversarialRetrySettings, run)) {
       notificationService.error(
-        'Configure a Kaira API URL and at least one credential row before retrying adversarial cases.',
-        'Missing Kaira settings',
+        'Configure the required API URL and credential row before retrying adversarial cases.',
+        'Missing app settings',
       );
       return;
     }
@@ -214,18 +210,18 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
     }
 
     await submitAdversarialRetry(
-      'evaluate-adversarial',
-      buildAdversarialRetryParams({
-        run,
-        kairaSettings,
-        timeouts,
-        retryEvalIds: retryableAdversarialEvalIds,
-        sourceRunId: run.run_id,
-        nameSuffix: ' Failed Case Retry',
-      }),
+        'evaluate-adversarial',
+        buildAdversarialRetryParams({
+          run,
+          kairaSettings: adversarialRetrySettings,
+          timeouts,
+          retryEvalIds: retryableAdversarialEvalIds,
+          sourceRunId: run.run_id,
+          nameSuffix: ' Failed Case Retry',
+        }),
     );
   }, [
-    kairaSettings,
+    adversarialRetrySettings,
     retryableAdversarialEvalIds,
     run,
     submitAdversarialRetry,
@@ -396,7 +392,7 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
         <p className="text-sm text-[var(--text-secondary)]">
           This evaluation run may have been deleted or doesn't exist.
         </p>
-        <Link to={routes.kaira.runs} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
+        <Link to={runsForApp(appId)} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
           Back to runs
         </Link>
       </div>
@@ -409,7 +405,7 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
         <AlertTriangle className="h-10 w-10 text-[var(--color-error)]" />
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Failed to load run</h2>
         <p className="text-sm text-[var(--color-error)]">{error}</p>
-        <Link to={routes.kaira.runs} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
+        <Link to={runsForApp(appId)} className="text-sm font-medium text-[var(--text-brand)] hover:underline">
           Back to runs
         </Link>
       </div>
@@ -590,7 +586,7 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
 
   const headerActions = (
     <RunHeaderActions
-      logsHref={`${routes.kaira.logs}?run_id=${run.run_id}`}
+      logsHref={`${apiLogsForApp(appId)}?run_id=${run.run_id}`}
       isActive={isRunActive}
       cancelling={cancelling}
       deleting={deleting}
@@ -623,7 +619,7 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
     <div className="flex flex-1 min-h-0 flex-col pt-4 gap-4">
       {activeTab === 'report' && run && (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <AppReportTab appId="kaira-bot" runId={run.run_id} />
+          <AppReportTab appId={appId} runId={run.run_id} />
         </div>
       )}
 
@@ -731,222 +727,25 @@ export default function RunDetail({ surface }: RunDetailProps = {}) {
     />
   ) : null;
 
-  if (surface) {
-    return (
-      <InlineReviewProvider runId={run.run_id} appId="kaira-bot" enabled={canReview}>
-        <PageSurface
-          icon={surface.icon}
-          title={run.name || run.command}
-          subtitle={metadataStrip}
-          back={surface.back}
-          actions={headerActions}
-        >
-          {banners}
-          {tabBar}
-          {scrollableBody}
-          {deleteDialog}
-        </PageSurface>
-      </InlineReviewProvider>
-    );
-  }
-
   return (
-    <InlineReviewProvider runId={run.run_id} appId="kaira-bot" enabled={canReview}>
-    <div className="run-detail-container flex flex-col flex-1 min-h-0">
-      {/* ── Sticky header ─────────────────────────────────── */}
-      <div className="run-detail-header shrink-0 space-y-2 pb-2">
-        <nav className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-          {isInReview
-            ? <span>Runs</span>
-            : <Link to={routes.kaira.runs} className="hover:text-[var(--text-brand)] transition-colors">Runs</Link>}
-          <span>/</span>
-          <span className="font-mono text-[var(--text-primary)] font-medium">{run.run_id.slice(0, 12)}</span>
-        </nav>
-
-        {isRunActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
-
-        {showSuccessBanner && <SuccessBanner durationSeconds={run.duration_seconds} />}
-        {run.status.toLowerCase() === "failed" && run.error_message && !isRunActive && (
-          <FailureBanner message={run.error_message} />
-        )}
-        {run.status.toLowerCase() === "cancelled" && (
-          <CancelledBanner durationSeconds={run.duration_seconds} />
-        )}
-        {summaryErrors > 0 && summaryCompleted > 0 && !isRunActive && (
-          <ErrorWarningBanner errors={summaryErrors} total={summaryTotal} completed={summaryCompleted} />
-        )}
-
-        <div className="bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <h1 className="text-[13px] font-bold text-[var(--text-primary)] truncate">
-              {run.name || run.command}
-            </h1>
-            <VerdictBadge verdict={run.status} category="status" />
-            {run.description && (
-              <span className="text-xs text-[var(--text-secondary)] truncate hidden sm:inline">{run.description}</span>
-            )}
-            <RunHeaderActions
-              logsHref={`${routes.kaira.logs}?run_id=${run.run_id}`}
-              isActive={isRunActive}
-              cancelling={cancelling}
-              deleting={deleting}
-              onCancel={handleCancel}
-              onDelete={() => setConfirmDelete(true)}
-              hideActions={isInReview}
-              visibilityContent={isInReview || !isReviewable ? null : (
-                <EvalRunVisibilityPanel
-                  runId={run.run_id}
-                  visibility={run.visibility ?? 'private'}
-                  ownerId={run.userId}
-                  mode="inline"
-                  onUpdated={(visibility) => setRun((current) => (
-                    current
-                      ? { ...current, visibility, shared_by: visibility === 'shared' ? current.shared_by : null, shared_at: visibility === 'shared' ? current.shared_at : null }
-                      : current
-                  ))}
-                />
-              )}
-              reviewContent={isInReview || !isReviewable ? null : <StartReviewButton runId={run.run_id} />}
-            />
-          </div>
-          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1 text-xs text-[var(--text-muted)]">
-            <span className="font-mono">{run.run_id.slice(0, 12)}</span>
-            <span className="flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              {formatTimestamp(run.timestamp)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {isRunActive ? elapsed || "\u2014" : formatDuration(run.duration_seconds)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Cpu className="h-3 w-3" />
-              {run.llm_provider}/{run.llm_model}
-            </span>
-            <span className="flex items-center gap-1">
-              <Thermometer className="h-3 w-3" />
-              {run.eval_temperature}
-            </span>
-            {run.data_path && (
-              <span className="flex items-center gap-1 truncate max-w-48">
-                <FileText className="h-3 w-3 shrink-0" />
-                {run.data_path}
-              </span>
-            )}
-            {run.error_message && run.status.toLowerCase() === 'failed' && (
-              <span className="text-[var(--color-error)]">{run.error_message}</span>
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* ── Tab bar (only when report tab is available) ──── */}
-      {!isInReview && run && isReviewable && (
-        <ReviewAwareRunTabs activeTab={activeTab} onChange={setActiveTab} showBaseline={isAdversarialRun && !isRunActive} />
-      )}
-
-      {/* ── Scrollable body ───────────────────────────────── */}
-      <div className="run-detail-body flex-1 min-h-0 overflow-y-auto space-y-4 pt-4">
-        {activeTab === 'report' && run && (
-          <AppReportTab appId="kaira-bot" runId={run.run_id} />
-        )}
-
-        {activeTab === 'history' && run && (
-          <ReviewHistoryTab runId={run.run_id} />
-        )}
-
-        {activeTab === 'results' && threadEvals.length > 0 && (
+    <InlineReviewProvider runId={run.run_id} appId={appId} enabled={canReview}>
+      <PageSurface
+        icon={icon}
+        title={run.name || run.command}
+        subtitle={metadataStrip}
+        back={{ to: runsForApp(appId), label: 'Runs' }}
+        actions={
           <>
-            <ReviewAwareSummarySection
-              run={run}
-              threadEvals={threadEvals}
-              summaryTotal={summaryTotal}
-              summarySkipped={summarySkipped}
-              summaryErrors={summaryErrors}
-              correctnessDist={correctnessDist}
-              efficiencyDist={efficiencyDist}
-              customEvalSummary={customEvalSummary}
-            />
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search thread ID, verdict..."
-                className="px-2.5 py-1.5 text-sm border border-[var(--border-default)] rounded-md w-60 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/30 focus:border-[var(--border-focus)]"
-              />
-              <div className="flex gap-1 flex-wrap">
-                {allVerdicts.map((v) => {
-                  const def = getLabelDefinition(v, "correctness");
-                  return (
-                    <button
-                      key={v}
-                      onClick={() => toggleVerdictFilter(v)}
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${verdictFilter.has(v)
-                        ? "bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]"
-                        : "bg-[var(--bg-primary)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
-                      }`}
-                    >
-                      {def.displayName}
-                    </button>
-                  );
-                })}
-              </div>
-              <span className="text-xs text-[var(--text-muted)] ml-auto">
-                {filteredThreads.length}{filteredThreads.length !== threadEvals.length ? ` of ${threadEvals.length}` : ""} threads
-              </span>
-            </div>
-
-            <ReviewAwareEvalTable evaluations={filteredThreads} evaluatorDescriptors={run.evaluator_descriptors} runId={run.run_id} />
+            {extraActions}
+            {headerActions}
           </>
-        )}
-
-        {activeTab === 'results' && adversarialEvals.length > 0 && (
-          <AdversarialSection
-            evals={adversarialEvals}
-            adversarialDist={adversarialDist}
-            run={run}
-            isRunActive={isRunActive}
-          />
-        )}
-
-        {activeTab === 'baseline' && adversarialEvals.length > 0 && !isRunActive && (
-          <AdversarialComparisonPanel
-            currentRunId={run.run_id}
-            currentRunName={run.name || 'Current adversarial run'}
-            currentRunCreatedAt={run.timestamp}
-            currentEvaluations={adversarialEvals}
-          />
-        )}
-
-        {activeTab === 'results' && threadEvals.length === 0 && adversarialEvals.length === 0 && (
-          isRunActive ? (
-            <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
-              <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
-              <p className="text-sm font-semibold text-[var(--text-primary)]">Evaluations are being processed...</p>
-              <p className="text-sm text-[var(--text-secondary)]">Results will appear here as threads are evaluated.</p>
-            </div>
-          ) : (
-            <EmptyState icon={ClipboardList} title="No evaluations found" description="This run has no evaluation results yet." />
-          )
-        )}
-      </div>
-
-      {run && (
-        <ConfirmDialog
-          isOpen={confirmDelete}
-          onClose={() => setConfirmDelete(false)}
-          onConfirm={handleDeleteConfirm}
-          title="Delete Evaluation Run"
-          description={`Delete run ${run.run_id.slice(0, 12)}... and all its evaluations? This cannot be undone.`}
-          confirmLabel={deleting ? "Deleting..." : "Delete"}
-          variant="danger"
-          isLoading={deleting}
-        />
-      )}
-    </div>
+        }
+      >
+        {banners}
+        {tabBar}
+        {scrollableBody}
+        {deleteDialog}
+      </PageSurface>
     </InlineReviewProvider>
   );
 }

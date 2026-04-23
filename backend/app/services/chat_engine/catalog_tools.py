@@ -119,25 +119,20 @@ def parse_column_comment(comment_text: str | None) -> dict[str, Any]:
     return parsed
 
 
-def build_catalog_allowlist(
-    *,
-    app_id: str | None = None,
-    app_config: dict[str, Any] | None = None,
-    semantic_model: dict[str, Any] | None = None,
-) -> list[str]:
-    """Allowed catalog tables for an app. Manifest-driven when `app_id` is given;
-    falls back to legacy semantic-model scan for callers that still pass
-    `semantic_model` (kept until Phase 9 cleanup).
+def build_catalog_allowlist(app_id: str) -> list[str]:
+    """Allowed catalog tables for ``app_id`` — sourced from the manifest only.
+
+    Phase 9: the semantic-model fallback was removed. The manifest is the
+    single owner of the allow-list; callers MUST pass ``app_id``.
     """
-    if app_id is not None:
-        return sorted(get_catalog_model_map(app_id).keys())
-    tables = (semantic_model or {}).get('tables', {})
-    allowed = set(tables.keys()) if isinstance(tables, dict) else set()
-    allowed.add('eval_runs')
-    return sorted(table_name for table_name in allowed if table_name in _ORM_REGISTRY_TO_TABLE)
+
+    return sorted(get_catalog_model_map(app_id).keys())
 
 
-# Legacy fallback used only when build_catalog_allowlist is called without app_id.
+# table_name -> ORM class. Used by the catalog tools' runtime lookups
+# (``catalog_values`` / ``catalog_sample``) and by ``sql_agent``'s
+# ``data_check`` helper. Manifest-driven; the entries here mirror the
+# declared ``catalog_tables`` across all registered manifests.
 _ORM_REGISTRY_TO_TABLE = {
     'analytics_run_facts': AnalyticsRunFact,
     'analytics_eval_facts': AnalyticsEvalFact,
@@ -593,38 +588,22 @@ def _validate_table_access(
     *,
     table: str,
     column: str | None,
-    app_id: str | None = None,
-    app_config: dict[str, Any] | None = None,
-    semantic_model: dict[str, Any] | None = None,
+    app_id: str,
 ) -> ToolEnvelope | None:
-    if app_id is not None:
-        allowed_tables = build_catalog_allowlist(app_id=app_id)
-        if table not in allowed_tables:
-            msg = (
-                f"Table {table!r} is not declared in the manifest for {app_id}. "
-                f"Declared tables: {', '.join(allowed_tables)}. "
-                f"To add it, edit backend/app/services/chat_engine/manifests/{app_id}.yaml."
-            )
-            return error_envelope(
-                capability='analytics',
-                reason_code=reason_codes.ENTITY_OUT_OF_SCOPE,
-                summary=f'table {table!r} not declared',
-                warnings=[msg],
-                payload={'table': table, 'reason': 'unknown_table', 'available_tables': allowed_tables},
-            )
-    else:
-        allowed_tables = build_catalog_allowlist(
-            app_config=app_config, semantic_model=semantic_model,
+    allowed_tables = build_catalog_allowlist(app_id=app_id)
+    if table not in allowed_tables:
+        msg = (
+            f"Table {table!r} is not declared in the manifest for {app_id}. "
+            f"Declared tables: {', '.join(allowed_tables)}. "
+            f"To add it, edit backend/app/services/chat_engine/manifests/{app_id}.yaml."
         )
-        if table not in allowed_tables:
-            msg = f'Unknown or disallowed table: {table}. Valid tables are: {", ".join(sorted(allowed_tables))}'
-            return error_envelope(
-                capability='analytics',
-                reason_code=reason_codes.ENTITY_OUT_OF_SCOPE,
-                summary=f'table {table!r} disallowed',
-                warnings=[msg],
-                payload={'table': table, 'reason': 'unknown_table', 'available_tables': sorted(allowed_tables)},
-            )
+        return error_envelope(
+            capability='analytics',
+            reason_code=reason_codes.ENTITY_OUT_OF_SCOPE,
+            summary=f'table {table!r} not declared',
+            warnings=[msg],
+            payload={'table': table, 'reason': 'unknown_table', 'available_tables': allowed_tables},
+        )
     if column and not _SIMPLE_IDENTIFIER_PATTERN.match(column.split('->', 1)[0].strip()):
         msg = f'Invalid column expression: {column}'
         return error_envelope(

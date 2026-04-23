@@ -39,14 +39,16 @@ OutcomeKind = Literal[
     'error',
 ]
 
-Capability = Literal[
-    'analytics',
-    'report_builder',
-    'vector_retrieval',
-    'knowledge_graph',
-    'clinical_workflow',
-    'harness',
-]
+# Plan §6.3 rule 5: "Harness Core carries artifacts as opaque tuples". The
+# ``capability`` field on an outcome is the pack id that produced the
+# result. Pack ids are pluggable (``CAPABILITY_PACK_REGISTRY`` keys), so
+# this stays a plain ``str`` at the harness layer. The owning pack is the
+# one that knows which literal it uses.
+#
+# Known in-tree pack ids today (for documentation only, not validation):
+#   'analytics', 'report_builder', 'vector_retrieval', 'knowledge_graph',
+#   'clinical_workflow', 'harness'
+Capability = str
 
 Status = Literal['ok', 'partial', 'error']
 
