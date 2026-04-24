@@ -80,11 +80,23 @@ def _retry_interval_minutes(schedule: ScheduledJob) -> int:
         return DEFAULT_RETRY_INTERVAL_MINUTES
 
 
-def _merged_params(schedule: ScheduledJob) -> dict[str, Any]:
+def _merged_params(
+    schedule: ScheduledJob,
+    *,
+    user_id: uuid.UUID,
+) -> dict[str, Any]:
     params = dict(schedule.params or {})
     # Ensure app_id is always in the payload so legacy runners that read
     # `params["app_id"]` continue to work.
     params.setdefault("app_id", schedule.app_id)
+    # Job worker's generic handler dispatcher reads ``params["tenant_id"]``
+    # and ``params["user_id"]`` to build AuthContext-free kwargs for every
+    # registered handler (see ``app.services.job_worker`` where a job is
+    # claimed). On-demand submissions go through the `/api/jobs` route
+    # which injects these; scheduler-fired jobs need the same injection
+    # here or every scheduled fire fails fast with ``KeyError: 'tenant_id'``.
+    params["tenant_id"] = str(schedule.tenant_id)
+    params["user_id"] = str(user_id)
     # Schedule-driven fires are always scheduled runs; the prune step keys
     # off this flag (§PR4). Caller-supplied `is_scheduled_run` is ignored
     # intentionally — a user-authored param cannot flip this.
@@ -99,13 +111,13 @@ async def _enqueue_job_from_schedule(
     now: datetime,
 ) -> Job:
     """Insert a `jobs` row owned by the schedule. Returns the persisted Job."""
-    params = _merged_params(schedule)
     # Runners authenticated a user on launch. Scheduled fires have no user;
     # reuse the `created_by` if present, else fall back to a platform user
     # WITHIN THE SAME TENANT so cross-tenant rows never surface.
     user_id = schedule.created_by
     if user_id is None:
         user_id = await _resolve_platform_user_id(db, tenant_id=schedule.tenant_id)
+    params = _merged_params(schedule, user_id=user_id)
     job = Job(
         id=uuid.uuid4(),
         tenant_id=schedule.tenant_id,
