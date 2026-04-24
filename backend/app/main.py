@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI):
 
     worker_task = None
     recovery_task = None
+    scheduler_task = None
     if settings.JOB_RUN_EMBEDDED_WORKER:
         # Recover any jobs stuck in "running" from a previous crash,
         # then reconcile any eval_runs orphaned by the same crash
@@ -135,6 +136,21 @@ async def lifespan(app: FastAPI):
         # Start background job worker and periodic recovery loop
         worker_task = asyncio.create_task(worker_loop())
         recovery_task = asyncio.create_task(recovery_loop())
+
+        # Scheduler tick loop also runs inside the embedded path so single-
+        # container deployments (no dedicated worker process) still fire
+        # cron-driven `scheduled_jobs`. Set SCHEDULER_TICK_INTERVAL_SECONDS=0
+        # to opt out (useful when a dedicated worker container handles ticking).
+        # tick_once uses FOR UPDATE SKIP LOCKED, so multiple tickers are safe.
+        if settings.SCHEDULER_TICK_INTERVAL_SECONDS > 0:
+            from app.services.scheduler.engine import scheduler_tick_loop
+            scheduler_task = asyncio.create_task(scheduler_tick_loop())
+        else:
+            logger.warning(
+                "scheduler.disabled SCHEDULER_TICK_INTERVAL_SECONDS=%s — "
+                "embedded worker will NOT fire scheduled_jobs on this replica.",
+                settings.SCHEDULER_TICK_INTERVAL_SECONDS,
+            )
     else:
         logger.info("Embedded job worker disabled; expecting a separate worker process")
 
@@ -145,6 +161,8 @@ async def lifespan(app: FastAPI):
         worker_task.cancel()
     if recovery_task:
         recovery_task.cancel()
+    if scheduler_task:
+        scheduler_task.cancel()
     await engine.dispose()
 
 
