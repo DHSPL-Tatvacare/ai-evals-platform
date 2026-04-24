@@ -93,12 +93,8 @@ class StartupSchemaTests(unittest.TestCase):
     def test_schema_bootstrap_seeds_catalog_column_comments(self):
         contents = SCHEMA_BOOTSTRAP_PATH.read_text()
 
-        self.assertIn('COLUMN_COMMENT_SQL = (', contents)
-        self.assertIn('COMMENT ON COLUMN analytics_run_facts.eval_type IS', contents)
-        self.assertIn('COMMENT ON COLUMN analytics_run_facts.run_name IS', contents)
-        self.assertIn('COMMENT ON COLUMN analytics_eval_facts.result_status IS', contents)
-        self.assertIn('COMMENT ON COLUMN analytics_eval_facts.intent IS', contents)
-        self.assertIn('COMMENT ON COLUMN eval_runs.batch_metadata IS', contents)
+        self.assertIn('from app.services.chat_engine.comment_emitter import emit_column_comments', contents)
+        self.assertIn('for statement in emit_column_comments():', contents)
 
     def test_schema_bootstrap_adds_sherlock_runtime_turns_table(self):
         contents = SCHEMA_BOOTSTRAP_PATH.read_text()

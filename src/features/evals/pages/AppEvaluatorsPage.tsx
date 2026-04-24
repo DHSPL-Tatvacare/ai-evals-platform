@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, ConfirmDialog, PageSurface } from '@/components/ui';
+import { Button, ConfirmDialog, FilterButton, PageHeaderSearch, PageSurface } from '@/components/ui';
 import { evaluatorDetailForApp } from '@/config/routes';
 import { useCurrentAppConfig, useCurrentAppId, useCurrentAppMetadata } from '@/hooks';
 import { CreateEvaluatorWizard, EvaluatorsTable } from '@/features/evals/components';
@@ -37,6 +37,8 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
   const canShare = usePermission('asset:share');
   const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorDefinition | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -186,8 +188,24 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
     </>
   );
 
+  const headerFilters = (
+    <>
+      <PageHeaderSearch
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search evaluators…"
+        label="Search evaluators"
+      />
+      <FilterButton
+        activeCount={filter === 'all' ? 0 : 1}
+        onClick={() => setFilterPanelOpen(true)}
+        iconOnly
+      />
+    </>
+  );
+
   return (
-    <PageSurface icon={icon} title={title} actions={headerActions}>
+    <PageSurface icon={icon} title={title} filters={headerFilters} actions={headerActions}>
       <EvaluatorsTable
         evaluators={filteredEvaluators}
         loading={!isLoaded}
@@ -211,6 +229,9 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
         description={`Manage private and shared evaluators for ${appMetadata.name}.`}
         emptyStateActions={emptyStatePageActions.length > 0 ? <>{emptyStatePageActions}</> : undefined}
         hideHeader
+        searchQuery={searchQuery}
+        filterPanelOpen={filterPanelOpen}
+        onFilterPanelOpenChange={setFilterPanelOpen}
         onOpen={defaultOpenEvaluator}
         canCreate={canCreate}
         canEditOwned={canEdit}

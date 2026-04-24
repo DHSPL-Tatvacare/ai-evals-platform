@@ -268,7 +268,7 @@ export function SelectCallsStep({
     dateFrom: config.dateFrom,
     dateTo: config.dateTo,
     agents: config.agents,
-    prospectId: '',
+    prospectId: [],
     direction: config.direction,
     status: config.status,
     hasRecording: config.hasRecording,

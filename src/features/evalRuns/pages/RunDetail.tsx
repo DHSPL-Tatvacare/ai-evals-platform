@@ -5,6 +5,7 @@ import { Loader2, CheckCircle2, XCircle, Clock, ClipboardList, Ban, AlertTriangl
 import { EmptyState, ConfirmDialog, LoadingState, Tooltip } from "@/components/ui";
 import { PermissionGate } from "@/components/auth/PermissionGate";
 import { PageSurface } from "@/components/ui/PageSurface";
+import { Tabs } from "@/components/ui/Tabs";
 import { RunHeaderActions, ActionIconButton } from "../components/RunHeaderActions";
 import type { Run, ThreadEvalRow, AdversarialEvalRow } from "@/types";
 import {
@@ -135,7 +136,6 @@ export default function RunDetail() {
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [activeTab, setActiveTab] = useState<'results' | 'report' | 'history' | 'baseline'>('results');
   const canReview = usePermission('review:manage');
   const reviewActive = useReviewModeStore((s) => s.active);
   const reviewRunId = useReviewModeStore((s) => s.runId);
@@ -611,25 +611,9 @@ export default function RunDetail() {
     />
   );
 
-  const tabBar = !isInReview && run && isReviewable ? (
-    <ReviewAwareRunTabs activeTab={activeTab} onChange={setActiveTab} showBaseline={isAdversarialRun && !isRunActive} />
-  ) : null;
-
-  const scrollableBody = (
-    <div className="flex flex-1 min-h-0 flex-col pt-4 gap-4">
-      {activeTab === 'report' && run && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <AppReportTab appId={appId} runId={run.run_id} />
-        </div>
-      )}
-
-      {activeTab === 'history' && run && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <ReviewHistoryTab runId={run.run_id} />
-        </div>
-      )}
-
-      {activeTab === 'results' && threadEvals.length > 0 && (
+  const resultsContent = (
+    <div className="flex flex-1 min-h-0 flex-col gap-4">
+      {threadEvals.length > 0 && (
         <>
           <div className="shrink-0 space-y-4">
             <ReviewAwareSummarySection
@@ -680,7 +664,7 @@ export default function RunDetail() {
         </>
       )}
 
-      {activeTab === 'results' && adversarialEvals.length > 0 && (
+      {adversarialEvals.length > 0 && (
         <AdversarialSection
           evals={adversarialEvals}
           adversarialDist={adversarialDist}
@@ -689,18 +673,7 @@ export default function RunDetail() {
         />
       )}
 
-      {activeTab === 'baseline' && adversarialEvals.length > 0 && !isRunActive && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <AdversarialComparisonPanel
-            currentRunId={run.run_id}
-            currentRunName={run.name || 'Current adversarial run'}
-            currentRunCreatedAt={run.timestamp}
-            currentEvaluations={adversarialEvals}
-          />
-        </div>
-      )}
-
-      {activeTab === 'results' && threadEvals.length === 0 && adversarialEvals.length === 0 && (
+      {threadEvals.length === 0 && adversarialEvals.length === 0 && (
         isRunActive ? (
           <div className="flex flex-col items-center gap-2 border border-dashed border-[var(--border-default)] rounded-lg py-10 px-6">
             <Loader2 className="h-6 w-6 text-[var(--color-info)] animate-spin" />
@@ -711,6 +684,50 @@ export default function RunDetail() {
           <EmptyState icon={ClipboardList} title="No evaluations found" description="This run has no evaluation results yet." />
         )
       )}
+    </div>
+  );
+
+  const reportContent = run ? (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <AppReportTab appId={appId} runId={run.run_id} />
+    </div>
+  ) : null;
+
+  const historyContent = run ? (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <ReviewHistoryTab runId={run.run_id} />
+    </div>
+  ) : null;
+
+  const baselineContent = run && adversarialEvals.length > 0 && !isRunActive ? (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <AdversarialComparisonPanel
+        currentRunId={run.run_id}
+        currentRunName={run.name || 'Current adversarial run'}
+        currentRunCreatedAt={run.timestamp}
+        currentEvaluations={adversarialEvals}
+      />
+    </div>
+  ) : null;
+
+  const runDetailTabs = [
+    { id: 'results', label: 'Results', content: resultsContent },
+    { id: 'report', label: 'Report', content: reportContent },
+    ...(isAdversarialRun && !isRunActive
+      ? [{ id: 'baseline', label: 'Baseline', content: baselineContent }]
+      : []),
+    { id: 'history', label: 'History', content: historyContent },
+  ];
+
+  const showTabs = !isInReview && run && isReviewable;
+
+  const tabbedBody = showTabs ? (
+    <div className="flex-1 min-h-0 pt-2">
+      <Tabs tabs={runDetailTabs} defaultTab="results" fillHeight />
+    </div>
+  ) : (
+    <div className="flex flex-1 min-h-0 flex-col pt-4 gap-4">
+      {resultsContent}
     </div>
   );
 
@@ -742,8 +759,7 @@ export default function RunDetail() {
         }
       >
         {banners}
-        {tabBar}
-        {scrollableBody}
+        {tabbedBody}
         {deleteDialog}
       </PageSurface>
     </InlineReviewProvider>
@@ -898,35 +914,6 @@ function StartReviewButton({ runId }: { runId: string }) {
   return button;
 }
 
-
-type RunTabId = 'results' | 'report' | 'history' | 'baseline';
-
-function ReviewAwareRunTabs({
-  activeTab,
-  onChange,
-  showBaseline = false,
-}: {
-  activeTab: RunTabId;
-  onChange: (tab: RunTabId) => void;
-  showBaseline?: boolean;
-}) {
-  const tabClass = (id: RunTabId) =>
-    `px-4 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-      activeTab === id
-        ? 'border-[var(--interactive-primary)] text-[var(--text-primary)]'
-        : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-    }`;
-  return (
-    <div className="run-detail-tabs shrink-0 flex gap-0 border-b border-[var(--border-subtle)]">
-      <button onClick={() => onChange('results')} className={tabClass('results')}>Results</button>
-      <button onClick={() => onChange('report')} className={tabClass('report')}>Report</button>
-      {showBaseline && (
-        <button onClick={() => onChange('baseline')} className={tabClass('baseline')}>Baseline</button>
-      )}
-      <button onClick={() => onChange('history')} className={tabClass('history')}>History</button>
-    </div>
-  );
-}
 
 function ReviewAwareSummarySection({
   run,

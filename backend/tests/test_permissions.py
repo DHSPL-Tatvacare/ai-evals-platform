@@ -1,5 +1,6 @@
 """Unit tests for backend permission catalog and guard normalization."""
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -42,7 +43,6 @@ ROUTE_EXPECTATIONS = {
     'routes/reports.py': [
         "require_permission('insights:view')",
         "require_permission('evaluation:export')",
-        "require_permission('asset:share')",
     ],
     'routes/admin.py': [
         "require_permission('insights:view')",
@@ -52,9 +52,7 @@ ROUTE_EXPECTATIONS = {
         "ensure_permissions(auth, 'user:edit')",
         "ensure_permissions(auth, 'user:deactivate')",
     ],
-    'routes/prompts.py': ["require_permission('asset:share')"],
-    'routes/schemas.py': ["require_permission('asset:share')"],
-    'routes/evaluators.py': ["require_permission('asset:share')"],
+    'routes/evaluators.py': ["ensure_permissions(auth, 'asset:share')"],
     'routes/settings.py': ["require_permission('configuration:edit')"],
     'routes/rules.py': ["require_permission('configuration:edit')"],
     'routes/adversarial_config.py': ["require_permission('configuration:edit')"],
@@ -94,6 +92,7 @@ def test_permission_enum_has_all_expected_values():
         'user:delete',
         'user:reset_password',
         'role:assign',
+        'schedule:manage',
     }
     assert VALID_PERMISSIONS == expected
 
@@ -194,3 +193,47 @@ def test_key_routes_reference_canonical_permissions():
 def test_admin_route_uses_helper_for_inline_permission_checks():
     contents = (APP_ROOT / 'routes' / 'admin.py').read_text()
     assert ' not in auth.permissions' not in contents
+
+
+_PERMISSION_CALL_RE = re.compile(
+    r"""(?:require_permission|ensure_permissions)\s*\(\s*(?:auth\s*,\s*)?['"]([^'"]+)['"]"""
+)
+
+
+def _collect_route_permission_usages() -> dict[str, set[str]]:
+    """Return {relative_path: {permission_id, ...}} for every route file."""
+    usages: dict[str, set[str]] = {}
+    for path in (APP_ROOT / 'routes').rglob('*.py'):
+        if path.name == '__init__.py':
+            continue
+        matches = set(_PERMISSION_CALL_RE.findall(path.read_text()))
+        if matches:
+            usages[path.relative_to(APP_ROOT).as_posix()] = matches
+    return usages
+
+
+def test_every_route_permission_is_in_the_catalog():
+    """Every require_permission/ensure_permissions call in routes/ must reference
+    a permission that exists in VALID_PERMISSIONS. Catches typos and stale
+    references to removed permissions."""
+    unknown: dict[str, list[str]] = {}
+    for relative_path, permissions in _collect_route_permission_usages().items():
+        bad = sorted(permissions - VALID_PERMISSIONS)
+        if bad:
+            unknown[relative_path] = bad
+    assert unknown == {}, (
+        f'Route files reference permissions not in VALID_PERMISSIONS: {unknown}'
+    )
+
+
+def test_every_catalog_permission_is_used_by_at_least_one_route():
+    """Every permission in VALID_PERMISSIONS must be referenced by at least
+    one route file. Catches dead catalog entries that were added but never
+    wired up, or entries whose wiring was removed without updating the catalog."""
+    used: set[str] = set()
+    for permissions in _collect_route_permission_usages().values():
+        used.update(permissions)
+    orphaned = sorted(VALID_PERMISSIONS - used)
+    assert orphaned == [], (
+        f'Catalog permissions with no route enforcement: {orphaned}'
+    )

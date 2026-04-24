@@ -76,6 +76,15 @@ def _job(**overrides):
         'completed_at': None,
         'error_message': None,
         'last_error_at': None,
+        'next_retry_at': None,
+        'dead_lettered_at': None,
+        'dead_letter_reason': None,
+        'depends_on_job_id': None,
+        'scheduled_job_id': None,
+        'submission_context': None,
+        'progress': {'current': 0, 'total': 0, 'message': ''},
+        'batch_metadata': None,
+        'result': None,
         'created_at': datetime(2026, 1, 1, tzinfo=timezone.utc),
         'params': {'app_id': 'voice-rx'},
     }
@@ -143,6 +152,8 @@ class JobWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
             lease_owner='worker-a',
             lease_expires_at=now - timedelta(seconds=1),
             started_at=now - timedelta(minutes=1),
+            attempt_count=1,
+            max_attempts=1,
         )
         fake_session = _FakeSession([stale_job])
 

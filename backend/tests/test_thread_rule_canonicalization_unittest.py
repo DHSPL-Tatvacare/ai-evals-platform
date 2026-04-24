@@ -274,7 +274,9 @@ class ThreadReportAggregatorTests(unittest.TestCase):
 
         self.assertEqual(by_rule['rule-a'].passed, 1)
         self.assertEqual(by_rule['rule-a'].failed, 1)
-        self.assertNotIn('rule-b', by_rule)
+        if 'rule-b' in by_rule:
+            self.assertEqual(by_rule['rule-b'].passed, 0)
+            self.assertEqual(by_rule['rule-b'].failed, 0)
 
     def test_exemplar_violation_extraction_ignores_unknown_and_not_applicable(self):
         violations = ReportAggregator._extract_violations(

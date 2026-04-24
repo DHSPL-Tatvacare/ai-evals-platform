@@ -62,6 +62,13 @@ interface EvaluatorsTableProps {
    * be embedded inside an outer shell (e.g. PageSurface).
    */
   hideHeader?: boolean;
+  /** Controlled search term (case-insensitive name contains). */
+  searchQuery?: string;
+  /** Controlled filter panel open state. When provided together with
+   * {@link onFilterPanelOpenChange}, the table also skips rendering its own
+   * filter trigger button so the outer shell can host it (e.g. PageSurface). */
+  filterPanelOpen?: boolean;
+  onFilterPanelOpenChange?: (open: boolean) => void;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -125,23 +132,37 @@ export function EvaluatorsTable({
   canManageSeededDefaults = false,
   loading = false,
   hideHeader = false,
+  searchQuery,
+  filterPanelOpen: filterPanelOpenProp,
+  onFilterPanelOpenChange,
 }: EvaluatorsTableProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [internalFilterPanelOpen, setInternalFilterPanelOpen] = useState(false);
+  const isFilterControlled = filterPanelOpenProp !== undefined && onFilterPanelOpenChange !== undefined;
+  const filterPanelOpen = isFilterControlled ? filterPanelOpenProp : internalFilterPanelOpen;
+  const setFilterPanelOpen = isFilterControlled ? onFilterPanelOpenChange : setInternalFilterPanelOpen;
   const [sortState, setSortState] = useState<SortState>({ key: 'updatedAt', order: 'desc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const user = useAuthStore((state) => state.user);
   const showRunColumn = Boolean(onRun || onCancelRun || Object.keys(latestRunsByEvaluatorId).length > 0);
 
+  const searched = useMemo(() => {
+    const query = (searchQuery ?? '').trim().toLowerCase();
+    if (!query) return evaluators;
+    return evaluators.filter((evaluator) =>
+      evaluator.name.toLowerCase().includes(query),
+    );
+  }, [evaluators, searchQuery]);
+
   const sorted = useMemo(() => {
-    const arr = [...evaluators];
+    const arr = [...searched];
     arr.sort((a, b) => {
       const cmp = compareEvaluators(a, b, sortState.key);
       return sortState.order === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [evaluators, sortState]);
+  }, [searched, sortState]);
 
   const totalItems = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -447,8 +468,9 @@ export function EvaluatorsTable({
       )}
 
       {/* When the header is hidden (outer PageSurface owns the CTAs) we still need
-          the filter affordance above the table. */}
-      {hideHeader && (
+          the filter affordance above the table — unless the filter trigger is
+          being hosted externally (controlled filterPanelOpen). */}
+      {hideHeader && !isFilterControlled && (
         <div className="flex items-center justify-end gap-2">{filterButton}</div>
       )}
 

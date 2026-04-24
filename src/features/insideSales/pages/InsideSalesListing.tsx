@@ -165,6 +165,7 @@ function CollectionToolbar({
   searchLabel,
   filterCount,
   onOpenFilters,
+  filterPills,
   trailingContent,
 }: {
   searchValue: string;
@@ -173,11 +174,12 @@ function CollectionToolbar({
   searchLabel: string;
   filterCount: number;
   onOpenFilters: () => void;
+  filterPills?: ReactNode;
   trailingContent?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <PageHeaderSearch
           value={searchValue}
           onChange={onSearchChange}
@@ -185,6 +187,7 @@ function CollectionToolbar({
           label={searchLabel}
         />
         <FilterButton activeCount={filterCount} onClick={onOpenFilters} iconOnly />
+        {filterPills}
       </div>
       {trailingContent ? (
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -342,6 +345,18 @@ function LeadsTableContent({
     },
   ], []);
 
+  const leadsFilterPillsContent = activeFilterPills.length > 0 ? (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {activeFilterPills.map((pill) => (
+        <FilterPill
+          key={pill.key}
+          label={pill.label}
+          onRemove={() => useLeadsStore.getState().setLeadFilters(pill.clearPatch)}
+        />
+      ))}
+    </div>
+  ) : null;
+
   const toolbar = useMemo(
     () => (
       <CollectionToolbar
@@ -351,29 +366,20 @@ function LeadsTableContent({
         searchLabel="Search leads"
         filterCount={filterButtonCount}
         onOpenFilters={onOpenFilters}
+        filterPills={leadsFilterPillsContent}
       />
     ),
     [
       filterButtonCount,
       onOpenFilters,
       searchInput,
+      leadsFilterPillsContent,
     ],
   );
 
   return (
     <div className="flex h-full flex-col">
       {toolbar}
-      {activeFilterPills.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pb-2">
-            {activeFilterPills.map((pill) => (
-              <FilterPill
-                key={pill.key}
-                label={pill.label}
-                onRemove={() => useLeadsStore.getState().setLeadFilters(pill.clearPatch)}
-              />
-            ))}
-        </div>
-      )}
 
       {leadsError ? (
         <EmptyState
@@ -672,6 +678,18 @@ export function InsideSalesListing() {
     };
   }, [activeTab, callsRefreshJobId, leadsRefreshJobId]);
 
+  const callsFilterPillsContent = activeFilterPills.length > 0 ? (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {activeFilterPills.map((pill) => (
+        <FilterPill
+          key={pill.key}
+          label={pill.label}
+          onRemove={() => useInsideSalesStore.getState().setFilters(pill.clearPatch)}
+        />
+      ))}
+    </div>
+  ) : null;
+
   const callsToolbar = useMemo(() => {
     const trailingContent =
       selectedCallIds.size > 0 ? (
@@ -704,12 +722,14 @@ export function InsideSalesListing() {
         searchLabel="Search calls"
         filterCount={activeFilterCount}
         onOpenFilters={() => setFilterPanelOpen(true)}
+        filterPills={callsFilterPillsContent}
         trailingContent={trailingContent}
       />
     );
   }, [
     activeFilterCount,
     callSearch,
+    callsFilterPillsContent,
     handleSearchChange,
     openModal,
     selectedCallIds.size,
@@ -841,17 +861,6 @@ export function InsideSalesListing() {
   const tableContent = (
     <div className="flex h-full flex-col">
       {callsToolbar}
-      {activeFilterPills.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pb-2">
-            {activeFilterPills.map((pill) => (
-              <FilterPill
-                key={pill.key}
-                label={pill.label}
-                onRemove={() => useInsideSalesStore.getState().setFilters(pill.clearPatch)}
-              />
-            ))}
-        </div>
-      )}
 
       {error ? (
         <EmptyState

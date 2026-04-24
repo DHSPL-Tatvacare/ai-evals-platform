@@ -269,7 +269,7 @@ class GetEligibleChartsRobustnessTests(unittest.TestCase):
 
 class SnapshotIntegrationTests(unittest.TestCase):
 
-    def test_snapshot_includes_column_types_and_eligible_charts(self):
+    def test_snapshot_includes_column_types(self):
         result = {
             'status': 'ok',
             'question': 'Revenue by agent',
@@ -283,10 +283,8 @@ class SnapshotIntegrationTests(unittest.TestCase):
         self.assertIn('column_types', snapshot)
         self.assertEqual(snapshot['column_types']['agent'], 'categorical')
         self.assertEqual(snapshot['column_types']['revenue'], 'numeric')
-        self.assertIn('eligible_charts', snapshot)
-        self.assertIn('bar', snapshot['eligible_charts'])
 
-    def test_snapshot_with_dimensions_enables_funnel(self):
+    def test_snapshot_with_dimensions_marks_ordered_categorical(self):
         result = {
             'status': 'ok',
             'question': 'Leads by stage',
@@ -299,4 +297,3 @@ class SnapshotIntegrationTests(unittest.TestCase):
         dimensions = [{'name': 'stage', 'ordering': ['new', 'contacted', 'closed']}]
         snapshot = build_analysis_snapshot(result, dimensions=dimensions)
         self.assertEqual(snapshot['column_types']['stage'], 'ordered_categorical')
-        self.assertIn('funnel', snapshot['eligible_charts'])

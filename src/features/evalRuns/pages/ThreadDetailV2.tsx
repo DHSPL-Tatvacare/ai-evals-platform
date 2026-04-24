@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react';
-import { LoadingState, PageSurface, Select, Tooltip } from '@/components/ui';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { LoadingState, PageSurface, Select } from '@/components/ui';
 import { Tabs } from '@/components/ui/Tabs';
-import { VerdictBadge } from '../components';
 import type {
   ThreadEvalRow,
   ThreadEvalResult,
@@ -362,52 +361,6 @@ export default function ThreadDetailV2() {
     </>
   ) : null;
 
-  const subtitle = current ? (
-    <div className="flex items-center gap-2 whitespace-nowrap">
-      {current.worst_correctness && (
-        <VerdictBadge verdict={current.worst_correctness} category="correctness" />
-      )}
-      {current.efficiency_verdict && (
-        <VerdictBadge verdict={current.efficiency_verdict} category="efficiency" />
-      )}
-      <Tooltip
-        position="bottom"
-        maxWidth={360}
-        closeDelay={150}
-        content={
-          <div className="flex flex-col gap-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-[72px] text-[var(--text-muted)]">Thread ID</span>
-              <span className="font-mono text-[var(--text-primary)] truncate max-w-[220px]">{threadId}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-[72px] text-[var(--text-muted)]">Run ID</span>
-              <span className="font-mono text-[var(--text-primary)]">{current.run_id}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-[72px] text-[var(--text-muted)]">Evaluated</span>
-              <span className="text-[var(--text-primary)]">{formatTimestamp(current.created_at)}</span>
-            </div>
-            {history.length > 1 && (
-              <div className="flex items-center gap-2">
-                <span className="w-[72px] text-[var(--text-muted)]">Evaluations</span>
-                <span className="text-[var(--text-primary)]">{history.length}</span>
-              </div>
-            )}
-          </div>
-        }
-      >
-        <button
-          type="button"
-          aria-label="Thread details"
-          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-        >
-          <Info className="h-3.5 w-3.5" />
-        </button>
-      </Tooltip>
-    </div>
-  ) : null;
-
   const backTarget = current
     ? { to: runDetailForApp(appId, current.run_id), label: current.run_id.slice(0, 12) }
     : { to: runsForApp(appId), label: 'Runs' };
@@ -419,7 +372,6 @@ export default function ThreadDetailV2() {
       <PageSurface
         icon={icon}
         title={title}
-        subtitle={subtitle}
         back={backTarget}
         actions={
           <>

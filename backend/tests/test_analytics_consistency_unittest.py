@@ -72,6 +72,7 @@ def test_extract_custom_treats_cancelled_as_non_failure():
         listing_id=uuid.uuid4(),
         session_id=None,
         evaluator_id=uuid.uuid4(),
+        batch_metadata=None,
     )
 
     fact_set = extract_custom(run, [])
@@ -96,6 +97,7 @@ def test_extract_full_eval_treats_cancelled_as_non_failure():
         duration_ms=1234.0,
         result={'status': 'cancelled'},
         listing_id=uuid.uuid4(),
+        batch_metadata=None,
     )
 
     fact_set = extract_full_eval(run, [])

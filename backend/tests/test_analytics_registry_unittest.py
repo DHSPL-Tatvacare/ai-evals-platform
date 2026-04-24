@@ -42,14 +42,12 @@ class AnalyticsRegistryTests(unittest.TestCase):
         self.assertIsNotNone(profile.cross_run_summary_narrator_cls)
         self.assertIsNotNone(profile.cross_run_summary_model)
 
-    def test_voice_rx_profile_is_explicit_but_runtime_disabled(self):
+    def test_voice_rx_profile_is_explicit_and_runtime_enabled(self):
         profile = get_analytics_profile('voice_rx_v1')
         self.assertIsNotNone(profile)
         assert profile is not None
-        self.assertIsNone(profile.report_service_cls)
-        self.assertIsNone(profile.report_payload_model)
-        self.assertIsNone(profile.cross_run_adapter)
-        self.assertIsNone(profile.pdf_renderer)
+        self.assertIsNotNone(profile.report_service_cls)
+        self.assertIsNotNone(profile.report_payload_model)
 
     def test_unknown_profile_has_no_registry_entry(self):
         self.assertIsNone(get_analytics_profile('unknown_v1'))

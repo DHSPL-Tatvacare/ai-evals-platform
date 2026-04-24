@@ -18,7 +18,7 @@ export function StageBadge({ stage, truncate = true }: { stage: string; truncate
   // Shorten "Interested In Future Plan" → "Interested" in compact contexts
   const label = truncate ? (stage.replace(/in future plan/i, '').trim() || stage) : stage;
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', colorClass)}>
+    <span className={cn('inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium', colorClass)}>
       {label}
     </span>
   );

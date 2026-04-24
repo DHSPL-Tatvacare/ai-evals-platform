@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw, Info, Loader2 } from 'lucide-react';
-import { LoadingState, PageSurface, Tooltip, ConfirmDialog } from '@/components/ui';
+import { BookmarkPlus, ChevronLeft, ChevronRight, RotateCcw, Loader2 } from 'lucide-react';
+import { LoadingState, PageSurface, ConfirmDialog } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
 import type { AdversarialEvalRow, AdversarialResult, ChatMessage, Run } from '@/types';
 import { fetchRun, fetchRunAdversarial } from '@/services/api/evalRunsApi';
@@ -358,59 +358,6 @@ export default function AdversarialDetailV2() {
       </div>
     );
 
-    const subtitle = (
-      <div className="flex items-center gap-2 whitespace-nowrap">
-        {verdict && <VerdictBadge verdict={verdict} category="adversarial" />}
-        <VerdictBadge verdict={tc.difficulty} category="difficulty" />
-        <Tooltip
-          position="bottom"
-          maxWidth={380}
-          closeDelay={150}
-          content={
-            <div className="flex flex-col gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="w-[88px] text-[var(--text-muted)]">Turns</span>
-                <span className="text-[var(--text-primary)]">{turnCount}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-[88px] text-[var(--text-muted)]">Judge goal</span>
-                <span
-                  className="font-semibold"
-                  style={{ color: judgeGoalAchieved ? 'var(--color-success)' : 'var(--color-error)' }}
-                >
-                  {judgeGoalAchieved ? '✓ Achieved' : '✗ Not Achieved'}
-                </span>
-              </div>
-              {failureModes.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="w-[88px] text-[var(--text-muted)]">Failures</span>
-                  <span className="font-semibold text-[var(--color-error)]">{failureModes.length}</span>
-                </div>
-              )}
-              {contradictionTypes.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="w-[88px] text-[var(--text-muted)]">Warnings</span>
-                  <span className="font-semibold text-[var(--color-warning)]">{contradictionTypes.length}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-2 pt-1 border-t border-[var(--border-subtle)]">
-                <span className="w-[88px] text-[var(--text-muted)]">Case ID</span>
-                <span className="font-mono text-[var(--text-primary)] truncate max-w-[220px]">{String(evalItem.id)}</span>
-              </div>
-            </div>
-          }
-        >
-          <button
-            type="button"
-            aria-label="Case details"
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-          >
-            <Info className="h-3.5 w-3.5" />
-          </button>
-        </Tooltip>
-      </div>
-    );
-
     const body = (
       <>
         {/* Mobile: stacked */}
@@ -482,7 +429,6 @@ export default function AdversarialDetailV2() {
         <PageSurface
           icon={icon}
           title={goalFlowText}
-          subtitle={subtitle}
           back={{ to: runDetailForApp(appId, runId!), label: runId?.slice(0, 12) ?? 'Run' }}
           actions={<>{extraActions}{actions}</>}
         >
