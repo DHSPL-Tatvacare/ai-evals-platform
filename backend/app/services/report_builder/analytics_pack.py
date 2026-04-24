@@ -488,6 +488,10 @@ class AnalyticsPack:
     """
 
     pack_id: str = 'analytics'
+    # Participates in the ``BundleBuilder`` cache key (plan §7). Bump when
+    # the analytics manifest or tool surface changes so Phase 1 cache
+    # invalidation is deterministic.
+    pack_version: str = '2026.04.24'
     reason_codes: frozenset[str] = reason_codes.ANALYTICS_REASON_CODES
 
     # Contract id -> type of ``payload`` carried inside
@@ -709,6 +713,151 @@ class AnalyticsPack:
             'surface_key': sorted(vocab.surfaces.keys()),
             'block_type': sorted(vocab.block_types.keys()),
         }
+
+    # ---- Phase 1 / M1 scoped-bundle projection ----
+
+    def contribute_projection(self, scope: Any) -> Any:
+        """Project analytics ontology classes onto pack-local storage.
+
+        Platform ontology owns cross-pack entity safety (``run_name`` is
+        flagged ``explicit_only`` in the platform seed, for example); the
+        pack declares which ontology classes it covers, the storage
+        behind each one, and its bounded tool surface. Manifest
+        ``data_surfaces`` stay pack-owned — they feed the
+        ``semantic_slice`` of the projection so the bundle can expose
+        them without the platform absorbing them.
+        """
+        from app.services.chat_engine.manifest import get_manifest
+        from app.services.sherlock.bundle_types import PackProjection
+
+        app_id = getattr(scope, 'effective_app_id', None)
+        if not isinstance(app_id, str) or not app_id:
+            return PackProjection(pack_id=self.pack_id, pack_version=self.pack_version)
+
+        try:
+            manifest = get_manifest(app_id)
+        except KeyError:
+            manifest = None
+
+        semantic_model = _semantic_model_from_manifest(manifest)
+        tool_specs = tuple(self.tool_specs())
+        try:
+            enums = self.tool_schema_enums(app_id=app_id, semantic_model=semantic_model)
+        except Exception:  # pragma: no cover - manifest absent / partial app
+            enums = {}
+        enum_tuple: dict[str, tuple[str, ...]] = {
+            key: tuple(values) for key, values in (enums or {}).items()
+        }
+
+        projected_classes = _build_class_projections(manifest)
+
+        return PackProjection(
+            pack_id=self.pack_id,
+            pack_version=self.pack_version,
+            projected_classes=projected_classes,
+            semantic_slice={
+                'data_surfaces': _surfaces_slice(manifest),
+                'catalog_tables': tuple(semantic_model.get('tables', {}).keys()),
+            },
+            tool_specs=tool_specs,
+            tool_schema_enums=enum_tuple,
+            question_hints='',
+        )
+
+
+def _semantic_model_from_manifest(manifest: Any) -> Mapping[str, Any]:
+    if manifest is None:
+        return {}
+    tables: dict[str, Any] = {}
+    for name, table in getattr(manifest, 'catalog_tables', {}).items():
+        columns = {col: vals.model_dump() for col, vals in table.columns.items()}
+        tables[name] = {
+            'alias': getattr(table, 'alias', None),
+            'columns': columns,
+        }
+    return {'tables': tables}
+
+
+def _surfaces_slice(manifest: Any) -> tuple[Mapping[str, Any], ...]:
+    if manifest is None:
+        return ()
+    surfaces = getattr(manifest, 'data_surfaces', []) or []
+    return tuple(
+        {
+            'key': s.key,
+            'backed_by': s.backed_by,
+            'entity_types': tuple(s.entity_types),
+            'entity_field_map': dict(s.entity_field_map),
+            'fields': tuple(s.fields),
+            'default_limit': s.default_limit,
+        }
+        for s in surfaces
+    )
+
+
+def _build_class_projections(manifest: Any) -> tuple[Any, ...]:
+    """Project analytics ontology classes onto pack-local storage.
+
+    Derived from the pack-owned manifest — no new YAML key required in
+    Phase 1. ``run_name`` is flagged ``explicit_only`` on
+    ``evaluation.run`` even though the platform ontology row already
+    carries the same flag; keeping it here ensures the bundle's
+    per-class safety lookup remains correct even if the platform row is
+    ever narrowed.
+    """
+    from app.services.sherlock.bundle_types import ClassProjection
+
+    tables = {}
+    surfaces = ()
+    if manifest is not None:
+        tables = dict(getattr(manifest, 'catalog_tables', {}) or {})
+        surfaces = tuple(getattr(manifest, 'data_surfaces', ()) or ())
+
+    projections: list[ClassProjection] = []
+
+    run_field_safety = {'run_name': 'explicit_only'}
+    if 'analytics_run_facts' in tables:
+        projections.append(ClassProjection(
+            ontology_class='evaluation.run',
+            storage='analytics_run_facts',
+            identifier_field='run_id',
+            field_safety=run_field_safety,
+        ))
+    if 'analytics_eval_facts' in tables:
+        projections.append(ClassProjection(
+            ontology_class='evaluation.judgment',
+            storage='analytics_eval_facts',
+            identifier_field='item_id',
+        ))
+    if 'analytics_criterion_facts' in tables:
+        projections.append(ClassProjection(
+            ontology_class='evaluation.judgment',
+            storage='analytics_criterion_facts',
+            identifier_field='criterion_id',
+        ))
+
+    # Chart artifact projection is contract-first, not storage-first.
+    projections.append(ClassProjection(
+        ontology_class='artifact.chart',
+        contract_id='analytics.chart.v1',
+    ))
+
+    # If no run-facts table exists (non-kaira app) but ``run_name`` still
+    # shows up in any surface, keep the explicit_only flag attached to
+    # the evaluation.run class so downstream callers see consistent
+    # safety regardless of storage availability.
+    if not any(p.ontology_class == 'evaluation.run' for p in projections):
+        for surface in surfaces:
+            if 'run_name' in (surface.entity_field_map or {}):
+                projections.append(ClassProjection(
+                    ontology_class='evaluation.run',
+                    storage=surface.backed_by,
+                    identifier_field=surface.entity_field_map.get('run_id'),
+                    field_safety=run_field_safety,
+                ))
+                break
+
+    return tuple(projections)
 
 
 _ANALYTICS_PACK = AnalyticsPack()

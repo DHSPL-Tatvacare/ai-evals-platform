@@ -157,44 +157,80 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
             },
         }
 
+        # M2: resolver config now travels on the bundle attached to the
+        # working session; ``handle_discover`` projects the bundle's
+        # resolver entity_types into its discovery payload.
+        import uuid as _uuid
+
+        from app.services.sherlock.bundle_types import (
+            ResolverRecord,
+            ScopedBundle,
+            ScopeContext,
+        )
+
+        scope = ScopeContext(
+            tenant_id=_uuid.uuid4(),
+            user_id=_uuid.uuid4(),
+            allowed_app_ids=('inside-sales',),
+            requested_app_ids=('inside-sales',),
+            effective_app_id='inside-sales',
+            effective_pack_ids=('analytics', 'report_builder'),
+        )
+        bundle = ScopedBundle(
+            scope=scope,
+            ontology_classes=(),
+            entity_types=(),
+            resolvers=(
+                ResolverRecord(
+                    id=_uuid.uuid4(),
+                    tenant_id=None,
+                    app_id=None,
+                    key='thread-id',
+                    entity_type='thread_id',
+                    description='Resolve thread IDs',
+                    source='api_logs',
+                    config={'source': 'api_logs', 'field': 'thread_id', 'match': 'prefix', 'limit': 10},
+                    safety='safe_first_pass',
+                ),
+            ),
+            pack_projections=(),
+            tool_specs=(),
+            tool_schema_enums={},
+            question_hints='',
+            cache_key=(str(scope.tenant_id), 'inside-sales', 0, frozenset()),
+            ontology_version=0,
+        )
+
+        surfaces_fixture = [
+            {
+                'key': 'logs',
+                'description': 'Raw logs',
+                'source': 'api_logs',
+                'entity_types': ['thread_id'],
+                'fields': ['thread_id', 'response'],
+                'default_limit': 10,
+            },
+        ]
         with patch(
             'app.services.report_builder.tool_handlers._load_active_semantic_model',
             new=AsyncMock(return_value=semantic_model),
         ), patch(
             'app.services.chat_engine.sql_agent.load_app_config',
-            new=AsyncMock(return_value={
-                'chat': {
-                    'dataSurfaces': [
-                        {
-                            'key': 'logs',
-                            'description': 'Raw logs',
-                            'source': 'api_logs',
-                            'entityFieldMap': {'thread_id': 'thread_id'},
-                            'fields': ['thread_id', 'response'],
-                            'defaultLimit': 10,
-                        },
-                    ],
-                    'entityResolvers': [
-                        {
-                            'key': 'thread-id',
-                            'entityType': 'thread_id',
-                            'source': 'api_logs',
-                            'field': 'thread_id',
-                        },
-                    ],
-                },
-            }),
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.data_surfaces.build_surface_catalog',
+            return_value=surfaces_fixture,
         ):
             result = await tool_handlers.handle_discover(
                 db=db,
                 auth=self._auth(),
                 app_id='inside-sales',
-                session={'scratchpad': {}},
+                session={'scratchpad': {}, '_bundle': bundle},
             )
 
-        # Phase 2 envelope — discovery data lives under ``envelope.payload``.
-        # Surfaces are sourced from the app manifest (canonical), entity
-        # resolvers come from the mocked ``app_config.chat.entityResolvers``.
+        # M2 envelope — discovery data lives under ``envelope.payload``.
+        # Surfaces are sourced from the app manifest (canonical); entity
+        # resolver types come from the scoped bundle.
         self.assertEqual(result['status'], 'ok')
         body = result['payload']
         self.assertEqual(body['dimensions'][0]['name'], 'direction')

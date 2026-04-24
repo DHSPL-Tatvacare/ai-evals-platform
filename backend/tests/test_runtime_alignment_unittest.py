@@ -7,12 +7,12 @@ import json
 import logging
 import uuid
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from app.services.chat_engine.data_surfaces import _apply_entity_filter
-from app.services.chat_engine.entity_recognition import EntityRecognitionResult, RecognizedEntity
 from app.services.chat_engine.openai_agents_adapter import build_sherlock_agent
 from app.services.chat_engine.sql_agent import load_semantic_model
 from app.services.report_builder.chat_handler import (
@@ -21,6 +21,7 @@ from app.services.report_builder.chat_handler import (
 )
 from app.services.report_builder.scratchpad_state import default_scratchpad
 from app.services.report_builder.tool_handlers import dispatch_tool_call
+from app.services.sherlock import RecognitionEvent
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +112,13 @@ def test_question_contract_hints_force_discovery_for_ambiguous_score():
 
 
 @pytest.mark.asyncio
-async def test_execute_chat_turn_emits_terminal_error_when_recognition_fails():
+async def test_execute_chat_turn_emits_terminal_error_when_scope_resolution_fails():
+    """M2: the old recognition-fails path covered the entity pre-pass, which is gone.
+
+    Scope/bundle assembly now runs at turn start; if ``resolve_turn_scope_and_bundle``
+    raises, the harness must still emit a terminal ``error`` event through the
+    same runtime path.
+    """
     tenant_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())
     turn_id = str(uuid.uuid4())
@@ -120,20 +127,8 @@ async def test_execute_chat_turn_emits_terminal_error_when_recognition_fails():
     runtime_event = AsyncMock(return_value={'event': 'error', 'data': {'seq': 9}})
 
     with patch(
-        'app.services.report_builder.chat_handler._resolve_tools_for_app',
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        'app.services.report_builder.chat_handler.load_app_config',
-        new=AsyncMock(return_value={}),
-    ), patch(
-        'app.services.report_builder.chat_handler.load_semantic_model',
-        return_value=load_semantic_model('kaira-bot'),
-    ), patch(
-        'app.services.report_builder.chat_handler.load_entity_registry',
-        return_value=[],
-    ), patch(
-        'app.services.report_builder.chat_handler.recognize_entities',
-        new=AsyncMock(side_effect=RuntimeError('entity recognition failed')),
+        'app.services.report_builder.chat_handler.resolve_turn_scope_and_bundle',
+        new=AsyncMock(side_effect=RuntimeError('scope resolution failed')),
     ), patch(
         'app.services.report_builder.chat_handler.save_runtime_state',
         new=AsyncMock(),
@@ -147,7 +142,7 @@ async def test_execute_chat_turn_emits_terminal_error_when_recognition_fails():
         'app.services.report_builder.chat_handler.mark_turn_terminal',
         new=AsyncMock(),
     ):
-        with pytest.raises(RuntimeError, match='entity recognition failed'):
+        with pytest.raises(RuntimeError, match='scope resolution failed'):
             await _execute_chat_turn(
                 {
                     'chat_session_id': 'session-1',
@@ -181,7 +176,8 @@ async def test_execute_chat_turn_two_turn_reproducer_persists_final_pie_outcome(
     metadata, and live chart projection must all reflect the final pie result.
     """
     from app.services.chat_engine.openai_agents_adapter import _sherlock_tool_handler
-    from app.services.chat_engine.entity_recognition import EntityRecognitionResult
+    from app.services.sherlock import ScopeContext, ScopedBundle
+    from app.services.sherlock.turn_assembly import TurnAssembly
 
     tenant_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())
@@ -347,22 +343,39 @@ async def test_execute_chat_turn_two_turn_reproducer_persists_final_pie_outcome(
             },
         }
 
+    fake_scope = ScopeContext(
+        tenant_id=uuid.UUID(tenant_id),
+        user_id=uuid.UUID(user_id),
+        allowed_app_ids=('kaira-bot',),
+        requested_app_ids=('kaira-bot',),
+        effective_app_id='kaira-bot',
+        effective_pack_ids=('analytics', 'report_builder'),
+    )
+    fake_bundle = ScopedBundle(
+        scope=fake_scope,
+        ontology_classes=(),
+        entity_types=(),
+        resolvers=(),
+        pack_projections=(),
+        tool_specs=(),
+        tool_schema_enums={},
+        question_hints='',
+        cache_key=(str(fake_scope.tenant_id), 'kaira-bot', 0, frozenset()),
+        ontology_version=0,
+    )
+
     with contextlib.ExitStack() as stack:
         stack.enter_context(patch(
-            'app.services.report_builder.chat_handler._resolve_tools_for_app',
-            new=AsyncMock(return_value=[]),
+            'app.services.report_builder.chat_handler.resolve_turn_scope_and_bundle',
+            new=AsyncMock(return_value=TurnAssembly(scope=fake_scope, bundle=fake_bundle)),
+        ))
+        stack.enter_context(patch(
+            'app.services.report_builder.chat_handler._build_tools_from_bundle',
+            return_value=[],
         ))
         stack.enter_context(patch(
             'app.services.report_builder.chat_handler.load_app_config',
             new=AsyncMock(return_value={}),
-        ))
-        stack.enter_context(patch(
-            'app.services.report_builder.chat_handler.load_entity_registry',
-            return_value=[],
-        ))
-        stack.enter_context(patch(
-            'app.services.report_builder.chat_handler.recognize_entities',
-            new=AsyncMock(return_value=EntityRecognitionResult(is_platform_query=True, needs_resolution=False)),
         ))
         stack.enter_context(patch(
             'app.services.report_builder.chat_handler._question_contract_hints',
@@ -379,10 +392,6 @@ async def test_execute_chat_turn_two_turn_reproducer_persists_final_pie_outcome(
         stack.enter_context(patch(
             'app.services.report_builder.chat_handler.assemble_context',
             new=AsyncMock(return_value='You are Sherlock.'),
-        ))
-        stack.enter_context(patch(
-            'app.services.report_builder.chat_handler.render_entity_recognition_context',
-            return_value='',
         ))
         stack.enter_context(patch(
             'app.services.report_builder.chat_handler.record_user_message',

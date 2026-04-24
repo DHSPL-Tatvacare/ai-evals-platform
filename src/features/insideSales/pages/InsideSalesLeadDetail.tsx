@@ -4,12 +4,20 @@ import {
   Activity,
   AlertTriangle,
   BadgeCheck,
+  CalendarClock,
+  CheckCircle2,
+  Cpu,
   FileText,
   HeartPulse,
+  IndianRupee,
   Info,
   ListChecks,
   Mic,
+  Package,
+  Receipt,
+  RefreshCw,
   User,
+  Users,
 } from 'lucide-react';
 import {
   Button,
@@ -77,7 +85,23 @@ function cleanEnum(val: string | null | undefined): string {
 
 /* ── Small building blocks ─────────────────────────────────────── */
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+/** Renders `null` when the value is an em-dash, empty, or literally falsy —
+ *  so drilldown grids aren't padded with "—" noise for pre-converted leads.
+ *  Opt out with `alwaysShow` for cases where a missing value is the signal
+ *  (e.g. "Owner: —" where absence is worth calling out). */
+function Field({
+  label,
+  value,
+  mono,
+  alwaysShow = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  alwaysShow?: boolean;
+}) {
+  const empty = !value || value === '—';
+  if (empty && !alwaysShow) return null;
   return (
     <div className="flex flex-col gap-0.5 min-w-0">
       <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
@@ -87,13 +111,18 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
         className={cn(
           'text-[13px] text-[var(--text-primary)] truncate',
           mono && 'font-mono',
+          empty && 'text-[var(--text-muted)]',
         )}
-        title={value !== '—' ? value : undefined}
+        title={value && value !== '—' ? value : undefined}
       >
-        {value}
+        {value || '—'}
       </span>
     </div>
   );
+}
+
+function isNonEmpty(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function formatLeadFieldValue(lead: LeadDetailFullResponse, field: AppDrilldownFieldConfig): string {
@@ -137,46 +166,241 @@ function formatLeadFieldValue(lead: LeadDetailFullResponse, field: AppDrilldownF
 
 /* ── Plan purchase surface ─────────────────────────────────────── */
 
-/** Order = how a sales-ops reader scans a purchase:
- *  plan → pricing → payment → program dates → device → fulfilment.
- */
-const PLAN_FIELD_LABELS: Array<[keyof LeadDetailFullResponse['plan'], string]> = [
-  ['planName', 'Plan Name'],
-  ['durationOrQuantity', 'Duration'],
-  ['programPrice', 'Program Price'],
-  ['invoiceAmount', 'Invoice Amount'],
-  ['paymentId', 'Payment ID'],
-  ['paymentDateAndTime', 'Payment Date & Time'],
-  ['planAssignedAt', 'Plan Assigned At'],
-  ['signUpDate', 'Sign Up Date'],
-  ['programStartDate', 'Program Start'],
-  ['programEndDate', 'Program End'],
-  ['leadConversionDate', 'Lead Conversion Date'],
-  ['planIncludesCgm', 'Plan Includes CGM'],
-  ['cgm', 'CGM'],
-  ['cgmBrand', 'CGM Brand'],
-  ['sensorCount', 'Sensor Count'],
-  ['transmitterCount', 'Transmitter Count'],
-  ['bcaDevice', 'BCA Device'],
-  ['nutraceuticalsSold', 'Nutraceuticals Sold'],
-  ['salesTeam', 'Sales Team'],
-  ['deviceAwbNumber', 'Device AWB Number'],
-];
+/** Short date (e.g. "23 Apr, 06:36"). Plan receipts don't need the year —
+ *  the lead conversion date supplies that anchor. */
+function fmtShortDateTime(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const d = new Date(value.replace(' ', 'T') + 'Z');
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleString('en-IN', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+  } catch {
+    return value;
+  }
+}
 
-function PlanPurchasedSection({ plan }: { plan: LeadDetailFullResponse['plan'] }) {
-  const hasAny = PLAN_FIELD_LABELS.some(([key]) => plan[key] !== null && plan[key] !== '');
-  if (!hasAny) return null;
+function fmtShortDate(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const d = new Date(value.includes('T') ? value : `${value}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleString('en-IN', { day: '2-digit', month: 'short' });
+  } catch {
+    return value;
+  }
+}
+
+function Chip({ icon: Icon, label, tone = 'neutral' }: {
+  icon: typeof BadgeCheck;
+  label: string;
+  tone?: 'neutral' | 'success' | 'info' | 'brand';
+}) {
+  const toneClass = {
+    neutral: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-subtle)]',
+    success: 'bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success)] border-[color-mix(in_srgb,var(--color-success)_35%,transparent)]',
+    info: 'bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-info)] border-[color-mix(in_srgb,var(--color-info)_35%,transparent)]',
+    brand: 'bg-[var(--surface-brand-subtle)] text-[var(--text-brand)] border-[var(--border-brand)]/60',
+  }[tone];
   return (
-    <SectionBlock title="Plan Purchased" icon={BadgeCheck} tone="success" surface="tinted">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {PLAN_FIELD_LABELS.map(([key, label]) => {
-          const raw = plan[key];
-          const value = raw === null || raw === '' ? '—' : String(raw);
-          const mono = key === 'paymentId' || key === 'deviceAwbNumber';
-          return <Field key={key} label={label} value={value} mono={mono} />;
-        })}
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium',
+        toneClass,
+      )}
+    >
+      <Icon className="h-3 w-3" />
+      {label}
+    </span>
+  );
+}
+
+function TimelineRow({ icon: Icon, label, value }: {
+  icon: typeof BadgeCheck;
+  label: string;
+  value: string;
+}) {
+  return (
+    <li className="flex items-center gap-3 text-xs">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--color-success)_12%,transparent)] text-[var(--color-success)]">
+        <Icon className="h-3 w-3" />
+      </span>
+      <span className="text-[var(--text-muted)] w-[140px]">{label}</span>
+      <span className="tabular-nums text-[var(--text-primary)]">{value}</span>
+    </li>
+  );
+}
+
+/**
+ * Plan Purchased — scannable receipt-style card. Shown only when there is an
+ * actual purchase signal (plan name or payment id). `leadConversionDate` alone
+ * doesn't trigger the card because LSQ populates it for every lead regardless
+ * of purchase outcome.
+ *
+ * Sections cascade in the order a sales-ops reader actually scans a sale:
+ *   1. Plan name + top-line chips (price · duration · CGM flag)
+ *   2. Timeline of the sale (conversion → assigned → program window)
+ *   3. Payment block (id + date + invoice)
+ *   4. Device block (only when device data is present)
+ *   5. Sales team footer (only when present)
+ */
+function PlanPurchasedCard({ plan }: { plan: LeadDetailFullResponse['plan'] }) {
+  const hasPurchase = isNonEmpty(plan.planName) || isNonEmpty(plan.paymentId);
+  if (!hasPurchase) return null;
+
+  const conversionAt = fmtShortDateTime(plan.leadConversionDate);
+  const assignedAt = fmtShortDateTime(plan.planAssignedAt);
+  const signUpAt = fmtShortDate(plan.signUpDate);
+  const programStart = fmtShortDate(plan.programStartDate);
+  const programEnd = fmtShortDate(plan.programEndDate);
+  const paymentAt = fmtShortDateTime(plan.paymentDateAndTime);
+
+  const hasPayment = isNonEmpty(plan.paymentId) || isNonEmpty(plan.invoiceAmount);
+  const hasDevice = [plan.cgm, plan.cgmBrand, plan.sensorCount, plan.transmitterCount, plan.bcaDevice, plan.deviceAwbNumber]
+    .some((v) => isNonEmpty(v));
+  const cgmDetail = [plan.cgmBrand, plan.cgm]
+    .filter(isNonEmpty)
+    .join(' · ');
+  const deviceCounts = [
+    isNonEmpty(plan.sensorCount) && `${plan.sensorCount}S`,
+    isNonEmpty(plan.transmitterCount) && `${plan.transmitterCount}T`,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <section
+      className={cn(
+        'relative overflow-hidden rounded-xl border',
+        'border-[color-mix(in_srgb,var(--color-success)_22%,transparent)]',
+        'bg-[var(--bg-elevated)]',
+      )}
+    >
+      {/* Thin success accent strip along the left edge — marks the card as
+          the "win" section without flooding the surface with tint. */}
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-[3px] bg-[var(--color-success)] opacity-80"
+      />
+      <div className="flex flex-col gap-5 p-5 pl-6">
+        {/* Header — win badge + eyebrow */}
+        <header className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[color-mix(in_srgb,var(--color-success)_18%,transparent)] text-[var(--color-success)] ring-1 ring-[color-mix(in_srgb,var(--color-success)_35%,transparent)]">
+            <BadgeCheck className="h-3.5 w-3.5" />
+          </span>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-success)]">
+            Plan Purchased
+          </p>
+        </header>
+
+        {/* Plan name + rhythm chips */}
+        <div className="flex flex-col gap-3">
+          <h3 className="text-base font-semibold leading-tight text-[var(--text-primary)]">
+            {plan.planName ?? 'Plan details not named'}
+          </h3>
+          <div className="flex flex-wrap items-center gap-2">
+            {isNonEmpty(plan.programPrice) && (
+              <Chip icon={IndianRupee} label={`₹${plan.programPrice}`} tone="success" />
+            )}
+            {isNonEmpty(plan.durationOrQuantity) && (
+              <Chip icon={CalendarClock} label={plan.durationOrQuantity} tone="neutral" />
+            )}
+            {isNonEmpty(plan.planIncludesCgm) && (
+              <Chip icon={Cpu} label={`CGM: ${plan.planIncludesCgm}`} tone="info" />
+            )}
+          </div>
+        </div>
+
+        {/* Two-up: timeline on the left, payment on the right */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          {(conversionAt || assignedAt || signUpAt || programStart || programEnd) && (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Timeline
+              </p>
+              <ul className="flex flex-col gap-2">
+                {conversionAt && (
+                  <TimelineRow icon={CheckCircle2} label="Converted" value={conversionAt} />
+                )}
+                {assignedAt && (
+                  <TimelineRow icon={BadgeCheck} label="Plan Assigned" value={assignedAt} />
+                )}
+                {signUpAt && (
+                  <TimelineRow icon={User} label="Sign Up" value={signUpAt} />
+                )}
+                {(programStart || programEnd) && (
+                  <TimelineRow
+                    icon={CalendarClock}
+                    label="Program Window"
+                    value={[programStart, programEnd].filter(Boolean).join(' → ')}
+                  />
+                )}
+              </ul>
+            </div>
+          )}
+
+          {hasPayment && (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Payment
+              </p>
+              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
+                {isNonEmpty(plan.paymentId) && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Receipt className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" />
+                    <span className="font-mono truncate text-[var(--text-primary)]" title={plan.paymentId}>
+                      {plan.paymentId}
+                    </span>
+                  </div>
+                )}
+                {paymentAt && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <CalendarClock className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" />
+                    <span className="tabular-nums text-[var(--text-secondary)]">{paymentAt}</span>
+                  </div>
+                )}
+                {isNonEmpty(plan.invoiceAmount) && (
+                  <div className="flex items-center justify-between pt-1 border-t border-[var(--border-subtle)]">
+                    <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Invoice</span>
+                    <span className="tabular-nums text-[13px] font-semibold text-[var(--text-primary)]">
+                      ₹{plan.invoiceAmount}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Device + sales footer — low visual weight, only rendered when data exists */}
+        {(hasDevice || isNonEmpty(plan.salesTeam) || isNonEmpty(plan.nutraceuticalsSold)) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--border-subtle)] pt-3 text-[11px] text-[var(--text-muted)]">
+            {hasDevice && (
+              <span className="inline-flex items-center gap-1.5">
+                <Package className="h-3 w-3" />
+                {[cgmDetail, deviceCounts, plan.bcaDevice && `BCA ${plan.bcaDevice}`].filter(Boolean).join(' · ')}
+              </span>
+            )}
+            {isNonEmpty(plan.nutraceuticalsSold) && (
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className="h-3 w-3" />
+                {plan.nutraceuticalsSold}
+              </span>
+            )}
+            {isNonEmpty(plan.salesTeam) && (
+              <span className="inline-flex items-center gap-1.5">
+                <Users className="h-3 w-3" />
+                {plan.salesTeam}
+              </span>
+            )}
+            {isNonEmpty(plan.deviceAwbNumber) && (
+              <span className="inline-flex items-center gap-1.5">
+                AWB:&nbsp;<span className="font-mono text-[var(--text-secondary)]">{plan.deviceAwbNumber}</span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
-    </SectionBlock>
+    </section>
   );
 }
 
@@ -373,21 +597,25 @@ export function InsideSalesLeadDetail() {
 
   const [lead, setLead] = useState<LeadDetailFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [evalIdx, setEvalIdx] = useState(0);
   const [evalOpen, setEvalOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { refresh?: boolean }) => {
     if (!prospectId) return;
-    setLoading(true);
+    const isRefresh = Boolean(opts?.refresh);
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
     setError(null);
     try {
-      const data = await fetchLeadDetail(prospectId);
+      const data = await fetchLeadDetail(prospectId, { refresh: isRefresh });
       setLead(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load lead');
     } finally {
-      setLoading(false);
+      if (isRefresh) setRefreshing(false);
+      else setLoading(false);
     }
   }, [prospectId]);
 
@@ -440,10 +668,14 @@ export function InsideSalesLeadDetail() {
 
   const overviewTab = (
     <div className="flex min-h-0 flex-1 flex-col gap-8">
-      <PlanPurchasedSection plan={lead.plan} />
-      {drilldownSections.map((section) => (
-        <DrilldownSection key={section.id} lead={lead} section={section} />
-      ))}
+      <PlanPurchasedCard plan={lead.plan} />
+      {/* Skip sections the sticky rail already owns (identity/contact/source).
+          Those fields are rendered once on the left and never duplicated. */}
+      {drilldownSections
+        .filter((section) => section.id !== 'contact-source')
+        .map((section) => (
+          <DrilldownSection key={section.id} lead={lead} section={section} />
+        ))}
     </div>
   );
 
@@ -511,6 +743,19 @@ export function InsideSalesLeadDetail() {
           disableShortcuts={evalOpen}
         />
       )}
+      <button
+        type="button"
+        onClick={() => load({ refresh: true })}
+        disabled={refreshing}
+        title="Refresh lead data from LeadSquared"
+        className={cn(
+          'inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-default)]',
+          'text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
+          'transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        )}
+      >
+        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+      </button>
       <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
         <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
           Evaluate

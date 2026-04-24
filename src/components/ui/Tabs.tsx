@@ -1,9 +1,13 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { cn } from '@/utils';
 import { TabsHeaderActionsContext } from './TabsHeaderActionsContext';
 
 const TAB_UNDERLINE_SPRING = { type: 'spring' as const, stiffness: 400, damping: 38, mass: 0.9 };
+/** Same family as the underline spring — keeps the whole tab interaction on
+ *  one motion grammar whether the user is watching the bar slide or the
+ *  content cross-fade. */
+const TAB_CONTENT_SPRING = { type: 'spring' as const, stiffness: 400, damping: 38, mass: 0.9 };
 
 interface Tab {
   id: string;
@@ -118,22 +122,49 @@ export function Tabs({
           ) : null}
         </div>
         <div className={cn(fillHeight ? 'pt-2 flex-1 min-h-0 flex flex-col' : 'pt-4')}>
-          {tabs.map((tab) => {
-            if (mountStrategy === 'active-only' && activeTab !== tab.id) {
-              return null;
-            }
-            return (
-              <div
-                key={tab.id}
-                className={cn(
-                  mountStrategy === 'all' && activeTab !== tab.id && 'hidden',
-                  fillHeight && activeTab === tab.id && 'flex-1 min-h-0 overflow-y-auto'
-                )}
+          {mountStrategy === 'active-only' && fillHeight ? (
+            // Active-only + fill height: spring-cross-fade the content panel
+            // on tab change. Matches the Lead Detail RecordWorkspace motion
+            // grammar so every tabbed surface in the app feels the same.
+            //
+            // `flex min-h-0 flex-1 flex-col` on the panel is the critical bit
+            // for `<EmptyState fill />` children to centre — their own
+            // `flex-1` only activates inside a flex column that hands down a
+            // bounded height.
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={activeTab}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                transition={prefersReducedMotion ? { duration: 0 } : TAB_CONTENT_SPRING}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto"
               >
-                {tab.content}
-              </div>
-            );
-          })}
+                {tabs.find((tab) => tab.id === activeTab)?.content}
+              </motion.div>
+            </AnimatePresence>
+          ) : (
+            tabs.map((tab) => {
+              if (mountStrategy === 'active-only' && activeTab !== tab.id) {
+                return null;
+              }
+              return (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    mountStrategy === 'all' && activeTab !== tab.id && 'hidden',
+                    // Kept `flex min-h-0 flex-1 flex-col` (not just
+                    // `flex-1 min-h-0`) so fillHeight consumers with
+                    // `mountStrategy='all'` also propagate flex-1 to their
+                    // children — fixes `<EmptyState fill />` centering.
+                    fillHeight && activeTab === tab.id && 'flex min-h-0 flex-1 flex-col overflow-y-auto',
+                  )}
+                >
+                  {tab.content}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </TabsHeaderActionsContext.Provider>

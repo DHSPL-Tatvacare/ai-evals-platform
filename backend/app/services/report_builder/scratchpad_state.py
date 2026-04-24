@@ -14,8 +14,20 @@ _TEMPORAL_NAME_PATTERN = re.compile(
 _ISO_DATE_PATTERN = re.compile(
     r'^\d{4}[-/]\d{2}([-/]\d{2})?([T ]\d{2}:\d{2}(:\d{2})?)?',
 )
-_RUN_SCOPE_FILTER_KEYS = {'run_name', 'run_reference'}
-_EMPTY_REASON_CODES = {'CG_EMPTY'}
+
+# M2: typed provenance labels (plan §8.1). Callers that write to
+# ``resolved_entities`` / ``active_filters`` pass a provenance label
+# describing where the value came from so carry-forward can distinguish
+# user-explicit from scope-derived state. The enum lives in
+# :mod:`app.services.sherlock.provenance`; this module accepts plain
+# strings to keep the scratchpad serializable as JSON.
+_VALID_PROVENANCE = frozenset({
+    'user_explicit',
+    'scope_derived',
+    'resolver_derived',
+    'model_inferred',
+    'heuristic',
+})
 
 
 def default_scratchpad() -> dict[str, Any]:
@@ -133,7 +145,6 @@ def _infer_column_types(
 def build_analysis_snapshot(
     result: dict[str, Any],
     dimensions: list[dict[str, Any]] | None = None,
-    app_scope_terms: list[str] | None = None,
 ) -> dict[str, Any]:
     rows = result.get('data', [])
     if not isinstance(rows, list):
@@ -187,7 +198,6 @@ def build_analysis_snapshot(
         'chart_summary': _chart_summary_from_result(result),
         'warnings': result.get('warnings', []),
         'applied_filters': result.get('applied_filters', {}),
-        'scope_recheck_hint': _build_scope_recheck_hint(result, app_scope_terms=app_scope_terms),
     }
 
 
@@ -266,78 +276,6 @@ def _gate_to_kind(fallback: str) -> str:
     return 'chart'
 
 
-def _build_scope_recheck_hint(
-    result: dict[str, Any],
-    *,
-    app_scope_terms: list[str] | None,
-) -> str | None:
-    normalized_scope_terms = {
-        _normalize_scope_text(term)
-        for term in (app_scope_terms or [])
-        if _normalize_scope_text(term)
-    }
-    if not normalized_scope_terms:
-        return None
-
-    chart_summary = _chart_summary_from_result(result)
-    if not isinstance(chart_summary, dict):
-        return None
-    if str(chart_summary.get('reason_code') or '').strip() not in _EMPTY_REASON_CODES:
-        return None
-
-    matched = _matching_run_scope_alias(
-        result.get('applied_filters'),
-        normalized_scope_terms=normalized_scope_terms,
-    )
-    if not matched:
-        return None
-
-    return (
-        f"The last result was empty after filtering run_name/run_reference to '{matched}', "
-        'which also matches the current app alias. If the next turn only changes chart shape or presentation, '
-        'rerun the analysis without that inferred run-name filter unless the user explicitly asks for a run name.'
-    )
-
-
-def _matching_run_scope_alias(
-    filters: Any,
-    *,
-    normalized_scope_terms: set[str],
-) -> str | None:
-    if not isinstance(filters, dict):
-        return None
-    for key, value in filters.items():
-        if str(key).strip().lower() not in _RUN_SCOPE_FILTER_KEYS:
-            continue
-        normalized_value = _normalize_filter_value(value)
-        if normalized_value and normalized_value in normalized_scope_terms:
-            return normalized_value
-    return None
-
-
-def _normalize_filter_value(value: Any) -> str | None:
-    if isinstance(value, str):
-        normalized = _normalize_scope_text(value)
-        return normalized or None
-    if isinstance(value, list):
-        for item in value:
-            normalized = _normalize_filter_value(item)
-            if normalized:
-                return normalized
-        return None
-    if isinstance(value, dict):
-        for key in ('value', 'text', 'search', 'contains', 'equals'):
-            if key in value:
-                normalized = _normalize_filter_value(value.get(key))
-                if normalized:
-                    return normalized
-    return None
-
-
-def _normalize_scope_text(text: str) -> str:
-    return ' '.join(part for part in re.split(r'[^a-z0-9]+', str(text or '').strip().lower()) if part)
-
-
 def push_analysis_snapshot(scratchpad: dict[str, Any], snapshot: dict[str, Any], *, max_entries: int = 5) -> None:
     history = scratchpad.setdefault('analysis_history', [])
     if not isinstance(history, list):
@@ -347,19 +285,40 @@ def push_analysis_snapshot(scratchpad: dict[str, Any], snapshot: dict[str, Any],
     scratchpad['last_analysis'] = snapshot
 
 
+def _coerce_provenance(value: str | None) -> str:
+    normalized = str(value or 'model_inferred').strip().lower()
+    if normalized not in _VALID_PROVENANCE:
+        return 'model_inferred'
+    return normalized
+
+
 def remember_resolved_entities(
     scratchpad: dict[str, Any],
     *,
     entity_type: str,
     search: str,
     matches: list[dict[str, Any]],
+    provenance: str | None = None,
+    source_tool: str | None = None,
+    source_turn_id: str | None = None,
 ) -> None:
+    """Persist a resolved-entity record with provenance typing.
+
+    M2 (plan §8.1): every entry carries ``provenance`` so carry-forward
+    can drop ``scope_derived`` values on scope change and keep
+    ``user_explicit`` / ``resolver_derived`` values sticky. Default is
+    ``model_inferred`` when the caller does not declare — the lowest
+    trust tier that still records the value.
+    """
     resolved_entities = scratchpad.setdefault('resolved_entities', {})
     if not isinstance(resolved_entities, dict):
         resolved_entities = {}
     resolved_entities[entity_type] = {
         'search': search,
         'matches': matches[:10],
+        'provenance': _coerce_provenance(provenance),
+        'source_tool': source_tool,
+        'source_turn_id': source_turn_id,
     }
     scratchpad['resolved_entities'] = resolved_entities
 
@@ -383,8 +342,90 @@ def remember_last_evidence(
 def remember_active_filters(
     scratchpad: dict[str, Any],
     filters: dict[str, Any] | None,
+    *,
+    provenance: str | None = None,
+    source_tool: str | None = None,
+    source_turn_id: str | None = None,
 ) -> None:
-    scratchpad['active_filters'] = copy_filters(filters)
+    """Persist active filters with provenance typing (plan §8.1).
+
+    The map value is still the compact filter-shape other code reads,
+    but now wrapped:
+    ``{'value': <original>, 'provenance': 'user_explicit' | ...,
+       'source_tool': ..., 'source_turn_id': ...}``.
+    ``copy_filters`` keeps the original shape inside ``value`` so
+    read-side consumers that accepted the old plain-value shape still
+    work — they just need to unwrap.
+    """
+    copied = copy_filters(filters)
+    prov = _coerce_provenance(provenance)
+    wrapped: dict[str, Any] = {}
+    for key, original in copied.items():
+        wrapped[key] = {
+            'value': original,
+            'provenance': prov,
+            'source_tool': source_tool,
+            'source_turn_id': source_turn_id,
+        }
+    scratchpad['active_filters'] = wrapped
+
+
+def active_filter_values(scratchpad: dict[str, Any] | None) -> dict[str, Any]:
+    """Unwrap ``active_filters`` into the plain ``{key: value}`` shape.
+
+    Read-side compat helper: most consumers care about the filter value,
+    not the provenance; this hides the per-entry metadata without
+    dropping it.
+    """
+    if not isinstance(scratchpad, dict):
+        return {}
+    filters = scratchpad.get('active_filters')
+    if not isinstance(filters, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, entry in filters.items():
+        if isinstance(entry, dict) and 'value' in entry and 'provenance' in entry:
+            out[key] = entry['value']
+        else:
+            out[key] = entry
+    return out
+
+
+def active_filter_provenance(scratchpad: dict[str, Any] | None) -> dict[str, str]:
+    """Return ``{key: provenance}`` for every entry in ``active_filters``."""
+    if not isinstance(scratchpad, dict):
+        return {}
+    filters = scratchpad.get('active_filters')
+    if not isinstance(filters, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, entry in filters.items():
+        if isinstance(entry, dict) and isinstance(entry.get('provenance'), str):
+            out[key] = entry['provenance']
+    return out
+
+
+def drop_scope_derived_filters(scratchpad: dict[str, Any] | None) -> None:
+    """Drop ``active_filters`` entries whose provenance is ``scope_derived``.
+
+    Called on scope change (plan §8.1 carry-forward policy): user-stated
+    filters are sticky across scope moves, but scope-derived residue
+    must not survive.
+    """
+    if not isinstance(scratchpad, dict):
+        return
+    filters = scratchpad.get('active_filters')
+    if not isinstance(filters, dict):
+        return
+    kept: dict[str, Any] = {}
+    for key, entry in filters.items():
+        prov = None
+        if isinstance(entry, dict):
+            prov = entry.get('provenance')
+        if prov == 'scope_derived':
+            continue
+        kept[key] = entry
+    scratchpad['active_filters'] = kept
 
 
 def copy_filters(filters: dict[str, Any] | None) -> dict[str, Any]:
@@ -407,6 +448,10 @@ def copy_filters(filters: dict[str, Any] | None) -> dict[str, Any]:
 def remember_data_check(
     scratchpad: dict[str, Any],
     payload: dict[str, Any],
+    *,
+    provenance: str | None = None,
+    source_tool: str | None = None,
+    source_turn_id: str | None = None,
 ) -> None:
     scratchpad['last_data_check'] = {
         'table': payload.get('table'),
@@ -415,7 +460,13 @@ def remember_data_check(
         'min_created_at': payload.get('min_created_at'),
         'max_created_at': payload.get('max_created_at'),
     }
-    remember_active_filters(scratchpad, payload.get('filters'))
+    remember_active_filters(
+        scratchpad,
+        payload.get('filters'),
+        provenance=provenance,
+        source_tool=source_tool,
+        source_turn_id=source_turn_id,
+    )
 
 
 def remember_catalog_inspection(
@@ -539,7 +590,11 @@ def build_previous_turn_context(scratchpad: dict[str, Any] | None) -> dict[str, 
     last_data_check = scratchpad.get('last_data_check')
     outcomes = scratchpad.get('outcomes', [])
     resolved_entities = scratchpad.get('resolved_entities', {})
-    active_filters = scratchpad.get('active_filters', {})
+    # M2: active_filters is now a provenance-wrapped dict; unwrap for
+    # prompt context so the model sees the plain key→value map it
+    # already understood, while carry-forward policy still runs over
+    # the wrapped shape.
+    active_filters = active_filter_values(scratchpad)
 
     has_context = any(
         isinstance(value, dict) and value
@@ -620,7 +675,7 @@ def build_previous_turn_context(scratchpad: dict[str, Any] | None) -> dict[str, 
             }
 
     if isinstance(active_filters, dict) and active_filters:
-        previous_turn['active_filters'] = copy_filters(active_filters)
+        previous_turn['active_filters'] = active_filters
 
     if isinstance(resolved_entities, dict) and resolved_entities:
         compact_entities: dict[str, list[str]] = {}
@@ -699,12 +754,9 @@ def build_data_query_context(
                 'preview_rows': last_analysis.get('preview_rows', []),
                 'sql_used': last_analysis.get('sql_used'),
             }
-            scope_recheck_hint = str(last_analysis.get('scope_recheck_hint') or '').strip()
-            if scope_recheck_hint:
-                context['prior_analysis']['scope_recheck_hint'] = scope_recheck_hint
-        active_filters = scratchpad.get('active_filters')
-        if isinstance(active_filters, dict) and active_filters:
-            context['active_filters'] = copy_filters(active_filters)
+        active_filters = active_filter_values(scratchpad)
+        if active_filters:
+            context['active_filters'] = active_filters
         resolved_entities = scratchpad.get('resolved_entities')
         if isinstance(resolved_entities, dict) and resolved_entities:
             context['resolved_entities'] = resolved_entities

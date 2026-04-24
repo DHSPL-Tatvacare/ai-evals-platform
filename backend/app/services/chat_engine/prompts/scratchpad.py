@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.report_builder.scratchpad_state import build_previous_turn_context
+from app.services.report_builder.scratchpad_state import (
+    active_filter_provenance,
+    active_filter_values,
+    build_previous_turn_context,
+)
 
 _MAX_FINDINGS = 15
 _MAX_ERRORS = 5
@@ -30,7 +34,8 @@ def render(session: dict[str, Any]) -> str:
     discovery = pad.get('discovery')
     lookups = pad.get('lookups', {})
     resolved_entities = pad.get('resolved_entities', {})
-    active_filters = pad.get('active_filters', {})
+    active_filters = active_filter_values(pad)
+    active_filter_prov = active_filter_provenance(pad)
     discovered_schema = pad.get('discovered_schema')
     last_data_check = pad.get('last_data_check')
     last_analysis = pad.get('last_analysis')
@@ -156,9 +161,15 @@ def render(session: dict[str, Any]) -> str:
             lines.append(f'- {entity_type}: {sample}')
 
     if active_filters:
+        # M2 (plan §8.1): each filter carries a typed provenance so the
+        # outer agent knows whether to carry it forward. ``user_explicit``
+        # is sticky; ``scope_derived`` drops on scope change (handled at
+        # write-side); ``resolver_derived`` / ``model_inferred`` /
+        # ``heuristic`` stay but annotated so the agent can re-justify.
         lines.append('Active filters to carry forward unless the user changes them:')
         for key, value in list(active_filters.items())[:_MAX_FILTERS]:
-            lines.append(f'- {key}: {value}')
+            provenance = active_filter_prov.get(key) or 'model_inferred'
+            lines.append(f'- {key}: {value} (provenance={provenance})')
 
     if discovered_schema:
         tables = discovered_schema.get('tables_inspected', []) if isinstance(discovered_schema, dict) else []

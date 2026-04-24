@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.chat_engine.data_surfaces import get_entity_resolvers, resolve_source_values
+from app.services.chat_engine.data_surfaces import resolve_source_values
 from app.services.chat_engine.sql_agent import _normalize_dimensions, load_app_config, load_semantic_model
 
 
@@ -36,7 +36,16 @@ async def resolve_entity_matches(
     app_config: dict[str, Any] | None = None,
     semantic_model: dict[str, Any] | None = None,
     limit: int = 10,
+    bundle_resolvers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Resolve a fuzzy entity match to deterministic dimension / source values.
+
+    M2: ``bundle_resolvers`` replaces the legacy app-config resolver
+    lookup. Callers pass the projected resolvers from ``ScopedBundle`` (via
+    :func:`app.services.sherlock.bundle_resolvers_as_legacy`); this
+    function filters them to ``entity_type`` and runs them against
+    semantic dimensions or raw sources.
+    """
     from app.services.report_builder.analytics_pack import _ANALYTICS_PACK
 
     if not search.strip():
@@ -53,10 +62,14 @@ async def resolve_entity_matches(
     if not vocab.validate_entity_type(entity_type):
         return _ANALYTICS_PACK.entity_type_error_payload(entity_type, vocab)
 
-    resolvers = get_entity_resolvers(active_app_config, entity_type=entity_type)
+    wanted = entity_type.strip().lower()
+    resolvers = [
+        resolver for resolver in (bundle_resolvers or [])
+        if str(resolver.get('entity_type', '')).strip().lower() == wanted
+    ]
     if not resolvers:
         # Entity type is valid per the vocabulary but has no configured
-        # resolver on the app config — fall back to the semantic dimension
+        # resolver in the bundle — fall back to the semantic dimension
         # with the same name (the vocabulary guarantees this exists).
         if entity_type.lower() in vocab.dimensions:
             resolvers = [{

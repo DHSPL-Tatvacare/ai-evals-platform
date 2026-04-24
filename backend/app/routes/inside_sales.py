@@ -51,6 +51,7 @@ from app.services.inside_sales_queries import (
 )
 from app.services.inside_sales_sync import build_manual_refresh_job_params
 from app.services.job_worker import get_job_submission_metadata
+from app.services.ttl_cache import TTLCache
 from app.services.lsq_client import (
     LsqRateLimitError,
     LsqRequestError,
@@ -64,6 +65,17 @@ from app.services.lsq_client import (
 )
 
 router = APIRouter(prefix="/api/inside-sales", tags=["inside-sales"])
+
+
+# Cache for the expensive LSQ fetch pair (lead profile + full activity
+# history) backing the drilldown endpoint. TTL matches the inside-sales
+# source staleness budget used for list endpoints.
+_LEAD_DRILLDOWN_TTL_SECONDS = 1800
+_lead_drilldown_cache: TTLCache[tuple[str, str], tuple[dict, list[dict], bool]] = TTLCache(
+    ttl_seconds=_LEAD_DRILLDOWN_TTL_SECONDS,
+    max_entries=512,
+    name="lead_drilldown_lsq",
+)
 
 
 def _parse_csv_query(value: str | None) -> tuple[str, ...]:
@@ -468,32 +480,46 @@ async def get_collection_coverage(
 @router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)
 async def get_lead_detail(
     prospect_id: str,
+    refresh: bool = Query(False, description="Force re-fetch from LeadSquared"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Lead drilldown endpoint: profile, call history, and eval history."""
-    # 1. Fetch full lead record
-    try:
-        raw = await fetch_lead_by_id(prospect_id)
-    except LsqRequestError as exc:
-        raise _translate_lsq_error(exc) from exc
-    if not raw:
-        raise HTTPException(status_code=404, detail="Lead not found")
+    """Lead drilldown endpoint: profile, call history, and eval history.
+
+    The LSQ fetch pair (lead profile + full activity history) is cached
+    in-process with a 30-minute TTL. Eval overlay/history come from our
+    own DB and are computed fresh on every request. Pass ``?refresh=true``
+    to bypass the cache.
+    """
+    cache_key = (str(auth.tenant_id), prospect_id)
+    if refresh:
+        _lead_drilldown_cache.invalidate(cache_key)
+
+    async def _load_lsq_bundle() -> tuple[dict, list[dict], bool]:
+        try:
+            raw_ = await fetch_lead_by_id(prospect_id)
+        except LsqRequestError as exc:
+            raise _translate_lsq_error(exc) from exc
+        if not raw_:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        created_on_ = normalize_lead(raw_)["createdOn"] or "2020-01-01 00:00:00"
+        date_to_now_ = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            activities_, truncated_ = await fetch_lead_activities_for_prospect(
+                prospect_id=prospect_id,
+                date_from=created_on_,
+                date_to=date_to_now_,
+            )
+        except LsqRequestError as exc:
+            raise _translate_lsq_error(exc) from exc
+        return raw_, activities_, truncated_
+
+    raw, raw_activities, history_truncated = await _lead_drilldown_cache.get_or_load(
+        cache_key, _load_lsq_bundle
+    )
 
     lead = normalize_lead(raw)
     mql_score, mql_signals = compute_mql_score(raw)
-
-    # 2. Fetch call history for this prospect
-    created_on = lead["createdOn"] or "2020-01-01 00:00:00"
-    date_to_now = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        raw_activities, history_truncated = await fetch_lead_activities_for_prospect(
-            prospect_id=prospect_id,
-            date_from=created_on,
-            date_to=date_to_now,
-        )
-    except LsqRequestError as exc:
-        raise _translate_lsq_error(exc) from exc
 
     # Normalize activities into LeadCallRecord format
     call_history_raw: list[dict] = []

@@ -109,13 +109,13 @@ export function InsideSalesCallDetail() {
       <PageSurface
         icon={PAGE_METADATA.callDetail.icon}
         title="Call"
-        back={{ to: routes.insideSales.listing, label: 'Calls' }}
+        back={{ to: routes.insideSales.listingForTab('calls'), label: 'Calls' }}
       >
         <EmptyState
           icon={PhoneIcon}
           title="Call not found"
           description="This call may not be loaded. Go back to the listing and try again."
-          action={{ label: 'Back to Calls', onClick: () => navigate(routes.insideSales.listing) }}
+          action={{ label: 'Back to Calls', onClick: () => navigate(routes.insideSales.listingForTab('calls')) }}
           fill
         />
       </PageSurface>
@@ -253,7 +253,7 @@ export function InsideSalesCallDetail() {
       icon={PAGE_METADATA.callDetail.icon}
       title={titleText}
       subtitle={subtitle}
-      back={{ to: routes.insideSales.listing, label: 'Calls' }}
+      back={{ to: routes.insideSales.listingForTab('calls'), label: 'Calls' }}
       actions={actions}
       showHeader={!evalLoading}
     >
@@ -305,6 +305,7 @@ export function InsideSalesCallDetail() {
             ]}
             defaultTab="transcript"
             fillHeight
+            mountStrategy="active-only"
           />
         </div>
       )}

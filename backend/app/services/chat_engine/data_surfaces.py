@@ -35,24 +35,18 @@ def app_access_clause_for_surfaces(model: Any, auth: Any):
     return model.app_id.in_(tuple(sorted(app_access)))
 
 
-def get_chat_config(app_config: dict[str, Any] | None) -> dict[str, Any]:
-    chat_config = ((app_config or {}).get('chat') or {})
-    return chat_config if isinstance(chat_config, dict) else {}
-
-
 def get_data_surfaces(
     app_id_or_config: str | dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     """Return the configured data surfaces for an app.
 
-    Canonical call: ``get_data_surfaces(app_id)`` — reads the manifest.
-    Legacy shape ``get_data_surfaces(app_config)`` is still accepted while
-    callers are migrated; a dict argument is treated as a full app_config
-    and we fall back to the old DB-backed parser.
+    M2: the manifest is the authoritative surface source. Dict-shaped
+    callers (legacy ``App.config`` path) return an empty list — the
+    legacy fallback is gone.
     """
     if isinstance(app_id_or_config, str):
         return _surfaces_from_manifest(app_id_or_config)
-    return _surfaces_from_app_config(app_id_or_config)
+    return []
 
 
 def _surfaces_from_manifest(app_id: str) -> list[dict[str, Any]]:
@@ -78,76 +72,6 @@ def _surfaces_from_manifest(app_id: str) -> list[dict[str, Any]]:
             'default_limit': _normalize_limit(s.default_limit),
         })
     return surfaces
-
-
-def _surfaces_from_app_config(app_config: dict[str, Any] | None) -> list[dict[str, Any]]:
-    raw_surfaces = get_chat_config(app_config).get('dataSurfaces')
-    if raw_surfaces is None:
-        raw_surfaces = get_chat_config(app_config).get('data_surfaces')
-    if not isinstance(raw_surfaces, list):
-        return []
-
-    surfaces: list[dict[str, Any]] = []
-    for item in raw_surfaces:
-        if not isinstance(item, dict):
-            continue
-        source = str(item.get('source', '')).strip()
-        key = str(item.get('key', '')).strip()
-        if not key or source not in _SUPPORTED_SOURCES:
-            continue
-        raw_entity_map = item.get('entityFieldMap', item.get('entity_field_map', {}))
-        entity_field_map = raw_entity_map if isinstance(raw_entity_map, dict) else {}
-        raw_fields = item.get('fields', [])
-        surfaces.append({
-            'key': key,
-            'description': str(item.get('description', '')).strip(),
-            'source': source,
-            'entity_field_map': {
-                str(entity_type): str(field)
-                for entity_type, field in entity_field_map.items()
-                if entity_type and field
-            },
-            'fields': [str(field) for field in raw_fields if field],
-            'default_limit': _normalize_limit(item.get('defaultLimit', item.get('default_limit', _DEFAULT_LIMIT))),
-        })
-    return surfaces
-
-
-def get_entity_resolvers(
-    app_config: dict[str, Any] | None,
-    *,
-    entity_type: str | None = None,
-) -> list[dict[str, Any]]:
-    raw_resolvers = get_chat_config(app_config).get('entityResolvers')
-    if raw_resolvers is None:
-        raw_resolvers = get_chat_config(app_config).get('entity_resolvers')
-    if not isinstance(raw_resolvers, list):
-        return []
-
-    wanted_entity = entity_type.lower() if entity_type else None
-    resolvers: list[dict[str, Any]] = []
-    for item in raw_resolvers:
-        if not isinstance(item, dict):
-            continue
-        resolver_entity = str(item.get('entityType', item.get('entity_type', ''))).strip()
-        source = str(item.get('source', '')).strip()
-        if not resolver_entity or not source:
-            continue
-        if wanted_entity and resolver_entity.lower() != wanted_entity:
-            continue
-        if source != 'semantic_dimension' and source not in _SUPPORTED_SOURCES:
-            continue
-        resolvers.append({
-            'key': str(item.get('key', resolver_entity)).strip() or resolver_entity,
-            'entity_type': resolver_entity,
-            'description': str(item.get('description', '')).strip(),
-            'source': source,
-            'field': str(item.get('field', '')).strip() or None,
-            'dimension': str(item.get('dimension', '')).strip() or None,
-            'match': _normalize_match(item.get('match')),
-            'limit': _normalize_limit(item.get('limit', _DEFAULT_LIMIT)),
-        })
-    return resolvers
 
 
 def build_surface_catalog(

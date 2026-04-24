@@ -144,54 +144,9 @@ class AggregateTurnUsageTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(summary['costUsd'], 0.00123)
 
 
-class EntityRecognitionWrapTests(unittest.IsolatedAsyncioTestCase):
-    async def test_wrap_applied_when_turn_id_provided(self):
-        from app.services.chat_engine.entity_recognition import (
-            _create_entity_recognition_provider,
-        )
-        from app.services.evaluators.llm_base import LoggingLLMWrapper
-
-        fake_inner = SimpleNamespace(model_name='gpt-4o-mini')
-        with patch(
-            'app.services.chat_engine.entity_recognition.create_llm_provider',
-            return_value=fake_inner,
-        ), patch(
-            'app.services.chat_engine.entity_recognition.get_llm_settings_from_db',
-            AsyncMock(return_value={'api_key': 'x', 'service_account_path': ''}),
-        ):
-            result = await _create_entity_recognition_provider(
-                provider='openai',
-                model='gpt-4o-mini',
-                tenant_id=str(uuid.uuid4()),
-                user_id=str(uuid.uuid4()),
-                app_id='kaira-bot',
-                turn_id=str(uuid.uuid4()),
-            )
-        self.assertIsInstance(result, LoggingLLMWrapper)
-        self.assertEqual(result._call_purpose, 'entity_recognition')
-        self.assertIsNotNone(result._usage_callback)
-
-    async def test_no_wrap_without_app_id(self):
-        from app.services.chat_engine.entity_recognition import (
-            _create_entity_recognition_provider,
-        )
-        from app.services.evaluators.llm_base import LoggingLLMWrapper
-
-        fake_inner = SimpleNamespace(model_name='gpt-4o-mini')
-        with patch(
-            'app.services.chat_engine.entity_recognition.create_llm_provider',
-            return_value=fake_inner,
-        ), patch(
-            'app.services.chat_engine.entity_recognition.get_llm_settings_from_db',
-            AsyncMock(return_value={'api_key': 'x', 'service_account_path': ''}),
-        ):
-            result = await _create_entity_recognition_provider(
-                provider='openai',
-                model='gpt-4o-mini',
-                tenant_id=str(uuid.uuid4()),
-                user_id=str(uuid.uuid4()),
-            )
-        self.assertNotIsInstance(result, LoggingLLMWrapper)
+# M2: the LLM entity-recognition pre-pass is gone; the former
+# ``EntityRecognitionWrapTests`` covered its LoggingLLMWrapper plumbing
+# and is deleted alongside the pre-pass itself.
 
 
 class CostTrackingProcessorTests(unittest.TestCase):

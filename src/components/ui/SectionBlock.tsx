@@ -7,10 +7,10 @@
  * of a gray card, so multiple sections can stack without turning the page
  * into a field of boxes.
  *
- * `tone` maps to an existing design-system colour token — never hardcoded —
- * and also gates a subtle gradient background when `surface="tinted"` is set,
- * for sections that deserve a bit of visual weight (e.g. a "Plan Purchased"
- * success highlight on a converted lead).
+ * `tone` maps to an existing design-system colour token — never hardcoded.
+ * `surface` controls the outer chrome: transparent (default), outlined
+ * (neutral border), or tinted (flat tone fill). No gradients anywhere —
+ * the design system anchors on flat tokens and hairline borders.
  *
  * Kept generic (no CRM or app vocabulary) — consumed by the shared
  * `RecordWorkspace` primitive and any other record-detail page.
@@ -56,19 +56,20 @@ const TONE_CHIP_CLASSES: Record<SectionBlockTone, string> = {
     'bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-info)] ring-[color-mix(in_srgb,var(--color-info)_35%,transparent)]',
 };
 
-/** Soft tone gradient used when `surface="tinted"`. Anchors on the same token
- *  family as the icon chip so tone stays visually coherent. */
+/** Flat tonal surface — no gradients. Each tone uses a low-opacity tint of
+ *  the same token family that powers the icon chip so the section reads as
+ *  coherent but never drifts into decorative territory. */
 const TONE_SURFACE_STYLE: Record<SectionBlockTone, string> = {
   neutral:
-    'bg-[linear-gradient(180deg,var(--bg-elevated)_0%,var(--bg-secondary)_100%)] border border-[var(--border-subtle)]',
+    'bg-[var(--bg-elevated)] border border-[var(--border-subtle)]',
   brand:
-    'bg-[linear-gradient(180deg,var(--surface-brand-subtle)_0%,transparent_100%)] border border-[var(--border-brand)]/35',
+    'bg-[var(--surface-brand-subtle)] border border-[var(--border-brand)]/35',
   success:
-    'bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-success)_10%,transparent)_0%,transparent_100%)] border border-[color-mix(in_srgb,var(--color-success)_25%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--color-success)_6%,transparent)] border border-[color-mix(in_srgb,var(--color-success)_25%,transparent)]',
   warning:
-    'bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-warning)_10%,transparent)_0%,transparent_100%)] border border-[color-mix(in_srgb,var(--color-warning)_25%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--color-warning)_6%,transparent)] border border-[color-mix(in_srgb,var(--color-warning)_25%,transparent)]',
   info:
-    'bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-info)_10%,transparent)_0%,transparent_100%)] border border-[color-mix(in_srgb,var(--color-info)_25%,transparent)]',
+    'bg-[color-mix(in_srgb,var(--color-info)_6%,transparent)] border border-[color-mix(in_srgb,var(--color-info)_25%,transparent)]',
 };
 
 export function SectionBlock({
@@ -102,7 +103,11 @@ export function SectionBlock({
             {Icon && (
               <span
                 className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded-md ring-1',
+                  // `ring-inset` draws the 1px outline inside the box instead
+                  // of outside. Without it, the ring can be clipped by any
+                  // ancestor with `overflow-*-auto` when the chip sits at
+                  // the left edge — e.g. a record-workspace section header.
+                  'flex h-6 w-6 items-center justify-center rounded-md ring-1 ring-inset',
                   TONE_CHIP_CLASSES[tone],
                 )}
                 aria-hidden

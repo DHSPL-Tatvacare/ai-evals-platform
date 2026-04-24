@@ -39,7 +39,15 @@ class ScratchpadStateTests(unittest.TestCase):
         self.assertEqual(previous_turn['active_filters']['status'], 'VIOLATED')
         self.assertEqual(previous_turn['active_entities']['rule'], ['Food QnA Instructions'])
 
-    def test_build_analysis_snapshot_marks_empty_app_alias_scope_for_requery(self):
+    def test_build_analysis_snapshot_no_longer_emits_scope_recheck_hint(self):
+        """M2: the app-alias / run_name scope-recheck band-aid is removed.
+
+        Platform ontology now flags ``run_name`` as ``explicit_only`` in
+        the scoped bundle, so the agent is told to resolve run identity
+        through ``resolve_entity`` instead of silently fuzzy-matching.
+        The old scratchpad post-hint is gone; this test locks that
+        removal so the band-aid cannot sneak back.
+        """
         snapshot = scratchpad_state.build_analysis_snapshot(
             {
                 'question': 'Show kaira eval runs per status',
@@ -55,10 +63,9 @@ class ScratchpadStateTests(unittest.TestCase):
                 ],
                 'applied_filters': {'run_name': 'kaira'},
             },
-            app_scope_terms=['kaira', 'kaira bot'],
         )
 
-        self.assertIn("run_name/run_reference to 'kaira'", snapshot['scope_recheck_hint'])
+        self.assertNotIn('scope_recheck_hint', snapshot)
 
         context = scratchpad_state.build_data_query_context(
             'show as pie',
@@ -71,7 +78,7 @@ class ScratchpadStateTests(unittest.TestCase):
         )
 
         self.assertIn('previous_turn', context)
-        self.assertIn('scope_recheck_hint', context['prior_analysis'])
+        self.assertNotIn('scope_recheck_hint', context.get('prior_analysis', {}))
 
 
 if __name__ == '__main__':

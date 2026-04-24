@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Phone,
   PhoneIncoming,
@@ -485,7 +485,18 @@ export function InsideSalesListing() {
 
   const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'leads' | 'calls'>('leads');
+  // Active tab is URL-driven via `?tab=leads|calls` so deep links (and the
+  // back-arrow from detail pages) can land on the right tab without
+  // hardcoded assumptions about a default.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: 'leads' | 'calls' = tabParam === 'calls' ? 'calls' : 'leads';
+  const setActiveTab = (next: 'leads' | 'calls') => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'leads') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
   const [callSearch, setCallSearch] = useState('');
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(typeof Audio !== 'undefined' ? new Audio() : null);
@@ -905,7 +916,7 @@ export function InsideSalesListing() {
           },
           { id: 'calls', label: 'All Calls', content: tableContent },
         ]}
-        defaultTab="leads"
+        defaultTab={activeTab}
         onChange={(id) => setActiveTab(id as 'leads' | 'calls')}
         mountStrategy="active-only"
         fillHeight

@@ -76,9 +76,10 @@ async def handle_discover(
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
     from app.services.chat_engine.artifact import build_envelope
-    from app.services.chat_engine.data_surfaces import build_surface_catalog, get_entity_resolvers
+    from app.services.chat_engine.data_surfaces import build_surface_catalog
     from app.services.chat_engine.sql_agent import load_app_config
     from app.services.report_builder.analytics.vocabulary import build_tool_vocabulary
+    from app.services.sherlock import bundle_resolvers_as_legacy
 
     scratchpad = (session or {}).get('scratchpad', {}) if session else {}
     cached = scratchpad.get('discovery')
@@ -97,9 +98,17 @@ async def handle_discover(
     semantic_model = await _load_active_semantic_model(db, app_id)
     vocab = build_tool_vocabulary(app_id, semantic_model)
     surfaces = build_surface_catalog(app_id)
+    # M2: resolver entity types come from the bundle (platform
+    # ontology + pack projections) rather than the legacy app-config
+    # resolver seed.
+    bundle = (session or {}).get('_bundle') if session else None
+    if bundle is not None:
+        bundle_resolvers = bundle_resolvers_as_legacy(bundle)
+    else:
+        bundle_resolvers = []
     resolver_entity_types = sorted({
         resolver['entity_type']
-        for resolver in get_entity_resolvers(app_config)
+        for resolver in bundle_resolvers
     })
     metrics = semantic_model.get('metrics', {})
     params = {
@@ -420,10 +429,22 @@ async def handle_resolve_entity(
     db: AsyncSession,
     auth: Any,
     app_id: str,
+    session: dict[str, Any] | None = None,
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
     from app.services.chat_engine.artifact import build_envelope, error_envelope
     from app.services.chat_engine.entity_resolution import resolve_entity_matches
+    from app.services.sherlock import bundle_resolvers_as_legacy
+
+    # M2: resolver config comes from the bundle (platform ontology +
+    # pack projections), not the legacy app-config resolver seed. The
+    # bundle rides on the working session that the tool dispatcher
+    # passes through.
+    bundle = (session or {}).get('_bundle') if session else None
+    bundle_resolvers = (
+        bundle_resolvers_as_legacy(bundle, entity_type=entity_type)
+        if bundle is not None else []
+    )
 
     raw = await resolve_entity_matches(
         entity_type=entity_type,
@@ -432,6 +453,7 @@ async def handle_resolve_entity(
         db=db,
         auth=auth,
         app_id=app_id,
+        bundle_resolvers=bundle_resolvers,
     )
     if raw.get('status') == 'error':
         mapped = reason_codes.ENTITY_OUT_OF_SCOPE

@@ -205,36 +205,59 @@ def test_reportBuilder_directory_absent():
 
 
 def test_every_bounded_param_gets_an_enum_on_real_schemas():
-    """Ensures the Phase-4 enum injection still reaches every bounded
-    parameter. If a new tool is added with a ``dimension`` / ``entity_type``
-    / ``surface_key`` / ``block_type`` param and the injection loop
-    doesn't cover it, this test fails."""
-    from unittest.mock import AsyncMock, Mock, patch
-    import asyncio
+    """Ensures the M2 enum injection still reaches every bounded parameter.
 
+    The bundle-fed path replaces the old ``_resolve_tools_for_app``;
+    bounded params still must carry an ``enum`` drawn from the scoped
+    bundle's ``tool_schema_enums``.
+    """
+    import uuid
+
+    from unittest.mock import patch
+
+    from app.services.chat_engine.capability_pack import collect_tool_schema_enums, resolve_pack_ids_for_app
     from app.services.chat_engine.manifest import (
         _clear_manifest_cache_for_tests,
         load_all_manifests,
     )
     from app.services.chat_engine.sql_agent import load_semantic_model
-    from app.services.report_builder.chat_handler import _resolve_tools_for_app
+    from app.services.report_builder.chat_handler import _build_tools_from_bundle
+    from app.services.sherlock.bundle_types import ScopedBundle, ScopeContext
 
     _clear_manifest_cache_for_tests()
     load_all_manifests()
     sm = load_semantic_model('kaira-bot', app_config={})
 
-    execute_result = Mock()
-    execute_result.scalar_one_or_none.return_value = {
-        'displayName': 'Kaira', 'icon': 'chat', 'description': 'kaira test',
-    }
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=execute_result)
+    pack_ids = tuple(resolve_pack_ids_for_app(None, app_id='kaira-bot'))
+    enums = collect_tool_schema_enums(
+        pack_ids=pack_ids, app_id='kaira-bot', semantic_model=sm,
+    )
+    scope = ScopeContext(
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        allowed_app_ids=('kaira-bot',),
+        requested_app_ids=('kaira-bot',),
+        effective_app_id='kaira-bot',
+        effective_pack_ids=pack_ids,
+    )
+    bundle = ScopedBundle(
+        scope=scope,
+        ontology_classes=(),
+        entity_types=(),
+        resolvers=(),
+        pack_projections=(),
+        tool_specs=(),
+        tool_schema_enums={k: tuple(v) for k, v in enums.items()},
+        question_hints='',
+        cache_key=(str(scope.tenant_id), 'kaira-bot', 0, frozenset()),
+        ontology_version=0,
+    )
 
     with patch(
         'app.services.chat_engine.sql_agent.load_semantic_model',
         return_value=sm,
     ):
-        tools = asyncio.run(_resolve_tools_for_app('kaira-bot', db))
+        tools = _build_tools_from_bundle(scope, bundle)
 
     bounded = {'dimension', 'entity_type', 'surface_key', 'block_type', 'table'}
     missing: list[str] = []
@@ -250,7 +273,7 @@ def test_every_bounded_param_gets_an_enum_on_real_schemas():
     assert not missing, (
         f"Bounded parameters missing enum injection: {missing!r}. "
         "Every string param named dimension/entity_type/surface_key/"
-        "block_type/table must get its enum from _resolve_tools_for_app."
+        "block_type/table must get its enum from _build_tools_from_bundle."
     )
 
 

@@ -259,25 +259,50 @@ async def test_dispatch_short_circuits_on_pack_validate_arguments_error(fake_app
 
 @pytest.mark.asyncio
 async def test_resolve_tools_injects_vocabulary_enums(fake_app_id):
+    import uuid
+
+    from app.services.chat_engine.capability_pack import (
+        collect_tool_schema_enums,
+        resolve_pack_ids_for_app,
+    )
     from app.services.chat_engine.sql_agent import load_semantic_model
-    from app.services.report_builder.chat_handler import _resolve_tools_for_app
+    from app.services.report_builder.chat_handler import _build_tools_from_bundle
+    from app.services.sherlock.bundle_types import ScopedBundle, ScopeContext
 
     sm = load_semantic_model('kaira-bot', app_config={})
 
-    execute_result = Mock()
-    execute_result.scalar_one_or_none.return_value = {
-        'displayName': 'Kaira',
-        'icon': 'chat',
-        'description': 'Kaira test',
-    }
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=execute_result)
+    # M2: tools + enum injection now flow from the ScopedBundle
+    # (platform ontology + pack projections) rather than directly from
+    # ``App.config``. Build the same enums the live assembly layer would
+    # materialize so the acceptance check stays honest.
+    pack_ids = tuple(resolve_pack_ids_for_app(None, app_id=fake_app_id))
+    enums = collect_tool_schema_enums(pack_ids=pack_ids, app_id=fake_app_id, semantic_model=sm)
+    scope = ScopeContext(
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        allowed_app_ids=(fake_app_id,),
+        requested_app_ids=(fake_app_id,),
+        effective_app_id=fake_app_id,
+        effective_pack_ids=pack_ids,
+    )
+    bundle = ScopedBundle(
+        scope=scope,
+        ontology_classes=(),
+        entity_types=(),
+        resolvers=(),
+        pack_projections=(),
+        tool_specs=(),
+        tool_schema_enums={k: tuple(v) for k, v in enums.items()},
+        question_hints='',
+        cache_key=(str(scope.tenant_id), fake_app_id, 0, frozenset()),
+        ontology_version=0,
+    )
 
     with patch(
         'app.services.chat_engine.sql_agent.load_semantic_model',
         return_value=sm,
     ):
-        tools = await _resolve_tools_for_app(fake_app_id, db)
+        tools = _build_tools_from_bundle(scope, bundle)
 
     by_name = {t['name']: t for t in tools}
 

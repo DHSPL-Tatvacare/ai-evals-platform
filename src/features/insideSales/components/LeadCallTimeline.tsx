@@ -1,13 +1,16 @@
 /**
  * Call Timeline tab content — table of all calls for a lead.
+ *
+ * Audio is played inline: clicking the row's play button toggles playback
+ * on a single shared `<audio>` element. No route navigation — the sales
+ * agent should be able to hear a call without losing lead context.
  */
-import { Phone, Play } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Pause, Phone, Play } from 'lucide-react';
 import { EmptyState } from '@/components/ui';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
-import { routes } from '@/config/routes';
 import type { LeadCallRecord } from '@/services/api/insideSales';
 
 interface LeadCallTimelineProps {
@@ -32,9 +35,9 @@ function formatCallDateTime(dateStr: string): string {
 function CallStatusBadge({ status }: { status: string }) {
   const s = status.toLowerCase();
   const style =
-    s === 'answered' ? 'bg-emerald-500/15 text-emerald-400' :
-    s === 'callfailure' || s === 'call failure' ? 'bg-[var(--bg-secondary)] text-[var(--text-muted)]' :
-    'bg-red-500/15 text-red-400';
+    s === 'answered' ? 'bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success)]' :
+    s === 'callfailure' || s === 'call failure' ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]' :
+    'bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error)]';
   const label =
     s === 'answered' ? 'Answered' :
     s === 'callfailure' || s === 'call failure' ? 'Call Failure' :
@@ -47,7 +50,42 @@ function CallStatusBadge({ status }: { status: string }) {
 }
 
 export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCallTimelineProps) {
-  const navigate = useNavigate();
+  /** Single shared audio element so toggling between rows auto-stops the
+   *  previous clip — matches how agents typically sample recordings. */
+  const audioRef = useRef<HTMLAudioElement | null>(
+    typeof Audio !== 'undefined' ? new Audio() : null,
+  );
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    return () => {
+      if (el) {
+        el.pause();
+        el.src = '';
+      }
+    };
+  }, []);
+
+  const togglePlayback = (call: LeadCallRecord) => {
+    const el = audioRef.current;
+    if (!el || !call.recordingUrl) return;
+    if (playingId === call.activityId) {
+      el.pause();
+      setPlayingId(null);
+      return;
+    }
+    el.src = call.recordingUrl;
+    const playPromise = el.play();
+    // `HTMLMediaElement.play()` returns a Promise in evergreen browsers but
+    // not all runtimes; guard the `.catch` so the TS compiler doesn't complain
+    // and so test environments without an audio backend don't throw.
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => setPlayingId(null));
+    }
+    setPlayingId(call.activityId);
+    el.onended = () => setPlayingId(null);
+  };
 
   if (callHistory.length === 0) {
     return (
@@ -61,27 +99,28 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--border-default)]">
+    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
       <table className="w-full text-xs">
         <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
-          <tr className="border-b border-[var(--border-default)]">
-            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Time</th>
-            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent</th>
-            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Duration</th>
-            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
-            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Eval</th>
+          <tr className="border-b border-[var(--border-subtle)]">
+            <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Time</th>
+            <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Agent</th>
+            <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Duration</th>
+            <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Status</th>
+            <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Eval</th>
             <th className="w-8 px-2 py-2" />
           </tr>
         </thead>
         <tbody>
           {callHistory.map((call) => {
             const isActive = call.activityId === activeEvalActivityId;
+            const isPlaying = playingId === call.activityId;
             return (
               <tr
                 key={call.activityId}
                 className={cn(
-                  'border-b border-[var(--border-subtle)] transition-colors',
-                  isActive && 'border-l-2 border-l-[var(--color-brand-accent)]',
+                  'border-b border-[var(--border-subtle)] transition-colors last:border-b-0',
+                  isActive && 'bg-[var(--surface-brand-subtle)]',
                 )}
               >
                 <td className="px-3 py-2.5 text-[var(--text-primary)] whitespace-nowrap">
@@ -90,10 +129,14 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
                 <td className="px-3 py-2.5 text-[var(--text-secondary)]">
                   {call.agentName || '—'}
                 </td>
-                <td className={cn(
-                  'px-3 py-2.5 tabular-nums whitespace-nowrap',
-                  call.isCounseling ? 'font-semibold text-emerald-400' : 'text-[var(--text-secondary)]',
-                )}>
+                <td
+                  className={cn(
+                    'px-3 py-2.5 tabular-nums whitespace-nowrap',
+                    call.isCounseling
+                      ? 'font-semibold text-[var(--color-success)]'
+                      : 'text-[var(--text-secondary)]',
+                  )}
+                >
                   {call.durationSeconds > 0 ? formatDuration(call.durationSeconds) : '—'}
                 </td>
                 <td className="px-3 py-2.5">
@@ -114,11 +157,21 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
                 <td className="w-8 px-2 py-2.5">
                   {call.recordingUrl ? (
                     <button
-                      onClick={() => navigate(routes.insideSales.callView(call.activityId))}
-                      className="rounded-full p-1.5 bg-[var(--color-brand-accent)]/10 text-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent)]/25 transition-colors"
-                      title="Open call detail"
+                      onClick={() => togglePlayback(call)}
+                      aria-label={isPlaying ? 'Pause recording' : 'Play recording'}
+                      title={isPlaying ? 'Pause' : 'Play recording'}
+                      className={cn(
+                        'flex h-7 w-7 items-center justify-center rounded-full transition-colors',
+                        isPlaying
+                          ? 'bg-[var(--interactive-primary)] text-[var(--text-on-color)]'
+                          : 'bg-[var(--surface-brand-subtle)] text-[var(--text-brand)] hover:bg-[color-mix(in_srgb,var(--interactive-primary)_20%,transparent)]',
+                      )}
                     >
-                      <Play className="h-3.5 w-3.5" />
+                      {isPlaying ? (
+                        <Pause className="h-3.5 w-3.5" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5" />
+                      )}
                     </button>
                   ) : (
                     <span className="text-[var(--text-muted)] text-[10px]">—</span>

@@ -32,13 +32,15 @@ from app.services.cost_tracking import (
     set_correlation_id,
     set_sherlock_turn_context,
 )
-from app.services.chat_engine.entity_recognition import (
-    EntityRecognitionResult,
-    derive_app_scope_terms,
-    recognize_entities,
-    render_entity_recognition_context,
+from app.services.sherlock import (
+    BundleBuilder,
+    RecognitionEvent,
+    ScopedBundle,
+    ScopeContext,
+    build_recognition_event,
+    render_bundle_context,
+    resolve_turn_scope_and_bundle,
 )
-from app.services.chat_engine.entity_registry import load_entity_registry
 from app.services.chat_engine.openai_agents_adapter import (
     SherlockContext,
     TURN_DEADLINE_SECONDS,
@@ -50,6 +52,7 @@ from app.services.report_builder.schemas import ToolCallDetailOut
 from app.services.report_builder.scratchpad_state import (
     build_analysis_snapshot,
     default_scratchpad,
+    drop_scope_derived_filters,
     push_analysis_snapshot,
     remember_active_filters,
     remember_catalog_inspection,
@@ -646,11 +649,28 @@ def _copy_working_session(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sync_session_state(target: dict[str, Any], source: dict[str, Any]) -> None:
-    for key in ('messages', 'scratchpad', 'last_response_id', '_app_context', '_user_context'):
+    for key in (
+        'messages',
+        'scratchpad',
+        'last_response_id',
+        '_app_context',
+        '_user_context',
+        # M2: the scope-change detector reads the previous turn's
+        # effective app_id from the session; it must survive the
+        # working-session deep-copy round-trip.
+        '_last_effective_app_id',
+    ):
         target[key] = source.get(key)
 
 
-def _serialize_entity_recognition(result: EntityRecognitionResult) -> dict[str, Any]:
+def _serialize_recognition_event(result: RecognitionEvent) -> dict[str, Any]:
+    """Serialize the bundle-synthesized recognition payload.
+
+    The frontend SSE contract still carries an ``entity_recognition``
+    event shaped like the old ``EntityRecognitionResult``; M2 keeps the
+    key set stable but populates it deterministically from the bundle
+    rather than from an LLM pre-pass.
+    """
     return result.model_dump(mode='json')
 
 
@@ -807,6 +827,19 @@ def _compute_question_hints(
     if 'score' in question_words and 'score' not in seen_terms and len(score_candidates) > 1:
         ambiguous_metric_terms.append('score')
 
+    # M2 c02_pie_donut lesson: ``status`` alone is the canonical ambiguous
+    # term for apps that project both ``analytics_run_facts.status``
+    # (run-level) and ``analytics_eval_facts.result_status`` (per-item
+    # verdict). The SQL agent can't disambiguate without a nudge; flagging
+    # the bare word here so the outer agent discovers/clarifies before
+    # data_query.
+    status_candidates = sorted(
+        name for name in known_names
+        if name == 'status' or name.endswith('_status')
+    )
+    if 'status' in question_words and 'status' not in seen_terms and len(status_candidates) > 1:
+        ambiguous_metric_terms.append('status')
+
     if not mapped_terms and not unresolved_terms and not ambiguous_metric_terms:
         return {'context': '', 'needs_discovery': False}
 
@@ -884,8 +917,17 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
     if tool_name == 'data_query' and data.get('status') == 'ok':
         question = str(data.get('question', '')).strip()
         row_count = data.get('row_count', 0)
-        remember_active_filters(pad, data.get('applied_filters'))
-        app_scope_terms = derive_app_scope_terms(app_id)
+        # M2: applied filters come from a tool result — provenance is
+        # ``resolver_derived`` (a resolver tool produced the value) or
+        # ``model_inferred`` (the SQL agent picked it). Tag as
+        # ``resolver_derived`` by default; the tool handler that knows
+        # its own provenance can override when it writes directly.
+        remember_active_filters(
+            pad,
+            data.get('applied_filters'),
+            provenance='resolver_derived',
+            source_tool=tool_name,
+        )
         # Load dimension metadata for chart classifier
         dimensions: list[dict[str, Any]] | None = None
         if app_id:
@@ -897,18 +939,14 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
                 pass
         push_analysis_snapshot(
             pad,
-            build_analysis_snapshot(
-                data,
-                dimensions=dimensions,
-                app_scope_terms=app_scope_terms,
-            ),
+            build_analysis_snapshot(data, dimensions=dimensions),
         )
         if question:
             pad['findings'].append(f'{question} ({row_count} rows)')
         return
 
     if tool_name == 'data_check' and data.get('status') == 'ok':
-        remember_data_check(pad, data)
+        remember_data_check(pad, data, provenance='resolver_derived')
         pad['findings'].append(f"{data.get('table', 'table')} check ({int(data.get('row_count', 0) or 0)} rows)")
         return
 
@@ -955,13 +993,16 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
         entity_type = str(data.get('entity_type', '')).strip()
         if entity_type:
             matches = data.get('matches', [])
+            resolved_matches = matches if isinstance(matches, list) else []
             remember_resolved_entities(
                 pad,
                 entity_type=entity_type,
                 search=str(data.get('search', '')).strip(),
-                matches=matches if isinstance(matches, list) else [],
+                matches=resolved_matches,
+                provenance='resolver_derived',
+                source_tool=tool_name,
             )
-            pad['findings'].append(f"Resolved {entity_type} ({len(matches) if isinstance(matches, list) else 0} matches)")
+            pad['findings'].append(f"Resolved {entity_type} ({len(resolved_matches)} matches)")
         return
 
     if tool_name == 'get_surface_records' and data.get('status') == 'ok':
@@ -1093,49 +1134,28 @@ def _build_tool_call_detail(name: str, result_str: str, *, execution_ms: float) 
     return detail
 
 
-async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str, Any]]:
-    """Resolve tools from App.config.chat.capabilities.
+def _build_tools_from_bundle(
+    scope: ScopeContext,
+    bundle: ScopedBundle,
+) -> list[dict[str, Any]]:
+    """Assemble the per-turn tool list from the scoped bundle (M2 cutover).
 
-    Phase 3: ``App.config.chat.capabilities`` values are pack ids. The
-    ``resolve_pack_ids_for_app`` validator raises on any id missing from
-    ``CAPABILITY_PACK_REGISTRY`` — the boot-time guard that caps the
-    "unknown pack id" acceptance gate.
+    The ``ScopedBundle`` carries the authoritative pack list for this
+    scope in ``scope.effective_pack_ids`` and the merged
+    ``tool_schema_enums`` contributed by every active pack. This
+    replaces the old ``_resolve_tools_for_app`` that read
+    ``App.config.chat.capabilities`` directly — scope is now
+    deterministic and upstream.
 
-    Injects hard enums drawn from the canonical vocabulary onto every
-    bounded parameter (``table``, ``dimension``, ``entity_type``,
-    ``surface_key``, ``block_type``). The LLM sees the allowed values in
-    the tool schema; the dispatcher rejects anything outside them at the
-    tool boundary (``_validate_bounded_arguments`` in tool_handlers.py).
+    Description rendering still flows through the pack's own
+    ``describe_tools`` via :func:`resolve_tools`, and the bundle's
+    ``tool_schema_enums`` are copied onto bounded string parameters the
+    same way the legacy path did so the Agents SDK sees the same strict
+    contract at the tool boundary.
     """
-    from sqlalchemy import select
-    from app.models.app import App
-    from app.schemas.app_config import AppConfig
-    from app.services.chat_engine.capability_pack import (
-        collect_tool_schema_enums,
-        resolve_pack_ids_for_app,
-    )
-
-    result = await db.execute(
-        select(App.config).where(App.slug == app_id, App.is_active.is_(True))
-    )
-    raw_config = result.scalar_one_or_none()
-    app_config = AppConfig.model_validate(raw_config or {})
-    pack_ids = resolve_pack_ids_for_app(
-        app_config.chat.capabilities or None,
-        app_id=app_id,
-    )
-    tools = resolve_tools(pack_ids, app_id=app_id)
-
-    semantic_model = load_semantic_model(app_id, app_config=raw_config)
-
-    # Harness Core asks every active pack (generically) for the bounded
-    # tool-schema enums that apply to its tool args. No pack id is named
-    # here — ``collect_tool_schema_enums`` merges what the packs return.
-    enums = collect_tool_schema_enums(
-        pack_ids=pack_ids,
-        app_id=app_id,
-        semantic_model=semantic_model,
-    )
+    pack_ids = list(scope.effective_pack_ids)
+    tools = resolve_tools(pack_ids, app_id=scope.effective_app_id)
+    enums = {key: list(values) for key, values in bundle.tool_schema_enums.items()}
 
     def _is_string_typed(prop: dict[str, Any]) -> bool:
         # Phase 3: strict-schema optional fields use ``["string", "null"]``
@@ -1175,6 +1195,45 @@ async def _resolve_tools_for_app(app_id: str, db: AsyncSession) -> list[dict[str
             section_props['type']['enum'] = block_type_enum
 
     return tools
+
+
+def _bundle_event_payload(bundle: ScopedBundle) -> dict[str, Any]:
+    """Stable shape for the ``bundle.assembled`` runtime event (plan §4).
+
+    The bundle itself is per-request ephemeral, but the event payload
+    records its cache-key inputs (ontology version, pack versions), the
+    resolved tool / enum / safety views, and the pack projection
+    identities so replay consumers can reason about which assembly
+    shipped the turn. Raw ontology/resolver rows are intentionally not
+    persisted — they live in ``sherlock_ontology_*`` and can be
+    re-hydrated by ontology version.
+    """
+    pack_versions = sorted(
+        (proj.pack_id, proj.pack_version) for proj in bundle.pack_projections
+    )
+    return {
+        'cache_key': [
+            str(bundle.scope.tenant_id),
+            bundle.scope.effective_app_id,
+            int(bundle.ontology_version),
+            [list(pair) for pair in pack_versions],
+        ],
+        'ontology_version': int(bundle.ontology_version),
+        'effective_app_id': bundle.scope.effective_app_id,
+        'effective_pack_ids': list(bundle.scope.effective_pack_ids),
+        'pack_versions': [
+            {'pack_id': pid, 'pack_version': ver} for pid, ver in pack_versions
+        ],
+        'tool_names': sorted({
+            str(spec.get('name')) for spec in bundle.tool_specs
+            if isinstance(spec, dict) and spec.get('name')
+        }),
+        'tool_schema_enums': {
+            key: list(values) for key, values in bundle.tool_schema_enums.items()
+        },
+        'safety_by_entity': bundle.safety_by_entity(),
+        'resolver_keys': sorted({r.key for r in bundle.resolvers if r.key}),
+    }
 
 
 def _runtime_session_from_state(session: dict[str, Any], provider: str, model: str) -> SherlockRuntimeSession:
@@ -1227,7 +1286,7 @@ async def _execute_chat_turn(
     auth: 'Any',
     emit: EventEmitter | None = None,
     turn: SherlockRuntimeTurnState | None = None,
-    entity_recognition: EntityRecognitionResult | None = None,
+    entity_recognition: RecognitionEvent | None = None,
 ) -> dict[str, Any]:
     if db is None:
         async with async_session() as owned_db:
@@ -1276,35 +1335,62 @@ async def _execute_chat_turn(
     warnings: list[str] = []
     text = ''
     assistant_message_id: str | None = None
-    entity_recognition_payload = EntityRecognitionResult().model_dump(mode='json')
+    entity_recognition_payload = RecognitionEvent().model_dump(mode='json')
 
     try:
-        tools = await _resolve_tools_for_app(session["app_id"], db)
-        app_config = await load_app_config(db, working_session['app_id'])
-        semantic_model = load_semantic_model(working_session['app_id'], app_config=app_config)
-        app_scope_terms = derive_app_scope_terms(working_session.get('app_id'))
-        if entity_recognition is None:
-            entity_registry = load_entity_registry(
-                working_session['app_id'],
-                app_config=app_config,
-                semantic_model=semantic_model,
-            )
-            entity_recognition = await recognize_entities(
-                question=user_message,
-                scratchpad=working_session.get('scratchpad'),
-                entity_registry=entity_registry,
-                provider=provider,
-                model=model,
-                tenant_id=working_session['tenant_id'],
-                user_id=working_session['user_id'],
-                app_id=working_session.get('app_id'),
-                turn_id=turn.id if turn is not None else None,
-                app_scope_terms=app_scope_terms,
-            )
-        entity_recognition_payload = _serialize_entity_recognition(entity_recognition)
+        # M2 cutover: the turn starts with deterministic scope + bundle.
+        # ``ScopeGuard`` resolves exactly one ``effective_app_id`` for
+        # the turn (single-app runtime contract preserved);
+        # ``BundleBuilder`` assembles platform ontology + pack
+        # projections into the ``ScopedBundle`` the rest of the turn
+        # reads from. No LLM entity pre-pass runs here — entity
+        # classification has moved into the ReAct loop via
+        # ``resolve_entity`` / ``lookup`` / ``get_surface_records``.
+        requested_app_id = session.get('requested_app_id') or working_session.get('requested_app_id')
+        assembly = await resolve_turn_scope_and_bundle(
+            auth=auth,
+            session_app_id=working_session.get('app_id'),
+            requested_app_id=requested_app_id,
+            db=db,
+        )
+        scope = assembly.scope
+        bundle = assembly.bundle
+        # Working-session is single-app (scope.effective_app_id == session['app_id']).
+        # Attach the bundle so tool handlers can read resolver/safety
+        # metadata without re-deriving it from app config.
+        working_session['_scope'] = scope
+        working_session['_bundle'] = bundle
+
+        # Plan §8.1 carry-forward policy: ``scope_derived`` filters are
+        # recomputed every turn. Drop them at the top of each turn so
+        # the scratchpad only carries ``user_explicit`` / resolver-derived
+        # state. Any ``scope_derived`` hint for this turn is re-emitted
+        # downstream (e.g. when a tool projects the resolved app scope
+        # into ``active_filters``).
+        previous_app_id = working_session.get('_last_effective_app_id')
+        scope_changed = (
+            previous_app_id is not None
+            and previous_app_id != scope.effective_app_id
+        )
+        drop_scope_derived_filters(working_session.get('scratchpad'))
+        working_session['_last_effective_app_id'] = scope.effective_app_id
+        if scope_changed:
+            # Scope change is rare (single-app runtime contract) but
+            # possible via ``requested_app_id``. Resolved entities are
+            # frequently scope-specific; clear them so the next turn
+            # must re-resolve under the new scope.
+            pad = working_session.get('scratchpad') or {}
+            if isinstance(pad.get('resolved_entities'), dict):
+                pad['resolved_entities'] = {}
+
+        tools = _build_tools_from_bundle(scope, bundle)
+        app_config = await load_app_config(db, scope.effective_app_id)
+        semantic_model = load_semantic_model(scope.effective_app_id, app_config=app_config)
+        entity_recognition = entity_recognition or build_recognition_event(bundle)
+        entity_recognition_payload = _serialize_recognition_event(entity_recognition)
         question_contract_hints = _question_contract_hints(
             question=user_message,
-            app_id=working_session['app_id'],
+            app_id=scope.effective_app_id,
             semantic_model=semantic_model,
             app_config=app_config,
         )
@@ -1332,6 +1418,23 @@ async def _execute_chat_turn(
             runtime_session,
             'user_message_added',
             {'role': 'user', 'content': user_message},
+            None,
+            db,
+        )
+        # M2: deterministic scope + bundle events are append-only and
+        # land before the synthesized ``entity_recognition`` event so
+        # replay consumers see scope/bundle first.
+        await _emit_runtime_event(
+            runtime_session,
+            'scope.resolved',
+            scope.as_event_payload(),
+            None,
+            db,
+        )
+        await _emit_runtime_event(
+            runtime_session,
+            'bundle.assembled',
+            _bundle_event_payload(bundle),
             None,
             db,
         )
@@ -1364,7 +1467,9 @@ async def _execute_chat_turn(
         # ``assemble_context`` owns cacheable + per-turn state; the caller
         # appends entity/hints next, and the pending-jobs block last.
         system = await assemble_context(working_session, db)
-        recognition_context = render_entity_recognition_context(entity_recognition)
+        recognition_context = render_bundle_context(scope, bundle)
+        if bundle.question_hints:
+            system = f'{system}\n\n{bundle.question_hints}'
         if question_contract_hints['context']:
             system = f'{system}\n\n{question_contract_hints["context"]}'
         if recognition_context:
@@ -1395,10 +1500,11 @@ async def _execute_chat_turn(
         )
 
         deadline = time.monotonic() + TURN_DEADLINE_SECONDS
-        # Phase 5: out-of-scope detection remains a hard gate; tool choice
-        # is always ``auto``. The agent observes the pinned envelope and
-        # replans on its own — no forced first-tool-call.
-        turn_tools = tools if entity_recognition.is_platform_query else []
+        # M2 cutover: scope is deterministic and the turn is always
+        # in-scope by construction (``ScopeGuard`` raised earlier if no
+        # app could be resolved). Tool-choice stays ``auto``; the outer
+        # agent decides whether to call a tool or refuse.
+        turn_tools = tools
         agen = run_sherlock_sdk_turn(
             user_message=user_message,
             instructions=system,

@@ -54,6 +54,10 @@ export const routes = {
   insideSales: {
     home: '/inside-sales',
     listing: '/inside-sales',
+    /** Listing URL scoped to a specific collection tab. `tab=leads` is the
+     *  default and returns the bare path; other values are passed as a
+     *  query param so deep links and "back" buttons stay truthful. */
+    listingForTab: (tab: 'leads' | 'calls') => (tab === 'leads' ? '/inside-sales' : '/inside-sales?tab=calls'),
     evaluators: '/inside-sales/evaluators',
     evaluatorDetail: (id: string) => `/inside-sales/evaluators/${id}`,
     runs: '/inside-sales/runs',

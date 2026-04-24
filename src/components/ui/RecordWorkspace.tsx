@@ -69,17 +69,13 @@ export function RecordWorkspace({
   return (
     <div className={cn('flex min-h-0 flex-1 gap-6', className)}>
       {/* Left rail — sticky within the scrolling right column, separated by a
-          hairline. A whisper-thin diagonal brand gradient adds warmth without
-          turning the rail into a card. */}
+          hairline. Intentionally flat: no gradient, no fill; the rail is
+          structural, not decorative. */}
       <aside
-        className="relative isolate flex flex-shrink-0 flex-col border-r border-[var(--border-subtle)] pr-6"
+        className="flex flex-shrink-0 flex-col border-r border-[var(--border-subtle)] pr-6"
         style={{ width: railWidth }}
       >
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(180deg,var(--surface-brand-subtle)_0%,transparent_55%)] opacity-60"
-        />
-        <div className="relative z-10 sticky top-0 flex flex-col gap-6">
+        <div className="sticky top-0 flex flex-col gap-6">
           {summary}
         </div>
       </aside>
@@ -124,8 +120,12 @@ export function RecordWorkspace({
           })}
         </div>
 
-        {/* Panel body — spring-eased cross-fade between tabs. */}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto pt-5">
+        {/* Panel body — spring-eased cross-fade between tabs.
+            `pr-2` reserves gutter for the overlay scrollbar so any child
+            element at the right edge (icon rings, badges, tab underlines)
+            is never clipped by the scrollbar.
+            `pb-4` keeps a little breathing room under the last section. */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto pt-5 pr-2 pb-4 pl-1">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={activeTab?.id}

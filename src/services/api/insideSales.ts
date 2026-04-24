@@ -323,8 +323,12 @@ export async function fetchLeads(
   return apiRequest<LeadListResponse>(`/api/inside-sales/leads?${params.toString()}`);
 }
 
-export async function fetchLeadDetail(prospectId: string): Promise<LeadDetailFullResponse> {
-  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
+export async function fetchLeadDetail(
+  prospectId: string,
+  options?: { refresh?: boolean },
+): Promise<LeadDetailFullResponse> {
+  const qs = options?.refresh ? '?refresh=true' : '';
+  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail${qs}`);
 }
 
 export async function refreshInsideSalesCollection(
