@@ -1,8 +1,14 @@
 """inside-sales route tests for refresh behavior.
 
-The refresh endpoint is locked to the 7-day hot window. Any ``date_from`` /
-``date_to`` sent by the client is ignored; older data is out of scope for the
-mirror and is not fetched here. Tests pin this contract.
+Post LSQ-ETL retention change, the refresh endpoint supports three
+explicit sync modes:
+
+  * ``incremental`` (default) — one-shot delta on the last watermark.
+  * ``date_range`` — explicit window bootstrap.
+  * ``bootstrap`` — sugar for the canonical 90-day ``date_range`` seed.
+
+There is no longer a forced 7-day hot window and no prune. Tests lock
+those contracts.
 """
 
 from __future__ import annotations
@@ -53,17 +59,12 @@ def _parse_dt(value: str) -> datetime:
 
 
 @pytest.mark.asyncio
-async def test_refresh_collection_forces_seven_day_window_and_ignores_body_dates():
-    """Regardless of body dates (even 30-day out-of-window), the job params
-    must carry ``[now-7d, now]`` as a ``date_range`` sync. No incremental,
-    no boundary helper."""
+async def test_refresh_collection_default_sync_mode_is_incremental():
+    """No ``sync_mode`` in the body means a one-shot delta on top of the
+    last successful watermark. No explicit dates should be sent."""
     auth = _auth()
     db = _FakeSession()
-    body = CollectionRefreshRequest(
-        date_from='2026-01-01 00:00:00',  # deliberately way out of window
-        date_to='2026-02-01 00:00:00',
-        event_codes='21,22',
-    )
+    body = CollectionRefreshRequest(event_codes='21,22')
 
     response = await inside_sales_routes.refresh_collection(
         source_family='calls',
@@ -73,29 +74,76 @@ async def test_refresh_collection_forces_seven_day_window_and_ignores_body_dates
     )
 
     assert db.commits == 1
-    assert len(db.added) == 1
     job = db.added[0]
     assert isinstance(job, Job)
     params = job.params or {}
-    assert params['app_id'] == 'inside-sales'
-    assert params['source_family'] == 'calls'
-    assert params['sync_mode'] == 'date_range'
-    assert params['is_scheduled_run'] is False
+    assert params['sync_mode'] == 'incremental'
+    assert 'date_from' not in params
+    assert 'date_to' not in params
     assert params['event_codes'] == '21,22'
+    assert params['is_scheduled_run'] is False
+    assert response.sync_mode == 'incremental'
 
+
+@pytest.mark.asyncio
+async def test_refresh_collection_bootstrap_mode_emits_90_day_date_range():
+    """``sync_mode=bootstrap`` is the plan's Phase 1 seed. The params must
+    carry a 90-day ``date_range`` window ending now."""
+    auth = _auth()
+    db = _FakeSession()
+    body = CollectionRefreshRequest(sync_mode='bootstrap')
+
+    await inside_sales_routes.refresh_collection(
+        source_family='calls',
+        body=body,
+        auth=auth,
+        db=db,
+    )
+
+    params = db.added[0].params
+    assert params['sync_mode'] == 'date_range'
     date_from = _parse_dt(params['date_from'])
     date_to = _parse_dt(params['date_to'])
     now = datetime.now(timezone.utc)
-    # Hot window = [now-7d, now], allow a minute of clock drift in the test.
     assert now - date_to <= timedelta(minutes=1)
     span = date_to - date_from
-    assert timedelta(days=7) - timedelta(minutes=1) <= span <= timedelta(days=7) + timedelta(minutes=1)
-    # Body dates should NOT have leaked through.
-    assert params['date_from'] != '2026-01-01 00:00:00'
-    assert params['date_to'] != '2026-02-01 00:00:00'
+    assert timedelta(days=90) - timedelta(minutes=1) <= span <= timedelta(days=90) + timedelta(minutes=1)
+    assert params['event_codes'] == '21,22'
 
-    assert response.source_family == 'calls'
-    assert response.sync_mode == 'date_range'
+
+@pytest.mark.asyncio
+async def test_refresh_collection_date_range_mode_requires_dates():
+    """``sync_mode=date_range`` without explicit dates must 400."""
+    import fastapi
+    auth = _auth()
+    db = _FakeSession()
+    body = CollectionRefreshRequest(sync_mode='date_range')
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await inside_sales_routes.refresh_collection(
+            source_family='calls',
+            body=body,
+            auth=auth,
+            db=db,
+        )
+    assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_refresh_collection_rejects_unknown_sync_mode():
+    import fastapi
+    auth = _auth()
+    db = _FakeSession()
+    body = CollectionRefreshRequest(sync_mode='weekly')
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await inside_sales_routes.refresh_collection(
+            source_family='calls',
+            body=body,
+            auth=auth,
+            db=db,
+        )
+    assert excinfo.value.status_code == 400
 
 
 @pytest.mark.asyncio

@@ -3,9 +3,17 @@ import { scheduledJobsApi } from '@/services/api/scheduledJobsApi';
 import type {
   Schedule,
   ScheduleCreateInput,
+  ScheduleFireSummary,
   ScheduleRegistryResponse,
   ScheduleUpdateInput,
 } from '@/features/admin/scheduledJobs/types';
+
+interface DetailEntry {
+  fires: ScheduleFireSummary[];
+  loading: boolean;
+  error: string | null;
+  loadedAt: number | null;
+}
 
 interface ScheduledJobsState {
   schedules: Schedule[];
@@ -13,6 +21,9 @@ interface ScheduledJobsState {
   error: string | null;
   registry: ScheduleRegistryResponse | null;
   registryLoading: boolean;
+  /** Per-schedule detail cache keyed by schedule id. Surfaces the fires list
+   *  for the history overlay without re-fetching on every open. */
+  detailById: Record<string, DetailEntry>;
 
   load: () => Promise<void>;
   loadRegistry: () => Promise<void>;
@@ -21,6 +32,7 @@ interface ScheduledJobsState {
   remove: (id: string) => Promise<void>;
   toggle: (id: string) => Promise<Schedule>;
   fireNow: (id: string) => Promise<Schedule>;
+  fetchDetail: (id: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -30,6 +42,7 @@ export const useScheduledJobsStore = create<ScheduledJobsState>((set, get) => ({
   error: null,
   registry: null,
   registryLoading: false,
+  detailById: {},
 
   load: async () => {
     set({ isLoading: true, error: null });
@@ -88,6 +101,54 @@ export const useScheduledJobsStore = create<ScheduledJobsState>((set, get) => ({
     return updated;
   },
 
+  fetchDetail: async (id) => {
+    set((s) => ({
+      detailById: {
+        ...s.detailById,
+        [id]: {
+          fires: s.detailById[id]?.fires ?? [],
+          loading: true,
+          error: null,
+          loadedAt: s.detailById[id]?.loadedAt ?? null,
+        },
+      },
+    }));
+    try {
+      const detail = await scheduledJobsApi.get(id);
+      set((s) => ({
+        detailById: {
+          ...s.detailById,
+          [id]: {
+            fires: detail.recentFires,
+            loading: false,
+            error: null,
+            loadedAt: Date.now(),
+          },
+        },
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load run history';
+      set((s) => ({
+        detailById: {
+          ...s.detailById,
+          [id]: {
+            fires: s.detailById[id]?.fires ?? [],
+            loading: false,
+            error: msg,
+            loadedAt: s.detailById[id]?.loadedAt ?? null,
+          },
+        },
+      }));
+    }
+  },
+
   reset: () =>
-    set({ schedules: [], isLoading: false, error: null, registry: null, registryLoading: false }),
+    set({
+      schedules: [],
+      isLoading: false,
+      error: null,
+      registry: null,
+      registryLoading: false,
+      detailById: {},
+    }),
 }));

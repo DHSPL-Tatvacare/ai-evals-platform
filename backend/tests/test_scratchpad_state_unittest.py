@@ -80,6 +80,30 @@ class ScratchpadStateTests(unittest.TestCase):
         self.assertIn('previous_turn', context)
         self.assertNotIn('scope_recheck_hint', context.get('prior_analysis', {}))
 
+    def test_build_data_query_context_surfaces_typed_grounding_views(self):
+        context = scratchpad_state.build_data_query_context(
+            'show run alpha',
+            {
+                'confirmed_constraints': [
+                    {'key': 'run_name', 'value': 'Alpha', 'provenance': 'resolver_derived'},
+                ],
+                'grounded_refs': [
+                    {'kind': 'run_name', 'key': 'run_name', 'value': 'Alpha', 'provenance': 'resolver_derived'},
+                ],
+                'outcomes': [
+                    {
+                        'tool': 'resolve_entity',
+                        'artifact_type': None,
+                        'reason_code': None,
+                        'counts': {'rows': 0, 'records': 1, 'affected': 0},
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(context['confirmed_constraints'], {'run_name': 'Alpha'})
+        self.assertEqual(context['grounded_refs'], {'run_name': ['Alpha']})
+
 
 if __name__ == '__main__':
     unittest.main()

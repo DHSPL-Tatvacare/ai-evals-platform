@@ -149,6 +149,21 @@ SCHEMA_BOOTSTRAP_SQL = (
     # on (surface, session_id) without scanning the whole jobs table.
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_context JSONB",
     "CREATE INDEX IF NOT EXISTS idx_jobs_submission_context_gin ON jobs USING GIN (submission_context jsonb_path_ops)",
+    # Idempotency: callers may supply an ``Idempotency-Key`` header on
+    # ``POST /api/jobs``. A partial unique index lets NULLs coexist freely
+    # while blocking duplicate submissions **within the same tenant+user**.
+    # Why user-scoped, not tenant-scoped: ``GET /api/jobs/{id}`` filters
+    # ``Job.user_id == auth.user_id``, so a tenant-scoped key would let
+    # User B replay User A's key, get A's row in the POST response, and
+    # then 404 on every subsequent GET — both a data-leak surface and an
+    # unusable replay. Idempotency belongs with the submitter.
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(120)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_user_idempotency_key "
+    "ON jobs (tenant_id, user_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+    # Defense-in-depth: if the old tenant-scoped index was created by an
+    # intermediate build of this migration, drop it so the per-user index
+    # is the only one enforcing uniqueness.
+    "DROP INDEX IF EXISTS uq_jobs_tenant_idempotency_key",
     """
     DO $$
     BEGIN

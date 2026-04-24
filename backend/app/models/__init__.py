@@ -28,6 +28,7 @@ from app.models.lsq_call_cache import LsqLeadCache
 from app.models.source_records import SourceCallRecord, SourceLeadRecord, SourceSyncRun
 from app.models.external_agent import ExternalAgent
 from app.models.scheduled_job import ScheduledJob
+from app.models.scheduler_heartbeat import SchedulerHeartbeat
 from app.models.eval_template import EvalTemplate
 from app.models.analytics_facts import AnalyticsRunFact, AnalyticsEvalFact, AnalyticsCriterionFact
 from app.models.analytics_log import AnalyticsJobLog, AgentToolLog, AnalyticsQueryCache
@@ -59,7 +60,7 @@ __all__ = [
     "LsqLeadCache",
     "SourceCallRecord", "SourceLeadRecord", "SourceSyncRun",
     "ExternalAgent",
-    "ScheduledJob",
+    "ScheduledJob", "SchedulerHeartbeat",
     "EvalTemplate",
     "AnalyticsRunFact", "AnalyticsEvalFact", "AnalyticsCriterionFact",
     "AnalyticsJobLog", "AgentToolLog", "AnalyticsQueryCache",

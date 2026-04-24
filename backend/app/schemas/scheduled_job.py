@@ -81,6 +81,17 @@ class ScheduledJobRow(CamelORMModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # True for schedules owned by SYSTEM_TENANT_ID — seeded by the
+    # platform and surfaced to every tenant as read-only. The UI uses
+    # this flag to disable edit/delete/fire-now controls for non-owning
+    # tenants (which also get a 403 from the backend mutation routes).
+    is_platform_managed: bool = False
+    # Status of the most recent fire (``last_fire_job_id``), resolved by
+    # looking up ``jobs.status`` in the list/detail serializer. One of:
+    # queued, running, retryable_failed, completed, failed, cancelled,
+    # or None when there has been no fire yet. Lets the UI show a
+    # "running" indicator without a second round-trip.
+    last_fire_status: str | None = None
 
 
 class ScheduledJobFireSummary(CamelModel):

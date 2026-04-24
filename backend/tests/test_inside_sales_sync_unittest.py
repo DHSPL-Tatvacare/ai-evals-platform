@@ -1,6 +1,8 @@
 import uuid
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from app.services import inside_sales_sync as sync_service  # noqa: E402
@@ -113,6 +115,54 @@ class InsideSalesSyncRequestTests(unittest.TestCase):
 
         self.assertEqual(date_from, "2026-04-07 00:00:00")
         self.assertTrue(isinstance(date_to, str) and len(date_to) >= 19)
+
+    def test_resolve_incremental_window_applies_overlap_minutes(self):
+        """Overlap shifts date_from backward by N minutes to catch late
+        mutations LSQ's CreatedOn-bound filter cannot surface otherwise."""
+        latest = type(
+            "LatestRun",
+            (),
+            {"watermark_to": "2026-04-20 12:00:00"},
+        )()
+
+        date_from, _date_to = sync_service._resolve_incremental_window(
+            sync_service.InsideSalesSyncRequest(
+                app_id="inside-sales",
+                source_family="calls",
+                sync_mode="incremental",
+                source_system="lsq",
+            ),
+            latest,
+            overlap_minutes=60,
+        )
+        self.assertEqual(date_from, "2026-04-20 11:00:00")
+
+    def test_parse_sync_request_accepts_overlap_minutes(self):
+        req = sync_service.parse_inside_sales_sync_request({
+            "app_id": "inside-sales",
+            "source_family": "calls",
+            "sync_mode": "incremental",
+            "overlap_minutes": 60,
+        })
+        self.assertEqual(req.overlap_minutes, 60)
+
+    def test_parse_sync_request_rejects_negative_overlap_minutes(self):
+        with self.assertRaisesRegex(ValueError, "overlap_minutes"):
+            sync_service.parse_inside_sales_sync_request({
+                "app_id": "inside-sales",
+                "source_family": "calls",
+                "sync_mode": "incremental",
+                "overlap_minutes": -1,
+            })
+
+    def test_parse_sync_request_rejects_overlap_over_cap(self):
+        with self.assertRaisesRegex(ValueError, "exceed"):
+            sync_service.parse_inside_sales_sync_request({
+                "app_id": "inside-sales",
+                "source_family": "leads",
+                "sync_mode": "incremental",
+                "overlap_minutes": 99999,
+            })
 
     def test_build_manual_refresh_job_params_uses_incremental_after_first_success(self):
         params = sync_service.build_manual_refresh_job_params(
@@ -343,8 +393,10 @@ class PruneRowsUnitTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
-    """PR4: persist `is_scheduled_run` + `job_id` on `source_sync_runs` and
-    route prune only through scheduled runs."""
+    """After the LSQ-ETL retention contract change, scheduled runs are
+    pure provenance: ``is_scheduled_run`` + ``job_id`` land on the
+    ``source_sync_runs`` row but the scheduled path does **not** prune
+    and does **not** force a 7-day hot window."""
 
     def test_sync_run_builder_signature_accepts_provenance(self):
         import inspect as _inspect
@@ -354,10 +406,28 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("job_id", sig.parameters)
         self.assertIn("is_scheduled_run", sig.parameters)
 
-    async def _run_sync(self, *, is_scheduled_run: bool) -> tuple[_FakeSession, AsyncMock]:
+    async def _run_sync(
+        self,
+        *,
+        is_scheduled_run: bool,
+        sync_mode: str = "date_range",
+        latest_successful=None,
+        extra_params: dict | None = None,
+    ) -> tuple[_FakeSession, AsyncMock]:
         """Helper: run the end-to-end sync with stubbed LSQ + upsert + prune."""
-        fake_session = _FakeSession()
+        fake_session = _FakeSession(latest_successful=latest_successful)
         prune_mock = AsyncMock(return_value=0)
+        params = {
+            "app_id": "inside-sales",
+            "source_family": "leads",
+            "sync_mode": sync_mode,
+            "is_scheduled_run": is_scheduled_run,
+        }
+        if sync_mode == "date_range":
+            params["date_from"] = "2026-04-01 00:00:00"
+            params["date_to"] = "2026-04-21 00:00:00"
+        if extra_params:
+            params.update(extra_params)
         # Stub the leads-family path (smaller, deterministic).
         with patch.object(sync_service, "_async_session_factory", return_value=fake_session), \
              patch.object(sync_service, "fetch_leads", new=AsyncMock(return_value={"leads": [], "has_more": False})), \
@@ -367,31 +437,41 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
              patch("app.services.job_worker.is_job_cancelled", new=AsyncMock(return_value=False)):
             await sync_service.run_inside_sales_source_sync(
                 job_id=str(uuid.uuid4()),
-                params={
-                    "app_id": "inside-sales",
-                    "source_family": "leads",
-                    "sync_mode": "date_range",
-                    "date_from": "2026-04-01 00:00:00",
-                    "date_to": "2026-04-21 00:00:00",
-                    "is_scheduled_run": is_scheduled_run,
-                },
+                params=params,
                 tenant_id=uuid.uuid4(),
                 user_id=uuid.uuid4(),
             )
         return fake_session, prune_mock
 
-    async def test_scheduled_sync_prunes_old_rows(self):
+    async def test_scheduled_sync_does_not_prune_old_rows(self):
+        """Retention contract: scheduled runs never delete older source rows."""
         _session, prune_mock = await self._run_sync(is_scheduled_run=True)
-        prune_mock.assert_awaited_once()
-        # Prune scope kwargs
-        call_kwargs = prune_mock.await_args.kwargs
-        self.assertEqual(call_kwargs["app_id"], "inside-sales")
-        self.assertEqual(call_kwargs["source_family"], "leads")
-        self.assertIn("cutoff", call_kwargs)
+        prune_mock.assert_not_awaited()
 
     async def test_ondemand_sync_does_not_prune(self):
         _session, prune_mock = await self._run_sync(is_scheduled_run=False)
         prune_mock.assert_not_awaited()
+
+    async def test_scheduled_incremental_uses_watermark_window_not_seven_day_window(self):
+        """Scheduled incremental runs follow the watermark (with overlap),
+        not a rolling [now-7d, now] override."""
+        from app.models.source_records import SourceSyncRun
+
+        latest = type(
+            "LatestRun",
+            (),
+            {"watermark_to": "2026-04-20 12:00:00"},
+        )()
+        fake_session, _prune = await self._run_sync(
+            is_scheduled_run=True,
+            sync_mode="incremental",
+            latest_successful=latest,
+        )
+        sync_rows = [item for item in fake_session.added if isinstance(item, SourceSyncRun)]
+        self.assertEqual(len(sync_rows), 1)
+        # Leads incremental default overlap is 10 min; the watermark must
+        # land at (latest_watermark - 10 min), NOT at (now - 7d).
+        self.assertEqual(sync_rows[0].watermark_from, "2026-04-20T11:50:00+00:00")
 
     async def test_sync_run_persists_is_scheduled_run_and_job_id(self):
         fake_session, _prune = await self._run_sync(is_scheduled_run=True)
@@ -402,6 +482,213 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sync_rows), 1)
         self.assertTrue(sync_rows[0].is_scheduled_run)
         self.assertIsNotNone(sync_rows[0].job_id)
+
+
+class LeadsModifiedOnContractTests(unittest.IsolatedAsyncioTestCase):
+    """Lead incremental sync must filter AND sort by LSQ ``ModifiedOn`` so
+    leads created outside the window but updated inside it are refreshed.
+    Backfills (full/date_range) keep the ``CreatedOn`` contract."""
+
+    async def _run_lead_sync(self, *, sync_mode: str, latest_successful=None) -> AsyncMock:
+        fake_session = _FakeSession(latest_successful=latest_successful)
+        fetch_mock = AsyncMock(return_value={"leads": [], "has_more": False})
+        params = {
+            "app_id": "inside-sales",
+            "source_family": "leads",
+            "sync_mode": sync_mode,
+        }
+        if sync_mode == "date_range":
+            params["date_from"] = "2026-04-01 00:00:00"
+            params["date_to"] = "2026-04-21 00:00:00"
+        with patch.object(sync_service, "_async_session_factory", return_value=fake_session), \
+             patch.object(sync_service, "fetch_leads", new=fetch_mock), \
+             patch.object(sync_service, "upsert_lead_source_rows", new=AsyncMock(return_value=0)), \
+             patch("app.services.job_worker.update_job_progress", new=AsyncMock(return_value=None)), \
+             patch("app.services.job_worker.is_job_cancelled", new=AsyncMock(return_value=False)):
+            await sync_service.run_inside_sales_source_sync(
+                job_id=str(uuid.uuid4()),
+                params=params,
+                tenant_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
+        return fetch_mock
+
+    async def test_incremental_lead_sync_passes_modifiedon_filter_field(self):
+        latest = type("L", (), {"watermark_to": "2026-04-20 12:00:00"})()
+        fetch_mock = await self._run_lead_sync(
+            sync_mode="incremental", latest_successful=latest
+        )
+        fetch_mock.assert_awaited()
+        kwargs = fetch_mock.await_args.kwargs
+        self.assertEqual(kwargs["filter_field"], "ModifiedOn")
+
+    async def test_date_range_lead_sync_passes_createdon_filter_field(self):
+        fetch_mock = await self._run_lead_sync(sync_mode="date_range")
+        fetch_mock.assert_awaited()
+        kwargs = fetch_mock.await_args.kwargs
+        self.assertEqual(kwargs["filter_field"], "CreatedOn")
+
+    async def test_incremental_lead_sync_refreshes_old_lead_modified_inside_window(self):
+        """Probe-shaped case: a lead created months before the delta window
+        but modified inside it must be fetched + upserted. This test asserts
+        the LSQ filter is ModifiedOn so LSQ returns such a lead."""
+        old_modified_lead = {
+            "ProspectID": "prospect-old-modified",
+            "FirstName": "Old",
+            "ProspectStage": "Payment Received",
+            "mx_RNR_Count": "0",
+            "mx_Answered_Call_Count": "1",
+            "CreatedOn": "2025-01-29 12:18:47",
+            "ModifiedOn": "2026-04-24 08:51:05",
+            "ProspectActivityDate_Min": "2025-01-29 12:20:00",
+            "ProspectActivityDate_Max": "2026-04-24 08:51:05",
+        }
+        fake_session = _FakeSession(latest_successful=type(
+            "L", (), {"watermark_to": "2026-04-24 06:00:00"}
+        )())
+        fetch_mock = AsyncMock(side_effect=[
+            {"leads": [old_modified_lead], "has_more": False},
+        ])
+        upsert_mock = AsyncMock(return_value=1)
+        with patch.object(sync_service, "_async_session_factory", return_value=fake_session), \
+             patch.object(sync_service, "fetch_leads", new=fetch_mock), \
+             patch.object(sync_service, "upsert_lead_source_rows", new=upsert_mock), \
+             patch("app.services.job_worker.update_job_progress", new=AsyncMock(return_value=None)), \
+             patch("app.services.job_worker.is_job_cancelled", new=AsyncMock(return_value=False)):
+            result = await sync_service.run_inside_sales_source_sync(
+                job_id=str(uuid.uuid4()),
+                params={
+                    "app_id": "inside-sales",
+                    "source_family": "leads",
+                    "sync_mode": "incremental",
+                },
+                tenant_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
+        self.assertEqual(fetch_mock.await_args.kwargs["filter_field"], "ModifiedOn")
+        upsert_mock.assert_awaited_once()
+        upserted_rows = upsert_mock.await_args.args[1]
+        self.assertEqual(len(upserted_rows), 1)
+        self.assertEqual(upserted_rows[0]["prospect_id"], "prospect-old-modified")
+        self.assertEqual(result["records_upserted"], 1)
+
+
+class WatermarkRetentionTests(unittest.IsolatedAsyncioTestCase):
+    """A failed sync must leave the previous watermark in place so the
+    next tick re-covers the same window."""
+
+    async def test_failed_sync_does_not_advance_prior_watermark(self):
+        from app.models.source_records import SourceSyncRun
+
+        latest = SimpleNamespace(
+            watermark_to="2026-04-20 12:00:00",
+            completed_at=datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc),
+        )
+        fake_session = _FakeSession(latest_successful=latest)
+        # Simulate fetch_leads failing mid-run.
+        with patch.object(sync_service, "_async_session_factory", return_value=fake_session), \
+             patch.object(sync_service, "fetch_leads", new=AsyncMock(side_effect=RuntimeError("lsq boom"))), \
+             patch.object(sync_service, "upsert_lead_source_rows", new=AsyncMock(return_value=0)), \
+             patch("app.services.job_worker.update_job_progress", new=AsyncMock(return_value=None)), \
+             patch("app.services.job_worker.is_job_cancelled", new=AsyncMock(return_value=False)):
+            with self.assertRaises(RuntimeError):
+                await sync_service.run_inside_sales_source_sync(
+                    job_id=str(uuid.uuid4()),
+                    params={
+                        "app_id": "inside-sales",
+                        "source_family": "leads",
+                        "sync_mode": "incremental",
+                    },
+                    tenant_id=uuid.uuid4(),
+                    user_id=uuid.uuid4(),
+                )
+        sync_rows = [item for item in fake_session.added if isinstance(item, SourceSyncRun)]
+        self.assertEqual(len(sync_rows), 1)
+        self.assertEqual(sync_rows[0].status, "failed")
+        # The failed run records the window it attempted, but the
+        # next call to get_latest_successful_sync_run will still
+        # pick up ``latest`` (status=completed), which has the
+        # original watermark — i.e., the prior watermark is
+        # preserved for the retry.
+        self.assertEqual(latest.watermark_to, "2026-04-20 12:00:00")
+
+
+class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
+    """Upsert statements must carry a
+    ``WHERE target.source_record_hash IS DISTINCT FROM excluded.source_record_hash``
+    clause so unchanged rows are true no-ops."""
+
+    async def test_call_upsert_emits_hash_distinct_where_clause(self):
+        from sqlalchemy.dialects import postgresql as _pg
+
+        captured: list[Any] = []
+
+        class _Sess:
+            async def execute(self, stmt):
+                captured.append(stmt)
+                return None
+
+        row = {
+            "tenant_id": uuid.uuid4(),
+            "app_id": "inside-sales",
+            "source_system": "lsq",
+            "activity_id": "activity-1",
+            "prospect_id": "prospect-1",
+            "event_code": 21,
+            "direction": "inbound",
+            "duration_seconds": 0,
+            "has_recording": False,
+            "source_record_hash": "abc",
+            "first_synced_at": datetime.now(timezone.utc),
+            "last_synced_at": datetime.now(timezone.utc),
+            "last_seen_in_source_at": datetime.now(timezone.utc),
+        }
+        await sync_service.upsert_call_source_rows(_Sess(), [row])  # type: ignore[arg-type]
+        self.assertEqual(len(captured), 1)
+        compiled = str(
+            captured[0].compile(
+                dialect=_pg.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("ON CONFLICT", compiled)
+        self.assertIn("source_record_hash IS DISTINCT FROM", compiled)
+
+    async def test_lead_upsert_emits_hash_distinct_where_clause(self):
+        from sqlalchemy.dialects import postgresql as _pg
+
+        captured: list[Any] = []
+
+        class _Sess:
+            async def execute(self, stmt):
+                captured.append(stmt)
+                return None
+
+        row = {
+            "tenant_id": uuid.uuid4(),
+            "app_id": "inside-sales",
+            "source_system": "lsq",
+            "prospect_id": "prospect-1",
+            "prospect_stage": "New Lead",
+            "rnr_count": 0,
+            "answered_count": 0,
+            "total_dials": 0,
+            "created_on": datetime.now(timezone.utc),
+            "source_record_hash": "abc",
+            "first_synced_at": datetime.now(timezone.utc),
+            "last_synced_at": datetime.now(timezone.utc),
+            "last_seen_in_source_at": datetime.now(timezone.utc),
+        }
+        await sync_service.upsert_lead_source_rows(_Sess(), [row])  # type: ignore[arg-type]
+        self.assertEqual(len(captured), 1)
+        compiled = str(
+            captured[0].compile(
+                dialect=_pg.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("ON CONFLICT", compiled)
+        self.assertIn("source_record_hash IS DISTINCT FROM", compiled)
 
 
 class InsideSalesSyncJobTests(unittest.IsolatedAsyncioTestCase):

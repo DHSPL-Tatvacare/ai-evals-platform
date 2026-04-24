@@ -55,6 +55,7 @@ class JobResponse(CamelORMModel):
     tenant_id: uuid.UUID
     user_id: uuid.UUID
     queue_position: Optional[int] = None
+    idempotency_key: Optional[str] = None
 
     @model_validator(mode="after")
     def strip_large_params(self):

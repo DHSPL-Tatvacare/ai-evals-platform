@@ -11,23 +11,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import socket
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from croniter import croniter
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.job import Job
 from app.models.scheduled_job import ScheduledJob
+from app.models.scheduler_heartbeat import SchedulerHeartbeat
 from app.services.scheduler import predicates as predicate_registry
 from app.services.scheduler.config import (
     DEFAULT_RETRY_COUNT,
     DEFAULT_RETRY_INTERVAL_MINUTES,
     DEFAULT_TICK_INTERVAL_SECONDS,
 )
+
+# Stable per-process identity. Matches the shape used by ``job_worker.WORKER_INSTANCE_ID``
+# but computed independently — the scheduler loop and the job loop may
+# live in different processes in the future.
+_SCHEDULER_INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}:sched:{uuid.uuid4().hex[:8]}"
+_HOST_LABEL = os.environ.get("HOSTNAME") or os.environ.get("HOST") or socket.gethostname()
 
 _log = logging.getLogger(__name__)
 
@@ -283,6 +293,44 @@ async def fire_now(
     return job, "fired"
 
 
+async def _record_heartbeat(
+    db: AsyncSession,
+    *,
+    worker_id: str,
+    now: datetime,
+    fired: int,
+) -> None:
+    """UPSERT a heartbeat row for this worker instance.
+
+    Operators alert on ``now() - max(last_tick_at) > threshold`` to catch
+    stalled tickers, misconfigured replicas (``SCHEDULER_TICK_INTERVAL_SECONDS=0``
+    on every worker), or a crashed scheduler task. The write is a single
+    statement so a failure here never blocks the tick itself.
+    """
+    stmt = (
+        pg_insert(SchedulerHeartbeat)
+        .values(
+            worker_id=worker_id,
+            started_at=now,
+            last_tick_at=now,
+            tick_count=1,
+            fired_count=fired,
+            host_label=_HOST_LABEL,
+        )
+        .on_conflict_do_update(
+            index_elements=[SchedulerHeartbeat.worker_id],
+            set_={
+                "last_tick_at": now,
+                "tick_count": SchedulerHeartbeat.tick_count + 1,
+                "fired_count": SchedulerHeartbeat.fired_count + fired,
+                "host_label": _HOST_LABEL,
+            },
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
 async def scheduler_tick_loop() -> None:
     """Background asyncio task: run `tick_once` on an interval forever."""
     from app.config import settings
@@ -294,13 +342,29 @@ async def scheduler_tick_loop() -> None:
     if interval < 1:
         interval = DEFAULT_TICK_INTERVAL_SECONDS
 
-    _log.info("scheduler.loop.start interval_seconds=%s", interval)
+    _log.info(
+        "scheduler.loop.start interval_seconds=%s worker_id=%s",
+        interval,
+        _SCHEDULER_INSTANCE_ID,
+    )
     while True:
         try:
             async with async_session() as db:
-                await tick_once(db)
+                fired = await tick_once(db)
+            # Heartbeat writes outside the tick transaction: a tick-loop
+            # crash here is logged but never blocks the next tick.
+            try:
+                async with async_session() as hb_db:
+                    await _record_heartbeat(
+                        hb_db,
+                        worker_id=_SCHEDULER_INSTANCE_ID,
+                        now=datetime.now(timezone.utc),
+                        fired=len(fired),
+                    )
+            except Exception as hb_exc:  # pragma: no cover — never fail a tick on heartbeat
+                _log.warning("scheduler.heartbeat.error: %s", hb_exc)
         except asyncio.CancelledError:
-            _log.info("scheduler.loop.cancelled")
+            _log.info("scheduler.loop.cancelled worker_id=%s", _SCHEDULER_INSTANCE_ID)
             raise
         except Exception as exc:  # pragma: no cover — logged and retried
             _log.exception("scheduler.loop.error: %s", exc)

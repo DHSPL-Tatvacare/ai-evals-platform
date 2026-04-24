@@ -83,6 +83,28 @@ def test_build_call_count_query_wraps_filtered_call_scope_without_pagination():
     assert " OFFSET " not in sql
 
 
+def test_lead_listing_query_filters_by_created_on_even_though_sync_uses_modified_on():
+    """Lead serving semantics contract: list filters / ordering are
+    tied to ``created_on``. The ETL follows LSQ ``ModifiedOn`` for
+    freshness, but the UI question "when did this lead enter the
+    funnel?" still answers from ``created_on``. This test locks that
+    split so a future refactor can't silently swap the axis."""
+    statement = build_lead_listing_query(
+        tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        app_id="inside-sales",
+        filters=InsideSalesLeadFilters(
+            date_from="2026-04-01 00:00:00",
+            date_to="2026-04-08 23:59:59",
+        ),
+        page=1,
+        page_size=50,
+    )
+    sql = _compile(statement)
+    assert "source_lead_records.created_on >=" in sql
+    assert "source_lead_records.modified_on" not in sql
+    assert "ORDER BY source_lead_records.created_on DESC" in sql
+
+
 def test_build_lead_listing_query_applies_filters_and_created_on_sort():
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),

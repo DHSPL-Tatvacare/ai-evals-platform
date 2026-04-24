@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.app_scope import require_registered_app_access
 from app.auth.permission_catalog import VALID_PERMISSIONS
 from app.database import get_db
+from app.models.app import App
 from app.models.role import Role, RoleAppAccess, RolePermission
 
 if TYPE_CHECKING:
@@ -22,6 +23,13 @@ async def load_role_permissions(
     """Load a role with its permissions and app access slugs in one query.
 
     Returns: (role, permission_strings, app_slugs)
+
+    For the Owner system role, ``app_slugs`` is expanded at load time to
+    every currently-active app. Owner is the tenant's top role and is
+    expected to reach every registered app; representing that in
+    ``app_access`` directly keeps ``AuthContext`` the single source of
+    truth so downstream scope checks (e.g. ``ScopeGuard``) do not need
+    an Owner-only bypass.
     """
     stmt = (
         select(Role)
@@ -38,6 +46,14 @@ async def load_role_permissions(
 
     perm_strings = [rp.permission for rp in role.permissions]
     app_slugs = [ra.app.slug for ra in role.app_access]
+
+    if role.is_system and role.name == "Owner":
+        active_apps = await db.execute(
+            select(App.slug).where(App.is_active == True)
+        )
+        active_slugs = {slug for slug in active_apps.scalars().all() if slug}
+        app_slugs = sorted(active_slugs.union(app_slugs))
+
     return role, perm_strings, app_slugs
 
 

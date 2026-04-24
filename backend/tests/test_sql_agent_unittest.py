@@ -306,6 +306,71 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         analytics_db.rollback.assert_awaited_once()
         execute_query.assert_awaited_once()
 
+    async def test_analyze_retry_preserves_explicit_only_columns(self):
+        auth = self._auth_context()
+        app_db = AsyncMock()
+        analytics_db = Mock()
+        analytics_db.commit = AsyncMock()
+        analytics_db.rollback = AsyncMock()
+
+        bundle = Mock()
+        bundle.pack_projections = ()
+        bundle.safety_by_entity = Mock(return_value={'run_name': 'explicit_only'})
+
+        generate_sql = AsyncMock(side_effect=[
+            {'sql': 'SELECT rf.status FROM analytics_run_facts rf'},
+            {'sql': 'SELECT rf.status FROM analytics_run_facts rf'},
+        ])
+        check_cost = AsyncMock(side_effect=[Exception('force retry'), None])
+
+        with patch(
+            'app.services.chat_engine.sql_agent._match_common_query',
+            return_value=None,
+        ), patch(
+            'app.services.chat_engine.sql_agent.load_app_config',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent._resolve_run_id_prefixes',
+            new=AsyncMock(return_value={}),
+        ), patch(
+            'app.services.chat_engine.sql_agent.generate_sql',
+            new=generate_sql,
+        ), patch(
+            'app.services.chat_engine.sql_agent._get_cache',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'app.services.chat_engine.sql_agent._check_query_cost',
+            new=check_cost,
+        ), patch(
+            'app.services.chat_engine.sql_agent.execute_query',
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            'app.services.chat_engine.sql_agent._set_cache',
+            new=AsyncMock(),
+        ), patch(
+            'app.database.analytics_session',
+            return_value=_FakeAnalyticsSession(analytics_db),
+        ):
+            result = await sql_agent.data_query(
+                question='show statuses',
+                db=app_db,
+                auth=auth,
+                app_id='kaira-bot',
+                provider='gemini',
+                bundle=bundle,
+            )
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(generate_sql.await_count, 2)
+        self.assertEqual(
+            generate_sql.await_args_list[0].kwargs['explicit_only_columns'],
+            {'run_name'},
+        )
+        self.assertEqual(
+            generate_sql.await_args_list[1].kwargs['explicit_only_columns'],
+            {'run_name'},
+        )
+
     async def test_data_check_returns_row_count_and_bounds(self):
         from app.models.eval_run import EvalRun
 
@@ -438,7 +503,13 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result['status'], 'ok')
-        self.assertEqual(result['applied_filters'], {'eval_type': 'custom'})
+        # Phase 2 §2.2 (durable current-turn memory): applied_filters is
+        # derived from the generated SQL's actual WHERE predicates, not
+        # echoed from the context. The mocked SQL has no user-filter
+        # predicates (only scope clauses get added by prepare_query and
+        # those are elided). Prior-turn ``active_filters`` from context
+        # belong to the scratchpad, not to this turn's applied_filters.
+        self.assertEqual(result['applied_filters'], {})
         self.assertEqual(result['columns'][0]['name'], 'week_start')
         self.assertEqual(result['columns'][0]['role'], 'temporal')
         self.assertEqual(result['columns'][1]['name'], 'total_runs')

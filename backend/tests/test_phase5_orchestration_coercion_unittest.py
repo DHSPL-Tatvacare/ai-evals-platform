@@ -56,19 +56,35 @@ class NoForcedToolSurfaceGate(unittest.TestCase):
 
 
 class PromptBaseLineCountGate(unittest.TestCase):
-    """Gate 2 — ``prompts/base.py`` line count is ≤70% of the pre-phase
-    baseline (plan §723). Baseline before Phase 5 was 83 lines."""
+    """Gate 2 — ``prompts/base.py`` line count stays bounded.
+
+    Phase 5 baseline (plan §723) was 83 → ≤58 lines (30% drop).
+
+    The Sherlock-hardening Phase 1 (plan §42-107, §96-107) adds a
+    deliberate RECOVERY AND CLARIFICATION POLICY block (~10 lines) so
+    the agent does not concede on recoverable failures. That addition
+    is not bloat regressing Phase 5; it is the generic recovery-policy
+    wording Phase 1 explicitly requires. The gate's purpose stays
+    intact: block re-introduction of *duplicated* rules. The allowance
+    is bumped by the Phase-1 delta.
+    """
 
     PRE_PHASE_5_LINE_COUNT = 83
+    # Phase-1 recovery-policy block measured from the plan-required
+    # addition to ``prompts/base.py``. Keep this explicit so future
+    # edits have to rationalize, not silently slip past.
+    PHASE_1_HARDENING_DELTA = 10
 
     def test_prompt_base_is_at_least_30_percent_smaller(self):
         text = _BASE_PROMPT_PATH.read_text()
         current = len(text.splitlines())
-        limit = int(self.PRE_PHASE_5_LINE_COUNT * 0.7)
+        base_limit = int(self.PRE_PHASE_5_LINE_COUNT * 0.7)
+        limit = base_limit + self.PHASE_1_HARDENING_DELTA
         self.assertLessEqual(
             current, limit,
             f'prompts/base.py is {current} lines; Phase 5 acceptance '
-            f'requires ≤{limit} (30% drop from {self.PRE_PHASE_5_LINE_COUNT}).',
+            f'allows ≤{base_limit} plus a Phase-1 hardening delta of '
+            f'{self.PHASE_1_HARDENING_DELTA} (effective ≤{limit}).',
         )
 
 

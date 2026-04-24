@@ -126,8 +126,10 @@ _CATALOG_TOOLS: list[dict[str, Any]] = [
                     "description": "Optional case-insensitive search filter.",
                 },
                 "limit": {
-                    "type": ["integer", "null"],
-                    "description": "Maximum values to return (default 20, max 100).",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum values to return (default 20, max 100). Omit to use default.",
                 },
             },
             "required": ["table", "column"],
@@ -154,8 +156,10 @@ _CATALOG_TOOLS: list[dict[str, Any]] = [
                     "description": "Optional column name. Provide a JSONB column to inspect nested structure.",
                 },
                 "limit": {
-                    "type": ["integer", "null"],
-                    "description": "Maximum rows to sample (default 5, max 25).",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25,
+                    "description": "Maximum rows to sample (default 5, max 25). Omit to use default.",
                 },
             },
             "required": ["table"],
@@ -201,8 +205,10 @@ _DISCOVERY_TOOLS: list[dict[str, Any]] = [
                     "description": "Optional case-insensitive search term.",
                 },
                 "limit": {
-                    "type": ["integer", "null"],
-                    "description": "Max values to return (default 25, max 100).",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Max values to return (default 25, max 100). Omit to use default.",
                 },
             },
             "required": ["dimension"],
@@ -233,8 +239,10 @@ _EVIDENCE_TOOLS: list[dict[str, Any]] = [
                     "description": "The partial ID or search text to resolve.",
                 },
                 "limit": {
-                    "type": ["integer", "null"],
-                    "description": "Max matches to return (default 10, max 25).",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25,
+                    "description": "Max matches to return (default 10, max 25). Omit to use default.",
                 },
             },
             "required": ["entity_type", "search"],
@@ -271,8 +279,10 @@ _EVIDENCE_TOOLS: list[dict[str, Any]] = [
                     "description": "Optional run ID or short prefix to scope the surface query.",
                 },
                 "limit": {
-                    "type": ["integer", "null"],
-                    "description": "Max records to return (default surface limit, max 25).",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25,
+                    "description": "Max records to return (default surface limit, max 25). Omit to use surface default.",
                 },
             },
             "required": ["surface_key"],
@@ -301,9 +311,11 @@ _ANALYTICS_TOOLS: list[dict[str, Any]] = [
                 "filters": {
                     "type": ["string", "null"],
                     "description": (
-                        "JSON-encoded object of exact filters to apply for the existence check. "
-                        "Values must be concrete, not speculative. Example: "
-                        "'{\"status\":\"fail\",\"agent\":\"kaira\"}'."
+                        "JSON-encoded object of exact filters, or null/omit for no filters. "
+                        "Keys are column names, values are concrete literals (strings, numbers, booleans). "
+                        "Values must be concrete, not speculative. "
+                        "Example: '{\"status\": \"fail\", \"agent\": \"kaira\"}'. "
+                        "MUST be a JSON string (e.g. '{}' or '{\"k\":\"v\"}'), not a raw object."
                     ),
                 },
             },
@@ -643,9 +655,11 @@ class AnalyticsPack:
         unresolved-term flagging, ambiguous-metric detection) so
         ``chat_handler`` never reaches around into ``tool_vocabulary``.
         """
-        from app.services.report_builder.chat_handler import _compute_question_hints
+        from app.services.report_builder.analytics.question_hints import (
+            compute_question_hints,
+        )
 
-        return _compute_question_hints(
+        return compute_question_hints(
             question=question,
             app_id=app_id,
             semantic_model=dict(semantic_model),

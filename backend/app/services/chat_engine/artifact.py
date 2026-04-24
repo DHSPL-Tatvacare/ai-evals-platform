@@ -88,13 +88,102 @@ class ToolOutcome(TypedDict, total=False):
     artifact: ToolArtifactOutcome
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 — generic recovery + state_delta contracts
+#
+# Both are additive and optional. Packs that do not emit them keep the
+# existing envelope shape; the harness merge helpers simply no-op. This
+# keeps the §6.2 contract backward compatible while giving the outer
+# agent a small, typed signal about whether a non-terminal outcome is
+# recoverable, and a small, typed memory patch the scratchpad can apply
+# deterministically across turns.
+# ---------------------------------------------------------------------------
+
+
+FailureKind = Literal[
+    'none',
+    'ambiguous',
+    'empty',
+    'invalid_reference',
+    'unsupported',
+    'permission',
+    'tool_error',
+]
+
+
+class ToolRecovery(TypedDict, total=False):
+    """Small generic classification the outer agent observes post-call."""
+
+    recoverable: bool
+    failure_kind: FailureKind
+
+
+class StateDeltaConfirmedConstraint(TypedDict, total=False):
+    key: str
+    value: Any
+    provenance: str
+    source_tool: str
+    source_turn_id: str
+
+
+class StateDeltaGroundedRef(TypedDict, total=False):
+    kind: str
+    key: str
+    value: Any
+    provenance: str
+    source_tool: str
+    source_turn_id: str
+
+
+class StateDeltaOpenThread(TypedDict, total=False):
+    kind: str
+    key: str
+    message: str
+
+
+class StateDeltaLastResult(TypedDict, total=False):
+    kind: str
+    artifact_type: str
+    row_count: int
+    columns: list[str]
+    reason_code: str
+
+
+class StateDeltaFailureRecord(TypedDict, total=False):
+    reason_code: str
+    failure_kind: FailureKind
+    recoverable: bool
+    summary: str
+
+
+class ToolStateDelta(TypedDict, total=False):
+    """Small typed memory patch emitted by a pack alongside an envelope."""
+
+    confirmed_constraints: list[StateDeltaConfirmedConstraint]
+    grounded_refs: list[StateDeltaGroundedRef]
+    open_threads: list[StateDeltaOpenThread]
+    last_result: StateDeltaLastResult
+    failure_record: StateDeltaFailureRecord
+
+
 class ToolEnvelope(TypedDict, total=False):
-    """§6.2 envelope — the single contract every tool handler returns."""
+    """§6.2 envelope — the single contract every tool handler returns.
+
+    Phase 1 adds two optional, additive blocks that packs may emit:
+
+    - ``recovery``: generic outcome classification so the outer agent
+      can decide whether to retry / clarify / concede.
+    - ``state_delta``: small typed memory patch the harness merges into
+      the scratchpad. Packs must not stuff arbitrary internal state
+      into this slot; the schema is fixed here.
+    """
 
     status: Status
     summary: str
     outcome: ToolOutcome
     payload: dict[str, Any]
+    recovery: ToolRecovery
+    state_delta: ToolStateDelta
 
 
 class ToolCountsModel(BaseModel):
@@ -132,6 +221,82 @@ class ToolOutcomeModel(BaseModel):
     artifact: ToolArtifactOutcomeModel | None = None
 
 
+class ToolRecoveryModel(BaseModel):
+    """Pydantic form of the generic ``recovery`` classification (Phase 1)."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    recoverable: bool
+    failure_kind: FailureKind
+
+
+class StateDeltaConfirmedConstraintModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    key: str
+    value: Any
+    provenance: str
+    source_tool: str | None = None
+    source_turn_id: str | None = None
+
+
+class StateDeltaGroundedRefModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    kind: str
+    key: str
+    value: Any
+    provenance: str
+    source_tool: str | None = None
+    source_turn_id: str | None = None
+
+
+class StateDeltaOpenThreadModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    kind: str
+    key: str
+    message: str
+
+
+class StateDeltaLastResultModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    kind: str
+    artifact_type: str | None = None
+    row_count: int | None = None
+    columns: list[str] | None = None
+    reason_code: str | None = None
+
+
+class StateDeltaFailureRecordModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    reason_code: str | None = None
+    failure_kind: FailureKind
+    recoverable: bool
+    summary: str | None = None
+
+
+class ToolStateDeltaModel(BaseModel):
+    """Pydantic form of the generic, typed ``state_delta`` memory patch.
+
+    Every sub-field is optional. The harness scratchpad merger applies
+    only the fields a pack actually emitted; missing fields are
+    preserved untouched.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    confirmed_constraints: list[StateDeltaConfirmedConstraintModel] = Field(
+        default_factory=list,
+    )
+    grounded_refs: list[StateDeltaGroundedRefModel] = Field(default_factory=list)
+    open_threads: list[StateDeltaOpenThreadModel] = Field(default_factory=list)
+    last_result: StateDeltaLastResultModel | None = None
+    failure_record: StateDeltaFailureRecordModel | None = None
+
+
 class ToolEnvelopeModel(BaseModel):
     """Pydantic-validated form of the §6.2 tool envelope.
 
@@ -139,6 +304,11 @@ class ToolEnvelopeModel(BaseModel):
     The model also exposes dict-like access so existing code paths can read
     ``result['status']`` / ``result.get('payload')`` without learning a new
     API while Phase 3 hardens the boundary.
+
+    Phase 1 additions (``recovery`` / ``state_delta``) are optional and
+    default to ``None``. Serialization via ``as_dict()`` drops the None
+    values so envelopes from packs that do not emit the new fields are
+    byte-identical to the pre-Phase-1 shape.
     """
 
     model_config = ConfigDict(extra='forbid')
@@ -147,9 +317,21 @@ class ToolEnvelopeModel(BaseModel):
     summary: str
     outcome: ToolOutcomeModel
     payload: dict[str, Any] = Field(default_factory=dict)
+    recovery: ToolRecoveryModel | None = None
+    state_delta: ToolStateDeltaModel | None = None
 
     def as_dict(self) -> ToolEnvelope:
-        return cast(ToolEnvelope, self.model_dump(mode='json'))
+        # Keep the Phase-1 ``recovery`` / ``state_delta`` fields byte-stable
+        # for envelopes that did not set them: omit only those top-level
+        # keys when they're ``None``, so existing callers that expect
+        # ``outcome.reason_code`` to be present (even when ``None``) stay
+        # unchanged. Pre-Phase-1 envelope shape is preserved exactly.
+        dumped = self.model_dump(mode='json')
+        if self.recovery is None:
+            dumped.pop('recovery', None)
+        if self.state_delta is None:
+            dumped.pop('state_delta', None)
+        return cast(ToolEnvelope, dumped)
 
     def __getitem__(self, key: str) -> Any:
         return self.as_dict()[key]
@@ -196,11 +378,17 @@ def build_envelope(
     job: ToolJob | None = None,
     artifact: ToolArtifactOutcome | None = None,
     payload: dict[str, Any] | None = None,
+    recovery: ToolRecovery | None = None,
+    state_delta: ToolStateDelta | None = None,
 ) -> ToolEnvelopeModel:
     """Construct a §6.2-shaped envelope with sensible defaults.
 
     Packs call this once per tool return. The dispatcher persists the
     resulting JSON verbatim — no re-wrapping, no prose substitution.
+
+    Phase 1 adds two optional, additive blocks: ``recovery`` (generic
+    outcome classification) and ``state_delta`` (typed memory patch the
+    harness merges into the scratchpad).
     """
 
     outcome: ToolOutcome = {
@@ -218,12 +406,16 @@ def build_envelope(
         outcome['job'] = job
     if artifact is not None:
         outcome['artifact'] = artifact
-    envelope: ToolEnvelope = {
+    envelope: dict[str, Any] = {
         'status': status,
         'summary': summary,
         'outcome': outcome,
         'payload': payload or {},
     }
+    if recovery is not None:
+        envelope['recovery'] = recovery
+    if state_delta is not None:
+        envelope['state_delta'] = state_delta
     return ToolEnvelopeModel.model_validate(envelope)
 
 
@@ -234,8 +426,15 @@ def error_envelope(
     summary: str,
     warnings: list[str] | None = None,
     payload: dict[str, Any] | None = None,
+    recovery: ToolRecovery | None = None,
+    state_delta: ToolStateDelta | None = None,
 ) -> ToolEnvelopeModel:
-    """Short-hand for ``kind='error'`` + ``status='error'`` envelope."""
+    """Short-hand for ``kind='error'`` + ``status='error'`` envelope.
+
+    Phase 1 ``recovery`` / ``state_delta`` are optional here too so
+    packs can attach an open_threads clarification or a failure_record
+    alongside an error (e.g. analytics ``SQL_EXPLICIT_ONLY_UNGROUNDED``).
+    """
 
     return build_envelope(
         status='error',
@@ -245,6 +444,8 @@ def error_envelope(
         reason_code=reason_code,
         warnings=warnings or [],
         payload=payload,
+        recovery=recovery,
+        state_delta=state_delta,
     )
 
 

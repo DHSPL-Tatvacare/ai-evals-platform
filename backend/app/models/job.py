@@ -29,6 +29,12 @@ class Job(Base, TenantUserMixin):
         ForeignKey("scheduled_jobs.id", ondelete="SET NULL", name="fk_jobs_scheduled_job_id"),
         nullable=True,
     )
+    # Optional idempotency token supplied via the ``Idempotency-Key`` request
+    # header. When set, a partial unique index enforces one live job per
+    # ``(tenant_id, idempotency_key)`` — a replay returns the existing row
+    # instead of creating a duplicate. NULL means "no idempotency requested"
+    # and multiple submissions are allowed.
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
     queue_class: Mapped[str] = mapped_column(String(20), nullable=False, default="standard", server_default="standard")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

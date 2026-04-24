@@ -251,12 +251,17 @@ async def handle_lookup(
     *,
     dimension: str,
     search: str | None = '',
-    limit: int = 25,
+    limit: int | None = 25,
     db: AsyncSession,
     auth: Any,
     app_id: str,
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
+    # Schema forbids null via Phase-2.4 type hardening, but handlers stay
+    # None-safe so pre-hardening persisted turns / upstream replays don't
+    # crash the int arithmetic inside the engine.
+    if limit is None:
+        limit = 25
     from app.services.chat_engine.artifact import build_envelope, error_envelope
     from app.services.report_builder.analytics.vocabulary import (
         build_tool_vocabulary,
@@ -380,7 +385,7 @@ async def handle_catalog_values(
     table: str,
     column: str,
     search: str | None = '',
-    limit: int = 20,
+    limit: int | None = 20,
     db: AsyncSession,
     auth: Any,
     app_id: str,
@@ -388,6 +393,8 @@ async def handle_catalog_values(
 ) -> ToolEnvelopeModel:
     from app.services.chat_engine.catalog_tools import catalog_values
 
+    if limit is None:
+        limit = 20
     return await catalog_values(
         table=table,
         column=column,
@@ -403,13 +410,15 @@ async def handle_catalog_sample(
     *,
     table: str,
     column: str | None = None,
-    limit: int = 5,
+    limit: int | None = 5,
     db: AsyncSession,
     auth: Any,
     app_id: str,
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
     from app.services.chat_engine.catalog_tools import catalog_sample
+    if limit is None:
+        limit = 5
 
     return await catalog_sample(
         table=table,
@@ -425,13 +434,15 @@ async def handle_resolve_entity(
     *,
     entity_type: str,
     search: str,
-    limit: int = 10,
+    limit: int | None = 10,
     db: AsyncSession,
     auth: Any,
     app_id: str,
     session: dict[str, Any] | None = None,
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
+    if limit is None:
+        limit = 10
     from app.services.chat_engine.artifact import build_envelope, error_envelope
     from app.services.chat_engine.entity_resolution import resolve_entity_matches
     from app.services.sherlock import bundle_resolvers_as_legacy
@@ -472,6 +483,64 @@ async def handle_resolve_entity(
         reason_code = reason_codes.ENTITY_NOT_FOUND
     elif len(matches) > 1:
         reason_code = reason_codes.ENTITY_AMBIGUOUS
+
+    # Phase 2 §2.2: emit state_delta so successful resolutions become
+    # durable grounded refs (picked up by the SQL explicit_only validator
+    # on the next turn) and ambiguous / empty outcomes become open
+    # clarification threads + a recovery signal.
+    source_turn_id = (session or {}).get('turn_id') if session else None
+    state_delta: dict[str, Any] = {}
+    recovery: dict[str, Any] | None = None
+    if len(matches) == 1 and isinstance(matches[0], dict) and matches[0].get('value') not in (None, ''):
+        value = matches[0].get('value')
+        state_delta['grounded_refs'] = [
+            {
+                'kind': str(entity_type),
+                'key': str(entity_type),
+                'value': value,
+                'provenance': 'resolver_derived',
+                'source_tool': 'resolve_entity',
+                **({'source_turn_id': str(source_turn_id)} if source_turn_id else {}),
+            }
+        ]
+        state_delta['confirmed_constraints'] = [
+            {
+                'key': str(entity_type),
+                'value': value,
+                'provenance': 'resolver_derived',
+                'source_tool': 'resolve_entity',
+                **({'source_turn_id': str(source_turn_id)} if source_turn_id else {}),
+            }
+        ]
+    elif reason_code == reason_codes.ENTITY_AMBIGUOUS:
+        state_delta['open_threads'] = [
+            {
+                'kind': 'clarify_entity',
+                'key': str(entity_type),
+                'message': (
+                    f'Multiple {entity_type} matches for {search!r}. '
+                    'Pick one before proceeding.'
+                ),
+            }
+        ]
+        state_delta['failure_record'] = {
+            'reason_code': reason_code,
+            'failure_kind': 'ambiguous',
+            'recoverable': True,
+            'summary': f'{len(matches)} {entity_type} matches',
+        }
+        recovery = {'recoverable': True, 'failure_kind': 'ambiguous'}
+    elif reason_code == reason_codes.ENTITY_NOT_FOUND:
+        state_delta['failure_record'] = {
+            'reason_code': reason_code,
+            'failure_kind': 'empty',
+            'recoverable': True,
+            'summary': f'no {entity_type} matches for {search!r}',
+        }
+        recovery = {'recoverable': True, 'failure_kind': 'empty'}
+
+    from app.services.chat_engine.artifact import ToolRecovery, ToolStateDelta
+
     return cast(dict[str, Any], build_envelope(
         status='ok',
         summary=f'{entity_type} · {len(matches)} matches',
@@ -480,6 +549,8 @@ async def handle_resolve_entity(
         reason_code=reason_code,
         counts={'rows': 0, 'records': len(matches), 'affected': 0},
         payload={k: v for k, v in raw.items() if k != 'status'},
+        recovery=cast(ToolRecovery, recovery) if recovery else None,
+        state_delta=cast(ToolStateDelta, state_delta) if state_delta else None,
     ))
 
 
@@ -910,7 +981,7 @@ async def handle_blueprint_list(
 async def handle_data_check(
     *,
     table: str,
-    filters: dict[str, Any] | None = None,
+    filters: Any = None,
     db: AsyncSession,
     auth: Any,
     app_id: str,
@@ -919,6 +990,45 @@ async def handle_data_check(
     """Lightweight existence and coverage check for concrete table filters."""
     from app.services.chat_engine.artifact import build_envelope, error_envelope
     from app.services.chat_engine.sql_agent import data_check
+
+    # Phase 2 §2.4 + strict-schema reconciliation: the Agents SDK strict
+    # JSON Schema cannot express a dynamic-keyed object (that would
+    # require ``additionalProperties: true`` which strict mode forbids).
+    # So the tool spec declares ``filters`` as a JSON-encoded string;
+    # this handler is the single boundary where we unmarshal it back to
+    # a dict for the engine. Any failure to parse, or the wrong shape
+    # after parsing, surfaces as a typed ``SQL_INVALID_FILTERS_SHAPE``
+    # envelope so the outer agent can observe and retry.
+    if isinstance(filters, str):
+        raw_str = filters.strip()
+        if raw_str == '':
+            filters = None
+        else:
+            try:
+                filters = json.loads(raw_str)
+            except json.JSONDecodeError as exc:
+                return cast(dict[str, Any], error_envelope(
+                    capability='analytics',
+                    reason_code=reason_codes.SQL_INVALID_FILTERS_SHAPE,
+                    summary='filters must be a JSON-encoded object',
+                    warnings=[
+                        f'data_check could not parse ``filters`` as JSON: {exc}. '
+                        f"Send a JSON string like '{{\"status\":\"fail\"}}'."
+                    ],
+                    payload={'table': table, 'received_filters_preview': raw_str[:120]},
+                ))
+    if filters is not None and not isinstance(filters, dict):
+        return cast(dict[str, Any], error_envelope(
+            capability='analytics',
+            reason_code=reason_codes.SQL_INVALID_FILTERS_SHAPE,
+            summary='filters must be an object keyed by column name',
+            warnings=[
+                'data_check received ``filters`` of type '
+                + type(filters).__name__
+                + '; expected object/dict with column → value entries.'
+            ],
+            payload={'table': table, 'received_filters_type': type(filters).__name__},
+        ))
 
     raw = await data_check(
         table=table,
@@ -937,6 +1047,29 @@ async def handle_data_check(
             payload={k: v for k, v in raw.items() if k not in {'status'}},
         ))
     row_count = int(raw.get('row_count') or 0)
+
+    # Phase 2 §2.2: user-supplied filters are durable constraints; a
+    # row_count summary goes into last_result so the next turn can read
+    # "the X-filter slice had N rows" without replaying this call.
+    source_turn_id = (_kwargs.get('session') or {}).get('turn_id') if isinstance(_kwargs.get('session'), dict) else None
+    normalized = raw.get('filters') or {}
+    state_delta: dict[str, Any] = {}
+    if isinstance(normalized, dict) and normalized:
+        state_delta['confirmed_constraints'] = [
+            {
+                'key': str(key),
+                'value': value,
+                'provenance': 'user_explicit',
+                'source_tool': 'data_check',
+                **({'source_turn_id': str(source_turn_id)} if source_turn_id else {}),
+            }
+            for key, value in normalized.items()
+            if key not in (None, '')
+        ]
+    state_delta['last_result'] = {
+        'kind': 'empty' if row_count == 0 else 'table',
+        'row_count': row_count,
+    }
     return cast(dict[str, Any], build_envelope(
         status='ok',
         summary=f'{row_count} rows',
@@ -944,6 +1077,7 @@ async def handle_data_check(
         capability='analytics',
         counts={'rows': row_count, 'records': 0, 'affected': 0},
         payload={k: v for k, v in raw.items() if k not in {'status'}},
+        state_delta=state_delta or None,
     ))
 
 
@@ -964,6 +1098,12 @@ async def handle_data_query(
     ``top_n``) land on ``outcome`` before the handler returns. The
     dispatcher's wrapper sees a complete envelope and passes it through
     verbatim.
+
+    Phase 2 §2.1/§2.2 additions: threads the scoped bundle and Phase-1
+    scratchpad through to ``sql_agent.data_query`` so the explicit_only
+    validator runs, and builds a typed ``state_delta`` so applied
+    filters / last result / open clarification threads persist across
+    turns via harness merge (not via LLM prose).
     """
     from app.services.chat_engine.artifact import build_envelope, error_envelope
     from app.services.chat_engine.sql_agent import data_query
@@ -972,6 +1112,8 @@ async def handle_data_query(
 
     scratchpad = (session or {}).get('scratchpad', {}) if session else {}
     context = build_data_query_context(question, scratchpad)
+    bundle = (session or {}).get('_bundle') if session else None
+    source_turn_id = (session or {}).get('turn_id') if session else None
 
     raw = await data_query(
         question=question,
@@ -980,22 +1122,87 @@ async def handle_data_query(
         auth=auth,
         app_id=app_id,
         provider=provider,
+        bundle=bundle,
+        scratchpad=scratchpad,
     )
 
     if raw.get('status') == 'error':
         reason_code = raw.get('reason_code') or reason_codes.SQL_EXECUTION_ERROR
         err_text = str(raw.get('error') or 'SQL agent failed')
+        # Phase 2 §2.2: an ungrounded explicit_only filter is the
+        # canonical "ambiguous + recoverable" clarification trigger.
+        # Surface it as an open thread so the Phase-1 prompt policy
+        # turns it into one clarifying question next turn.
+        state_delta: dict[str, Any] | None = None
+        recovery: dict[str, Any] | None = None
+        if reason_code == reason_codes.SQL_EXPLICIT_ONLY_UNGROUNDED:
+            state_delta = {
+                'open_threads': [
+                    {
+                        'kind': 'clarify_explicit_only',
+                        'key': 'data_query',
+                        'message': (
+                            'An explicit-only filter needs a grounded value. '
+                            'Call resolve_entity or ask for the exact value.'
+                        ),
+                    }
+                ],
+                'failure_record': {
+                    'reason_code': reason_code,
+                    'failure_kind': 'invalid_reference',
+                    'recoverable': True,
+                    'summary': err_text[:120],
+                },
+            }
+            recovery = {'recoverable': True, 'failure_kind': 'invalid_reference'}
+        elif reason_code == reason_codes.SQL_INVALID_FILTERS_SHAPE:
+            # Defensive — ``data_query`` doesn't emit this today, but keep
+            # the generic recovery classification consistent if it ever does.
+            recovery = {'recoverable': True, 'failure_kind': 'tool_error'}
         return cast(dict[str, Any], error_envelope(
             capability='analytics',
             reason_code=reason_code,
             summary='query failed',
             warnings=[err_text],
             payload={'question': raw.get('question', question)},
+            recovery=recovery,
+            state_delta=state_delta,
         ))
+
+    # ------------------------------------------------------------------
+    # Phase 2 §2.2: build a typed state_delta from the VALIDATED handler
+    # outcome — never from raw LLM prose. Applied filters come from
+    # ``data_query`` after SQL validation / parameterization, so they
+    # reflect the filters actually used, not the LLM's claim.
+    # ------------------------------------------------------------------
+    applied_filters = raw.get('applied_filters') or {}
+    typed_columns = raw.get('typed_columns') or []
+    state_delta_ok: dict[str, Any] = {}
+    if isinstance(applied_filters, dict) and applied_filters:
+        state_delta_ok['confirmed_constraints'] = [
+            {
+                'key': str(key),
+                'value': value,
+                'provenance': 'resolver_derived',
+                'source_tool': 'data_query',
+                **({'source_turn_id': str(source_turn_id)} if source_turn_id else {}),
+            }
+            for key, value in applied_filters.items()
+            if key not in (None, '')
+        ]
 
     outcome = _build_analytics_chart_outcome(raw)
     if outcome is None:
         row_count = int(raw.get('row_count') or 0)
+        state_delta_ok['last_result'] = {
+            'kind': 'table' if row_count > 0 else 'empty',
+            'row_count': row_count,
+            'columns': [
+                str(col.get('name'))
+                for col in typed_columns
+                if isinstance(col, dict) and col.get('name')
+            ][:8],
+        }
         return cast(dict[str, Any], build_envelope(
             status='ok',
             summary=f'{row_count} rows',
@@ -1003,11 +1210,28 @@ async def handle_data_query(
             capability='analytics',
             counts={'rows': row_count, 'records': 0, 'affected': 0},
             payload={k: v for k, v in raw.items() if k != 'status'},
+            state_delta=state_delta_ok or None,
         ))
 
     row_count = int(raw.get('row_count') or outcome['row_count'])
     payload_body = {k: v for k, v in raw.items() if k != 'status'}
     payload_body['chart'] = outcome['chart_payload']
+
+    # Populate the generic last_result summary from the validated picker
+    # output — same source that drove the artifact envelope, so the
+    # next turn sees exactly what the user saw.
+    state_delta_ok['last_result'] = {
+        'kind': 'chart' if outcome['artifact_type'] == 'chart' else outcome['artifact_type'],
+        'artifact_type': outcome['artifact_type'],
+        'row_count': row_count,
+        'columns': [
+            str(col.get('name'))
+            for col in typed_columns
+            if isinstance(col, dict) and col.get('name')
+        ][:8],
+        **({'reason_code': outcome['reason_code']} if outcome.get('reason_code') else {}),
+    }
+
     return cast(dict[str, Any], build_envelope(
         status='ok',
         summary=f'{row_count} rows',
@@ -1025,6 +1249,7 @@ async def handle_data_query(
             },
         },
         payload=payload_body,
+        state_delta=state_delta_ok or None,
     ))
 
 

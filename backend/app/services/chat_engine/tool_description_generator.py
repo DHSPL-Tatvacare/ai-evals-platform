@@ -8,6 +8,11 @@ Tools (see the concrete capability packs) can embed the tokens:
 - ``{{reason_codes}}`` — comma-separated stable list of the tool's pack-owned codes
 - ``{{chart_capabilities}}`` — analytics-only; generated from the deterministic picker
 - ``{{limitations}}`` — explicit pack-owned limits/preconditions in stable list order
+- ``{{recovery_semantics}}`` — Phase 1 generic recovery + state contract blurb,
+  rendered once with the same wording for every tool. Pack-specific
+  ``reason_codes`` stay visible via ``{{reason_codes}}`` for precision,
+  but recovery behavior (retry / clarify / concede) is described once
+  here, not as a per-code next-action catalog.
 
 Substitution is a single deterministic pass (§6.3.1 rule 2). No loops,
 conditionals, or pack-crossing reads happen here.
@@ -64,6 +69,32 @@ def _format_limitations(limits: Sequence[str]) -> str:
     if not limits:
         return 'Limitations: none.'
     return 'Limitations:\n' + '\n'.join(f'- {limit}' for limit in limits)
+
+
+def render_recovery_semantics() -> str:
+    """Generic recovery semantics (Phase 1, plan §42-107).
+
+    Rendered once and substituted verbatim across every tool that opts
+    in via ``{{recovery_semantics}}``. Kept short on purpose — the
+    detailed recovery + clarification policy lives in the base prompt
+    (see ``prompts/base.py``); this blurb tells the agent only what the
+    typed envelope signals mean and that pack-specific reason codes
+    remain the precision source for debugging.
+    """
+
+    return (
+        'Recovery semantics (generic): every envelope may carry a '
+        '``recovery`` block with ``recoverable`` (bool) and '
+        '``failure_kind`` (none | ambiguous | empty | invalid_reference | '
+        'unsupported | permission | tool_error). When ``recoverable`` is '
+        'true, retry with discovery / lookup / canonicalization, or ask '
+        'exactly one clarifying question — do not concede. Envelopes may '
+        'also carry ``state_delta`` (confirmed_constraints, grounded_refs, '
+        'open_threads, last_result, failure_record); the harness merges '
+        'these into durable session state automatically. Pack-specific '
+        '``reason_code`` names are kept for debugging precision and are '
+        'listed under "Reason codes" above.'
+    )
 
 
 def _format_chart_capabilities() -> str:
@@ -128,6 +159,7 @@ def fill_tool_description(
         getattr(pack, 'tool_limitations', lambda _n: ())(tool_name),
     )
     chart_capabilities_str = _format_chart_capabilities()
+    recovery_semantics_str = render_recovery_semantics()
 
     def _apply(text: str) -> str:
         t = _substitute_manifest(
@@ -141,6 +173,7 @@ def fill_tool_description(
             .replace('{{reason_codes}}', reason_codes_str)
             .replace('{{chart_capabilities}}', chart_capabilities_str)
             .replace('{{limitations}}', limitations_str)
+            .replace('{{recovery_semantics}}', recovery_semantics_str)
         )
 
     if isinstance(filled.get('description'), str):

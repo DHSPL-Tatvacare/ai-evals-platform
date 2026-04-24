@@ -34,6 +34,7 @@ from app.services.sherlock.platform_ontology import (
     platform_ontology_version,
 )
 from app.services.sherlock.bundle import BundleBuilder
+from app.services.sherlock.bundle_helpers import explicit_only_column_set
 from app.services.sherlock.recognition import (
     RecognitionEvent,
     build_recognition_event,
@@ -64,6 +65,7 @@ __all__ = [
     'TurnAssembly',
     'build_recognition_event',
     'bundle_resolvers_as_legacy',
+    'explicit_only_column_set',
     'platform_ontology_version',
     'render_bundle_context',
     'resolve_turn_scope_and_bundle',

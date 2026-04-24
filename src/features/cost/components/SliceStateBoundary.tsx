@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Inbox } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { EmptyState, Button } from '@/components/ui';
+import { LoadingState } from '@/components/ui/LoadingState';
 import type { Slice } from '@/stores/costStore';
 
 interface SliceStateBoundaryProps<T> {
@@ -43,10 +44,7 @@ export function SliceStateBoundary<T>({
   if (slice.status === 'idle' || slice.status === 'loading') {
     return (
       <CenteredFill>
-        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>{loadingLabel}</span>
-        </div>
+        <LoadingState message={loadingLabel} fill={false} />
       </CenteredFill>
     );
   }

@@ -7,6 +7,7 @@ from app.services.report_builder.scratchpad_state import (
     active_filter_provenance,
     active_filter_values,
     build_previous_turn_context,
+    render_recovery_context_block,
 )
 
 _MAX_FINDINGS = 15
@@ -55,7 +56,26 @@ def render(session: dict[str, Any]) -> str:
             )
         )
 
-    if not findings and not errors and not discovery and not lookups and not resolved_entities and not active_filters and not has_discovered_schema and not last_data_check and not last_analysis and not last_evidence and not outcomes:
+    # Phase 1 (plan §42-107): the recovery block is populated by
+    # ``envelope.state_delta`` / ``envelope.recovery``. It can be the ONLY
+    # non-empty block on a turn (e.g. after a pure ambiguity signal), so
+    # include it in the early-return guard alongside legacy state.
+    recovery_block = render_recovery_context_block(pad)
+
+    if (
+        not findings
+        and not errors
+        and not discovery
+        and not lookups
+        and not resolved_entities
+        and not active_filters
+        and not has_discovered_schema
+        and not last_data_check
+        and not last_analysis
+        and not last_evidence
+        and not outcomes
+        and not recovery_block
+    ):
         return ''
 
     lines = ['SESSION STATE:']
@@ -286,5 +306,12 @@ def render(session: dict[str, Any]) -> str:
         lines.append('Recent errors:')
         for error in errors[-_MAX_ERRORS:]:
             lines.append(f'- {error}')
+
+    # Phase 1 (plan §42-107): compact prior-failure / open-threads /
+    # last-result block driven by ``envelope.state_delta`` and
+    # ``envelope.recovery``. Generic across packs — the outer prompt
+    # reads this to decide between retry, clarification, and concession.
+    if recovery_block:
+        lines.append(recovery_block)
 
     return '\n'.join(lines)

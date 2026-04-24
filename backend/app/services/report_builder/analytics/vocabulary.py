@@ -178,6 +178,64 @@ class ToolVocabulary:
             return False
         return entity_type in surface.entity_types
 
+    # -- Clarity surface (Phase 3) ------------------------------------
+    #
+    # Three small read-only views over the assembled vocabulary that make
+    # the pack's grounding contract easier to inspect and trust:
+    #
+    #   canonical_field_names()  -- every term the pack considers a
+    #       first-class analytical target (dimensions + catalog columns
+    #       and their ``table.column`` forms).
+    #   ambiguous_synonyms()     -- synonyms that currently resolve to
+    #       more than one target, i.e. terms the agent MUST disambiguate
+    #       before direct analytical use.
+    #   needs_clarification(term) -- the pack's own policy for "this
+    #       user-facing term cannot be used as-is". Keeps the heuristic
+    #       (unknown, ambiguous, id/status/comment/name suffix) pinned in
+    #       the pack and out of harness-core.
+
+    def canonical_field_names(self) -> frozenset[str]:
+        names: set[str] = set(self.dimensions.keys())
+        for targets in self.column_alias_index.values():
+            for target in targets:
+                names.add(target.column.lower())
+                names.add(f'{target.table}.{target.column}'.lower())
+        return frozenset(names)
+
+    def ambiguous_synonyms(self) -> Mapping[str, tuple[ColumnTarget, ...]]:
+        return {
+            term: targets
+            for term, targets in self.column_alias_index.items()
+            if len(targets) > 1
+        }
+
+    def needs_clarification(self, term: str) -> bool:
+        """Return True when ``term`` cannot be used directly without discovery.
+
+        A term needs clarification when it is ambiguous, unknown to both
+        the dimension and column indices, or when its shape matches one
+        of the ``_id`` / ``_status`` / ``_comment`` / ``_name`` suffix
+        classes (commonly projected to multiple tables). This is the
+        pack's own policy; harness-core does not override it.
+        """
+        if not term or not term.strip():
+            return False
+        dimension_resolution = self.resolve_dimension(term)
+        column_resolution = self.resolve_column(term)
+        if dimension_resolution.status == 'ambiguous':
+            return True
+        if column_resolution.status == 'ambiguous':
+            return True
+        if dimension_resolution.status == 'unique' or column_resolution.status == 'unique':
+            return False
+        # Fully unknown to the vocabulary but shaped like a schema term:
+        # an ``_id``/``_status``/``_comment``/``_name`` suffix is the
+        # common footgun (multiple tables expose it) — force discovery.
+        normalized = term.strip().lower()
+        if normalized.endswith(('_id', '_status', '_comment', '_name')):
+            return True
+        return False
+
 
 # ── Builder ──────────────────────────────────────────────────────────
 

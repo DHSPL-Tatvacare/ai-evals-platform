@@ -7,7 +7,7 @@ without silently changing route responsibilities.
 
 import math
 import uuid as _uuid
-from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+from datetime import datetime as _dt, timezone as _tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -24,6 +24,8 @@ from app.schemas.inside_sales import (
     CallRecord,
     CollectionRefreshRequest,
     CollectionRefreshResponse,
+    CollectionRunEntry,
+    CollectionRunsResponse,
     CollectionSyncStatus,
     LeadCallRecord,
     LeadDetailFullResponse,
@@ -49,7 +51,13 @@ from app.services.inside_sales_queries import (
     list_collection_suggestions,
     list_leads_from_source,
 )
-from app.services.inside_sales_sync import build_manual_refresh_job_params
+from app.services.inside_sales_sync import (
+    INSIDE_SALES_APP_ID,
+    build_bootstrap_backfill_job_params,
+    build_date_range_refresh_job_params,
+    build_incremental_refresh_job_params,
+)
+from app.models.source_records import SourceSyncRun
 from app.services.job_worker import get_job_submission_metadata
 from app.services.ttl_cache import TTLCache
 from app.services.lsq_client import (
@@ -325,23 +333,55 @@ async def refresh_collection(
 ):
     """Explicit refresh trigger for synced source collections.
 
-    The refresh always targets the 7-day hot window (``[now-7d, now]``).
-    ``body.date_from`` / ``body.date_to`` are ignored — older data is out of
-    scope for the mirror and will not be fetched here. ``event_codes`` is
-    still honored for call refreshes.
+    Supported ``sync_mode`` values (case-insensitive, default
+    ``incremental``):
+
+      * ``incremental`` — one-shot delta on top of the last successful
+        watermark. Leads use LSQ ``ModifiedOn``, calls apply the 60-min
+        overlap default. This is the normal "run delta now" button.
+      * ``date_range`` — explicit ``dateFrom`` / ``dateTo`` bootstrap
+        run. Required for the first-ever sync and for ad-hoc window
+        backfills.
+      * ``bootstrap`` — sugar for the canonical 90-day ``date_range``
+        seed (calls + leads) described in the LSQ ETL plan.
+
+    Neither mode prunes older rows; retention is "accumulate
+    indefinitely for now" per the plan.
     """
     family = _validate_source_family(source_family)
-    now = _dt.now(_tz.utc)
-    hot_date_to = now.strftime("%Y-%m-%d %H:%M:%S")
-    hot_date_from = (now - _td(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        job_params = build_manual_refresh_job_params(
-            source_family=family,  # type: ignore[arg-type]
-            has_successful_sync=False,  # always explicit date_range, never incremental
-            date_from=hot_date_from,
-            date_to=hot_date_to,
-            event_codes=body.event_codes,
+    sync_mode = (body.sync_mode or "incremental").strip().lower()
+    if sync_mode not in {"incremental", "date_range", "bootstrap"}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "sync_mode must be one of: incremental, date_range, bootstrap"
+            ),
         )
+
+    try:
+        if sync_mode == "bootstrap":
+            job_params = build_bootstrap_backfill_job_params(
+                source_family=family,  # type: ignore[arg-type]
+                event_codes=body.event_codes,
+            )
+        elif sync_mode == "date_range":
+            if not body.date_from or not body.date_to:
+                raise HTTPException(
+                    status_code=400,
+                    detail="date_range sync requires dateFrom and dateTo",
+                )
+            job_params = build_date_range_refresh_job_params(
+                source_family=family,  # type: ignore[arg-type]
+                date_from=body.date_from,
+                date_to=body.date_to,
+                event_codes=body.event_codes,
+            )
+        else:
+            job_params = build_incremental_refresh_job_params(
+                source_family=family,  # type: ignore[arg-type]
+                event_codes=body.event_codes,
+                overlap_minutes=body.overlap_minutes,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -351,8 +391,9 @@ async def refresh_collection(
         "tenant_id": str(auth.tenant_id),
         "user_id": str(auth.user_id),
         "app_id": str(metadata["app_id"]),
-        # On-demand refresh — never prune. Scheduled syncs set this to True
-        # via the scheduler engine (§PR4).
+        # On-demand refresh is never marked as scheduled. Scheduler-fired
+        # jobs carry ``is_scheduled_run=True`` as provenance only — the
+        # delta path no longer branches on it.
         "is_scheduled_run": False,
     }
     job = Job(
@@ -431,6 +472,52 @@ async def get_collection_status(
         source_family=family,
     )
     return CollectionSyncStatus(**status)
+
+
+@router.get("/collections/{source_family}/runs", response_model=CollectionRunsResponse)
+async def list_collection_runs(
+    source_family: str,
+    limit: int = Query(10, ge=1, le=50),
+    auth: AuthContext = require_fixed_app_access('inside-sales'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the most recent ``source_sync_runs`` rows for ops use.
+
+    Ops reads this to reconcile scheduled-run history, spot repeated
+    failures, and trigger re-runs. Scoped to tenant + inside-sales.
+    """
+    family = _validate_source_family(source_family)
+    stmt = (
+        select(SourceSyncRun)
+        .where(
+            SourceSyncRun.tenant_id == auth.tenant_id,
+            SourceSyncRun.app_id == INSIDE_SALES_APP_ID,
+            SourceSyncRun.source_family == family,
+        )
+        .order_by(SourceSyncRun.created_at.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return CollectionRunsResponse(
+        source_family=family,
+        runs=[
+            CollectionRunEntry(
+                id=str(row.id),
+                sync_mode=row.sync_mode,
+                status=row.status,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                watermark_from=row.watermark_from,
+                watermark_to=row.watermark_to,
+                records_scanned=row.records_scanned,
+                records_upserted=row.records_upserted,
+                records_failed=row.records_failed,
+                is_scheduled_run=row.is_scheduled_run,
+                error_message=row.error_message,
+            )
+            for row in rows
+        ],
+    )
 
 
 @router.get("/coverage")

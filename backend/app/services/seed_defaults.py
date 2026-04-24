@@ -17,7 +17,7 @@ from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.models.user import User
 from app.models.app import App
-from app.models.role import Role
+from app.models.role import Role, RoleAppAccess
 from app.models.eval_template import EvalTemplate
 from app.models.evaluator import Evaluator
 from app.models.report_config import ReportConfig
@@ -2544,10 +2544,14 @@ def _build_default_report_config_seeds() -> list[dict]:
 
 
 async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.UUID:
-    """Ensure the Owner system role exists for a tenant.
+    """Ensure the Owner system role exists for a tenant and grants every active app.
 
-    Owner remains outside the grantable permission catalog and keeps full access
-    through the owner-only bypass semantics used by AuthContext.
+    Owner remains outside the grantable permission catalog (full permission
+    set is applied via the Owner bypass in ``missing_permissions``/
+    ``ensure_any_permission``). App access, however, is now represented
+    truthfully in ``role_app_access`` so that ``AuthContext.app_access`` is
+    the single source of truth for scope checks — no Owner-only bypass in
+    ``ScopeGuard`` or ``ensure_registered_app_access``.
     """
     existing = await session.execute(
         select(Role).where(
@@ -2558,13 +2562,44 @@ async def seed_owner_role(session: AsyncSession, tenant_id: uuid.UUID) -> uuid.U
     )
     role = existing.scalar_one_or_none()
     if not role:
-        # Owner is the non-grantable, system-managed role; it is not seeded with
-        # catalog permissions because owner-only access bypasses grant checks.
         role = Role(tenant_id=tenant_id, name="Owner", description="Full access", is_system=True)
         session.add(role)
         await session.flush()
         logger.info(f"Seeded Owner role for tenant {tenant_id}")
+
+    await _backfill_owner_app_access(session, role.id)
     return role.id
+
+
+async def _backfill_owner_app_access(session: AsyncSession, role_id: uuid.UUID) -> None:
+    """Ensure the Owner role has a ``role_app_access`` row for every active app.
+
+    Idempotent: only inserts rows for apps the role does not already reach.
+    Called from ``seed_owner_role`` after active apps have been seeded.
+    """
+    active_apps = await session.execute(
+        select(App.id).where(App.is_active == True)
+    )
+    active_ids = [app_id for (app_id,) in active_apps.all()]
+    if not active_ids:
+        return
+
+    existing_grants = await session.execute(
+        select(RoleAppAccess.app_id).where(RoleAppAccess.role_id == role_id)
+    )
+    already = {app_id for (app_id,) in existing_grants.all()}
+
+    added = 0
+    for app_id in active_ids:
+        if app_id in already:
+            continue
+        session.add(RoleAppAccess(role_id=role_id, app_id=app_id))
+        added += 1
+    if added:
+        await session.flush()
+        logger.info(
+            "Granted Owner role %s access to %d active app(s)", role_id, added
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3191,6 +3226,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
     from app.services.evaluator_seed_catalog import reconcile_evaluator_seed_catalog
     from app.services.cost_tracking.bootstrap_seed import seed_model_pricing
+    from app.services.cost_tracking.schedule_seed import seed_cost_rollup_schedule
 
     logger.info("Checking seed defaults...")
     await seed_apps(session)
@@ -3201,6 +3237,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await _seed_eval_templates(session)
     await seed_sherlock_ontology(session)
     await seed_model_pricing(session)
+    await seed_cost_rollup_schedule(session)
     reconciled, deduped = await reconcile_evaluator_seed_catalog(session)
     if reconciled or deduped:
         logger.info(

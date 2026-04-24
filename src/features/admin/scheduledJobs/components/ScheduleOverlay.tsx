@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import cronstrue from 'cronstrue';
 import { Plus, X } from 'lucide-react';
-import { Button, Input, Select } from '@/components/ui';
+import {
+  Button,
+  ConfirmDialog,
+  Input,
+  RightSlideOverShell,
+  Select,
+} from '@/components/ui';
 import { useScheduledJobsStore } from '@/stores/scheduledJobsStore';
 import { notificationService } from '@/services/notifications';
 import { cn } from '@/utils';
@@ -33,12 +39,14 @@ function defaultArgsFor(predicate: RegisteredPredicate): Record<string, unknown>
 }
 
 export function ScheduleOverlay({ schedule, onClose }: Props) {
+  const titleId = useId();
   const loadRegistry = useScheduledJobsStore((state) => state.loadRegistry);
   const registry = useScheduledJobsStore((state) => state.registry);
   const createSchedule = useScheduledJobsStore((state) => state.create);
   const updateSchedule = useScheduledJobsStore((state) => state.update);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
 
   useEffect(() => {
     void loadRegistry();
@@ -59,6 +67,40 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
     schedule?.override ?? { skipCriteria: [], retryCount: 0, retryIntervalMinutes: 15, onExhaust: 'wait_next_tick' },
   );
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
+
+  // Snapshot the initial form shape so a dirty-state gate can compare
+  // against the current field values. A single JSON-serialized baseline
+  // keeps this cheap and avoids a per-field change-tracking layer.
+  const baselineRef = useRef<string>(
+    JSON.stringify({
+      name: schedule?.name ?? '',
+      description: schedule?.description ?? '',
+      appId: schedule?.appId ?? '',
+      jobType: schedule?.jobType ?? '',
+      scheduleKey: schedule?.scheduleKey ?? '',
+      cron: schedule?.cron ?? '0 */6 * * *',
+      paramsText: JSON.stringify(schedule?.params ?? {}, null, 2),
+      override: schedule?.override ?? {
+        skipCriteria: [],
+        retryCount: 0,
+        retryIntervalMinutes: 15,
+        onExhaust: 'wait_next_tick',
+      },
+      enabled: schedule?.enabled ?? true,
+    }),
+  );
+  const currentSnapshot = JSON.stringify({
+    name,
+    description: description ?? '',
+    appId,
+    jobType,
+    scheduleKey,
+    cron,
+    paramsText,
+    override,
+    enabled,
+  });
+  const isDirty = currentSnapshot !== baselineRef.current;
 
   const apps = registry?.apps ?? [];
   const workloadsForApp = useMemo(
@@ -183,19 +225,44 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
 
   const identityDisabled = isEdit;
 
+  // Close intent goes through the dirty-state gate. Escape and backdrop
+  // both route here via RightSlideOverShell; they can't skip the guard.
+  const handleCloseIntent = () => {
+    if (saving) return;
+    if (isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-[var(--z-overlay)] flex justify-end bg-black/40">
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="flex h-full w-[520px] flex-col bg-[var(--bg-primary)] shadow-xl"
-      >
+    <RightSlideOverShell
+      isOpen={true}
+      onClose={handleCloseIntent}
+      onEscape={handleCloseIntent}
+      labelledBy={titleId}
+      widthClassName="w-[520px] max-w-[92vw]"
+      panelClassName="bg-[var(--bg-primary)]"
+      closeOnBackdropClick={!saving}
+    >
+      <div className="flex h-full w-full flex-col">
         <header className="flex items-center justify-between border-b border-[var(--border-default)] px-5 py-3">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-            {isEdit ? 'Edit Schedule' : 'Create Schedule'}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 id={titleId} className="text-sm font-semibold text-[var(--text-primary)]">
+              {isEdit ? 'Edit Schedule' : 'Create Schedule'}
+            </h2>
+            {isDirty ? (
+              <span
+                className="rounded-full bg-[var(--color-warning)]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-warning)]"
+                title="You have unsaved changes"
+              >
+                Unsaved
+              </span>
+            ) : null}
+          </div>
           <button
-            onClick={onClose}
+            onClick={handleCloseIntent}
             className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)]"
           >
             <X className="h-4 w-4" />
@@ -362,7 +429,7 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-[var(--border-default)] px-5 py-3">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+          <Button variant="secondary" onClick={handleCloseIntent} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={!canSave}>
@@ -370,7 +437,21 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
           </Button>
         </footer>
       </div>
-    </div>
+
+      <ConfirmDialog
+        isOpen={confirmDiscardOpen}
+        title="Discard unsaved changes?"
+        description="You have unsaved changes to this schedule. Close anyway and lose them?"
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        variant="warning"
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onClose();
+        }}
+        onClose={() => setConfirmDiscardOpen(false)}
+      />
+    </RightSlideOverShell>
   );
 }
 

@@ -8,7 +8,7 @@ import re as _re
 import time
 import uuid
 from datetime import datetime as _dt, timezone as _tz
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from sqlalchemy import select
@@ -95,7 +95,7 @@ _LEAD_FIELDS_CSV = (
     "mx_What_is_your_main_health_goal,mx_Job_Title_or_Occupation,"
     "mx_Preferred_Time_for_Call_with_Health_Counsellor,"
     "mx_RNR_Count,mx_Answered_Call_Count,mx_Lead_Status,"
-    "CreatedOn,ProspectActivityDate_Min,ProspectActivityDate_Max,"
+    "CreatedOn,ModifiedOn,ProspectActivityDate_Min,ProspectActivityDate_Max,"
     "OwnerIdName,Source,SourceCampaign,"
     # Plan-purchase surface. These fields populate ``raw_payload`` on
     # sync so the leads list API can derive the ``plan`` object without
@@ -383,27 +383,39 @@ async def fetch_call_activities(
 async def fetch_leads(
     date_from: str,
     date_to: str,
+    *,
+    filter_field: Literal["CreatedOn", "ModifiedOn"] = "CreatedOn",
+    sort_field: Literal["CreatedOn", "ModifiedOn"] | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
-    """Fetch one page of leads from LSQ by CreatedOn range.
+    """Fetch one page of leads from LSQ by date range.
 
-    Sends a single request to LSQ with PageIndex/PageSize. date_to is applied
-    client-side (LSQ Leads.Get only supports >= operator).
+    ``filter_field`` controls which timestamp the ``LookupName`` / server-side
+    filter uses. ``ModifiedOn`` is the authoritative delta field for updated
+    leads and is the right choice for incremental syncs; ``CreatedOn`` is the
+    right choice for backfills / date-range seeds.
+
+    ``sort_field`` defaults to ``filter_field`` when not set, keeping the page
+    order aligned with the filter and giving deterministic paging.
+
+    ``date_to`` is applied client-side against the same field that drove the
+    request (LSQ Leads.Get only supports a single ``>=`` operator).
 
     Returns: {"leads": list[raw_lead_dict], "has_more": bool}
     has_more is True when LSQ returned a full page (there may be more).
     """
+    sort_column = sort_field or filter_field
     async with httpx.AsyncClient(timeout=30) as client:
         body = {
             "Parameter": {
-                "LookupName": "CreatedOn",
+                "LookupName": filter_field,
                 "LookupValue": date_from,
                 "SqlOperator": ">=",
             },
             "Paging": {"PageIndex": page - 1, "PageSize": page_size},
             "Columns": {"Include_CSV": _LEAD_FIELDS_CSV},
-            "Sorting": {"ColumnName": "CreatedOn", "Direction": 1},
+            "Sorting": {"ColumnName": sort_column, "Direction": 1},
         }
         resp = await _rate_limited_request(
             client, "POST",
@@ -415,10 +427,13 @@ async def fetch_leads(
         if not isinstance(raw_page, list):
             return {"leads": [], "has_more": False}
 
-        # Apply date_to filter client-side (strip ms to avoid format mismatch)
+        # Apply upper bound client-side on the same field that drove the
+        # server-side filter, so the window is bounded on both sides by the
+        # same timestamp (strip fractional seconds to match LSQ's string
+        # comparison).
         leads = [
             l for l in raw_page
-            if (l.get("CreatedOn") or "").split(".")[0] <= date_to
+            if (l.get(filter_field) or "").split(".")[0] <= date_to
         ]
         return {"leads": leads, "has_more": len(raw_page) >= page_size}
 

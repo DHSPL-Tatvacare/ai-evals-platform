@@ -411,6 +411,16 @@ const SECTION_ICONS: Record<string, { icon: typeof BadgeCheck; tone: 'brand' | '
   'health-profile': { icon: HeartPulse, tone: 'info' },
 };
 
+/** A drilldown field is considered empty when ``formatLeadFieldValue`` returns
+ *  an unset/em-dash value. This is the same contract ``Field`` uses to hide
+ *  individual rows; we lift it up to the section level so that a section
+ *  whose every field is empty (e.g. Health Profile before any care-plan data
+ *  has been collected) disappears entirely — matching how PlanPurchasedCard
+ *  already handles the "no purchase yet" case. */
+function isDrilldownValueEmpty(value: string): boolean {
+  return !value || value === '—';
+}
+
 function DrilldownSection({
   lead,
   section,
@@ -419,14 +429,21 @@ function DrilldownSection({
   section: AppDrilldownSectionConfig;
 }) {
   const meta = SECTION_ICONS[section.id] ?? { icon: ListChecks, tone: 'neutral' as const };
+  // Pre-compute values once so the emptiness check and the render pass agree
+  // on the same data (no drift between "would Field hide this?" and "did we
+  // count it as empty at the section level?").
+  const populated = section.fields
+    .map((field) => ({ field, value: formatLeadFieldValue(lead, field) }))
+    .filter(({ value }) => !isDrilldownValueEmpty(value));
+  if (populated.length === 0) return null;
   return (
     <SectionBlock title={section.title} icon={meta.icon} tone={meta.tone}>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {section.fields.map((field) => (
+        {populated.map(({ field, value }) => (
           <Field
             key={field.key}
             label={field.label}
-            value={formatLeadFieldValue(lead, field)}
+            value={value}
             mono={field.presentation === 'mono'}
           />
         ))}

@@ -124,22 +124,22 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    prospect_stage: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
-    prospect_stage_normalized: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    # Plan-purchase surface. ``plan_name`` is indexed (filter dropdown + table
-    # column). The remaining plan/CGM/payment fields are read out of
-    # ``raw_payload`` at API-response time — no per-field columns.
+    # Free-text fields stored as TEXT so dirty LSQ values don't break batch
+    # upserts. Prior fixed-width columns (80/120) were tuned for "normal"
+    # enum-like values but LSQ allows operators to enter arbitrary strings.
+    prospect_stage: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    prospect_stage_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     plan_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    city_normalized: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    age_group: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
+    age_group: Mapped[str | None] = mapped_column(Text, nullable=True)
     condition: Mapped[str | None] = mapped_column(String(255), nullable=True)
     condition_normalized: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    hba1c_band: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    hba1c_band: Mapped[str | None] = mapped_column(Text, nullable=True)
     intent_to_pay: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_name_normalized: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_campaign: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_activity_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

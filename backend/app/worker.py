@@ -76,6 +76,18 @@ async def run_worker() -> None:
         from app.services.scheduler.engine import scheduler_tick_loop
 
         tasks.append(asyncio.create_task(scheduler_tick_loop()))
+    else:
+        # Loud warning, not silent skip: if every replica opts out, scheduled
+        # jobs never fire and the only visible symptom is "this platform
+        # feature stopped working." The heartbeat table (scheduler_heartbeats)
+        # exposes the same signal in SQL for alerting.
+        logger.warning(
+            "scheduler.disabled SCHEDULER_TICK_INTERVAL_SECONDS=%s — "
+            "this worker will NOT fire scheduled_jobs. If this is the only "
+            "worker replica, cron-style schedules (cost rollup, CRM sync, "
+            "...) will stop running.",
+            settings.SCHEDULER_TICK_INTERVAL_SECONDS,
+        )
 
     try:
         await asyncio.gather(*tasks)

@@ -71,6 +71,28 @@ class SQLValidationError(Exception):
     pass
 
 
+class SQLExplicitOnlyUngroundedError(SQLValidationError):
+    """Phase 2 §2.1: generated SQL filtered an ``explicit_only`` column
+    without a matching grounded literal.
+
+    Raised by the deterministic post-generation validator. The outer
+    harness observes the resulting ``SQL_EXPLICIT_ONLY_UNGROUNDED``
+    reason code on the tool envelope and decides whether to clarify or
+    retry under the Phase-1 recovery policy.
+    """
+
+    def __init__(self, *, column: str, values: list[str], grounded: set[str]) -> None:
+        self.column = column
+        self.values = list(values)
+        self.grounded = set(grounded)
+        super().__init__(
+            f"SQL filters explicit_only column '{column}' against {values!r} "
+            f"but no matching grounded value is in scope. Grounded values: "
+            f"{sorted(grounded)!r}. Resolve via resolve_entity / lookup first "
+            f'or ask the user for an exact value.'
+        )
+
+
 def _load_yaml_model(path: Path) -> dict[str, Any]:
     content = path.read_text()
     cache_key = f'{path}:{hashlib.md5(content.encode()).hexdigest()}'
@@ -255,6 +277,189 @@ def validate_sql_columns_against_manifest(sql: str, *, app_id: str) -> None:
                 if t in {aliases.get(a.lower(), a.lower()) for a in aliases}
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 §2.1 — explicit_only SQL safety propagation.
+#
+# Context: platform ontology flags certain entity types as ``explicit_only``
+# (e.g. ``run_name`` on ``Evaluation.Run``). Those columns must only be
+# filtered against values that prior tool calls have resolved. App display
+# aliases (``kaira``, ``kaira-bot``) are scope metadata, never grounding.
+#
+# Two generic reads — the bundle safety flatten and the scratchpad
+# grounded-literal flatten — live in pack-agnostic modules so future
+# packs (vector / graph / RAG) can reuse the same views without reaching
+# into sql_agent.py. See plan §364-380 (generic → harness, pack-specific →
+# pack). SQL-specific pieces stay here:
+#
+# - ``validate_sql_explicit_only`` — regex on WHERE predicates; SQL-shape.
+# - ``extract_applied_filters_from_sql`` — regex on WHERE predicates;
+#   SQL-shape. A vector pack would write its own applied-filter extractor
+#   against its own query AST.
+#
+# The validator is pure regex (no sqlglot dependency, same approach as
+# ``validate_sql_columns_against_manifest``). It intentionally does NOT
+# parse full SQL ASTs — a small number of false negatives is acceptable;
+# a false positive never is.
+# ---------------------------------------------------------------------------
+
+# Re-exports for callers that already import from sql_agent (tests, etc.).
+# Canonical locations:
+# - ``sherlock.bundle_helpers.explicit_only_column_set``
+# - ``scratchpad_state.grounded_literal_set``
+from app.services.sherlock.bundle_helpers import (
+    explicit_only_column_set as _explicit_only_column_set,
+)
+from app.services.report_builder.scratchpad_state import (
+    grounded_literal_set as _grounded_literal_set,
+)
+
+
+def _collect_explicit_only_columns(
+    bundle: Any | None,
+    semantic_model: dict[str, Any] | None = None,
+) -> set[str]:
+    """Deprecated shim — call ``explicit_only_column_set`` directly.
+
+    Kept so existing imports keep resolving. ``semantic_model`` is
+    reserved for a future manifest-driven override path and is
+    currently ignored (the canonical helper reads only bundle-level
+    safety flags).
+    """
+    del semantic_model
+    return _explicit_only_column_set(bundle)
+
+
+def _collect_grounded_literals(
+    scratchpad: dict[str, Any] | None,
+    current_filters: dict[str, Any] | None = None,
+) -> set[str]:
+    """Deprecated shim — call ``grounded_literal_set`` directly."""
+    return _grounded_literal_set(scratchpad, current_filters=current_filters)
+
+
+_SQL_WHERE_PATTERN = re.compile(
+    r'\bWHERE\b(?P<body>.+?)(?=\b(?:GROUP|ORDER|LIMIT|OFFSET|HAVING|WINDOW|FETCH)\b|$)',
+    re.IGNORECASE | re.DOTALL,
+)
+_SQL_PREDICATE_EQ_PATTERN = re.compile(
+    r"(?:(\w+)\.)?(\w+)\s*(=|!=|<>|ILIKE|LIKE)\s*'([^']*)'",
+    re.IGNORECASE,
+)
+_SQL_PREDICATE_IN_PATTERN = re.compile(
+    r"(?:(\w+)\.)?(\w+)\s+IN\s*\(\s*([^)]*?)\s*\)",
+    re.IGNORECASE,
+)
+_SQL_IN_LITERAL_PATTERN = re.compile(r"'([^']*)'")
+
+# Columns we never treat as user-visible filters for carry-forward purposes.
+# ``app_id`` / ``tenant_id`` are scope clauses injected by every query; surfacing
+# them as ``applied_filters`` would re-leak the F1 mental model that scope is
+# a filter (it's not — it's a bundle-scope bind).
+_SQL_FILTER_SCOPE_COLUMNS: frozenset[str] = frozenset({'app_id', 'tenant_id'})
+
+
+def extract_applied_filters_from_sql(
+    sql: str,
+    *,
+    exclude_columns: set[str] | frozenset[str] | None = None,
+) -> dict[str, Any]:
+    """Derive current-turn applied filters from the generated SQL's WHERE bodies.
+
+    Plan §148: the validated SQL outcome — not the scratchpad echo — is the
+    source of truth for what *this turn* actually filtered on. Phase-2 durable
+    memory (``state_delta.confirmed_constraints``) consumes this dict so the
+    next turn carries only filters the agent actually applied, not stale
+    scratchpad residue.
+
+    Returns ``{column_lowercased: value}`` where ``value`` is:
+    - a single string for ``col = 'lit'`` / ``col ILIKE 'lit'`` predicates
+    - a list of strings for ``col IN ('a', 'b', ...)`` predicates with >1 literal
+    - a single string for ``col IN ('a')`` with exactly one literal
+
+    Bind parameters (``:uuid_1``, ``:app_id``) are intentionally skipped —
+    their *values* live in the params dict, not in the SQL text, and they're
+    typically id/scope clauses not user-facing filters.
+
+    Scope clauses (``app_id`` / ``tenant_id``) are elided even when they carry
+    literals (rare but possible if the LLM hardcodes them) because they're
+    bundle-scope, not user intent.
+
+    First-seen wins per column: repeated predicates across joined subqueries
+    collapse to the outer-most. Deterministic across runs.
+    """
+    exclude = {c.lower() for c in (exclude_columns or set())} | _SQL_FILTER_SCOPE_COLUMNS
+    applied: dict[str, Any] = {}
+    for match in _SQL_WHERE_PATTERN.finditer(sql):
+        body = match.group('body')
+        for _alias, column, _op, literal in _SQL_PREDICATE_EQ_PATTERN.findall(body):
+            col = column.strip().lower()
+            if col in exclude or col in applied:
+                continue
+            applied[col] = literal
+        for _alias, column, literals_blob in _SQL_PREDICATE_IN_PATTERN.findall(body):
+            col = column.strip().lower()
+            if col in exclude or col in applied:
+                continue
+            literals = _SQL_IN_LITERAL_PATTERN.findall(literals_blob)
+            if not literals:
+                continue
+            applied[col] = literals[0] if len(literals) == 1 else list(literals)
+    return applied
+
+
+def validate_sql_explicit_only(
+    sql: str,
+    *,
+    explicit_only_columns: set[str],
+    grounded_literals: set[str],
+) -> None:
+    """Reject SQL that filters an explicit_only column against an ungrounded literal.
+
+    Scans every ``WHERE`` body (including subqueries' ``WHERE`` clauses
+    — regex is non-positional so nested blocks are covered). For each
+    ``<col> = 'lit'`` / ``<col> IN ('a', 'b')`` / ``<col> ILIKE 'lit'``
+    predicate, if ``<col>`` is in ``explicit_only_columns`` and none of
+    the RHS literals are in ``grounded_literals``, raise
+    ``SQLExplicitOnlyUngroundedError``.
+
+    No-op when ``explicit_only_columns`` or the WHERE scan is empty.
+    """
+    if not explicit_only_columns:
+        return
+
+    where_bodies = [match.group('body') for match in _SQL_WHERE_PATTERN.finditer(sql)]
+    if not where_bodies:
+        return
+
+    grounded_lower = {str(v).strip().lower() for v in grounded_literals if v not in (None, '')}
+
+    for body in where_bodies:
+        for _alias, column, _op, literal in _SQL_PREDICATE_EQ_PATTERN.findall(body):
+            col = column.strip().lower()
+            if col not in explicit_only_columns:
+                continue
+            lit = str(literal).strip().lower()
+            if lit and lit not in grounded_lower:
+                raise SQLExplicitOnlyUngroundedError(
+                    column=column,
+                    values=[literal],
+                    grounded=grounded_lower,
+                )
+        for _alias, column, literals_blob in _SQL_PREDICATE_IN_PATTERN.findall(body):
+            col = column.strip().lower()
+            if col not in explicit_only_columns:
+                continue
+            literals = _SQL_IN_LITERAL_PATTERN.findall(literals_blob)
+            if not literals:
+                continue
+            if not any(str(lit).strip().lower() in grounded_lower for lit in literals):
+                raise SQLExplicitOnlyUngroundedError(
+                    column=column,
+                    values=list(literals),
+                    grounded=grounded_lower,
+                )
 
 
 def validate_sql(sql: str, semantic_model: dict[str, Any] | None = None) -> str:
@@ -711,6 +916,12 @@ def _sql_validation_reason(exc: SQLValidationError) -> str:
     the outer agent reasons over the stable literal.
     """
     from app.services.chat_engine import reason_codes
+
+    # Phase 2 §2.1: isinstance is more precise than string sniffing and
+    # guarantees the typed ``explicit_only`` leak always surfaces the
+    # same code even if the message text is edited later.
+    if isinstance(exc, SQLExplicitOnlyUngroundedError):
+        return reason_codes.SQL_EXPLICIT_ONLY_UNGROUNDED
 
     message = str(exc)
     if 'must not be relabeled as a different known concept' in message:
@@ -1281,6 +1492,8 @@ MANDATORY RULES:
 - LIMIT {max_rows} rows max.
 - Column role hints:
 {column_role_hints}
+- Explicit-only columns (scope-safety rule):
+{explicit_only_rule}
 - Output ONLY a JSON object with these fields (no markdown, no explanation):
   {{
     "sql": "YOUR SELECT QUERY HERE",
@@ -1469,6 +1682,32 @@ def _build_typed_columns(
     return [asdict(c) for c in typed.columns]
 
 
+_ATTRIBUTION_MAX_MESSAGE_LEN = 500
+_ATTRIBUTION_MAX_SQL_LEN = 1000
+
+
+def build_sql_attribution_artifact(
+    *,
+    original_user_message: str | None,
+    rewritten_question: str | None,
+    generated_sql: str | None,
+) -> dict[str, str]:
+    """Phase 4 F1 attribution: minimum three-field chain that ties a
+    generated SQL statement back to the user turn that produced it.
+
+    The artifact is a plain dict so adversarial harnesses, debug
+    endpoints, and log scrapers can capture it without reaching into
+    the logging subsystem. Values are truncated to keep the payload
+    log-friendly; callers that need the full text should consult their
+    own turn store.
+    """
+    return {
+        'original_user_message': (original_user_message or '')[:_ATTRIBUTION_MAX_MESSAGE_LEN],
+        'rewritten_question': (rewritten_question or '')[:_ATTRIBUTION_MAX_MESSAGE_LEN],
+        'generated_sql': (generated_sql or '')[:_ATTRIBUTION_MAX_SQL_LEN],
+    }
+
+
 async def generate_sql(
     question: str,
     *,
@@ -1480,6 +1719,8 @@ async def generate_sql(
     schema_context: dict[str, Any] | None = None,
     context_payload: dict[str, Any] | None = None,
     app_id: str | None = None,
+    explicit_only_columns: set[str] | None = None,
+    original_user_message: str | None = None,
 ) -> dict[str, Any]:
     """Generate SQL + output-column manifest from a natural-language question.
 
@@ -1497,6 +1738,34 @@ async def generate_sql(
         'available_tables': sorted(_allowed_tables(active_model)),
     }
     model_yaml = yaml.dump(prompt_schema, default_flow_style=False, width=120, sort_keys=False)
+    # Phase 2 §2.1: per-request scope-safety rule. Rendered inline with
+    # the column list so the model cannot miss it; concrete column names
+    # come from the bundle. ``explicit_only_columns`` is a plain set so
+    # callers without a bundle (legacy / common-query cache) get the
+    # neutral "(none)" wording and no behavior change.
+    if explicit_only_columns:
+        explicit_only_rule = (
+            '  The following columns are EXPLICIT-ONLY: '
+            + ', '.join(sorted(explicit_only_columns))
+            + '.\n'
+            '  Only filter them against a value that already appears in CONTEXT as '
+            'resolved grounding — one of: CONTEXT.resolved_entities[*].matches[*].value, '
+            'CONTEXT.active_filters, CONTEXT.confirmed_constraints, or '
+            'CONTEXT.grounded_refs. Those sources are produced by prior tool calls '
+            '(resolve_entity / lookup / catalog_values / data_check).\n'
+            '  A literal that merely APPEARS in the user question text is NOT '
+            'grounding. If the user says "show kaira runs" and "kaira" is not in '
+            'CONTEXT grounding, DO NOT emit WHERE run_name = \'kaira\'. The outer '
+            'agent must call resolve_entity first; the deterministic post-generation '
+            'validator will otherwise reject the query.\n'
+            '  App display names and scope aliases are scope metadata, never '
+            'grounding. Never invent an explicit-only filter from a display name.\n'
+            '  When grounding is absent, emit SQL that does not filter the '
+            'explicit-only column at all. The outer agent will either ground the '
+            'value on the next turn or ask the user for an exact one.'
+        )
+    else:
+        explicit_only_rule = '  (none)'
     prompt = SQL_AGENT_PROMPT.format(
         schema=model_yaml,
         question=question,
@@ -1506,6 +1775,7 @@ async def generate_sql(
         column_role_hints='\n'.join(
             f'- {hint}' for hint in _column_role_hints(prompt_schema, app_id=app_id)
         ) or '- none',
+        explicit_only_rule=explicit_only_rule,
     )
 
     sql_provider = provider_override or os.getenv('SQL_AGENT_PROVIDER', '') or 'openai'
@@ -1593,6 +1863,26 @@ async def generate_sql(
             app_id=app_id,
             semantic_model=active_model,
         )
+
+    # Phase 4 §2 — F1 attribution. One structured record links the
+    # user's turn, the outer agent's tool-call rewrite, and the final
+    # SQL so bad ``run_name`` leakage can be traced to its source
+    # without guessing. The record emits once per successful
+    # generation; callers that need the in-memory artifact can call
+    # ``build_sql_attribution_artifact`` directly.
+    attribution = build_sql_attribution_artifact(
+        original_user_message=original_user_message,
+        rewritten_question=question,
+        generated_sql=sql,
+    )
+    logger.info(
+        'sherlock.sql_attribution',
+        extra={
+            'event': 'sherlock_sql_attribution',
+            'app_id': app_id,
+            **attribution,
+        },
+    )
 
     return {
         'sql': sql,
@@ -1803,8 +2093,19 @@ async def data_query(
     auth: Any,
     app_id: str,
     provider: str | None = None,
+    bundle: Any | None = None,
+    scratchpad: dict[str, Any] | None = None,
+    original_user_message: str | None = None,
 ) -> dict:
-    """End-to-end: question → SQL generation → validation → execution → results."""
+    """End-to-end: question → SQL generation → validation → execution → results.
+
+    Phase 2 §2.1 additions: ``bundle`` carries the scoped bundle and
+    ``scratchpad`` carries Phase-1 typed state. Both are optional so
+    legacy callers (and the common-query cache path) behave unchanged
+    when they are not provided. When provided, the post-generation
+    ``validate_sql_explicit_only`` runs with the bundle's per-pack
+    ``field_safety`` flags and the scratchpad-derived grounded literals.
+    """
     from app.database import analytics_session
     from app.services.chat_engine.result_verifier import verify_query_result
 
@@ -1812,6 +2113,15 @@ async def data_query(
         semantic_model = load_semantic_model(app_id, app_config=await load_app_config(db, app_id))
         normalized_context = _normalize_context_payload(context=context, question_context=question_context)
         schema_context = _build_schema_context(semantic_model, normalized_context)
+        # Phase 2 §2.1: collect explicit_only safety + grounded literals ONCE
+        # per data_query call. Both sets stay constant across retries inside
+        # the MAX_QUERY_ATTEMPTS loop — any retry that adds a new filter still
+        # has to live inside the same grounding.
+        explicit_only_columns = _collect_explicit_only_columns(bundle, semantic_model)
+        grounded_literals = _collect_grounded_literals(
+            scratchpad,
+            current_filters=(normalized_context or {}).get('active_filters'),
+        )
         uuid_registry = UUIDParamRegistry()
         normalized_question = await _expand_run_id_prefixes(
             question,
@@ -1842,6 +2152,8 @@ async def data_query(
                 schema_context=schema_context,
                 context_payload=parameterized_context,
                 app_id=app_id,
+                explicit_only_columns=explicit_only_columns,
+                original_user_message=original_user_message,
             )
             sql = gen_result['sql']
             chart_title = gen_result.get('chart_title')
@@ -1857,6 +2169,15 @@ async def data_query(
         except SQLValidationError as pre_err:
             logger.info('SQL agent: manifest pre-check rejected query: %s', str(pre_err)[:240])
             raise
+        # Phase 2 §2.1: explicit_only safety. The outer harness handler
+        # observes ``SQL_EXPLICIT_ONLY_UNGROUNDED`` and can either ask a
+        # clarifying question or ground the value via ``resolve_entity``
+        # on the next turn.
+        validate_sql_explicit_only(
+            validated_sql,
+            explicit_only_columns=explicit_only_columns,
+            grounded_literals=grounded_literals,
+        )
         safe_sql, params = prepare_query(
             validated_sql,
             auth,
@@ -1904,7 +2225,10 @@ async def data_query(
                     'sql_used': safe_sql,
                     'cache_hit': True,
                     'warnings': warnings,
-                    'applied_filters': copy.deepcopy(parameterized_context.get('active_filters', {})),
+                    # Phase 2 §2.2: derive applied_filters from the SQL that
+                    # actually ran, not from the scratchpad echo. This is the
+                    # validated-outcome source Phase-1 ``state_delta`` consumes.
+                    'applied_filters': extract_applied_filters_from_sql(safe_sql),
                 }
                 return payload
 
@@ -1952,6 +2276,8 @@ async def data_query(
                         schema_context=schema_context,
                         context_payload=parameterized_context,
                         app_id=app_id,
+                        explicit_only_columns=explicit_only_columns,
+                        original_user_message=original_user_message,
                     )
                     current_generated_sql = retry_result['sql']
                     if retry_result.get('chart_title'):
@@ -1961,6 +2287,14 @@ async def data_query(
                         declared_output_columns = list(retry_cols)
                     validated_retry_sql = validate_sql(current_generated_sql, semantic_model=semantic_model)
                     validate_sql_columns_against_manifest(validated_retry_sql, app_id=app_id)
+                    # Phase 2 §2.1: re-apply explicit_only check on retry —
+                    # a retry must not quietly re-introduce an ungrounded
+                    # explicit_only predicate.
+                    validate_sql_explicit_only(
+                        validated_retry_sql,
+                        explicit_only_columns=explicit_only_columns,
+                        grounded_literals=grounded_literals,
+                    )
                     current_sql, current_params = prepare_query(
                         validated_retry_sql,
                         auth,
@@ -2003,7 +2337,10 @@ async def data_query(
             'sql_used': safe_sql,
             'cache_hit': False,
             'warnings': warnings,
-            'applied_filters': copy.deepcopy(parameterized_context.get('active_filters', {})),
+            # Phase 2 §2.2: derive applied_filters from the SQL that actually
+            # ran (validated + param-prepared), not from the scratchpad echo.
+            # The cache-hit branch above uses the same extractor.
+            'applied_filters': extract_applied_filters_from_sql(safe_sql),
         }
         return payload
 

@@ -1,8 +1,9 @@
 """Jobs API - submit, list, check status, cancel background jobs."""
 from uuid import UUID
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import select, desc, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
@@ -15,6 +16,25 @@ from app.models.eval_run import EvalRun
 from app.schemas.job import JobCreate, JobResponse
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+# Idempotency keys are opaque client tokens. Cap the length at the column
+# width and reject obvious garbage so the unique-index path is the only
+# place we ever care about collision semantics.
+_IDEMPOTENCY_KEY_MAX_LEN = 120
+
+
+def _normalize_idempotency_key(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    key = raw.strip()
+    if not key:
+        return None
+    if len(key) > _IDEMPOTENCY_KEY_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Idempotency-Key must be <= {_IDEMPOTENCY_KEY_MAX_LEN} chars",
+        )
+    return key
 
 
 async def _maybe_chain_boundary_sync(
@@ -68,14 +88,54 @@ async def _maybe_chain_boundary_sync(
 @router.post("", response_model=JobResponse, status_code=201)
 async def submit_job(
     body: JobCreate,
+    response: Response,
     auth: AuthContext = require_permission('evaluation:run'),
     db: AsyncSession = Depends(get_db),
+    idempotency_key_header: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    """Submit a new background job. Injects auth context into params for downstream runners."""
+    """Submit a new background job.
+
+    Injects auth context into params for downstream runners. Two pre-write
+    guards run before any DB work:
+
+    1. ``job_type`` must have a registered handler. Submitting an unknown
+       type used to succeed and then fail at the worker; now it 422s at the
+       boundary where the client can see it.
+    2. If ``Idempotency-Key`` is supplied, a prior ``(tenant_id, user_id, key)``
+       match is returned verbatim with status 200 instead of inserting a
+       duplicate. A race between two concurrent replays is handled by
+       catching the partial-unique-index violation and re-selecting.
+       Scope is per-user (not per-tenant) because ``GET /api/jobs/{id}``
+       is user-filtered — returning another user's job here would be a
+       cross-user read and also unusable (404 on next fetch).
+    """
+    from app.services.job_worker import JOB_HANDLERS, get_job_submission_metadata
+
+    if body.job_type not in JOB_HANDLERS:
+        # 422 because the payload is semantically invalid (unknown type),
+        # not malformed. Stable detail string so clients can branch on it.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown job_type: {body.job_type!r}",
+        )
+
+    idempotency_key = _normalize_idempotency_key(idempotency_key_header)
+    if idempotency_key is not None:
+        existing = await db.scalar(
+            select(Job).where(
+                Job.tenant_id == auth.tenant_id,
+                Job.user_id == auth.user_id,
+                Job.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            # Replay: mirror the original submission. 200 (not 201) so the
+            # client can distinguish "already here" from "just created".
+            response.status_code = 200
+            return existing
+
     job_data = body.model_dump()
     job_params = dict(job_data.get("params") or {})
-
-    from app.services.job_worker import get_job_submission_metadata
 
     try:
         metadata = get_job_submission_metadata(job_data["job_type"], job_params)
@@ -116,9 +176,28 @@ async def submit_job(
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
         depends_on_job_id=depends_on_job_id,
+        idempotency_key=idempotency_key,
     )
     db.add(job)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Concurrent submission with the same Idempotency-Key won the race.
+        # Roll back and return the row that landed first. Per-user scope
+        # matches the uq_jobs_user_idempotency_key index.
+        await db.rollback()
+        if idempotency_key is not None:
+            existing = await db.scalar(
+                select(Job).where(
+                    Job.tenant_id == auth.tenant_id,
+                    Job.user_id == auth.user_id,
+                    Job.idempotency_key == idempotency_key,
+                )
+            )
+            if existing is not None:
+                response.status_code = 200
+                return existing
+        raise HTTPException(status_code=409, detail="Job submission conflict")
     await db.refresh(job)
 
     # Placeholder EvalRun so queued work is visible in the Runs list before

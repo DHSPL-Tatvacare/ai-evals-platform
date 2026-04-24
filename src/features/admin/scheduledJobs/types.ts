@@ -17,10 +17,16 @@ export interface Schedule {
   currentCycleAttempts: number;
   lastFireAt: string | null;
   lastFireJobId: string | null;
+  lastFireStatus: string | null;
   lastSkipReason: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  // True for rows owned by SYSTEM_TENANT_ID (platform-wide seeds, e.g.
+  // the daily cost rollup). Surfaced to every tenant's list but locked
+  // read-only — the backend returns 403 on PATCH/DELETE/TOGGLE/FIRE-NOW
+  // from non-system tenants.
+  isPlatformManaged: boolean;
 }
 
 export interface ScheduleOverride {

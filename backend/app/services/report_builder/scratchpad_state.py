@@ -57,6 +57,15 @@ def default_scratchpad() -> dict[str, Any]:
         # Phase 2: structured per-tool outcome log (plan §6 step 6).
         # Each entry: {tool, reason_code, artifact_type, counts}.
         'outcomes': [],
+        # Phase 1 (generic recovery / state contracts, plan §42-107).
+        # Populated by ``apply_state_delta`` when a pack emits
+        # ``envelope.state_delta`` / ``envelope.recovery``. Pack-agnostic:
+        # any pack may write here, harness merge is deterministic.
+        'confirmed_constraints': [],
+        'grounded_refs': [],
+        'open_threads': [],
+        'last_result': None,
+        'last_failure': None,
     }
 
 
@@ -745,6 +754,14 @@ def build_data_query_context(
     if previous_turn:
         context['previous_turn'] = previous_turn
 
+    confirmed_constraints = confirmed_constraint_values(scratchpad)
+    if confirmed_constraints:
+        context['confirmed_constraints'] = confirmed_constraints
+
+    grounded_refs = grounded_ref_values(scratchpad)
+    if grounded_refs:
+        context['grounded_refs'] = grounded_refs
+
     last_analysis = select_analysis_snapshot(question, scratchpad)
     if should_apply_analysis_context(question, last_analysis):
         if isinstance(last_analysis, dict):
@@ -801,3 +818,438 @@ def build_resolved_entity_context(scratchpad: dict[str, Any] | None) -> str | No
         )
 
     return '\n'.join(lines) if len(lines) > 1 else None
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — generic recovery / state_delta merge and render helpers
+#
+# These are intentionally pack-agnostic: ``apply_state_delta`` accepts the
+# typed ``ToolStateDelta`` shape (dict form) and merges each sub-field
+# deterministically into the scratchpad without overwriting unrelated
+# state. ``build_recovery_context`` renders the compact prior-failure /
+# open-threads summary the outer agent needs to decide between retry,
+# clarification, and concession. Existing analytics-shaped helpers
+# (``active_filters`` / ``resolved_entities``) stay as compatibility
+# views and are not replaced.
+# ---------------------------------------------------------------------------
+
+
+_MAX_CONFIRMED_CONSTRAINTS = 20
+_MAX_GROUNDED_REFS = 20
+_MAX_OPEN_THREADS = 8
+
+
+def _constraint_dedup_key(entry: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(entry.get('key') or ''),
+        str(entry.get('source_tool') or ''),
+        str(entry.get('provenance') or ''),
+    )
+
+
+def _grounded_ref_dedup_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(entry.get('kind') or ''),
+        str(entry.get('key') or ''),
+        str(entry.get('source_tool') or ''),
+        str(entry.get('provenance') or ''),
+    )
+
+
+def _open_thread_dedup_key(entry: dict[str, Any]) -> tuple[str, str]:
+    return (str(entry.get('kind') or ''), str(entry.get('key') or ''))
+
+
+def _merge_typed_list(
+    existing: Any,
+    incoming: list[dict[str, Any]],
+    *,
+    dedup_key,
+    max_entries: int,
+) -> list[dict[str, Any]]:
+    """Append-with-replace merge: same-key incoming entries replace the old.
+
+    Keeps the merge deterministic (last-write-wins per dedup key) while
+    avoiding unbounded growth of the scratchpad across turns.
+    """
+    merged: list[dict[str, Any]] = []
+    by_key: dict[Any, int] = {}
+
+    if isinstance(existing, list):
+        for entry in existing:
+            if not isinstance(entry, dict):
+                continue
+            key = dedup_key(entry)
+            if key in by_key:
+                merged[by_key[key]] = entry
+            else:
+                by_key[key] = len(merged)
+                merged.append(entry)
+
+    for entry in incoming:
+        if not isinstance(entry, dict):
+            continue
+        key = dedup_key(entry)
+        if key in by_key:
+            merged[by_key[key]] = entry
+        else:
+            by_key[key] = len(merged)
+            merged.append(entry)
+
+    if len(merged) > max_entries:
+        merged = merged[-max_entries:]
+    return merged
+
+
+def apply_state_delta(
+    scratchpad: dict[str, Any],
+    state_delta: dict[str, Any] | None,
+) -> None:
+    """Merge a typed ``state_delta`` patch into the scratchpad.
+
+    Rules (plan Phase 1 §58-73, §386):
+    - each sub-field is optional; missing fields leave existing state untouched
+    - lists merge with deterministic dedup (same-key incoming replaces old)
+    - ``last_result`` / ``failure_record`` overwrite wholesale (they are the
+      most recent summary by construction)
+    - arbitrary extra keys at the top of the delta are ignored so a pack
+      cannot sneak internal state through this slot
+    - failure records mirror into ``last_failure`` for recovery-context rendering
+    """
+    if not isinstance(scratchpad, dict) or not isinstance(state_delta, dict):
+        return
+
+    confirmed = state_delta.get('confirmed_constraints')
+    if isinstance(confirmed, list) and confirmed:
+        scratchpad['confirmed_constraints'] = _merge_typed_list(
+            scratchpad.get('confirmed_constraints'),
+            [entry for entry in confirmed if isinstance(entry, dict)],
+            dedup_key=_constraint_dedup_key,
+            max_entries=_MAX_CONFIRMED_CONSTRAINTS,
+        )
+
+    grounded = state_delta.get('grounded_refs')
+    if isinstance(grounded, list) and grounded:
+        scratchpad['grounded_refs'] = _merge_typed_list(
+            scratchpad.get('grounded_refs'),
+            [entry for entry in grounded if isinstance(entry, dict)],
+            dedup_key=_grounded_ref_dedup_key,
+            max_entries=_MAX_GROUNDED_REFS,
+        )
+
+    threads = state_delta.get('open_threads')
+    if isinstance(threads, list) and threads:
+        scratchpad['open_threads'] = _merge_typed_list(
+            scratchpad.get('open_threads'),
+            [entry for entry in threads if isinstance(entry, dict)],
+            dedup_key=_open_thread_dedup_key,
+            max_entries=_MAX_OPEN_THREADS,
+        )
+
+    last_result = state_delta.get('last_result')
+    if isinstance(last_result, dict):
+        scratchpad['last_result'] = dict(last_result)
+
+    failure = state_delta.get('failure_record')
+    if isinstance(failure, dict):
+        scratchpad['last_failure'] = dict(failure)
+
+
+def apply_tool_recovery(
+    scratchpad: dict[str, Any],
+    recovery: dict[str, Any] | None,
+    *,
+    reason_code: str | None = None,
+    summary: str | None = None,
+) -> None:
+    """Persist a generic ``recovery`` observation as a compact failure record.
+
+    Called by the harness for every envelope that carries a non-``'none'``
+    ``failure_kind``. When a pack already emits ``state_delta.failure_record``
+    that write is authoritative and this helper is a no-op (the merged
+    record stays in place).
+    """
+    if not isinstance(scratchpad, dict) or not isinstance(recovery, dict):
+        return
+    failure_kind = str(recovery.get('failure_kind') or 'none')
+    if failure_kind == 'none':
+        return
+    if isinstance(scratchpad.get('last_failure'), dict):
+        # A pack-emitted failure_record is more precise than the generic
+        # classification; prefer it.
+        existing = scratchpad['last_failure']
+        if existing.get('failure_kind') == failure_kind and (
+            existing.get('reason_code') or not reason_code
+        ):
+            return
+    scratchpad['last_failure'] = {
+        'reason_code': reason_code,
+        'failure_kind': failure_kind,
+        'recoverable': bool(recovery.get('recoverable')),
+        'summary': summary,
+    }
+
+
+def resolve_open_thread(
+    scratchpad: dict[str, Any],
+    *,
+    kind: str,
+    key: str,
+) -> None:
+    """Drop an open thread once it has been answered.
+
+    Called by ``apply_state_delta`` callers (or the harness) after the
+    user has resolved the ambiguity. Kept as a public helper so packs
+    can close their own threads without reaching into the scratchpad.
+    """
+    if not isinstance(scratchpad, dict):
+        return
+    threads = scratchpad.get('open_threads')
+    if not isinstance(threads, list):
+        return
+    scratchpad['open_threads'] = [
+        entry
+        for entry in threads
+        if not (
+            isinstance(entry, dict)
+            and str(entry.get('kind') or '') == kind
+            and str(entry.get('key') or '') == key
+        )
+    ]
+
+
+def build_recovery_context(scratchpad: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Compact prior-failure + open-threads context for the next prompt.
+
+    Returns ``None`` when there is nothing to surface so the caller can
+    omit the block entirely. Kept small and typed on purpose — this
+    feeds recovery wording in the outer prompt, not a full replay of
+    pack state.
+    """
+    if not isinstance(scratchpad, dict):
+        return None
+
+    raw_failure = scratchpad.get('last_failure')
+    raw_threads = scratchpad.get('open_threads')
+    raw_last_result = scratchpad.get('last_result')
+
+    last_failure: dict[str, Any] | None = (
+        raw_failure if isinstance(raw_failure, dict) else None
+    )
+    open_threads: list[Any] = raw_threads if isinstance(raw_threads, list) else []
+    last_result: dict[str, Any] | None = (
+        raw_last_result if isinstance(raw_last_result, dict) else None
+    )
+
+    has_failure = bool(
+        last_failure
+        and last_failure.get('failure_kind') not in (None, 'none')
+    )
+    has_threads = any(isinstance(entry, dict) for entry in open_threads)
+    has_last_result = bool(last_result)
+
+    if not (has_failure or has_threads or has_last_result):
+        return None
+
+    context: dict[str, Any] = {}
+
+    if has_failure and last_failure is not None:
+        context['prior_failure'] = {
+            'failure_kind': str(last_failure.get('failure_kind') or ''),
+            'recoverable': bool(last_failure.get('recoverable')),
+            'reason_code': last_failure.get('reason_code'),
+            'summary': last_failure.get('summary'),
+        }
+
+    if has_threads:
+        rendered_threads: list[dict[str, Any]] = []
+        for entry in open_threads[:_MAX_OPEN_THREADS]:
+            if not isinstance(entry, dict):
+                continue
+            rendered_threads.append({
+                'kind': str(entry.get('kind') or ''),
+                'key': str(entry.get('key') or ''),
+                'message': str(entry.get('message') or ''),
+            })
+        if rendered_threads:
+            context['open_threads'] = rendered_threads
+
+    if has_last_result and last_result is not None:
+        context['last_result'] = {
+            key: last_result[key]
+            for key in ('kind', 'artifact_type', 'row_count', 'reason_code')
+            if key in last_result
+        }
+
+    return context or None
+
+
+def render_recovery_context_block(scratchpad: dict[str, Any] | None) -> str | None:
+    """Render ``build_recovery_context`` as plain text for the prompt.
+
+    Returns ``None`` when there is nothing to surface. Kept separate from
+    the dict form so tests can assert on both shapes and callers can
+    pick whichever fits their prompt layout.
+    """
+    context = build_recovery_context(scratchpad)
+    if not context:
+        return None
+
+    lines = ['RECOVERY CONTEXT:']
+    prior = context.get('prior_failure')
+    if isinstance(prior, dict):
+        kind = prior.get('failure_kind') or 'unknown'
+        recoverable = 'recoverable' if prior.get('recoverable') else 'not recoverable'
+        reason = prior.get('reason_code')
+        summary = prior.get('summary')
+        header = f'- Prior failure: {kind} ({recoverable})'
+        if reason:
+            header += f' reason_code={reason}'
+        lines.append(header)
+        if summary:
+            lines.append(f'  Summary: {summary}')
+
+    threads = context.get('open_threads')
+    if isinstance(threads, list) and threads:
+        lines.append('- Open clarification threads:')
+        for thread in threads:
+            if not isinstance(thread, dict):
+                continue
+            kind = thread.get('kind') or 'thread'
+            key = thread.get('key') or ''
+            message = thread.get('message') or ''
+            key_suffix = f' [{key}]' if key else ''
+            message_suffix = f': {message}' if message else ''
+            lines.append(f'  - {kind}{key_suffix}{message_suffix}')
+
+    last_result = context.get('last_result')
+    if isinstance(last_result, dict) and last_result:
+        parts = []
+        for label, key in (('kind', 'kind'), ('artifact', 'artifact_type'), ('rows', 'row_count'), ('reason', 'reason_code')):
+            if last_result.get(key) not in (None, ''):
+                parts.append(f'{label}={last_result[key]}')
+        if parts:
+            lines.append('- Last result: ' + ', '.join(parts))
+
+    return '\n'.join(lines) if len(lines) > 1 else None
+
+
+def confirmed_constraint_values(
+    scratchpad: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return ``{key: value}`` for confirmed constraints (compat view).
+
+    Unlike ``active_filter_values`` this reads the Phase-1 typed list, so
+    packs that have migrated to ``state_delta`` can expose their durable
+    truths alongside the legacy analytics ``active_filters`` surface.
+    """
+    if not isinstance(scratchpad, dict):
+        return {}
+    entries = scratchpad.get('confirmed_constraints')
+    if not isinstance(entries, list):
+        return {}
+    out: dict[str, Any] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get('key')
+        if key is None:
+            continue
+        out[str(key)] = entry.get('value')
+    return out
+
+
+def grounded_ref_values(
+    scratchpad: dict[str, Any] | None,
+) -> dict[str, list[Any]]:
+    """Return ``{kind: [values]}`` for grounded refs (compat view)."""
+    if not isinstance(scratchpad, dict):
+        return {}
+    entries = scratchpad.get('grounded_refs')
+    if not isinstance(entries, list):
+        return {}
+    out: dict[str, list[Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get('kind') or '')
+        if not kind:
+            continue
+        out.setdefault(kind, []).append(entry.get('value'))
+    return out
+
+
+def grounded_literal_set(
+    scratchpad: dict[str, Any] | None,
+    current_filters: dict[str, Any] | None = None,
+) -> set[str]:
+    """Return the flat set of lower-cased literal values that count as grounding.
+
+    Pack-agnostic: walks Phase-1 typed state (``confirmed_constraints`` /
+    ``grounded_refs`` / ``resolved_entities`` / ``active_filters`` /
+    ``lookups``) plus any current-turn filter-argument map and flattens
+    every scalar value into a single lowercase string set. Integers /
+    UUIDs / booleans are all included by string-equality after casting
+    — the caller only needs membership.
+
+    Any pack that needs to enforce "only filter on grounded values"
+    (analytics SQL validator, future vector-collection-auth, future
+    graph-edge-auth) consumes this view via the same lookup surface,
+    so there's no pack-to-pack coupling on the scratchpad contents.
+    """
+    out: set[str] = set()
+
+    def _add(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, (list, tuple, set)):
+            for v in value:
+                _add(v)
+            return
+        if isinstance(value, dict):
+            if 'value' in value:
+                _add(value['value'])
+            for key in ('min', 'max', 'start', 'end'):
+                if key in value:
+                    _add(value[key])
+            return
+        text = str(value).strip()
+        if text:
+            out.add(text.lower())
+
+    if isinstance(scratchpad, dict):
+        for entry in (scratchpad.get('confirmed_constraints') or []):
+            if isinstance(entry, dict):
+                _add(entry.get('value'))
+        for entry in (scratchpad.get('grounded_refs') or []):
+            if isinstance(entry, dict):
+                _add(entry.get('value'))
+        resolved = scratchpad.get('resolved_entities') or {}
+        if isinstance(resolved, dict):
+            for payload in resolved.values():
+                if not isinstance(payload, dict):
+                    continue
+                for match in (payload.get('matches') or []):
+                    if isinstance(match, dict):
+                        _add(match.get('value'))
+        active = scratchpad.get('active_filters') or {}
+        if isinstance(active, dict):
+            for entry in active.values():
+                if isinstance(entry, dict) and 'value' in entry:
+                    _add(entry.get('value'))
+                else:
+                    _add(entry)
+        lookups = scratchpad.get('lookups') or {}
+        if isinstance(lookups, dict):
+            for payload in lookups.values():
+                if not isinstance(payload, dict):
+                    continue
+                for item in (payload.get('values') or []):
+                    if isinstance(item, dict):
+                        _add(item.get('value'))
+
+    if isinstance(current_filters, dict):
+        for value in current_filters.values():
+            _add(value)
+
+    return out

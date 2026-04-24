@@ -120,9 +120,15 @@ class LeadListResponse(CamelModel):
 
 
 class CollectionRefreshRequest(CamelModel):
+    # ``sync_mode`` lets ops trigger either a one-shot 90-day bootstrap
+    # (``date_range`` with explicit ``dateFrom``/``dateTo``) or an
+    # on-demand delta (``incremental``). ``bootstrap`` is sugar for a
+    # 90-day ``date_range`` with the plan's defaults.
+    sync_mode: str | None = None
     date_from: str | None = None
     date_to: str | None = None
     event_codes: str | None = None
+    overlap_minutes: int | None = None
 
 
 class CollectionRefreshResponse(CamelModel):
@@ -130,6 +136,27 @@ class CollectionRefreshResponse(CamelModel):
     source_family: str
     sync_mode: str
     status: str
+
+
+class CollectionRunEntry(CamelModel):
+    """One row in the last-N ``source_sync_runs`` list surfaced to ops."""
+    id: str
+    sync_mode: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    watermark_from: str | None = None
+    watermark_to: str | None = None
+    records_scanned: int = 0
+    records_upserted: int = 0
+    records_failed: int = 0
+    is_scheduled_run: bool = False
+    error_message: str | None = None
+
+
+class CollectionRunsResponse(CamelModel):
+    source_family: str
+    runs: list[CollectionRunEntry]
 
 
 class CollectionSyncStatus(CamelModel):

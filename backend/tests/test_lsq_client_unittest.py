@@ -144,5 +144,109 @@ class LsqClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(http_error.headers, {'Retry-After': '3'})
 
 
+class FetchLeadsFilterContractTests(unittest.IsolatedAsyncioTestCase):
+    """fetch_leads must wire ``filter_field`` into LSQ's ``LookupName`` and
+    mirror it onto ``Sorting.ColumnName`` by default. This is the entire
+    ModifiedOn-delta contract at the HTTP boundary."""
+
+    async def asyncSetUp(self):
+        lsq_client._next_request_slot_at = 0.0
+
+    async def _capture(self, *, filter_field=None, sort_field=None):
+        import httpx as _httpx
+
+        request = _httpx.Request('POST', 'https://example.com/lsq')
+        response = _httpx.Response(200, json=[], request=request)
+        captured: dict = {}
+
+        class _AC:
+            async def __aenter__(self_):  # noqa: N805
+                return self_
+
+            async def __aexit__(self_, *_):  # noqa: N805
+                return False
+
+            async def request(self_, method, url, **kwargs):  # noqa: N805
+                captured['method'] = method
+                captured['url'] = url
+                captured['body'] = kwargs.get('json')
+                return response
+
+        with patch.object(lsq_client.httpx, 'AsyncClient', lambda *a, **k: _AC()):
+            kwargs_out = {}
+            if filter_field is not None:
+                kwargs_out['filter_field'] = filter_field
+            if sort_field is not None:
+                kwargs_out['sort_field'] = sort_field
+            await lsq_client.fetch_leads(
+                date_from='2026-04-20 00:00:00',
+                date_to='2026-04-21 00:00:00',
+                page=1,
+                page_size=50,
+                **kwargs_out,
+            )
+        return captured['body']
+
+    async def test_fetch_leads_defaults_to_createdon_filter_and_sort(self):
+        body = await self._capture()
+        self.assertEqual(body['Parameter']['LookupName'], 'CreatedOn')
+        self.assertEqual(body['Sorting']['ColumnName'], 'CreatedOn')
+
+    async def test_fetch_leads_modifiedon_filter_also_sorts_by_modifiedon(self):
+        body = await self._capture(filter_field='ModifiedOn')
+        self.assertEqual(body['Parameter']['LookupName'], 'ModifiedOn')
+        self.assertEqual(body['Sorting']['ColumnName'], 'ModifiedOn')
+
+    async def test_fetch_leads_explicit_sort_field_overrides_default(self):
+        body = await self._capture(filter_field='ModifiedOn', sort_field='CreatedOn')
+        self.assertEqual(body['Parameter']['LookupName'], 'ModifiedOn')
+        self.assertEqual(body['Sorting']['ColumnName'], 'CreatedOn')
+
+    async def test_fetch_leads_requests_modifiedon_column(self):
+        body = await self._capture(filter_field='ModifiedOn')
+        # Include_CSV must ask LSQ to return ModifiedOn so the client-side
+        # upper-bound filter has data to compare against.
+        self.assertIn('ModifiedOn', body['Columns']['Include_CSV'])
+
+    async def test_fetch_leads_client_side_upper_bound_uses_filter_field(self):
+        """If filter_field=ModifiedOn, the client-side date_to must filter
+        on ModifiedOn (not CreatedOn)."""
+        import httpx as _httpx
+
+        request = _httpx.Request('POST', 'https://example.com/lsq')
+        inside = {
+            'ProspectID': 'p1',
+            'CreatedOn': '2025-01-01 00:00:00',
+            'ModifiedOn': '2026-04-20 09:00:00',
+        }
+        outside = {
+            'ProspectID': 'p2',
+            'CreatedOn': '2025-01-01 00:00:00',
+            'ModifiedOn': '2026-04-22 00:00:00',
+        }
+        response = _httpx.Response(200, json=[inside, outside], request=request)
+
+        class _AC:
+            async def __aenter__(self_):  # noqa: N805
+                return self_
+
+            async def __aexit__(self_, *_):  # noqa: N805
+                return False
+
+            async def request(self_, method, url, **kwargs):  # noqa: N805
+                return response
+
+        with patch.object(lsq_client.httpx, 'AsyncClient', lambda *a, **k: _AC()):
+            result = await lsq_client.fetch_leads(
+                date_from='2026-04-20 00:00:00',
+                date_to='2026-04-21 00:00:00',
+                filter_field='ModifiedOn',
+                page=1,
+                page_size=50,
+            )
+        prospect_ids = [l['ProspectID'] for l in result['leads']]
+        self.assertEqual(prospect_ids, ['p1'])
+
+
 if __name__ == '__main__':
     unittest.main()

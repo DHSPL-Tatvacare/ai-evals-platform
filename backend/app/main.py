@@ -80,6 +80,17 @@ async def lifespan(app: FastAPI):
 
     _validate_startup_config()
 
+    # Eagerly import the job worker so ``@register_job_handler`` runs and
+    # populates both JOB_HANDLERS and the scheduler workload registry
+    # before any request hits ``/api/jobs`` or ``/api/scheduled-jobs/registry``.
+    # This is required in dedicated-worker deployments (JOB_RUN_EMBEDDED_WORKER=false)
+    # where the API process never starts the job loop itself — without this
+    # import, unknown-job-type validation and the scheduled-workload list
+    # would see an empty registry on the first request after boot.
+    # (Aliased import: the lifespan param is named ``app``, shadowing the
+    # top-level ``app`` package.)
+    import app.services.job_worker as _register_job_handlers  # noqa: F401
+
     await bootstrap_database_schema()
 
     # Fail boot if any Sherlock manifest drifts from live Postgres schema.

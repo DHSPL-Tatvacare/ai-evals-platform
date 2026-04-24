@@ -101,18 +101,18 @@ function FreshnessBadge({
 
   if (syncing) {
     primary = 'Refreshing data…';
-    secondary = 'Fetching last 7 days from LSQ';
+    secondary = 'Pulling delta from LSQ';
   } else if (failed) {
     primary = 'Last sync failed';
     secondary = truncateError(status?.lastError ?? null);
     tone = 'error';
   } else if (lastSuccessAt) {
-    primary = '7-day window current';
+    primary = 'Data synced';
     secondary = describeSuccessTimestamp(lastSuccessAt);
     if (freshness?.stale) tone = 'warning';
   } else {
     primary = 'Not synced yet';
-    secondary = 'Click refresh to sync last 7 days';
+    secondary = 'Run a bootstrap or delta sync to populate this view';
     tone = 'warning';
   }
 

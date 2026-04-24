@@ -9,7 +9,6 @@ import copy
 import inspect
 import json
 import logging
-import re
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -50,6 +49,8 @@ from app.services.chat_engine.openai_agents_adapter import (
 from app.services.chat_engine.sql_agent import load_app_config, load_semantic_model
 from app.services.report_builder.schemas import ToolCallDetailOut
 from app.services.report_builder.scratchpad_state import (
+    apply_state_delta,
+    apply_tool_recovery,
     build_analysis_snapshot,
     default_scratchpad,
     drop_scope_derived_filters,
@@ -80,9 +81,6 @@ from app.services.report_builder.turn_store import (
 )
 
 logger = logging.getLogger(__name__)
-
-_SCHEMA_TERM_PATTERN = re.compile(r'\b[a-z][a-z0-9]*_[a-z0-9_]+\b')
-_QUESTION_WORD_PATTERN = re.compile(r'[a-z][a-z0-9_]*')
 
 
 def _reset_turn_contextvars(correlation_token, sherlock_token) -> None:
@@ -674,64 +672,6 @@ def _serialize_recognition_event(result: RecognitionEvent) -> dict[str, Any]:
     return result.model_dump(mode='json')
 
 
-def _normalize_question_term(term: str) -> str:
-    return '_'.join(str(term or '').strip().lower().split())
-
-
-def _semantic_name_candidates(semantic_model: dict[str, Any]) -> set[str]:
-    names: set[str] = set()
-
-    dimensions = semantic_model.get('dimensions') or []
-    if isinstance(dimensions, list):
-        for dimension in dimensions:
-            if isinstance(dimension, dict):
-                name = _normalize_question_term(str(dimension.get('name') or ''))
-                if name:
-                    names.add(name)
-
-    metrics = semantic_model.get('metrics') or []
-    if isinstance(metrics, dict):
-        iterable = metrics.keys()
-    elif isinstance(metrics, list):
-        iterable = [
-            metric.get('name')
-            for metric in metrics
-            if isinstance(metric, dict)
-        ]
-    else:
-        iterable = []
-    for metric_name in iterable:
-        name = _normalize_question_term(str(metric_name or ''))
-        if name:
-            names.add(name)
-
-    tables = semantic_model.get('tables') or {}
-    if isinstance(tables, dict):
-        for table_payload in tables.values():
-            columns = table_payload.get('columns') if isinstance(table_payload, dict) else {}
-            if not isinstance(columns, dict):
-                continue
-            for column_name in columns.keys():
-                name = _normalize_question_term(str(column_name or ''))
-                if name:
-                    names.add(name)
-
-    return names
-
-
-def _semantic_metric_name_candidates(semantic_model: dict[str, Any]) -> set[str]:
-    from app.services.chat_engine.sql_agent import _normalize_metrics
-
-    names: set[str] = set()
-    for metric in _normalize_metrics(semantic_model):
-        if not isinstance(metric, dict):
-            continue
-        name = _normalize_question_term(str(metric.get('name') or ''))
-        if name:
-            names.add(name)
-    return names
-
-
 def _question_contract_hints(
     *,
     question: str,
@@ -765,100 +705,6 @@ def _question_contract_hints(
     )
 
 
-def _compute_question_hints(
-    *,
-    question: str,
-    app_id: str,
-    semantic_model: dict[str, Any],
-    tool_vocabulary,
-) -> dict[str, Any]:
-    """Internal helper invoked by ``AnalyticsPack.question_hints``.
-
-    Accepts a ``tool_vocabulary(app_id, semantic_model) -> ToolVocabulary``
-    callable so the pack controls the vocabulary source; chat_handler
-    holds only the regex/text helpers invoked from here.
-    """
-    if not question.strip() or not app_id:
-        return {'context': '', 'needs_discovery': False}
-
-    try:
-        vocab = tool_vocabulary(app_id, semantic_model)
-    except Exception:
-        logger.debug('sherlock question contract: failed to build vocabulary', exc_info=True)
-        return {'context': '', 'needs_discovery': False}
-
-    mapped_terms: list[str] = []
-    unresolved_terms: list[str] = []
-    seen_terms = sorted({
-        _normalize_question_term(match.group(0))
-        for match in _SCHEMA_TERM_PATTERN.finditer(question.lower())
-    })
-    for term in seen_terms:
-        dimension_resolution = vocab.resolve_dimension(term)
-        column_resolution = vocab.resolve_column(term)
-        if dimension_resolution.status == 'unique' and dimension_resolution.canonical is not None:
-            canonical_dimension = _normalize_question_term(dimension_resolution.canonical.name)
-            if canonical_dimension != term:
-                mapped_terms.append(
-                    f'`{term}` means the `{dimension_resolution.canonical.name}` dimension.'
-                )
-            continue
-        if column_resolution.status == 'unique' and column_resolution.canonical is not None:
-            canonical_column = _normalize_question_term(column_resolution.canonical.column)
-            if canonical_column != term:
-                mapped_terms.append(
-                    f'`{term}` means `{column_resolution.canonical.table}.{column_resolution.canonical.column}`.'
-                )
-            continue
-        if (
-            dimension_resolution.status == 'ambiguous'
-            or column_resolution.status == 'ambiguous'
-            or term.endswith(('_id', '_status', '_comment', '_name'))
-        ):
-            unresolved_terms.append(term)
-
-    ambiguous_metric_terms: list[str] = []
-    question_words = set(_QUESTION_WORD_PATTERN.findall(question.lower()))
-    known_names = _semantic_name_candidates(semantic_model)
-    score_candidates = sorted(
-        name for name in known_names
-        if name == 'score' or name.endswith('_score')
-    )
-    if 'score' in question_words and 'score' not in seen_terms and len(score_candidates) > 1:
-        ambiguous_metric_terms.append('score')
-
-    # M2 c02_pie_donut lesson: ``status`` alone is the canonical ambiguous
-    # term for apps that project both ``analytics_run_facts.status``
-    # (run-level) and ``analytics_eval_facts.result_status`` (per-item
-    # verdict). The SQL agent can't disambiguate without a nudge; flagging
-    # the bare word here so the outer agent discovers/clarifies before
-    # data_query.
-    status_candidates = sorted(
-        name for name in known_names
-        if name == 'status' or name.endswith('_status')
-    )
-    if 'status' in question_words and 'status' not in seen_terms and len(status_candidates) > 1:
-        ambiguous_metric_terms.append('status')
-
-    if not mapped_terms and not unresolved_terms and not ambiguous_metric_terms:
-        return {'context': '', 'needs_discovery': False}
-
-    lines = ['Question contract notes:']
-    lines.extend(f'- {line}' for line in mapped_terms)
-    lines.extend(
-        f'- `{term}` is not a declared field in this app. Discover or clarify it first; never substitute a nearby column.'
-        for term in unresolved_terms
-    )
-    lines.extend(
-        f'- `{term}` is ambiguous in this app. Discover or clarify the intended field before data_query.'
-        for term in ambiguous_metric_terms
-    )
-    return {
-        'context': '\n'.join(lines),
-        'needs_discovery': bool(unresolved_terms or ambiguous_metric_terms),
-    }
-
-
 def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str, *, app_id: str = '') -> None:
     """Capture structured tool outcomes for the next turn's prompt.
 
@@ -879,6 +725,32 @@ def _update_scratchpad(session: dict[str, Any], tool_name: str, result_str: str,
     payload = envelope.get('payload') if isinstance(envelope, dict) else None
     if not isinstance(payload, dict):
         payload = {}
+
+    # ------------------------------------------------------------------
+    # Phase 1 — apply generic ``state_delta`` / ``recovery`` blocks.
+    #
+    # Both are optional and additive (plan §42-107). When present they
+    # feed the harness-owned scratchpad blocks the outer prompt reads
+    # back via ``build_recovery_context`` / ``render_recovery_context_block``.
+    # When absent the behavior below is byte-identical to the pre-Phase-1
+    # shape, so legacy pack envelopes continue to work unchanged.
+    # ------------------------------------------------------------------
+    if isinstance(envelope, dict):
+        state_delta = envelope.get('state_delta')
+        if isinstance(state_delta, dict):
+            apply_state_delta(pad, state_delta)
+        recovery = envelope.get('recovery')
+        if isinstance(recovery, dict):
+            reason_code_for_recovery = (
+                outcome.get('reason_code') if isinstance(outcome, dict) else None
+            )
+            summary_for_recovery = envelope.get('summary') if isinstance(envelope, dict) else None
+            apply_tool_recovery(
+                pad,
+                recovery,
+                reason_code=str(reason_code_for_recovery) if reason_code_for_recovery else None,
+                summary=str(summary_for_recovery) if summary_for_recovery else None,
+            )
 
     # ------------------------------------------------------------------
     # Structured outcome record — plan §6 step 6. The outer agent sees
@@ -1207,10 +1079,47 @@ def _bundle_event_payload(bundle: ScopedBundle) -> dict[str, Any]:
     shipped the turn. Raw ontology/resolver rows are intentionally not
     persisted — they live in ``sherlock_ontology_*`` and can be
     re-hydrated by ontology version.
+
+    Phase 2 §2.3: also surface the per-pack ``projected_classes`` slice
+    so debug/replay consumers can see which ontology classes landed on
+    which pack storage, and which fields each pack flagged
+    ``explicit_only``. This is stable metadata — it does not leak row
+    data and the shapes are already captured in the bundle's typed
+    ``ClassProjection`` records, so we just serialize them.
     """
     pack_versions = sorted(
         (proj.pack_id, proj.pack_version) for proj in bundle.pack_projections
     )
+    pack_projections_payload: list[dict[str, Any]] = []
+    for proj in bundle.pack_projections:
+        classes_payload: list[dict[str, Any]] = []
+        for cls in proj.projected_classes:
+            entry: dict[str, Any] = {
+                'ontology_class': cls.ontology_class,
+            }
+            if cls.storage:
+                entry['storage'] = cls.storage
+            if cls.identifier_field:
+                entry['identifier_field'] = cls.identifier_field
+            if cls.contract_id:
+                entry['contract_id'] = cls.contract_id
+            if cls.field_safety:
+                # Serialize only ``explicit_only`` overrides to keep the
+                # payload compact — the default ``safe_first_pass`` does
+                # not need to show up here.
+                explicit_only = {
+                    str(col): str(level)
+                    for col, level in cls.field_safety.items()
+                    if str(level).strip().lower() == 'explicit_only'
+                }
+                if explicit_only:
+                    entry['field_safety'] = explicit_only
+            classes_payload.append(entry)
+        pack_projections_payload.append({
+            'pack_id': proj.pack_id,
+            'pack_version': proj.pack_version,
+            'projected_classes': classes_payload,
+        })
     return {
         'cache_key': [
             str(bundle.scope.tenant_id),
@@ -1224,6 +1133,7 @@ def _bundle_event_payload(bundle: ScopedBundle) -> dict[str, Any]:
         'pack_versions': [
             {'pack_id': pid, 'pack_version': ver} for pid, ver in pack_versions
         ],
+        'pack_projections': pack_projections_payload,
         'tool_names': sorted({
             str(spec.get('name')) for spec in bundle.tool_specs
             if isinstance(spec, dict) and spec.get('name')

@@ -316,8 +316,9 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 export type { CallRecord, CallFilters, LeadListRecord, LeadFilters };
 
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
-  // Default to the hot window (7d) so the mirror always serves it without a
-  // boundary sync. Users who need older data can widen the filter explicitly.
+  // UX default: show the last 7 days of leads on first open. The mirror
+  // holds all accumulated history since the 90-day bootstrap; users who
+  // need older data widen the filter explicitly.
   dateFrom: daysAgoLocalDateString(7) + ' 00:00:00',
   dateTo: todayLocalDateString() + ' 23:59:59',
   agents: [],

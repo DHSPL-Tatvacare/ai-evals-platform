@@ -71,6 +71,15 @@ SQL_SECURITY_REJECTED = 'SQL_SECURITY_REJECTED'
 SQL_VALIDATION_FAILED = 'SQL_VALIDATION_FAILED'
 SQL_INVALID_OUTPUT_ALIAS_CONTRACT = 'SQL_INVALID_OUTPUT_ALIAS_CONTRACT'
 SQL_EXECUTION_ERROR = 'SQL_EXECUTION_ERROR'
+# Phase 2 §2.1: generated SQL references an ``explicit_only`` column in
+# a filter predicate without a matching grounded_ref / confirmed_constraint
+# in the current scratchpad. Raised by the deterministic post-generation
+# validator, never by prose.
+SQL_EXPLICIT_ONLY_UNGROUNDED = 'SQL_EXPLICIT_ONLY_UNGROUNDED'
+# Phase 2 §2.4: ``data_check(filters=...)`` received a non-dict value
+# (e.g. a bare string). Guarded at the handler boundary so a malformed
+# input produces a typed error envelope instead of an ``AttributeError``.
+SQL_INVALID_FILTERS_SHAPE = 'SQL_INVALID_FILTERS_SHAPE'
 
 ANALYTICS_SQL_REASON_CODES: frozenset[str] = frozenset({
     SQL_UNKNOWN_COLUMN,
@@ -79,6 +88,8 @@ ANALYTICS_SQL_REASON_CODES: frozenset[str] = frozenset({
     SQL_VALIDATION_FAILED,
     SQL_INVALID_OUTPUT_ALIAS_CONTRACT,
     SQL_EXECUTION_ERROR,
+    SQL_EXPLICIT_ONLY_UNGROUNDED,
+    SQL_INVALID_FILTERS_SHAPE,
 })
 
 # ---------------------------------------------------------------------------

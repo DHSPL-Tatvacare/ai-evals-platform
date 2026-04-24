@@ -101,13 +101,20 @@ async def ensure_registered_app_access(
     required: bool = True,
     param_name: str = 'app_id',
 ) -> str | None:
+    """Enforce that ``auth`` can reach the requested app.
+
+    ``auth.app_access`` is treated as the single source of truth. The
+    Owner role is reflected there at auth-load time via
+    :func:`app.auth.permissions.load_role_permissions`, so no Owner-only
+    branch is needed here.
+    """
     normalized = await validate_registered_app_slug(
         db,
         app_slug,
         required=required,
         param_name=param_name,
     )
-    if normalized is None or auth.is_owner:
+    if normalized is None:
         return normalized
     if normalized not in auth.app_access:
         raise HTTPException(403, f'No access to app: {normalized}')

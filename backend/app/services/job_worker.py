@@ -42,45 +42,20 @@ _cancel_check_times: dict[str, float] = {}
 _CANCEL_CHECK_INTERVAL = 10.0  # seconds between DB fallback checks
 
 QUEUE_CLASSES = frozenset({"interactive", "standard", "bulk", "analytics"})
-JOB_QUEUE_DEFAULTS: dict[str, dict[str, int | str]] = {
-    "generate-report": {"queue_class": "interactive", "priority": 10},
-    "generate-cross-run-report": {"queue_class": "interactive", "priority": 10},
-    "generate-evaluator-draft": {"queue_class": "interactive", "priority": 20},
-    "sync-external-source": {"queue_class": "standard", "priority": 120},
-    "evaluate-voice-rx": {"queue_class": "standard", "priority": 100},
-    "evaluate-custom": {"queue_class": "standard", "priority": 100},
-    "evaluate-custom-batch": {"queue_class": "standard", "priority": 110},
-    "evaluate-inside-sales": {"queue_class": "standard", "priority": 110},
-    "evaluate-batch": {"queue_class": "bulk", "priority": 200},
-    "evaluate-adversarial": {"queue_class": "bulk", "priority": 220},
-    "populate-analytics": {"queue_class": "bulk", "priority": 500},
-    "populate-cost-rollup": {"queue_class": "bulk", "priority": 510},
-}
-JOB_APP_DEFAULTS: dict[str, str] = {
-    "evaluate-voice-rx": "voice-rx",
-    "evaluate-inside-sales": "inside-sales",
-    "evaluate-batch": "kaira-bot",
-    "evaluate-adversarial": "kaira-bot",
-}
-RETRY_SAFE_JOB_TYPES = frozenset({
-    "generate-report",
-    "generate-cross-run-report",
-    "generate-evaluator-draft",
-    "sync-external-source",
-    "populate-analytics",
-    # Evaluation jobs (Phase 0, 2026-04): on transient LLM errors
-    # (timeouts, 429, 5xx, connection errors) the worker retries the job.
-    # promote_eval_run_to_running handles the "row already exists from a
-    # prior attempt" case by UPDATE-if-exists-else-INSERT, so retried
-    # attempts own the same eval_run row (matched by eval_run_id threaded
-    # through params) rather than orphaning a failed row.
-    "evaluate-voice-rx",
-    "evaluate-batch",
-    "evaluate-adversarial",
-    "evaluate-custom",
-    "evaluate-custom-batch",
-    "evaluate-inside-sales",
-})
+
+# Job-type policy is populated by ``@register_job_handler`` at import time.
+# The decorator is the single source of truth for queue_class, priority,
+# default app_id, retry safety, and schedulability — there are no parallel
+# hand-maintained dicts to drift against. Module consumers treat these as
+# read-only lookups (see ``get_job_submission_metadata``, ``_is_retry_safe_job``).
+#
+# Why: before consolidation the same job_type appeared in up to four
+# independent maps (queue defaults, app defaults, retry-safe set, scheduler
+# workload registry) and stayed in sync only by convention. A new job_type
+# that forgot any one of them was silently mis-queued or un-schedulable.
+JOB_QUEUE_DEFAULTS: dict[str, dict[str, int | str]] = {}
+JOB_APP_DEFAULTS: dict[str, str] = {}
+RETRY_SAFE_JOB_TYPES: set[str] = set()
 
 
 def _clean_str(value) -> str:
@@ -568,15 +543,101 @@ def _job_error_message(error: Exception) -> str:
     return safe_error_message(error)
 
 
-# Job handler registry - add new job types here
-JOB_HANDLERS = {}
+from typing import Any, Awaitable, Callable
+
+# Job handler registry — populated by ``@register_job_handler`` at import time.
+# Maps ``job_type -> handler coroutine``.
+JobHandler = Callable[..., Awaitable[Any]]
+JOB_HANDLERS: dict[str, JobHandler] = {}
 
 
-def register_job_handler(job_type: str):
-    """Decorator to register a job handler function."""
+def register_job_handler(
+    job_type: str,
+    *,
+    queue_class: str = "standard",
+    priority: int = 100,
+    app_id_default: str = "",
+    retry_safe: bool = False,
+    schedulable: bool = False,
+    schedule_app_id: str | None = None,
+    schedule_label: str | None = None,
+    schedule_description: str | None = None,
+    schedule_launch_source: str = "explicit_params",
+    schedule_source_list_endpoint: str | None = None,
+    schedule_default_params: dict | None = None,
+    schedule_platform_managed: bool = False,
+):
+    """Decorator: register a job handler + its queue / retry / schedule policy.
+
+    One decorator per job type. Keeping the policy next to the handler body
+    prevents drift: adding a job type that forgets to register its queue
+    class, retry safety, or schedulability used to be silent; now those
+    are decorator arguments.
+
+    Args:
+        job_type: stable string identifier used on the wire and in ``jobs.job_type``.
+        queue_class: one of ``QUEUE_CLASSES``. Governs cross-queue fairness caps.
+        priority: 0..1000, lower runs first within the same queue_class.
+        app_id_default: ``params["app_id"]`` to substitute when the submitter
+            omits it. Empty means "caller must supply or job is platform-wide".
+        retry_safe: when True, transient failures (timeouts, 429, 5xx,
+            connection errors) re-queue the job with exponential backoff
+            instead of terminal-failing. Handlers promoted to retry-safe must
+            be idempotent on their ``params`` (see evaluation runners'
+            ``promote_eval_run_to_running`` contract).
+        schedulable: when True, also registers a
+            ``app.services.scheduler.workloads.ScheduledWorkload`` so the
+            Create Schedule overlay offers this workload. Requires
+            ``schedule_label``.
+        schedule_app_id: overrides ``app_id_default`` for the workload key.
+            Use when a handler (e.g. ``sync-external-source``) is generic
+            but schedulability is gated to a specific app.
+        schedule_label / schedule_description / schedule_launch_source /
+        schedule_source_list_endpoint / schedule_default_params: forwarded
+            verbatim to ``ScheduledWorkload``.
+    """
+    if queue_class not in QUEUE_CLASSES:
+        allowed = ", ".join(sorted(QUEUE_CLASSES))
+        raise ValueError(
+            f"register_job_handler({job_type!r}): queue_class {queue_class!r} "
+            f"not in {{{allowed}}}"
+        )
+    if not 0 <= priority <= 1000:
+        raise ValueError(
+            f"register_job_handler({job_type!r}): priority {priority!r} must be in [0, 1000]"
+        )
+    if schedulable and not schedule_label:
+        raise ValueError(
+            f"register_job_handler({job_type!r}): schedulable=True requires schedule_label"
+        )
 
     def decorator(func):
         JOB_HANDLERS[job_type] = func
+        JOB_QUEUE_DEFAULTS[job_type] = {"queue_class": queue_class, "priority": priority}
+        if app_id_default:
+            JOB_APP_DEFAULTS[job_type] = app_id_default
+        if retry_safe:
+            RETRY_SAFE_JOB_TYPES.add(job_type)
+        if schedulable:
+            # Import lazily to avoid a cycle: workloads is consumed by routes
+            # that may import this module.
+            from app.services.scheduler.workloads import (
+                ScheduledWorkload,
+                register_workload,
+            )
+            workload_app_id = schedule_app_id if schedule_app_id is not None else app_id_default
+            register_workload(
+                ScheduledWorkload(
+                    app_id=workload_app_id or "",
+                    job_type=job_type,
+                    label=schedule_label or job_type,
+                    description=schedule_description or "",
+                    launch_source=schedule_launch_source,  # type: ignore[arg-type]
+                    source_list_endpoint=schedule_source_list_endpoint,
+                    default_params=dict(schedule_default_params or {}),
+                    platform_managed=schedule_platform_managed,
+                )
+            )
         return func
 
     return decorator
@@ -1080,7 +1141,13 @@ async def get_queue_position(job_id: str) -> int:
 # ── Job Handlers ─────────────────────────────────────────────────
 
 
-@register_job_handler("evaluate-batch")
+@register_job_handler(
+    "evaluate-batch",
+    queue_class="bulk",
+    priority=200,
+    app_id_default="kaira-bot",
+    retry_safe=True,
+)
 async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run batch evaluation on threads from a data file."""
     from app.services.evaluators.batch_runner import run_batch_evaluation
@@ -1122,7 +1189,13 @@ async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
     return result
 
 
-@register_job_handler("evaluate-adversarial")
+@register_job_handler(
+    "evaluate-adversarial",
+    queue_class="bulk",
+    priority=220,
+    app_id_default="kaira-bot",
+    retry_safe=True,
+)
 async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run adversarial stress test against live Kaira API."""
     from app.services.evaluators.adversarial_runner import run_adversarial_evaluation
@@ -1172,7 +1245,13 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
     return result
 
 
-@register_job_handler("evaluate-voice-rx")
+@register_job_handler(
+    "evaluate-voice-rx",
+    queue_class="standard",
+    priority=100,
+    app_id_default="voice-rx",
+    retry_safe=True,
+)
 async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx two-call evaluation (transcription + critique)."""
     from app.services.evaluators.voice_rx_runner import run_voice_rx_evaluation
@@ -1180,7 +1259,12 @@ async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID
     return await run_voice_rx_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
-@register_job_handler("evaluate-custom")
+@register_job_handler(
+    "evaluate-custom",
+    queue_class="standard",
+    priority=100,
+    retry_safe=True,
+)
 async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run a custom evaluator on a voice-rx listing."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_evaluator
@@ -1188,7 +1272,12 @@ async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, 
     return await run_custom_evaluator(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
-@register_job_handler("evaluate-custom-batch")
+@register_job_handler(
+    "evaluate-custom-batch",
+    queue_class="standard",
+    priority=110,
+    retry_safe=True,
+)
 async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run multiple custom evaluators on a single entity."""
     from app.services.evaluators.custom_evaluator_runner import run_custom_eval_batch
@@ -1196,7 +1285,13 @@ async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.
     return await run_custom_eval_batch(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
-@register_job_handler("evaluate-inside-sales")
+@register_job_handler(
+    "evaluate-inside-sales",
+    queue_class="standard",
+    priority=110,
+    app_id_default="inside-sales",
+    retry_safe=True,
+)
 async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run inside-sales call quality evaluation."""
     from app.services.evaluators.inside_sales_runner import run_inside_sales_evaluation
@@ -1204,7 +1299,28 @@ async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.
     return await run_inside_sales_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
-@register_job_handler("sync-external-source")
+@register_job_handler(
+    "sync-external-source",
+    queue_class="standard",
+    priority=120,
+    retry_safe=True,
+    # Schedulable under inside-sales only — the LSQ adapter is the sole
+    # concrete source today. When a second source lands, register another
+    # ``ScheduledWorkload`` for its app at seed time instead of here.
+    schedulable=True,
+    schedule_app_id="inside-sales",
+    schedule_label="Inside Sales CRM sync",
+    schedule_description=(
+        "Pulls new and updated LSQ calls and leads on every tick. "
+        "Run a bootstrap refresh once before enabling the first cron "
+        "so the watermark is established."
+    ),
+    schedule_default_params={
+        "app_id": "inside-sales",
+        "source_system": "lsq",
+        "sync_mode": "incremental",
+    },
+)
 async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Sync an external source into local source tables."""
     from app.services.source_sync import run_external_source_sync
@@ -1212,7 +1328,12 @@ async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.U
     return await run_external_source_sync(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
-@register_job_handler("generate-report")
+@register_job_handler(
+    "generate-report",
+    queue_class="interactive",
+    priority=10,
+    retry_safe=True,
+)
 async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate and persist a single-run report artifact through the generic composer."""
     from app.services.reports.report_generation_service import generate_single_run_report_artifact
@@ -1235,7 +1356,12 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
     )
 
 
-@register_job_handler("generate-evaluator-draft")
+@register_job_handler(
+    "generate-evaluator-draft",
+    queue_class="interactive",
+    priority=20,
+    retry_safe=True,
+)
 async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate evaluator output-field draft from a prompt via LLM."""
     from app.services.evaluators.evaluator_draft_service import generate_evaluator_draft
@@ -1277,7 +1403,12 @@ async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uu
     return result
 
 
-@register_job_handler("generate-cross-run-report")
+@register_job_handler(
+    "generate-cross-run-report",
+    queue_class="interactive",
+    priority=10,
+    retry_safe=True,
+)
 async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate and persist a cross-run report artifact through the generic composer."""
     from app.services.reports.report_generation_service import generate_cross_run_report_artifact
@@ -1296,7 +1427,12 @@ async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: u
     )
 
 
-@register_job_handler("populate-analytics")
+@register_job_handler(
+    "populate-analytics",
+    queue_class="bulk",
+    priority=500,
+    retry_safe=True,
+)
 async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Populate analytics fact tables for a completed eval run."""
     from app.services.analytics.fact_populator import FactPopulator
@@ -1311,7 +1447,30 @@ async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUI
         return result.to_dict()
 
 
-@register_job_handler("populate-cost-rollup")
+@register_job_handler(
+    "populate-cost-rollup",
+    queue_class="bulk",
+    priority=510,
+    # Rollup is a pure UPSERT over llm_usage → llm_usage_daily_rollup, so
+    # transient DB errors are always safe to retry; a partial day is never
+    # observable because populate_rollup_range commits per-day.
+    retry_safe=True,
+    # Platform-wide daily job. app_id="" because the rollup scans all
+    # tenants in one pass rather than per-app. Marked platform_managed
+    # so the user-facing registry endpoint does not advertise a workload
+    # that users can't actually create (ScheduledJobCreate enforces
+    # ``app_id`` min_length=1). The seed_cost_rollup_schedule path
+    # bypasses pydantic and writes the system-tenant row directly.
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="LLM cost daily rollup",
+    schedule_description=(
+        "Rebuilds llm_usage_daily_rollup for D-1 across all tenants. "
+        "Seed creates a default 01:05 UTC schedule under the system tenant."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
 async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Rebuild ``llm_usage_daily_rollup`` for a date range.
 

@@ -35,8 +35,21 @@ from app.services.lsq_client import (
 SyncMode = Literal["full", "incremental", "date_range", "targeted"]
 SourceFamily = Literal["calls", "leads"]
 
+# Single source of truth for the Inside Sales ETL surface. Other modules
+# (schedule seed, source resolver, routes) import these instead of
+# re-declaring string literals.
+INSIDE_SALES_APP_ID = "inside-sales"
+LSQ_SOURCE_SYSTEM = "lsq"
+# Call activity types we mirror: 21 = inbound telephony, 22 = outbound.
+INSIDE_SALES_CALL_EVENT_CODES: tuple[int, ...] = (21, 22)
+
 CALLS_PAGE_SIZE = 100
 LEADS_PAGE_SIZE = 100
+
+
+def _event_codes_csv(codes: tuple[int, ...]) -> str:
+    """Comma-separated form used by LSQ job params and the refresh API body."""
+    return ",".join(str(code) for code in codes)
 
 
 def _async_session_factory():
@@ -55,6 +68,19 @@ class InsideSalesSyncRequest:
     date_to: str | None = None
     targeted_source_id: str | None = None
     event_codes: tuple[int, ...] | None = None
+    overlap_minutes: int | None = None
+
+
+# Safety cap to prevent watermark regressions from accidental operator input.
+_OVERLAP_MINUTES_CAP = 360
+# Per-family defaults, applied only to incremental syncs when the request
+# does not pass an explicit overlap. Calls need 60 min because LSQ's
+# activity filter is CreatedOn-only and late mutations (status flip,
+# recording URL arrival) of up to ~45 min have been observed in the
+# production probe. Leads are authoritative on ModifiedOn, so a small
+# overlap only guards against page drift / clock skew.
+DEFAULT_CALL_OVERLAP_MINUTES = 60
+DEFAULT_LEAD_OVERLAP_MINUTES = 10
 
 
 @dataclass
@@ -110,21 +136,37 @@ def _parse_event_codes(value: Any) -> tuple[int, ...] | None:
     raise ValueError("event_codes must be a comma-separated string or list of integers")
 
 
+def _parse_overlap_minutes(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("overlap_minutes must be an integer") from exc
+    if parsed < 0:
+        raise ValueError("overlap_minutes must be non-negative")
+    if parsed > _OVERLAP_MINUTES_CAP:
+        raise ValueError(
+            f"overlap_minutes cannot exceed {_OVERLAP_MINUTES_CAP} (6 hours)"
+        )
+    return parsed
+
+
 def parse_inside_sales_sync_request(params: dict[str, Any]) -> InsideSalesSyncRequest:
     app_id = str(params.get("app_id") or "").strip()
     source_family = str(params.get("source_family") or "").strip().lower()
     sync_mode = str(params.get("sync_mode") or "incremental").strip().lower()
-    source_system = str(params.get("source_system") or "lsq").strip().lower()
+    source_system = str(params.get("source_system") or LSQ_SOURCE_SYSTEM).strip().lower()
     targeted_source_id = str(params.get("targeted_source_id") or "").strip() or None
 
-    if app_id != "inside-sales":
-        raise ValueError("app_id must be 'inside-sales'")
+    if app_id != INSIDE_SALES_APP_ID:
+        raise ValueError(f"app_id must be {INSIDE_SALES_APP_ID!r}")
     if source_family not in {"calls", "leads"}:
         raise ValueError("source_family must be one of: calls, leads")
     if sync_mode not in {"full", "incremental", "date_range", "targeted"}:
         raise ValueError("sync_mode must be one of: full, incremental, date_range, targeted")
-    if source_system != "lsq":
-        raise ValueError("source_system must be 'lsq'")
+    if source_system != LSQ_SOURCE_SYSTEM:
+        raise ValueError(f"source_system must be {LSQ_SOURCE_SYSTEM!r}")
 
     request = InsideSalesSyncRequest(
         app_id=app_id,
@@ -135,6 +177,7 @@ def parse_inside_sales_sync_request(params: dict[str, Any]) -> InsideSalesSyncRe
         date_to=str(params.get("date_to") or "").strip() or None,
         targeted_source_id=targeted_source_id,
         event_codes=_parse_event_codes(params.get("event_codes")),
+        overlap_minutes=_parse_overlap_minutes(params.get("overlap_minutes")),
     )
 
     if request.sync_mode in {"full", "date_range"}:
@@ -149,6 +192,85 @@ def parse_inside_sales_sync_request(params: dict[str, Any]) -> InsideSalesSyncRe
     return request
 
 
+# Phase 1 bootstrap default: the 90-day backfill is the permanent
+# starting dataset, not a rolling hot window.
+BOOTSTRAP_BACKFILL_DAYS = 90
+
+
+def _default_event_codes_for(source_family: SourceFamily) -> str | None:
+    """Return the default event-codes CSV for a family, or None if the
+    family doesn't use them. Leads never carry event codes."""
+    if source_family == "calls":
+        return _event_codes_csv(INSIDE_SALES_CALL_EVENT_CODES)
+    return None
+
+
+def build_incremental_refresh_job_params(
+    *,
+    source_family: SourceFamily,
+    event_codes: str | None = None,
+    overlap_minutes: int | None = None,
+) -> dict[str, Any]:
+    """Canonical shape for an on-demand incremental delta job."""
+    params: dict[str, Any] = {
+        "app_id": INSIDE_SALES_APP_ID,
+        "source_family": source_family,
+        "source_system": LSQ_SOURCE_SYSTEM,
+        "sync_mode": "incremental",
+    }
+    resolved_codes = event_codes if event_codes is not None else _default_event_codes_for(source_family)
+    if resolved_codes:
+        params["event_codes"] = resolved_codes
+    if overlap_minutes is not None:
+        params["overlap_minutes"] = overlap_minutes
+    return params
+
+
+def build_date_range_refresh_job_params(
+    *,
+    source_family: SourceFamily,
+    date_from: str,
+    date_to: str,
+    event_codes: str | None = None,
+) -> dict[str, Any]:
+    """Canonical shape for an explicit window (bootstrap or ad-hoc range)."""
+    if not date_from or not date_to:
+        raise ValueError("date_range sync requires both date_from and date_to")
+    params: dict[str, Any] = {
+        "app_id": INSIDE_SALES_APP_ID,
+        "source_family": source_family,
+        "source_system": LSQ_SOURCE_SYSTEM,
+        "sync_mode": "date_range",
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+    resolved_codes = event_codes if event_codes is not None else _default_event_codes_for(source_family)
+    if resolved_codes:
+        params["event_codes"] = resolved_codes
+    return params
+
+
+def build_bootstrap_backfill_job_params(
+    *,
+    source_family: SourceFamily,
+    now: datetime | None = None,
+    days: int = BOOTSTRAP_BACKFILL_DAYS,
+    event_codes: str | None = None,
+) -> dict[str, Any]:
+    """Return the ``date_range`` payload for a one-shot Phase 1 backfill."""
+    if days <= 0:
+        raise ValueError("days must be positive")
+    current = now or _utc_now()
+    return build_date_range_refresh_job_params(
+        source_family=source_family,
+        date_from=(current - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S"),
+        date_to=current.strftime("%Y-%m-%d %H:%M:%S"),
+        event_codes=event_codes,
+    )
+
+
+# Back-compat shim for existing callers / tests. Prefer the explicit
+# builders above for new code.
 def build_manual_refresh_job_params(
     *,
     source_family: SourceFamily,
@@ -157,24 +279,19 @@ def build_manual_refresh_job_params(
     date_to: str | None,
     event_codes: str | None = None,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "app_id": "inside-sales",
-        "source_family": source_family,
-        "source_system": "lsq",
-    }
     if has_successful_sync:
-        params["sync_mode"] = "incremental"
-    else:
-        if not date_from or not date_to:
-            raise ValueError("date_from and date_to are required before first successful sync")
-        params.update({
-            "sync_mode": "date_range",
-            "date_from": date_from,
-            "date_to": date_to,
-        })
-    if source_family == "calls" and event_codes:
-        params["event_codes"] = event_codes
-    return params
+        return build_incremental_refresh_job_params(
+            source_family=source_family,
+            event_codes=event_codes,
+        )
+    if not date_from or not date_to:
+        raise ValueError("date_from and date_to are required before first successful sync")
+    return build_date_range_refresh_job_params(
+        source_family=source_family,
+        date_from=date_from,
+        date_to=date_to,
+        event_codes=event_codes,
+    )
 
 
 async def get_latest_successful_sync_run(
@@ -203,11 +320,20 @@ async def get_latest_successful_sync_run(
 def _resolve_incremental_window(
     request: InsideSalesSyncRequest,
     latest_successful: SourceSyncRun | None,
+    *,
+    overlap_minutes: int = 0,
 ) -> tuple[str, str]:
     latest_watermark = latest_successful.watermark_to if latest_successful else None
     date_from = _format_sync_datetime(request.date_from) or _format_sync_datetime(latest_watermark)
     if not date_from:
         raise ValueError("incremental sync requires date_from or an existing successful watermark")
+
+    if overlap_minutes:
+        parsed_from = _parse_lsq_datetime(date_from)
+        if parsed_from is not None:
+            date_from = (parsed_from - timedelta(minutes=overlap_minutes)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
     date_to = _format_sync_datetime(request.date_to) or _utc_now().strftime("%Y-%m-%d %H:%M:%S")
     return date_from, date_to
@@ -383,6 +509,9 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         stmt.on_conflict_do_update(
             constraint="uq_source_call_records_tenant_app_activity",
             set_=update_columns,
+            where=SourceCallRecord.source_record_hash.is_distinct_from(
+                stmt.excluded.source_record_hash
+            ),
         )
     )
     return len(rows)
@@ -435,6 +564,9 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         stmt.on_conflict_do_update(
             constraint="uq_source_lead_records_tenant_app_prospect",
             set_=update_columns,
+            where=SourceLeadRecord.source_record_hash.is_distinct_from(
+                stmt.excluded.source_record_hash
+            ),
         )
     )
     return len(rows)
@@ -694,6 +826,13 @@ async def _sync_leads_family(
 
     assert date_from is not None and date_to is not None
 
+    # Incremental lead syncs follow LSQ's authoritative ``ModifiedOn``
+    # delta so leads created before the window but updated inside it are
+    # refreshed. Backfill / date_range seed passes stay on ``CreatedOn``.
+    lead_filter_field: Literal["CreatedOn", "ModifiedOn"] = (
+        "ModifiedOn" if request.sync_mode == "incremental" else "CreatedOn"
+    )
+
     page = 1
     while True:
         if await is_job_cancelled(job_id, tenant_id=tenant_id):
@@ -702,6 +841,7 @@ async def _sync_leads_family(
         response = await fetch_leads(
             date_from=date_from,
             date_to=date_to,
+            filter_field=lead_filter_field,
             page=page,
             page_size=LEADS_PAGE_SIZE,
         )
@@ -774,10 +914,10 @@ async def run_inside_sales_source_sync(
     Session" error that can arise when autobegun SELECTs, explicit commits,
     and ``async with session.begin()`` are interleaved on the same session.
 
-    When ``params.is_scheduled_run`` is True, the window is forced to
-    ``[now - 7d, now]`` regardless of request params, and rows older than
-    7 days are pruned atomically with the upsert. On-demand runs never
-    prune.
+    ``params.is_scheduled_run`` is recorded as provenance on the
+    ``source_sync_runs`` row but does not change retention behavior: the
+    delta path never prunes and never forces a rolling hot window. The
+    mirror accumulates indefinitely; archival is a separate policy.
     """
     request = parse_inside_sales_sync_request(params)
     is_scheduled_run = bool(params.get("is_scheduled_run"))
@@ -809,23 +949,22 @@ async def run_inside_sales_source_sync(
                 watermark_from = _to_watermark(sync_date_from)
                 watermark_to = _to_watermark(sync_date_to)
             elif request.sync_mode == "incremental":
+                # Per-family overlap defaults protect against late-arriving
+                # mutations (calls) and page-boundary drift (leads). An
+                # explicit ``overlap_minutes`` in the request always wins.
+                if request.overlap_minutes is not None:
+                    overlap = request.overlap_minutes
+                elif request.source_family == "calls":
+                    overlap = DEFAULT_CALL_OVERLAP_MINUTES
+                else:
+                    overlap = DEFAULT_LEAD_OVERLAP_MINUTES
                 resolved_date_from, resolved_date_to = _resolve_incremental_window(
-                    request, latest_successful
+                    request, latest_successful, overlap_minutes=overlap
                 )
                 watermark_from = _to_watermark(resolved_date_from)
                 watermark_to = _to_watermark(resolved_date_to)
                 sync_date_from = resolved_date_from
                 sync_date_to = resolved_date_to
-
-            # Scheduled fires always cover the 7-day hot window; overrides
-            # whatever sync_mode / watermark was resolved above. Prune then
-            # happens inside the upsert tx below.
-            if is_scheduled_run:
-                now = _utc_now()
-                sync_date_to = now.strftime("%Y-%m-%d %H:%M:%S")
-                sync_date_from = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-                watermark_from = _to_watermark(sync_date_from)
-                watermark_to = _to_watermark(sync_date_to)
 
             sync_run = _build_sync_run(
                 request=request,
@@ -843,7 +982,6 @@ async def run_inside_sales_source_sync(
         # the context manager commits; on exception it rolls back and we
         # drop into Phase 3 to mark the row as failed in yet another
         # fresh ``begin()`` block.
-        pruned = 0
         result: dict[str, Any]
         try:
             async with db.begin():
@@ -876,21 +1014,7 @@ async def run_inside_sales_source_sync(
                     failed=int(result["records_failed"]),
                 )
 
-                if is_scheduled_run:
-                    from app.services.inside_sales_queries import prune_rows_older_than
-
-                    cutoff = _utc_now() - timedelta(days=7)
-                    pruned = await prune_rows_older_than(
-                        db,
-                        tenant_id=tenant_id,
-                        app_id=request.app_id,
-                        source_family=request.source_family,
-                        cutoff=cutoff,
-                    )
-
                 extra_details: dict[str, Any] = {"pagesProcessed": result["pages_processed"]}
-                if is_scheduled_run:
-                    extra_details["prunedRows"] = pruned
 
                 await _complete_sync_run(
                     db,
@@ -934,6 +1058,5 @@ async def run_inside_sales_source_sync(
         "watermark_from": sync_run.watermark_from,
         "watermark_to": sync_run.watermark_to,
         "is_scheduled_run": is_scheduled_run,
-        "pruned_rows": pruned,
         **result,
     }

@@ -76,8 +76,11 @@ class AppScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertEqual(ctx.exception.detail, 'App not found')
 
-    async def test_ensure_registered_app_access_allows_owner_without_explicit_app_grant(self):
-        auth = SimpleNamespace(is_owner=True, app_access=frozenset())
+    async def test_ensure_registered_app_access_allows_owner_with_grant_in_app_access(self):
+        """Phase 3: Owner access is represented truthfully in ``auth.app_access``
+        at auth-load time, so ``ensure_registered_app_access`` simply reads that
+        single source of truth. No Owner-only bypass remains in this helper."""
+        auth = SimpleNamespace(is_owner=True, app_access=frozenset({'kaira-bot'}))
         with patch.object(
             app_scope,
             'load_active_app_map',
@@ -90,6 +93,28 @@ class AppScopeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(resolved, 'kaira-bot')
+
+    async def test_ensure_registered_app_access_denies_owner_with_empty_app_access(self):
+        """Phase 3 regression: the helper no longer short-circuits on
+        ``is_owner``. If ``auth.app_access`` is empty (e.g. because the seed or
+        auth-loader failed to expand Owner grants) the caller must be denied so
+        the failure surfaces rather than silently permitting an Owner with no
+        resolvable app."""
+        auth = SimpleNamespace(is_owner=True, app_access=frozenset())
+        with patch.object(
+            app_scope,
+            'load_active_app_map',
+            AsyncMock(return_value={'kaira-bot': object()}),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await app_scope.ensure_registered_app_access(
+                    db=AsyncMock(),
+                    auth=auth,
+                    app_slug='kaira-bot',
+                )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail, 'No access to app: kaira-bot')
 
     async def test_ensure_registered_app_access_rejects_registered_app_without_grant(self):
         auth = SimpleNamespace(is_owner=False, app_access=frozenset({'voice-rx'}))
