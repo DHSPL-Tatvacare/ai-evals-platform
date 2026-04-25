@@ -16,12 +16,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth.app_scope import require_fixed_app_access
 from app.auth.context import AuthContext
+from app.auth.permissions import ensure_permissions
 from app.database import get_db
 from app.models.job import Job
 from app.schemas.inside_sales import (
     AgentListResponse,
     CallListResponse,
     CallRecord,
+    CollectionCoverage,
     CollectionRefreshRequest,
     CollectionRefreshResponse,
     CollectionRunEntry,
@@ -44,6 +46,7 @@ from app.services.inside_sales_eval_linkage import (
     list_eval_history_entries,
 )
 from app.services.inside_sales_queries import (
+    get_collection_coverage as get_collection_coverage_summary,
     get_collection_freshness,
     get_collection_sync_status,
     list_call_agent_names_from_source,
@@ -357,6 +360,8 @@ async def refresh_collection(
                 "sync_mode must be one of: incremental, date_range, bootstrap"
             ),
         )
+    if sync_mode in {"date_range", "bootstrap"}:
+        ensure_permissions(auth, "schedule:manage")
 
     try:
         if sync_mode == "bootstrap":
@@ -520,48 +525,39 @@ async def list_collection_runs(
     )
 
 
-@router.get("/coverage")
+@router.get("/coverage", response_model=CollectionCoverage)
 async def get_collection_coverage(
     source_family: str,
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Expose `[hot_from, hot_to]` + last scheduled sync timestamp per family.
-
-    `hot_from` / `hot_to` are computed at request time (now-7d, now) — they
-    are NOT read from DB. `lastScheduledSync*` is read from
-    `source_sync_runs.is_scheduled_run = true` (persistent, not inferred from
-    `jobs.params`).
-    """
-    from datetime import datetime as _dt, timezone as _tz
-
-    from app.models.source_records import SourceSyncRun
-    from app.services.inside_sales_boundary import hot_boundary
-
+    """Expose DB-backed mirrored coverage per source family."""
     family = _validate_source_family(source_family)
-    now = _dt.now(_tz.utc)
-    hot_from = hot_boundary(now)
-    hot_to = now
-
-    stmt = (
-        select(SourceSyncRun)
-        .where(
-            SourceSyncRun.tenant_id == auth.tenant_id,
-            SourceSyncRun.app_id == "inside-sales",
-            SourceSyncRun.source_family == family,
-            SourceSyncRun.is_scheduled_run.is_(True),
-            SourceSyncRun.status == "completed",
-        )
-        .order_by(SourceSyncRun.completed_at.desc())
-        .limit(1)
+    coverage = await get_collection_coverage_summary(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id="inside-sales",
+        source_family=family,
     )
-    last = (await db.execute(stmt)).scalars().first()
-    return {
-        "hotFrom": hot_from.strftime("%Y-%m-%d %H:%M:%S"),
-        "hotTo": hot_to.strftime("%Y-%m-%d %H:%M:%S"),
-        "lastScheduledSyncAt": last.completed_at.isoformat() if last and last.completed_at else None,
-        "lastScheduledSyncStatus": last.status if last else None,
-    }
+    return CollectionCoverage(
+        has_data=bool(coverage["hasData"]),
+        available_from=(
+            coverage["availableFrom"].strftime("%Y-%m-%d %H:%M:%S")
+            if coverage["availableFrom"]
+            else None
+        ),
+        available_to=(
+            coverage["availableTo"].strftime("%Y-%m-%d %H:%M:%S")
+            if coverage["availableTo"]
+            else None
+        ),
+        last_scheduled_sync_at=(
+            coverage["lastScheduledSyncAt"].isoformat()
+            if coverage["lastScheduledSyncAt"]
+            else None
+        ),
+        last_scheduled_sync_status=coverage["lastScheduledSyncStatus"],
+    )
 
 
 @router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)

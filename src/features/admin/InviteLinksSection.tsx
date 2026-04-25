@@ -1,18 +1,25 @@
 import { useState, useEffect, useCallback, useId, useMemo } from 'react';
-import { Link2, Copy, Check, Trash2, Plus, Search, SearchX, X } from 'lucide-react';
-import { Button, Badge, LoadingState, ConfirmDialog, EmptyState, Select, Pagination } from '@/components/ui';
+import { Link2, Copy, Check, Trash2, Plus, SearchX, X } from 'lucide-react';
+import {
+  Button,
+  Badge,
+  LoadingState,
+  ConfirmDialog,
+  Select,
+  TableToolbar,
+  DataTable,
+  type ColumnDef,
+} from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
 import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
-import { cn } from '@/utils';
 import { useRightOverlay } from '@/hooks';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { usePermission } from '@/utils/permissions';
 
-const ROWS_PER_PAGE = 20;
+const DEFAULT_PAGE_SIZE = 25;
 
 const EXPIRY_OPTIONS = [
   { label: '1 hour', value: 1 },
@@ -21,14 +28,26 @@ const EXPIRY_OPTIONS = [
   { label: '30 days', value: 720 },
 ];
 
+type LinkStatus = { label: string; variant: 'success' | 'neutral' | 'warning' };
+
+function statusFor(link: InviteLink): LinkStatus {
+  const expired = new Date(link.expiresAt) < new Date();
+  const exhausted = link.maxUses !== null && link.usesCount >= link.maxUses;
+  if (!link.isActive) return { label: 'Revoked', variant: 'neutral' };
+  if (expired) return { label: 'Expired', variant: 'neutral' };
+  if (exhausted) return { label: 'Exhausted', variant: 'warning' };
+  return { label: 'Active', variant: 'success' };
+}
+
 export function InviteLinksSection() {
-  const canManageInvites = usePermission('invite_link:manage');
   const [links, setLinks] = useState<InviteLink[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [revokingLink, setRevokingLink] = useState<InviteLink | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [allRoles, setAllRoles] = useState<RoleResponse[]>([]);
 
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -62,14 +81,18 @@ export function InviteLinksSection() {
   useEffect(() => { setPage(1); }, [search]);
   useEffect(() => {
     rolesApi.listRoles().then((all) => {
+      setAllRoles(all);
       const filtered = all.filter((r) => !r.isSystem);
       setRoles(filtered);
       if (filtered.length > 0) setRoleId(filtered[0].id);
     });
   }, []);
 
-  const isExpired = (link: InviteLink) => new Date(link.expiresAt) < new Date();
-  const isExhausted = (link: InviteLink) => link.maxUses !== null && link.usesCount >= link.maxUses;
+  const roleNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of allRoles) map.set(r.id, r.name);
+    return map;
+  }, [allRoles]);
 
   const roleOptions = useMemo<SelectOption[]>(
     () => roles.map((role) => ({ value: role.id, label: role.name })),
@@ -81,13 +104,6 @@ export function InviteLinksSection() {
     [],
   );
 
-  const linkStatus = (link: InviteLink): { label: string; variant: 'success' | 'neutral' | 'warning' } => {
-    if (!link.isActive) return { label: 'Revoked', variant: 'neutral' };
-    if (isExpired(link)) return { label: 'Expired', variant: 'neutral' };
-    if (isExhausted(link)) return { label: 'Exhausted', variant: 'warning' };
-    return { label: 'Active', variant: 'success' };
-  };
-
   const filtered = useMemo(() => {
     if (!search.trim()) return links;
     const q = search.toLowerCase();
@@ -95,14 +111,16 @@ export function InviteLinksSection() {
       (l) =>
         (l.label ?? '').toLowerCase().includes(q) ||
         l.roleId.toLowerCase().includes(q) ||
+        (roleNamesById.get(l.roleId) ?? '').toLowerCase().includes(q) ||
         l.createdByEmail.toLowerCase().includes(q) ||
-        linkStatus(l).label.toLowerCase().includes(q),
+        statusFor(l).label.toLowerCase().includes(q),
     );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [links, search]);
+  }, [links, search, roleNamesById]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
-  const paginated = filtered.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE);
+  const totalItems = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const handleCreate = async () => {
     setIsCreating(true);
@@ -149,16 +167,98 @@ export function InviteLinksSection() {
 
   const inputClass = 'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
 
+  const columns = useMemo((): ColumnDef<InviteLink>[] => [
+    {
+      key: 'label',
+      header: 'Label',
+      width: 'min-w-[180px]',
+      render: (link) =>
+        link.label ? link.label : <span className="italic text-[var(--text-muted)]">No label</span>,
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      width: 'min-w-[160px]',
+      render: (link) => {
+        const name = roleNamesById.get(link.roleId);
+        return (
+          <span title={link.roleId}>
+            <Badge variant="neutral" size="sm">
+              {name ?? link.roleId.slice(0, 8)}
+            </Badge>
+          </span>
+        );
+      },
+    },
+    {
+      key: 'uses',
+      header: 'Uses',
+      width: 'w-[90px]',
+      render: (link) => (
+        <span className="tabular-nums text-[var(--text-secondary)]">
+          {link.usesCount}{link.maxUses !== null ? ` / ${link.maxUses}` : ''}
+        </span>
+      ),
+    },
+    {
+      key: 'expires',
+      header: 'Expires',
+      width: 'w-[170px]',
+      render: (link) => (
+        <span className="tabular-nums text-[var(--text-muted)]">
+          {new Date(link.expiresAt).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 'w-[110px]',
+      render: (link) => {
+        const status = statusFor(link);
+        return <Badge variant={status.variant} dot={status.variant} size="sm">{status.label}</Badge>;
+      },
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      width: 'w-[100px]',
+      cellClassName: 'text-right',
+      headerClassName: 'text-right',
+      render: (link) =>
+        link.isActive ? (
+          <PermissionGate action="invite_link:manage">
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              iconOnly
+              title="Revoke"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRevokingLink(link);
+              }}
+            />
+          </PermissionGate>
+        ) : null,
+    },
+  ], [roleNamesById]);
+
   if (isLoading) {
     return <LoadingState />;
   }
 
   return (
-    <>
-      {/* Generated URL banner */}
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {generatedUrl && (
-        <div className="mb-4 rounded-lg border border-[var(--color-brand-accent)]/30 bg-[var(--color-brand-accent)]/5 p-3">
-          <p className="mb-2 text-[12px] font-medium text-[var(--text-primary)]">
+        <div className="rounded-lg border border-[var(--color-brand-accent)]/30 bg-[var(--color-brand-accent)]/5 p-3">
+          <p className="mb-2 text-[13px] font-medium text-[var(--text-primary)]">
             Invite link generated — copy it now, it won&apos;t be shown again.
           </p>
           <div className="flex items-center gap-2">
@@ -172,7 +272,47 @@ export function InviteLinksSection() {
         </div>
       )}
 
-      {/* Create form — right overlay panel */}
+      <TableToolbar
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search invite links…',
+          label: 'Search invite links',
+        }}
+        actions={
+          <PermissionGate action="invite_link:manage">
+            <Button size="sm" icon={Plus} onClick={() => { setShowCreateForm(true); setGeneratedUrl(null); }}>
+              Generate Invite Link
+            </Button>
+          </PermissionGate>
+        }
+      />
+
+      <DataTable
+        columns={columns}
+        data={paginated}
+        keyExtractor={(link) => link.id}
+        pagination={{
+          page: safePage,
+          totalPages,
+          pageSize,
+          totalItems,
+          showCount: true,
+          onPageChange: setPage,
+          onPageSizeChange: (n) => {
+            setPageSize(n);
+            setPage(1);
+          },
+        }}
+        emptyIcon={search ? SearchX : Link2}
+        emptyTitle={search ? 'No results found' : 'No invite links yet'}
+        emptyDescription={
+          search
+            ? `No invite links match "${search}"`
+            : 'Generate an invite link to let team members sign up'
+        }
+      />
+
       {showCreateForm && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowCreateForm(false)} />
@@ -219,92 +359,6 @@ export function InviteLinksSection() {
         </div>
       )}
 
-      {/* Toolbar: search + generate (hidden when empty and no search) */}
-      <div className={cn('mb-4 flex items-center gap-3', links.length === 0 && !search && 'hidden')}>
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by label, role, or creator..."
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-brand-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)] transition-colors"
-          />
-        </div>
-        <PermissionGate action="invite_link:manage">
-          <Button size="md" icon={Plus} onClick={() => { setShowCreateForm(true); setGeneratedUrl(null); }}>
-            Generate Invite Link
-          </Button>
-        </PermissionGate>
-      </div>
-
-      {/* Links table (hidden when no links at all) */}
-      <div className={cn('overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)]', filtered.length === 0 && 'hidden')}>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-              <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Label</th>
-              <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Role</th>
-              <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Uses</th>
-              <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Expires</th>
-              <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Status</th>
-              <th className="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border-subtle)]">
-            {paginated.map((link) => {
-              const status = linkStatus(link);
-              const canRevoke = link.isActive;
-              return (
-                <tr key={link.id} className={cn('transition-colors', !link.isActive && 'opacity-50')}>
-                  <td className="px-4 py-2.5 text-[13px] text-[var(--text-primary)]">
-                    {link.label || <span className="text-[var(--text-muted)] italic">No label</span>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant="neutral" size="sm">{link.roleId}</Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-[13px] text-[var(--text-secondary)]">
-                    {link.usesCount}{link.maxUses !== null ? ` / ${link.maxUses}` : ''}
-                  </td>
-                  <td className="px-4 py-2.5 text-[12px] text-[var(--text-muted)]">
-                    {new Date(link.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant={status.variant} dot={status.variant} size="sm">{status.label}</Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <div className="inline-grid grid-cols-1 gap-1 w-[32px]">
-                      {canRevoke ? (
-                        <PermissionGate action="invite_link:manage">
-                          <Button variant="danger" size="sm" icon={Trash2} iconOnly title="Revoke" onClick={() => setRevokingLink(link)} />
-                        </PermissionGate>
-                      ) : <span />}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {filtered.length === 0 && !showCreateForm && (
-        <EmptyState
-          icon={search ? SearchX : Link2}
-          title={search ? 'No results found' : 'No invite links yet'}
-          description={search ? `No invite links match "${search}"` : 'Generate an invite link to let team members sign up'}
-          compact
-          className="mt-4"
-          action={
-            !search && canManageInvites
-              ? { label: 'Generate Invite Link', onClick: () => { setShowCreateForm(true); setGeneratedUrl(null); } }
-              : undefined
-          }
-        />
-      )}
-
-      {/* Pagination */}
-      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} showCount totalItems={filtered.length} pageSize={ROWS_PER_PAGE} className="mt-3" />
-
       <ConfirmDialog
         isOpen={!!revokingLink}
         title="Revoke Invite Link"
@@ -314,6 +368,6 @@ export function InviteLinksSection() {
         onConfirm={handleRevoke}
         onClose={() => setRevokingLink(null)}
       />
-    </>
+    </div>
   );
 }

@@ -51,6 +51,9 @@ export interface ScheduleFireSummary {
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
+  /** Best-effort row count from Job.result. ``null`` when the runner doesn't
+   *  surface a count — overlay hides the Rows column when every fire is null. */
+  rows: number | null;
 }
 
 export interface ScheduleDetailResponse {

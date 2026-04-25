@@ -559,8 +559,16 @@ async def run_sherlock_sdk_turn(
     client: openai.AsyncOpenAI,
     previous_response_id: str | None = None,
     max_turns: int = 15,
+    input_items: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """Run one Sherlock turn via the OpenAI Agents SDK."""
+    """Run one Sherlock turn via the OpenAI Agents SDK.
+
+    When ``input_items`` is provided, the prior conversation is replayed as
+    a list of ``{role, content}`` items and ``previous_response_id`` is
+    expected to be ``None``. This is the fallback path when OpenAI's
+    server-side response (referenced by ``previous_response_id``) has aged
+    past the 30-day retention window.
+    """
 
     agent = build_sherlock_agent(
         instructions=instructions,
@@ -585,9 +593,17 @@ async def run_sherlock_sdk_turn(
 
     async def _run() -> None:
         try:
+            # The SDK types ``input`` as ``str | list[TResponseInputItem]``;
+            # ``TResponseInputItem`` is a TypedDict and ``list`` is
+            # invariant, so a plain ``list[dict]`` (correctly shaped
+            # ``{role, content}`` items per OpenAI Responses API) needs
+            # an explicit cast to satisfy Pyright at the call site.
+            sdk_input: Any = (
+                input_items if input_items is not None else user_message
+            )
             stream = Runner.run_streamed(
                 agent,
-                user_message,
+                sdk_input,
                 context=sherlock_context,
                 max_turns=max_turns,
                 previous_response_id=previous_response_id,

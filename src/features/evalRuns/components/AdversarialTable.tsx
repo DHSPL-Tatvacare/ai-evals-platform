@@ -206,9 +206,9 @@ export default function AdversarialTable({ evaluations, runId, reviewableItems, 
         render: (ae) => {
           const itemKey = String(ae.id);
           return reviewedIds!.has(itemKey) ? (
-            <span className="text-[11px] font-semibold text-[var(--text-brand)]">Yes</span>
+            <span className="font-semibold text-[var(--text-brand)]">Yes</span>
           ) : (
-            <span className="text-[11px] text-[var(--text-muted)]">No</span>
+            <span className="text-[var(--text-muted)]">No</span>
           );
         },
       });

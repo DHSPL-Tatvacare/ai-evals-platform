@@ -5,9 +5,9 @@
 import { useEffect, useId, useState, useMemo, useCallback } from 'react';
 import { Search, Check, Info, Filter, X } from 'lucide-react';
 import { apiRequest } from '@/services/api/client';
-import { fetchCalls, fetchCallsForSelection, fetchCoverage } from '@/services/api/insideSales';
+import { fetchCalls, fetchCallsForSelection, fetchCoverage, isRangeOutsideCoverage } from '@/services/api/insideSales';
 import { Input, Button, Combobox } from '@/components/ui';
-import type { CallFilters, CallRecord } from '@/services/api/insideSales';
+import type { CallFilters, CallRecord, CollectionCoverage } from '@/services/api/insideSales';
 import { formatDuration } from '@/utils/formatters';
 import { cn } from '@/utils';
 import { useRightOverlay } from '@/hooks';
@@ -65,7 +65,7 @@ function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) 
   const titleId = useId();
   const ariaProps = useRightOverlay(true, { onClose, labelledBy: titleId });
   const [agentOptions, setAgentOptions] = useState<{ value: string; label: string }[]>([]);
-  const [hotFromDate, setHotFromDate] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<CollectionCoverage | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams({ date_from: config.dateFrom, date_to: config.dateTo });
@@ -79,12 +79,12 @@ function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) 
     fetchCoverage('calls')
       .then((coverage) => {
         if (!cancelled) {
-          setHotFromDate(coverage.hotFrom.split(' ')[0] ?? null);
+          setCoverage(coverage);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setHotFromDate(null);
+          setCoverage(null);
         }
       });
     return () => {
@@ -141,7 +141,12 @@ function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) 
                 className={inputCls}
               />
             </div>
-            <BoundarySyncBanner dateFrom={config.dateFrom} hotFromDate={hotFromDate} />
+            <BoundarySyncBanner
+              dateFrom={config.dateFrom}
+              dateTo={config.dateTo}
+              selectionMode={config.selectionMode}
+              coverage={coverage}
+            />
           </div>
 
           {/* Agent */}
@@ -625,37 +630,26 @@ export function SelectCallsStep({
 
 function BoundarySyncBanner({
   dateFrom,
-  hotFromDate,
+  dateTo,
+  selectionMode,
+  coverage,
 }: {
   dateFrom: string;
-  hotFromDate: string | null;
+  dateTo: string;
+  selectionMode: CallSelectionConfig['selectionMode'];
+  coverage: CollectionCoverage | null;
 }) {
-  // Hot window is always [now-7d, now]. If dateFrom lands before the boundary,
-  // the eval will chain an on-demand date_range sync server-side (§PR5). The
-  // banner is informational so users aren't surprised by the extra latency.
-  // Prefer the server-provided hotFromDate (from /coverage) over a client clock.
-  const [clientBoundary, setClientBoundary] = useState(
-    () => Date.now() - 7 * 24 * 60 * 60 * 1000,
-  );
-  useEffect(() => {
-    const id = setInterval(
-      () => setClientBoundary(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      60 * 60 * 1000,
-    );
-    return () => clearInterval(id);
-  }, []);
-  const fromStr = (dateFrom || '').split(' ')[0];
-  if (!fromStr) return null;
-  const from = new Date(fromStr + 'T00:00:00Z').getTime();
-  if (Number.isNaN(from)) return null;
-  const boundaryMs = hotFromDate
-    ? new Date(hotFromDate + 'T00:00:00Z').getTime()
-    : clientBoundary;
-  if (Number.isNaN(boundaryMs) || from >= boundaryMs) return null;
-  const hotFromStr = new Date(boundaryMs).toISOString().slice(0, 10);
+  if (selectionMode === 'specific' || !coverage || !isRangeOutsideCoverage(coverage, dateFrom, dateTo)) {
+    return null;
+  }
+  const availableFrom = coverage.availableFrom?.split(' ')[0] ?? null;
+  const availableTo = coverage.availableTo?.split(' ')[0] ?? null;
+  const coverageLabel = availableFrom && availableTo
+    ? `${availableFrom} to ${availableTo}`
+    : 'no mirrored coverage yet';
   return (
     <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--text-secondary)]">
-      Data before {hotFromStr} will be synced first (~30s), then your eval runs.
+      This range sits outside mirrored coverage ({coverageLabel}). Submitting the eval will queue a source sync first.
     </div>
   );
 }

@@ -220,7 +220,7 @@ function PricingRowsTable({
       header: 'Model',
       width: 'w-80',
       render: (row) => (
-        <span className="truncate text-[13px] text-[var(--text-primary)]" title={row.model}>
+        <span className="truncate" title={row.model}>
           {row.model}
         </span>
       ),
@@ -381,7 +381,7 @@ function RefreshHistoryTable({ rows }: { rows: SnapshotRow[] }) {
       key: 'hash',
       header: 'Hash',
       width: 'w-40',
-      cellClassName: 'font-mono text-[11px] text-[var(--text-muted)]',
+      cellClassName: 'font-mono text-[length:var(--text-table-header)] text-[var(--text-muted)]',
       render: (row) => row.payloadHash.slice(0, 12),
     },
   ];

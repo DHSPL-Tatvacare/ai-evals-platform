@@ -164,7 +164,7 @@ function UnpricedCallsCard({ rows }: { rows: GroupedSpend[] }) {
       key: 'model',
       header: 'Model',
       render: (row) => (
-        <span className="font-mono text-[12px] text-[var(--text-primary)]" title={row.key}>
+        <span className="font-mono" title={row.key}>
           {row.key}
         </span>
       ),

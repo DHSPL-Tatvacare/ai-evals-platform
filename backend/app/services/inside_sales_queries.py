@@ -64,6 +64,22 @@ def _call_sort_expression():
     return func.coalesce(SourceCallRecord.call_started_at, SourceCallRecord.created_on)
 
 
+def _coverage_model_for(source_family: str) -> type[SourceCallRecord] | type[SourceLeadRecord]:
+    if source_family == "calls":
+        return SourceCallRecord
+    if source_family == "leads":
+        return SourceLeadRecord
+    raise ValueError(f"unsupported source_family for coverage: {source_family!r}")
+
+
+def _coverage_time_expression(source_family: str):
+    if source_family == "calls":
+        return _call_sort_expression()
+    if source_family == "leads":
+        return SourceLeadRecord.created_on
+    raise ValueError(f"unsupported source_family for coverage: {source_family!r}")
+
+
 def _build_call_filter_clauses(
     *,
     tenant_id: uuid.UUID,
@@ -532,6 +548,51 @@ async def get_collection_sync_status(
         "lastStatus": latest_attempt.status if latest_attempt else None,
         "lastError": latest_attempt.error_message if latest_attempt else None,
         "syncInProgress": in_progress is not None,
+    }
+
+
+async def get_collection_coverage(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    source_family: str,
+) -> dict[str, Any]:
+    model = _coverage_model_for(source_family)
+    coverage_time = _coverage_time_expression(source_family)
+    count, available_from, available_to = (
+        await db.execute(
+            select(
+                func.count(model.id),
+                func.min(coverage_time),
+                func.max(coverage_time),
+            )
+            .select_from(model)
+            .where(
+                model.tenant_id == tenant_id,
+                model.app_id == app_id,
+            )
+        )
+    ).one()
+    latest_scheduled = await db.scalar(
+        select(SourceSyncRun)
+        .where(
+            SourceSyncRun.tenant_id == tenant_id,
+            SourceSyncRun.app_id == app_id,
+            SourceSyncRun.source_family == source_family,
+            SourceSyncRun.is_scheduled_run.is_(True),
+            SourceSyncRun.status == "completed",
+        )
+        .order_by(SourceSyncRun.completed_at.desc(), SourceSyncRun.created_at.desc())
+        .limit(1)
+    )
+    has_data = bool(count and available_from is not None and available_to is not None)
+    return {
+        "hasData": has_data,
+        "availableFrom": available_from if has_data else None,
+        "availableTo": available_to if has_data else None,
+        "lastScheduledSyncAt": latest_scheduled.completed_at if latest_scheduled else None,
+        "lastScheduledSyncStatus": latest_scheduled.status if latest_scheduled else None,
     }
 
 

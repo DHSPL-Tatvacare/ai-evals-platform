@@ -51,6 +51,7 @@ export {
 } from './FilterPanel';
 export { FilterButton } from './FilterButton';
 export { PageHeaderSearch } from './PageHeaderSearch';
+export { TableToolbar, type TableToolbarSearch } from './TableToolbar';
 export { RingGauge, type RingGaugeTone } from './RingGauge';
 export { HBarList, type HBarRowData, type HBarTone } from './HBarList';
 export { TrendDelta, type TrendSemantic } from './TrendDelta';

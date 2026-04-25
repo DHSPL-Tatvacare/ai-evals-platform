@@ -127,7 +127,7 @@ export function ReviewHistoryTab({ runId }: ReviewHistoryTabProps) {
             <span className="font-semibold text-[var(--text-primary)]">
               {row.reviewerName ?? '—'}
             </span>
-            <span className="text-[11px] text-[var(--text-secondary)]">
+            <span className="text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
               {row.overallDecision ?? 'final'}
             </span>
           </span>
@@ -146,7 +146,7 @@ export function ReviewHistoryTab({ runId }: ReviewHistoryTabProps) {
       key: 'summary',
       header: 'Summary',
       render: (row) => (
-        <span className="text-[var(--text-secondary)] text-[12px]">{summarize(row)}</span>
+        <span className="text-[var(--text-secondary)]">{summarize(row)}</span>
       ),
     },
     {

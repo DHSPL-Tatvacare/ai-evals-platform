@@ -1,15 +1,13 @@
-"""Boundary helpers for `[now-7d, now]` hot-window decisions + on-demand syncs.
+"""Mirrored-coverage helpers + on-demand sync dedupe for Inside Sales.
 
-§PR5 — when a user's filter window extends before `now - 7d`, the backend
-enqueues a scoped `sync-external-source` job for the missing window and
-chains dependents via `depends_on_job_id`. This module owns:
+The source mirror now accumulates indefinitely. Boundary decisions must come
+from the DB-backed mirrored coverage window, not a synthetic "last 7 days"
+clock window. This module owns:
 
-  - `hot_boundary(now)`: returns `now - 7d`
-  - `is_inside_hot_window(...)`: pure predicate
-  - `validate_ondemand_window(...)`: enforces the 30-day cap (§1.1)
+  - `validate_ondemand_window(...)`: parse + validate requested ranges
+  - `get_mirrored_coverage_window(...)`: compare a requested range against
+    stored coverage
   - `build_boundary_sync_job_params(...)`: explicit `date_range` payload
-    (never routed through `build_manual_refresh_job_params()` which would
-    collapse to `incremental` after any prior successful sync)
   - `find_or_enqueue_ondemand_sync(...)`: dedup against queued/running
     on-demand sync jobs that already cover the requested window
 """
@@ -18,7 +16,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -26,11 +25,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job import Job
+from app.services.inside_sales_queries import get_collection_coverage
 
 _log = logging.getLogger(__name__)
 
-HOT_WINDOW_DAYS = 7
-ONDEMAND_WINDOW_CAP_DAYS = 30
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -48,31 +46,21 @@ def _parse(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def hot_boundary(now: datetime) -> datetime:
-    """`now - 7d` — the earliest timestamp guaranteed in the synced source window."""
-    tz_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
-    return tz_now - timedelta(days=HOT_WINDOW_DAYS)
-
-
-def is_inside_hot_window(date_from: str, date_to: str, now: datetime) -> bool:
-    """True when `[date_from, date_to]` sits entirely within `[now-7d, now]`."""
-    boundary = hot_boundary(now)
-    try:
-        from_dt = _parse(date_from)
-        to_dt = _parse(date_to)
-    except ValueError:
-        return False
-    return from_dt >= boundary and to_dt <= now.astimezone(timezone.utc)
+@dataclass(frozen=True)
+class MirroredCoverageWindow:
+    requested_from: datetime
+    requested_to: datetime
+    available_from: datetime | None
+    available_to: datetime | None
+    has_data: bool
+    requires_sync: bool
 
 
 def validate_ondemand_window(
     date_from: str,
     date_to: str,
-    now: datetime,
-    *,
-    max_days: int = ONDEMAND_WINDOW_CAP_DAYS,
-) -> None:
-    """Raises HTTPException(400) when the out-of-window range exceeds `max_days`."""
+) -> tuple[datetime, datetime]:
+    """Parse and validate a requested backfill/eval range."""
     try:
         from_dt = _parse(date_from)
         to_dt = _parse(date_to)
@@ -81,16 +69,41 @@ def validate_ondemand_window(
 
     if to_dt < from_dt:
         raise HTTPException(status_code=400, detail="date_to must be >= date_from")
+    return from_dt, to_dt
 
-    boundary = hot_boundary(now)
-    # Only the portion before the hot boundary is the "on-demand" range.
-    effective_from = min(from_dt, boundary)
-    span_days = max(0, (boundary - effective_from).days)
-    if span_days > max_days:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Out-of-window range capped at {max_days} days",
-        )
+
+async def get_mirrored_coverage_window(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    source_family: str,
+    date_from: str,
+    date_to: str,
+) -> MirroredCoverageWindow:
+    requested_from, requested_to = validate_ondemand_window(date_from, date_to)
+    coverage = await get_collection_coverage(
+        db,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        source_family=source_family,
+    )
+    available_from = coverage["availableFrom"]
+    available_to = coverage["availableTo"]
+    has_data = bool(coverage["hasData"] and available_from is not None and available_to is not None)
+    requires_sync = (
+        not has_data
+        or requested_from < available_from
+        or requested_to > available_to
+    )
+    return MirroredCoverageWindow(
+        requested_from=requested_from,
+        requested_to=requested_to,
+        available_from=available_from,
+        available_to=available_to,
+        has_data=has_data,
+        requires_sync=requires_sync,
+    )
 
 
 def build_boundary_sync_job_params(
@@ -163,8 +176,9 @@ async def find_or_enqueue_ondemand_sync(
         if params.get("source_family") != source_family:
             continue
         if params.get("is_scheduled_run"):
-            # Scheduled fires prune; we do NOT want to chain dependents onto
-            # a fire that will shrink the synced source window before they read.
+            # Scheduled fires are typically incremental and do not carry an
+            # explicit requested coverage contract. Only dedup against
+            # on-demand range jobs whose params make containment obvious.
             continue
         try:
             ex_from = _parse(str(params.get("date_from") or ""))

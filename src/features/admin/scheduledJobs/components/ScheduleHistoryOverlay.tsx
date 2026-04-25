@@ -139,71 +139,99 @@ export function ScheduleHistoryOverlay({ schedule, onClose }: Props) {
   const safePage = Math.min(page, totalPages);
   const pagedFires = filteredFires.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+  // Hide the Rows column when no visible fire reports a row count — keeps the
+  // overlay clean for evaluation-style schedules that have no row concept.
+  const showRowsColumn = useMemo(
+    () => filteredFires.some((fire) => fire.rows !== null && fire.rows !== undefined),
+    [filteredFires],
+  );
+
   const columns = useMemo<ColumnDef<ScheduleFireSummary>[]>(
-    () => [
-      {
-        key: 'fired-at',
-        header: 'Fired at',
-        width: 'min-w-[190px]',
-        render: (row) => (
-          <div>
-            <div className="tabular-nums text-[13px] text-[var(--text-primary)]">
-              {formatAbsolute(row.createdAt)}
+    () => {
+      const cols: ColumnDef<ScheduleFireSummary>[] = [
+        {
+          key: 'fired-at',
+          header: 'Fired at',
+          width: 'min-w-[190px]',
+          render: (row) => (
+            <div>
+              <div className="tabular-nums">{formatAbsolute(row.createdAt)}</div>
+              {row.startedAt && row.startedAt !== row.createdAt ? (
+                <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">
+                  started {formatAbsolute(row.startedAt)}
+                </div>
+              ) : null}
             </div>
-            {row.startedAt && row.startedAt !== row.createdAt ? (
-              <div className="text-[11px] text-[var(--text-muted)]">
-                started {formatAbsolute(row.startedAt)}
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        key: 'status',
-        header: 'Status',
-        width: 'w-[140px]',
-        render: (row) => (
-          <Badge variant={STATUS_VARIANT[row.status] ?? 'neutral'}>{row.status}</Badge>
-        ),
-      },
-      {
-        key: 'duration',
-        header: 'Duration',
-        width: 'w-[100px]',
-        render: (row) => (
-          <span className="tabular-nums text-[var(--text-secondary)]">
-            {formatDuration(row.startedAt, row.completedAt)}
-          </span>
-        ),
-      },
-      {
-        key: 'job-id',
-        header: 'Job ID',
-        width: 'min-w-[160px]',
-        render: (row) => (
-          <span className="font-mono text-[11px] text-[var(--text-muted)]" title={row.id}>
-            {row.id.slice(0, 8)}…{row.id.slice(-4)}
-          </span>
-        ),
-      },
-      {
-        key: 'error',
-        header: 'Error',
-        width: 'min-w-[240px]',
-        render: (row) =>
-          row.errorMessage ? (
-            <span
-              className="line-clamp-2 text-[12px] text-[var(--color-danger)]"
-              title={row.errorMessage}
-            >
-              {row.errorMessage}
-            </span>
-          ) : (
-            <span className="text-[var(--text-muted)]">—</span>
           ),
-      },
-    ],
-    [],
+        },
+        {
+          key: 'status',
+          header: 'Status',
+          width: 'w-[140px]',
+          render: (row) => (
+            <Badge variant={STATUS_VARIANT[row.status] ?? 'neutral'}>{row.status}</Badge>
+          ),
+        },
+        {
+          key: 'duration',
+          header: 'Duration',
+          width: 'w-[100px]',
+          render: (row) => (
+            <span className="tabular-nums text-[var(--text-secondary)]">
+              {formatDuration(row.startedAt, row.completedAt)}
+            </span>
+          ),
+        },
+      ];
+
+      if (showRowsColumn) {
+        cols.push({
+          key: 'rows',
+          header: 'Rows',
+          width: 'w-[90px]',
+          cellClassName: 'text-right tabular-nums',
+          headerClassName: 'text-right',
+          render: (row) =>
+            row.rows !== null && row.rows !== undefined ? (
+              <span>{row.rows.toLocaleString()}</span>
+            ) : (
+              <span className="text-[var(--text-muted)]">—</span>
+            ),
+        });
+      }
+
+      cols.push(
+        {
+          key: 'job-id',
+          header: 'Job ID',
+          width: 'min-w-[160px]',
+          render: (row) => (
+            <span className="font-mono text-[length:var(--text-table-header)] text-[var(--text-muted)]" title={row.id}>
+              {row.id.slice(0, 8)}…{row.id.slice(-4)}
+            </span>
+          ),
+        },
+        {
+          key: 'error',
+          header: 'Error',
+          width: 'min-w-[240px]',
+          render: (row) =>
+            row.errorMessage ? (
+              <span
+                className="line-clamp-2 text-[var(--color-danger)]"
+                title={row.errorMessage}
+              >
+                {row.errorMessage}
+              </span>
+            ) : (
+              <span className="text-[var(--text-muted)]">—</span>
+            ),
+        },
+      );
+
+      return cols;
+    },
+    [showRowsColumn],
   );
 
   const isEmpty = !loading && !error && fires.length === 0;
@@ -264,7 +292,7 @@ export function ScheduleHistoryOverlay({ schedule, onClose }: Props) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
           {loading && fires.length === 0 ? (
             <LoadingState />
           ) : error ? (

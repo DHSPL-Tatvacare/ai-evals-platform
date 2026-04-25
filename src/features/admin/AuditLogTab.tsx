@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, ScrollText } from 'lucide-react';
-import {
-  FilterButton,
-  FilterPanel,
-  type FilterFieldConfig,
-} from '@/components/ui';
+import { TableToolbar } from '@/components/ui';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { AuditLogEntry } from '@/services/api/rolesApi';
@@ -12,15 +8,6 @@ import { notificationService } from '@/services/notifications';
 
 const DEFAULT_PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 300;
-
-const FILTER_FIELDS: FilterFieldConfig[] = [
-  {
-    key: 'action',
-    label: 'Action',
-    control: 'text',
-    placeholder: 'Filter by action (e.g. role.create)',
-  },
-];
 
 function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -43,9 +30,8 @@ export function AuditLogTab() {
   const [actionFilter, setActionFilter] = useState('');
   const [pendingAction, setPendingAction] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
 
-  // Debounce the pending action input so URL/network traffic isn't spammed
+  // Debounce the input so URL/network traffic isn't spammed on every keystroke.
   useEffect(() => {
     const handle = setTimeout(() => {
       setActionFilter(pendingAction.trim());
@@ -71,7 +57,6 @@ export function AuditLogTab() {
     loadLog(page, pageSize, actionFilter);
   }, [loadLog, page, pageSize, actionFilter]);
 
-  const activeFilterCount = actionFilter.length > 0 ? 1 : 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const columns = useMemo((): ColumnDef<AuditLogEntry>[] => [
@@ -80,7 +65,7 @@ export function AuditLogTab() {
       header: 'Time',
       width: 'w-[110px]',
       render: (entry) => (
-        <span className="text-[12px] text-[var(--text-muted)] whitespace-nowrap" title={entry.createdAt}>
+        <span className="text-[var(--text-muted)] whitespace-nowrap" title={entry.createdAt}>
           {formatTime(entry.createdAt)}
         </span>
       ),
@@ -90,7 +75,7 @@ export function AuditLogTab() {
       header: 'Actor',
       width: 'min-w-[180px]',
       render: (entry) => (
-        <span className="text-[13px] text-[var(--text-secondary)]">
+        <span className="text-[var(--text-secondary)]">
           {entry.actorEmail ?? entry.actorId.slice(0, 8)}
         </span>
       ),
@@ -100,7 +85,7 @@ export function AuditLogTab() {
       header: 'Action',
       width: 'min-w-[180px]',
       render: (entry) => (
-        <code className="rounded bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[12px] font-mono text-[var(--text-primary)]">
+        <code className="rounded bg-[var(--bg-secondary)] px-1.5 py-0.5 font-mono text-[length:var(--text-table-header)] text-[var(--text-primary)]">
           {entry.action}
         </code>
       ),
@@ -110,20 +95,21 @@ export function AuditLogTab() {
       header: 'Entity',
       width: 'w-[140px]',
       render: (entry) => (
-        <span className="capitalize text-[13px] text-[var(--text-secondary)]">{entry.entityType}</span>
+        <span className="capitalize text-[var(--text-secondary)]">{entry.entityType}</span>
       ),
     },
   ], []);
 
-  const toolbar = (
-    <div className="flex items-center gap-2">
-      <FilterButton activeCount={activeFilterCount} onClick={() => setFilterPanelOpen(true)} />
-    </div>
-  );
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3" style={{ height: 'calc(100vh - 220px)' }}>
-      {toolbar}
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <TableToolbar
+        search={{
+          value: pendingAction,
+          onChange: setPendingAction,
+          placeholder: 'Filter by action (e.g. role.create)',
+          label: 'Filter audit actions',
+        }}
+      />
 
       <DataTable
         columns={columns}
@@ -133,10 +119,10 @@ export function AuditLogTab() {
         renderExpandedRow={(entry) => {
           const hasDetails = entry.beforeState !== null || entry.afterState !== null;
           if (!hasDetails) {
-            return <span className="text-[12px] text-[var(--text-muted)]">No before/after state captured.</span>;
+            return <span className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">No before/after state captured.</span>;
           }
           return (
-            <pre className="max-w-full overflow-x-auto rounded bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
+            <pre className="max-w-full overflow-x-auto rounded bg-[var(--bg-secondary)] p-2 text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
               {JSON.stringify({ before: entry.beforeState, after: entry.afterState }, null, 2)}
             </pre>
           );
@@ -160,17 +146,6 @@ export function AuditLogTab() {
             ? `No entries matching "${actionFilter}"`
             : 'Activity will appear here as actions are performed.'
         }
-      />
-
-      <FilterPanel
-        open={filterPanelOpen}
-        onClose={() => setFilterPanelOpen(false)}
-        fields={FILTER_FIELDS}
-        values={{ action: pendingAction }}
-        onChange={(patch) => {
-          if (typeof patch.action === 'string') setPendingAction(patch.action);
-        }}
-        onClear={() => setPendingAction('')}
       />
     </div>
   );

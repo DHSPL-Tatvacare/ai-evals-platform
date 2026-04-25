@@ -50,6 +50,43 @@ router = APIRouter(prefix="/api/scheduled-jobs", tags=["scheduled-jobs"])
 
 RECENT_FIRES_LIMIT = 50
 
+# Ordered list of keys runners use to report a row/record count in
+# ``Job.result``. First match wins. Centralized here so the schedule
+# detail route stays runner-agnostic — adding a new runner that already
+# uses one of these keys is automatic.
+_ROW_COUNT_KEYS: tuple[str, ...] = (
+    "rows_processed",
+    "rows_inserted",
+    "records_upserted",
+    "records_processed",
+    "rows",
+)
+
+
+def _extract_fire_row_count(result: dict[str, Any] | None) -> int | None:
+    """Pull a row/record count out of a finished job's ``result`` dict.
+
+    Returns ``None`` when the runner did not surface a count under any
+    known key (e.g. evaluation jobs). The UI hides the Rows column when
+    every visible fire returns ``None``.
+    """
+    if not isinstance(result, dict):
+        return None
+    for key in _ROW_COUNT_KEYS:
+        value = result.get(key)
+        if isinstance(value, bool):
+            # ``bool`` is an ``int`` subclass — guard against truthy flags.
+            continue
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _serialize_fire_summary(job: Job) -> ScheduledJobFireSummary:
+    summary = ScheduledJobFireSummary.model_validate(job, from_attributes=True)
+    summary.rows = _extract_fire_row_count(job.result)
+    return summary
+
 
 def _is_platform_schedule(schedule: ScheduledJob) -> bool:
     """Platform-managed schedules are owned by the system tenant.
@@ -275,9 +312,7 @@ async def get_schedule(
             schedule,
             last_fire_status=statuses.get(schedule.last_fire_job_id),
         ),
-        recent_fires=[
-            ScheduledJobFireSummary.model_validate(job, from_attributes=True) for job in fires
-        ],
+        recent_fires=[_serialize_fire_summary(job) for job in fires],
     )
 
 

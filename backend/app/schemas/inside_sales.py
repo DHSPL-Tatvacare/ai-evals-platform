@@ -138,6 +138,14 @@ class CollectionRefreshResponse(CamelModel):
     status: str
 
 
+class CollectionCoverage(CamelModel):
+    has_data: bool = False
+    available_from: str | None = None
+    available_to: str | None = None
+    last_scheduled_sync_at: str | None = None
+    last_scheduled_sync_status: str | None = None
+
+
 class CollectionRunEntry(CamelModel):
     """One row in the last-N ``source_sync_runs`` list surfaced to ops."""
     id: str

@@ -212,7 +212,7 @@ export function UnmappedTab({ active }: TabProps) {
     {
       key: 'model',
       header: 'Observed model',
-      render: (r) => <span className="font-mono text-[12px] text-[var(--text-primary)]">{r.model}</span>,
+      render: (r) => <span className="font-mono">{r.model}</span>,
     },
     {
       key: 'callCount',
@@ -220,13 +220,13 @@ export function UnmappedTab({ active }: TabProps) {
       width: 'w-20',
       cellClassName: 'text-right tabular-nums',
       headerClassName: 'text-right',
-      render: (r) => <span className="text-[12px] text-[var(--text-secondary)]">{formatInt(r.callCount)}</span>,
+      render: (r) => <span className="text-[var(--text-secondary)]">{formatInt(r.callCount)}</span>,
     },
     {
       key: 'lastSeenAt',
       header: 'Last seen',
       width: 'w-40',
-      render: (r) => <span className="text-[12px] text-[var(--text-muted)]">{formatDateTime(r.lastSeenAt)}</span>,
+      render: (r) => <span className="text-[var(--text-muted)]">{formatDateTime(r.lastSeenAt)}</span>,
     },
     {
       key: 'canonical',
@@ -272,7 +272,7 @@ export function UnmappedTab({ active }: TabProps) {
       header: 'Scope',
       width: 'w-24',
       render: (r) => (
-        <span className="text-[12px] text-[var(--text-secondary)]">
+        <span className="text-[var(--text-secondary)]">
           {r.tenantId === null ? 'System' : 'Tenant'}
         </span>
       ),
@@ -286,18 +286,18 @@ export function UnmappedTab({ active }: TabProps) {
     {
       key: 'observed',
       header: 'Observed',
-      render: (r) => <span className="font-mono text-[12px] text-[var(--text-primary)]">{r.observed}</span>,
+      render: (r) => <span className="font-mono">{r.observed}</span>,
     },
     {
       key: 'canonical',
       header: 'Canonical',
-      render: (r) => <span className="font-mono text-[12px] text-[var(--text-brand)]">{r.canonical}</span>,
+      render: (r) => <span className="font-mono text-[var(--text-brand)]">{r.canonical}</span>,
     },
     {
       key: 'updatedAt',
       header: 'Updated',
       width: 'w-40',
-      render: (r) => <span className="text-[12px] text-[var(--text-muted)]">{formatDateTime(r.updatedAt)}</span>,
+      render: (r) => <span className="text-[var(--text-muted)]">{formatDateTime(r.updatedAt)}</span>,
     },
     {
       key: 'action',

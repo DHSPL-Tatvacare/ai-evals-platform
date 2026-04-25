@@ -120,7 +120,7 @@ function TopModelsCard({ rows }: { rows: GroupedSpend[] }) {
       key: 'model',
       header: 'Model',
       render: (row) => (
-        <span className="font-mono text-[12px] text-[var(--text-primary)]" title={row.key}>
+        <span className="font-mono" title={row.key}>
           {row.key}
         </span>
       ),
@@ -171,7 +171,7 @@ function TopUsersCard({ rows }: { rows: GroupedSpend[] }) {
       key: 'user',
       header: 'User',
       render: (row) => (
-        <span className="font-mono text-[12px] text-[var(--text-primary)]" title={row.key}>
+        <span className="font-mono" title={row.key}>
           {truncateId(row.key, 8)}
         </span>
       ),

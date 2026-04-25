@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, ShieldAlert } from 'lucide-react';
+import { ChevronDown, Check } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,12 +11,13 @@ import {
   userHasAnyPermission,
   userHasPermission,
 } from '@/utils/permissions';
+import { AppIcon, type AppIconKind } from './AppIcon';
 
 interface AppConfig {
   id: AppId | 'admin-view';
   name: string;
   route: string;
-  iconType: 'image' | 'glyph';
+  iconType: AppIconKind;
   iconValue: string;
 }
 
@@ -85,28 +86,14 @@ export function AppSwitcher() {
     navigate(app.route);
   };
 
-  const renderOptionIcon = (app: AppConfig, sizeClass: string) => {
-    if (app.iconType === 'image') {
-      return (
-        <img
-          src={app.iconValue}
-          alt={app.name}
-          className={cn(sizeClass, 'rounded object-cover')}
-        />
-      );
-    }
-
-    return (
-      <div
-        className={cn(
-          sizeClass,
-          'flex items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
-        )}
-      >
-        <ShieldAlert className="h-4 w-4" />
-      </div>
-    );
-  };
+  const renderOptionIcon = (app: AppConfig, sizeClass: string) => (
+    <AppIcon
+      iconType={app.iconType}
+      iconValue={app.iconValue}
+      name={app.name}
+      className={sizeClass}
+    />
+  );
 
   if (!currentOption) {
     return null;

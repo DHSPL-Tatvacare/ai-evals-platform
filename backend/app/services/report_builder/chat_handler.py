@@ -13,6 +13,7 @@ import time
 import uuid
 from typing import Any, Awaitable, Callable
 
+import openai
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,7 @@ from app.services.report_builder.runtime_store import (
     append_runtime_event,
     create_assistant_message,
     finalize_assistant_message,
+    list_sherlock_history_for_responses_input,
     record_user_message,
     save_runtime_state,
     touch_sherlock_chat_session,
@@ -1415,53 +1417,114 @@ async def _execute_chat_turn(
         # app could be resolved). Tool-choice stays ``auto``; the outer
         # agent decides whether to call a tool or refuse.
         turn_tools = tools
-        agen = run_sherlock_sdk_turn(
-            user_message=user_message,
-            instructions=system,
-            tools=turn_tools,
-            sherlock_context=sherlock_ctx,
-            model=model,
-            client=client,
-            previous_response_id=runtime_session.last_response_id,
-            max_turns=MAX_TOOL_ROUNDS,
-        )
-        try:
-            async for event in agen:
-                if time.monotonic() >= deadline:
-                    warnings.append(f'turn exceeded {TURN_DEADLINE_SECONDS:.0f}s wall-clock deadline')
-                    await agen.aclose()
+
+        def _build_agen(prev_id: str | None, replay_items: list[dict[str, Any]] | None):
+            return run_sherlock_sdk_turn(
+                user_message=user_message,
+                instructions=system,
+                tools=turn_tools,
+                sherlock_context=sherlock_ctx,
+                model=model,
+                client=client,
+                previous_response_id=prev_id,
+                max_turns=MAX_TOOL_ROUNDS,
+                input_items=replay_items,
+            )
+
+        # OpenAI Responses API retains response objects for 30 days. If the
+        # stored ``last_response_id`` has expired (or was deleted),
+        # ``Runner.run_streamed`` raises ``openai.BadRequestError`` with
+        # code ``previous_response_not_found`` before any events drain.
+        # Recover by replaying the local conversation history
+        # (chat_messages) as a fresh Responses-API ``input`` list with
+        # ``previous_response_id=None`` — OpenAI generates a new
+        # response_id, full continuity preserved.
+        def _is_stale_previous_response_id(exc: BaseException) -> bool:
+            cur: BaseException | None = exc
+            while cur is not None:
+                if isinstance(cur, openai.BadRequestError):
+                    code = getattr(cur, 'code', None)
+                    if code == 'previous_response_not_found':
+                        return True
+                    body = getattr(cur, 'body', None)
+                    if isinstance(body, dict):
+                        err = body.get('error') or {}
+                        if isinstance(err, dict) and err.get('code') == 'previous_response_not_found':
+                            return True
+                if isinstance(cur, openai.NotFoundError):
+                    msg = str(cur).lower()
+                    if 'previous_response' in msg or 'previous response' in msg:
+                        return True
+                nxt = cur.__cause__ or cur.__context__
+                if nxt is cur:
                     break
+                cur = nxt
+            return False
 
-                if event['event'] == '_internal_turn_complete':
-                    new_response_id = event['data'].get('last_response_id')
-                    if new_response_id:
-                        runtime_session.last_response_id = new_response_id
-                        working_session['last_response_id'] = new_response_id
-                    final_output = event['data'].get('final_output') or ''
-                    if final_output:
-                        text = final_output
-                    continue
+        agen = _build_agen(runtime_session.last_response_id, None)
+        stale_id_retried = False
+        while True:
+            try:
+                async for event in agen:
+                    if time.monotonic() >= deadline:
+                        warnings.append(f'turn exceeded {TURN_DEADLINE_SECONDS:.0f}s wall-clock deadline')
+                        await agen.aclose()
+                        break
 
-                # Ephemeral: forward status events to SSE but do NOT persist.
-                # Stale on reload; indicator falls back to phrase rotation.
-                if event['event'] == 'status':
-                    if emit is not None:
-                        await emit({'event': 'status', 'data': event['data']})
-                    continue
+                    if event['event'] == '_internal_turn_complete':
+                        new_response_id = event['data'].get('last_response_id')
+                        if new_response_id:
+                            runtime_session.last_response_id = new_response_id
+                            working_session['last_response_id'] = new_response_id
+                        final_output = event['data'].get('final_output') or ''
+                        if final_output:
+                            text = final_output
+                        continue
 
-                if event['event'] == 'content_delta':
-                    streamed_text_parts.append(event['data']['delta'])
+                    # Ephemeral: forward status events to SSE but do NOT persist.
+                    # Stale on reload; indicator falls back to phrase rotation.
+                    if event['event'] == 'status':
+                        if emit is not None:
+                            await emit({'event': 'status', 'data': event['data']})
+                        continue
 
-                await _emit_runtime_event(
-                    runtime_session,
-                    event['event'],
-                    event['data'],
-                    emit,
-                    db,
+                    if event['event'] == 'content_delta':
+                        streamed_text_parts.append(event['data']['delta'])
+
+                    await _emit_runtime_event(
+                        runtime_session,
+                        event['event'],
+                        event['data'],
+                        emit,
+                        db,
+                    )
+                    await db.commit()
+                break
+            except (openai.BadRequestError, openai.NotFoundError) as exc:
+                if not _is_stale_previous_response_id(exc):
+                    raise
+                if stale_id_retried or runtime_session.last_response_id is None:
+                    raise
+                stale_id_retried = True
+                replay_items = await list_sherlock_history_for_responses_input(
+                    runtime_session=runtime_session,
+                    db=db,
+                )
+                runtime_session.last_response_id = None
+                working_session['last_response_id'] = None
+                # Persist the null immediately so a future turn doesn't
+                # re-trigger the same fallback if our retry below fails.
+                await update_last_response_id(
+                    runtime_session=runtime_session,
+                    last_response_id=None,
+                    db=db,
                 )
                 await db.commit()
-        finally:
-            pass
+                warnings.append(
+                    'previous_response_id expired (>30d retention); '
+                    f'replayed {len(replay_items)} messages from local history'
+                )
+                agen = _build_agen(None, replay_items)
 
         tool_call_log = sherlock_ctx.tool_call_log
         # Phase 1: pack-produced results arrive as ``Artifact`` triples on

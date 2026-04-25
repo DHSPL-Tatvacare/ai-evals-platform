@@ -158,7 +158,7 @@ export function ScheduledJobsListPage() {
       render: (schedule) => (
         <div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">{schedule.name}</span>
+            <span className="font-medium">{schedule.name}</span>
             {schedule.isPlatformManaged ? (
               <Tooltip
                 position="top"
@@ -171,7 +171,7 @@ export function ScheduledJobsListPage() {
               </Tooltip>
             ) : null}
           </div>
-          <div className="text-[11px] text-[var(--text-muted)]">{schedule.scheduleKey}</div>
+          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">{schedule.scheduleKey}</div>
         </div>
       ),
     },
@@ -181,8 +181,8 @@ export function ScheduledJobsListPage() {
       width: 'min-w-[220px]',
       render: (schedule) => (
         <div>
-          <div className="text-[13px] text-[var(--text-primary)]">{schedule.appId}</div>
-          <div className="text-[11px] text-[var(--text-muted)]">
+          <div>{schedule.appId}</div>
+          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">
             {workloadLabels.get(`${schedule.appId}:${schedule.jobType}`) ?? schedule.jobType}
           </div>
         </div>
@@ -194,8 +194,8 @@ export function ScheduledJobsListPage() {
       width: 'min-w-[220px]',
       render: (schedule) => (
         <div>
-          <div className="font-mono text-[var(--text-primary)]">{schedule.cron}</div>
-          <div className="text-[11px] text-[var(--text-muted)]" title={cronHumanPreview(schedule.cron)}>
+          <div className="font-mono">{schedule.cron}</div>
+          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]" title={cronHumanPreview(schedule.cron)}>
             {cronHumanPreview(schedule.cron)}
           </div>
         </div>
@@ -227,7 +227,7 @@ export function ScheduledJobsListPage() {
           <div className="tabular-nums text-[var(--text-secondary)]">{relative(schedule.lastFireAt)}</div>
           <LastFireChip status={schedule.lastFireStatus} />
           {schedule.lastFireJobId ? (
-            <div className="text-[11px] text-[var(--text-muted)]">{schedule.lastFireJobId.slice(0, 8)}</div>
+            <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">{schedule.lastFireJobId.slice(0, 8)}</div>
           ) : null}
         </div>
       ),
@@ -272,7 +272,7 @@ export function ScheduledJobsListPage() {
                 </div>
               }
             >
-              <div className="mt-1 inline-flex max-w-[180px] cursor-default truncate text-[11px] text-[var(--color-warning)]">
+              <div className="mt-1 inline-flex max-w-[180px] cursor-default truncate text-[length:var(--text-table-header)] text-[var(--color-warning)]">
                 Skipped: {schedule.lastSkipReason}
               </div>
             </Tooltip>

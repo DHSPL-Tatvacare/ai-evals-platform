@@ -199,8 +199,9 @@ export interface CollectionRefreshResponse {
 }
 
 export interface CollectionCoverage {
-  hotFrom: string;
-  hotTo: string;
+  hasData: boolean;
+  availableFrom: string | null;
+  availableTo: string | null;
   lastScheduledSyncAt: string | null;
   lastScheduledSyncStatus: string | null;
 }
@@ -251,6 +252,42 @@ export async function fetchCoverage(
     `/api/inside-sales/coverage?source_family=${encodeURIComponent(sourceFamily)}`,
   );
 }
+
+function parseCoverageDate(value: string | null | undefined): number | null {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.includes('T') ? trimmed : `${trimmed.replace(' ', 'T')}Z`;
+  const parsed = new Date(normalized).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function isRangeOutsideCoverage(
+  coverage: CollectionCoverage | null,
+  dateFrom: string,
+  dateTo: string,
+): boolean {
+  const fromMs = parseCoverageDate(dateFrom);
+  const toMs = parseCoverageDate(dateTo);
+  const availableFromMs = parseCoverageDate(coverage?.availableFrom);
+  const availableToMs = parseCoverageDate(coverage?.availableTo);
+
+  if (
+    !coverage
+    || !coverage.hasData
+    || fromMs === null
+    || toMs === null
+    || availableFromMs === null
+    || availableToMs === null
+  ) {
+    return true;
+  }
+
+  return fromMs < availableFromMs || toMs > availableToMs;
+}
+
+export type CollectionRefreshSyncMode = 'incremental' | 'date_range' | 'bootstrap';
 
 function buildCallSearchParams(
   filters: CallFilters,
@@ -334,17 +371,21 @@ export async function fetchLeadDetail(
 export async function refreshInsideSalesCollection(
   sourceFamily: InsideSalesCollectionFamily,
   payload: {
+    syncMode?: CollectionRefreshSyncMode;
     dateFrom?: string;
     dateTo?: string;
     eventCodes?: string;
+    overlapMinutes?: number;
   },
 ): Promise<CollectionRefreshResponse> {
   return apiRequest<CollectionRefreshResponse>(`/api/inside-sales/collections/${sourceFamily}/refresh`, {
     method: 'POST',
     body: JSON.stringify({
+      syncMode: payload.syncMode,
       dateFrom: payload.dateFrom,
       dateTo: payload.dateTo,
       eventCodes: payload.eventCodes,
+      overlapMinutes: payload.overlapMinutes,
     }),
   });
 }

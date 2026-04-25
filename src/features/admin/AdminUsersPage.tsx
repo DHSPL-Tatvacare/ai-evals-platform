@@ -4,11 +4,10 @@ import {
   Button,
   Badge,
   LoadingState,
-  PageHeaderSearch,
   PageSurface,
   ConfirmDialog,
   Tabs,
-  useTabsHeaderActions,
+  TableToolbar,
 } from '@/components/ui';
 import { PAGE_METADATA } from '@/config/pageMetadata';
 import { DataTable, type ColumnDef, type SortState } from '@/components/ui/DataTable';
@@ -151,9 +150,9 @@ function UsersTab() {
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand-accent)]/20 text-[10px] font-semibold text-[var(--text-brand)]">
               {user.displayName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
             </div>
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
+            <span className="font-medium">
               {user.displayName}
-              {isSelf && <span className="ml-1.5 text-[11px] text-[var(--text-muted)]">(you)</span>}
+              {isSelf && <span className="ml-1.5 text-[length:var(--text-table-header)] text-[var(--text-muted)]">(you)</span>}
             </span>
           </div>
         );
@@ -165,7 +164,7 @@ function UsersTab() {
       sortable: true,
       width: 'min-w-[200px]',
       render: (user) => (
-        <span className="text-[13px] text-[var(--text-secondary)]">{user.email}</span>
+        <span className="text-[var(--text-secondary)]">{user.email}</span>
       ),
     },
     {
@@ -225,32 +224,27 @@ function UsersTab() {
     },
   ], [currentUser?.id, isOwner]);
 
-  const headerActions = useMemo(
-    () => (
-      <div className="flex items-center gap-2">
-        <PageHeaderSearch
-          value={search}
-          onChange={setSearch}
-          placeholder="Search users…"
-          label="Search users"
-        />
-        <PermissionGate action="user:create">
-          <Button size="sm" onClick={() => setIsCreateOpen(true)} icon={Plus}>
-            Add User
-          </Button>
-        </PermissionGate>
-      </div>
-    ),
-    [search],
-  );
-  useTabsHeaderActions('users', headerActions);
-
   if (isLoading) {
     return <LoadingState />;
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4" style={{ height: 'calc(100vh - 220px)' }}>
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <TableToolbar
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search users…',
+          label: 'Search users',
+        }}
+        actions={
+          <PermissionGate action="user:create">
+            <Button size="sm" onClick={() => setIsCreateOpen(true)} icon={Plus}>
+              Add User
+            </Button>
+          </PermissionGate>
+        }
+      />
       <DataTable
         columns={columns}
         data={paged}
@@ -366,7 +360,7 @@ export function AdminUsersPage() {
       title={title}
       subtitle="Manage users, access, and security for your organization"
     >
-      <Tabs tabs={tabs} defaultTab={defaultTab} />
+      <Tabs tabs={tabs} defaultTab={defaultTab} fillHeight />
     </PageSurface>
   );
 }

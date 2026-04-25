@@ -89,6 +89,13 @@ interface RunGroupRow {
 
 /* ── Component ─────────────────────────────────────────────────── */
 
+// Client-side pagination cap. Search & filtering need to operate over the
+// whole window, so we fetch a generous slice and paginate locally — same
+// pattern used by Admin Users / Inside Sales / Cost tabs. If a hit-cap
+// banner becomes a real ask, surface ``logsTotal > LOGS_FETCH_CAP``.
+const LOGS_FETCH_CAP = 1000;
+const DEFAULT_PAGE_SIZE = 25;
+
 export default function Logs() {
   const navigate = useNavigate();
   const appId = useCurrentAppId();
@@ -101,10 +108,12 @@ export default function Logs() {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const load = useCallback(() => {
     setLoading(true);
-    fetchLogs({ run_id: runIdFilter || undefined, app_id: appId, limit: 200 })
+    fetchLogs({ run_id: runIdFilter || undefined, app_id: appId, limit: LOGS_FETCH_CAP })
       .then((r) => {
         setLogs(r.logs);
         setError('');
@@ -124,10 +133,14 @@ export default function Logs() {
       .catch(() => setIsLive(false));
   }, [runIdFilter]);
 
+  // Reset to first page whenever the underlying dataset or filter changes —
+  // otherwise switching views or typing a search can land on an empty page.
+  useEffect(() => { setPage(1); }, [runIdFilter, searchQuery]);
+
   usePoll({
     fn: async () => {
       const [logsResult, updatedRun] = await Promise.all([
-        fetchLogs({ run_id: runIdFilter, app_id: appId, limit: 200 }),
+        fetchLogs({ run_id: runIdFilter, app_id: appId, limit: LOGS_FETCH_CAP }),
         fetchRun(runIdFilter),
       ]);
       setLogs(logsResult.logs);
@@ -226,12 +239,12 @@ export default function Logs() {
           <Link
             to={runDetailForApp(appId, row.runId)}
             onClick={(e) => e.stopPropagation()}
-            className="font-mono text-[13px] font-semibold text-[var(--text-brand)] hover:underline"
+            className="font-mono font-semibold text-[var(--text-brand)] hover:underline"
           >
             {row.runName || row.runId.slice(0, 12)}
           </Link>
           {row.runName && (
-            <span className="font-mono text-[10px] text-[var(--text-muted)]">{row.runId.slice(0, 12)}</span>
+            <span className="font-mono text-[length:var(--text-table-header)] text-[var(--text-muted)]">{row.runId.slice(0, 12)}</span>
           )}
         </div>
       ),
@@ -240,33 +253,29 @@ export default function Logs() {
       key: 'evalType',
       header: 'Type',
       render: (row) => (
-        <span className="text-xs text-[var(--text-secondary)]">{row.evalType ? humanize(row.evalType) : '\u2014'}</span>
+        <span className="text-[var(--text-secondary)]">{row.evalType ? humanize(row.evalType) : '\u2014'}</span>
       ),
     },
     {
       key: 'calls',
       header: 'Calls',
-      render: (row) => (
-        <span className="text-xs text-[var(--text-primary)]">{row.calls}</span>
-      ),
+      render: (row) => <span>{row.calls}</span>,
     },
     {
       key: 'errors',
       header: 'Errors',
       render: (row) =>
         row.errors > 0 ? (
-          <span className="text-xs font-medium text-[var(--color-error)]">{row.errors}</span>
+          <span className="font-medium text-[var(--color-error)]">{row.errors}</span>
         ) : (
-          <span className="text-xs text-[var(--text-muted)]">&mdash;</span>
+          <span className="text-[var(--text-muted)]">&mdash;</span>
         ),
     },
     {
       key: 'totalTime',
       header: 'Total Time',
       render: (row) => (
-        <span className="text-xs text-[var(--text-primary)]">
-          {row.totalTimeMs > 0 ? formatDuration(row.totalTimeMs) : '\u2014'}
-        </span>
+        <span>{row.totalTimeMs > 0 ? formatDuration(row.totalTimeMs) : '\u2014'}</span>
       ),
     },
     {
@@ -278,15 +287,13 @@ export default function Logs() {
     {
       key: 'threads',
       header: 'Threads',
-      render: (row) => (
-        <span className="text-xs text-[var(--text-primary)]">{row.threads || '\u2014'}</span>
-      ),
+      render: (row) => <span>{row.threads || '\u2014'}</span>,
     },
     {
       key: 'date',
       header: 'Date',
       render: (row) => (
-        <span className="text-xs text-[var(--text-muted)]">
+        <span className="text-[var(--text-muted)]">
           {row.dateStr ? timeAgo(row.dateStr) : ''}
         </span>
       ),
@@ -316,7 +323,7 @@ export default function Logs() {
         const clean = cleanPromptPreview(log.prompt, log.method);
         const truncated = clean.length > 90 ? `${clean.slice(0, 90)}\u2026` : clean;
         return (
-          <span className="text-[13px] text-[var(--text-primary)] truncate block max-w-[300px]">
+          <span className="truncate block max-w-[300px]">
             {q ? highlightText(truncated, q) : truncated}
           </span>
         );
@@ -326,9 +333,7 @@ export default function Logs() {
       key: 'duration',
       header: 'Duration',
       render: (log) => (
-        <span className="text-xs text-[var(--text-primary)]">
-          {log.duration_ms != null ? formatDuration(log.duration_ms) : '\u2014'}
-        </span>
+        <span>{log.duration_ms != null ? formatDuration(log.duration_ms) : '\u2014'}</span>
       ),
     },
     {
@@ -340,14 +345,14 @@ export default function Logs() {
       key: 'thread',
       header: 'Thread',
       render: (log) => {
-        if (!log.thread_id) return <span className="text-xs text-[var(--text-muted)]">&mdash;</span>;
+        if (!log.thread_id) return <span className="text-[var(--text-muted)]">&mdash;</span>;
         const threadHref = threadDetailForApp(appId, log.thread_id, log.run_id);
         return threadHref ? (
-          <Link to={threadHref} className="font-mono text-xs text-[var(--text-brand)] hover:underline">
+          <Link to={threadHref} className="font-mono text-[var(--text-brand)] hover:underline">
             {log.thread_id.slice(0, 15)}
           </Link>
         ) : (
-          <span className="font-mono text-xs text-[var(--text-muted)]">{log.thread_id.slice(0, 15)}</span>
+          <span className="font-mono text-[var(--text-muted)]">{log.thread_id.slice(0, 15)}</span>
         );
       },
     },
@@ -360,7 +365,7 @@ export default function Logs() {
       key: 'date',
       header: 'Date',
       render: (log) => (
-        <span className="text-xs text-[var(--text-muted)]">{timeAgo(log.created_at)}</span>
+        <span className="text-[var(--text-muted)]">{timeAgo(log.created_at)}</span>
       ),
     },
   ], [appId, q]);
@@ -375,6 +380,36 @@ export default function Logs() {
     : isSearching
       ? `${filteredLogs.length} of ${logs.length} entries`
       : `${filteredLogs.length} entries`;
+
+  // ── Pagination ──────────────────────────────────────────────────
+  // Both views paginate over the same fetch window (LOGS_FETCH_CAP) so
+  // search keeps working across pages. Multi-run paginates by run group;
+  // single-run paginates by individual log entry.
+  const activeRows = isMultiRun ? runGroupRows : filteredLogs;
+  const totalItems = activeRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const pagedMultiRunRows = useMemo(
+    () => (isMultiRun ? runGroupRows.slice(pageStart, pageStart + pageSize) : []),
+    [isMultiRun, runGroupRows, pageStart, pageSize],
+  );
+  const pagedSingleRunRows = useMemo(
+    () => (isMultiRun ? [] : filteredLogs.slice(pageStart, pageStart + pageSize)),
+    [isMultiRun, filteredLogs, pageStart, pageSize],
+  );
+  const paginationProps = {
+    page: safePage,
+    totalPages,
+    pageSize,
+    totalItems,
+    showCount: true,
+    onPageChange: setPage,
+    onPageSizeChange: (n: number) => {
+      setPageSize(n);
+      setPage(1);
+    },
+  };
 
   // ── Expanded log detail ─────────────────────────────────────────
 
@@ -490,21 +525,24 @@ export default function Logs() {
             {isMultiRun ? (
               <DataTable
                 columns={multiRunColumns}
-                data={runGroupRows}
+                data={pagedMultiRunRows}
                 keyExtractor={(row) => row.runId}
                 onRowClick={(row) => navigate(`${apiLogsForApp(appId)}?run_id=${row.runId}`)}
                 loading={loading}
+                pagination={paginationProps}
                 emptyTitle="No API logs found"
-                emptyDescription="Run an evaluation to generate logs."
+                emptyDescription={isSearching ? `No runs match "${q}"` : 'Run an evaluation to generate logs.'}
               />
             ) : (
               <DataTable
                 columns={singleRunColumns}
-                data={filteredLogs}
+                data={pagedSingleRunRows}
                 keyExtractor={(log) => String(log.id)}
                 renderExpandedRow={renderLogDetail}
                 loading={loading}
+                pagination={paginationProps}
                 emptyTitle="No API logs found"
+                emptyDescription={isSearching ? `No log entries match "${q}"` : undefined}
               />
             )}
           </>

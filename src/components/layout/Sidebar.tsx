@@ -39,6 +39,7 @@ import { evaluateActionAvailability } from "@/utils/actionAvailability";
 import { getNavItems } from "@/config/sidebarNav";
 import { getAdminNavItems } from "@/config/sidebarNav";
 import { AppSwitcher } from "./AppSwitcher";
+import { AppIcon, type AppIconKind } from "./AppIcon";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
 import { InsideSalesSidebarContent } from "./InsideSalesSidebarContent";
@@ -63,15 +64,19 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
   const { settings: kairaBotSettings } = useKairaBotSettings();
   const kairaChatUserId = kairaBotSettings.kairaChatUserId;
 
-  // Compute settings path based on current app
-  const settingsPath = settingsRouteForApp(appId);
-  const isSettingsActive = APP_IDS.some((candidateAppId) => location.pathname === settingsRouteForApp(candidateAppId));
   const isGuideActive = location.pathname === routes.guide;
 
   // Auth
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdminView = location.pathname === routes.adminUsers || location.pathname.startsWith(`${routes.adminRoot}/`);
+  // App-scoped settings target. ``null`` when the current view is not bound
+  // to an app (e.g. admin chrome) so ``UserMenu`` hides the Settings entry
+  // — keeps the avatar menu free of dangling links into a different context.
+  const settingsPath = isAdminView ? null : settingsRouteForApp(appId);
+  const isSettingsActive =
+    settingsPath !== null &&
+    APP_IDS.some((candidateAppId) => location.pathname === settingsRouteForApp(candidateAppId));
   const canViewCost = usePermission('cost:view');
   const canManageSchedules = usePermission('schedule:manage');
   const canEditConfiguration = usePermission('configuration:edit');
@@ -255,6 +260,13 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
     );
   };
 
+  // Resolves to the icon shown in the collapsed-sidebar header. Single source
+  // for both apps (image URL from metadata) and admin (the shield glyph),
+  // so adding a new app surface only touches the metadata config.
+  const collapsedAppIcon: { iconType: AppIconKind; iconValue: string; name: string } = isAdminView
+    ? { iconType: 'glyph', iconValue: 'shield-alert', name: 'Admin' }
+    : { iconType: 'image', iconValue: appMetadata.icon, name: appMetadata.name };
+
   // App content key for the AnimatePresence crossfade — changes when the user
   // switches apps or enters/leaves admin view.
   const appContentKey = isAdminView
@@ -276,18 +288,38 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
         {sidebarCollapsed ? (
           <>
             <div className="flex h-14 items-center justify-center">
+              {/* Active app icon shows by default; the expand-panel control
+                  swaps in on hover via Tailwind's `group` pattern (no JS
+                  state, no listeners — robust to re-renders). The button
+                  itself always toggles the sidebar; the icon is decorative
+                  context for the current surface. */}
               <button
                 onClick={toggleSidebar}
-                className="rounded-md p-2 text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
                 title="Expand sidebar"
+                aria-label="Expand sidebar"
+                className="group relative flex h-9 w-9 items-center justify-center rounded-md text-[var(--text-secondary)] transition-colors hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
               >
-                <PanelLeft className="h-5 w-5" />
+                <AppIcon
+                  iconType={collapsedAppIcon.iconType}
+                  iconValue={collapsedAppIcon.iconValue}
+                  name={collapsedAppIcon.name}
+                  className="h-6 w-6 transition-opacity duration-150 group-hover:opacity-0"
+                />
+                <PanelLeft
+                  aria-hidden
+                  className="absolute h-5 w-5 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                />
               </button>
             </div>
             <div className="flex-1 flex flex-col items-center py-3 gap-2">
               {renderNewAction('collapsed')}
 
-              <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
+              {/* Divider separates the "New …" action from nav items. Hide
+                  it in admin view (and any view without a New action), since
+                  there is nothing above it to separate from. */}
+              {!isAdminView && newMenuItems.length > 0 ? (
+                <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
+              ) : null}
               {navItems.map((item) => (
                 <CollapsedNavLink
                   key={item.to}
@@ -465,7 +497,9 @@ function UserMenu({
   onLogout,
   onChangePassword,
 }: {
-  settingsPath: string;
+  /** ``null`` when the current view has no app-scoped settings (e.g. admin)
+   *  — Settings entry is hidden in that case. */
+  settingsPath: string | null;
   isSettingsActive: boolean;
   canEditConfiguration: boolean;
   isGuideActive: boolean;
@@ -477,7 +511,7 @@ function UserMenu({
 
   return (
     <div className="py-1">
-      {canEditConfiguration && (
+      {settingsPath && canEditConfiguration && (
         <Link to={settingsPath} className={isSettingsActive ? activeLinkClass : menuLinkClass}>
           <Settings className="h-4 w-4" />
           Settings

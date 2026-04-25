@@ -38,6 +38,18 @@ def _auth() -> AuthContext:
     )
 
 
+def _ops_auth() -> AuthContext:
+    return AuthContext(
+        user_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email='ops@example.com',
+        role_id=uuid.uuid4(),
+        is_owner=False,
+        permissions=frozenset({'inside-sales:view', 'schedule:manage'}),
+        app_access=frozenset({'inside-sales'}),
+    )
+
+
 class _FakeSession:
     def __init__(self):
         self.added: list[Any] = []
@@ -89,7 +101,7 @@ async def test_refresh_collection_default_sync_mode_is_incremental():
 async def test_refresh_collection_bootstrap_mode_emits_90_day_date_range():
     """``sync_mode=bootstrap`` is the plan's Phase 1 seed. The params must
     carry a 90-day ``date_range`` window ending now."""
-    auth = _auth()
+    auth = _ops_auth()
     db = _FakeSession()
     body = CollectionRefreshRequest(sync_mode='bootstrap')
 
@@ -115,7 +127,7 @@ async def test_refresh_collection_bootstrap_mode_emits_90_day_date_range():
 async def test_refresh_collection_date_range_mode_requires_dates():
     """``sync_mode=date_range`` without explicit dates must 400."""
     import fastapi
-    auth = _auth()
+    auth = _ops_auth()
     db = _FakeSession()
     body = CollectionRefreshRequest(sync_mode='date_range')
 
@@ -144,6 +156,48 @@ async def test_refresh_collection_rejects_unknown_sync_mode():
             db=db,
         )
     assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_refresh_collection_bootstrap_requires_schedule_manage_permission():
+    import fastapi
+
+    auth = _auth()
+    db = _FakeSession()
+    body = CollectionRefreshRequest(sync_mode='bootstrap')
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await inside_sales_routes.refresh_collection(
+            source_family='calls',
+            body=body,
+            auth=auth,
+            db=db,
+        )
+    assert excinfo.value.status_code == 403
+    assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_collection_date_range_requires_schedule_manage_permission():
+    import fastapi
+
+    auth = _auth()
+    db = _FakeSession()
+    body = CollectionRefreshRequest(
+        sync_mode='date_range',
+        date_from='2026-04-01 00:00:00',
+        date_to='2026-04-05 23:59:59',
+    )
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await inside_sales_routes.refresh_collection(
+            source_family='calls',
+            body=body,
+            auth=auth,
+            db=db,
+        )
+    assert excinfo.value.status_code == 403
+    assert db.added == []
 
 
 @pytest.mark.asyncio
@@ -221,3 +275,38 @@ async def test_refresh_collection_leads_family_omits_event_codes():
     # Leads path never attaches event_codes.
     assert 'event_codes' not in params
     assert response.source_family == 'leads'
+
+
+@pytest.mark.asyncio
+async def test_get_collection_coverage_reads_mirrored_bounds():
+    auth = _auth()
+    db = _FakeSession()
+    with patch.object(
+        inside_sales_routes,
+        'get_collection_coverage_summary',
+        new=AsyncMock(
+            return_value={
+                'hasData': True,
+                'availableFrom': datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+                'availableTo': datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc),
+                'lastScheduledSyncAt': datetime(2026, 4, 24, 12, 30, 0, tzinfo=timezone.utc),
+                'lastScheduledSyncStatus': 'completed',
+            }
+        ),
+    ) as coverage_mock:
+        response = await inside_sales_routes.get_collection_coverage(
+            source_family='calls',
+            auth=auth,
+            db=db,
+        )
+
+    coverage_mock.assert_awaited_once_with(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id='inside-sales',
+        source_family='calls',
+    )
+    assert response.has_data is True
+    assert response.available_from == '2026-04-01 00:00:00'
+    assert response.available_to == '2026-04-24 12:00:00'
+    assert response.last_scheduled_sync_at == '2026-04-24T12:30:00+00:00'

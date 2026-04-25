@@ -337,9 +337,9 @@ export default function EvalTable({
         width: 'w-[110px]',
         render: (e) =>
           reviewedThreadIds!.has(e.thread_id) ? (
-            <span className="text-[11px] font-semibold text-[var(--text-brand)]">Yes</span>
+            <span className="font-semibold text-[var(--text-brand)]">Yes</span>
           ) : (
-            <span className="text-[11px] text-[var(--text-muted)]">No</span>
+            <span className="text-[var(--text-muted)]">No</span>
           ),
       });
     }

@@ -163,7 +163,7 @@ export function DataTable<T>({
                       key={col.key}
                       onClick={col.sortable ? () => handleHeaderClick(col) : undefined}
                       className={cn(
-                        'px-3 py-2 align-middle text-left text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]',
+                        'px-3 py-2 align-middle text-left text-[length:var(--text-table-header)] font-medium uppercase tracking-wide text-[var(--text-muted)]',
                         col.sortable &&
                           'cursor-pointer select-none hover:text-[var(--text-secondary)]',
                         col.width,
@@ -257,7 +257,14 @@ function ExpandableRow<T>({
         )}
       >
         {columns.map((col) => (
-          <td key={col.key} className={cn('px-3 py-3', col.width, col.cellClassName)}>
+          <td
+            key={col.key}
+            className={cn(
+              'px-3 py-3 text-[length:var(--text-table-cell)] text-[var(--text-primary)]',
+              col.width,
+              col.cellClassName,
+            )}
+          >
             {col.render(row)}
           </td>
         ))}

@@ -3,7 +3,9 @@ import { jobsApi } from '@/services/api/jobsApi';
 import { isTerminalJobStatus } from '@/services/api/jobPolling';
 import {
   fetchCalls as apiFetchCalls,
+  fetchCoverage,
   fetchLeads as apiFetchLeads,
+  isRangeOutsideCoverage,
   refreshInsideSalesCollection,
 } from '@/services/api/insideSales';
 import type {
@@ -15,6 +17,7 @@ import type {
   LeadListRecord,
   LeadListResponse,
 } from '@/services/api/insideSales';
+import { hasPermission } from '@/utils/permissions';
 
 type CallsCacheEntry = Pick<CallListResponse, 'calls' | 'total' | 'page' | 'pageSize' | 'freshness'>;
 type LeadsCacheEntry = Pick<LeadListResponse, 'leads' | 'total' | 'page' | 'pageSize' | 'freshness'>;
@@ -257,9 +260,14 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       freshness: markFreshnessSyncing(s.freshness),
     }));
     try {
+      const coverage = await fetchCoverage('calls');
+      const canManageBackfill = hasPermission('schedule:manage');
+      const needsDateRangeBackfill = canManageBackfill
+        && isRangeOutsideCoverage(coverage, filters.dateFrom, filters.dateTo);
       const response = await refreshInsideSalesCollection('calls', {
-        dateFrom: filters.dateFrom,
-        dateTo: filters.dateTo,
+        syncMode: needsDateRangeBackfill ? 'date_range' : 'incremental',
+        dateFrom: needsDateRangeBackfill ? filters.dateFrom : undefined,
+        dateTo: needsDateRangeBackfill ? filters.dateTo : undefined,
         eventCodes: filters.eventCodes,
       });
       set((s) => ({
@@ -467,9 +475,14 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
       leadsFreshness: markFreshnessSyncing(s.leadsFreshness),
     }));
     try {
+      const coverage = await fetchCoverage('leads');
+      const canManageBackfill = hasPermission('schedule:manage');
+      const needsDateRangeBackfill = canManageBackfill
+        && isRangeOutsideCoverage(coverage, leadFilters.dateFrom, leadFilters.dateTo);
       const response = await refreshInsideSalesCollection('leads', {
-        dateFrom: leadFilters.dateFrom,
-        dateTo: leadFilters.dateTo,
+        syncMode: needsDateRangeBackfill ? 'date_range' : 'incremental',
+        dateFrom: needsDateRangeBackfill ? leadFilters.dateFrom : undefined,
+        dateTo: needsDateRangeBackfill ? leadFilters.dateTo : undefined,
       });
       set((s) => ({
         leadsRefreshJobId: response.jobId,

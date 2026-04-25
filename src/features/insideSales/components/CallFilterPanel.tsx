@@ -9,10 +9,11 @@ import { useAppConfig } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import { apiRequest } from '@/services/api/client';
-import { fetchCoverage } from '@/services/api/insideSales';
-import type { CallFilters, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
+import { fetchCoverage, isRangeOutsideCoverage } from '@/services/api/insideSales';
+import type { CallFilters, CollectionCoverage, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
 import type { AppCollectionFilterConfig } from '@/types';
 import { cn } from '@/utils/cn';
+import { usePermission } from '@/utils/permissions';
 import { useCollectionSuggestions } from '../hooks/useCollectionSuggestions';
 
 interface CallFilterPanelProps {
@@ -198,19 +199,30 @@ function renderFilterControl(
 
 function BoundarySyncNotice({
   dateFrom,
-  hotFromDate,
+  dateTo,
+  coverage,
+  canManageBackfill,
 }: {
   dateFrom: string;
-  hotFromDate: string | null;
+  dateTo: string;
+  coverage: CollectionCoverage | null;
+  canManageBackfill: boolean;
 }) {
-  const selectedDate = readDateValue(dateFrom);
-  if (!selectedDate || !hotFromDate || selectedDate >= hotFromDate) {
+  if (!coverage || !isRangeOutsideCoverage(coverage, dateFrom, dateTo)) {
     return null;
   }
+  const availableFrom = coverage.availableFrom?.split(' ')[0] ?? null;
+  const availableTo = coverage.availableTo?.split(' ')[0] ?? null;
+  const coverageLabel = availableFrom && availableTo
+    ? `${availableFrom} to ${availableTo}`
+    : 'no mirrored coverage yet';
+  const message = canManageBackfill
+    ? `This range sits outside mirrored coverage (${coverageLabel}). Refreshing this view will queue a backfill first.`
+    : `This range sits outside mirrored coverage (${coverageLabel}). Ask an admin to backfill it before refreshing.`;
 
   return (
     <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--text-secondary)]">
-      Data before {hotFromDate} will be synced first when you refresh this view.
+      {message}
     </div>
   );
 }
@@ -224,7 +236,8 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
   const callFilters = useInsideSalesStore((state) => state.filters);
   const leadFilters = useLeadsStore((state) => state.leadFilters);
   const [agentOptions, setAgentOptions] = useState<Array<{ value: string; label: string }>>([]);
-  const [hotFromDate, setHotFromDate] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<CollectionCoverage | null>(null);
+  const canManageBackfill = usePermission('schedule:manage');
 
   const values = datasetKey === 'leads' ? leadFilters : callFilters;
   const setPatch = (patch: Partial<CallFilters> | Partial<LeadFilters>) => {
@@ -266,12 +279,12 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
     fetchCoverage(datasetKey)
       .then((coverage) => {
         if (!cancelled) {
-          setHotFromDate(coverage.hotFrom.split(' ')[0] ?? null);
+          setCoverage(coverage);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setHotFromDate(null);
+          setCoverage(null);
         }
       });
     return () => {
@@ -306,7 +319,12 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
               {renderFilterControl(filter, values, setPatch, agentOptions, datasetKey)}
             </div>
           ))}
-          <BoundarySyncNotice dateFrom={values.dateFrom} hotFromDate={hotFromDate} />
+          <BoundarySyncNotice
+            dateFrom={values.dateFrom}
+            dateTo={values.dateTo}
+            coverage={coverage}
+            canManageBackfill={canManageBackfill}
+          />
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-default)]">

@@ -499,7 +499,7 @@ async def save_runtime_state(
 async def update_last_response_id(
     *,
     runtime_session: SherlockRuntimeSession,
-    last_response_id: str,
+    last_response_id: str | None,
     db: AsyncSession,
 ) -> None:
     row = await db.scalar(
@@ -510,6 +510,44 @@ async def update_last_response_id(
     if row is not None:
         row.last_response_id = last_response_id
         await db.flush()
+
+
+async def list_sherlock_history_for_responses_input(
+    *,
+    runtime_session: SherlockRuntimeSession,
+    db: AsyncSession,
+) -> list[dict[str, str]]:
+    """Reconstruct OpenAI Responses-API ``input`` items from chat_messages.
+
+    Used as the fallback when ``last_response_id`` has aged past OpenAI's
+    30-day retention. Returns the conversation as a plain ``[{role, content}]``
+    list ordered by creation time. The current turn's user message is
+    already persisted (chat_handler records it before the SDK call) and
+    appears as the final entry, so callers pass this list straight through
+    to ``Runner.run_streamed`` with ``previous_response_id=None``.
+
+    Tool calls/results are intentionally not replayed — Responses API
+    accepts simple message items, and the model rebuilds tool context from
+    the assistant's prior textual output.
+    """
+    rows = (
+        await db.execute(
+            select(ChatMessage.role, ChatMessage.content)
+            .where(
+                ChatMessage.session_id == uuid.UUID(runtime_session.chat_session_id),
+                ChatMessage.tenant_id == uuid.UUID(runtime_session.tenant_id),
+                ChatMessage.user_id == uuid.UUID(runtime_session.user_id),
+                ChatMessage.status == 'complete',
+                ChatMessage.role.in_(('user', 'assistant')),
+            )
+            .order_by(ChatMessage.created_at, ChatMessage.id)
+        )
+    ).all()
+    return [
+        {'role': role, 'content': content}
+        for role, content in rows
+        if content
+    ]
 
 
 async def append_runtime_event(

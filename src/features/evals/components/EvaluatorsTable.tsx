@@ -197,7 +197,7 @@ export function EvaluatorsTable({
               )}
               {evaluatorShowsInHeader(evaluator) ? <RoleBadge role="metric" /> : null}
             </div>
-            <p className="mt-1 max-w-[360px] truncate text-xs text-[var(--text-secondary)]">
+            <p className="mt-1 max-w-[360px] truncate text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
               {evaluator.prompt}
             </p>
           </div>

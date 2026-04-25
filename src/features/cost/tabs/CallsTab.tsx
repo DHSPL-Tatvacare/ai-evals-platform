@@ -120,7 +120,7 @@ function CallsTable({
       header: 'Model',
       width: 'w-56',
       render: (row) => (
-        <span className="truncate font-mono text-[12px] text-[var(--text-primary)]" title={row.model}>
+        <span className="truncate font-mono" title={row.model}>
           {row.model}
         </span>
       ),
@@ -130,7 +130,7 @@ function CallsTable({
       header: 'Purpose',
       width: 'w-36',
       render: (row) => (
-        <span className="text-[12px] text-[var(--text-secondary)]">{row.callPurpose ?? '—'}</span>
+        <span className="text-[var(--text-secondary)]">{row.callPurpose ?? '—'}</span>
       ),
     },
     {

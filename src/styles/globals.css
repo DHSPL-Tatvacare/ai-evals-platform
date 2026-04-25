@@ -64,6 +64,12 @@
   --text-lg: 20px;
   --text-xl: 23px;
 
+  /* Table typography — applied as defaults inside DataTable. Cells should
+     not override these values; reserve text-size overrides for true
+     hierarchy (e.g. a subtitle line beneath the primary cell text). */
+  --text-table-header: 11px;
+  --text-table-cell: 13px;
+
   /* Status palette (used by labels, badges, eval results) */
   --color-verdict-pass: #16a34a;
   --color-verdict-fail: #dc2626;

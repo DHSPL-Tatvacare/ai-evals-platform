@@ -257,10 +257,10 @@ function LeadsTableContent({
       width: 'min-w-[220px]',
       render: (lead) => (
         <div>
-          <div className="font-medium text-[var(--text-primary)]">
+          <div className="font-medium">
             {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
           </div>
-          <div className="font-mono text-[13px] text-[var(--text-muted)]">{lead.phone}</div>
+          <div className="font-mono text-[length:var(--text-table-header)] text-[var(--text-muted)]">{lead.phone}</div>
         </div>
       ),
     },
@@ -780,7 +780,7 @@ export function InsideSalesListing() {
       header: 'Prospect ID',
       headerTooltip: 'CRM prospect identifier linked to the call.',
       width: 'min-w-[130px]',
-      render: (call) => <span className="font-mono text-xs text-[var(--text-secondary)]">{call.prospectId || '—'}</span>,
+      render: (call) => <span className="font-mono text-[var(--text-secondary)]">{call.prospectId || '—'}</span>,
     },
     {
       key: 'durationSeconds',
@@ -800,11 +800,11 @@ export function InsideSalesListing() {
       width: 'w-[80px]',
       render: (call) =>
         call.evalCount && call.evalCount > 0 ? (
-          <span style={{ color: scoreColor(call.lastEvalScore ?? null) }} className="text-xs font-mono font-semibold">
+          <span style={{ color: scoreColor(call.lastEvalScore ?? null) }} className="font-mono font-semibold">
             {call.lastEvalScore !== null && call.lastEvalScore !== undefined ? Math.round(call.lastEvalScore) : '—'}
           </span>
         ) : (
-          <span className="text-xs text-[var(--text-muted)]">—</span>
+          <span className="text-[var(--text-muted)]">—</span>
         ),
     },
     {
@@ -846,7 +846,7 @@ export function InsideSalesListing() {
             )}
           </button>
         ) : (
-          <span className="text-[13px] text-[var(--text-muted)]">—</span>
+          <span className="text-[var(--text-muted)]">—</span>
         ),
     },
   ], [
