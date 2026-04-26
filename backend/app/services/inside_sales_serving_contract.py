@@ -170,8 +170,8 @@ def _build_inside_sales_contract() -> AppCollectionServingContract:
                 "src/features/insideSales/pages/InsideSalesCallDetail.tsx",
             ],
             notes=[
-                "Supplemental lead lookup with explicit refresh support.",
-                "Not part of the collection-serving cutover contract.",
+                "Supplemental lead lookup served from ``source_lead_records``.",
+                "Freshness is governed by the scheduled ``sync-external-source`` job; the route never reaches LSQ at request time.",
             ],
         ),
         CollectionSurfaceContract(
@@ -187,8 +187,8 @@ def _build_inside_sales_contract() -> AppCollectionServingContract:
                 "src/features/insideSales/pages/InsideSalesLeadDetail.tsx",
             ],
             notes=[
-                "Lead drilldown remains separate from collection-serving work.",
-                "Any future source-backed detail flow should preserve eval-history linkage by stable prospect and activity identifiers.",
+                "Drilldown is assembled from ``source_lead_records`` (profile + cached LSQ ``raw_payload``) and ``source_call_records`` (call history capped at MAX_LEAD_CALL_HISTORY).",
+                "Eval overlay/history come from local ``thread_evaluations``; preserve linkage by stable prospect and activity identifiers.",
             ],
         ),
         CollectionSurfaceContract(

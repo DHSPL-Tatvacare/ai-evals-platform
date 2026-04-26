@@ -345,6 +345,25 @@ def map_call_listing_row(
     }
 
 
+def map_lead_call_history_entry(call: SourceCallRecord) -> dict[str, Any]:
+    """Project a stored call row into the dict shape consumed by the lead
+    drilldown response and ``compute_drilldown_metrics``.
+
+    Returned shape mirrors what ``normalize_activity`` used to emit, so
+    downstream consumers do not need to branch on data source.
+    """
+    return {
+        "activityId": call.activity_id,
+        "callTime": _format_response_datetime(call.call_started_at or call.created_on),
+        "agentName": call.agent_name or None,
+        "durationSeconds": call.duration_seconds,
+        "status": call.status or "",
+        "recordingUrl": call.recording_url or None,
+        "evalScore": None,
+        "isCounseling": call.duration_seconds >= 600,
+    }
+
+
 def map_lead_listing_row(lead: SourceLeadRecord) -> dict[str, Any]:
     return {
         "prospectId": lead.prospect_id,
@@ -491,6 +510,52 @@ async def list_leads_from_source(
         page=page,
         page_size=page_size,
     )
+
+
+async def get_lead_record(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    prospect_id: str,
+) -> SourceLeadRecord | None:
+    """Fetch one lead row from the synced mirror, or ``None`` if absent."""
+    stmt = select(SourceLeadRecord).where(
+        SourceLeadRecord.tenant_id == tenant_id,
+        SourceLeadRecord.app_id == app_id,
+        SourceLeadRecord.prospect_id == prospect_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def list_call_history_for_prospect(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    prospect_id: str,
+    limit: int,
+) -> tuple[list[SourceCallRecord], bool]:
+    """Return up to ``limit`` most-recent calls for the prospect.
+
+    The boolean is ``True`` when the prospect has more than ``limit``
+    matching rows. Implemented via ``LIMIT limit + 1`` so we avoid an
+    extra ``COUNT`` round trip purely to set the flag.
+    """
+    stmt = (
+        select(SourceCallRecord)
+        .where(
+            SourceCallRecord.tenant_id == tenant_id,
+            SourceCallRecord.app_id == app_id,
+            SourceCallRecord.prospect_id == prospect_id,
+        )
+        .order_by(_call_sort_expression())
+        .limit(limit + 1)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    if len(rows) > limit:
+        return rows[:limit], True
+    return rows, False
 
 
 async def get_collection_sync_status(

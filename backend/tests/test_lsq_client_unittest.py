@@ -4,7 +4,6 @@ from unittest.mock import patch
 import httpx
 
 from app.services import lsq_client  # noqa: E402
-from app.routes.inside_sales import _translate_lsq_error  # noqa: E402
 
 
 class _FakeAsyncClient:
@@ -133,15 +132,6 @@ class LsqClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 503)
         self.assertTrue(ctx.exception.retryable)
-
-    def test_translate_lsq_error_maps_rate_limits_to_retryable_http_error(self):
-        exc = lsq_client.LsqRateLimitError(url='https://example.com/lsq', retry_after_seconds=2.1)
-
-        http_error = _translate_lsq_error(exc)
-
-        self.assertEqual(http_error.status_code, 503)
-        self.assertEqual(http_error.detail, 'LeadSquared rate limit reached. Please retry shortly.')
-        self.assertEqual(http_error.headers, {'Retry-After': '3'})
 
 
 class FetchLeadsFilterContractTests(unittest.IsolatedAsyncioTestCase):

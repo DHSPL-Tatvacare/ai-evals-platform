@@ -15,7 +15,6 @@ import {
   Mic,
   Package,
   Receipt,
-  RefreshCw,
   User,
   Users,
 } from 'lucide-react';
@@ -614,25 +613,21 @@ export function InsideSalesLeadDetail() {
 
   const [lead, setLead] = useState<LeadDetailFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [evalIdx, setEvalIdx] = useState(0);
   const [evalOpen, setEvalOpen] = useState(false);
 
-  const load = useCallback(async (opts?: { refresh?: boolean }) => {
+  const load = useCallback(async () => {
     if (!prospectId) return;
-    const isRefresh = Boolean(opts?.refresh);
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+    setLoading(true);
     setError(null);
     try {
-      const data = await fetchLeadDetail(prospectId, { refresh: isRefresh });
+      const data = await fetchLeadDetail(prospectId);
       setLead(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load lead');
     } finally {
-      if (isRefresh) setRefreshing(false);
-      else setLoading(false);
+      setLoading(false);
     }
   }, [prospectId]);
 
@@ -760,19 +755,6 @@ export function InsideSalesLeadDetail() {
           disableShortcuts={evalOpen}
         />
       )}
-      <button
-        type="button"
-        onClick={() => load({ refresh: true })}
-        disabled={refreshing}
-        title="Refresh lead data from LeadSquared"
-        className={cn(
-          'inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-default)]',
-          'text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
-          'transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-        )}
-      >
-        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-      </button>
       <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
         <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
           Evaluate

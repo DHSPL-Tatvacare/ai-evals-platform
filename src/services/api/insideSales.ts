@@ -362,10 +362,8 @@ export async function fetchLeads(
 
 export async function fetchLeadDetail(
   prospectId: string,
-  options?: { refresh?: boolean },
 ): Promise<LeadDetailFullResponse> {
-  const qs = options?.refresh ? '?refresh=true' : '';
-  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail${qs}`);
+  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
 }
 
 export async function refreshInsideSalesCollection(

@@ -9,7 +9,6 @@ import {
   Users,
   Phone as PhoneIcon,
   Calendar,
-  RefreshCw,
   Mail,
   ChevronLeft,
   ChevronRight,
@@ -34,7 +33,6 @@ interface LeadDetail {
   lastName: string;
   phone: string;
   email: string;
-  cached: boolean;
 }
 
 function formatDateTime(dateStr: string): string {
@@ -68,7 +66,6 @@ export function InsideSalesCallDetail() {
   );
 
   const [leadData, setLeadData] = useState<LeadDetail | null>(null);
-  const [leadLoading, setLeadLoading] = useState(false);
   const [evalOpen, setEvalOpen] = useState(false);
   const [evalHistory, setEvalHistory] = useState<ThreadEvalRow[]>([]);
   const [evalIdx, setEvalIdx] = useState(0);
@@ -76,18 +73,12 @@ export function InsideSalesCallDetail() {
   const canReview = usePermission('review:manage');
   const activeRunId = evalHistory[evalIdx]?.run_id ?? '';
 
-  const fetchLead = useCallback(async (prospectId: string, refresh = false) => {
-    setLeadLoading(true);
+  const fetchLead = useCallback(async (prospectId: string) => {
     try {
-      const url = refresh
-        ? `/api/inside-sales/leads/${prospectId}?refresh=true`
-        : `/api/inside-sales/leads/${prospectId}`;
-      const data = await apiRequest<LeadDetail>(url);
+      const data = await apiRequest<LeadDetail>(`/api/inside-sales/leads/${prospectId}`);
       setLeadData(data);
     } catch {
       // silently fail — lead data is supplemental
-    } finally {
-      setLeadLoading(false);
     }
   }, []);
 
@@ -175,9 +166,6 @@ export function InsideSalesCallDetail() {
           <span>{leadData.email}</span>
         </div>
       )}
-      {leadData?.cached && (
-        <div className="text-[10px] text-[var(--text-muted)]">(cached from LSQ)</div>
-      )}
     </div>
   );
 
@@ -203,19 +191,6 @@ export function InsideSalesCallDetail() {
       <Tooltip content={metaTooltip} closeDelay={150}>
         <Info className="h-3.5 w-3.5 text-[var(--text-muted)] cursor-help" />
       </Tooltip>
-      {leadData && (
-        <button
-          onClick={() => fetchLead(call.prospectId, true)}
-          disabled={leadLoading}
-          title="Refresh lead data from LSQ"
-          className={cn(
-            'rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors',
-            leadLoading && 'animate-spin'
-          )}
-        >
-          <RefreshCw className="h-3 w-3" />
-        </button>
-      )}
     </>
   );
 

@@ -117,6 +117,10 @@ SCHEMA_BOOTSTRAP_SQL = (
     "CONSTRAINT uq_sherlock_runtime_turn_client_id UNIQUE (chat_session_id, client_turn_id))",
     "CREATE INDEX IF NOT EXISTS idx_sherlock_runtime_turn_status ON sherlock_runtime_turns (chat_session_id, status)",
     "DROP TABLE IF EXISTS lsq_call_cache",
+    # ``lsq_lead_cache`` was a stop-gap profile cache for the lead-detail
+    # routes; those routes now read directly from ``source_lead_records``
+    # (populated by the inside-sales sync job), so the table is orphaned.
+    "DROP TABLE IF EXISTS lsq_lead_cache",
     "ALTER TABLE schemas ADD COLUMN IF NOT EXISTS source_type VARCHAR(20)",
     "ALTER TABLE eval_runs DROP COLUMN IF EXISTS report_cache",
     "ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'private'",

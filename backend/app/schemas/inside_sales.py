@@ -50,7 +50,6 @@ class LeadDetailResponse(CamelModel):
     last_name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    cached: bool = False
 
 
 class LeadPlanPurchase(CamelModel):

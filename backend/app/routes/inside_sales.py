@@ -3,16 +3,17 @@
 Collection-serving semantics are formalized in
 ``app.services.inside_sales_serving_contract`` so the serving source can change
 without silently changing route responsibilities.
-"""
 
-import math
-import uuid as _uuid
-from datetime import datetime as _dt, timezone as _tz
+Live LeadSquared calls are confined to the sync jobs (see
+``app.services.inside_sales_sync``). Every route here reads from the
+``source_lead_records`` / ``source_call_records`` mirror and never reaches
+out to LSQ at request time. Operators control freshness via the scheduled
+``sync-external-source`` job cadence.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth.app_scope import require_fixed_app_access
 from app.auth.context import AuthContext
@@ -49,10 +50,13 @@ from app.services.inside_sales_queries import (
     get_collection_coverage as get_collection_coverage_summary,
     get_collection_freshness,
     get_collection_sync_status,
+    get_lead_record,
     list_call_agent_names_from_source,
+    list_call_history_for_prospect,
     list_calls_from_source,
     list_collection_suggestions,
     list_leads_from_source,
+    map_lead_call_history_entry,
 )
 from app.services.inside_sales_sync import (
     INSIDE_SALES_APP_ID,
@@ -62,54 +66,20 @@ from app.services.inside_sales_sync import (
 )
 from app.models.source_records import SourceSyncRun
 from app.services.job_worker import get_job_submission_metadata
-from app.services.ttl_cache import TTLCache
 from app.services.lsq_client import (
-    LsqRateLimitError,
-    LsqRequestError,
-    normalize_activity,
-    extract_lead_plan_fields,
-    fetch_lead_by_id,
-    fetch_lead_activities_for_prospect,
-    normalize_lead,
-    compute_mql_score,
+    MAX_LEAD_CALL_HISTORY,
     compute_drilldown_metrics,
+    extract_lead_plan_fields,
+    normalize_lead,
 )
 
 router = APIRouter(prefix="/api/inside-sales", tags=["inside-sales"])
-
-
-# Cache for the expensive LSQ fetch pair (lead profile + full activity
-# history) backing the drilldown endpoint. TTL matches the inside-sales
-# source staleness budget used for list endpoints.
-_LEAD_DRILLDOWN_TTL_SECONDS = 1800
-_lead_drilldown_cache: TTLCache[tuple[str, str], tuple[dict, list[dict], bool]] = TTLCache(
-    ttl_seconds=_LEAD_DRILLDOWN_TTL_SECONDS,
-    max_entries=512,
-    name="lead_drilldown_lsq",
-)
 
 
 def _parse_csv_query(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
     return tuple(part.strip() for part in value.split(",") if part.strip())
-
-
-def _translate_lsq_error(exc: LsqRequestError) -> HTTPException:
-    if isinstance(exc, LsqRateLimitError):
-        headers = None
-        if exc.retry_after_seconds is not None:
-            headers = {"Retry-After": str(max(1, math.ceil(exc.retry_after_seconds)))}
-        return HTTPException(
-            status_code=503,
-            detail="LeadSquared rate limit reached. Please retry shortly.",
-            headers=headers,
-        )
-
-    return HTTPException(
-        status_code=502,
-        detail="LeadSquared request failed.",
-    )
 
 
 def _validate_source_family(source_family: str) -> str:
@@ -202,73 +172,30 @@ async def list_calls(
 @router.get("/leads/{prospect_id}", response_model=LeadDetailResponse)
 async def get_lead(
     prospect_id: str,
-    refresh: bool = Query(False, description="Force re-fetch from LSQ"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch a supplemental lead lookup by prospect ID. Cached in DB after first fetch.
+    """Supplemental lead-card lookup served from the synced mirror.
 
-    Pass ?refresh=true to force re-fetch from LSQ (resync button).
+    Returns the small profile card (name, phone, email) used as a hover/header
+    helper on call-detail surfaces. Reads from ``source_lead_records`` only;
+    freshness is governed by the scheduled ``sync-external-source`` job.
     """
-    from app.models.lsq_call_cache import LsqLeadCache
-
-    # Check DB cache first (unless refresh requested)
-    if not refresh:
-        result = await db.execute(
-            select(LsqLeadCache).where(
-                LsqLeadCache.tenant_id == auth.tenant_id,
-                LsqLeadCache.prospect_id == prospect_id,
-            )
-        )
-        cached = result.scalar_one_or_none()
-        if cached:
-            return LeadDetailResponse(
-                prospect_id=prospect_id,
-                first_name=cached.first_name,
-                last_name=cached.last_name,
-                phone=cached.phone,
-                email=cached.email,
-                cached=True,
-            )
-
-    # Fetch from LSQ
-    try:
-        lead = await fetch_lead_by_id(prospect_id)
-    except LsqRequestError as exc:
-        raise _translate_lsq_error(exc) from exc
-
-    # Cache the result (upsert)
-    try:
-        stmt = pg_insert(LsqLeadCache).values(
-            id=_uuid.uuid4(),
-            tenant_id=auth.tenant_id,
-            user_id=auth.user_id,
-            prospect_id=prospect_id,
-            first_name=lead.get("FirstName", ""),
-            last_name=lead.get("LastName", ""),
-            phone=lead.get("Phone", ""),
-            email=lead.get("EmailAddress", ""),
-        ).on_conflict_do_update(
-            constraint="uq_lsq_lead_cache_tenant_prospect",
-            set_={
-                "first_name": lead.get("FirstName", ""),
-                "last_name": lead.get("LastName", ""),
-                "phone": lead.get("Phone", ""),
-                "email": lead.get("EmailAddress", ""),
-            },
-        )
-        await db.execute(stmt)
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    record = await get_lead_record(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=INSIDE_SALES_APP_ID,
+        prospect_id=prospect_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
 
     return LeadDetailResponse(
-        prospect_id=prospect_id,
-        first_name=lead.get("FirstName", ""),
-        last_name=lead.get("LastName", ""),
-        phone=lead.get("Phone", ""),
-        email=lead.get("EmailAddress", ""),
-        cached=False,
+        prospect_id=record.prospect_id,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        phone=record.phone,
+        email=record.email,
     )
 
 
@@ -563,75 +490,59 @@ async def get_collection_coverage(
 @router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)
 async def get_lead_detail(
     prospect_id: str,
-    refresh: bool = Query(False, description="Force re-fetch from LeadSquared"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Lead drilldown endpoint: profile, call history, and eval history.
+    """Lead drilldown: profile, call history, and eval history.
 
-    The LSQ fetch pair (lead profile + full activity history) is cached
-    in-process with a 30-minute TTL. Eval overlay/history come from our
-    own DB and are computed fresh on every request. Pass ``?refresh=true``
-    to bypass the cache.
+    Assembled from ``source_lead_records`` (profile + stored MQL columns +
+    cached LSQ ``raw_payload`` for fields not promoted to columns) and
+    ``source_call_records`` (per-prospect call history, capped at
+    ``MAX_LEAD_CALL_HISTORY``). Eval overlay/history come from local
+    ``thread_evaluations``. No LSQ round trips happen at request time —
+    freshness is governed entirely by the scheduled sync job.
     """
-    cache_key = (str(auth.tenant_id), prospect_id)
-    if refresh:
-        _lead_drilldown_cache.invalidate(cache_key)
-
-    async def _load_lsq_bundle() -> tuple[dict, list[dict], bool]:
-        try:
-            raw_ = await fetch_lead_by_id(prospect_id)
-        except LsqRequestError as exc:
-            raise _translate_lsq_error(exc) from exc
-        if not raw_:
-            raise HTTPException(status_code=404, detail="Lead not found")
-        created_on_ = normalize_lead(raw_)["createdOn"] or "2020-01-01 00:00:00"
-        date_to_now_ = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            activities_, truncated_ = await fetch_lead_activities_for_prospect(
-                prospect_id=prospect_id,
-                date_from=created_on_,
-                date_to=date_to_now_,
-            )
-        except LsqRequestError as exc:
-            raise _translate_lsq_error(exc) from exc
-        return raw_, activities_, truncated_
-
-    raw, raw_activities, history_truncated = await _lead_drilldown_cache.get_or_load(
-        cache_key, _load_lsq_bundle
+    record = await get_lead_record(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=INSIDE_SALES_APP_ID,
+        prospect_id=prospect_id,
     )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not record.raw_payload:
+        # Sync writes ``raw_payload`` for every row; a missing payload means
+        # this row predates that contract. Surface it instead of silently
+        # returning a half-empty drilldown — operator should re-sync.
+        raise HTTPException(
+            status_code=503,
+            detail="Lead row is missing its source payload. Trigger a sync to populate it.",
+        )
 
+    raw = record.raw_payload
     lead = normalize_lead(raw)
-    mql_score, mql_signals = compute_mql_score(raw)
 
-    # Normalize activities into LeadCallRecord format
-    call_history_raw: list[dict] = []
-    for a in raw_activities:
-        norm = normalize_activity(a)
-        call_history_raw.append({
-            "activityId": norm["activityId"],
-            "callTime": norm["callStartTime"],
-            "agentName": norm["agentName"] or None,
-            "durationSeconds": norm["durationSeconds"],
-            "status": norm["status"],
-            "recordingUrl": norm["recordingUrl"] or None,
-            "evalScore": None,   # filled in step 3
-            "isCounseling": norm["durationSeconds"] >= 600,
-        })
+    call_rows, history_truncated = await list_call_history_for_prospect(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=INSIDE_SALES_APP_ID,
+        prospect_id=prospect_id,
+        limit=MAX_LEAD_CALL_HISTORY,
+    )
+    call_history_raw = [map_lead_call_history_entry(call) for call in call_rows]
 
     activity_ids = [c["activityId"] for c in call_history_raw]
     eval_overlay_map = await fetch_latest_eval_overlays(
         db,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
-        app_id="inside-sales",
+        app_id=INSIDE_SALES_APP_ID,
         thread_ids=activity_ids,
     )
-    if activity_ids:
-        for c in call_history_raw:
-            overlay = eval_overlay_map.get(c["activityId"])
-            if overlay is not None:
-                c["evalScore"] = overlay.latest_score
+    for c in call_history_raw:
+        overlay = eval_overlay_map.get(c["activityId"])
+        if overlay is not None:
+            c["evalScore"] = overlay.latest_score
 
     eval_history_list = [
         LeadEvalHistoryEntry(**entry)
@@ -639,12 +550,11 @@ async def get_lead_detail(
             db,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
-            app_id="inside-sales",
+            app_id=INSIDE_SALES_APP_ID,
             thread_ids=activity_ids,
         )
     ]
 
-    # 5. Compute drilldown metrics
     drilldown_metrics = compute_drilldown_metrics(
         created_on=lead["createdOn"],
         last_activity_on=lead["lastActivityOn"],
@@ -667,29 +577,31 @@ async def get_lead_detail(
     ]
 
     return LeadDetailFullResponse(
-        prospect_id=lead["prospectId"],
-        first_name=lead["firstName"],
-        last_name=lead["lastName"],
-        phone=lead["phone"],
-        email=lead.get("email"),
-        prospect_stage=lead["prospectStage"],
-        city=lead["city"],
-        age_group=lead["ageGroup"],
-        condition=lead["condition"],
-        hba1c_band=lead["hba1cBand"],
+        prospect_id=record.prospect_id,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        phone=record.phone,
+        email=record.email,
+        prospect_stage=record.prospect_stage,
+        city=record.city,
+        age_group=record.age_group,
+        condition=record.condition,
+        hba1c_band=record.hba1c_band,
+        # Fields below are not promoted to dedicated columns — read them
+        # from the cached LSQ payload via ``normalize_lead``.
         blood_sugar_band=lead["bloodSugarBand"],
         diabetes_duration=lead["diabetesDuration"],
         current_management=lead["currentManagement"],
         goal=lead["goal"],
-        intent_to_pay=lead["intentToPay"],
+        intent_to_pay=record.intent_to_pay,
         job_title=lead["jobTitle"],
         preferred_call_time=lead["preferredCallTime"],
-        agent_name=lead["agentName"],
-        source=lead["source"],
-        source_campaign=lead["sourceCampaign"],
+        agent_name=record.agent_name,
+        source=record.source,
+        source_campaign=record.source_campaign,
         created_on=lead["createdOn"],
-        mql_score=mql_score,
-        mql_signals=mql_signals,
+        mql_score=record.mql_score,
+        mql_signals=record.mql_signals,
         frt_seconds=drilldown_metrics["frt_seconds"],
         total_dials=drilldown_metrics["total_dials"],
         connect_rate=drilldown_metrics["connect_rate"],
@@ -701,7 +613,5 @@ async def get_lead_detail(
         call_history=call_history_records,
         history_truncated=history_truncated,
         eval_history=eval_history_list,
-        # Plan-purchase surface. Built from the same raw LSQ payload we
-        # already fetched (via GET Leads.GetById) — no extra round trips.
         plan=LeadPlanPurchase.model_validate(extract_lead_plan_fields(raw)),
     )

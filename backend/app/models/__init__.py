@@ -24,7 +24,6 @@ from app.models.report_run import ReportRun
 from app.models.report_artifact import ReportArtifact
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
-from app.models.lsq_call_cache import LsqLeadCache
 from app.models.source_records import SourceCallRecord, SourceLeadRecord, SourceSyncRun
 from app.models.external_agent import ExternalAgent
 from app.models.scheduled_job import ScheduledJob
@@ -57,7 +56,6 @@ __all__ = [
     "ChatSession", "ChatMessage", "History", "Setting", "AdversarialSavedTestCase", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog", "EvalReview", "EvalReviewItem",
     "EvaluationAnalytics", "ReportConfig", "ReportRun", "ReportArtifact",
-    "LsqLeadCache",
     "SourceCallRecord", "SourceLeadRecord", "SourceSyncRun",
     "ExternalAgent",
     "ScheduledJob", "SchedulerHeartbeat",
