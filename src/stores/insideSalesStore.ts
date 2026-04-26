@@ -1,12 +1,7 @@
 import { create } from 'zustand';
-import { jobsApi } from '@/services/api/jobsApi';
-import { isTerminalJobStatus } from '@/services/api/jobPolling';
 import {
   fetchCalls as apiFetchCalls,
-  fetchCoverage,
   fetchLeads as apiFetchLeads,
-  isRangeOutsideCoverage,
-  refreshInsideSalesCollection,
 } from '@/services/api/insideSales';
 import type {
   CallFilters,
@@ -17,7 +12,6 @@ import type {
   LeadListRecord,
   LeadListResponse,
 } from '@/services/api/insideSales';
-import { hasPermission } from '@/utils/permissions';
 
 type CallsCacheEntry = Pick<CallListResponse, 'calls' | 'total' | 'page' | 'pageSize' | 'freshness'>;
 type LeadsCacheEntry = Pick<LeadListResponse, 'leads' | 'total' | 'page' | 'pageSize' | 'freshness'>;
@@ -55,14 +49,6 @@ function buildLeadsFilterHash(filters: LeadFilters, pageSize: number): string {
   ].join('|');
 }
 
-function markFreshnessSyncing(current: CollectionFreshness | null): CollectionFreshness {
-  return {
-    lastSyncedAt: current?.lastSyncedAt ?? null,
-    syncInProgress: true,
-    stale: current?.stale ?? true,
-  };
-}
-
 interface InsideSalesState {
   calls: CallRecord[];
   total: number;
@@ -71,9 +57,6 @@ interface InsideSalesState {
   freshness: CollectionFreshness | null;
   isLoading: boolean;
   error: string | null;
-  isRefreshing: boolean;
-  refreshError: string | null;
-  refreshJobId: string | null;
   filters: CallFilters;
   selectedCallIds: Set<string>;
   _lastFetchKey: string;
@@ -92,8 +75,6 @@ interface InsideSalesState {
   selectAllOnPage: () => void;
   deselectAll: () => void;
   loadCalls: (force?: boolean) => Promise<void>;
-  refreshCalls: () => Promise<string | null>;
-  pollCallsRefresh: () => Promise<boolean>;
   reset: () => void;
 }
 
@@ -137,9 +118,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
   freshness: null,
   isLoading: false,
   error: null,
-  isRefreshing: false,
-  refreshError: null,
-  refreshJobId: null,
   filters: { ...DEFAULT_FILTERS },
   selectedCallIds: new Set(),
   _lastFetchKey: '',
@@ -248,58 +226,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
     }
   },
 
-  refreshCalls: async () => {
-    const { filters } = get();
-    set((s) => ({
-      isRefreshing: true,
-      refreshError: null,
-      refreshJobId: null,
-      _callsCache: {},
-      _lastFetchKey: '',
-      _pendingFetchKey: null,
-      freshness: markFreshnessSyncing(s.freshness),
-    }));
-    try {
-      const coverage = await fetchCoverage('calls');
-      const canManageBackfill = hasPermission('schedule:manage');
-      const needsDateRangeBackfill = canManageBackfill
-        && isRangeOutsideCoverage(coverage, filters.dateFrom, filters.dateTo);
-      const response = await refreshInsideSalesCollection('calls', {
-        syncMode: needsDateRangeBackfill ? 'date_range' : 'incremental',
-        dateFrom: needsDateRangeBackfill ? filters.dateFrom : undefined,
-        dateTo: needsDateRangeBackfill ? filters.dateTo : undefined,
-        eventCodes: filters.eventCodes,
-      });
-      set((s) => ({
-        refreshJobId: response.jobId,
-        freshness: markFreshnessSyncing(s.freshness),
-      }));
-      return response.jobId;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to queue calls refresh';
-      set({ isRefreshing: false, refreshError: msg });
-      return null;
-    }
-  },
-
-  pollCallsRefresh: async () => {
-    const { refreshJobId } = get();
-    if (!refreshJobId) return false;
-    const job = await jobsApi.get(refreshJobId);
-    if (!isTerminalJobStatus(job.status)) {
-      return true;
-    }
-
-    set((s) => ({
-      isRefreshing: false,
-      refreshJobId: null,
-      refreshError: job.status === 'completed' ? null : (job.errorMessage ?? 'Calls refresh failed'),
-      freshness: s.freshness ? { ...s.freshness, syncInProgress: false } : s.freshness,
-    }));
-    await get().loadCalls(true);
-    return false;
-  },
-
   reset: () =>
     set({
       calls: [],
@@ -308,9 +234,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
       freshness: null,
       isLoading: false,
       error: null,
-      isRefreshing: false,
-      refreshError: null,
-      refreshJobId: null,
       filters: { ...DEFAULT_FILTERS },
       selectedCallIds: new Set(),
       _lastFetchKey: '',
@@ -348,9 +271,6 @@ interface LeadsState {
   leadsFreshness: CollectionFreshness | null;
   leadsLoading: boolean;
   leadsError: string | null;
-  leadsRefreshing: boolean;
-  leadsRefreshError: string | null;
-  leadsRefreshJobId: string | null;
   leadFilters: LeadFilters;
 
   _lastLeadsFetchKey: string;
@@ -363,8 +283,6 @@ interface LeadsState {
   setLeadsPage: (page: number) => void;
   setLeadsPageSize: (pageSize: number) => void;
   loadLeads: (force?: boolean) => Promise<void>;
-  refreshLeads: () => Promise<string | null>;
-  pollLeadsRefresh: () => Promise<boolean>;
 }
 
 export const useLeadsStore = create<LeadsState>((set, get) => ({
@@ -375,9 +293,6 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
   leadsFreshness: null,
   leadsLoading: false,
   leadsError: null,
-  leadsRefreshing: false,
-  leadsRefreshError: null,
-  leadsRefreshJobId: null,
   leadFilters: { ...DEFAULT_LEAD_FILTERS },
   _lastLeadsFetchKey: '',
   _pendingLeadsFetchKey: null,
@@ -463,54 +378,4 @@ export const useLeadsStore = create<LeadsState>((set, get) => ({
     }
   },
 
-  refreshLeads: async () => {
-    const { leadFilters } = get();
-    set((s) => ({
-      leadsRefreshing: true,
-      leadsRefreshError: null,
-      leadsRefreshJobId: null,
-      _leadsCache: {},
-      _lastLeadsFetchKey: '',
-      _pendingLeadsFetchKey: null,
-      leadsFreshness: markFreshnessSyncing(s.leadsFreshness),
-    }));
-    try {
-      const coverage = await fetchCoverage('leads');
-      const canManageBackfill = hasPermission('schedule:manage');
-      const needsDateRangeBackfill = canManageBackfill
-        && isRangeOutsideCoverage(coverage, leadFilters.dateFrom, leadFilters.dateTo);
-      const response = await refreshInsideSalesCollection('leads', {
-        syncMode: needsDateRangeBackfill ? 'date_range' : 'incremental',
-        dateFrom: needsDateRangeBackfill ? leadFilters.dateFrom : undefined,
-        dateTo: needsDateRangeBackfill ? leadFilters.dateTo : undefined,
-      });
-      set((s) => ({
-        leadsRefreshJobId: response.jobId,
-        leadsFreshness: markFreshnessSyncing(s.leadsFreshness),
-      }));
-      return response.jobId;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to queue leads refresh';
-      set({ leadsRefreshing: false, leadsRefreshError: msg });
-      return null;
-    }
-  },
-
-  pollLeadsRefresh: async () => {
-    const { leadsRefreshJobId } = get();
-    if (!leadsRefreshJobId) return false;
-    const job = await jobsApi.get(leadsRefreshJobId);
-    if (!isTerminalJobStatus(job.status)) {
-      return true;
-    }
-
-    set((s) => ({
-      leadsRefreshing: false,
-      leadsRefreshJobId: null,
-      leadsRefreshError: job.status === 'completed' ? null : (job.errorMessage ?? 'Leads refresh failed'),
-      leadsFreshness: s.leadsFreshness ? { ...s.leadsFreshness, syncInProgress: false } : s.leadsFreshness,
-    }));
-    await get().loadLeads(true);
-    return false;
-  },
 }));

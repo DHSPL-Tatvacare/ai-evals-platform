@@ -18,6 +18,7 @@ from sqlalchemy import select, update
 
 from app.models.eval_run import EvalRun, ThreadEvaluation
 from app.models.evaluator import Evaluator
+from app.models.source_records import SourceLeadRecord
 from app.services.evaluators.output_schema_utils import find_primary_field, primary_score
 from app.services.evaluators.llm_base import (
     LoggingLLMWrapper,
@@ -42,6 +43,7 @@ from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters
 from app.services.inside_sales_source_resolver import (
     resolve_call_selection_from_source as resolve_call_selection,
 )
+from app.services.inside_sales_sync import INSIDE_SALES_APP_ID
 from app.services.inside_sales_eval_linkage import (
     build_inside_sales_run_config_snapshot,
     build_inside_sales_source_snapshot,
@@ -341,6 +343,35 @@ async def run_inside_sales_evaluation(
         )
         return {"status": "completed", "total": 0, "evaluated": 0}
 
+    # Resolve every prospect's display name from the synced lead mirror in
+    # one query and stash it on each call dict. This replaces a per-worker
+    # LSQ ``Leads.GetById`` round trip — live LSQ I/O is reserved for the
+    # sync job.
+    prospect_ids = sorted(
+        {call.get("prospectId", "") for call in calls if call.get("prospectId")}
+    )
+    lead_name_map: dict[str, str] = {}
+    if prospect_ids:
+        async with _async_session() as db:
+            rows = (await db.execute(
+                select(
+                    SourceLeadRecord.prospect_id,
+                    SourceLeadRecord.first_name,
+                    SourceLeadRecord.last_name,
+                ).where(
+                    SourceLeadRecord.tenant_id == tenant_id,
+                    SourceLeadRecord.app_id == INSIDE_SALES_APP_ID,
+                    SourceLeadRecord.prospect_id.in_(prospect_ids),
+                )
+            )).all()
+        for prospect_id, first_name, last_name in rows:
+            full_name = f"{(first_name or '').strip()} {(last_name or '').strip()}".strip()
+            if full_name:
+                lead_name_map[prospect_id] = full_name
+    for call in calls:
+        prospect_id = call.get("prospectId", "")
+        call["_leadName"] = lead_name_map.get(prospect_id) or (prospect_id[:8] if prospect_id else "")
+
     # ── Build transcription prompt once (shared across all calls) ─
     transcription_prompt, transcription_sys = _build_transcription_prompt(transcription_config)
 
@@ -354,16 +385,6 @@ async def run_inside_sales_evaluation(
         """
         call_id = call.get("activityId", f"call-{index}")
         recording_url = call.get("recordingUrl", "")
-
-        # Fetch lead name (individual GetById — reliable 1:1 mapping)
-        prospect_id = call.get("prospectId", "")
-        if prospect_id:
-            from app.services.lsq_client import fetch_lead_by_id
-            lead_info = await fetch_lead_by_id(prospect_id)
-            lead_name = f"{lead_info.get('firstName', '')} {lead_info.get('lastName', '')}".strip()
-            call["_leadName"] = lead_name or prospect_id[:8]
-        else:
-            call["_leadName"] = ""
 
         # Thread-safe LLM clone
         worker_llm = llm.clone_for_thread(call_id)

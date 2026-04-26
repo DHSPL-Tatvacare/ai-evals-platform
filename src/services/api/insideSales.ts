@@ -191,13 +191,6 @@ export interface LeadFilters {
 export type CallQueryScope = 'page' | 'all';
 export type InsideSalesCollectionFamily = 'calls' | 'leads';
 
-export interface CollectionRefreshResponse {
-  jobId: string;
-  sourceFamily: InsideSalesCollectionFamily;
-  syncMode: string;
-  status: string;
-}
-
 export interface CollectionCoverage {
   hasData: boolean;
   availableFrom: string | null;
@@ -287,8 +280,6 @@ export function isRangeOutsideCoverage(
   return fromMs < availableFromMs || toMs > availableToMs;
 }
 
-export type CollectionRefreshSyncMode = 'incremental' | 'date_range' | 'bootstrap';
-
 function buildCallSearchParams(
   filters: CallFilters,
   page: number,
@@ -366,24 +357,3 @@ export async function fetchLeadDetail(
   return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
 }
 
-export async function refreshInsideSalesCollection(
-  sourceFamily: InsideSalesCollectionFamily,
-  payload: {
-    syncMode?: CollectionRefreshSyncMode;
-    dateFrom?: string;
-    dateTo?: string;
-    eventCodes?: string;
-    overlapMinutes?: number;
-  },
-): Promise<CollectionRefreshResponse> {
-  return apiRequest<CollectionRefreshResponse>(`/api/inside-sales/collections/${sourceFamily}/refresh`, {
-    method: 'POST',
-    body: JSON.stringify({
-      syncMode: payload.syncMode,
-      dateFrom: payload.dateFrom,
-      dateTo: payload.dateTo,
-      eventCodes: payload.eventCodes,
-      overlapMinutes: payload.overlapMinutes,
-    }),
-  });
-}

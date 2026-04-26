@@ -11,9 +11,23 @@ sys.modules.setdefault('app.database', fake_database)
 from app.services.evaluators import inside_sales_runner as runner  # noqa: E402
 
 
+class _FakeExecuteResult:
+    """Stand-in for a SQLAlchemy ``Result`` for tests that just need ``.all()``."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def all(self):
+        return list(self._rows)
+
+
 class _FakeSession:
-    def __init__(self, *, scalar_results=None):
+    def __init__(self, *, scalar_results=None, execute_results=None):
         self.scalar_results = list(scalar_results or [])
+        # Optional canned ``Result`` objects returned by successive
+        # ``execute()`` calls. When unset, ``execute()`` returns ``None``
+        # for back-compat with tests that only inspect ``executed``.
+        self.execute_results = list(execute_results or [])
         self.added = []
         self.executed = []
         self.commits = 0
@@ -31,6 +45,8 @@ class _FakeSession:
 
     async def execute(self, statement):
         self.executed.append(statement)
+        if self.execute_results:
+            return self.execute_results.pop(0)
         return None
 
     def add(self, item):
@@ -107,12 +123,19 @@ class InsideSalesRunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
             output_schema={"type": "object"},
         )
         load_evaluators_session = _FakeSession(scalar_results=[fake_evaluator])
+        # The runner pre-fetches lead names from ``source_lead_records`` in
+        # one bulk query; surface a row matching the resolved call so the
+        # snapshot picks up the synced first/last name.
+        lead_name_session = _FakeSession(execute_results=[
+            _FakeExecuteResult([("prospect-1", "Lead", "One")]),
+        ])
         update_run_session = _FakeSession()
         persist_thread_session = _FakeSession()
         fake_session_factory = _FakeAsyncSessionFactory([
             load_evaluators_session,
             _FakeSession(),
             update_run_session,
+            lead_name_session,
             persist_thread_session,
         ])
 

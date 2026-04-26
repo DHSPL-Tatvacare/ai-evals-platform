@@ -20,7 +20,7 @@ import {
   Tabs,
 } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { useAppConfig, usePoll } from '@/hooks';
+import { useAppConfig } from '@/hooks';
 import { useInsideSalesStore, useUIStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
@@ -31,7 +31,6 @@ import { formatDuration, formatFrt } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
 import { usePageMetadata } from '@/config/pageMetadata';
-import { notificationService } from '@/services/notifications';
 import { CallFilterPanel } from '../components/CallFilterPanel';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { StageBadge } from '../components/StageBadge';
@@ -64,45 +63,42 @@ function truncateError(msg: string | null, max = 90): string {
   return msg.length <= max ? msg : `${msg.slice(0, max - 1)}…`;
 }
 
-/** Progress card in the collection header.
+/** Header card describing the synced data the user is looking at.
  *
- * Four mutually-exclusive states, in priority order:
- *   1. `syncing`  — a job is running. Spinner copy + disabled button.
- *   2. `failed`   — last attempt terminally failed. Red, shows truncated error.
- *   3. `idle-ok`  — last attempt succeeded; shows how long ago.
- *   4. `idle-empty` — nothing synced yet.
+ * The scheduled inside-sales sync job owns LSQ ingestion; this card
+ * reports its outcome and lets the user re-read the synced mirror.
+ *
+ * Three mutually-exclusive states, in priority order:
+ *   1. `failed`   — the most recent scheduled sync failed. Shows the
+ *      truncated error so ops can see something is wrong.
+ *   2. `idle-ok`  — last sync succeeded; shows how long ago.
+ *   3. `idle-empty` — nothing synced yet.
  *
  * Durable status (`status` prop) is sourced from
  * `/api/inside-sales/collections/{family}/status` so the card renders
- * correctly after a page reload. `freshness` is kept only as a fallback
- * for the initial render before the first status fetch lands.
+ * correctly after a page reload. `freshness` is the fallback for the
+ * first paint before status lands.
  */
 function FreshnessBadge({
   freshness,
   status,
-  refreshing,
-  onRefresh,
+  reloading,
+  onReload,
 }: {
   freshness: CollectionFreshness | null;
   status: CollectionSyncStatus | null;
-  refreshing: boolean;
-  onRefresh: () => void;
+  reloading: boolean;
+  onReload: () => void;
 }) {
-  const syncing = Boolean(
-    refreshing || status?.syncInProgress || freshness?.syncInProgress,
-  );
   const lastStatus = status?.lastStatus ?? null;
   const lastSuccessAt = status?.lastSuccessAt ?? freshness?.lastSyncedAt ?? null;
-  const failed = !syncing && lastStatus === 'failed';
+  const failed = lastStatus === 'failed';
 
   let primary: string;
   let secondary: string;
   let tone: 'default' | 'warning' | 'error' = 'default';
 
-  if (syncing) {
-    primary = 'Refreshing data…';
-    secondary = 'Pulling delta from LSQ';
-  } else if (failed) {
+  if (failed) {
     primary = 'Last sync failed';
     secondary = truncateError(status?.lastError ?? null);
     tone = 'error';
@@ -112,7 +108,7 @@ function FreshnessBadge({
     if (freshness?.stale) tone = 'warning';
   } else {
     primary = 'Not synced yet';
-    secondary = 'Run a bootstrap or delta sync to populate this view';
+    secondary = 'Waiting for the first scheduled sync';
     tone = 'warning';
   }
 
@@ -142,17 +138,17 @@ function FreshnessBadge({
         </span>
       </div>
       <Button
-        variant={failed ? 'primary' : 'secondary'}
+        variant="secondary"
         size="sm"
-        onClick={onRefresh}
-        disabled={syncing}
+        onClick={onReload}
+        disabled={reloading}
         icon={RefreshCcw}
         iconOnly
-        aria-label={syncing ? 'Refreshing collection data' : failed ? 'Retry failed sync' : 'Refresh collection data'}
-        title={syncing ? 'Refreshing collection data' : failed ? 'Retry failed sync' : 'Refresh collection data'}
+        aria-label={reloading ? 'Reloading from synced data' : 'Reload from synced data'}
+        title="Reload synced data"
         className="shrink-0"
       >
-        {syncing ? 'Refreshing' : failed ? 'Retry' : 'Refresh'}
+        {reloading ? 'Reloading' : 'Reload'}
       </Button>
     </div>
   );
@@ -479,15 +475,10 @@ export function InsideSalesListing() {
   const callsFreshness = useInsideSalesStore((s) => s.freshness);
   const isLoading = useInsideSalesStore((s) => s.isLoading);
   const error = useInsideSalesStore((s) => s.error);
-  const isRefreshingCalls = useInsideSalesStore((s) => s.isRefreshing);
-  const callsRefreshError = useInsideSalesStore((s) => s.refreshError);
-  const callsRefreshJobId = useInsideSalesStore((s) => s.refreshJobId);
   const filters = useInsideSalesStore((s) => s.filters);
   const selectedCallIds = useInsideSalesStore((s) => s.selectedCallIds);
   const leadsFreshness = useLeadsStore((s) => s.leadsFreshness);
-  const leadsRefreshing = useLeadsStore((s) => s.leadsRefreshing);
-  const leadsRefreshError = useLeadsStore((s) => s.leadsRefreshError);
-  const leadsRefreshJobId = useLeadsStore((s) => s.leadsRefreshJobId);
+  const leadsLoading = useLeadsStore((s) => s.leadsLoading);
 
   const openModal = useUIStore((s) => s.openModal);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -527,30 +518,6 @@ export function InsideSalesListing() {
     if (activeTab !== 'calls') return;
     useInsideSalesStore.getState().loadCalls();
   }, [activeTab, filterKey]);
-
-  usePoll({
-    enabled: Boolean(callsRefreshJobId),
-    fn: async () => useInsideSalesStore.getState().pollCallsRefresh(),
-    intervalMs: 3000,
-  });
-
-  usePoll({
-    enabled: Boolean(leadsRefreshJobId),
-    fn: async () => useLeadsStore.getState().pollLeadsRefresh(),
-    intervalMs: 3000,
-  });
-
-  useEffect(() => {
-    if (callsRefreshError) {
-      notificationService.error(callsRefreshError);
-    }
-  }, [callsRefreshError]);
-
-  useEffect(() => {
-    if (leadsRefreshError) {
-      notificationService.error(leadsRefreshError);
-    }
-  }, [leadsRefreshError]);
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -642,25 +609,23 @@ export function InsideSalesListing() {
   );
 
   const handleRefresh = useCallback(async () => {
+    // Local data is kept current by the scheduled inside-sales sync job;
+    // this button just re-reads the synced mirror so the view picks up
+    // any rows the scheduler has landed since the page first loaded.
     if (activeTab === 'calls') {
-      const jobId = await useInsideSalesStore.getState().refreshCalls();
-      if (jobId) {
-        notificationService.info('Calls refresh queued.');
-      }
+      await useInsideSalesStore.getState().loadCalls(true);
       return;
     }
-    const jobId = await useLeadsStore.getState().refreshLeads();
-    if (jobId) {
-      notificationService.info('Leads refresh queued.');
-    }
+    await useLeadsStore.getState().loadLeads(true);
   }, [activeTab]);
 
   const [callsStatus, setCallsStatus] = useState<CollectionSyncStatus | null>(null);
   const [leadsStatus, setLeadsStatus] = useState<CollectionSyncStatus | null>(null);
   const activeStatus = activeTab === 'calls' ? callsStatus : leadsStatus;
 
-  // Pull durable status whenever the tab becomes active, a refresh is kicked
-  // off, and when polling flips the jobId back to null (terminal state).
+  // Pull durable status when the tab becomes active. The scheduler owns
+  // sync runs, so the badge no longer has a job-id signal to react to —
+  // the periodic re-fetch below keeps it eventually-consistent.
   useEffect(() => {
     let cancelled = false;
     const family: 'calls' | 'leads' = activeTab === 'calls' ? 'calls' : 'leads';
@@ -676,7 +641,7 @@ export function InsideSalesListing() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, callsRefreshJobId, leadsRefreshJobId]);
+  }, [activeTab]);
 
   const callsFilterPillsContent = activeFilterPills.length > 0 ? (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -906,8 +871,8 @@ export function InsideSalesListing() {
         <FreshnessBadge
           freshness={activeTab === 'calls' ? callsFreshness : leadsFreshness}
           status={activeStatus}
-          refreshing={activeTab === 'calls' ? isRefreshingCalls : leadsRefreshing}
-          onRefresh={handleRefresh}
+          reloading={activeTab === 'calls' ? isLoading : leadsLoading}
+          onReload={handleRefresh}
         />
       }
     >
