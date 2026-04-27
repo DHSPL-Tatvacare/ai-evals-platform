@@ -19,7 +19,7 @@ export default function ChatTurnBadges({
   if (!hasAnything) return null;
 
   return (
-    <span className="inline-flex items-center gap-2 ml-auto">
+    <span className="inline-flex items-center gap-2 mr-auto">
       {correctnessVerdict && (
         <AnnotationChip
           color={getLabelDefinition(correctnessVerdict, 'correctness').color}

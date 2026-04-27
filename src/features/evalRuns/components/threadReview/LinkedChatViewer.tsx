@@ -45,29 +45,29 @@ export default function LinkedChatViewer({
               isActive && 'ring-2 ring-inset ring-[var(--border-brand)] bg-[var(--surface-info)]',
             )}
           >
-            {/* Header row: turn info left, eval annotations right */}
-            <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-              <span className="font-semibold">Turn {i + 1}</span>
-              {m.timestamp && <span>{formatChatTimestamp(m.timestamp)}</span>}
-              {m.intent_detected && (
-                <span className="text-[var(--color-info)]">{m.intent_detected}</span>
-              )}
-              {m.has_image && (
-                <span className="px-1 py-px rounded text-[9px] font-semibold bg-[var(--color-accent-purple)] text-white">
-                  IMG
-                </span>
-              )}
-              {isFriction && (
-                <span className="text-[var(--color-warning)] font-semibold">Friction</span>
-              )}
-
-              {/* Eval annotations — pushed to right */}
+            {/* Header row: eval annotations left (aligned with bot), turn info right (aligned with agent) */}
+            <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] justify-end">
+              {/* Eval annotations — flush left via mr-auto */}
               <ChatTurnBadges
                 turnIndex={i}
                 correctnessVerdict={correctnessMap.get(i)}
                 isCorrectIntent={intentMap.get(i)}
                 onBadgeClick={onTurnClick}
               />
+
+              {isFriction && (
+                <span className="text-[var(--color-warning)] font-semibold">Friction</span>
+              )}
+              {m.has_image && (
+                <span className="px-1 py-px rounded text-[9px] font-semibold bg-[var(--color-accent-purple)] text-white">
+                  IMG
+                </span>
+              )}
+              {m.intent_detected && (
+                <span className="text-[var(--color-info)]">{m.intent_detected}</span>
+              )}
+              {m.timestamp && <span>{formatChatTimestamp(m.timestamp)}</span>}
+              <span className="font-semibold">Turn {i + 1}</span>
             </div>
 
             {/* User / conversation agent message — sender on right */}
