@@ -297,34 +297,11 @@ SCHEMA_BOOTSTRAP_SQL = (
         END IF;
     END $$;
     """,
-    """
-    DO $$
-    BEGIN
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conname = 'fk_analytics_charts_source_session_id'
-        ) THEN
-            ALTER TABLE analytics_charts
-            ADD CONSTRAINT fk_analytics_charts_source_session_id
-            FOREIGN KEY (source_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL;
-        END IF;
-    END $$;
-    """,
-    """
-    DO $$
-    BEGIN
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conname = 'fk_analytics_dashboards_source_session_id'
-        ) THEN
-            ALTER TABLE analytics_dashboards
-            ADD CONSTRAINT fk_analytics_dashboards_source_session_id
-            FOREIGN KEY (source_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL;
-        END IF;
-    END $$;
-    """,
+    # The duplicate `fk_analytics_charts_source_session_id` and
+    # `fk_analytics_dashboards_source_session_id` blocks were removed when
+    # alembic migration 0003_drop_redundant_fks_and_lsq dropped those
+    # constraints. The SQLAlchemy-default `*_source_session_id_fkey` FKs
+    # remain on each table and continue to enforce referential integrity.
     """
     DO $$
     BEGIN
