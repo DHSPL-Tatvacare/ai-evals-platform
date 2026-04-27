@@ -36,8 +36,8 @@ def test_source_record_tables_are_registered_with_expected_indexes():
     sync_indexes = {index.name for index in SourceSyncRun.__table__.indexes}
 
     assert "idx_source_call_records_tenant_app_call_started" in call_indexes
-    assert "idx_source_call_records_tenant_app_status" in call_indexes
-    assert "idx_source_lead_records_tenant_app_stage" in lead_indexes
+    assert "idx_source_call_records_tenant_app_status_lower" in call_indexes
+    assert "idx_source_lead_records_tenant_app_stage_lower" in lead_indexes
     assert "idx_source_lead_records_tenant_app_mql" in lead_indexes
     assert "idx_source_sync_runs_tenant_family_status" in sync_indexes
 
@@ -62,12 +62,10 @@ def test_call_source_row_schema_exposes_camel_case_fields():
             prospect_id="prospect-1",
             agent_id="agent-1",
             agent_name="Agent Amy",
-            agent_name_normalized="agent amy",
             agent_email="amy@example.com",
             event_code=21,
             direction="inbound",
             status="Answered",
-            status_normalized="answered",
             call_started_at=now,
             duration_seconds=180,
             has_recording=True,
@@ -83,7 +81,7 @@ def test_call_source_row_schema_exposes_camel_case_fields():
     dumped = row.model_dump(by_alias=True)
 
     assert dumped["activityId"] == "activity-1"
-    assert dumped["agentNameNormalized"] == "agent amy"
+    assert dumped["agentName"] == "Agent Amy"
     assert dumped["hasRecording"] is True
 
 
@@ -109,16 +107,12 @@ def test_lead_source_row_schema_keeps_derived_metrics_typed():
             phone="9999999999",
             email="lead@example.com",
             prospect_stage="New Lead",
-            prospect_stage_normalized="new lead",
             city="Mumbai",
-            city_normalized="mumbai",
             age_group="31-40",
             condition="Diabetes",
-            condition_normalized="diabetes",
             hba1c_band="6.5",
             intent_to_pay="Yes",
             agent_name="Agent Amy",
-            agent_name_normalized="agent amy",
             source="Campaign",
             source_campaign="Summer",
             created_on=now,

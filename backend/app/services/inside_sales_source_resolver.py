@@ -1,10 +1,7 @@
-"""Source-only resolvers that power eval/list reads after PR5.
+"""Source-only resolvers that power eval reads.
 
-The legacy `inside_sales_dataset_resolver` fetched records from LSQ
-synchronously; PR5 routes every read through the synced source tables instead.
-This module owns the selection logic (sampling, skip-evaluated, no-recording
-filter) layered on top of the SQL queries already defined in
-`inside_sales_queries`.
+Owns the selection logic (sampling, skip-evaluated, no-recording filter)
+layered on top of the SQL queries defined in `inside_sales_queries`.
 """
 
 from __future__ import annotations
@@ -19,16 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.eval_run import EvalRun, ThreadEvaluation
 from app.models.source_records import SourceCallRecord
 from app.services.inside_sales_dataset_resolver import (
-    CallDatasetScope,
     CallSelectionMode,
     InsideSalesCallFilters,
-    InsideSalesLeadFilters,
     ResolvedCallSelection,
-    ResolvedDatasetPage,
 )
 from app.services.inside_sales_queries import (
     list_calls_from_source,
-    list_leads_from_source,
     map_call_listing_row,
 )
 from app.services.inside_sales_sync import INSIDE_SALES_APP_ID
@@ -47,48 +40,6 @@ class SpecificCallSelectionMissingError(ValueError):
         )
 
 
-async def resolve_call_dataset_page_from_source(
-    filters: InsideSalesCallFilters,
-    *,
-    page: int,
-    page_size: int,
-    scope: CallDatasetScope,
-    tenant_id: uuid.UUID,
-    user_id: uuid.UUID,
-    db: AsyncSession,
-    app_id: str = INSIDE_SALES_APP_ID,
-) -> ResolvedDatasetPage:
-    return await list_calls_from_source(
-        db,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        app_id=app_id,
-        filters=filters,
-        page=page,
-        page_size=page_size,
-        scope=scope,
-    )
-
-
-async def resolve_lead_dataset_page_from_source(
-    filters: InsideSalesLeadFilters,
-    *,
-    page: int,
-    page_size: int,
-    tenant_id: uuid.UUID,
-    app_id: str = INSIDE_SALES_APP_ID,
-    db: AsyncSession,
-) -> ResolvedDatasetPage:
-    return await list_leads_from_source(
-        db,
-        tenant_id=tenant_id,
-        app_id=app_id,
-        filters=filters,
-        page=page,
-        page_size=page_size,
-    )
-
-
 async def _fetch_calls_by_activity_ids(
     db: AsyncSession,
     *,
@@ -97,12 +48,12 @@ async def _fetch_calls_by_activity_ids(
     activity_ids: Sequence[str],
 ) -> list[dict]:
     """Fetch specific calls from the source mirror by ID, bypassing
-    date / agent / status filters. Scoped strictly to tenant + app.
+    agent / status filters. Scoped strictly to tenant + app.
 
-    Phase 4 fix for the filter-ordering bug: user-selected specific
-    calls must not be silently dropped by UI date defaults. The eval
-    runner consumes the selection and does its own ``skip_evaluated``
-    query downstream, so we skip the per-row eval overlay here."""
+    User-selected specific calls must not be silently dropped by UI
+    filter defaults. The eval runner consumes the selection and does
+    its own ``skip_evaluated`` query downstream, so we skip the per-row
+    eval overlay here."""
     ids = [aid for aid in activity_ids if aid]
     if not ids:
         return []
@@ -128,15 +79,15 @@ async def resolve_call_selection_from_source(
     db: AsyncSession,
     app_id: str = INSIDE_SALES_APP_ID,
 ) -> ResolvedCallSelection:
-    """Source-backed selection: replaces `resolve_call_selection`'s LSQ fetch.
+    """Source-backed selection for the eval runner.
 
     Post-SQL steps (selection mode, skip_evaluated, no-recording, sampling)
     stay in Python so they remain deterministic across provider and storage
-    backends — identical semantics to the legacy resolver.
+    backends.
 
-    Phase 4 contract: when ``selection_mode == "specific"``, the date /
-    agent / status filters are bypassed and calls are fetched directly
-    by ``activity_id`` scoped to tenant + app. If any requested ID does
+    Contract: when ``selection_mode == "specific"``, agent / status
+    filters are bypassed and calls are fetched directly by
+    ``activity_id`` scoped to tenant + app. If any requested ID does
     not resolve to a row in the source mirror, the function raises
     ``SpecificCallSelectionMissingError`` rather than silently returning
     a shorter list.

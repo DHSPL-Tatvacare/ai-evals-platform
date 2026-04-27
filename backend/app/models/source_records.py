@@ -65,12 +65,10 @@ class SourceCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     prospect_id: Mapped[str] = mapped_column(String(100), nullable=False)
     agent_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     agent_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    agent_name_normalized: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     event_code: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    status_normalized: Mapped[str | None] = mapped_column(String(50), nullable=True)
     call_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     has_recording: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -93,19 +91,20 @@ class SourceCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
             activity_id.desc(),
         ),
         Index(
-            "idx_source_call_records_tenant_app_activity_agent",
+            "idx_source_call_records_tenant_app_agent_lower",
             "tenant_id",
             "app_id",
-            func.coalesce(call_started_at, created_on),
-            "agent_name_normalized",
-            "agent_name",
-            postgresql_where=text(
-                "agent_name IS NOT NULL AND agent_name_normalized IS NOT NULL"
-            ),
+            func.lower(agent_name),
+            postgresql_where=text("agent_name IS NOT NULL"),
         ),
-        Index("idx_source_call_records_tenant_app_agent", "tenant_id", "app_id", "agent_name_normalized"),
         Index("idx_source_call_records_tenant_app_direction", "tenant_id", "app_id", "direction"),
-        Index("idx_source_call_records_tenant_app_status", "tenant_id", "app_id", "status_normalized"),
+        Index(
+            "idx_source_call_records_tenant_app_status_lower",
+            "tenant_id",
+            "app_id",
+            func.lower(status),
+            postgresql_where=text("status IS NOT NULL"),
+        ),
         Index("idx_source_call_records_tenant_app_prospect", "tenant_id", "app_id", "prospect_id"),
         Index("idx_source_call_records_tenant_app_recording", "tenant_id", "app_id", "has_recording"),
     )
@@ -128,17 +127,13 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     # upserts. Prior fixed-width columns (80/120) were tuned for "normal"
     # enum-like values but LSQ allows operators to enter arbitrary strings.
     prospect_stage: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    prospect_stage_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     plan_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     city: Mapped[str | None] = mapped_column(Text, nullable=True)
-    city_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     age_group: Mapped[str | None] = mapped_column(Text, nullable=True)
     condition: Mapped[str | None] = mapped_column(Text, nullable=True)
-    condition_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     hba1c_band: Mapped[str | None] = mapped_column(Text, nullable=True)
     intent_to_pay: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    agent_name_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_campaign: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -165,10 +160,26 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
             prospect_id.desc(),
         ),
         Index("idx_source_lead_records_tenant_app_last_activity", "tenant_id", "app_id", "last_activity_on"),
-        Index("idx_source_lead_records_tenant_app_stage", "tenant_id", "app_id", "prospect_stage_normalized"),
-        Index("idx_source_lead_records_tenant_app_agent", "tenant_id", "app_id", "agent_name_normalized"),
-        Index("idx_source_lead_records_tenant_app_city", "tenant_id", "app_id", "city_normalized"),
-        Index("idx_source_lead_records_tenant_app_condition", "tenant_id", "app_id", "condition_normalized"),
+        Index(
+            "idx_source_lead_records_tenant_app_stage_lower",
+            "tenant_id",
+            "app_id",
+            func.lower(prospect_stage),
+        ),
+        Index(
+            "idx_source_lead_records_tenant_app_agent_lower",
+            "tenant_id",
+            "app_id",
+            func.lower(agent_name),
+            postgresql_where=text("agent_name IS NOT NULL"),
+        ),
+        Index(
+            "idx_source_lead_records_tenant_app_city_lower",
+            "tenant_id",
+            "app_id",
+            func.lower(city),
+            postgresql_where=text("city IS NOT NULL"),
+        ),
         Index("idx_source_lead_records_tenant_app_mql", "tenant_id", "app_id", "mql_score"),
         Index("idx_source_lead_records_tenant_app_plan_name", "tenant_id", "app_id", "plan_name"),
     )

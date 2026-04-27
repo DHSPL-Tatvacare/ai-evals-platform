@@ -18,8 +18,6 @@ type LeadsCacheEntry = Pick<LeadListResponse, 'leads' | 'total' | 'page' | 'page
 
 function buildCallsFilterHash(filters: CallFilters, pageSize: number): string {
   return [
-    filters.dateFrom,
-    filters.dateTo,
     (filters.agents ?? []).join(','),
     (filters.prospectId ?? []).join(','),
     filters.direction ?? '',
@@ -34,8 +32,6 @@ function buildCallsFilterHash(filters: CallFilters, pageSize: number): string {
 
 function buildLeadsFilterHash(filters: LeadFilters, pageSize: number): string {
   return [
-    filters.dateFrom,
-    filters.dateTo,
     (filters.agents ?? []).join(','),
     (filters.stage ?? []).join(','),
     (filters.condition ?? []).join(','),
@@ -78,28 +74,7 @@ interface InsideSalesState {
   reset: () => void;
 }
 
-// Browser-local `YYYY-MM-DD`; avoids the UTC `toISOString()` shift that flips
-// "today" at 5:30 AM IST for tenants operating in India.
-function formatLocalDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function todayLocalDateString(): string {
-  return formatLocalDateString(new Date());
-}
-
-function daysAgoLocalDateString(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return formatLocalDateString(d);
-}
-
 const DEFAULT_FILTERS: CallFilters = {
-  dateFrom: daysAgoLocalDateString(7) + ' 00:00:00',
-  dateTo: todayLocalDateString() + ' 23:59:59',
   agents: [],
   prospectId: [],
   direction: '',
@@ -247,11 +222,6 @@ export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
 export type { CallRecord, CallFilters, LeadListRecord, LeadFilters };
 
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
-  // UX default: show the last 7 days of leads on first open. The mirror
-  // holds all accumulated history since the 90-day bootstrap; users who
-  // need older data widen the filter explicitly.
-  dateFrom: daysAgoLocalDateString(7) + ' 00:00:00',
-  dateTo: todayLocalDateString() + ' 23:59:59',
   agents: [],
   stage: [],
   mqlMin: '',

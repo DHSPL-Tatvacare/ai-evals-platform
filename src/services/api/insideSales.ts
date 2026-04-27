@@ -97,8 +97,6 @@ export interface CollectionFreshness {
 }
 
 export interface CallFilters {
-  dateFrom: string;
-  dateTo: string;
   agents: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   prospectId: string[];
@@ -170,8 +168,6 @@ export interface LeadDetailFullResponse {
 // ── API functions ──────────────────────────────────────────────────────────
 
 export interface LeadFilters {
-  dateFrom: string;
-  dateTo: string;
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   agents: string[];
   stage: string[];
@@ -190,14 +186,6 @@ export interface LeadFilters {
 
 export type CallQueryScope = 'page' | 'all';
 export type InsideSalesCollectionFamily = 'calls' | 'leads';
-
-export interface CollectionCoverage {
-  hasData: boolean;
-  availableFrom: string | null;
-  availableTo: string | null;
-  lastScheduledSyncAt: string | null;
-  lastScheduledSyncStatus: string | null;
-}
 
 export interface CollectionSyncStatus {
   lastSuccessAt: string | null;
@@ -238,48 +226,6 @@ export async function fetchCollectionSuggestions(
   return res.values ?? [];
 }
 
-export async function fetchCoverage(
-  sourceFamily: InsideSalesCollectionFamily,
-): Promise<CollectionCoverage> {
-  return apiRequest<CollectionCoverage>(
-    `/api/inside-sales/coverage?source_family=${encodeURIComponent(sourceFamily)}`,
-  );
-}
-
-function parseCoverageDate(value: string | null | undefined): number | null {
-  const trimmed = (value ?? '').trim();
-  if (!trimmed) {
-    return null;
-  }
-  const normalized = trimmed.includes('T') ? trimmed : `${trimmed.replace(' ', 'T')}Z`;
-  const parsed = new Date(normalized).getTime();
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-export function isRangeOutsideCoverage(
-  coverage: CollectionCoverage | null,
-  dateFrom: string,
-  dateTo: string,
-): boolean {
-  const fromMs = parseCoverageDate(dateFrom);
-  const toMs = parseCoverageDate(dateTo);
-  const availableFromMs = parseCoverageDate(coverage?.availableFrom);
-  const availableToMs = parseCoverageDate(coverage?.availableTo);
-
-  if (
-    !coverage
-    || !coverage.hasData
-    || fromMs === null
-    || toMs === null
-    || availableFromMs === null
-    || availableToMs === null
-  ) {
-    return true;
-  }
-
-  return fromMs < availableFromMs || toMs > availableToMs;
-}
-
 function buildCallSearchParams(
   filters: CallFilters,
   page: number,
@@ -287,8 +233,6 @@ function buildCallSearchParams(
   scope: CallQueryScope,
 ): URLSearchParams {
   const params = new URLSearchParams({
-    date_from: filters.dateFrom,
-    date_to: filters.dateTo,
     page: String(page),
     page_size: String(pageSize),
   });
@@ -332,8 +276,6 @@ export async function fetchLeads(
   pageSize: number,
 ): Promise<LeadListResponse> {
   const params = new URLSearchParams({
-    date_from: filters.dateFrom,
-    date_to: filters.dateTo,
     page: String(page),
     page_size: String(pageSize),
   });
@@ -356,4 +298,3 @@ export async function fetchLeadDetail(
 ): Promise<LeadDetailFullResponse> {
   return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
 }
-

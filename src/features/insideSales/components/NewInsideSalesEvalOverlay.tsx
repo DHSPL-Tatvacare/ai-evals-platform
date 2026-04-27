@@ -28,17 +28,6 @@ const STEPS: WizardStep[] = [
   { key: 'review', label: 'Review' },
 ];
 
-function formatLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function todayStr(): string {
-  return formatLocalDateString(new Date());
-}
-
 interface NewInsideSalesEvalOverlayProps {
   onClose: () => void;
   preSelectedCallIds?: string[];
@@ -58,8 +47,6 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
       ? preSelectedCallIds
       : [...useInsideSalesStore.getState().selectedCallIds];
     return {
-      dateFrom: todayStr() + ' 00:00:00',
-      dateTo: todayStr() + ' 23:59:59',
       agents: [],
       direction: '',
       status: '',
@@ -160,7 +147,6 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
     {
       label: 'Call Selection',
       items: [
-        { key: 'Date range', value: `${callConfig.dateFrom.split(' ')[0]} → ${callConfig.dateTo.split(' ')[0]}` },
         { key: 'Mode', value: callConfig.selectionMode },
         { key: 'Calls', value: String(callCount) },
         ...(callConfig.agents.length ? [{ key: 'Agents', value: callConfig.agents.join(', ') }] : []),
@@ -202,8 +188,6 @@ export function NewInsideSalesEvalOverlay({ onClose, preSelectedCallIds }: NewIn
       run_name: runName,
       run_description: runDescription,
       call_selection: {
-        date_from: callConfig.dateFrom,
-        date_to: callConfig.dateTo,
         agents: callConfig.agents,
         direction: callConfig.direction,
         status: callConfig.status,

@@ -33,8 +33,6 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
         tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
         app_id="inside-sales",
         filters=InsideSalesCallFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
             agents=("Agent Amy", "Agent Bob"),
             prospect_ids=("pros-1",),
             direction="inbound",
@@ -52,11 +50,12 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
 
     assert "source_call_records.tenant_id =" in sql
     assert "source_call_records.app_id =" in sql
-    assert "coalesce(source_call_records.call_started_at, source_call_records.created_on) >=" in sql
-    assert "source_call_records.agent_name_normalized IN ('agent amy', 'agent bob')" in sql
+    # No date_from / date_to clauses anymore — listing serves the full mirror.
+    assert "call_started_at >=" not in sql
+    assert "lower(source_call_records.agent_name) IN ('agent amy', 'agent bob')" in sql
     assert "source_call_records.prospect_id ILIKE '%%pros-1%%'" in sql
     assert "source_call_records.direction = 'inbound'" in sql
-    assert "source_call_records.status_normalized = 'answered'" in sql
+    assert "lower(source_call_records.status) = 'answered'" in sql
     assert "source_call_records.duration_seconds >= 30" in sql
     assert "source_call_records.duration_seconds <= 600" in sql
     assert "source_call_records.has_recording IS true" in sql
@@ -69,49 +68,36 @@ def test_build_call_count_query_wraps_filtered_call_scope_without_pagination():
     statement = build_call_count_query(
         tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
         app_id="inside-sales",
-        filters=InsideSalesCallFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-            status="Answered",
-        ),
+        filters=InsideSalesCallFilters(status="Answered"),
     )
     sql = _compile(statement)
 
     assert "SELECT count(*) AS count_1" in sql
-    assert "status_normalized = 'answered'" in sql
+    assert "lower(source_call_records.status) = 'answered'" in sql
     assert " LIMIT " not in sql
     assert " OFFSET " not in sql
 
 
-def test_lead_listing_query_filters_by_created_on_even_though_sync_uses_modified_on():
-    """Lead serving semantics contract: list filters / ordering are
-    tied to ``created_on``. The ETL follows LSQ ``ModifiedOn`` for
-    freshness, but the UI question "when did this lead enter the
-    funnel?" still answers from ``created_on``. This test locks that
-    split so a future refactor can't silently swap the axis."""
+def test_lead_listing_query_orders_by_created_on_desc():
+    """Lead listing always orders newest-first by ``created_on``."""
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-        ),
+        filters=InsideSalesLeadFilters(),
         page=1,
         page_size=50,
     )
     sql = _compile(statement)
-    assert "source_lead_records.created_on >=" in sql
-    assert "source_lead_records.modified_on" not in sql
     assert "ORDER BY source_lead_records.created_on DESC" in sql
+    # No date_from / date_to clauses anymore.
+    assert "source_lead_records.created_on >=" not in sql
 
 
-def test_build_lead_listing_query_applies_filters_and_created_on_sort():
+def test_build_lead_listing_query_applies_filters_against_raw_columns():
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
         filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
             agents=("Agent Amy",),
             stage=("New Lead", "Call Back"),
             mql_min=3,
@@ -124,11 +110,10 @@ def test_build_lead_listing_query_applies_filters_and_created_on_sort():
     )
     sql = _compile(statement)
 
-    assert "source_lead_records.created_on >=" in sql
-    assert "source_lead_records.agent_name_normalized IN ('agent amy')" in sql
-    assert "source_lead_records.prospect_stage_normalized IN ('new lead', 'call back')" in sql
-    assert "source_lead_records.condition_normalized ILIKE '%%diabetes%%'" in sql
-    assert "source_lead_records.city_normalized ILIKE '%%mumbai%%'" in sql
+    assert "lower(source_lead_records.agent_name) IN ('agent amy')" in sql
+    assert "lower(source_lead_records.prospect_stage) IN ('new lead', 'call back')" in sql
+    assert "source_lead_records.condition ILIKE '%%diabetes%%'" in sql
+    assert "source_lead_records.city ILIKE '%%mumbai%%'" in sql
     assert "source_lead_records.prospect_id ILIKE '%%prospect-9%%'" in sql
     assert "source_lead_records.mql_score >= 3" in sql
     assert "ORDER BY source_lead_records.created_on DESC, source_lead_records.prospect_id DESC" in sql
@@ -139,11 +124,7 @@ def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-            q="  rohit  ",
-        ),
+        filters=InsideSalesLeadFilters(q="  rohit  "),
         page=1,
         page_size=25,
     )
@@ -160,11 +141,7 @@ def test_build_lead_query_skips_q_when_whitespace_only():
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-            q="   ",
-        ),
+        filters=InsideSalesLeadFilters(q="   "),
         page=1,
         page_size=25,
     )
@@ -178,11 +155,7 @@ def test_build_lead_query_prospect_id_substring_match():
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-            prospect_ids=("abc123",),
-        ),
+        filters=InsideSalesLeadFilters(prospect_ids=("abc123",)),
         page=1,
         page_size=25,
     )
@@ -196,11 +169,7 @@ def test_build_lead_count_query_wraps_filtered_lead_scope():
     statement = build_lead_count_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(
-            date_from="2026-04-01 00:00:00",
-            date_to="2026-04-08 23:59:59",
-            mql_min=5,
-        ),
+        filters=InsideSalesLeadFilters(mql_min=5),
     )
     sql = _compile(statement)
 

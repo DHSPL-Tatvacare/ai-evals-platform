@@ -189,7 +189,7 @@ class InsideSalesSyncRequestTests(unittest.TestCase):
 
 
 class InsideSalesSourceRowBuilderTests(unittest.TestCase):
-    def test_build_call_source_row_sets_normalized_fields(self):
+    def test_build_call_source_row_preserves_raw_text_columns(self):
         synced_at = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
         row = sync_service.build_call_source_row(
             {
@@ -215,8 +215,10 @@ class InsideSalesSourceRowBuilderTests(unittest.TestCase):
         )
 
         self.assertEqual(row["activity_id"], "activity-1")
-        self.assertEqual(row["agent_name_normalized"], "agent amy")
-        self.assertEqual(row["status_normalized"], "answered")
+        # No more shadow normalized columns — raw values are preserved.
+        self.assertNotIn("agent_name_normalized", row)
+        self.assertNotIn("status_normalized", row)
+        self.assertEqual(row["status"], "Answered")
         self.assertTrue(row["has_recording"])
 
     def test_build_lead_source_row_sets_derived_fields(self):
@@ -252,7 +254,11 @@ class InsideSalesSourceRowBuilderTests(unittest.TestCase):
 
         self.assertIsNotNone(row)
         assert row is not None
-        self.assertEqual(row["prospect_stage_normalized"], "new lead")
+        self.assertEqual(row["prospect_stage"], "New Lead")
+        # No shadow normalized columns.
+        self.assertNotIn("prospect_stage_normalized", row)
+        self.assertNotIn("city_normalized", row)
+        self.assertNotIn("agent_name_normalized", row)
         self.assertEqual(row["mql_score"], 5)
         self.assertEqual(row["total_dials"], 5)
         self.assertEqual(row["connect_rate"], 60.0)

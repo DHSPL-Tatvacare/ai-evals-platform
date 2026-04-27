@@ -1,20 +1,22 @@
 /**
  * SelectCallsStep — wizard step 2 for inside-sales eval wizard.
+ *
+ * Reads from the synced source mirror via the same routes as the listing
+ * page. No date-range scoping: the user picks calls from the full
+ * synced history, paginated server-side.
  */
 
 import { useEffect, useId, useState, useMemo, useCallback } from 'react';
 import { Search, Check, Info, Filter, X } from 'lucide-react';
-import { apiRequest } from '@/services/api/client';
-import { fetchCalls, fetchCallsForSelection, fetchCoverage, isRangeOutsideCoverage } from '@/services/api/insideSales';
+import { fetchCalls, fetchCallsForSelection } from '@/services/api/insideSales';
 import { Input, Button, Combobox } from '@/components/ui';
-import type { CallFilters, CallRecord, CollectionCoverage } from '@/services/api/insideSales';
+import type { CallFilters, CallRecord } from '@/services/api/insideSales';
 import { formatDuration } from '@/utils/formatters';
 import { cn } from '@/utils';
 import { useRightOverlay } from '@/hooks';
+import { useCollectionSuggestions } from '../hooks/useCollectionSuggestions';
 
 export interface CallSelectionConfig {
-  dateFrom: string;
-  dateTo: string;
   agents: string[];
   direction: string;
   status: string;
@@ -64,33 +66,15 @@ interface FilterPanelProps {
 function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) {
   const titleId = useId();
   const ariaProps = useRightOverlay(true, { onClose, labelledBy: titleId });
-  const [agentOptions, setAgentOptions] = useState<{ value: string; label: string }[]>([]);
-  const [coverage, setCoverage] = useState<CollectionCoverage | null>(null);
 
-  useEffect(() => {
-    const params = new URLSearchParams({ date_from: config.dateFrom, date_to: config.dateTo });
-    apiRequest<{ agents: string[] }>(`/api/inside-sales/agents?${params.toString()}`)
-      .then((d) => setAgentOptions(d.agents.map((a) => ({ value: a, label: a }))))
-      .catch(() => {});
-  }, [config.dateFrom, config.dateTo]);
+  // Backed by the same suggestions endpoint the listing page uses, so the
+  // dropdown values map 1:1 to what the filter actually matches.
+  const { options: agentOptions, loading: agentLoading, onSearchChange: onAgentSearchChange } =
+    useCollectionSuggestions('calls', 'agent_name', { debounceMs: 250, limit: 20 });
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchCoverage('calls')
-      .then((coverage) => {
-        if (!cancelled) {
-          setCoverage(coverage);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCoverage(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const mergedAgentOptions = Array.from(
+    new Set([...(config.agents ?? []), ...(agentOptions ?? [])]),
+  ).map((value) => ({ value, label: value }));
 
   const toggle = <K extends 'direction' | 'status'>(
     field: K,
@@ -124,31 +108,6 @@ function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) 
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* Date Range */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-[var(--text-secondary)]">Date Range</label>
-            <div className="flex gap-2">
-              <input
-                type="date"
-                value={config.dateFrom.split(' ')[0]}
-                onChange={(e) => onConfigChange({ dateFrom: e.target.value + ' 00:00:00' })}
-                className={inputCls}
-              />
-              <input
-                type="date"
-                value={config.dateTo.split(' ')[0]}
-                onChange={(e) => onConfigChange({ dateTo: e.target.value + ' 23:59:59' })}
-                className={inputCls}
-              />
-            </div>
-            <BoundarySyncBanner
-              dateFrom={config.dateFrom}
-              dateTo={config.dateTo}
-              selectionMode={config.selectionMode}
-              coverage={coverage}
-            />
-          </div>
-
           {/* Agent */}
           <div className="space-y-2">
             <label className="text-xs font-medium text-[var(--text-secondary)]">Agent</label>
@@ -156,8 +115,11 @@ function EvalFilterPanel({ config, onConfigChange, onClose }: FilterPanelProps) 
               multi
               value={config.agents}
               onChange={(agents) => onConfigChange({ agents })}
-              options={agentOptions}
-              placeholder="Select agents..."
+              options={mergedAgentOptions}
+              onSearchChange={onAgentSearchChange}
+              loading={agentLoading}
+              placeholder="Type to search agents..."
+              size="sm"
             />
           </div>
 
@@ -270,8 +232,6 @@ export function SelectCallsStep({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const callFilters = useMemo<CallFilters>(() => ({
-    dateFrom: config.dateFrom,
-    dateTo: config.dateTo,
     agents: config.agents,
     prospectId: [],
     direction: config.direction,
@@ -281,8 +241,6 @@ export function SelectCallsStep({
     durationMin: config.durationMin,
     durationMax: config.durationMax,
   }), [
-    config.dateFrom,
-    config.dateTo,
     config.agents,
     config.direction,
     config.status,
@@ -368,15 +326,12 @@ export function SelectCallsStep({
       <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5">
         <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
         <p className="text-[12px] text-[var(--text-secondary)]">
-          Calls are loaded from synced source data. If you choose an older window, the platform syncs it first and then starts the evaluation.
+          Calls are loaded from synced source data. Picks come from the full synced history; freshness is governed by the scheduled sync.
         </p>
       </div>
 
       {/* Filters button */}
-      <div className="flex justify-between items-center">
-        <div className="text-[12px] text-[var(--text-muted)]">
-          {config.dateFrom.split(' ')[0]} → {config.dateTo.split(' ')[0]}
-        </div>
+      <div className="flex justify-end items-center">
         <Button
           variant="secondary"
           size="sm"
@@ -624,32 +579,6 @@ export function SelectCallsStep({
           onClose={() => setFiltersOpen(false)}
         />
       )}
-    </div>
-  );
-}
-
-function BoundarySyncBanner({
-  dateFrom,
-  dateTo,
-  selectionMode,
-  coverage,
-}: {
-  dateFrom: string;
-  dateTo: string;
-  selectionMode: CallSelectionConfig['selectionMode'];
-  coverage: CollectionCoverage | null;
-}) {
-  if (selectionMode === 'specific' || !coverage || !isRangeOutsideCoverage(coverage, dateFrom, dateTo)) {
-    return null;
-  }
-  const availableFrom = coverage.availableFrom?.split(' ')[0] ?? null;
-  const availableTo = coverage.availableTo?.split(' ')[0] ?? null;
-  const coverageLabel = availableFrom && availableTo
-    ? `${availableFrom} to ${availableTo}`
-    : 'no mirrored coverage yet';
-  return (
-    <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--text-secondary)]">
-      This range sits outside mirrored coverage ({coverageLabel}). Submitting the eval will queue a source sync first.
     </div>
   );
 }

@@ -221,7 +221,7 @@ function LeadsTableContent({
     return () => clearTimeout(id);
   }, [searchInput, leadFilters.q]);
 
-  const filterKey = `${leadFilters.dateFrom}|${leadFilters.dateTo}|${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.prospectId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
+  const filterKey = `${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.prospectId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
 
   const appConfig = useAppConfig('inside-sales');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
@@ -500,8 +500,6 @@ export function InsideSalesListing() {
 
   // Stable key from filter values + page — only re-fetch when these actually change
   const filterKey = [
-    filters.dateFrom,
-    filters.dateTo,
     (filters.agents ?? []).join(','),
     (filters.prospectId ?? []).join(','),
     filters.direction ?? '',

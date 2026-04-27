@@ -1,14 +1,9 @@
 """Shared DTOs for Inside Sales dataset resolution.
 
-Before PR 5, this module owned the LSQ-backed resolvers that fetched call and
-lead records synchronously from LeadSquared. PR 5 moved every read onto the
-Postgres source-serving layer (`inside_sales_source_resolver`); PR 6 deleted
-the LSQ fetch path. What remains is the shared type contract — filter and
-result dataclasses plus `normalize_match_value` — so both the source resolver
-and the serving contract speak the same language.
-
-Do NOT re-add LSQ-fetching functions here. If a new read path is needed, add
-it alongside the source resolver.
+The serving layer reads from the Postgres source mirror only — listing routes,
+suggestions, and the eval runner all consume the dataclasses below. Filtering
+is column-direct (case-insensitive on raw text columns); there is no
+date-window or shadow-normalized contract anymore.
 """
 
 from __future__ import annotations
@@ -38,8 +33,6 @@ class ResolvedCallSelection:
 
 @dataclass(frozen=True)
 class InsideSalesCallFilters:
-    date_from: str
-    date_to: str
     agents: tuple[str, ...] = ()
     prospect_ids: tuple[str, ...] = ()
     direction: str | None = None
@@ -52,8 +45,6 @@ class InsideSalesCallFilters:
 
 @dataclass(frozen=True)
 class InsideSalesLeadFilters:
-    date_from: str
-    date_to: str
     agents: tuple[str, ...] = ()
     stage: tuple[str, ...] = ()
     mql_min: int | None = None
@@ -63,7 +54,3 @@ class InsideSalesLeadFilters:
     phones: tuple[str, ...] = ()
     plan_names: tuple[str, ...] = ()
     q: str | None = None
-
-
-def normalize_match_value(value: str | None) -> str:
-    return " ".join((value or "").strip().lower().split())

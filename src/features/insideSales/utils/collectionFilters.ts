@@ -91,20 +91,6 @@ function formatFilterValue(filter: AppCollectionFilterConfig, state: object): st
         return null;
       }
       return summarizeString(primaryValue.trim());
-    case 'date-range': {
-      const fromRaw = typeof primaryValue === 'string' ? primaryValue.trim() : '';
-      const toValue = getValue(state, secondField);
-      const toRaw = typeof toValue === 'string' ? toValue.trim() : '';
-      if (!fromRaw && !toRaw) {
-        return null;
-      }
-      const fromDate = fromRaw.slice(0, 10);
-      const toDate = toRaw.slice(0, 10);
-      if (fromDate && toDate) {
-        return `${fromDate} → ${toDate}`;
-      }
-      return fromDate ? `from ${fromDate}` : `until ${toDate}`;
-    }
     default:
       return null;
   }
@@ -123,8 +109,6 @@ export function getFilterClearPatch(filter: AppCollectionFilterConfig): Record<s
     case 'segmented':
     case 'text':
       return { [fields[0]]: '' };
-    case 'date-range':
-      return {};
     default:
       return {};
   }
@@ -134,10 +118,6 @@ export function isCollectionFilterActive(
   filter: AppCollectionFilterConfig,
   state: object,
 ): boolean {
-  if (filter.control === 'date-range') {
-    return false;
-  }
-
   return getFields(filter).some((field) => isActiveValue(getValue(state, field)));
 }
 

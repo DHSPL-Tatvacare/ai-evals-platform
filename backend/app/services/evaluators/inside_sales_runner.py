@@ -266,8 +266,6 @@ async def run_inside_sales_evaluation(
     async with _async_session() as db:
         selection = await resolve_call_selection(
             InsideSalesCallFilters(
-                date_from=call_selection.get("date_from", ""),
-                date_to=call_selection.get("date_to", ""),
                 agents=tuple(agent_list),
                 prospect_ids=(
                     (pid,) if (pid := call_selection.get("prospect_id")) else ()

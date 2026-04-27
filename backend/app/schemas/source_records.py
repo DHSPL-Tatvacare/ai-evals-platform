@@ -26,12 +26,10 @@ class SourceCallRecordRow(SourceRecordRowBase):
     prospect_id: str
     agent_id: str | None = None
     agent_name: str | None = None
-    agent_name_normalized: str | None = None
     agent_email: str | None = None
     event_code: int
     direction: str
     status: str | None = None
-    status_normalized: str | None = None
     call_started_at: datetime | None = None
     duration_seconds: int
     has_recording: bool
@@ -50,16 +48,12 @@ class SourceLeadRecordRow(SourceRecordRowBase):
     phone: str | None = None
     email: str | None = None
     prospect_stage: str
-    prospect_stage_normalized: str | None = None
     city: str | None = None
-    city_normalized: str | None = None
     age_group: str | None = None
     condition: str | None = None
-    condition_normalized: str | None = None
     hba1c_band: str | None = None
     intent_to_pay: str | None = None
     agent_name: str | None = None
-    agent_name_normalized: str | None = None
     source: str | None = None
     source_campaign: str | None = None
     created_on: datetime | None = None

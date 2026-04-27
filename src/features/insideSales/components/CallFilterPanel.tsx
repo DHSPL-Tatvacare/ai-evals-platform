@@ -1,19 +1,20 @@
 /**
  * Filter panel for Inside Sales collection views.
+ *
+ * Every filter dropdown is backed by `/api/inside-sales/collections/{family}/suggestions`,
+ * which reads from the same raw column the listing query matches against —
+ * so what the user sees in the dropdown is exactly what filtering returns.
  */
 
-import { useEffect, useId, useState } from 'react';
+import { useId } from 'react';
 import { X } from 'lucide-react';
 import { Button, Combobox, RightSlideOverShell } from '@/components/ui';
 import { useAppConfig } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
-import { apiRequest } from '@/services/api/client';
-import { fetchCoverage, isRangeOutsideCoverage } from '@/services/api/insideSales';
-import type { CallFilters, CollectionCoverage, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
+import type { CallFilters, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
 import type { AppCollectionFilterConfig } from '@/types';
 import { cn } from '@/utils/cn';
-import { usePermission } from '@/utils/permissions';
 import { useCollectionSuggestions } from '../hooks/useCollectionSuggestions';
 
 interface CallFilterPanelProps {
@@ -25,16 +26,7 @@ interface CallFilterPanelProps {
 const INPUT_CLASS =
   'w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-accent)]';
 
-function readDateValue(value: unknown): string {
-  return typeof value === 'string' ? value.split(' ')[0] : '';
-}
-
-/** Multi-select combobox backed by `/api/inside-sales/collections/{family}/suggestions`.
- *
- * Kept inline in this file because it's the only consumer of the hook today.
- * If a second surface adopts it, promote to `components/ui/` with a
- * more generic prop shape.
- */
+/** Multi-select combobox backed by `/api/inside-sales/collections/{family}/suggestions`. */
 function AsyncMultiSelectControl({
   filter,
   values,
@@ -83,7 +75,6 @@ function renderFilterControl(
   filter: AppCollectionFilterConfig,
   values: CallFilters | LeadFilters,
   setPatch: (patch: Partial<CallFilters> | Partial<LeadFilters>) => void,
-  agentOptions: Array<{ value: string; label: string }>,
   family: InsideSalesCollectionFamily,
 ) {
   const fields = filter.fields ?? [filter.key];
@@ -97,23 +88,6 @@ function renderFilterControl(
           setPatch={setPatch}
           family={family}
         />
-      );
-    case 'date-range':
-      return (
-        <div className="flex gap-2">
-          <input
-            type="date"
-            value={readDateValue(values[fields[0] as keyof typeof values])}
-            onChange={(event) => setPatch({ [fields[0]]: `${event.target.value} 00:00:00` })}
-            className={INPUT_CLASS}
-          />
-          <input
-            type="date"
-            value={readDateValue(values[fields[1] as keyof typeof values])}
-            onChange={(event) => setPatch({ [fields[1]]: `${event.target.value} 23:59:59` })}
-            className={INPUT_CLASS}
-          />
-        </div>
       );
     case 'text':
       return (
@@ -131,7 +105,7 @@ function renderFilterControl(
           multi
           value={Array.isArray(values[fields[0] as keyof typeof values]) ? values[fields[0] as keyof typeof values] as string[] : []}
           onChange={(nextValue) => setPatch({ [fields[0]]: nextValue })}
-          options={filter.optionSource === 'agents' ? agentOptions : (filter.options ?? [])}
+          options={filter.options ?? []}
           placeholder={filter.placeholder}
         />
       );
@@ -144,7 +118,7 @@ function renderFilterControl(
               onClick={() => setPatch({ [fields[0]]: option.value })}
               className={cn(
                 'flex-1 rounded-md py-1.5 text-xs font-medium border transition-colors',
-                values[fields[0] as keyof typeof values] === option.value
+                String(values[fields[0] as keyof typeof values] ?? '') === option.value
                   ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10 text-[var(--text-brand)]'
                   : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
               )}
@@ -197,36 +171,6 @@ function renderFilterControl(
   }
 }
 
-function BoundarySyncNotice({
-  dateFrom,
-  dateTo,
-  coverage,
-  canManageBackfill,
-}: {
-  dateFrom: string;
-  dateTo: string;
-  coverage: CollectionCoverage | null;
-  canManageBackfill: boolean;
-}) {
-  if (!coverage || !isRangeOutsideCoverage(coverage, dateFrom, dateTo)) {
-    return null;
-  }
-  const availableFrom = coverage.availableFrom?.split(' ')[0] ?? null;
-  const availableTo = coverage.availableTo?.split(' ')[0] ?? null;
-  const coverageLabel = availableFrom && availableTo
-    ? `${availableFrom} to ${availableTo}`
-    : 'no mirrored coverage yet';
-  const message = canManageBackfill
-    ? `This range sits outside mirrored coverage (${coverageLabel}). Refreshing this view will queue a backfill first.`
-    : `This range sits outside mirrored coverage (${coverageLabel}). Ask an admin to backfill it before refreshing.`;
-
-  return (
-    <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--text-secondary)]">
-      {message}
-    </div>
-  );
-}
-
 export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFilterPanelProps) {
   const titleId = useId();
   const appConfig = useAppConfig('inside-sales');
@@ -235,9 +179,6 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
 
   const callFilters = useInsideSalesStore((state) => state.filters);
   const leadFilters = useLeadsStore((state) => state.leadFilters);
-  const [agentOptions, setAgentOptions] = useState<Array<{ value: string; label: string }>>([]);
-  const [coverage, setCoverage] = useState<CollectionCoverage | null>(null);
-  const canManageBackfill = usePermission('schedule:manage');
 
   const values = datasetKey === 'leads' ? leadFilters : callFilters;
   const setPatch = (patch: Partial<CallFilters> | Partial<LeadFilters>) => {
@@ -255,42 +196,6 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
     }
     useInsideSalesStore.getState().clearFilters();
   };
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const needsAgentOptions = datasetConfig?.filters.some((filter) => filter.optionSource === 'agents');
-    if (!needsAgentOptions || datasetKey !== 'calls') {
-      return;
-    }
-
-    const params = new URLSearchParams({
-      date_from: callFilters.dateFrom,
-      date_to: callFilters.dateTo,
-    });
-
-    apiRequest<{ agents: string[] }>(`/api/inside-sales/agents?${params.toString()}`)
-      .then((data) => setAgentOptions(data.agents.map((agent) => ({ value: agent, label: agent }))))
-      .catch(() => setAgentOptions([]));
-  }, [isOpen, callFilters.dateFrom, callFilters.dateTo, datasetConfig?.filters, datasetKey]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    fetchCoverage(datasetKey)
-      .then((coverage) => {
-        if (!cancelled) {
-          setCoverage(coverage);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCoverage(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, datasetKey]);
 
   return (
     <RightSlideOverShell
@@ -316,15 +221,9 @@ export function CallFilterPanel({ isOpen, onClose, activeTab = 'calls' }: CallFi
           {datasetConfig.filters.map((filter) => (
             <div key={filter.key} className="space-y-2">
               <label className="text-xs font-medium text-[var(--text-secondary)]">{filter.label}</label>
-              {renderFilterControl(filter, values, setPatch, agentOptions, datasetKey)}
+              {renderFilterControl(filter, values, setPatch, datasetKey)}
             </div>
           ))}
-          <BoundarySyncNotice
-            dateFrom={values.dateFrom}
-            dateTo={values.dateTo}
-            coverage={coverage}
-            canManageBackfill={canManageBackfill}
-          />
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-default)]">

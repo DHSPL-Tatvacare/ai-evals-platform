@@ -16,7 +16,6 @@ from app.services.inside_sales_dataset_resolver import (
     InsideSalesCallFilters,
     InsideSalesLeadFilters,
     ResolvedDatasetPage,
-    normalize_match_value,
 )
 from app.services.inside_sales_eval_linkage import (
     extract_inside_sales_eval_score,
@@ -29,17 +28,6 @@ INSIDE_SALES_STALE_AFTER = timedelta(minutes=30)
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _parse_query_datetime(value: str) -> datetime:
-    cleaned = value.strip()
-    if "T" in cleaned:
-        cleaned = cleaned.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(cleaned)
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    return datetime.strptime(cleaned, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
 
 
 def _format_response_datetime(value: datetime | None) -> str:
@@ -64,20 +52,20 @@ def _call_sort_expression():
     return func.coalesce(SourceCallRecord.call_started_at, SourceCallRecord.created_on)
 
 
-def _coverage_model_for(source_family: str) -> type[SourceCallRecord] | type[SourceLeadRecord]:
-    if source_family == "calls":
-        return SourceCallRecord
-    if source_family == "leads":
-        return SourceLeadRecord
-    raise ValueError(f"unsupported source_family for coverage: {source_family!r}")
+def _normalize_text_values(values: tuple[str, ...]) -> tuple[str, ...]:
+    """Strip + lowercase + collapse whitespace for case-insensitive equality.
 
-
-def _coverage_time_expression(source_family: str):
-    if source_family == "calls":
-        return _call_sort_expression()
-    if source_family == "leads":
-        return SourceLeadRecord.created_on
-    raise ValueError(f"unsupported source_family for coverage: {source_family!r}")
+    Mirrors what `func.lower(col)` produces on the Postgres side, so callers
+    can do `func.lower(col).in_(_normalize_text_values(values))`.
+    """
+    out: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        normalized = " ".join(value.strip().lower().split())
+        if normalized:
+            out.append(normalized)
+    return tuple(out)
 
 
 def _build_call_filter_clauses(
@@ -86,24 +74,14 @@ def _build_call_filter_clauses(
     app_id: str,
     filters: InsideSalesCallFilters,
 ) -> list[Any]:
-    date_from = _parse_query_datetime(filters.date_from)
-    date_to = _parse_query_datetime(filters.date_to)
-    call_time = _call_sort_expression()
-
     clauses: list[Any] = [
         SourceCallRecord.tenant_id == tenant_id,
         SourceCallRecord.app_id == app_id,
-        call_time >= date_from,
-        call_time <= date_to,
     ]
 
-    agent_names = tuple(
-        normalized
-        for normalized in (normalize_match_value(value) for value in filters.agents)
-        if normalized
-    )
+    agent_names = _normalize_text_values(filters.agents)
     if agent_names:
-        clauses.append(SourceCallRecord.agent_name_normalized.in_(agent_names))
+        clauses.append(func.lower(SourceCallRecord.agent_name).in_(agent_names))
 
     call_prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
     if call_prospect_ids:
@@ -115,9 +93,7 @@ def _build_call_filter_clauses(
         clauses.append(SourceCallRecord.direction == filters.direction)
 
     if filters.status:
-        clauses.append(
-            SourceCallRecord.status_normalized == normalize_match_value(filters.status)
-        )
+        clauses.append(func.lower(SourceCallRecord.status) == filters.status.strip().lower())
 
     if filters.duration_min is not None:
         clauses.append(SourceCallRecord.duration_seconds >= filters.duration_min)
@@ -183,50 +159,29 @@ def _build_lead_filter_clauses(
     app_id: str,
     filters: InsideSalesLeadFilters,
 ) -> list[Any]:
-    date_from = _parse_query_datetime(filters.date_from)
-    date_to = _parse_query_datetime(filters.date_to)
-
     clauses: list[Any] = [
         SourceLeadRecord.tenant_id == tenant_id,
         SourceLeadRecord.app_id == app_id,
-        SourceLeadRecord.created_on >= date_from,
-        SourceLeadRecord.created_on <= date_to,
     ]
 
-    agent_names = tuple(
-        normalized
-        for normalized in (normalize_match_value(value) for value in filters.agents)
-        if normalized
-    )
+    agent_names = _normalize_text_values(filters.agents)
     if agent_names:
-        clauses.append(SourceLeadRecord.agent_name_normalized.in_(agent_names))
+        clauses.append(func.lower(SourceLeadRecord.agent_name).in_(agent_names))
 
-    stages = tuple(
-        normalized
-        for normalized in (normalize_match_value(value) for value in filters.stage)
-        if normalized
-    )
+    stages = _normalize_text_values(filters.stage)
     if stages:
-        clauses.append(SourceLeadRecord.prospect_stage_normalized.in_(stages))
+        clauses.append(func.lower(SourceLeadRecord.prospect_stage).in_(stages))
 
-    conditions = tuple(
-        normalized
-        for normalized in (normalize_match_value(value) for value in filters.condition)
-        if normalized
-    )
+    conditions = tuple(c.strip() for c in filters.condition if c.strip())
     if conditions:
         clauses.append(
-            or_(*(SourceLeadRecord.condition_normalized.ilike(f"%{condition}%") for condition in conditions))
+            or_(*(SourceLeadRecord.condition.ilike(f"%{condition}%") for condition in conditions))
         )
 
-    cities = tuple(
-        normalized
-        for normalized in (normalize_match_value(value) for value in filters.city)
-        if normalized
-    )
+    cities = tuple(c.strip() for c in filters.city if c.strip())
     if cities:
         clauses.append(
-            or_(*(SourceLeadRecord.city_normalized.ilike(f"%{city}%") for city in cities))
+            or_(*(SourceLeadRecord.city.ilike(f"%{city}%") for city in cities))
         )
 
     prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
@@ -398,34 +353,6 @@ def map_lead_listing_row(lead: SourceLeadRecord) -> dict[str, Any]:
     }
 
 
-async def list_call_agent_names_from_source(
-    db: AsyncSession,
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    date_from: str,
-    date_to: str,
-) -> list[str]:
-    parsed_from = _parse_query_datetime(date_from)
-    parsed_to = _parse_query_datetime(date_to)
-    call_time = _call_sort_expression()
-
-    result = await db.execute(
-        select(SourceCallRecord.agent_name, SourceCallRecord.agent_name_normalized)
-        .where(
-            SourceCallRecord.tenant_id == tenant_id,
-            SourceCallRecord.app_id == app_id,
-            call_time >= parsed_from,
-            call_time <= parsed_to,
-            SourceCallRecord.agent_name.is_not(None),
-            SourceCallRecord.agent_name_normalized.is_not(None),
-        )
-        .distinct(SourceCallRecord.agent_name_normalized)
-        .order_by(SourceCallRecord.agent_name_normalized.asc(), SourceCallRecord.agent_name.asc())
-    )
-    return [name for name, _normalized in result.all() if name]
-
-
 async def list_calls_from_source(
     db: AsyncSession,
     *,
@@ -463,14 +390,16 @@ async def list_calls_from_source(
         thread_ids=activity_ids,
     )
 
-    records = [
-        map_call_listing_row(
-            call,
-            eval_count=eval_map.get(call.activity_id).eval_count if eval_map.get(call.activity_id) else 0,
-            eval_result=eval_map.get(call.activity_id).latest_result if eval_map.get(call.activity_id) else None,
+    records = []
+    for call in calls:
+        overlay = eval_map.get(call.activity_id)
+        records.append(
+            map_call_listing_row(
+                call,
+                eval_count=overlay.eval_count if overlay else 0,
+                eval_result=overlay.latest_result if overlay else None,
+            )
         )
-        for call in calls
-    ]
     resolved_page_size = total if scope == "all" and total > 0 else page_size
     return ResolvedDatasetPage(
         records=records,
@@ -616,51 +545,6 @@ async def get_collection_sync_status(
     }
 
 
-async def get_collection_coverage(
-    db: AsyncSession,
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    source_family: str,
-) -> dict[str, Any]:
-    model = _coverage_model_for(source_family)
-    coverage_time = _coverage_time_expression(source_family)
-    count, available_from, available_to = (
-        await db.execute(
-            select(
-                func.count(model.id),
-                func.min(coverage_time),
-                func.max(coverage_time),
-            )
-            .select_from(model)
-            .where(
-                model.tenant_id == tenant_id,
-                model.app_id == app_id,
-            )
-        )
-    ).one()
-    latest_scheduled = await db.scalar(
-        select(SourceSyncRun)
-        .where(
-            SourceSyncRun.tenant_id == tenant_id,
-            SourceSyncRun.app_id == app_id,
-            SourceSyncRun.source_family == source_family,
-            SourceSyncRun.is_scheduled_run.is_(True),
-            SourceSyncRun.status == "completed",
-        )
-        .order_by(SourceSyncRun.completed_at.desc(), SourceSyncRun.created_at.desc())
-        .limit(1)
-    )
-    has_data = bool(count and available_from is not None and available_to is not None)
-    return {
-        "hasData": has_data,
-        "availableFrom": available_from if has_data else None,
-        "availableTo": available_to if has_data else None,
-        "lastScheduledSyncAt": latest_scheduled.completed_at if latest_scheduled else None,
-        "lastScheduledSyncStatus": latest_scheduled.status if latest_scheduled else None,
-    }
-
-
 async def get_collection_freshness(
     db: AsyncSession,
     *,
@@ -732,7 +616,9 @@ async def list_collection_suggestions(
     ``query``, tenant/app-scoped. Used to feed type-ahead filter dropdowns.
 
     ``field`` is validated against a fixed whitelist so this can never be
-    steered into reading arbitrary columns.
+    steered into reading arbitrary columns. The same raw column the listing
+    query matches against is read here, so what the user sees in the
+    dropdown is exactly what filtering matches.
     """
     column = _SUGGESTION_FIELDS.get((source_family, field))
     if column is None:

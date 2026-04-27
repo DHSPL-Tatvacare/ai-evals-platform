@@ -277,36 +277,3 @@ async def test_refresh_collection_leads_family_omits_event_codes():
     assert response.source_family == 'leads'
 
 
-@pytest.mark.asyncio
-async def test_get_collection_coverage_reads_mirrored_bounds():
-    auth = _auth()
-    db = _FakeSession()
-    with patch.object(
-        inside_sales_routes,
-        'get_collection_coverage_summary',
-        new=AsyncMock(
-            return_value={
-                'hasData': True,
-                'availableFrom': datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
-                'availableTo': datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc),
-                'lastScheduledSyncAt': datetime(2026, 4, 24, 12, 30, 0, tzinfo=timezone.utc),
-                'lastScheduledSyncStatus': 'completed',
-            }
-        ),
-    ) as coverage_mock:
-        response = await inside_sales_routes.get_collection_coverage(
-            source_family='calls',
-            auth=auth,
-            db=db,
-        )
-
-    coverage_mock.assert_awaited_once_with(
-        db,
-        tenant_id=auth.tenant_id,
-        app_id='inside-sales',
-        source_family='calls',
-    )
-    assert response.has_data is True
-    assert response.available_from == '2026-04-01 00:00:00'
-    assert response.available_to == '2026-04-24 12:00:00'
-    assert response.last_scheduled_sync_at == '2026-04-24T12:30:00+00:00'

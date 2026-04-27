@@ -1,9 +1,9 @@
 """Tests for ``resolve_call_selection_from_source``.
 
-Phase 4 LSQ ETL contract: when ``selection_mode="specific"``, the
-resolver must bypass UI date / agent / status filters and match calls
-by ``activity_id`` scoped to tenant + app. If any requested ID does
-not resolve, the run fails loudly with
+Specific-selection contract: when ``selection_mode="specific"``, the
+resolver must bypass UI agent / status filters and match calls by
+``activity_id`` scoped to tenant + app. If any requested ID does not
+resolve, the run fails loudly with
 ``SpecificCallSelectionMissingError`` instead of returning a shorter
 list than the user asked for.
 """
@@ -26,10 +26,10 @@ class _FakeSession:
         raise AssertionError("scalars() should be patched in each test")
 
 
-class SpecificSelectionBypassesDateWindowTests(unittest.IsolatedAsyncioTestCase):
+class SpecificSelectionBypassesListQueryTests(unittest.IsolatedAsyncioTestCase):
     async def test_specific_mode_does_not_run_filtered_list_query(self):
-        """When mode=specific, the resolver must skip the date-filtered
-        listing query entirely and go straight to activity_id lookup."""
+        """When mode=specific, the resolver must skip the filtered listing
+        query entirely and go straight to activity_id lookup."""
         fetch_mock = AsyncMock(return_value=[
             {"activityId": "A1", "durationSeconds": 30, "recordingUrl": "u1"},
             {"activityId": "A2", "durationSeconds": 30, "recordingUrl": "u2"},
@@ -38,10 +38,7 @@ class SpecificSelectionBypassesDateWindowTests(unittest.IsolatedAsyncioTestCase)
         with patch.object(resolver, "_fetch_calls_by_activity_ids", new=fetch_mock), \
              patch.object(resolver, "list_calls_from_source", new=list_mock):
             result = await resolver.resolve_call_selection_from_source(
-                InsideSalesCallFilters(
-                    date_from="2026-04-24 00:00:00",
-                    date_to="2026-04-24 23:59:59",
-                ),
+                InsideSalesCallFilters(),
                 selection_mode="specific",
                 selected_call_ids=["A1", "A2"],
                 sample_size=10,
@@ -62,10 +59,7 @@ class SpecificSelectionBypassesDateWindowTests(unittest.IsolatedAsyncioTestCase)
         with patch.object(resolver, "_fetch_calls_by_activity_ids", new=fetch_mock):
             with self.assertRaises(resolver.SpecificCallSelectionMissingError) as ctx:
                 await resolver.resolve_call_selection_from_source(
-                    InsideSalesCallFilters(
-                        date_from="2026-04-24 00:00:00",
-                        date_to="2026-04-24 23:59:59",
-                    ),
+                    InsideSalesCallFilters(),
                     selection_mode="specific",
                     selected_call_ids=["A1", "A2-MISSING"],
                     sample_size=10,
@@ -77,28 +71,23 @@ class SpecificSelectionBypassesDateWindowTests(unittest.IsolatedAsyncioTestCase)
                 )
         self.assertIn("A2-MISSING", ctx.exception.missing_ids)
 
-    async def test_specific_mode_resolves_call_from_day_before_ui_window(self):
-        """Probe for the real-world bug: a call with CreatedOn on
-        2026-04-23 must resolve even when the UI date window is
-        2026-04-24. This was the root cause of run
-        66e0d243-e2f1-4854-b388-28f3d8f0334d returning total:0."""
-        yesterday_call = {
-            "activityId": "ACT-2026-04-23",
+    async def test_specific_mode_resolves_call_independent_of_other_filters(self):
+        """Specific selection must resolve activity_ids regardless of the
+        agent/status filter state — those filters apply only to the
+        list-driven modes (all/sample)."""
+        target_call = {
+            "activityId": "ACT-FROM-OTHER-DAY",
             "durationSeconds": 180,
             "recordingUrl": "https://example.com/rec.mp3",
-            "createdOn": "2026-04-23 18:00:00",
         }
-        fetch_mock = AsyncMock(return_value=[yesterday_call])
-        list_mock = AsyncMock()  # would return [] for the tight UI date window
+        fetch_mock = AsyncMock(return_value=[target_call])
+        list_mock = AsyncMock()
         with patch.object(resolver, "_fetch_calls_by_activity_ids", new=fetch_mock), \
              patch.object(resolver, "list_calls_from_source", new=list_mock):
             result = await resolver.resolve_call_selection_from_source(
-                InsideSalesCallFilters(
-                    date_from="2026-04-24 00:00:00",
-                    date_to="2026-04-24 23:59:59",
-                ),
+                InsideSalesCallFilters(agents=("Other Agent",)),
                 selection_mode="specific",
-                selected_call_ids=["ACT-2026-04-23"],
+                selected_call_ids=["ACT-FROM-OTHER-DAY"],
                 sample_size=10,
                 skip_evaluated=False,
                 min_duration_seconds=None,
@@ -107,7 +96,7 @@ class SpecificSelectionBypassesDateWindowTests(unittest.IsolatedAsyncioTestCase)
                 db=_FakeSession(),  # type: ignore[arg-type]
             )
         self.assertEqual(len(result.records), 1)
-        self.assertEqual(result.records[0]["activityId"], "ACT-2026-04-23")
+        self.assertEqual(result.records[0]["activityId"], "ACT-FROM-OTHER-DAY")
 
 
 class NonSpecificModeStillUsesFilteredListTests(unittest.IsolatedAsyncioTestCase):
@@ -126,10 +115,7 @@ class NonSpecificModeStillUsesFilteredListTests(unittest.IsolatedAsyncioTestCase
         with patch.object(resolver, "list_calls_from_source", new=list_mock), \
              patch.object(resolver, "_fetch_calls_by_activity_ids", new=fetch_by_ids_mock):
             result = await resolver.resolve_call_selection_from_source(
-                InsideSalesCallFilters(
-                    date_from="2026-04-24 00:00:00",
-                    date_to="2026-04-24 23:59:59",
-                ),
+                InsideSalesCallFilters(),
                 selection_mode="sample",
                 selected_call_ids=[],
                 sample_size=5,

@@ -36,8 +36,7 @@ def test_source_resolver_exposes_expected_entrypoints():
     from app.services import inside_sales_source_resolver as mod
 
     assert hasattr(mod, "resolve_call_selection_from_source")
-    assert hasattr(mod, "resolve_call_dataset_page_from_source")
-    assert hasattr(mod, "resolve_lead_dataset_page_from_source")
+    assert hasattr(mod, "SpecificCallSelectionMissingError")
 
 
 def test_source_resolver_does_not_import_lsq_client_modules():

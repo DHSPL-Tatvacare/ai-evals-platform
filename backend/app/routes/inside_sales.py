@@ -1,9 +1,5 @@
 """Inside Sales routes.
 
-Collection-serving semantics are formalized in
-``app.services.inside_sales_serving_contract`` so the serving source can change
-without silently changing route responsibilities.
-
 Live LeadSquared calls are confined to the sync jobs (see
 ``app.services.inside_sales_sync``). Every route here reads from the
 ``source_lead_records`` / ``source_call_records`` mirror and never reaches
@@ -21,10 +17,9 @@ from app.auth.permissions import ensure_permissions
 from app.database import get_db
 from app.models.job import Job
 from app.schemas.inside_sales import (
-    AgentListResponse,
     CallListResponse,
     CallRecord,
-    CollectionCoverage,
+    CollectionFreshness,
     CollectionRefreshRequest,
     CollectionRefreshResponse,
     CollectionRunEntry,
@@ -39,19 +34,19 @@ from app.schemas.inside_sales import (
     LeadPlanPurchase,
 )
 from app.services.inside_sales_dataset_resolver import (
+    CallDatasetScope,
     InsideSalesCallFilters,
     InsideSalesLeadFilters,
 )
+from typing import cast
 from app.services.inside_sales_eval_linkage import (
     fetch_latest_eval_overlays,
     list_eval_history_entries,
 )
 from app.services.inside_sales_queries import (
-    get_collection_coverage as get_collection_coverage_summary,
     get_collection_freshness,
     get_collection_sync_status,
     get_lead_record,
-    list_call_agent_names_from_source,
     list_call_history_for_prospect,
     list_calls_from_source,
     list_collection_suggestions,
@@ -89,29 +84,8 @@ def _validate_source_family(source_family: str) -> str:
     return family
 
 
-@router.get("/agents", response_model=AgentListResponse)
-async def list_agents(
-    date_from: str = Query(..., description="Start date YYYY-MM-DD HH:MM:SS"),
-    date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
-    auth: AuthContext = require_fixed_app_access('inside-sales'),
-    db: AsyncSession = Depends(get_db),
-):
-    """Serving helper endpoint for date-scoped call filter options."""
-    return AgentListResponse(
-        agents=await list_call_agent_names_from_source(
-            db,
-            tenant_id=auth.tenant_id,
-            app_id="inside-sales",
-            date_from=date_from,
-            date_to=date_to,
-        ),
-    )
-
-
 @router.get("/calls", response_model=CallListResponse)
 async def list_calls(
-    date_from: str = Query(..., description="Start date YYYY-MM-DD HH:MM:SS"),
-    date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     scope: str = Query("page", pattern="^(page|all)$"),
@@ -138,8 +112,6 @@ async def list_calls(
         user_id=auth.user_id,
         app_id="inside-sales",
         filters=InsideSalesCallFilters(
-            date_from=date_from,
-            date_to=date_to,
             agents=_parse_csv_query(agents),
             prospect_ids=_parse_csv_query(prospect_id),
             direction=direction,
@@ -151,7 +123,7 @@ async def list_calls(
         ),
         page=page,
         page_size=page_size,
-        scope=scope,
+        scope=cast(CallDatasetScope, scope),
     )
     freshness = await get_collection_freshness(
         db,
@@ -165,7 +137,7 @@ async def list_calls(
         total=call_page.total,
         page=call_page.page,
         page_size=call_page.page_size,
-        freshness=freshness,
+        freshness=CollectionFreshness.model_validate(freshness),
     )
 
 
@@ -201,8 +173,6 @@ async def get_lead(
 
 @router.get("/leads", response_model=LeadListResponse)
 async def list_leads(
-    date_from: str = Query(..., description="Start date YYYY-MM-DD HH:MM:SS"),
-    date_to: str = Query(..., description="End date YYYY-MM-DD HH:MM:SS"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     agents: str | None = Query(None, description="Comma-separated agent names"),
@@ -223,8 +193,6 @@ async def list_leads(
         tenant_id=auth.tenant_id,
         app_id="inside-sales",
         filters=InsideSalesLeadFilters(
-            date_from=date_from,
-            date_to=date_to,
             agents=_parse_csv_query(agents),
             stage=_parse_csv_query(stage),
             mql_min=mql_min,
@@ -250,7 +218,7 @@ async def list_leads(
         total=lead_page.total,
         page=lead_page.page,
         page_size=lead_page.page_size,
-        freshness=freshness,
+        freshness=CollectionFreshness.model_validate(freshness),
     )
 
 
@@ -365,7 +333,9 @@ async def get_collection_suggestions(
     Reads distinct values of ``field`` from the synced DB mirror, scoped to
     ``tenant_id`` / ``app_id`` / ``source_family``. Never hits LSQ. The
     ``field`` argument is whitelisted in ``list_collection_suggestions`` —
-    it cannot be steered to read arbitrary columns.
+    it cannot be steered to read arbitrary columns. The same raw column the
+    listing query matches against is read here, so dropdown values map
+    1:1 to filter behaviour.
     """
     family = _validate_source_family(source_family)
     try:
@@ -449,41 +419,6 @@ async def list_collection_runs(
             )
             for row in rows
         ],
-    )
-
-
-@router.get("/coverage", response_model=CollectionCoverage)
-async def get_collection_coverage(
-    source_family: str,
-    auth: AuthContext = require_fixed_app_access('inside-sales'),
-    db: AsyncSession = Depends(get_db),
-):
-    """Expose DB-backed mirrored coverage per source family."""
-    family = _validate_source_family(source_family)
-    coverage = await get_collection_coverage_summary(
-        db,
-        tenant_id=auth.tenant_id,
-        app_id="inside-sales",
-        source_family=family,
-    )
-    return CollectionCoverage(
-        has_data=bool(coverage["hasData"]),
-        available_from=(
-            coverage["availableFrom"].strftime("%Y-%m-%d %H:%M:%S")
-            if coverage["availableFrom"]
-            else None
-        ),
-        available_to=(
-            coverage["availableTo"].strftime("%Y-%m-%d %H:%M:%S")
-            if coverage["availableTo"]
-            else None
-        ),
-        last_scheduled_sync_at=(
-            coverage["lastScheduledSyncAt"].isoformat()
-            if coverage["lastScheduledSyncAt"]
-            else None
-        ),
-        last_scheduled_sync_status=coverage["lastScheduledSyncStatus"],
     )
 
 

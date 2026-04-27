@@ -143,7 +143,6 @@ export interface AppCollectionFilterConfig {
   label: string;
   pillLabel?: string | null;
   control:
-    | 'date-range'
     | 'text'
     | 'multi-select'
     | 'segmented'
@@ -763,7 +762,6 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       datasets: {
         leads: {
           filters: [
-            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date', control: 'date-range', fields: ['dateFrom', 'dateTo'] },
             {
               key: 'prospectId',
               label: 'Prospect ID',
@@ -849,7 +847,6 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         calls: {
           filters: [
-            { key: 'dateRange', label: 'Date Range', pillLabel: 'Date', control: 'date-range', fields: ['dateFrom', 'dateTo'] },
             {
               key: 'agents',
               label: 'Agent',

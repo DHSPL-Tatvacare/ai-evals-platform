@@ -21,7 +21,6 @@ from app.models.source_records import (
     SourceLeadRecord,
     SourceSyncRun,
 )
-from app.services.inside_sales_dataset_resolver import normalize_match_value
 from app.services.lsq_client import (
     compute_lead_metrics,
     compute_mql_score,
@@ -349,8 +348,6 @@ def build_call_source_row(
     synced_at: datetime,
 ) -> dict[str, Any]:
     record = normalize_activity(raw_activity)
-    agent_name_normalized = normalize_match_value(record.get("agentName")) or None
-    status_normalized = normalize_match_value(record.get("status")) or None
 
     return {
         "tenant_id": tenant_id,
@@ -360,12 +357,10 @@ def build_call_source_row(
         "prospect_id": record.get("prospectId", ""),
         "agent_id": record.get("agentId") or None,
         "agent_name": record.get("agentName") or None,
-        "agent_name_normalized": agent_name_normalized,
         "agent_email": record.get("agentEmail") or None,
         "event_code": int(record.get("eventCode") or 0),
         "direction": record.get("direction") or "",
         "status": record.get("status") or None,
-        "status_normalized": status_normalized,
         "call_started_at": _parse_lsq_datetime(record.get("callStartTime")),
         "duration_seconds": int(record.get("durationSeconds") or 0),
         "has_recording": bool(record.get("recordingUrl")),
@@ -440,17 +435,13 @@ def build_lead_source_row(
         "phone": record["phone"] or None,
         "email": record["email"] or None,
         "prospect_stage": record["prospectStage"],
-        "prospect_stage_normalized": normalize_match_value(record.get("prospectStage")) or None,
         "plan_name": (record.get("planName") or "").strip() or None,
         "city": record["city"] or None,
-        "city_normalized": normalize_match_value(record.get("city")) or None,
         "age_group": record["ageGroup"] or None,
         "condition": record["condition"] or None,
-        "condition_normalized": normalize_match_value(record.get("condition")) or None,
         "hba1c_band": record["hba1cBand"] or None,
         "intent_to_pay": record["intentToPay"] or None,
         "agent_name": record["agentName"] or None,
-        "agent_name_normalized": normalize_match_value(record.get("agentName")) or None,
         "source": record["source"] or None,
         "source_campaign": record["sourceCampaign"] or None,
         "created_on": created_on_value,
@@ -483,12 +474,10 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         "prospect_id": stmt.excluded.prospect_id,
         "agent_id": stmt.excluded.agent_id,
         "agent_name": stmt.excluded.agent_name,
-        "agent_name_normalized": stmt.excluded.agent_name_normalized,
         "agent_email": stmt.excluded.agent_email,
         "event_code": stmt.excluded.event_code,
         "direction": stmt.excluded.direction,
         "status": stmt.excluded.status,
-        "status_normalized": stmt.excluded.status_normalized,
         "call_started_at": stmt.excluded.call_started_at,
         "duration_seconds": stmt.excluded.duration_seconds,
         "has_recording": stmt.excluded.has_recording,
@@ -528,17 +517,13 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         "phone": stmt.excluded.phone,
         "email": stmt.excluded.email,
         "prospect_stage": stmt.excluded.prospect_stage,
-        "prospect_stage_normalized": stmt.excluded.prospect_stage_normalized,
         "plan_name": stmt.excluded.plan_name,
         "city": stmt.excluded.city,
-        "city_normalized": stmt.excluded.city_normalized,
         "age_group": stmt.excluded.age_group,
         "condition": stmt.excluded.condition,
-        "condition_normalized": stmt.excluded.condition_normalized,
         "hba1c_band": stmt.excluded.hba1c_band,
         "intent_to_pay": stmt.excluded.intent_to_pay,
         "agent_name": stmt.excluded.agent_name,
-        "agent_name_normalized": stmt.excluded.agent_name_normalized,
         "source": stmt.excluded.source,
         "source_campaign": stmt.excluded.source_campaign,
         "created_on": stmt.excluded.created_on,

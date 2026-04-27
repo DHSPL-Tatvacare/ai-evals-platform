@@ -40,10 +40,6 @@ class CallListResponse(CamelModel):
     freshness: CollectionFreshness = Field(default_factory=CollectionFreshness)
 
 
-class AgentListResponse(CamelModel):
-    agents: list[str]
-
-
 class LeadDetailResponse(CamelModel):
     prospect_id: str
     first_name: Optional[str] = None
@@ -135,14 +131,6 @@ class CollectionRefreshResponse(CamelModel):
     source_family: str
     sync_mode: str
     status: str
-
-
-class CollectionCoverage(CamelModel):
-    has_data: bool = False
-    available_from: str | None = None
-    available_to: str | None = None
-    last_scheduled_sync_at: str | None = None
-    last_scheduled_sync_status: str | None = None
 
 
 class CollectionRunEntry(CamelModel):
