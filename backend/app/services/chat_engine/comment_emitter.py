@@ -1,7 +1,10 @@
 """Emit ``COMMENT ON COLUMN`` statements from the per-app manifest.
 
-Runs at every boot via startup_schema.bootstrap_database_schema so the
-``pg_description`` rows SQL-agent reads are always consistent with the manifest.
+Applied to the live database by ``backend/scripts/sync_column_comments.py``,
+invoked from the FastAPI lifespan (the Sherlock SQL agent runs in the
+backend process and reads ``pg_description``; the worker never calls this).
+Keeps the ``pg_description`` rows the SQL agent reads consistent with the
+YAML manifest.
 """
 from __future__ import annotations
 

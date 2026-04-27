@@ -48,26 +48,36 @@ All commands run from the `backend/` directory.
 4. Run `alembic upgrade head` against your local DB. Verify behavior.
 5. Commit the model change AND the migration in the same commit.
 
-## Phase status (during Alembic adoption)
+## Adoption history
 
-This directory is being introduced incrementally per
+The Alembic adoption shipped in eight phases per
 `docs/plans/2026-04-24-implementation-sequence/phase-01-db-and-alembic-migration/11-execution-phases.md`.
+All phases are live on prod as of 2026-04-27. `bootstrap_database_schema`
+and the legacy `backend/app/startup_schema.py` no longer exist. Schema
+state is owned exclusively by `alembic_version` and the files in
+`versions/`.
 
-- **Phase 0 (done):** drift audit, prod snapshot, model reconciliation. See `baseline/`.
-- **Phase 1 (this commit):** scaffold only — `env.py`, `alembic.ini`, empty `versions/`. No migrations exist; `alembic current` returns nothing.
-- **Phase 2:** add `versions/0001_baseline_prod.py` and stamp prod once.
-- **Phase 3:** add catch-up migrations 0002, 0003 (planned in `baseline/follow_up_migrations.md`).
-- **Phase 5:** wire `alembic upgrade head` into the boot path (`entrypoint.sh`).
-- **Phase 6:** remove `bootstrap_database_schema()` from the FastAPI lifespan.
-- **Phase 8:** delete `backend/app/startup_schema.py`.
+## Drift protection — manual, not CI
 
-Until Phase 5 lands, **nothing in the running app calls Alembic.** Schema is
-still owned by `startup_schema.py`. This directory is inert scaffolding.
+Phase 7 (a GitHub Actions workflow that runs `alembic check` on every PR
+and fails on drift) was **not shipped** because the deploy pipeline is
+not currently editable from this repo's contributors. That gap means a
+developer can change a model file without a matching migration and
+ship it; the drift will land on prod and become visible only when
+something at request time hits the missing column or constraint.
 
-## Why this scaffold doesn't break prod
+**Manual mitigation:** before pushing any commit that touches a model
+under `backend/app/models/`, run:
 
-- `alembic.ini` and `env.py` are inert files. Nothing imports them at app boot.
-- No revisions exist in `versions/`. `alembic upgrade head` (if run) would no-op.
-- The model edits in Phase 0 are no-ops at runtime because `Base.metadata.create_all(checkfirst=True)` skips existing tables.
+```bash
+cd backend && alembic revision --autogenerate -m _drift_check_ \
+  && rm versions/*_drift_check_.py
+```
+
+If autogenerate emits any operations, write the real migration. If it
+emits nothing, you're clean.
+
+Restore Phase 7 (`docs/plans/.../11-execution-phases.md` §7) when the
+deploy pipeline opens up — the migration files are CI-ready.
 
 Phase 1 is safe to deploy. The behavior change starts in Phase 5.

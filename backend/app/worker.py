@@ -55,9 +55,8 @@ async def run_worker() -> None:
     _validate_worker_config()
     logger.info("Starting dedicated job worker process")
 
-    # Schema is owned entirely by Alembic; entrypoint.sh ran `alembic upgrade
-    # head` before this process started. Phase 6 removed the
-    # bootstrap_database_schema() call.
+    # Schema is owned by Alembic; entrypoint.sh ran `alembic upgrade head`
+    # before this process started. Log the alembic head for diagnostics.
     async with engine.begin() as _boot_conn:
         _head_row = (
             await _boot_conn.execute(text("SELECT version_num FROM alembic_version"))

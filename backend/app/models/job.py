@@ -51,8 +51,8 @@ class Job(Base, TenantUserMixin):
     # Sherlock harness carry ``{surface: 'sherlock', session_id, turn_id}`` so
     # the next turn's context loader can find them without a Sherlock-specific
     # FK on the platform jobs schema. JSONB (not JSON) so Postgres ``@>``
-    # containment + the GIN ``jsonb_path_ops`` index from startup_schema.py
-    # make the per-session pending-jobs query bounded.
+    # containment + the ``idx_jobs_submission_context_gin`` GIN index keep
+    # the per-session pending-jobs query bounded.
     submission_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     progress: Mapped[dict] = mapped_column(JSON, default=lambda: {"current": 0, "total": 0, "message": ""})

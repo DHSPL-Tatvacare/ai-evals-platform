@@ -90,14 +90,10 @@ async def lifespan(app: FastAPI):
     # top-level ``app`` package.)
     import app.services.job_worker as _register_job_handlers  # noqa: F401
 
-    # Schema is now owned entirely by Alembic. Migrations were applied by
-    # entrypoint.sh's `alembic upgrade head` before this process started.
-    # Phase 6 removed the bootstrap_database_schema() call that previously
-    # ran ~300 lines of idempotent ALTER statements at every boot.
-    #
-    # Diagnostic: log the alembic head this process is operating against.
-    # Sync manifest-driven COMMENT ON COLUMN rows (separate from Alembic;
-    # Sherlock's SQL agent reads pg_description for column semantics).
+    # Schema is owned by Alembic; migrations were applied by entrypoint.sh's
+    # `alembic upgrade head` before this process started. Log the alembic head
+    # for diagnostics, then sync manifest-driven COMMENT ON COLUMN rows
+    # (separate from Alembic; Sherlock's SQL agent reads pg_description).
     from scripts.sync_column_comments import sync_column_comments
     async with engine.begin() as _boot_conn:
         _head_row = (

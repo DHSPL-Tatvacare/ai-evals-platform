@@ -515,8 +515,9 @@ async def _render_pending_jobs_block(
     pending_statuses = ('queued', 'running', 'retryable_failed')
 
     # JSONB containment matches the surface+session_id keys; the GIN
-    # ``jsonb_path_ops`` index on ``submission_context`` (created in
-    # startup_schema.py) keeps this bounded to the session's jobs.
+    # ``jsonb_path_ops`` index on ``submission_context``
+    # (``idx_jobs_submission_context_gin``) keeps this bounded to the
+    # session's jobs.
     session_clause = (
         Job.tenant_id == tenant_id,
         Job.user_id == user_id,

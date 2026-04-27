@@ -7,9 +7,8 @@ from the per-app manifests under
 ``Base.metadata``, so they need a separate sync pass after schema DDL is
 in place. Alembic does not own them; this script does.
 
-Called once per boot from ``app.main`` lifespan after Alembic-applied
-migrations and (for now, until Phase 6 ships) after the legacy
-``bootstrap_database_schema`` run. Also runnable standalone for
+Called once per boot from ``app.main`` lifespan, after Alembic has applied
+any pending migrations via ``entrypoint.sh``. Also runnable standalone for
 out-of-band re-syncs:
 
     PYTHONPATH=backend python -m scripts.sync_column_comments
