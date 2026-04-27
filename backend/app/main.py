@@ -93,6 +93,14 @@ async def lifespan(app: FastAPI):
 
     await bootstrap_database_schema()
 
+    # Sync manifest-driven COMMENT ON COLUMN rows (Sherlock SQL agent reads
+    # pg_description for column semantics). Lifted out of startup_schema in
+    # Phase 4 of the Alembic adoption so it survives Phase 6's removal of
+    # bootstrap_database_schema.
+    from scripts.sync_column_comments import sync_column_comments
+    async with engine.begin() as _comment_conn:
+        await sync_column_comments(_comment_conn)
+
     # Fail boot if any Sherlock manifest drifts from live Postgres schema.
     from app.database import async_session
     from app.services.chat_engine.manifest_validator import run_manifest_validator

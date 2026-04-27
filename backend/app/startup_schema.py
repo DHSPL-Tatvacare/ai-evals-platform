@@ -383,12 +383,10 @@ async def bootstrap_database_schema() -> None:
         for statement in INDEX_REPAIR_SQL:
             await conn.execute(text(statement))
 
-        # Column comments are generated from the Sherlock manifests instead
-        # of the hand-maintained COLUMN_COMMENT_SQL list, so the pg_description
-        # rows SQL-agent reads never drift from role/unit/synonym declarations.
-        from app.services.chat_engine.comment_emitter import emit_column_comments
-        for statement in emit_column_comments():
-            await conn.execute(text(statement))
+        # COMMENT ON COLUMN sync now lives in scripts.sync_column_comments,
+        # invoked from the FastAPI lifespan after this bootstrap returns.
+        # Extracted in Phase 4 of the Alembic adoption so it survives
+        # Phase 6's removal of this whole bootstrap function.
     _log.info(
         "bootstrap_database_schema: done took_ms=%.0f",
         (time.perf_counter() - t0) * 1000.0,
