@@ -6,7 +6,7 @@ from app.services.chat_engine.manifest import get_manifest
 
 def test_lookup_column_with_qualified_name() -> None:
     m = get_manifest("kaira-bot")
-    col = m.lookup_column("analytics_run_facts.pass_rate")
+    col = m.lookup_column("agg_evaluation_run.pass_rate")
     assert col is not None
     assert col.role == "measure"
     assert col.semantic_type == "percent"
@@ -14,7 +14,7 @@ def test_lookup_column_with_qualified_name() -> None:
 
 def test_lookup_column_identifier_column() -> None:
     m = get_manifest("kaira-bot")
-    col = m.lookup_column("analytics_run_facts.run_id")
+    col = m.lookup_column("agg_evaluation_run.run_id")
     assert col is not None
     assert col.role == "identifier"
     assert col.semantic_type == "id_hash"
@@ -32,4 +32,4 @@ def test_lookup_column_unqualified_returns_none() -> None:
 
 def test_lookup_column_missing_column_on_real_table_returns_none() -> None:
     m = get_manifest("kaira-bot")
-    assert m.lookup_column("analytics_run_facts.ghost_column") is None
+    assert m.lookup_column("agg_evaluation_run.ghost_column") is None

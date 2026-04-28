@@ -52,8 +52,8 @@ async def test_validator_rejects_missing_column(db):
     bogus = AppManifest(
         app_id="drift-test",
         catalog_tables={
-            "analytics_run_facts": CatalogTable(
-                orm="AnalyticsRunFact",
+            "agg_evaluation_run": CatalogTable(
+                orm="AggEvaluationRun",
                 columns={
                     "does_not_exist_column": ManifestColumn(role="measure"),
                 },

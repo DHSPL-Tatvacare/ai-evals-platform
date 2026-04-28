@@ -61,7 +61,7 @@ def test_fill_substitutes_catalog_tables_for_kaira_bot():
     tool = {"name": "x", "description": "Check {{catalog_tables}}."}
     filled = fill_tool_description(tool, app_id="kaira-bot", pack=_PACK)
     assert "{{catalog_tables}}" not in filled["description"]
-    assert "analytics_run_facts" in filled["description"]
+    assert "agg_evaluation_run" in filled["description"]
     assert "eval_runs" in filled["description"]
 
 

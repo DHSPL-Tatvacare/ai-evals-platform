@@ -1,8 +1,12 @@
 """LLM usage + cost tracking ORM models.
 
-These tables back the Phase 1 fact pipeline and the pricing data Phase 4 will
-consume. Only the schema definitions + indexes live here; recording logic and
-pricing resolution live in ``app.services.cost_tracking``.
+Schema-qualified to ``analytics`` per Roadmap 01 §3.2 / §5.13. Class
+and table names follow the role-prefix convention from §4 — ``fact_``
+for the per-call generation log, ``agg_`` for the daily rollup,
+``ref_`` for pricing/alias/catalog tables, and ``snapshot_`` for the
+per-refresh catalog snapshot.
+
+Recording logic and pricing resolution live in ``app.services.cost_tracking``.
 """
 from __future__ import annotations
 
@@ -31,14 +35,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base
 
 
-class LlmUsage(Base):
+class FactLlmGeneration(Base):
     """Unified append-only fact table for every model-generation call.
 
-    Tool execution traces stay in ``agent_tool_logs`` / Sherlock runtime
-    events. Only generation spans are persisted here.
+    Tool execution traces stay in ``analytics.log_sherlock_tool_call`` /
+    Sherlock runtime events. Only generation spans are persisted here.
     """
 
-    __tablename__ = 'llm_usage'
+    __tablename__ = 'fact_llm_generation'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(
@@ -97,7 +101,7 @@ class LlmUsage(Base):
     cost_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     pricing_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey('model_pricing.id', ondelete='RESTRICT'),
+        ForeignKey('analytics.ref_llm_model_pricing.id', ondelete='RESTRICT'),
         nullable=True,
     )
     pricing_fallback: Mapped[bool] = mapped_column(
@@ -114,28 +118,29 @@ class LlmUsage(Base):
     idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        Index('idx_llm_usage_tenant_created', 'tenant_id', 'created_at'),
-        Index('idx_llm_usage_tenant_app_created', 'tenant_id', 'app_id', 'created_at'),
-        Index('idx_llm_usage_tenant_user_created', 'tenant_id', 'user_id', 'created_at'),
-        Index('idx_llm_usage_owner', 'owner_type', 'owner_id'),
-        Index('idx_llm_usage_provider_model_created', 'provider', 'model', 'created_at'),
+        Index('idx_fact_llm_generation_tenant_created', 'tenant_id', 'created_at'),
+        Index('idx_fact_llm_generation_tenant_app_created', 'tenant_id', 'app_id', 'created_at'),
+        Index('idx_fact_llm_generation_tenant_user_created', 'tenant_id', 'user_id', 'created_at'),
+        Index('idx_fact_llm_generation_owner', 'owner_type', 'owner_id'),
+        Index('idx_fact_llm_generation_provider_model_created', 'provider', 'model', 'created_at'),
         Index(
-            'uq_llm_usage_idempotency_key',
+            'uq_fact_llm_generation_idempotency_key',
             'idempotency_key',
             unique=True,
             postgresql_where=text('idempotency_key IS NOT NULL'),
         ),
+        {'schema': 'analytics'},
     )
 
 
-class ModelPricing(Base):
+class RefLlmModelPricing(Base):
     """Effective-dated billing rates.
 
     Global (not tenant-scoped). Immutable history: new rate = close the current
     row (``effective_to = now()``) and insert a new row.
     """
 
-    __tablename__ = 'model_pricing'
+    __tablename__ = 'ref_llm_model_pricing'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
@@ -178,14 +183,15 @@ class ModelPricing(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint('provider', 'model', 'effective_from', name='uq_model_pricing_effective'),
-        Index('idx_model_pricing_lookup', 'provider', 'model', 'effective_from'),
-        Index('idx_model_pricing_source_snapshot', 'source_snapshot_id'),
+        UniqueConstraint('provider', 'model', 'effective_from', name='uq_ref_llm_model_pricing_effective'),
+        Index('idx_ref_llm_model_pricing_lookup', 'provider', 'model', 'effective_from'),
+        Index('idx_ref_llm_model_pricing_source_snapshot', 'source_snapshot_id'),
+        {'schema': 'analytics'},
     )
 
 
-class ModelAlias(Base):
-    """Map observed model strings to canonical ``model_pricing.model`` keys.
+class RefLlmModelAlias(Base):
+    """Map observed model strings to canonical ``ref_llm_model_pricing.model`` keys.
 
     Live pricing lookup consults this table when an exact match fails. Rows can
     be tenant-scoped (a tenant's Azure deployment name maps to a base model) or
@@ -195,7 +201,7 @@ class ModelAlias(Base):
     Resolution order: tenant-specific > system-wide > no alias.
     """
 
-    __tablename__ = 'model_aliases'
+    __tablename__ = 'ref_llm_model_alias'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -218,17 +224,18 @@ class ModelAlias(Base):
     __table_args__ = (
         UniqueConstraint('tenant_id', 'provider', 'observed', name='uq_model_alias_scope'),
         Index('idx_model_alias_lookup', 'provider', 'observed', 'tenant_id'),
+        {'schema': 'analytics'},
     )
 
 
-class LlmUsageDailyRollup(Base):
+class AggLlmUsageDaily(Base):
     """Aggregate cache for overview/spend/efficiency surfaces only.
 
     Never the source of truth for entity drill-down, raw calls, or CostChip
-    lookups — those read ``llm_usage`` directly.
+    lookups — those read ``analytics.fact_llm_generation`` directly.
     """
 
-    __tablename__ = 'llm_usage_daily_rollup'
+    __tablename__ = 'agg_llm_usage_daily'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     day: Mapped[date] = mapped_column(Date, nullable=False)
@@ -265,22 +272,23 @@ class LlmUsageDailyRollup(Base):
             'model',
             'call_purpose',
             'status',
-            name='uq_llm_usage_daily_rollup_scope',
+            name='uq_agg_llm_usage_daily_scope',
         ),
-        Index('idx_llm_usage_daily_rollup_tenant_day', 'tenant_id', 'day'),
-        Index('idx_llm_usage_daily_rollup_tenant_app_day', 'tenant_id', 'app_id', 'day'),
+        Index('idx_agg_llm_usage_daily_tenant_day', 'tenant_id', 'day'),
+        Index('idx_agg_llm_usage_daily_tenant_app_day', 'tenant_id', 'app_id', 'day'),
+        {'schema': 'analytics'},
     )
 
 
-class ModelsDevCatalog(Base):
+class RefLlmModelsCatalog(Base):
     """Normalized snapshot of model metadata from models.dev.
 
     One row per (provider, model). Refreshes upsert in place. Billing data
-    lives in ``model_pricing``; this table only tracks model capability
-    metadata.
+    lives in ``analytics.ref_llm_model_pricing``; this table only tracks
+    model capability metadata.
     """
 
-    __tablename__ = 'models_dev_catalog'
+    __tablename__ = 'ref_llm_models_catalog'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -322,16 +330,17 @@ class ModelsDevCatalog(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint('provider', 'model', name='uq_models_dev_catalog_provider_model'),
-        Index('idx_models_dev_catalog_source_id', 'provider_key', 'model_id'),
-        Index('idx_models_dev_catalog_status', 'status'),
+        UniqueConstraint('provider', 'model', name='uq_ref_llm_models_catalog_provider_model'),
+        Index('idx_ref_llm_models_catalog_source_id', 'provider_key', 'model_id'),
+        Index('idx_ref_llm_models_catalog_status', 'status'),
+        {'schema': 'analytics'},
     )
 
 
-class ModelsDevSnapshot(Base):
+class SnapshotLlmModelsCatalog(Base):
     """One row per models.dev refresh run."""
 
-    __tablename__ = 'models_dev_snapshots'
+    __tablename__ = 'snapshot_llm_models_catalog'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -352,6 +361,7 @@ class ModelsDevSnapshot(Base):
     raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
     __table_args__ = (
-        Index('idx_models_dev_snapshots_fetched_at', 'fetched_at'),
-        Index('idx_models_dev_snapshots_payload_hash', 'payload_hash'),
+        Index('idx_snapshot_llm_models_catalog_fetched_at', 'fetched_at'),
+        Index('idx_snapshot_llm_models_catalog_payload_hash', 'payload_hash'),
+        {'schema': 'analytics'},
     )

@@ -1,7 +1,7 @@
 """Tests for the ``recover_stale_source_sync_runs`` reconciler.
 
 Kept separate from inside-sales sync tests because the reconciler is a
-platform-level concern — it operates on any ``source_sync_runs`` row
+platform-level concern — it operates on any ``log_crm_source_sync`` row
 regardless of which app populated it.
 
 Uses in-memory fake sessions instead of an SQLite backend because the

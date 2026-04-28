@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import LlmUsage
+from app.models.cost import FactLlmGeneration
 
 
 class TurnUsageSummary(TypedDict, total=False):
@@ -43,18 +43,18 @@ async def aggregate_turn_usage(
     """
     stmt = (
         select(
-            func.coalesce(func.sum(LlmUsage.input_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.output_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.cached_read_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.cached_write_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.reasoning_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.tool_use_prompt_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.total_tokens), 0),
-            func.coalesce(func.sum(LlmUsage.cost_usd), 0),
-            func.count(LlmUsage.id),
+            func.coalesce(func.sum(FactLlmGeneration.input_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.output_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.cached_read_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.cached_write_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.reasoning_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.tool_use_prompt_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.total_tokens), 0),
+            func.coalesce(func.sum(FactLlmGeneration.cost_usd), 0),
+            func.count(FactLlmGeneration.id),
         )
-        .where(LlmUsage.owner_type == owner_type)
-        .where(LlmUsage.owner_id == owner_id)
+        .where(FactLlmGeneration.owner_type == owner_type)
+        .where(FactLlmGeneration.owner_id == owner_id)
     )
     row: Any = (await db.execute(stmt)).one()
     call_count = int(row[8])

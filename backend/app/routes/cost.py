@@ -51,12 +51,12 @@ from app.config import settings
 from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.cost import (
-    LlmUsage,
-    LlmUsageDailyRollup,
-    ModelAlias,
-    ModelPricing,
-    ModelsDevCatalog,
-    ModelsDevSnapshot,
+    FactLlmGeneration,
+    AggLlmUsageDaily,
+    RefLlmModelAlias,
+    RefLlmModelPricing,
+    RefLlmModelsCatalog,
+    SnapshotLlmModelsCatalog,
 )
 from app.models.user import User
 from app.schemas.base import CamelModel
@@ -120,7 +120,7 @@ def _tenant_scope_clause(auth: AuthContext):
     platform operators who need all-tenant views should use a different
     tool rather than overload `cost:view`.
     """
-    return LlmUsage.tenant_id == auth.tenant_id
+    return FactLlmGeneration.tenant_id == auth.tenant_id
 
 
 def _apply_tenant_scope(stmt, auth: AuthContext, tenant_column):
@@ -533,21 +533,21 @@ async def cost_overview(
     if full_day_range is not None:
         rollup_filters = _apply_optional_fact_filters(
             [
-                LlmUsageDailyRollup.day >= full_day_range[0],
-                LlmUsageDailyRollup.day < full_day_range[1],
+                AggLlmUsageDaily.day >= full_day_range[0],
+                AggLlmUsageDaily.day < full_day_range[1],
             ],
-            LlmUsageDailyRollup,
+            AggLlmUsageDaily,
             app_id=app_id,
             provider=provider,
             model=model,
         )
         kpi_rollup_stmt = select(
-            _sum_column(LlmUsageDailyRollup.cost_usd, 'cost_usd'),
-            _sum_column(LlmUsageDailyRollup.total_tokens, 'tokens'),
-            _sum_column(LlmUsageDailyRollup.call_count, 'calls'),
+            _sum_column(AggLlmUsageDaily.cost_usd, 'cost_usd'),
+            _sum_column(AggLlmUsageDaily.total_tokens, 'tokens'),
+            _sum_column(AggLlmUsageDaily.call_count, 'calls'),
             _sum_column(
                 case(
-                    (LlmUsageDailyRollup.status != 'ok', LlmUsageDailyRollup.call_count),
+                    (AggLlmUsageDaily.status != 'ok', AggLlmUsageDaily.call_count),
                     else_=0,
                 ),
                 'errors',
@@ -556,7 +556,7 @@ async def cost_overview(
         kpi_rollup_stmt = _apply_tenant_scope(
             kpi_rollup_stmt,
             auth,
-            LlmUsageDailyRollup.tenant_id,
+            AggLlmUsageDaily.tenant_id,
         )
         rollup_row = (await db.execute(kpi_rollup_stmt)).one()
         total_cost += _to_float(rollup_row[0])
@@ -567,21 +567,21 @@ async def cost_overview(
     for raw_start, raw_end in raw_windows:
         raw_filters = _apply_optional_fact_filters(
             [
-                LlmUsage.created_at >= raw_start,
-                LlmUsage.created_at < raw_end,
+                FactLlmGeneration.created_at >= raw_start,
+                FactLlmGeneration.created_at < raw_end,
             ],
-            LlmUsage,
+            FactLlmGeneration,
             app_id=app_id,
             provider=provider,
             model=model,
         )
         kpi_raw_stmt = select(
-            _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-            _sum_column(LlmUsage.total_tokens, 'tokens'),
-            func.count(LlmUsage.id).label('calls'),
-            func.sum(case((LlmUsage.status != 'ok', 1), else_=0)).label('errors'),
+            _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+            _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+            func.count(FactLlmGeneration.id).label('calls'),
+            func.sum(case((FactLlmGeneration.status != 'ok', 1), else_=0)).label('errors'),
         ).where(and_(*raw_filters))
-        kpi_raw_stmt = _apply_tenant_scope(kpi_raw_stmt, auth, LlmUsage.tenant_id)
+        kpi_raw_stmt = _apply_tenant_scope(kpi_raw_stmt, auth, FactLlmGeneration.tenant_id)
         raw_row = (await db.execute(kpi_raw_stmt)).one()
         total_cost += _to_float(raw_row[0])
         total_tokens += int(raw_row[1] or 0)
@@ -590,17 +590,17 @@ async def cost_overview(
 
     fallback_filters = _apply_optional_fact_filters(
         [
-            LlmUsage.created_at >= start,
-            LlmUsage.created_at < end,
-            LlmUsage.pricing_fallback.is_(True),
+            FactLlmGeneration.created_at >= start,
+            FactLlmGeneration.created_at < end,
+            FactLlmGeneration.pricing_fallback.is_(True),
         ],
-        LlmUsage,
+        FactLlmGeneration,
         app_id=app_id,
         provider=provider,
         model=model,
     )
-    fallback_stmt = select(func.count(LlmUsage.id)).where(and_(*fallback_filters))
-    fallback_stmt = _apply_tenant_scope(fallback_stmt, auth, LlmUsage.tenant_id)
+    fallback_stmt = select(func.count(FactLlmGeneration.id)).where(and_(*fallback_filters))
+    fallback_stmt = _apply_tenant_scope(fallback_stmt, auth, FactLlmGeneration.tenant_id)
     pricing_fallback_calls = int((await db.execute(fallback_stmt)).scalar_one() or 0)
     kpis = CostKpi(
         total_cost_usd=total_cost,
@@ -615,29 +615,29 @@ async def cost_overview(
     if full_day_range is not None:
         ts_rollup_filters = _apply_optional_fact_filters(
             [
-                LlmUsageDailyRollup.day >= full_day_range[0],
-                LlmUsageDailyRollup.day < full_day_range[1],
+                AggLlmUsageDaily.day >= full_day_range[0],
+                AggLlmUsageDaily.day < full_day_range[1],
             ],
-            LlmUsageDailyRollup,
+            AggLlmUsageDaily,
             app_id=app_id,
             provider=provider,
             model=model,
         )
         ts_rollup_stmt = (
             select(
-                LlmUsageDailyRollup.day,
-                _sum_column(LlmUsageDailyRollup.cost_usd, 'cost_usd'),
-                _sum_column(LlmUsageDailyRollup.total_tokens, 'tokens'),
-                _sum_column(LlmUsageDailyRollup.call_count, 'calls'),
+                AggLlmUsageDaily.day,
+                _sum_column(AggLlmUsageDaily.cost_usd, 'cost_usd'),
+                _sum_column(AggLlmUsageDaily.total_tokens, 'tokens'),
+                _sum_column(AggLlmUsageDaily.call_count, 'calls'),
             )
             .where(and_(*ts_rollup_filters))
-            .group_by(LlmUsageDailyRollup.day)
-            .order_by(LlmUsageDailyRollup.day.asc())
+            .group_by(AggLlmUsageDaily.day)
+            .order_by(AggLlmUsageDaily.day.asc())
         )
         ts_rollup_stmt = _apply_tenant_scope(
             ts_rollup_stmt,
             auth,
-            LlmUsageDailyRollup.tenant_id,
+            AggLlmUsageDaily.tenant_id,
         )
         for row in (await db.execute(ts_rollup_stmt)).all():
             day_key = row[0].isoformat() if row[0] else ''
@@ -647,14 +647,14 @@ async def cost_overview(
                 'calls': int(row[3] or 0),
             }
 
-    day_expr = func.date_trunc('day', LlmUsage.created_at).label('day')
+    day_expr = func.date_trunc('day', FactLlmGeneration.created_at).label('day')
     for raw_start, raw_end in raw_windows:
         ts_raw_filters = _apply_optional_fact_filters(
             [
-                LlmUsage.created_at >= raw_start,
-                LlmUsage.created_at < raw_end,
+                FactLlmGeneration.created_at >= raw_start,
+                FactLlmGeneration.created_at < raw_end,
             ],
-            LlmUsage,
+            FactLlmGeneration,
             app_id=app_id,
             provider=provider,
             model=model,
@@ -662,15 +662,15 @@ async def cost_overview(
         ts_raw_stmt = (
             select(
                 day_expr,
-                _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-                _sum_column(LlmUsage.total_tokens, 'tokens'),
-                func.count(LlmUsage.id).label('calls'),
+                _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+                _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+                func.count(FactLlmGeneration.id).label('calls'),
             )
             .where(and_(*ts_raw_filters))
             .group_by(day_expr)
             .order_by(day_expr.asc())
         )
-        ts_raw_stmt = _apply_tenant_scope(ts_raw_stmt, auth, LlmUsage.tenant_id)
+        ts_raw_stmt = _apply_tenant_scope(ts_raw_stmt, auth, FactLlmGeneration.tenant_id)
         for row in (await db.execute(ts_raw_stmt)).all():
             day_key = row[0].date().isoformat() if row[0] else ''
             bucket = time_series_map.setdefault(day_key, {'cost_usd': 0.0, 'tokens': 0, 'calls': 0})
@@ -694,8 +694,8 @@ async def cost_overview(
         auth,
         start,
         end,
-        LlmUsage.app_id,
-        rollup_group_column=LlmUsageDailyRollup.app_id,
+        FactLlmGeneration.app_id,
+        rollup_group_column=AggLlmUsageDaily.app_id,
         app_id=app_id,
         provider=provider,
         model=model,
@@ -705,8 +705,8 @@ async def cost_overview(
         auth,
         start,
         end,
-        func.coalesce(LlmUsage.call_purpose, 'unspecified'),
-        rollup_group_column=func.coalesce(LlmUsageDailyRollup.call_purpose, 'unspecified'),
+        func.coalesce(FactLlmGeneration.call_purpose, 'unspecified'),
+        rollup_group_column=func.coalesce(AggLlmUsageDaily.call_purpose, 'unspecified'),
         app_id=app_id,
         provider=provider,
         model=model,
@@ -744,8 +744,8 @@ async def cost_spend(
         auth,
         start,
         end,
-        LlmUsage.app_id,
-        rollup_group_column=LlmUsageDailyRollup.app_id,
+        FactLlmGeneration.app_id,
+        rollup_group_column=AggLlmUsageDaily.app_id,
         app_id=app_id,
         provider=provider,
         model=model,
@@ -755,8 +755,8 @@ async def cost_spend(
         auth,
         start,
         end,
-        func.coalesce(LlmUsage.call_purpose, 'unspecified'),
-        rollup_group_column=func.coalesce(LlmUsageDailyRollup.call_purpose, 'unspecified'),
+        func.coalesce(FactLlmGeneration.call_purpose, 'unspecified'),
+        rollup_group_column=func.coalesce(AggLlmUsageDaily.call_purpose, 'unspecified'),
         app_id=app_id,
         provider=provider,
         model=model,
@@ -766,8 +766,8 @@ async def cost_spend(
         auth,
         start,
         end,
-        LlmUsage.model,
-        rollup_group_column=LlmUsageDailyRollup.model,
+        FactLlmGeneration.model,
+        rollup_group_column=AggLlmUsageDaily.model,
         app_id=app_id,
         provider=provider,
         model=model,
@@ -813,21 +813,21 @@ async def cost_efficiency(
     if full_day_range is not None:
         rollup_filters = _apply_optional_fact_filters(
             [
-                LlmUsageDailyRollup.day >= full_day_range[0],
-                LlmUsageDailyRollup.day < full_day_range[1],
+                AggLlmUsageDaily.day >= full_day_range[0],
+                AggLlmUsageDaily.day < full_day_range[1],
             ],
-            LlmUsageDailyRollup,
+            AggLlmUsageDaily,
             app_id=app_id,
             provider=provider,
             model=model,
         )
         cache_rollup_stmt = select(
-            _sum_column(LlmUsageDailyRollup.cached_read_tokens, 'cached_read'),
-            _sum_column(LlmUsageDailyRollup.input_tokens, 'input'),
-            _sum_column(LlmUsageDailyRollup.call_count, 'calls'),
+            _sum_column(AggLlmUsageDaily.cached_read_tokens, 'cached_read'),
+            _sum_column(AggLlmUsageDaily.input_tokens, 'input'),
+            _sum_column(AggLlmUsageDaily.call_count, 'calls'),
             _sum_column(
                 case(
-                    (LlmUsageDailyRollup.status != 'ok', LlmUsageDailyRollup.call_count),
+                    (AggLlmUsageDaily.status != 'ok', AggLlmUsageDaily.call_count),
                     else_=0,
                 ),
                 'errors',
@@ -836,7 +836,7 @@ async def cost_efficiency(
         cache_rollup_stmt = _apply_tenant_scope(
             cache_rollup_stmt,
             auth,
-            LlmUsageDailyRollup.tenant_id,
+            AggLlmUsageDaily.tenant_id,
         )
         rollup_row = (await db.execute(cache_rollup_stmt)).one()
         cached_read += int(rollup_row[0] or 0)
@@ -847,21 +847,21 @@ async def cost_efficiency(
     for raw_start, raw_end in raw_windows:
         raw_filters = _apply_optional_fact_filters(
             [
-                LlmUsage.created_at >= raw_start,
-                LlmUsage.created_at < raw_end,
+                FactLlmGeneration.created_at >= raw_start,
+                FactLlmGeneration.created_at < raw_end,
             ],
-            LlmUsage,
+            FactLlmGeneration,
             app_id=app_id,
             provider=provider,
             model=model,
         )
         cache_raw_stmt = select(
-            _sum_column(LlmUsage.cached_read_tokens, 'cached_read'),
-            _sum_column(LlmUsage.input_tokens, 'input'),
-            func.count(LlmUsage.id).label('calls'),
-            func.sum(case((LlmUsage.status != 'ok', 1), else_=0)).label('errors'),
+            _sum_column(FactLlmGeneration.cached_read_tokens, 'cached_read'),
+            _sum_column(FactLlmGeneration.input_tokens, 'input'),
+            func.count(FactLlmGeneration.id).label('calls'),
+            func.sum(case((FactLlmGeneration.status != 'ok', 1), else_=0)).label('errors'),
         ).where(and_(*raw_filters))
-        cache_raw_stmt = _apply_tenant_scope(cache_raw_stmt, auth, LlmUsage.tenant_id)
+        cache_raw_stmt = _apply_tenant_scope(cache_raw_stmt, auth, FactLlmGeneration.tenant_id)
         raw_row = (await db.execute(cache_raw_stmt)).one()
         cached_read += int(raw_row[0] or 0)
         uncached += int(raw_row[1] or 0)
@@ -882,8 +882,8 @@ async def cost_efficiency(
         auth,
         start,
         end,
-        func.coalesce(LlmUsage.call_purpose, 'unspecified'),
-        rollup_group_column=func.coalesce(LlmUsageDailyRollup.call_purpose, 'unspecified'),
+        func.coalesce(FactLlmGeneration.call_purpose, 'unspecified'),
+        rollup_group_column=func.coalesce(AggLlmUsageDaily.call_purpose, 'unspecified'),
         app_id=app_id,
         provider=provider,
         model=model,
@@ -902,11 +902,11 @@ async def cost_efficiency(
         auth,
         start,
         end,
-        func.coalesce(LlmUsage.error_code, 'unknown'),
+        func.coalesce(FactLlmGeneration.error_code, 'unknown'),
         app_id=app_id,
         provider=provider,
         model=model,
-        raw_extra_filters=[LlmUsage.status != 'ok'],
+        raw_extra_filters=[FactLlmGeneration.status != 'ok'],
         sort_metric='calls',
         use_rollup=False,
     )
@@ -916,11 +916,11 @@ async def cost_efficiency(
         auth,
         start,
         end,
-        LlmUsage.model,
+        FactLlmGeneration.model,
         app_id=app_id,
         provider=provider,
         model=model,
-        raw_extra_filters=[LlmUsage.pricing_fallback.is_(True)],
+        raw_extra_filters=[FactLlmGeneration.pricing_fallback.is_(True)],
         sort_metric='calls',
         use_rollup=False,
     )
@@ -930,13 +930,13 @@ async def cost_efficiency(
         auth,
         start,
         end,
-        LlmUsage.model,
-        rollup_group_column=LlmUsageDailyRollup.model,
+        FactLlmGeneration.model,
+        rollup_group_column=AggLlmUsageDaily.model,
         app_id=app_id,
         provider=provider,
         model=model,
-        raw_extra_filters=[LlmUsage.reasoning_tokens > 0],
-        rollup_extra_filters=[LlmUsageDailyRollup.reasoning_tokens > 0],
+        raw_extra_filters=[FactLlmGeneration.reasoning_tokens > 0],
+        rollup_extra_filters=[AggLlmUsageDaily.reasoning_tokens > 0],
         sort_metric='tokens',
     )
 
@@ -969,29 +969,29 @@ async def _top_users_by_email(
     collapse under the ``unknown`` bucket via ``coalesce(email, 'unknown')``.
     """
     filters: list[Any] = [
-        LlmUsage.created_at >= start,
-        LlmUsage.created_at < end,
+        FactLlmGeneration.created_at >= start,
+        FactLlmGeneration.created_at < end,
     ]
     _apply_optional_fact_filters(
-        filters, LlmUsage, app_id=app_id, provider=provider, model=model,
+        filters, FactLlmGeneration, app_id=app_id, provider=provider, model=model,
     )
 
     email_key = func.coalesce(User.email, 'unknown').label('key')
     stmt = (
         select(
             email_key,
-            _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-            _sum_column(LlmUsage.total_tokens, 'tokens'),
-            func.count(LlmUsage.id).label('calls'),
+            _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+            _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+            func.count(FactLlmGeneration.id).label('calls'),
         )
-        .select_from(LlmUsage)
-        .join(User, User.id == LlmUsage.user_id, isouter=True)
+        .select_from(FactLlmGeneration)
+        .join(User, User.id == FactLlmGeneration.user_id, isouter=True)
         .where(and_(*filters))
         .group_by(email_key)
         .order_by(desc('cost_usd'), desc('calls'))
         .limit(limit)
     )
-    stmt = _apply_tenant_scope(stmt, auth, LlmUsage.tenant_id)
+    stmt = _apply_tenant_scope(stmt, auth, FactLlmGeneration.tenant_id)
 
     rows = (await db.execute(stmt)).all()
     return [
@@ -1044,11 +1044,11 @@ async def _grouped_spend(
         if full_day_range is not None:
             rollup_filters = _apply_optional_fact_filters(
                 [
-                    LlmUsageDailyRollup.day >= full_day_range[0],
-                    LlmUsageDailyRollup.day < full_day_range[1],
+                    AggLlmUsageDaily.day >= full_day_range[0],
+                    AggLlmUsageDaily.day < full_day_range[1],
                     *(rollup_extra_filters or []),
                 ],
-                LlmUsageDailyRollup,
+                AggLlmUsageDaily,
                 app_id=app_id,
                 provider=provider,
                 model=model,
@@ -1056,9 +1056,9 @@ async def _grouped_spend(
             rollup_stmt = (
                 select(
                     rollup_group_column.label('key'),
-                    _sum_column(LlmUsageDailyRollup.cost_usd, 'cost_usd'),
-                    _sum_column(LlmUsageDailyRollup.total_tokens, 'tokens'),
-                    _sum_column(LlmUsageDailyRollup.call_count, 'calls'),
+                    _sum_column(AggLlmUsageDaily.cost_usd, 'cost_usd'),
+                    _sum_column(AggLlmUsageDaily.total_tokens, 'tokens'),
+                    _sum_column(AggLlmUsageDaily.call_count, 'calls'),
                 )
                 .where(and_(*rollup_filters))
                 .group_by(rollup_group_column)
@@ -1066,7 +1066,7 @@ async def _grouped_spend(
             rollup_stmt = _apply_tenant_scope(
                 rollup_stmt,
                 auth,
-                LlmUsageDailyRollup.tenant_id,
+                AggLlmUsageDaily.tenant_id,
             )
             for row in (await db.execute(rollup_stmt)).all():
                 _merge_row(row[0], row[1], row[2], row[3])
@@ -1076,11 +1076,11 @@ async def _grouped_spend(
     for raw_start, raw_end in raw_windows:
         raw_filters = _apply_optional_fact_filters(
             [
-                LlmUsage.created_at >= raw_start,
-                LlmUsage.created_at < raw_end,
+                FactLlmGeneration.created_at >= raw_start,
+                FactLlmGeneration.created_at < raw_end,
                 *(raw_extra_filters or []),
             ],
-            LlmUsage,
+            FactLlmGeneration,
             app_id=app_id,
             provider=provider,
             model=model,
@@ -1088,14 +1088,14 @@ async def _grouped_spend(
         raw_stmt = (
             select(
                 raw_group_column.label('key'),
-                _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-                _sum_column(LlmUsage.total_tokens, 'tokens'),
-                func.count(LlmUsage.id).label('calls'),
+                _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+                _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+                func.count(FactLlmGeneration.id).label('calls'),
             )
             .where(and_(*raw_filters))
             .group_by(raw_group_column)
         )
-        raw_stmt = _apply_tenant_scope(raw_stmt, auth, LlmUsage.tenant_id)
+        raw_stmt = _apply_tenant_scope(raw_stmt, auth, FactLlmGeneration.tenant_id)
         for row in (await db.execute(raw_stmt)).all():
             _merge_row(row[0], row[1], row[2], row[3])
 
@@ -1126,11 +1126,11 @@ async def list_entities(
     db: AsyncSession = Depends(get_db),
 ) -> EntityListResponse:
     start, end = _parse_range(range)
-    window = and_(LlmUsage.created_at >= start, LlmUsage.created_at < end)
+    window = and_(FactLlmGeneration.created_at >= start, FactLlmGeneration.created_at < end)
 
-    base_filters = _apply_optional_fact_filters([window], LlmUsage, app_id=app_id, provider=provider, model=model)
+    base_filters = _apply_optional_fact_filters([window], FactLlmGeneration, app_id=app_id, provider=provider, model=model)
     if owner_type:
-        base_filters.append(LlmUsage.owner_type == owner_type)
+        base_filters.append(FactLlmGeneration.owner_type == owner_type)
 
     trimmed = (q or '').strip()
     if trimmed:
@@ -1140,29 +1140,29 @@ async def list_entities(
         pattern = f'%{_ilike_escape(trimmed)}%'
         base_filters.append(
             or_(
-                LlmUsage.owner_type.ilike(pattern, escape='\\'),
-                func.cast(LlmUsage.owner_id, Text).ilike(pattern, escape='\\'),
-                LlmUsage.app_id.ilike(pattern, escape='\\'),
-                LlmUsage.provider.ilike(pattern, escape='\\'),
-                LlmUsage.model.ilike(pattern, escape='\\'),
-                LlmUsage.call_purpose.ilike(pattern, escape='\\'),
+                FactLlmGeneration.owner_type.ilike(pattern, escape='\\'),
+                func.cast(FactLlmGeneration.owner_id, Text).ilike(pattern, escape='\\'),
+                FactLlmGeneration.app_id.ilike(pattern, escape='\\'),
+                FactLlmGeneration.provider.ilike(pattern, escape='\\'),
+                FactLlmGeneration.model.ilike(pattern, escape='\\'),
+                FactLlmGeneration.call_purpose.ilike(pattern, escape='\\'),
             )
         )
 
     stmt = (
         select(
-            LlmUsage.owner_type,
-            LlmUsage.owner_id,
-            _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-            _sum_column(LlmUsage.total_tokens, 'tokens'),
-            func.count(LlmUsage.id).label('calls'),
-            func.min(LlmUsage.created_at).label('first_at'),
-            func.max(LlmUsage.created_at).label('last_at'),
+            FactLlmGeneration.owner_type,
+            FactLlmGeneration.owner_id,
+            _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+            _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+            func.count(FactLlmGeneration.id).label('calls'),
+            func.min(FactLlmGeneration.created_at).label('first_at'),
+            func.max(FactLlmGeneration.created_at).label('last_at'),
         )
         .where(and_(*base_filters))
-        .group_by(LlmUsage.owner_type, LlmUsage.owner_id)
+        .group_by(FactLlmGeneration.owner_type, FactLlmGeneration.owner_id)
     )
-    stmt = _apply_tenant_scope(stmt, auth, LlmUsage.tenant_id)
+    stmt = _apply_tenant_scope(stmt, auth, FactLlmGeneration.tenant_id)
 
     order_col = {
         'cost_desc': desc('cost_usd'),
@@ -1175,11 +1175,11 @@ async def list_entities(
 
     # Total owners in-scope (a second cheap count query).
     total_stmt = (
-        select(LlmUsage.owner_type, LlmUsage.owner_id)
+        select(FactLlmGeneration.owner_type, FactLlmGeneration.owner_id)
         .where(and_(*base_filters))
-        .group_by(LlmUsage.owner_type, LlmUsage.owner_id)
+        .group_by(FactLlmGeneration.owner_type, FactLlmGeneration.owner_id)
     )
-    total_stmt = _apply_tenant_scope(total_stmt, auth, LlmUsage.tenant_id)
+    total_stmt = _apply_tenant_scope(total_stmt, auth, FactLlmGeneration.tenant_id)
     total_stmt = select(func.count()).select_from(total_stmt.subquery())
     total = int((await db.execute(total_stmt)).scalar_one() or 0)
 
@@ -1290,23 +1290,23 @@ async def entity_drill(
     start, end = _parse_range(range)
     base_filters = _apply_optional_fact_filters(
         [
-            LlmUsage.owner_type == owner_type,
-            LlmUsage.owner_id == owner_id,
-            LlmUsage.created_at >= start,
-            LlmUsage.created_at < end,
+            FactLlmGeneration.owner_type == owner_type,
+            FactLlmGeneration.owner_id == owner_id,
+            FactLlmGeneration.created_at >= start,
+            FactLlmGeneration.created_at < end,
         ],
-        LlmUsage,
+        FactLlmGeneration,
         app_id=app_id,
         provider=provider,
         model=model,
     )
 
     summary_stmt = select(
-        _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-        _sum_column(LlmUsage.total_tokens, 'tokens'),
-        func.count(LlmUsage.id).label('calls'),
+        _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+        _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+        func.count(FactLlmGeneration.id).label('calls'),
     ).where(and_(*base_filters))
-    summary_stmt = _apply_tenant_scope(summary_stmt, auth, LlmUsage.tenant_id)
+    summary_stmt = _apply_tenant_scope(summary_stmt, auth, FactLlmGeneration.tenant_id)
     row = (await db.execute(summary_stmt)).one()
     if int(row[2] or 0) == 0:
         raise HTTPException(status_code=404, detail='No usage rows for this entity')
@@ -1316,11 +1316,11 @@ async def entity_drill(
         auth,
         start,
         end,
-        func.coalesce(LlmUsage.call_purpose, 'unspecified'),
+        func.coalesce(FactLlmGeneration.call_purpose, 'unspecified'),
         app_id=app_id,
         provider=provider,
         model=model,
-        raw_extra_filters=[LlmUsage.owner_type == owner_type, LlmUsage.owner_id == owner_id],
+        raw_extra_filters=[FactLlmGeneration.owner_type == owner_type, FactLlmGeneration.owner_id == owner_id],
         use_rollup=False,
     )
     by_model = await _grouped_spend(
@@ -1328,11 +1328,11 @@ async def entity_drill(
         auth,
         start,
         end,
-        LlmUsage.model,
+        FactLlmGeneration.model,
         app_id=app_id,
         provider=provider,
         model=model,
-        raw_extra_filters=[LlmUsage.owner_type == owner_type, LlmUsage.owner_id == owner_id],
+        raw_extra_filters=[FactLlmGeneration.owner_type == owner_type, FactLlmGeneration.owner_id == owner_id],
         use_rollup=False,
     )
 
@@ -1365,20 +1365,20 @@ async def entity_batch(
     range_window = None
     if body.range:
         start, end = _parse_range(body.range)
-        range_window = and_(LlmUsage.created_at >= start, LlmUsage.created_at < end)
+        range_window = and_(FactLlmGeneration.created_at >= start, FactLlmGeneration.created_at < end)
 
     pair_conditions = [
-        and_(LlmUsage.owner_type == item.owner_type, LlmUsage.owner_id == item.owner_id)
+        and_(FactLlmGeneration.owner_type == item.owner_type, FactLlmGeneration.owner_id == item.owner_id)
         for item in body.items
     ]
-    filters = [func.coalesce(LlmUsage.owner_id.isnot(None), True)]
+    filters = [func.coalesce(FactLlmGeneration.owner_id.isnot(None), True)]
     if pair_conditions:
         filters.append(or_(*pair_conditions))
     if range_window is not None:
         filters.append(range_window)
     _apply_optional_fact_filters(
         filters,
-        LlmUsage,
+        FactLlmGeneration,
         app_id=body.app_id,
         provider=body.provider,
         model=body.model,
@@ -1386,16 +1386,16 @@ async def entity_batch(
 
     stmt = (
         select(
-            LlmUsage.owner_type,
-            LlmUsage.owner_id,
-            _sum_column(LlmUsage.cost_usd, 'cost_usd'),
-            _sum_column(LlmUsage.total_tokens, 'tokens'),
-            func.count(LlmUsage.id).label('calls'),
+            FactLlmGeneration.owner_type,
+            FactLlmGeneration.owner_id,
+            _sum_column(FactLlmGeneration.cost_usd, 'cost_usd'),
+            _sum_column(FactLlmGeneration.total_tokens, 'tokens'),
+            func.count(FactLlmGeneration.id).label('calls'),
         )
         .where(and_(*filters))
-        .group_by(LlmUsage.owner_type, LlmUsage.owner_id)
+        .group_by(FactLlmGeneration.owner_type, FactLlmGeneration.owner_id)
     )
-    stmt = _apply_tenant_scope(stmt, auth, LlmUsage.tenant_id)
+    stmt = _apply_tenant_scope(stmt, auth, FactLlmGeneration.tenant_id)
     rows = (await db.execute(stmt)).all()
     return {
         f'{row[0]}:{row[1]}': ChipSummary(
@@ -1425,17 +1425,17 @@ async def list_calls(
     db: AsyncSession = Depends(get_db),
 ) -> CallsListResponse:
     start, end = _parse_range(range)
-    filters = [LlmUsage.created_at >= start, LlmUsage.created_at < end]
+    filters = [FactLlmGeneration.created_at >= start, FactLlmGeneration.created_at < end]
     if app_id:
-        filters.append(LlmUsage.app_id == app_id)
+        filters.append(FactLlmGeneration.app_id == app_id)
     if owner_type:
-        filters.append(LlmUsage.owner_type == owner_type)
+        filters.append(FactLlmGeneration.owner_type == owner_type)
     if provider:
-        filters.append(LlmUsage.provider == provider)
+        filters.append(FactLlmGeneration.provider == provider)
     if model:
-        filters.append(LlmUsage.model == model)
+        filters.append(FactLlmGeneration.model == model)
     if status:
-        filters.append(LlmUsage.status == status)
+        filters.append(FactLlmGeneration.status == status)
 
     trimmed = (q or '').strip()
     if trimmed:
@@ -1445,25 +1445,25 @@ async def list_calls(
         pattern = f'%{_ilike_escape(trimmed)}%'
         filters.append(
             or_(
-                LlmUsage.provider.ilike(pattern, escape='\\'),
-                LlmUsage.model.ilike(pattern, escape='\\'),
-                LlmUsage.app_id.ilike(pattern, escape='\\'),
-                LlmUsage.call_purpose.ilike(pattern, escape='\\'),
-                LlmUsage.model_family.ilike(pattern, escape='\\'),
-                LlmUsage.finish_reason.ilike(pattern, escape='\\'),
-                LlmUsage.error_code.ilike(pattern, escape='\\'),
+                FactLlmGeneration.provider.ilike(pattern, escape='\\'),
+                FactLlmGeneration.model.ilike(pattern, escape='\\'),
+                FactLlmGeneration.app_id.ilike(pattern, escape='\\'),
+                FactLlmGeneration.call_purpose.ilike(pattern, escape='\\'),
+                FactLlmGeneration.model_family.ilike(pattern, escape='\\'),
+                FactLlmGeneration.finish_reason.ilike(pattern, escape='\\'),
+                FactLlmGeneration.error_code.ilike(pattern, escape='\\'),
             )
         )
 
-    base = select(LlmUsage).where(and_(*filters))
-    base = _apply_tenant_scope(base, auth, LlmUsage.tenant_id)
+    base = select(FactLlmGeneration).where(and_(*filters))
+    base = _apply_tenant_scope(base, auth, FactLlmGeneration.tenant_id)
 
     count_stmt = select(func.count()).select_from(
-        _apply_tenant_scope(select(LlmUsage.id).where(and_(*filters)), auth, LlmUsage.tenant_id).subquery()
+        _apply_tenant_scope(select(FactLlmGeneration.id).where(and_(*filters)), auth, FactLlmGeneration.tenant_id).subquery()
     )
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
 
-    page_stmt = base.order_by(LlmUsage.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
+    page_stmt = base.order_by(FactLlmGeneration.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
     items = [_row_to_call(r) for r in (await db.execute(page_stmt)).scalars().all()]
     return CallsListResponse(items=items, total=total, page=page, page_size=page_size)
 
@@ -1474,15 +1474,15 @@ async def call_detail(
     auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> CallDetail:
-    stmt = select(LlmUsage).where(LlmUsage.id == call_id)
-    stmt = _apply_tenant_scope(stmt, auth, LlmUsage.tenant_id)
+    stmt = select(FactLlmGeneration).where(FactLlmGeneration.id == call_id)
+    stmt = _apply_tenant_scope(stmt, auth, FactLlmGeneration.tenant_id)
     row = (await db.execute(stmt)).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail='Call not found')
     return _row_to_call_detail(row)
 
 
-def _row_to_call(row: LlmUsage) -> CallRow:
+def _row_to_call(row: FactLlmGeneration) -> CallRow:
     return CallRow(
         id=row.id,
         created_at=row.created_at,
@@ -1508,7 +1508,7 @@ def _row_to_call(row: LlmUsage) -> CallRow:
     )
 
 
-def _row_to_call_detail(row: LlmUsage) -> CallDetail:
+def _row_to_call_detail(row: FactLlmGeneration) -> CallDetail:
     base = _row_to_call(row)
     return CallDetail(
         **base.model_dump(),
@@ -1531,21 +1531,21 @@ async def pricing_bundle(
     auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingBundleResponse:
-    pricing_stmt = select(ModelPricing)
+    pricing_stmt = select(RefLlmModelPricing)
     if active_only:
-        pricing_stmt = pricing_stmt.where(ModelPricing.effective_to.is_(None))
+        pricing_stmt = pricing_stmt.where(RefLlmModelPricing.effective_to.is_(None))
     pricing_stmt = pricing_stmt.order_by(
-        ModelPricing.provider.asc(), ModelPricing.model.asc(), ModelPricing.effective_from.desc()
+        RefLlmModelPricing.provider.asc(), RefLlmModelPricing.model.asc(), RefLlmModelPricing.effective_from.desc()
     )
     pricing_rows = [_pricing_row_out(r) for r in (await db.execute(pricing_stmt)).scalars().all()]
 
     catalog_stmt = (
-        select(ModelsDevCatalog)
-        .order_by(ModelsDevCatalog.provider.asc(), ModelsDevCatalog.model.asc())
+        select(RefLlmModelsCatalog)
+        .order_by(RefLlmModelsCatalog.provider.asc(), RefLlmModelsCatalog.model.asc())
     )
     catalog_rows = [_catalog_row_out(r) for r in (await db.execute(catalog_stmt)).scalars().all()]
 
-    history_stmt = select(ModelsDevSnapshot).order_by(ModelsDevSnapshot.fetched_at.desc()).limit(20)
+    history_stmt = select(SnapshotLlmModelsCatalog).order_by(SnapshotLlmModelsCatalog.fetched_at.desc()).limit(20)
     history_rows = [_snapshot_row_out(r) for r in (await db.execute(history_stmt)).scalars().all()]
 
     # Used by the auth context — acknowledged to satisfy static checkers.
@@ -1568,18 +1568,18 @@ async def pricing_create(
 
     # Close any active row for (provider, model).
     close_stmt = (
-        update(ModelPricing)
+        update(RefLlmModelPricing)
         .where(
-            ModelPricing.provider == body.provider,
-            ModelPricing.model == body.model,
-            ModelPricing.effective_to.is_(None),
+            RefLlmModelPricing.provider == body.provider,
+            RefLlmModelPricing.model == body.model,
+            RefLlmModelPricing.effective_to.is_(None),
         )
         .values(effective_to=now)
-        .returning(ModelPricing.id)
+        .returning(RefLlmModelPricing.id)
     )
     closed_ids = [r[0] for r in (await db.execute(close_stmt)).all()]
 
-    new_row = ModelPricing(
+    new_row = RefLlmModelPricing(
         provider=body.provider,
         model=body.model,
         effective_from=now,
@@ -1627,7 +1627,7 @@ async def pricing_patch(
     auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingRowOut:
-    existing = (await db.execute(select(ModelPricing).where(ModelPricing.id == pricing_id))).scalars().first()
+    existing = (await db.execute(select(RefLlmModelPricing).where(RefLlmModelPricing.id == pricing_id))).scalars().first()
     if existing is None:
         raise HTTPException(status_code=404, detail='pricing row not found')
     if existing.effective_to is not None:
@@ -1652,7 +1652,7 @@ async def pricing_patch(
         return Decimal(str(incoming))
 
     payload_fields = body.model_dump(exclude_unset=True)
-    new_row = ModelPricing(
+    new_row = RefLlmModelPricing(
         provider=existing.provider,
         model=existing.model,
         effective_from=now,
@@ -1724,8 +1724,8 @@ async def pricing_refresh(
     async def _latest_snapshot_id() -> str | None:
         last_snapshot = (
             await db.execute(
-                select(ModelsDevSnapshot)
-                .order_by(ModelsDevSnapshot.fetched_at.desc())
+                select(SnapshotLlmModelsCatalog)
+                .order_by(SnapshotLlmModelsCatalog.fetched_at.desc())
                 .limit(1)
             )
         ).scalars().first()
@@ -1825,7 +1825,7 @@ async def pricing_refresh_snapshot(
     auth: AuthContext = require_permission('cost:view'),
     db: AsyncSession = Depends(get_db),
 ) -> SnapshotRowOut:
-    row = (await db.execute(select(ModelsDevSnapshot).where(ModelsDevSnapshot.id == snapshot_id))).scalars().first()
+    row = (await db.execute(select(SnapshotLlmModelsCatalog).where(SnapshotLlmModelsCatalog.id == snapshot_id))).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail='snapshot not found')
     _ = auth
@@ -1835,7 +1835,7 @@ async def pricing_refresh_snapshot(
 # ── Model aliases: map observed model strings to canonical pricing keys ──
 
 
-def _alias_row_out(row: ModelAlias) -> AliasRowOut:
+def _alias_row_out(row: RefLlmModelAlias) -> AliasRowOut:
     return AliasRowOut(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -1872,15 +1872,15 @@ async def list_aliases(
     db: AsyncSession = Depends(get_db),
 ) -> AliasesBundleResponse:
     """List aliases visible to the caller: tenant-specific (theirs) + system."""
-    stmt = select(ModelAlias).where(
-        or_(ModelAlias.tenant_id == auth.tenant_id, ModelAlias.tenant_id.is_(None))
+    stmt = select(RefLlmModelAlias).where(
+        or_(RefLlmModelAlias.tenant_id == auth.tenant_id, RefLlmModelAlias.tenant_id.is_(None))
     )
     if provider:
-        stmt = stmt.where(ModelAlias.provider == provider)
+        stmt = stmt.where(RefLlmModelAlias.provider == provider)
     stmt = stmt.order_by(
-        ModelAlias.tenant_id.is_(None).asc(),
-        ModelAlias.provider.asc(),
-        ModelAlias.observed.asc(),
+        RefLlmModelAlias.tenant_id.is_(None).asc(),
+        RefLlmModelAlias.provider.asc(),
+        RefLlmModelAlias.observed.asc(),
     )
     rows = (await db.execute(stmt)).scalars().all()
     return AliasesBundleResponse(aliases=[_alias_row_out(r) for r in rows])
@@ -1895,17 +1895,17 @@ async def list_unmapped_models(
     and no resolving alias. Each row is a candidate that the admin should map."""
     fallback_stmt = (
         select(
-            LlmUsage.tenant_id,
-            LlmUsage.provider,
-            LlmUsage.model,
+            FactLlmGeneration.tenant_id,
+            FactLlmGeneration.provider,
+            FactLlmGeneration.model,
             func.count().label('call_count'),
-            func.max(LlmUsage.created_at).label('last_seen_at'),
+            func.max(FactLlmGeneration.created_at).label('last_seen_at'),
         )
         .where(
-            LlmUsage.pricing_fallback.is_(True),
-            LlmUsage.tenant_id == auth.tenant_id,
+            FactLlmGeneration.pricing_fallback.is_(True),
+            FactLlmGeneration.tenant_id == auth.tenant_id,
         )
-        .group_by(LlmUsage.tenant_id, LlmUsage.provider, LlmUsage.model)
+        .group_by(FactLlmGeneration.tenant_id, FactLlmGeneration.provider, FactLlmGeneration.model)
         .order_by(desc('call_count'))
     )
     fallback_rows = (await db.execute(fallback_stmt)).all()
@@ -1916,13 +1916,13 @@ async def list_unmapped_models(
     # Exclude (provider, model) combos that already resolve via an alias (tenant
     # or system). The caller shouldn't see "unmapped" for something already
     # mapped — the Repriceaction handles the llm_usage update separately.
-    alias_stmt = select(ModelAlias.provider, ModelAlias.observed).where(
-        or_(ModelAlias.tenant_id == auth.tenant_id, ModelAlias.tenant_id.is_(None))
+    alias_stmt = select(RefLlmModelAlias.provider, RefLlmModelAlias.observed).where(
+        or_(RefLlmModelAlias.tenant_id == auth.tenant_id, RefLlmModelAlias.tenant_id.is_(None))
     )
     resolved = {(p, m) for (p, m) in (await db.execute(alias_stmt)).all()}
 
     # Canonical catalog for suggestions: models.dev rows per provider.
-    catalog_stmt = select(ModelsDevCatalog.provider, ModelsDevCatalog.model)
+    catalog_stmt = select(RefLlmModelsCatalog.provider, RefLlmModelsCatalog.model)
     catalog_by_provider: dict[str, list[str]] = {}
     for p, m in (await db.execute(catalog_stmt)).all():
         catalog_by_provider.setdefault(p, []).append(m)
@@ -1963,12 +1963,12 @@ async def upsert_alias(
 
     target_tenant = None if body.tenant_scope == 'system' else auth.tenant_id
 
-    existing_stmt = select(ModelAlias).where(
-        ModelAlias.provider == body.provider,
-        ModelAlias.observed == body.observed,
-        ModelAlias.tenant_id == target_tenant
+    existing_stmt = select(RefLlmModelAlias).where(
+        RefLlmModelAlias.provider == body.provider,
+        RefLlmModelAlias.observed == body.observed,
+        RefLlmModelAlias.tenant_id == target_tenant
         if target_tenant is not None
-        else ModelAlias.tenant_id.is_(None),
+        else RefLlmModelAlias.tenant_id.is_(None),
     )
     existing = (await db.execute(existing_stmt)).scalars().first()
 
@@ -1983,7 +1983,7 @@ async def upsert_alias(
         row = existing
         action = 'cost.alias.updated'
     else:
-        row = ModelAlias(
+        row = RefLlmModelAlias(
             tenant_id=target_tenant,
             provider=body.provider,
             observed=body.observed,
@@ -2021,7 +2021,7 @@ async def delete_alias(
     auth: AuthContext = require_permission('cost:edit'),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
-    row = (await db.execute(select(ModelAlias).where(ModelAlias.id == alias_id))).scalars().first()
+    row = (await db.execute(select(RefLlmModelAlias).where(RefLlmModelAlias.id == alias_id))).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail='alias not found')
     if row.tenant_id is None:
@@ -2062,7 +2062,7 @@ async def reprice_alias(
     Backfill is tenant-scoped (or platform-wide for system aliases, still gated
     by the caller's ``cost:edit`` permission). Safe to re-run.
     """
-    row = (await db.execute(select(ModelAlias).where(ModelAlias.id == alias_id))).scalars().first()
+    row = (await db.execute(select(RefLlmModelAlias).where(RefLlmModelAlias.id == alias_id))).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail='alias not found')
 
@@ -2134,7 +2134,7 @@ async def rollup_backfill(
 # ── Row -> DTO helpers ──────────────────────────────────────────────
 
 
-def _pricing_row_out(row: ModelPricing) -> PricingRowOut:
+def _pricing_row_out(row: RefLlmModelPricing) -> PricingRowOut:
     return PricingRowOut(
         id=row.id,
         provider=row.provider,
@@ -2161,7 +2161,7 @@ def _pricing_row_out(row: ModelPricing) -> PricingRowOut:
     )
 
 
-def _catalog_row_out(row: ModelsDevCatalog) -> CatalogRowOut:
+def _catalog_row_out(row: RefLlmModelsCatalog) -> CatalogRowOut:
     return CatalogRowOut(
         provider=row.provider,
         model=row.model,
@@ -2178,7 +2178,7 @@ def _catalog_row_out(row: ModelsDevCatalog) -> CatalogRowOut:
     )
 
 
-def _snapshot_row_out(row: ModelsDevSnapshot) -> SnapshotRowOut:
+def _snapshot_row_out(row: SnapshotLlmModelsCatalog) -> SnapshotRowOut:
     return SnapshotRowOut(
         id=row.id,
         fetched_at=row.fetched_at,
@@ -2212,4 +2212,4 @@ def _optional_decimal(value: float | None) -> Decimal | None:
 
 # Suppress "unused" linter hits for dynamic-error paths.
 _ = IntegrityError
-_ = LlmUsageDailyRollup
+_ = AggLlmUsageDaily

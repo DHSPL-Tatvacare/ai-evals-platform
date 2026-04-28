@@ -9,9 +9,9 @@ from uuid import uuid4
 
 from app.models import Base
 from app.models.source_records import (
-    SourceCallRecord,
-    SourceLeadRecord,
-    SourceSyncRun,
+    CrmCallRecord,
+    CrmLeadRecord,
+    LogCrmSourceSync,
 )
 from app.schemas.source_records import (
     SourceCallRecordRow,
@@ -21,25 +21,25 @@ from app.schemas.source_records import (
 
 
 def test_source_record_tables_are_registered_with_expected_indexes():
-    assert "source_call_records" in Base.metadata.tables
-    assert "source_lead_records" in Base.metadata.tables
-    assert "source_sync_runs" in Base.metadata.tables
+    assert "analytics.crm_call_record" in Base.metadata.tables
+    assert "analytics.crm_lead_record" in Base.metadata.tables
+    assert "analytics.log_crm_source_sync" in Base.metadata.tables
 
-    call_constraints = {constraint.name for constraint in SourceCallRecord.__table__.constraints}
-    lead_constraints = {constraint.name for constraint in SourceLeadRecord.__table__.constraints}
+    call_constraints = {constraint.name for constraint in CrmCallRecord.__table__.constraints}
+    lead_constraints = {constraint.name for constraint in CrmLeadRecord.__table__.constraints}
 
-    assert "uq_source_call_records_tenant_app_activity" in call_constraints
-    assert "uq_source_lead_records_tenant_app_prospect" in lead_constraints
+    assert "uq_crm_call_record_tenant_app_activity" in call_constraints
+    assert "uq_crm_lead_record_tenant_app_prospect" in lead_constraints
 
-    call_indexes = {index.name for index in SourceCallRecord.__table__.indexes}
-    lead_indexes = {index.name for index in SourceLeadRecord.__table__.indexes}
-    sync_indexes = {index.name for index in SourceSyncRun.__table__.indexes}
+    call_indexes = {index.name for index in CrmCallRecord.__table__.indexes}
+    lead_indexes = {index.name for index in CrmLeadRecord.__table__.indexes}
+    sync_indexes = {index.name for index in LogCrmSourceSync.__table__.indexes}
 
-    assert "idx_source_call_records_tenant_app_call_started" in call_indexes
-    assert "idx_source_call_records_tenant_app_status_lower" in call_indexes
-    assert "idx_source_lead_records_tenant_app_stage_lower" in lead_indexes
-    assert "idx_source_lead_records_tenant_app_mql" in lead_indexes
-    assert "idx_source_sync_runs_tenant_family_status" in sync_indexes
+    assert "idx_crm_call_record_tenant_app_call_started" in call_indexes
+    assert "idx_crm_call_record_tenant_app_status_lower" in call_indexes
+    assert "idx_crm_lead_record_tenant_app_stage_lower" in lead_indexes
+    assert "idx_crm_lead_record_tenant_app_mql" in lead_indexes
+    assert "idx_log_crm_source_sync_tenant_family_status" in sync_indexes
 
 
 def test_call_source_row_schema_exposes_camel_case_fields():

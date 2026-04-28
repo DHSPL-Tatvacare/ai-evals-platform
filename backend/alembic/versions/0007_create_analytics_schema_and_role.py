@@ -1,4 +1,4 @@
-"""create analytics schema, analytics_reader role, grants, and default search_path
+"""create analytics schema, analytics_reader role, grants, and transitional search_path
 
 Roadmap 01 §9.3 revision 0007 + §9.2 grants/search_path block.
 
@@ -14,10 +14,11 @@ This revision:
      ``GRANT SELECT ON ALL TABLES`` is a no-op; ``ALTER DEFAULT PRIVILEGES``
      covers every table the rename chain will land here in revisions
      0008+.
-  4. Sets the database default ``search_path = platform, analytics`` per
-     §9.2. Application code MUST schema-qualify (Phase 1 made every
-     helper schema-aware); the search_path is purely for interactive
-     ``psql`` / GUI use.
+  4. Sets the database default ``search_path = platform, public, analytics``.
+     ``public`` stays in the path temporarily because revision 0006 leaves
+     16 transitional tables plus ``public.alembic_version`` there. A later
+     revision can tighten the path to ``platform, analytics`` once those
+     remaining tables have moved out of ``public``.
 
 Plan §9.3 lists this as Low risk. No table moves, no behavior change
 inside the application. Roadmap 03 (FHIR) later adds a third schema
@@ -118,7 +119,7 @@ def upgrade() -> None:
 
     db_name = _current_db_name()
     op.execute(
-        f'ALTER DATABASE "{db_name}" SET search_path = platform, analytics'
+        f'ALTER DATABASE "{db_name}" SET search_path = platform, public, analytics'
     )
 
 

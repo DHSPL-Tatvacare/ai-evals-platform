@@ -1,9 +1,8 @@
-"""Base report service with shared cache, data loading, and LLM setup."""
+"""Base report service with shared data loading and LLM setup."""
 
 from abc import ABC, abstractmethod
 import logging
 import uuid
-from datetime import datetime, timezone
 from uuid import UUID
 from typing import Any
 
@@ -11,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation
-from app.models.evaluation_analytics import EvaluationAnalytics
 from app.schemas.base import CamelModel
 from app.services.access_control import readable_scope_clause
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
@@ -34,34 +32,6 @@ class BaseReportService(ABC):
         self.tenant_id = tenant_id
         self.user_id = user_id
 
-    async def generate(
-        self,
-        run_id: str,
-        force_refresh: bool = False,
-        llm_provider: str | None = None,
-        llm_model: str | None = None,
-    ) -> CamelModel:
-        """Standard single-run report lifecycle for all analytics-enabled apps."""
-        run = await self._load_run(run_id)
-
-        if not force_refresh:
-            cached = await self._load_cache(run_id, run.app_id)
-            if cached:
-                validated = self._validate_cached_payload(cached, run_id)
-                if validated is not None:
-                    return validated
-
-        source_data = await self._load_source_data(run_id)
-        payload = await self._build_payload(
-            run=run,
-            source_data=source_data,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            include_narrative=True,
-        )
-        await self._save_cache(run_id, run.app_id, payload.model_dump(by_alias=True))
-        return payload
-
     async def build_payload_for_composer(
         self,
         run_id: str,
@@ -79,13 +49,6 @@ class BaseReportService(ABC):
             llm_model=llm_model,
             include_narrative=include_narrative,
         )
-
-    def _validate_cached_payload(self, cached: dict, run_id: str) -> CamelModel | None:
-        try:
-            return self.payload_model.model_validate(cached)
-        except Exception:
-            logger.warning("Report cache corrupted for run %s, regenerating", run_id)
-            return None
 
     # --- Data loading ---
 
@@ -139,56 +102,6 @@ class BaseReportService(ABC):
         include_narrative: bool = True,
     ) -> CamelModel:
         """Build the app-specific report payload from loaded source data."""
-
-    # --- Cache ---
-
-    async def _load_cache(self, run_id: str, app_id: str) -> dict | None:
-        try:
-            result = await self.db.execute(
-                select(EvaluationAnalytics.analytics_data).where(
-                    EvaluationAnalytics.scope == "single_run",
-                    EvaluationAnalytics.run_id == UUID(run_id),
-                    EvaluationAnalytics.app_id == app_id,
-                    EvaluationAnalytics.tenant_id == self.tenant_id,
-                )
-            )
-            row = result.scalar_one_or_none()
-            return row if row else None
-        except Exception as e:
-            logger.warning("Failed to load cache for run %s: %s", run_id, e)
-            return None
-
-    async def _save_cache(self, run_id: str, app_id: str, data: dict) -> None:
-        try:
-            now = datetime.now(timezone.utc)
-
-            result = await self.db.execute(
-                select(EvaluationAnalytics).where(
-                    EvaluationAnalytics.scope == "single_run",
-                    EvaluationAnalytics.run_id == UUID(run_id),
-                    EvaluationAnalytics.app_id == app_id,
-                    EvaluationAnalytics.tenant_id == self.tenant_id,
-                )
-            )
-            existing = result.scalar_one_or_none()
-
-            if existing:
-                existing.analytics_data = data
-                existing.computed_at = now
-            else:
-                row = EvaluationAnalytics(
-                    tenant_id=self.tenant_id,
-                    app_id=app_id,
-                    scope="single_run",
-                    run_id=UUID(run_id),
-                    analytics_data=data,
-                    computed_at=now,
-                )
-                self.db.add(row)
-
-            await self.db.commit()
-        except Exception as e:
-            logger.warning("Failed to cache report for run %s: %s", run_id, e)
 
     # --- LLM provider setup ---
 

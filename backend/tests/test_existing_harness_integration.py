@@ -127,7 +127,7 @@ def _make_bundle(scope: ScopeContext) -> ScopedBundle:
         projected_classes=(
             ClassProjection(
                 ontology_class='evaluation.run',
-                storage='analytics_run_facts',
+                storage='agg_evaluation_run',
                 identifier_field='run_id',
             ),
         ),

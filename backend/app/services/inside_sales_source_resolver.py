@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval_run import EvalRun, ThreadEvaluation
-from app.models.source_records import SourceCallRecord
+from app.models.source_records import CrmCallRecord
 from app.services.inside_sales_dataset_resolver import (
     CallSelectionMode,
     InsideSalesCallFilters,
@@ -57,10 +57,10 @@ async def _fetch_calls_by_activity_ids(
     ids = [aid for aid in activity_ids if aid]
     if not ids:
         return []
-    stmt = select(SourceCallRecord).where(
-        SourceCallRecord.tenant_id == tenant_id,
-        SourceCallRecord.app_id == app_id,
-        SourceCallRecord.activity_id.in_(ids),
+    stmt = select(CrmCallRecord).where(
+        CrmCallRecord.tenant_id == tenant_id,
+        CrmCallRecord.app_id == app_id,
+        CrmCallRecord.activity_id.in_(ids),
     )
     result = await db.execute(stmt)
     return [map_call_listing_row(call) for call in result.scalars().all()]

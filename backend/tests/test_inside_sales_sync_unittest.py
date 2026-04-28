@@ -375,11 +375,11 @@ class PruneRowsUnitTests(unittest.IsolatedAsyncioTestCase):
             dialect=__import__('sqlalchemy').dialects.postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         ))
-        self.assertIn("DELETE FROM source_call_records", compiled)
-        self.assertIn("source_call_records.tenant_id =", compiled)
-        self.assertIn("source_call_records.app_id = 'inside-sales'", compiled)
-        self.assertIn("source_call_records.created_on <", compiled)
-        self.assertIn("source_call_records.created_on IS NOT NULL", compiled)
+        self.assertIn("DELETE FROM analytics.crm_call_record", compiled)
+        self.assertIn("analytics.crm_call_record.tenant_id =", compiled)
+        self.assertIn("analytics.crm_call_record.app_id = 'inside-sales'", compiled)
+        self.assertIn("analytics.crm_call_record.created_on <", compiled)
+        self.assertIn("crm_call_record.created_on IS NOT NULL", compiled)
 
     async def test_prune_rejects_unknown_source_family(self):
         from app.services.inside_sales_queries import prune_rows_older_than
@@ -401,7 +401,7 @@ class PruneRowsUnitTests(unittest.IsolatedAsyncioTestCase):
 class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
     """After the LSQ-ETL retention contract change, scheduled runs are
     pure provenance: ``is_scheduled_run`` + ``job_id`` land on the
-    ``source_sync_runs`` row but the scheduled path does **not** prune
+    ``log_crm_source_sync`` row but the scheduled path does **not** prune
     and does **not** force a 7-day hot window."""
 
     def test_sync_run_builder_signature_accepts_provenance(self):
@@ -461,7 +461,7 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_scheduled_incremental_uses_watermark_window_not_seven_day_window(self):
         """Scheduled incremental runs follow the watermark (with overlap),
         not a rolling [now-7d, now] override."""
-        from app.models.source_records import SourceSyncRun
+        from app.models.source_records import LogCrmSourceSync
 
         latest = type(
             "LatestRun",
@@ -473,7 +473,7 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
             sync_mode="incremental",
             latest_successful=latest,
         )
-        sync_rows = [item for item in fake_session.added if isinstance(item, SourceSyncRun)]
+        sync_rows = [item for item in fake_session.added if isinstance(item, LogCrmSourceSync)]
         self.assertEqual(len(sync_rows), 1)
         # Leads incremental default overlap is 10 min; the watermark must
         # land at (latest_watermark - 10 min), NOT at (now - 7d).
@@ -481,10 +481,10 @@ class ScheduledRunProvenanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sync_run_persists_is_scheduled_run_and_job_id(self):
         fake_session, _prune = await self._run_sync(is_scheduled_run=True)
-        # `_create_sync_run` adds a `SourceSyncRun` with our provenance.
-        from app.models.source_records import SourceSyncRun
+        # `_create_sync_run` adds a `LogCrmSourceSync` with our provenance.
+        from app.models.source_records import LogCrmSourceSync
 
-        sync_rows = [item for item in fake_session.added if isinstance(item, SourceSyncRun)]
+        sync_rows = [item for item in fake_session.added if isinstance(item, LogCrmSourceSync)]
         self.assertEqual(len(sync_rows), 1)
         self.assertTrue(sync_rows[0].is_scheduled_run)
         self.assertIsNotNone(sync_rows[0].job_id)
@@ -584,7 +584,7 @@ class WatermarkRetentionTests(unittest.IsolatedAsyncioTestCase):
     next tick re-covers the same window."""
 
     async def test_failed_sync_does_not_advance_prior_watermark(self):
-        from app.models.source_records import SourceSyncRun
+        from app.models.source_records import LogCrmSourceSync
 
         latest = SimpleNamespace(
             watermark_to="2026-04-20 12:00:00",
@@ -608,7 +608,7 @@ class WatermarkRetentionTests(unittest.IsolatedAsyncioTestCase):
                     tenant_id=uuid.uuid4(),
                     user_id=uuid.uuid4(),
                 )
-        sync_rows = [item for item in fake_session.added if isinstance(item, SourceSyncRun)]
+        sync_rows = [item for item in fake_session.added if isinstance(item, LogCrmSourceSync)]
         self.assertEqual(len(sync_rows), 1)
         self.assertEqual(sync_rows[0].status, "failed")
         # The failed run records the window it attempted, but the

@@ -28,9 +28,9 @@ from app.services.report_builder.section_catalog import (
 )
 
 _DISCOVERY_VOLUME_LABELS = {
-    'analytics_run_facts': 'runs',
-    'analytics_eval_facts': 'evaluations',
-    'analytics_criterion_facts': 'criteria',
+    'agg_evaluation_run': 'runs',
+    'fact_evaluation': 'evaluations',
+    'fact_evaluation_criterion': 'criteria',
 }
 
 
@@ -175,8 +175,8 @@ async def handle_discover(
                 errors.append(f'{table_name}: {exc}')
 
     time_range = {}
-    if 'analytics_run_facts' in tables:
-        run_app_column, run_tenant_column = _table_scope_columns(semantic_model, 'analytics_run_facts')
+    if 'agg_evaluation_run' in tables:
+        run_app_column, run_tenant_column = _table_scope_columns(semantic_model, 'agg_evaluation_run')
         try:
             result = await db.execute(
                 text(
@@ -184,7 +184,7 @@ async def handle_discover(
                     SELECT
                         MIN(created_at)::date::text AS earliest,
                         MAX(created_at)::date::text AS latest
-                    FROM analytics_run_facts
+                    FROM analytics.agg_evaluation_run
                     WHERE {run_app_column} = :app_id
                       AND {run_tenant_column} = :tenant_id
                     """
@@ -1770,7 +1770,7 @@ async def _log_tool_call(
     """
     try:
         from app.database import async_session as _log_session
-        from app.models.analytics_log import AgentToolLog
+        from app.models.analytics_log import LogSherlockToolCall
 
         row_count = None
         generated_sql = None
@@ -1786,7 +1786,7 @@ async def _log_tool_call(
             cache_hit = bool(payload.get("cache_hit", False))
 
         async with _log_session() as log_db:
-            log = AgentToolLog(
+            log = LogSherlockToolCall(
                 tenant_id=getattr(auth, "tenant_id", None),
                 user_id=getattr(auth, "user_id", None),
                 app_id=app_id,

@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import LlmUsage
+from app.models.cost import FactLlmGeneration
 from app.services.cost_tracking.pricing import compute_cost, fetch_best_available_pricing
 from app.services.cost_tracking.rollup import populate_rollup_day
 
@@ -44,10 +44,10 @@ async def backfill_unpriced(
 
     Returns ``{'scanned', 'repriced', 'still_unpriced', 'days_rolled'}``.
     """
-    stmt = select(LlmUsage).where(LlmUsage.pricing_fallback.is_(True))
+    stmt = select(FactLlmGeneration).where(FactLlmGeneration.pricing_fallback.is_(True))
     if tenant_id is not None:
-        stmt = stmt.where(LlmUsage.tenant_id == tenant_id)
-    stmt = stmt.order_by(LlmUsage.created_at.asc())
+        stmt = stmt.where(FactLlmGeneration.tenant_id == tenant_id)
+    stmt = stmt.order_by(FactLlmGeneration.created_at.asc())
     if limit is not None:
         stmt = stmt.limit(limit)
 
@@ -84,8 +84,8 @@ async def backfill_unpriced(
             continue
 
         await db.execute(
-            update(LlmUsage)
-            .where(LlmUsage.id == row.id)
+            update(FactLlmGeneration)
+            .where(FactLlmGeneration.id == row.id)
             .values(
                 cost_usd=cost_usd,
                 cost_breakdown=breakdown,
@@ -127,14 +127,14 @@ async def backfill_unpriced_for_alias(
     — scans only the rows that actually care about this alias.
     """
     stmt = (
-        select(LlmUsage)
+        select(FactLlmGeneration)
         .where(
-            LlmUsage.pricing_fallback.is_(True),
-            LlmUsage.tenant_id == tenant_id,
-            LlmUsage.provider == provider,
-            LlmUsage.model == observed,
+            FactLlmGeneration.pricing_fallback.is_(True),
+            FactLlmGeneration.tenant_id == tenant_id,
+            FactLlmGeneration.provider == provider,
+            FactLlmGeneration.model == observed,
         )
-        .order_by(LlmUsage.created_at.asc())
+        .order_by(FactLlmGeneration.created_at.asc())
     )
     if limit is not None:
         stmt = stmt.limit(limit)
@@ -170,8 +170,8 @@ async def backfill_unpriced_for_alias(
             continue
 
         await db.execute(
-            update(LlmUsage)
-            .where(LlmUsage.id == row.id)
+            update(FactLlmGeneration)
+            .where(FactLlmGeneration.id == row.id)
             .values(
                 cost_usd=cost_usd,
                 cost_breakdown=breakdown,

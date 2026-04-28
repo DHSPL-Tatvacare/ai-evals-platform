@@ -6,8 +6,9 @@ description: |
   identity; data_surfaces for raw-evidence lookups.
 
 catalog_tables:
-  analytics_run_facts:
-    orm: AnalyticsRunFact
+  agg_evaluation_run:
+    pg_schema: analytics
+    orm: AggEvaluationRun
     alias: rf
     columns:
       id:
@@ -145,8 +146,9 @@ catalog_tables:
         type: jsonb
         data_type: nominal
         description: "App-specific metadata"
-  analytics_eval_facts:
-    orm: AnalyticsEvalFact
+  fact_evaluation:
+    pg_schema: analytics
+    orm: FactEvaluation
     alias: ef
     columns:
       id:
@@ -283,8 +285,9 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
-  analytics_criterion_facts:
-    orm: AnalyticsCriterionFact
+  fact_evaluation_criterion:
+    pg_schema: analytics
+    orm: FactEvaluationCriterion
     alias: cf
     columns:
       id:
@@ -356,6 +359,7 @@ catalog_tables:
         data_type: temporal
   eval_runs:
     orm: EvalRun
+    pg_schema: platform
     columns:
       id:
         role: identifier

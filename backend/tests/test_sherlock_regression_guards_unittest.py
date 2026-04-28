@@ -104,7 +104,7 @@ def test_no_legacy_tool_aliases_in_runtime_code(alias):
     We only check the Sherlock flow directories: report_builder and
     chat_engine services. The prompts/user_context.py file is excluded
     because it runs a backward-compat SQL query that maps HISTORICAL
-    agent_tool_logs rows (written before Phase 2) onto their canonical
+    log_sherlock_tool_call rows (written before Phase 2) onto their canonical
     names — that read is legitimate and does not forward calls."""
     excluded = {
         BACKEND_APP / 'services' / 'chat_engine' / 'prompts' / 'user_context.py',
@@ -354,7 +354,7 @@ def test_tool_vocabulary_reason_codes_are_stable():
 
 
 def test_agent_tool_log_receives_invalid_argument_status():
-    """Phase 5's contract-violation path logs to agent_tool_logs with
+    """Phase 5's contract-violation path logs to log_sherlock_tool_call with
     status='invalid_argument'. Test confirms the dispatch wiring stays
     intact so ops dashboards can filter by status."""
     from types import SimpleNamespace

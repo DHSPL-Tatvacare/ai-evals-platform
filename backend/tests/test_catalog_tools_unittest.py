@@ -78,17 +78,17 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
                 ('context', 'jsonb', 'jsonb', 'YES', None, 'App metadata. Role: dimension.'),
             ]),
             _Result(rows=[('eval_type',)]),
-            _Result(rows=[('idx_eval_type', 'CREATE INDEX idx_eval_type ON analytics_run_facts (eval_type)')]),
+            _Result(rows=[('idx_eval_type', 'CREATE INDEX idx_eval_type ON agg_evaluation_run (eval_type)')]),
         ]
 
         envelope = await catalog_tools.catalog_inspect(
-            table='analytics_run_facts',
+            table='agg_evaluation_run',
             column=None,
             db=db,
             auth=SimpleNamespace(),
             app_id='inside-sales',
             app_config={},
-            semantic_model={'tables': {'analytics_run_facts': {}}},
+            semantic_model={'tables': {'agg_evaluation_run': {}}},
         )
 
         # Phase 2: catalog tools return §6.2 envelopes directly.
@@ -118,35 +118,35 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
         db.execute.side_effect = _execute
 
         envelope = await catalog_tools.catalog_values(
-            table='analytics_eval_facts',
+            table='fact_evaluation',
             column='result_status',
             search='pa',
             db=db,
             auth=auth,
             app_id='inside-sales',
             app_config={},
-            semantic_model={'tables': {'analytics_eval_facts': {}}},
+            semantic_model={'tables': {'fact_evaluation': {}}},
         )
 
         self.assertEqual(envelope['status'], 'ok')
         self.assertEqual(envelope['outcome']['kind'], 'read')
         self.assertEqual(envelope['payload']['values'][0]['value'], 'PASS')
-        self.assertIn('analytics_eval_facts.tenant_id', captured['query'])
-        self.assertIn('analytics_eval_facts.app_id', captured['query'])
+        self.assertIn('fact_evaluation.tenant_id', captured['query'])
+        self.assertIn('fact_evaluation.app_id', captured['query'])
 
     async def test_catalog_values_accepts_none_search(self):
         db = AsyncMock()
         db.execute.return_value = _Result(rows=[('PASS', 7)])
 
         envelope = await catalog_tools.catalog_values(
-            table='analytics_eval_facts',
+            table='fact_evaluation',
             column='result_status',
             search=None,
             db=db,
             auth=SimpleNamespace(),
             app_id='inside-sales',
             app_config={},
-            semantic_model={'tables': {'analytics_eval_facts': {}}},
+            semantic_model={'tables': {'fact_evaluation': {}}},
         )
 
         self.assertEqual(envelope['status'], 'ok')
@@ -162,7 +162,7 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
             auth=SimpleNamespace(),
             app_id='inside-sales',
             app_config={},
-            semantic_model={'tables': {'analytics_eval_facts': {}}},
+            semantic_model={'tables': {'fact_evaluation': {}}},
         )
 
         self.assertEqual(envelope['status'], 'error')
@@ -178,13 +178,13 @@ class CatalogToolsTests(unittest.IsolatedAsyncioTestCase):
         db = AsyncMock()
 
         envelope = await catalog_tools.catalog_inspect(
-            table='analytics_run_facts',
+            table='agg_evaluation_run',
             column=None,
             db=db,
             auth=SimpleNamespace(is_owner=False, app_access=frozenset()),
             app_id='inside-sales',
             app_config={},
-            semantic_model={'tables': {'analytics_run_facts': {}}},
+            semantic_model={'tables': {'agg_evaluation_run': {}}},
         )
 
         self.assertEqual(envelope['status'], 'error')

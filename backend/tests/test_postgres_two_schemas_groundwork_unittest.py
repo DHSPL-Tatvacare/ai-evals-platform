@@ -41,8 +41,8 @@ def _write_minimal_manifest(path: Path, app_id: str, *, pg_schema: str | None = 
         f"""
 app_id: {app_id}
 catalog_tables:
-  analytics_run_facts:
-    orm: AnalyticsRunFact
+  agg_evaluation_run:
+    orm: AggEvaluationRun
 {schema_line}    columns:
       pass_rate:
         role: measure
@@ -51,7 +51,7 @@ catalog_tables:
         role: temporal
 data_surfaces:
   - key: runs
-    backed_by: analytics_run_facts
+    backed_by: agg_evaluation_run
 """.lstrip()
     )
     return path
@@ -59,7 +59,7 @@ data_surfaces:
 
 def test_catalog_table_defaults_to_public_when_pg_schema_unset(tmp_path: Path):
     manifest = load_manifest_from_path(_write_minimal_manifest(tmp_path / "a.yaml", "app-a"))
-    table = manifest.catalog_tables["analytics_run_facts"]
+    table = manifest.catalog_tables["agg_evaluation_run"]
     assert table.pg_schema is None
     assert table.effective_schema == DEFAULT_SCHEMA == "public"
 
@@ -68,14 +68,14 @@ def test_catalog_table_honors_explicit_pg_schema(tmp_path: Path):
     manifest = load_manifest_from_path(
         _write_minimal_manifest(tmp_path / "b.yaml", "app-b", pg_schema="analytics")
     )
-    assert manifest.catalog_tables["analytics_run_facts"].effective_schema == "analytics"
+    assert manifest.catalog_tables["agg_evaluation_run"].effective_schema == "analytics"
 
 
 def test_qualified_table_name_uses_effective_schema(tmp_path: Path):
     manifest = load_manifest_from_path(
         _write_minimal_manifest(tmp_path / "c.yaml", "app-c", pg_schema="platform")
     )
-    assert manifest.qualified_table_name("analytics_run_facts") == "platform.analytics_run_facts"
+    assert manifest.qualified_table_name("agg_evaluation_run") == "platform.agg_evaluation_run"
     assert manifest.qualified_table_name("missing_table") is None
 
 
@@ -84,7 +84,7 @@ def test_qualified_table_name_uses_effective_schema(tmp_path: Path):
 
 def test_lookup_column_accepts_table_column_form(tmp_path: Path):
     manifest = load_manifest_from_path(_write_minimal_manifest(tmp_path / "d.yaml", "app-d"))
-    col = manifest.lookup_column("analytics_run_facts.pass_rate")
+    col = manifest.lookup_column("agg_evaluation_run.pass_rate")
     assert col is not None
     assert col.role == "measure"
 
@@ -92,7 +92,7 @@ def test_lookup_column_accepts_table_column_form(tmp_path: Path):
 def test_lookup_column_accepts_schema_table_column_form(tmp_path: Path):
     """Schema-qualified lookup must succeed when the schema matches."""
     manifest = load_manifest_from_path(_write_minimal_manifest(tmp_path / "e.yaml", "app-e"))
-    col = manifest.lookup_column("public.analytics_run_facts.pass_rate")
+    col = manifest.lookup_column("public.agg_evaluation_run.pass_rate")
     assert col is not None
     assert col.role == "measure"
 
@@ -101,7 +101,7 @@ def test_lookup_column_rejects_schema_mismatch(tmp_path: Path):
     """A wrong schema must not silently match — phase 1 returns None instead."""
     manifest = load_manifest_from_path(_write_minimal_manifest(tmp_path / "f.yaml", "app-f"))
     # Manifest declares no pg_schema → effective is ``public``.
-    assert manifest.lookup_column("analytics.analytics_run_facts.pass_rate") is None
+    assert manifest.lookup_column("analytics.agg_evaluation_run.pass_rate") is None
 
 
 def test_lookup_column_rejects_too_many_parts(tmp_path: Path):
@@ -121,11 +121,10 @@ def test_known_schemas_includes_default_for_loaded_apps():
 def test_table_schema_map_returns_effective_schema_per_table():
     schema_map = table_schema_map("kaira-bot")
     if schema_map:
-        # Phase 1: nobody declares pg_schema yet, so every table resolves
-        # to ``public``. This contract is what unlocks revision 0006 — the
-        # day a manifest declares ``pg_schema: platform``, this map starts
-        # carrying the correct schema with no caller changes.
-        assert all(s == "public" for s in schema_map.values())
+        # Phase 3: analytics fact tables now declare ``pg_schema: analytics``
+        # alongside the existing ``platform``-qualified OLTP tables.
+        assert schema_map["eval_runs"] == "platform"
+        assert schema_map["agg_evaluation_run"] == "analytics"
 
 
 # ── COMMENT ON COLUMN emission is schema-qualified ─────────────────────
@@ -141,8 +140,12 @@ def test_comment_emitter_schema_qualifies_every_statement():
         target = head[len("COMMENT ON COLUMN ") :]
         parts = target.split(".")
         assert len(parts) == 3, f"expected schema.table.col, got: {head!r}"
-        # Phase 1: every part is ``public``.
-        assert parts[0] == "public", f"expected schema=public on Phase 1, got: {head!r}"
+        # Phase 3: ``platform`` for OLTP tables, ``analytics`` for facts /
+        # aggregates / refs / logs / caches; ``public`` only persists for
+        # tables that haven't yet declared a manifest schema.
+        assert parts[0] in {"public", "platform", "analytics"}, (
+            f"expected schema to be public/platform/analytics during the transition, got: {head!r}"
+        )
 
 
 # ── SQL validator recognizes schema prefixes ───────────────────────────
@@ -158,12 +161,12 @@ def test_sql_validator_accepts_known_schema_prefixes():
         validate_sql_columns_against_manifest,
     )
 
-    # Real apps registered in the repo. ``analytics_run_facts.pass_rate``
+    # Real apps registered in the repo. ``agg_evaluation_run.pass_rate``
     # is a known column on ``kaira-bot``; the schema prefix should be
     # treated as a qualifier and not rejected.
     sql = (
-        "SELECT analytics_run_facts.pass_rate "
-        "FROM public.analytics_run_facts"
+        "SELECT agg_evaluation_run.pass_rate "
+        "FROM public.agg_evaluation_run"
     )
     # Should not raise.
     validate_sql_columns_against_manifest(sql, app_id="kaira-bot")
@@ -172,7 +175,7 @@ def test_sql_validator_accepts_known_schema_prefixes():
     # must still raise even when the FROM is schema-qualified.
     with pytest.raises(SQLValidationError):
         validate_sql_columns_against_manifest(
-            "SELECT analytics_run_facts.does_not_exist FROM public.analytics_run_facts",
+            "SELECT agg_evaluation_run.does_not_exist FROM public.agg_evaluation_run",
             app_id="kaira-bot",
         )
 
@@ -196,7 +199,7 @@ def test_resolve_column_accepts_schema_table_column_form():
     )
 
     target = ColumnTarget(
-        table="analytics_run_facts",
+        table="agg_evaluation_run",
         column="pass_rate",
         role="measure",
         schema="public",
@@ -211,7 +214,7 @@ def test_resolve_column_accepts_schema_table_column_form():
     )
 
     # 3-part: schema must match.
-    res = vocab.resolve_column("public.analytics_run_facts.pass_rate")
+    res = vocab.resolve_column("public.agg_evaluation_run.pass_rate")
     assert res.status == "unique"
     assert res.canonical == target
 
@@ -220,11 +223,11 @@ def test_resolve_column_accepts_schema_table_column_form():
     # if the schema part doesn't match the canonical target, the resolver
     # reports ``unknown``. This matches the strict semantics of
     # ``manifest.lookup_column``.
-    res_wrong = vocab.resolve_column("analytics.analytics_run_facts.pass_rate")
+    res_wrong = vocab.resolve_column("analytics.agg_evaluation_run.pass_rate")
     assert res_wrong.status == "unknown"
 
     # 2-part: existing behavior preserved.
-    res2 = vocab.resolve_column("analytics_run_facts.pass_rate")
+    res2 = vocab.resolve_column("agg_evaluation_run.pass_rate")
     assert res2.status == "unique"
     assert res2.canonical == target
 
@@ -249,3 +252,26 @@ def test_alembic_env_includes_schemas_and_pins_version_table():
     body = env_path.read_text()
     assert "include_schemas=True" in body
     assert 'version_table_schema="public"' in body or "version_table_schema='public'" in body
+
+
+def test_boot_paths_query_public_alembic_version():
+    """Boot diagnostics must keep reading the version table from ``public``.
+
+    Roadmap 01 keeps ``alembic_version`` in ``public`` while app tables move
+    through ``platform``/``analytics``.
+    """
+    main_path = Path(__file__).parent.parent / "app" / "main.py"
+    worker_path = Path(__file__).parent.parent / "app" / "worker.py"
+    assert "public.alembic_version" in main_path.read_text()
+    assert "public.alembic_version" in worker_path.read_text()
+
+
+def test_analytics_schema_revision_keeps_public_in_search_path_during_transition():
+    """Revision 0007 must keep ``public`` in the DB search_path until the
+    remaining public tables are moved in later phases.
+    """
+    migration_path = (
+        Path(__file__).parent.parent / "alembic" / "versions" / "0007_create_analytics_schema_and_role.py"
+    )
+    body = migration_path.read_text()
+    assert "SET search_path = platform, public, analytics" in body

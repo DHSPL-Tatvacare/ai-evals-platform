@@ -1,47 +1,47 @@
 version: "3.0"
 
 tables:
-  analytics_run_facts:
+  agg_evaluation_run:
     columns:
       avg_score: { type: float, role: measure, unit: score, pre_aggregated: true, description: "Average rubric score for the batch run (numeric)" }
-  analytics_eval_facts:
+  fact_evaluation:
     description: >
       One row per call_rubric evaluation of a TatvaCare inside sales recording.
       Scored by 'GoodFlip Sales Call QA' on a 0-45.7 scale. result_status is
       always NULL for this app — use result_score for quality analysis.
-      No analytics_criterion_facts rows exist for this app.
+      No fact_evaluation_criterion rows exist for this app.
 dimensions:
   - name: run_name
-    table: analytics_run_facts
+    table: agg_evaluation_run
     expression: "run_name"
     description: "User-given run name when present"
   - name: eval_type
-    table: analytics_run_facts
+    table: agg_evaluation_run
     expression: "eval_type"
     description: "Type of scoring run — always 'call_quality' for this app"
   - name: agent
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "agent"
     description: "Human TatvaCare inside sales rep name (e.g. 'B Himani', 'Nisha V') — not an AI agent. Use lookup('agent') to see all rep names."
   - name: direction
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "direction"
     description: "Call direction: 'outbound' (majority of calls) or 'inbound'"
     allowed_values: ["inbound", "outbound"]
   - name: duration
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "duration_seconds"
     description: "Call duration in seconds. Divide by 60 for minutes. Observed range: 17–373 s"
   - name: evaluator_type
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "evaluator_type"
     description: "Evaluation type — always 'call_rubric' for this app"
   - name: evaluator_name
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "evaluator_name"
     description: "Evaluator name — always 'GoodFlip Sales Call QA' for this app"
   - name: thread_id
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "item_id"
     description: "Call recording identifier (item_type is always 'recording' for this app)"
 
@@ -49,8 +49,8 @@ metrics:
   avg_call_score:
     description: "Average rubric score (0–45.7 scale, GoodFlip Sales Call QA). Primary quality KPI — result_status is always NULL so use this."
     sql: "ROUND(AVG(ef.result_score)::numeric, 2)"
-    applies_to: analytics_eval_facts
+    applies_to: fact_evaluation
   max_call_score:
     description: "Highest rubric score in the result set (45.7 = perfect)"
     sql: "MAX(ef.result_score)"
-    applies_to: analytics_eval_facts
+    applies_to: fact_evaluation

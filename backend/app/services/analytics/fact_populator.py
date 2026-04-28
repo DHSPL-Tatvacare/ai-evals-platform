@@ -10,8 +10,8 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analytics_facts import AnalyticsCriterionFact, AnalyticsEvalFact, AnalyticsRunFact
-from app.models.analytics_log import AnalyticsJobLog
+from app.models.analytics_facts import FactEvaluationCriterion, FactEvaluation, AggEvaluationRun
+from app.models.analytics_log import LogFactPopulationRun
 from app.models.eval_run import AdversarialEvaluation, EvalRun, ThreadEvaluation
 from app.models.evaluator import Evaluator
 from app.services.analytics.extractors import EXTRACTORS
@@ -30,7 +30,7 @@ class FactPopulator:
         """Main entry point. Idempotent — deletes existing facts before inserting."""
         start = time.monotonic()
         errors: list[str] = []
-        log: AnalyticsJobLog | None = None
+        log: LogFactPopulationRun | None = None
 
         try:
             # 1. Load run first — we need tenant context for the log
@@ -39,7 +39,7 @@ class FactPopulator:
                 raise ValueError(f"EvalRun {run_id} not found")
 
             # 2. Create job log now that we have tenant context
-            log = AnalyticsJobLog(
+            log = LogFactPopulationRun(
                 run_id=run_id,
                 app_id=run.app_id,
                 tenant_id=run.tenant_id,
@@ -160,7 +160,7 @@ class FactPopulator:
     async def _delete_existing(self, run_id: UUID) -> int:
         """Delete existing fact rows for this run. Returns total deleted count."""
         total = 0
-        for model in (AnalyticsCriterionFact, AnalyticsEvalFact, AnalyticsRunFact):
+        for model in (FactEvaluationCriterion, FactEvaluation, AggEvaluationRun):
             result = await self.db.execute(
                 delete(model).where(model.run_id == run_id)
             )
@@ -173,7 +173,7 @@ class FactPopulator:
         count = 0
 
         # Run fact
-        self.db.add(AnalyticsRunFact(
+        self.db.add(AggEvaluationRun(
             run_id=fact_set.run_fact.run_id,
             app_id=fact_set.run_fact.app_id,
             tenant_id=fact_set.run_fact.tenant_id,
@@ -200,7 +200,7 @@ class FactPopulator:
 
         # Eval facts
         for ef in fact_set.eval_facts:
-            self.db.add(AnalyticsEvalFact(
+            self.db.add(FactEvaluation(
                 run_id=ef.run_id,
                 app_id=ef.app_id,
                 tenant_id=ef.tenant_id,
@@ -230,7 +230,7 @@ class FactPopulator:
 
         # Criterion facts
         for cf in fact_set.criterion_facts:
-            self.db.add(AnalyticsCriterionFact(
+            self.db.add(FactEvaluationCriterion(
                 run_id=cf.run_id,
                 app_id=cf.app_id,
                 tenant_id=cf.tenant_id,

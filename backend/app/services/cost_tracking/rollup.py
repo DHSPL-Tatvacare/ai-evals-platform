@@ -28,7 +28,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import LlmUsage, LlmUsageDailyRollup
+from app.models.cost import FactLlmGeneration, AggLlmUsageDaily
 
 _log = logging.getLogger(__name__)
 
@@ -48,40 +48,40 @@ async def populate_rollup_day(db: AsyncSession, day: date) -> dict[str, Any]:
     start, end = _day_bounds(day)
 
     # Wipe the day first so we can idempotently reinsert without duplicates.
-    delete_stmt = delete(LlmUsageDailyRollup).where(LlmUsageDailyRollup.day == day)
+    delete_stmt = delete(AggLlmUsageDaily).where(AggLlmUsageDaily.day == day)
     await db.execute(delete_stmt)
 
     group_cols = (
-        LlmUsage.tenant_id,
-        LlmUsage.app_id,
-        LlmUsage.user_id,
-        LlmUsage.provider,
-        LlmUsage.model,
-        func.coalesce(LlmUsage.call_purpose, '').label('call_purpose'),
-        LlmUsage.status,
+        FactLlmGeneration.tenant_id,
+        FactLlmGeneration.app_id,
+        FactLlmGeneration.user_id,
+        FactLlmGeneration.provider,
+        FactLlmGeneration.model,
+        func.coalesce(FactLlmGeneration.call_purpose, '').label('call_purpose'),
+        FactLlmGeneration.status,
     )
     select_stmt = (
         select(
             *group_cols,
-            func.coalesce(func.sum(LlmUsage.input_tokens), 0).label('input_tokens'),
-            func.coalesce(func.sum(LlmUsage.output_tokens), 0).label('output_tokens'),
-            func.coalesce(func.sum(LlmUsage.cached_read_tokens), 0).label('cached_read'),
-            func.coalesce(func.sum(LlmUsage.cached_write_tokens), 0).label('cached_write'),
-            func.coalesce(func.sum(LlmUsage.reasoning_tokens), 0).label('reasoning'),
-            func.coalesce(func.sum(LlmUsage.tool_use_prompt_tokens), 0).label('tool_use_prompt'),
-            func.coalesce(func.sum(LlmUsage.total_tokens), 0).label('total_tokens'),
-            func.coalesce(func.sum(LlmUsage.cost_usd), 0).label('cost_usd'),
-            func.count(LlmUsage.id).label('call_count'),
+            func.coalesce(func.sum(FactLlmGeneration.input_tokens), 0).label('input_tokens'),
+            func.coalesce(func.sum(FactLlmGeneration.output_tokens), 0).label('output_tokens'),
+            func.coalesce(func.sum(FactLlmGeneration.cached_read_tokens), 0).label('cached_read'),
+            func.coalesce(func.sum(FactLlmGeneration.cached_write_tokens), 0).label('cached_write'),
+            func.coalesce(func.sum(FactLlmGeneration.reasoning_tokens), 0).label('reasoning'),
+            func.coalesce(func.sum(FactLlmGeneration.tool_use_prompt_tokens), 0).label('tool_use_prompt'),
+            func.coalesce(func.sum(FactLlmGeneration.total_tokens), 0).label('total_tokens'),
+            func.coalesce(func.sum(FactLlmGeneration.cost_usd), 0).label('cost_usd'),
+            func.count(FactLlmGeneration.id).label('call_count'),
         )
-        .where(LlmUsage.created_at >= start)
-        .where(LlmUsage.created_at < end)
+        .where(FactLlmGeneration.created_at >= start)
+        .where(FactLlmGeneration.created_at < end)
         .group_by(*group_cols)
     )
 
     rows = (await db.execute(select_stmt)).all()
     tenants: set[uuid.UUID] = set()
     for row in rows:
-        rollup = LlmUsageDailyRollup(
+        rollup = AggLlmUsageDaily(
             id=uuid.uuid4(),
             day=day,
             tenant_id=row[0],

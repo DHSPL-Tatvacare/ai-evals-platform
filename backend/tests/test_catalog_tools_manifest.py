@@ -16,19 +16,19 @@ def setup_function(_):
 def test_catalog_model_map_has_four_tables_for_kaira_bot():
     m = get_catalog_model_map("kaira-bot")
     assert set(m.keys()) == {
-        "analytics_run_facts",
-        "analytics_eval_facts",
-        "analytics_criterion_facts",
+        "agg_evaluation_run",
+        "fact_evaluation",
+        "fact_evaluation_criterion",
         "eval_runs",
     }
 
 
 def test_build_catalog_allowlist_for_kaira_bot():
     assert build_catalog_allowlist(app_id="kaira-bot") == [
-        "analytics_criterion_facts",
-        "analytics_eval_facts",
-        "analytics_run_facts",
+        "agg_evaluation_run",
         "eval_runs",
+        "fact_evaluation",
+        "fact_evaluation_criterion",
     ]
 
 

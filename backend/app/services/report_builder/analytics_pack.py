@@ -830,23 +830,23 @@ def _build_class_projections(manifest: Any) -> tuple[Any, ...]:
     projections: list[ClassProjection] = []
 
     run_field_safety = {'run_name': 'explicit_only'}
-    if 'analytics_run_facts' in tables:
+    if 'agg_evaluation_run' in tables:
         projections.append(ClassProjection(
             ontology_class='evaluation.run',
-            storage='analytics_run_facts',
+            storage='agg_evaluation_run',
             identifier_field='run_id',
             field_safety=run_field_safety,
         ))
-    if 'analytics_eval_facts' in tables:
+    if 'fact_evaluation' in tables:
         projections.append(ClassProjection(
             ontology_class='evaluation.judgment',
-            storage='analytics_eval_facts',
+            storage='fact_evaluation',
             identifier_field='item_id',
         ))
-    if 'analytics_criterion_facts' in tables:
+    if 'fact_evaluation_criterion' in tables:
         projections.append(ClassProjection(
             ontology_class='evaluation.judgment',
-            storage='analytics_criterion_facts',
+            storage='fact_evaluation_criterion',
             identifier_field='criterion_id',
         ))
 

@@ -59,7 +59,7 @@ from app.services.inside_sales_sync import (
     build_date_range_refresh_job_params,
     build_incremental_refresh_job_params,
 )
-from app.models.source_records import SourceSyncRun
+from app.models.source_records import LogCrmSourceSync
 from app.services.job_worker import get_job_submission_metadata
 from app.services.lsq_client import (
     MAX_LEAD_CALL_HISTORY,
@@ -390,13 +390,13 @@ async def list_collection_runs(
     """
     family = _validate_source_family(source_family)
     stmt = (
-        select(SourceSyncRun)
+        select(LogCrmSourceSync)
         .where(
-            SourceSyncRun.tenant_id == auth.tenant_id,
-            SourceSyncRun.app_id == INSIDE_SALES_APP_ID,
-            SourceSyncRun.source_family == family,
+            LogCrmSourceSync.tenant_id == auth.tenant_id,
+            LogCrmSourceSync.app_id == INSIDE_SALES_APP_ID,
+            LogCrmSourceSync.source_family == family,
         )
-        .order_by(SourceSyncRun.created_at.desc())
+        .order_by(LogCrmSourceSync.created_at.desc())
         .limit(limit)
     )
     rows = (await db.execute(stmt)).scalars().all()

@@ -63,14 +63,14 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         db.execute.return_value = _Result(rows=[('Pareekshith Bompally', 12), ('Vicky Yadav', 9)])
         semantic_model = {
             'tables': {
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                 },
             },
             'dimensions': [
                 {
                     'name': 'agent',
-                    'table': 'analytics_eval_facts',
+                    'table': 'fact_evaluation',
                     'expression': "context->>'agent'",
                 },
             ],
@@ -97,14 +97,14 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         db.execute.return_value = _Result(rows=[('Pareekshith Bompally', 12)])
         semantic_model = {
             'tables': {
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                 },
             },
             'dimensions': [
                 {
                     'name': 'agent',
-                    'table': 'analytics_eval_facts',
+                    'table': 'fact_evaluation',
                     'expression': "context->>'agent'",
                 },
             ],
@@ -135,17 +135,17 @@ class ReportBuilderDiscoveryToolTests(unittest.IsolatedAsyncioTestCase):
         ]
         semantic_model = {
             'tables': {
-                'analytics_run_facts': {
+                'agg_evaluation_run': {
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                 },
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                 },
             },
             'dimensions': [
                 {
                     'name': 'direction',
-                    'table': 'analytics_eval_facts',
+                    'table': 'fact_evaluation',
                     'expression': "context->>'direction'",
                     'description': 'Inbound or outbound',
                 },

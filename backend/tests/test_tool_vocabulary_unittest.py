@@ -38,7 +38,7 @@ def test_canonical_dimension_name_resolves_unique(kaira_vocab):
     assert resolution.status == 'unique'
     assert isinstance(resolution.canonical, DimensionSpec)
     assert resolution.canonical.name == 'result_status'
-    assert resolution.canonical.table == 'analytics_eval_facts'
+    assert resolution.canonical.table == 'fact_evaluation'
 
 
 def test_canonical_dimension_name_case_insensitive(kaira_vocab):
@@ -132,7 +132,7 @@ def test_column_canonical_name_resolves_unique(kaira_vocab):
 
     assert resolution.status == 'unique'
     assert resolution.canonical is not None
-    assert resolution.canonical.table == 'analytics_criterion_facts'
+    assert resolution.canonical.table == 'fact_evaluation_criterion'
     assert resolution.canonical.column == 'criterion_label'
 
 
@@ -142,7 +142,7 @@ def test_column_synonym_resolves_unique_when_table_unique(kaira_vocab):
 
     assert resolution.status == 'unique'
     assert resolution.canonical is not None
-    assert resolution.canonical.table == 'analytics_eval_facts'
+    assert resolution.canonical.table == 'fact_evaluation'
     assert resolution.canonical.column == 'result_status'
 
 
@@ -157,11 +157,11 @@ def test_column_synonym_normalizes_whitespace_and_case(kaira_vocab):
 
 
 def test_column_resolves_per_table_qualifier(kaira_vocab):
-    resolution = kaira_vocab.resolve_column('analytics_eval_facts.result_status')
+    resolution = kaira_vocab.resolve_column('fact_evaluation.result_status')
 
     assert resolution.status == 'unique'
     assert resolution.canonical is not None
-    assert resolution.canonical.table == 'analytics_eval_facts'
+    assert resolution.canonical.table == 'fact_evaluation'
 
 
 def test_preferred_table_narrows_ambiguous_to_unique():

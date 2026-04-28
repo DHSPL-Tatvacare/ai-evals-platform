@@ -22,9 +22,13 @@
 | └ `sql_agent.validate_sql_columns_against_manifest` recognizes every `known_schemas()` prefix | ✅ |
 | └ `vocabulary.ColumnTarget` carries `schema` (default `"public"`); `resolve_column` accepts `schema.table.column` | ✅ |
 | Phase 1 entrypoint policy — `RUN_MIGRATIONS=true` default unchanged; flip deferred to revision `0006` PR | ✅ |
-| Revision `0005` (create `platform` schema) | ⏳ Next |
-| Revision `0006` (move 43 OLTP tables to `platform`) | ⏳ |
-| Revisions `0007`–`0018` | ⏳ |
+| Revision `0005` (create `platform` schema) | ✅ Shipped |
+| Revision `0006` (move 43 OLTP tables to `platform`) | ✅ Shipped |
+| Revision `0007` (create `analytics` schema + `analytics_reader` role + grants + transitional `search_path`) | ✅ Shipped |
+| Revision `0008` (move 16 analytics-adjacent tables to `analytics`) | ✅ Shipped |
+| Revision `0009` (rename 15 analytics tables to role-prefixed names) | ✅ Shipped |
+| Revision `0010` (drop legacy `evaluation_analytics` cache table) | ✅ Shipped |
+| Revisions `0011`–`0018` | ⏳ |
 
 ---
 
@@ -57,7 +61,7 @@
 
 | Work | Gated by |
 |---|---|
-| Revision `0006` (move app tables `public` → `platform`, leaving `public.alembic_version` in place) | §0.1 + §0.2 + §9.6 schema-aware refactor merged + §9.1 release choreography in place |
+| Revision `0006` (move app tables `public` → `platform`, leaving `public.alembic_version` in place permanently) | §0.1 + §0.2 + §9.6 schema-aware refactor merged + §9.1 release choreography in place |
 | Revisions `0007`–`0018` (analytics split, renames, inside-sales facts) | Revision `0006` applied; ORM models updated |
 | **Roadmap 02** (pgvector retrieval substrate) | This roadmap (§17) accepted as done |
 | **Roadmap 03** (FHIR / `clinical` schema) | Roadmap 02 accepted as done |
@@ -68,16 +72,16 @@ If any check in §0.1 is false, **stop**. Do not write revision `0005` or later.
 
 ## 1. End state when this roadmap is done
 
-Single Postgres database. Two application schemas (`platform`, `analytics`). Clean role-prefixed names. Inside-sales analytics history populating durably. `public` remains only as a compatibility/bookkeeping schema during this roadmap and holds no application-domain tables.
+Single Postgres database. Two application schemas (`platform`, `analytics`). Clean role-prefixed names. Inside-sales analytics history populating durably. `public` remains only as a bookkeeping schema and holds no application-domain tables.
 
 | Schema | Count | Purpose |
 |---|---|---|
 | `platform` | 43 tables | OLTP / app state. User-owned, transactional, FK-dense. |
 | `analytics` | 19 tables | OLAP. Facts, aggregates, dimensions, references, snapshots, logs, caches. Populated by jobs (occasionally by triggers; never by request handlers writing to facts). |
-| `public` | 1 bookkeeping table | Transitional only. Holds `alembic_version` during Roadmap 01; no application-domain tables remain here after revision `0006`. |
+| `public` | 1 bookkeeping table | Permanent bookkeeping only. Holds `alembic_version`; no application-domain tables remain here after revision `0006`. |
 
 - Sherlock SQL agent reads schema-qualified, role-prefixed identifiers.
-- Database default `search_path = platform, analytics` (interactive use only — application code schema-qualifies everywhere; Alembic still addresses `public.alembic_version` explicitly).
+- Database default `search_path = platform, public, analytics` while any non-bookkeeping tables still remain in `public`; once the analytics/public stragglers move in later revisions, the search path may tighten to `platform, analytics`. Application code schema-qualifies everywhere, and Alembic/app diagnostics address `public.alembic_version` explicitly.
 - `evaluation_analytics` table is dropped (legacy zero-row cache, fully shadowed by analytics layer).
 - 4 inside-sales tables (`dim_lead`, `fact_lead_stage_transition`, `fact_lead_activity`, `fact_lead_signal`) populating from sync side-effects + `populate-analytics`.
 
@@ -113,7 +117,7 @@ sherlock_ontology_classes, sherlock_ontology_entity_types, sherlock_entity_resol
 scheduled_job_definitions, scheduler_worker_heartbeats
 ```
 
-Bookkeeping stays in `public.alembic_version` for the duration of Roadmap 01.
+Bookkeeping stays in `public.alembic_version`. This roadmap does not move it, and no later phase in this roadmap or the follow-on roadmaps depends on moving it.
 
 ### 3.2 `analytics` schema (19 tables, role-prefixed)
 
@@ -534,13 +538,13 @@ ALTER ROLE analytics_reader SET idle_in_transaction_session_timeout = '60s';
 
 The existing app role retains full access to both `platform` and `analytics` schemas.
 
-Database default `search_path`:
+Database default `search_path` during the transition:
 
 ```sql
-ALTER DATABASE <db_name> SET search_path = platform, analytics;
+ALTER DATABASE <db_name> SET search_path = platform, public, analytics;
 ```
 
-This is for interactive `psql` / GUI use only. **Application code schema-qualifies every reference per §9.6 — no code path may rely on `search_path`.**
+`public` stays in the path until revisions `0008+` move the remaining transitional tables out of `public`. This is for interactive `psql` / GUI use only. **Application code schema-qualifies every reference per §9.6 — no code path may rely on `search_path`.**
 
 ### 9.3 Alembic revision sequence
 
@@ -579,7 +583,7 @@ ALTER TABLE public.users SET SCHEMA platform;
 -- Leave public.alembic_version untouched.
 
 -- Set the database default search_path for interactive use
-ALTER DATABASE :db_name SET search_path = platform, analytics;
+ALTER DATABASE :db_name SET search_path = platform, public, analytics;
 ```
 
 Locking: each `ALTER TABLE ... SET SCHEMA` takes a brief `ACCESS EXCLUSIVE` lock. Sub-second per table; bundle the migration in a worker-quiet maintenance window. Whole revision under one transaction.
@@ -604,7 +608,7 @@ context.configure(
 )
 ```
 
-`public.alembic_version` remains the Alembic bookkeeping location for the duration of Roadmap 01. Moving it — and dropping `public` entirely — is deferred to a later, explicitly manual cleanup release after the rename chain is universal.
+`public.alembic_version` remains the Alembic bookkeeping location. This plan does **not** schedule a later phase to move it into `platform`, and no later roadmap assumes such a move. Treat `public` as the permanent home of Alembic bookkeeping unless a separate future admin-only decision explicitly changes that.
 
 Single Alembic head. No fork.
 
@@ -667,8 +671,8 @@ Explicit dependency callouts so the chain is unambiguous:
 5. **Frontend coordination:** API payloads carrying table names (analytics chart specs, manifests over the wire). Audit `src/services/api/*.ts` and `src/features/analytics/` per revision.
 6. **Activity event-code allowlist** for inside-sales activities sync — operator picks consciously via workload `params`.
 7. **Extension installation target** (forward-looking for Roadmap 02). Install `pgvector` in `analytics`. No `extensions` schema. Locked.
-8. **Database default `search_path`.** `platform, analytics`. Locked.
-9. **`public` handling during Roadmap 01.** Keep `public.alembic_version`; do not attempt to drop `public` as part of this chain. Dropping `public` is a later manual cleanup release, not a dependency for Roadmap 02.
+8. **Database default `search_path`.** `platform, public, analytics` during the transition; tighten only when the remaining non-bookkeeping public tables are gone. Locked.
+9. **`public` handling.** Keep `public.alembic_version`; do not attempt to move it or drop `public` as part of this chain. No later phase in Roadmap 01, Roadmap 02, or Roadmap 03 assumes `alembic_version` moves to `platform`.
 
 ## 11. Risks and mitigations
 
@@ -678,7 +682,7 @@ Explicit dependency callouts so the chain is unambiguous:
 | Mixed-version backend/worker deploys hit renamed tables mid-rollout | Use the mandatory release choreography in §9.1. Old and new builds do not overlap during breaking revisions. |
 | Raw-SQL strings reference bare table names and break post-move | Grep + manifest validator assertion + CI grep test. |
 | `public` referenced by an extension or third-party tool | Pre-revision-0006 audit: list extensions (`SELECT * FROM pg_extension`) and dependent tools; confirm none depend on application tables living in `public`. None expected today since pgvector / AGE are not yet installed. |
-| Someone tries to move `alembic_version` or drop `public` mid-chain | Explicitly out of scope for Roadmap 01 (§10.9, §18). Keep `public.alembic_version` fixed throughout the chain. |
+| Someone tries to move `alembic_version` or drop `public` mid-chain | Explicitly out of scope for Roadmap 01 and not required by later roadmaps. Keep `public.alembic_version` fixed unless a separate future admin-only decision changes that. |
 | Search-path drift silently re-routes queries | Schema-qualify everywhere in code. Database default `search_path` is for interactive use only. Documented in CLAUDE.md addendum. |
 | Alembic autogen churn after enabling `include_schemas` | First revision scripts schema moves explicitly; future autogens stable once baseline set. |
 | Sherlock manifest drift after rename/move | `manifest_validator` cross-checks live catalog at boot. |
@@ -723,7 +727,7 @@ Explicit dependency callouts so the chain is unambiguous:
 - Signal extraction never triggers an LLM call at populator time. Re-running `populate-analytics` reads only from `platform.evaluation_run_thread_results.result.signals`.
 - Sync-side side-effects share the sync transaction. No separate transaction commits.
 - No app name (`inside-sales`, `kaira-bot`) appears in any new table, column, index, or service module except the scheduler workload registry.
-- During Roadmap 01, `public` may exist only as the home of `public.alembic_version`. Any application-domain table left in `public` after revision `0006` is a bug.
+- `public` exists only as the home of `public.alembic_version` once the remaining transitional tables have moved out. Any application-domain table left in `public` after its planned move revision is a bug.
 - Application code schema-qualifies every reference; no code path relies on `search_path`.
 - Single Alembic head throughout the rename chain.
 
@@ -855,9 +859,9 @@ For every breaking revision group:
 ## 17. Acceptance for Roadmap 01 done
 
 - All planned Alembic revisions (`0005`–`0018`, or the same ordered chain with incremented IDs if another head landed first) applied to prod.
-- `public` contains no application-domain tables in prod. `public.alembic_version` may remain.
+- `public` contains no application-domain tables in prod. `public.alembic_version` remains there as the Alembic bookkeeping table.
 - Breaking revisions shipped via the release choreography in §9.1 / §15 rather than mixed-version rolling cutover.
-- Database default `search_path = platform, analytics`.
+- Database default `search_path` is consistent with the actual schema state (`platform, public, analytics` during the transition; `platform, analytics` only after the remaining non-bookkeeping public tables have moved).
 - CLAUDE.md / AGENTS.md / `.github/copilot-instructions.md` registry updated with final schema-qualified names.
 - Sherlock manifest validator passes against the live catalog.
 - The four inside-sales tables exist in `analytics` under final names (`dim_lead`, `fact_lead_stage_transition`, `fact_lead_activity`, `fact_lead_signal`) and receive sync side-effects.
@@ -871,7 +875,7 @@ When all of those are true, **Roadmap 02 (vectors + graph) starts.**
 - No vector tables. Roadmap 02 territory.
 - No FHIR tables. Roadmap 03 territory.
 - No new top-level schemas beyond `platform` and `analytics`. Roadmap 03 will add a third (`clinical`) and that is the upper bound.
-- No attempt to move `alembic_version` out of `public` or drop `public` during Roadmap 01. That is a separate manual cleanup release.
+- No attempt to move `alembic_version` out of `public`. This roadmap treats `public` as the permanent Alembic bookkeeping schema.
 - No `extensions` schema. Extensions install into `analytics` when needed (Roadmap 02 installs `pgvector` there).
 - No JSONB flattening / registry / semantic-view YAML refactor. Deferred.
 - No warehouse migration. Downstream of Roadmap 02 thresholds.

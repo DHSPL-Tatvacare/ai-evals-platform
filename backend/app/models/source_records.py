@@ -2,6 +2,10 @@
 
 Tenant/app partitioned so multiple CRM-driven apps can share this storage
 model with strict tenant/app isolation. First consumer is Inside Sales.
+
+Schema-qualified to ``analytics`` per Roadmap 01 §3.2 / §5.12. Class
+and table names follow the role-prefix convention from §4 — ``crm_``
+for the rolling source mirror, ``log_`` for the per-sync audit row.
 """
 
 import uuid
@@ -53,8 +57,8 @@ class SourceRecordMetadataMixin:
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
-class SourceCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
-    __tablename__ = "source_call_records"
+class CrmCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
+    __tablename__ = "crm_call_record"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -80,38 +84,39 @@ class SourceCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     created_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "activity_id", name="uq_source_call_records_tenant_app_activity"),
-        Index("idx_source_call_records_tenant_app_call_started", "tenant_id", "app_id", "call_started_at"),
-        Index("idx_source_call_records_tenant_app_created", "tenant_id", "app_id", "created_on"),
+        UniqueConstraint("tenant_id", "app_id", "activity_id", name="uq_crm_call_record_tenant_app_activity"),
+        Index("idx_crm_call_record_tenant_app_call_started", "tenant_id", "app_id", "call_started_at"),
+        Index("idx_crm_call_record_tenant_app_created", "tenant_id", "app_id", "created_on"),
         Index(
-            "idx_source_call_records_tenant_app_activity_time",
+            "idx_crm_call_record_tenant_app_activity_time",
             "tenant_id",
             "app_id",
             func.coalesce(call_started_at, created_on).desc(),
             activity_id.desc(),
         ),
         Index(
-            "idx_source_call_records_tenant_app_agent_lower",
+            "idx_crm_call_record_tenant_app_agent_lower",
             "tenant_id",
             "app_id",
             func.lower(agent_name),
             postgresql_where=text("agent_name IS NOT NULL"),
         ),
-        Index("idx_source_call_records_tenant_app_direction", "tenant_id", "app_id", "direction"),
+        Index("idx_crm_call_record_tenant_app_direction", "tenant_id", "app_id", "direction"),
         Index(
-            "idx_source_call_records_tenant_app_status_lower",
+            "idx_crm_call_record_tenant_app_status_lower",
             "tenant_id",
             "app_id",
             func.lower(status),
             postgresql_where=text("status IS NOT NULL"),
         ),
-        Index("idx_source_call_records_tenant_app_prospect", "tenant_id", "app_id", "prospect_id"),
-        Index("idx_source_call_records_tenant_app_recording", "tenant_id", "app_id", "has_recording"),
+        Index("idx_crm_call_record_tenant_app_prospect", "tenant_id", "app_id", "prospect_id"),
+        Index("idx_crm_call_record_tenant_app_recording", "tenant_id", "app_id", "has_recording"),
+        {"schema": "analytics"},
     )
 
 
-class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
-    __tablename__ = "source_lead_records"
+class CrmLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
+    __tablename__ = "crm_lead_record"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -150,43 +155,44 @@ class SourceLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     mql_signals: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "prospect_id", name="uq_source_lead_records_tenant_app_prospect"),
-        Index("idx_source_lead_records_tenant_app_created", "tenant_id", "app_id", "created_on"),
+        UniqueConstraint("tenant_id", "app_id", "prospect_id", name="uq_crm_lead_record_tenant_app_prospect"),
+        Index("idx_crm_lead_record_tenant_app_created", "tenant_id", "app_id", "created_on"),
         Index(
-            "idx_source_lead_records_tenant_app_created_prospect",
+            "idx_crm_lead_record_tenant_app_created_prospect",
             "tenant_id",
             "app_id",
             created_on.desc(),
             prospect_id.desc(),
         ),
-        Index("idx_source_lead_records_tenant_app_last_activity", "tenant_id", "app_id", "last_activity_on"),
+        Index("idx_crm_lead_record_tenant_app_last_activity", "tenant_id", "app_id", "last_activity_on"),
         Index(
-            "idx_source_lead_records_tenant_app_stage_lower",
+            "idx_crm_lead_record_tenant_app_stage_lower",
             "tenant_id",
             "app_id",
             func.lower(prospect_stage),
         ),
         Index(
-            "idx_source_lead_records_tenant_app_agent_lower",
+            "idx_crm_lead_record_tenant_app_agent_lower",
             "tenant_id",
             "app_id",
             func.lower(agent_name),
             postgresql_where=text("agent_name IS NOT NULL"),
         ),
         Index(
-            "idx_source_lead_records_tenant_app_city_lower",
+            "idx_crm_lead_record_tenant_app_city_lower",
             "tenant_id",
             "app_id",
             func.lower(city),
             postgresql_where=text("city IS NOT NULL"),
         ),
-        Index("idx_source_lead_records_tenant_app_mql", "tenant_id", "app_id", "mql_score"),
-        Index("idx_source_lead_records_tenant_app_plan_name", "tenant_id", "app_id", "plan_name"),
+        Index("idx_crm_lead_record_tenant_app_mql", "tenant_id", "app_id", "mql_score"),
+        Index("idx_crm_lead_record_tenant_app_plan_name", "tenant_id", "app_id", "plan_name"),
+        {"schema": "analytics"},
     )
 
 
-class SourceSyncRun(Base, TimestampMixin):
-    __tablename__ = "source_sync_runs"
+class LogCrmSourceSync(Base, TimestampMixin):
+    __tablename__ = "log_crm_source_sync"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -228,7 +234,7 @@ class SourceSyncRun(Base, TimestampMixin):
     # `jobs.params` (which are transient and easy to misread under renames).
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("platform.jobs.id", ondelete="SET NULL", name="fk_source_sync_runs_job_id"),
+        ForeignKey("platform.jobs.id", ondelete="SET NULL", name="fk_log_crm_source_sync_job_id"),
         nullable=True,
     )
     is_scheduled_run: Mapped[bool] = mapped_column(
@@ -236,15 +242,16 @@ class SourceSyncRun(Base, TimestampMixin):
     )
 
     __table_args__ = (
-        Index("idx_source_sync_runs_tenant_app_created", "tenant_id", "app_id", "created_at"),
-        Index("idx_source_sync_runs_tenant_family_status", "tenant_id", "source_family", "status"),
-        Index("idx_source_sync_runs_tenant_family_completed", "tenant_id", "source_family", "completed_at"),
+        Index("idx_log_crm_source_sync_tenant_app_created", "tenant_id", "app_id", "created_at"),
+        Index("idx_log_crm_source_sync_tenant_family_status", "tenant_id", "source_family", "status"),
+        Index("idx_log_crm_source_sync_tenant_family_completed", "tenant_id", "source_family", "completed_at"),
         Index(
-            "idx_source_sync_runs_tenant_app_family_scheduled",
+            "idx_log_crm_source_sync_tenant_app_family_scheduled",
             "tenant_id",
             "app_id",
             "source_family",
             "is_scheduled_run",
             "completed_at",
         ),
+        {"schema": "analytics"},
     )

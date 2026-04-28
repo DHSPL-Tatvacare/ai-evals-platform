@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 
 from app.models.eval_run import EvalRun, ThreadEvaluation
 from app.models.evaluator import Evaluator
-from app.models.source_records import SourceLeadRecord
+from app.models.source_records import CrmLeadRecord
 from app.services.evaluators.output_schema_utils import find_primary_field, primary_score
 from app.services.evaluators.llm_base import (
     LoggingLLMWrapper,
@@ -353,13 +353,13 @@ async def run_inside_sales_evaluation(
         async with _async_session() as db:
             rows = (await db.execute(
                 select(
-                    SourceLeadRecord.prospect_id,
-                    SourceLeadRecord.first_name,
-                    SourceLeadRecord.last_name,
+                    CrmLeadRecord.prospect_id,
+                    CrmLeadRecord.first_name,
+                    CrmLeadRecord.last_name,
                 ).where(
-                    SourceLeadRecord.tenant_id == tenant_id,
-                    SourceLeadRecord.app_id == INSIDE_SALES_APP_ID,
-                    SourceLeadRecord.prospect_id.in_(prospect_ids),
+                    CrmLeadRecord.tenant_id == tenant_id,
+                    CrmLeadRecord.app_id == INSIDE_SALES_APP_ID,
+                    CrmLeadRecord.prospect_id.in_(prospect_ids),
                 )
             )).all()
         for prospect_id, first_name, last_name in rows:

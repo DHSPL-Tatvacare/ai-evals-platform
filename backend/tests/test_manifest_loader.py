@@ -11,8 +11,8 @@ def test_load_valid_manifest(tmp_path: Path):
         """
 app_id: test-app
 catalog_tables:
-  analytics_run_facts:
-    orm: AnalyticsRunFact
+  agg_evaluation_run:
+    orm: AggEvaluationRun
     columns:
       pass_rate:
         role: measure
@@ -21,14 +21,14 @@ catalog_tables:
         role: temporal
 data_surfaces:
   - key: runs
-    backed_by: analytics_run_facts
+    backed_by: agg_evaluation_run
 """.lstrip()
     )
     manifest = load_manifest_from_path(path)
     assert isinstance(manifest, AppManifest)
     assert manifest.app_id == "test-app"
-    assert "analytics_run_facts" in manifest.catalog_tables
-    assert manifest.catalog_tables["analytics_run_facts"].columns["pass_rate"].role == "measure"
+    assert "agg_evaluation_run" in manifest.catalog_tables
+    assert manifest.catalog_tables["agg_evaluation_run"].columns["pass_rate"].role == "measure"
     assert manifest.data_surfaces[0].key == "runs"
 
 

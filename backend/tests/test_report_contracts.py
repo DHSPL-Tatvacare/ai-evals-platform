@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.models.evaluation_analytics import EvaluationAnalytics
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.print_document import PlatformReportDocument
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
@@ -161,9 +160,3 @@ def test_print_document_contract_accepts_supported_block_types():
     })
 
     assert [block.type for block in document.blocks] == ["cover", "prose", "page_break"]
-
-
-def test_evaluation_analytics_exposes_phase_three_cache_constants():
-    assert EvaluationAnalytics.CACHE_SCHEMA_VERSION == "v1"
-    assert EvaluationAnalytics.CACHE_KIND_RUN_REPORT == "single_run"
-    assert EvaluationAnalytics.CACHE_KIND_CROSS_RUN == "cross_run"

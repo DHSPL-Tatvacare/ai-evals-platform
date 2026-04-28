@@ -44,15 +44,15 @@ def test_kaira_bot_catalog_identifiers_declared() -> None:
     """Known identifier columns in catalog tables must be role=identifier."""
     m = get_manifest("kaira-bot")
     known_catalog_ids = {
-        ("analytics_run_facts", "id"),
-        ("analytics_run_facts", "run_id"),
-        ("analytics_eval_facts", "id"),
-        ("analytics_eval_facts", "run_id"),
-        ("analytics_eval_facts", "item_id"),
-        ("analytics_criterion_facts", "id"),
-        ("analytics_criterion_facts", "run_id"),
-        ("analytics_criterion_facts", "item_id"),
-        ("analytics_criterion_facts", "criterion_id"),
+        ("agg_evaluation_run", "id"),
+        ("agg_evaluation_run", "run_id"),
+        ("fact_evaluation", "id"),
+        ("fact_evaluation", "run_id"),
+        ("fact_evaluation", "item_id"),
+        ("fact_evaluation_criterion", "id"),
+        ("fact_evaluation_criterion", "run_id"),
+        ("fact_evaluation_criterion", "item_id"),
+        ("fact_evaluation_criterion", "criterion_id"),
         ("eval_runs", "id"),
     }
     bad: list[str] = []

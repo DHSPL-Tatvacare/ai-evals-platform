@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 _log = logging.getLogger(__name__)
 
 from app.models.source_records import (
-    SourceCallRecord,
-    SourceLeadRecord,
-    SourceSyncRun,
+    CrmCallRecord,
+    CrmLeadRecord,
+    LogCrmSourceSync,
 )
 from app.services.lsq_client import (
     compute_lead_metrics,
@@ -299,18 +299,18 @@ async def get_latest_successful_sync_run(
     tenant_id: uuid.UUID,
     app_id: str,
     source_family: SourceFamily,
-) -> SourceSyncRun | None:
+) -> LogCrmSourceSync | None:
     return await db.scalar(
-        select(SourceSyncRun)
+        select(LogCrmSourceSync)
         .where(
-            SourceSyncRun.tenant_id == tenant_id,
-            SourceSyncRun.app_id == app_id,
-            SourceSyncRun.source_family == source_family,
-            SourceSyncRun.status == "completed",
+            LogCrmSourceSync.tenant_id == tenant_id,
+            LogCrmSourceSync.app_id == app_id,
+            LogCrmSourceSync.source_family == source_family,
+            LogCrmSourceSync.status == "completed",
         )
         .order_by(
-            SourceSyncRun.completed_at.desc(),
-            SourceSyncRun.created_at.desc(),
+            LogCrmSourceSync.completed_at.desc(),
+            LogCrmSourceSync.created_at.desc(),
         )
         .limit(1)
     )
@@ -318,7 +318,7 @@ async def get_latest_successful_sync_run(
 
 def _resolve_incremental_window(
     request: InsideSalesSyncRequest,
-    latest_successful: SourceSyncRun | None,
+    latest_successful: LogCrmSourceSync | None,
     *,
     overlap_minutes: int = 0,
 ) -> tuple[str, str]:
@@ -469,7 +469,7 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
     if not rows:
         return 0
 
-    stmt = pg_insert(SourceCallRecord).values(rows)
+    stmt = pg_insert(CrmCallRecord).values(rows)
     update_columns = {
         "prospect_id": stmt.excluded.prospect_id,
         "agent_id": stmt.excluded.agent_id,
@@ -498,7 +498,7 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         stmt.on_conflict_do_update(
             constraint="uq_source_call_records_tenant_app_activity",
             set_=update_columns,
-            where=SourceCallRecord.source_record_hash.is_distinct_from(
+            where=CrmCallRecord.source_record_hash.is_distinct_from(
                 stmt.excluded.source_record_hash
             ),
         )
@@ -510,7 +510,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
     if not rows:
         return 0
 
-    stmt = pg_insert(SourceLeadRecord).values(rows)
+    stmt = pg_insert(CrmLeadRecord).values(rows)
     update_columns = {
         "first_name": stmt.excluded.first_name,
         "last_name": stmt.excluded.last_name,
@@ -549,7 +549,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         stmt.on_conflict_do_update(
             constraint="uq_source_lead_records_tenant_app_prospect",
             set_=update_columns,
-            where=SourceLeadRecord.source_record_hash.is_distinct_from(
+            where=CrmLeadRecord.source_record_hash.is_distinct_from(
                 stmt.excluded.source_record_hash
             ),
         )
@@ -566,8 +566,8 @@ def _build_sync_run(
     watermark_to: str | None,
     job_id: uuid.UUID | None,
     is_scheduled_run: bool,
-) -> SourceSyncRun:
-    return SourceSyncRun(
+) -> LogCrmSourceSync:
+    return LogCrmSourceSync(
         tenant_id=tenant_id,
         app_id=request.app_id,
         source_system=request.source_system,
@@ -591,7 +591,7 @@ def _build_sync_run(
 
 async def _save_sync_run_progress(
     *,
-    sync_run: SourceSyncRun,
+    sync_run: LogCrmSourceSync,
     counters: SyncCounters,
     page_count: int,
     extra_details: dict[str, Any] | None = None,
@@ -610,7 +610,7 @@ async def _save_sync_run_progress(
 async def _complete_sync_run(
     db: AsyncSession,
     *,
-    sync_run: SourceSyncRun,
+    sync_run: LogCrmSourceSync,
     counters: SyncCounters,
     extra_details: dict[str, Any] | None = None,
 ) -> None:
@@ -628,7 +628,7 @@ async def _complete_sync_run(
 async def _fail_sync_run(
     db: AsyncSession,
     *,
-    sync_run: SourceSyncRun,
+    sync_run: LogCrmSourceSync,
     counters: SyncCounters,
     error_message: str,
     extra_details: dict[str, Any] | None = None,
@@ -649,7 +649,7 @@ async def _sync_calls_family(
     db: AsyncSession,
     *,
     job_id,
-    sync_run: SourceSyncRun,
+    sync_run: LogCrmSourceSync,
     request: InsideSalesSyncRequest,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -750,7 +750,7 @@ async def _sync_leads_family(
     db: AsyncSession,
     *,
     job_id,
-    sync_run: SourceSyncRun,
+    sync_run: LogCrmSourceSync,
     request: InsideSalesSyncRequest,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,

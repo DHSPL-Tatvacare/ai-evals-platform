@@ -18,19 +18,18 @@ from app.models.tag import Tag
 from app.models.job import Job
 from app.models.eval_run import EvalRun, ThreadEvaluation, AdversarialEvaluation, ApiLog
 from app.models.review import EvalReview, EvalReviewItem
-from app.models.evaluation_analytics import EvaluationAnalytics
 from app.models.report_config import ReportConfig
 from app.models.report_run import ReportRun
 from app.models.report_artifact import ReportArtifact
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
-from app.models.source_records import SourceCallRecord, SourceLeadRecord, SourceSyncRun
+from app.models.source_records import CrmCallRecord, CrmLeadRecord, LogCrmSourceSync
 from app.models.external_agent import ExternalAgent
 from app.models.scheduled_job import ScheduledJob
 from app.models.scheduler_heartbeat import SchedulerHeartbeat
 from app.models.eval_template import EvalTemplate
-from app.models.analytics_facts import AnalyticsRunFact, AnalyticsEvalFact, AnalyticsCriterionFact
-from app.models.analytics_log import AnalyticsJobLog, AgentToolLog, AnalyticsQueryCache
+from app.models.analytics_facts import AggEvaluationRun, FactEvaluation, FactEvaluationCriterion
+from app.models.analytics_log import LogFactPopulationRun, LogSherlockToolCall, CacheSqlQuery
 from app.models.analytics_chart import AnalyticsChart
 from app.models.analytics_dashboard import AnalyticsDashboard
 from app.models.sherlock_runtime import SherlockRuntimeSession, SherlockRuntimeEvent, SherlockRuntimeTurn
@@ -40,12 +39,12 @@ from app.models.sherlock_ontology import (
     SherlockResolver,
 )
 from app.models.cost import (
-    LlmUsage,
-    ModelPricing,
-    ModelAlias,
-    LlmUsageDailyRollup,
-    ModelsDevCatalog,
-    ModelsDevSnapshot,
+    FactLlmGeneration,
+    RefLlmModelPricing,
+    RefLlmModelAlias,
+    AggLlmUsageDaily,
+    RefLlmModelsCatalog,
+    SnapshotLlmModelsCatalog,
 )
 
 __all__ = [
@@ -55,16 +54,16 @@ __all__ = [
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
     "ChatSession", "ChatMessage", "History", "Setting", "AdversarialSavedTestCase", "Tag",
     "Job", "EvalRun", "ThreadEvaluation", "AdversarialEvaluation", "ApiLog", "EvalReview", "EvalReviewItem",
-    "EvaluationAnalytics", "ReportConfig", "ReportRun", "ReportArtifact",
-    "SourceCallRecord", "SourceLeadRecord", "SourceSyncRun",
+    "ReportConfig", "ReportRun", "ReportArtifact",
+    "CrmCallRecord", "CrmLeadRecord", "LogCrmSourceSync",
     "ExternalAgent",
     "ScheduledJob", "SchedulerHeartbeat",
     "EvalTemplate",
-    "AnalyticsRunFact", "AnalyticsEvalFact", "AnalyticsCriterionFact",
-    "AnalyticsJobLog", "AgentToolLog", "AnalyticsQueryCache",
+    "AggEvaluationRun", "FactEvaluation", "FactEvaluationCriterion",
+    "LogFactPopulationRun", "LogSherlockToolCall", "CacheSqlQuery",
     "AnalyticsChart", "AnalyticsDashboard",
     "SherlockRuntimeSession", "SherlockRuntimeEvent", "SherlockRuntimeTurn",
     "SherlockOntologyClass", "SherlockEntityType", "SherlockResolver",
-    "LlmUsage", "ModelPricing", "ModelAlias", "LlmUsageDailyRollup",
-    "ModelsDevCatalog", "ModelsDevSnapshot",
+    "FactLlmGeneration", "RefLlmModelPricing", "RefLlmModelAlias", "AggLlmUsageDaily",
+    "RefLlmModelsCatalog", "SnapshotLlmModelsCatalog",
 ]

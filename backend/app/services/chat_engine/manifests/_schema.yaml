@@ -22,6 +22,9 @@ properties:
           description: "Python ORM class name (import path resolved in manifest.py)."
         alias:
           type: string
+        pg_schema:
+          type: string
+          description: "Optional physical Postgres schema. Defaults to public when omitted."
         columns:
           type: object
           additionalProperties:

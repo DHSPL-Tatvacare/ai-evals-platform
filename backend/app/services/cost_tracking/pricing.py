@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import ModelAlias, ModelPricing
+from app.models.cost import RefLlmModelAlias, RefLlmModelPricing
 
 
 _ONE_MILLION = Decimal('1000000')
@@ -45,7 +45,7 @@ class PricingRow:
     source: str
 
     @classmethod
-    def from_orm(cls, row: ModelPricing) -> 'PricingRow':
+    def from_orm(cls, row: RefLlmModelPricing) -> 'PricingRow':
         return cls(
             id=row.id,
             provider=row.provider,
@@ -89,16 +89,16 @@ async def _resolve_canonical_model(
     Precedence: tenant-specific alias > system-wide alias > input unchanged.
     """
     stmt = (
-        select(ModelAlias)
+        select(RefLlmModelAlias)
         .where(
-            ModelAlias.provider == provider,
-            ModelAlias.observed == model,
+            RefLlmModelAlias.provider == provider,
+            RefLlmModelAlias.observed == model,
             or_(
-                ModelAlias.tenant_id == tenant_id if tenant_id is not None else False,
-                ModelAlias.tenant_id.is_(None),
+                RefLlmModelAlias.tenant_id == tenant_id if tenant_id is not None else False,
+                RefLlmModelAlias.tenant_id.is_(None),
             ),
         )
-        .order_by(ModelAlias.tenant_id.is_(None).asc())
+        .order_by(RefLlmModelAlias.tenant_id.is_(None).asc())
         .limit(1)
     )
     result = await db.execute(stmt)
@@ -135,14 +135,14 @@ async def _fetch_pricing_row(
     db: AsyncSession, provider: str, model: str, at: datetime
 ) -> PricingRow | None:
     stmt = (
-        select(ModelPricing)
+        select(RefLlmModelPricing)
         .where(
-            ModelPricing.provider == provider,
-            ModelPricing.model == model,
-            ModelPricing.effective_from <= at,
-            or_(ModelPricing.effective_to.is_(None), ModelPricing.effective_to > at),
+            RefLlmModelPricing.provider == provider,
+            RefLlmModelPricing.model == model,
+            RefLlmModelPricing.effective_from <= at,
+            or_(RefLlmModelPricing.effective_to.is_(None), RefLlmModelPricing.effective_to > at),
         )
-        .order_by(ModelPricing.effective_from.desc())
+        .order_by(RefLlmModelPricing.effective_from.desc())
         .limit(1)
     )
     result = await db.execute(stmt)
@@ -181,14 +181,14 @@ async def _fetch_best_available_pricing_row(
     db: AsyncSession, provider: str, model: str
 ) -> PricingRow | None:
     stmt = (
-        select(ModelPricing)
+        select(RefLlmModelPricing)
         .where(
-            ModelPricing.provider == provider,
-            ModelPricing.model == model,
+            RefLlmModelPricing.provider == provider,
+            RefLlmModelPricing.model == model,
         )
         .order_by(
-            ModelPricing.effective_to.is_(None).desc(),
-            ModelPricing.effective_from.desc(),
+            RefLlmModelPricing.effective_to.is_(None).desc(),
+            RefLlmModelPricing.effective_from.desc(),
         )
         .limit(1)
     )

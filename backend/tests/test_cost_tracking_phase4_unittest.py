@@ -81,9 +81,9 @@ class ModelsDevRefreshTests(unittest.IsolatedAsyncioTestCase):
         """Identical payload_hash short-circuits only when active catalog rows already
         cover the current payload."""
         from app.services.cost_tracking import models_dev_refresh as mod
-        from app.models.cost import ModelsDevCatalog, ModelsDevSnapshot
+        from app.models.cost import RefLlmModelsCatalog, SnapshotLlmModelsCatalog
 
-        latest = ModelsDevSnapshot(
+        latest = SnapshotLlmModelsCatalog(
             id=uuid.uuid4(),
             fetched_at=datetime.now(timezone.utc) - timedelta(hours=1),
             payload_hash='same',
@@ -128,16 +128,16 @@ class ModelsDevRefreshTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(diff['deduped'])
         # Only the snapshot row is added on the dedupe path.
-        self.assertTrue(any(isinstance(r, ModelsDevSnapshot) for r in added_rows))
-        self.assertFalse(any(isinstance(r, ModelsDevCatalog) for r in added_rows))
+        self.assertTrue(any(isinstance(r, SnapshotLlmModelsCatalog) for r in added_rows))
+        self.assertFalse(any(isinstance(r, RefLlmModelsCatalog) for r in added_rows))
 
     async def test_matching_hash_replays_when_catalog_is_missing(self):
         """A matching payload hash must still repair empty prod state instead of
         skipping catalog/pricing upserts."""
         from app.services.cost_tracking import models_dev_refresh as mod
-        from app.models.cost import ModelsDevSnapshot
+        from app.models.cost import SnapshotLlmModelsCatalog
 
-        latest = ModelsDevSnapshot(
+        latest = SnapshotLlmModelsCatalog(
             id=uuid.uuid4(),
             fetched_at=datetime.now(timezone.utc) - timedelta(hours=1),
             payload_hash='same',

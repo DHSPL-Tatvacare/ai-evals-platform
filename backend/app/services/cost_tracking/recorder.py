@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.database import async_session
-from app.models.cost import LlmUsage, LlmUsageDailyRollup
+from app.models.cost import FactLlmGeneration, AggLlmUsageDaily
 from app.services.cost_tracking.correlation import get_correlation_id
 from app.services.cost_tracking.models import LLMCallMetadata
 from app.services.cost_tracking.pricing import compute_cost, now_utc
@@ -148,14 +148,14 @@ async def record_llm_usage(
                 'idempotency_key': idempotency_key,
             }
 
-            stmt = pg_insert(LlmUsage).values(**values)
+            stmt = pg_insert(FactLlmGeneration).values(**values)
             if idempotency_key is not None:
                 # The unique index on idempotency_key is partial
                 # (`WHERE idempotency_key IS NOT NULL`), so Postgres requires
                 # the same predicate on ON CONFLICT to match the index.
                 stmt = stmt.on_conflict_do_nothing(
                     index_elements=['idempotency_key'],
-                    index_where=LlmUsage.idempotency_key.isnot(None),
+                    index_where=FactLlmGeneration.idempotency_key.isnot(None),
                 )
 
             try:
@@ -235,7 +235,7 @@ async def _upsert_daily_rollup(
     cost_usd: Decimal,
 ) -> None:
     day = at.date()
-    stmt = pg_insert(LlmUsageDailyRollup).values(
+    stmt = pg_insert(AggLlmUsageDaily).values(
         id=uuid.uuid4(),
         day=day,
         tenant_id=tenant_id,
@@ -267,15 +267,15 @@ async def _upsert_daily_rollup(
             'status',
         ],
         set_={
-            'input_tokens': LlmUsageDailyRollup.input_tokens + input_tokens,
-            'output_tokens': LlmUsageDailyRollup.output_tokens + output_tokens,
-            'cached_read_tokens': LlmUsageDailyRollup.cached_read_tokens + cached_read_tokens,
-            'cached_write_tokens': LlmUsageDailyRollup.cached_write_tokens + cached_write_tokens,
-            'reasoning_tokens': LlmUsageDailyRollup.reasoning_tokens + reasoning_tokens,
-            'tool_use_prompt_tokens': LlmUsageDailyRollup.tool_use_prompt_tokens + tool_use_prompt_tokens,
-            'total_tokens': LlmUsageDailyRollup.total_tokens + total_tokens,
-            'cost_usd': LlmUsageDailyRollup.cost_usd + cost_usd,
-            'call_count': LlmUsageDailyRollup.call_count + 1,
+            'input_tokens': AggLlmUsageDaily.input_tokens + input_tokens,
+            'output_tokens': AggLlmUsageDaily.output_tokens + output_tokens,
+            'cached_read_tokens': AggLlmUsageDaily.cached_read_tokens + cached_read_tokens,
+            'cached_write_tokens': AggLlmUsageDaily.cached_write_tokens + cached_write_tokens,
+            'reasoning_tokens': AggLlmUsageDaily.reasoning_tokens + reasoning_tokens,
+            'tool_use_prompt_tokens': AggLlmUsageDaily.tool_use_prompt_tokens + tool_use_prompt_tokens,
+            'total_tokens': AggLlmUsageDaily.total_tokens + total_tokens,
+            'cost_usd': AggLlmUsageDaily.cost_usd + cost_usd,
+            'call_count': AggLlmUsageDaily.call_count + 1,
         },
     )
     await db.execute(stmt)

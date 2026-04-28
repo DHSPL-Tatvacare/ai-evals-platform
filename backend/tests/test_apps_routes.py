@@ -84,7 +84,7 @@ def test_app_config_schema_matches_phase_one_shape():
                 "dimensions": [
                     {
                         "name": "agent",
-                        "table": "analytics_eval_facts",
+                        "table": "fact_evaluation",
                         "expression": "context->>'agent'",
                     },
                 ],

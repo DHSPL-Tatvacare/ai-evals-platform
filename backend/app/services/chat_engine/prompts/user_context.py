@@ -60,7 +60,7 @@ async def render(session: dict[str, Any], db: AsyncSession) -> str:
                     ELSE tool_name
                   END AS tool_name,
                   COUNT(*) AS uses
-                FROM agent_tool_logs
+                FROM analytics.log_sherlock_tool_call
                 WHERE tenant_id = :tenant_id
                   AND user_id = :user_id
                   AND app_id = :app_id

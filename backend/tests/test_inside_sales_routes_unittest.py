@@ -202,7 +202,7 @@ async def test_refresh_collection_date_range_requires_schedule_manage_permission
 
 @pytest.mark.asyncio
 async def test_get_collection_status_returns_durable_freshness_signal():
-    """The status route reads from ``source_sync_runs`` so the UI can render
+    """The status route reads from ``log_crm_source_sync`` so the UI can render
     correctly after a page reload. Verify it wires the service output to the
     ``CollectionSyncStatus`` schema field-for-field."""
     auth = _auth()

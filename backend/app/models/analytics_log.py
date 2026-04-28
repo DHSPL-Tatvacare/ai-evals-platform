@@ -1,4 +1,8 @@
-"""Analytics job logs, agent tool logs, and query cache."""
+"""Analytics populator log, Sherlock tool log, and SQL query cache.
+
+Schema-qualified to ``analytics`` per Roadmap 01 §3.2 / §5.10. Class
+and table names follow the role-prefix convention from §4.
+"""
 import uuid
 from datetime import datetime
 from sqlalchemy import Text, Integer, Float, Boolean, ForeignKey, DateTime, Index, UniqueConstraint, func, text
@@ -7,8 +11,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TenantUserMixin
 
 
-class AnalyticsJobLog(Base):
-    __tablename__ = "analytics_jobs"
+class LogFactPopulationRun(Base):
+    __tablename__ = "log_fact_population_run"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -34,11 +38,12 @@ class AnalyticsJobLog(Base):
         Index("idx_aj_tenant", "tenant_id", created_at.desc()),
         Index("idx_aj_run", "run_id"),
         Index("idx_aj_status", "status"),
+        {"schema": "analytics"},
     )
 
 
-class AgentToolLog(Base, TenantUserMixin):
-    __tablename__ = "agent_tool_logs"
+class LogSherlockToolCall(Base, TenantUserMixin):
+    __tablename__ = "log_sherlock_tool_call"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -62,11 +67,12 @@ class AgentToolLog(Base, TenantUserMixin):
         Index("idx_atl_tenant", "tenant_id", created_at.desc()),
         Index("idx_atl_tool", "tool_name", "status"),
         Index("idx_atl_session", "db_session_id"),
+        {"schema": "analytics"},
     )
 
 
-class AnalyticsQueryCache(Base):
-    __tablename__ = "analytics_query_cache"
+class CacheSqlQuery(Base):
+    __tablename__ = "cache_sql_query"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sql_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -80,4 +86,5 @@ class AnalyticsQueryCache(Base):
     __table_args__ = (
         UniqueConstraint("sql_hash", "tenant_id", "app_id"),
         Index("idx_aqc_lookup", "sql_hash", "tenant_id", "app_id", "expires_at"),
+        {"schema": "analytics"},
     )

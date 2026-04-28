@@ -34,7 +34,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
     def _semantic_model(self) -> dict[str, object]:
         return {
             'tables': {
-                'analytics_run_facts': {
+                'agg_evaluation_run': {
                     'alias': 'rf',
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                     'columns': {
@@ -44,7 +44,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
                         'pass_rate': {'type': 'numeric', 'role': 'measure', 'pre_aggregated': True},
                     },
                 },
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'alias': 'ef',
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                     'columns': {
@@ -75,7 +75,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
     def test_build_schema_context_preserves_dimension_metadata(self):
         semantic_model = {
             'tables': {
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'alias': 'ef',
                     'columns': {
                         'query_type': {
@@ -89,14 +89,14 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             'dimensions': [
                 {
                     'name': 'query_type',
-                    'table': 'analytics_eval_facts',
+                    'table': 'fact_evaluation',
                     'expression': 'query_type',
                     'description': 'Intent/query mode',
                     'allowed_values': ['logging', 'question'],
                 },
                 {
                     'name': 'result_status',
-                    'table': 'analytics_eval_facts',
+                    'table': 'fact_evaluation',
                     'expression': 'result_status',
                     'description': 'Ordered status',
                     'ordering': ['PASS', 'SOFT FAIL', 'HARD FAIL'],
@@ -106,7 +106,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
                 'pass_rate': {
                     'description': 'Pass rate',
                     'sql': 'AVG(success)',
-                    'applies_to': 'analytics_eval_facts',
+                    'applies_to': 'fact_evaluation',
                 },
             },
         }
@@ -114,7 +114,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         schema_context = sql_agent._build_schema_context(semantic_model, context=None)
         column_metadata = {
             column.get('alias') or column['name']: column['comment_metadata']
-            for column in schema_context['tables']['analytics_eval_facts']['columns']
+            for column in schema_context['tables']['fact_evaluation']['columns']
         }
 
         self.assertEqual(column_metadata['query_type']['allowed_values'], ['logging', 'question'])
@@ -155,7 +155,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
     def test_prepare_query_rejects_unbound_placeholders(self):
         semantic_model = {
             'tables': {
-                'analytics_eval_facts': {
+                'fact_evaluation': {
                     'alias': 'ef',
                     'access_control': {'tenant_column': 'tenant_id', 'app_column': 'app_id'},
                 },
@@ -164,7 +164,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(sql_agent.SQLValidationError):
             sql_agent.prepare_query(
-                'SELECT ef.item_id FROM analytics_eval_facts ef WHERE ef.item_id = :item_id',
+                'SELECT ef.item_id FROM fact_evaluation ef WHERE ef.item_id = :item_id',
                 auth=AuthContext(
                     user_id=uuid.uuid4(),
                     tenant_id=uuid.uuid4(),
@@ -198,7 +198,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_generate_sql(question: str, **_kwargs):
             captured_questions.append(question)
-            return {'sql': 'SELECT rf.run_id::text FROM analytics_run_facts rf WHERE rf.run_id = :run_id'}
+            return {'sql': 'SELECT rf.run_id::text FROM agg_evaluation_run rf WHERE rf.run_id = :run_id'}
 
         with patch(
             'app.services.chat_engine.sql_agent._match_common_query',
@@ -258,8 +258,8 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         analytics_db.rollback = AsyncMock()
 
         generate_sql = AsyncMock(side_effect=[
-            {'sql': 'SELECT * FROM analytics_criterion_facts cf WHERE cf.run_id = \'ca540908\''},
-            {'sql': 'SELECT * FROM analytics_criterion_facts cf WHERE cf.run_id = \'ca540908-1111-2222-3333-444444444444\''},
+            {'sql': 'SELECT * FROM fact_evaluation_criterion cf WHERE cf.run_id = \'ca540908\''},
+            {'sql': 'SELECT * FROM fact_evaluation_criterion cf WHERE cf.run_id = \'ca540908-1111-2222-3333-444444444444\''},
         ])
         check_cost = AsyncMock(side_effect=[Exception('bad uuid in explain'), None])
         execute_query = AsyncMock(return_value=[{'criterion_name': 'x'}])
@@ -318,8 +318,8 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         bundle.safety_by_entity = Mock(return_value={'run_name': 'explicit_only'})
 
         generate_sql = AsyncMock(side_effect=[
-            {'sql': 'SELECT rf.status FROM analytics_run_facts rf'},
-            {'sql': 'SELECT rf.status FROM analytics_run_facts rf'},
+            {'sql': 'SELECT rf.status FROM agg_evaluation_run rf'},
+            {'sql': 'SELECT rf.status FROM agg_evaluation_run rf'},
         ])
         check_cost = AsyncMock(side_effect=[Exception('force retry'), None])
 
@@ -408,7 +408,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['max_created_at'], '2026-04-14 00:00:00+00:00')
 
     async def test_data_check_resolves_manifest_column_synonym_filters(self):
-        from app.models.analytics_facts import AnalyticsEvalFact
+        from app.models.analytics_facts import FactEvaluation
 
         db = AsyncMock()
         result_proxy = Mock()
@@ -426,11 +426,11 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             return_value=None,
         ), patch.dict(
             'app.services.chat_engine.catalog_tools._ORM_REGISTRY_TO_TABLE',
-            {'analytics_eval_facts': AnalyticsEvalFact},
+            {'fact_evaluation': FactEvaluation},
             clear=False,
         ):
             payload = await sql_agent.data_check(
-                table='analytics_eval_facts',
+                table='fact_evaluation',
                 filters={'verdict': 'PASS'},
                 db=db,
                 auth=self._auth_context(),
@@ -464,7 +464,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={
                 'sql': (
                     "SELECT date_trunc('week', rf.created_at) AS week_start, COUNT(*) AS total_runs "
-                    'FROM analytics_run_facts rf GROUP BY 1 ORDER BY 1'
+                    'FROM agg_evaluation_run rf GROUP BY 1 ORDER BY 1'
                 ),
                 'chart_title': 'Weekly runs',
                 'output_columns': [
@@ -550,8 +550,8 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={
                 'sql': (
                     'SELECT rf.run_name, ef.result_status, COUNT(*) AS violation_count '
-                    'FROM analytics_run_facts rf '
-                    'JOIN analytics_eval_facts ef ON ef.run_id = rf.run_id '
+                    'FROM agg_evaluation_run rf '
+                    'JOIN fact_evaluation ef ON ef.run_id = rf.run_id '
                     'GROUP BY rf.run_name, ef.result_status'
                 ),
             }),
@@ -584,7 +584,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['status'], 'ok')
         self.assertEqual([column['role'] for column in result['columns']], ['dimension', 'dimension', 'measure'])
         self.assertIn('rf.tenant_id = :tenant_id', result['sql_used'])
-        self.assertIn('JOIN analytics_eval_facts ef ON ef.run_id = rf.run_id', result['sql_used'])
+        self.assertIn('JOIN fact_evaluation ef ON ef.run_id = rf.run_id', result['sql_used'])
         self.assertEqual(result['columns'][1]['name'], 'result_status')
 
     async def test_data_query_returns_deterministic_warning_codes(self):
@@ -609,7 +609,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             'app.services.chat_engine.sql_agent.generate_sql',
             new=AsyncMock(return_value={
-                'sql': 'SELECT rf.status, SUM(rf.pass_rate) AS pass_rate FROM analytics_run_facts rf GROUP BY rf.status',
+                'sql': 'SELECT rf.status, SUM(rf.pass_rate) AS pass_rate FROM agg_evaluation_run rf GROUP BY rf.status',
             }),
         ), patch(
             'app.services.chat_engine.sql_agent._get_cache',
@@ -646,7 +646,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
 
         warnings = verify_query_result(
             question='Show average pass rate',
-            sql='SELECT AVG(rf.pass_rate) AS pass_rate FROM analytics_run_facts rf',
+            sql='SELECT AVG(rf.pass_rate) AS pass_rate FROM agg_evaluation_run rf',
             rows=[{'pass_rate': 82.5}],
             columns=[
                 {
@@ -681,7 +681,7 @@ class SqlAgentTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=lambda question, **_kwargs: question),
         ), patch(
             'app.services.chat_engine.sql_agent.generate_sql',
-            new=AsyncMock(return_value={'sql': 'SELECT rf.run_name FROM analytics_run_facts rf WHERE 1 = 0'}),
+            new=AsyncMock(return_value={'sql': 'SELECT rf.run_name FROM agg_evaluation_run rf WHERE 1 = 0'}),
         ), patch(
             'app.services.chat_engine.sql_agent._get_cache',
             new=AsyncMock(return_value=None),

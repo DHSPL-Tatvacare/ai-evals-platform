@@ -43,14 +43,14 @@ def _auth() -> SimpleNamespace:
 
 _FAKE_GEN_RESULT = {
     "sql": "SELECT evaluator_name, AVG(result_score) AS avg_score "
-           "FROM analytics_eval_facts GROUP BY 1",
+           "FROM fact_evaluation GROUP BY 1",
     "chart_title": "Avg score",
     "output_columns": [
         {
             "alias": "evaluator_name",
             "role_hint": "dimension",
             "type_hint": "nominal",
-            "source_column": "analytics_eval_facts.evaluator_name",
+            "source_column": "fact_evaluation.evaluator_name",
         },
         {
             "alias": "avg_score",
@@ -152,7 +152,7 @@ async def test_data_query_cache_hit_branch_includes_typed_columns() -> None:
 @pytest.mark.asyncio
 async def test_data_query_common_query_branch_includes_typed_columns() -> None:
     rows = [{"evaluator_name": "E1", "avg_score": 0.82}]
-    common_sql = "SELECT evaluator_name, avg_score FROM analytics_eval_facts"
+    common_sql = "SELECT evaluator_name, avg_score FROM fact_evaluation"
     patches, app_db = _patches(rows, match_common=common_sql)
     with patches[0], patches[1], patches[2], patches[3], patches[4], \
          patches[5], patches[6], patches[7], patches[8], patches[9], \

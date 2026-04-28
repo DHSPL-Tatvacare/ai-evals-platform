@@ -1,4 +1,8 @@
-"""Analytics fact tables — pre-extracted from eval runs for fast querying."""
+"""Analytics fact / aggregate tables — populated by ``populate-analytics``.
+
+Schema-qualified to ``analytics`` per Roadmap 01 §3.2 / §5.10. Class
+and table names follow the role-prefix convention from §4.
+"""
 import uuid
 from datetime import datetime
 from sqlalchemy import Text, Integer, Float, Boolean, ForeignKey, DateTime, Index, text
@@ -7,8 +11,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TenantUserMixin
 
 
-class AnalyticsRunFact(Base, TenantUserMixin):
-    __tablename__ = "analytics_run_facts"
+class AggEvaluationRun(Base, TenantUserMixin):
+    __tablename__ = "agg_evaluation_run"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
@@ -37,11 +41,12 @@ class AnalyticsRunFact(Base, TenantUserMixin):
         Index("idx_arf_tenant_app", "tenant_id", "app_id", created_at.desc()),
         Index("idx_arf_app_type", "app_id", "eval_type", created_at.desc()),
         Index("idx_arf_context", "context", postgresql_using="gin"),
+        {"schema": "analytics"},
     )
 
 
-class AnalyticsEvalFact(Base):
-    __tablename__ = "analytics_eval_facts"
+class FactEvaluation(Base):
+    __tablename__ = "fact_evaluation"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
@@ -79,11 +84,12 @@ class AnalyticsEvalFact(Base):
         Index("idx_aef_item", "item_id", "evaluator_type"),
         Index("idx_aef_evaluator", "evaluator_type", "evaluator_name", "result_status"),
         Index("idx_aef_context", "context", postgresql_using="gin"),
+        {"schema": "analytics"},
     )
 
 
-class AnalyticsCriterionFact(Base):
-    __tablename__ = "analytics_criterion_facts"
+class FactEvaluationCriterion(Base):
+    __tablename__ = "fact_evaluation_criterion"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
@@ -109,4 +115,5 @@ class AnalyticsCriterionFact(Base):
         Index("idx_acf_criterion", "criterion_id", "status"),
         Index("idx_acf_tenant_app_criterion", "tenant_id", "app_id", "criterion_id", "status"),
         Index("idx_acf_item", "item_id"),
+        {"schema": "analytics"},
     )

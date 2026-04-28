@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import ModelPricing
+from app.models.cost import RefLlmModelPricing
 
 _log = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ async def seed_model_pricing(session: AsyncSession) -> int:
         return 0
 
     # Existing (provider, model) tuples with any pricing row — don't stomp them.
-    existing_stmt = select(ModelPricing.provider, ModelPricing.model).distinct()
+    existing_stmt = select(RefLlmModelPricing.provider, RefLlmModelPricing.model).distinct()
     existing = {(row[0], row[1]) for row in (await session.execute(existing_stmt)).all()}
 
     now = datetime.now(timezone.utc)
@@ -71,7 +71,7 @@ async def seed_model_pricing(session: AsyncSession) -> int:
         if (provider, model) in existing:
             continue
         session.add(
-            ModelPricing(
+            RefLlmModelPricing(
                 provider=provider,
                 model=model,
                 effective_from=now,

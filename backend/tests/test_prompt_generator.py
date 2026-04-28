@@ -14,7 +14,7 @@ def test_renders_kaira_bot_tools_section_includes_real_surfaces():
     assert "runs" in rendered
     assert "thread_evaluations" in rendered
     assert "adversarial_evaluations" in rendered
-    assert "analytics_run_facts" in rendered
+    assert "agg_evaluation_run" in rendered
     assert "{{" not in rendered
 
 

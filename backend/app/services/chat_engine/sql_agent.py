@@ -1945,15 +1945,15 @@ def _serialize_value(val: Any) -> Any:
 
 async def _get_cache(db: AsyncSession, sql_hash: str, tenant_id: str, app_id: str) -> dict | None:
     try:
-        from app.models.analytics_log import AnalyticsQueryCache
+        from app.models.analytics_log import CacheSqlQuery
 
         result = await db.execute(
-            select(AnalyticsQueryCache.result_json, AnalyticsQueryCache.row_count)
+            select(CacheSqlQuery.result_json, CacheSqlQuery.row_count)
             .where(
-                AnalyticsQueryCache.sql_hash == sql_hash,
-                AnalyticsQueryCache.tenant_id == tenant_id,
-                AnalyticsQueryCache.app_id == app_id,
-                AnalyticsQueryCache.expires_at > func.now(),
+                CacheSqlQuery.sql_hash == sql_hash,
+                CacheSqlQuery.tenant_id == tenant_id,
+                CacheSqlQuery.app_id == app_id,
+                CacheSqlQuery.expires_at > func.now(),
             )
         )
         row = result.first()
@@ -1975,16 +1975,16 @@ async def _set_cache(
     try:
         from datetime import datetime, timedelta, timezone
 
-        from app.models.analytics_log import AnalyticsQueryCache
+        from app.models.analytics_log import CacheSqlQuery
 
         await db.execute(
-            delete(AnalyticsQueryCache).where(
-                AnalyticsQueryCache.sql_hash == sql_hash,
-                AnalyticsQueryCache.tenant_id == tenant_id,
-                AnalyticsQueryCache.app_id == app_id,
+            delete(CacheSqlQuery).where(
+                CacheSqlQuery.sql_hash == sql_hash,
+                CacheSqlQuery.tenant_id == tenant_id,
+                CacheSqlQuery.app_id == app_id,
             )
         )
-        cache_entry = AnalyticsQueryCache(
+        cache_entry = CacheSqlQuery(
             sql_hash=sql_hash,
             tenant_id=tenant_id,
             app_id=app_id,

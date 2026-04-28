@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
 
-from app.models.source_records import SourceCallRecord, SourceLeadRecord  # noqa: E402
+from app.models.source_records import CrmCallRecord, CrmLeadRecord  # noqa: E402
 from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters, InsideSalesLeadFilters  # noqa: E402
 from app.services.inside_sales_queries import (  # noqa: E402
     INSIDE_SALES_STALE_AFTER,
@@ -48,19 +48,19 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
     )
     sql = _compile(statement)
 
-    assert "source_call_records.tenant_id =" in sql
-    assert "source_call_records.app_id =" in sql
+    assert "analytics.crm_call_record.tenant_id =" in sql
+    assert "analytics.crm_call_record.app_id =" in sql
     # No date_from / date_to clauses anymore — listing serves the full mirror.
     assert "call_started_at >=" not in sql
-    assert "lower(source_call_records.agent_name) IN ('agent amy', 'agent bob')" in sql
-    assert "source_call_records.prospect_id ILIKE '%%pros-1%%'" in sql
-    assert "source_call_records.direction = 'inbound'" in sql
-    assert "lower(source_call_records.status) = 'answered'" in sql
-    assert "source_call_records.duration_seconds >= 30" in sql
-    assert "source_call_records.duration_seconds <= 600" in sql
-    assert "source_call_records.has_recording IS true" in sql
-    assert "source_call_records.event_code IN (21, 22)" in sql
-    assert "ORDER BY coalesce(source_call_records.call_started_at, source_call_records.created_on) DESC" in sql
+    assert "lower(analytics.crm_call_record.agent_name) IN ('agent amy', 'agent bob')" in sql
+    assert "analytics.crm_call_record.prospect_id ILIKE '%%pros-1%%'" in sql
+    assert "analytics.crm_call_record.direction = 'inbound'" in sql
+    assert "lower(analytics.crm_call_record.status) = 'answered'" in sql
+    assert "analytics.crm_call_record.duration_seconds >= 30" in sql
+    assert "analytics.crm_call_record.duration_seconds <= 600" in sql
+    assert "analytics.crm_call_record.has_recording IS true" in sql
+    assert "analytics.crm_call_record.event_code IN (21, 22)" in sql
+    assert "ORDER BY coalesce(analytics.crm_call_record.call_started_at, analytics.crm_call_record.created_on) DESC" in sql
     assert " LIMIT 25 OFFSET 25" in sql
 
 
@@ -73,7 +73,7 @@ def test_build_call_count_query_wraps_filtered_call_scope_without_pagination():
     sql = _compile(statement)
 
     assert "SELECT count(*) AS count_1" in sql
-    assert "lower(source_call_records.status) = 'answered'" in sql
+    assert "lower(analytics.crm_call_record.status) = 'answered'" in sql
     assert " LIMIT " not in sql
     assert " OFFSET " not in sql
 
@@ -88,9 +88,9 @@ def test_lead_listing_query_orders_by_created_on_desc():
         page_size=50,
     )
     sql = _compile(statement)
-    assert "ORDER BY source_lead_records.created_on DESC" in sql
+    assert "ORDER BY analytics.crm_lead_record.created_on DESC" in sql
     # No date_from / date_to clauses anymore.
-    assert "source_lead_records.created_on >=" not in sql
+    assert "analytics.crm_lead_record.created_on >=" not in sql
 
 
 def test_build_lead_listing_query_applies_filters_against_raw_columns():
@@ -110,13 +110,13 @@ def test_build_lead_listing_query_applies_filters_against_raw_columns():
     )
     sql = _compile(statement)
 
-    assert "lower(source_lead_records.agent_name) IN ('agent amy')" in sql
-    assert "lower(source_lead_records.prospect_stage) IN ('new lead', 'call back')" in sql
-    assert "source_lead_records.condition ILIKE '%%diabetes%%'" in sql
-    assert "source_lead_records.city ILIKE '%%mumbai%%'" in sql
-    assert "source_lead_records.prospect_id ILIKE '%%prospect-9%%'" in sql
-    assert "source_lead_records.mql_score >= 3" in sql
-    assert "ORDER BY source_lead_records.created_on DESC, source_lead_records.prospect_id DESC" in sql
+    assert "lower(analytics.crm_lead_record.agent_name) IN ('agent amy')" in sql
+    assert "lower(analytics.crm_lead_record.prospect_stage) IN ('new lead', 'call back')" in sql
+    assert "analytics.crm_lead_record.condition ILIKE '%%diabetes%%'" in sql
+    assert "analytics.crm_lead_record.city ILIKE '%%mumbai%%'" in sql
+    assert "analytics.crm_lead_record.prospect_id ILIKE '%%prospect-9%%'" in sql
+    assert "analytics.crm_lead_record.mql_score >= 3" in sql
+    assert "ORDER BY analytics.crm_lead_record.created_on DESC, analytics.crm_lead_record.prospect_id DESC" in sql
 
 
 def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
@@ -131,9 +131,9 @@ def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
     sql = _compile(statement)
 
     assert "concat(" in sql
-    assert "source_lead_records.first_name" in sql
-    assert "source_lead_records.last_name" in sql
-    assert "source_lead_records.phone" in sql
+    assert "analytics.crm_lead_record.first_name" in sql
+    assert "analytics.crm_lead_record.last_name" in sql
+    assert "analytics.crm_lead_record.phone" in sql
     assert "ILIKE '%%rohit%%'" in sql
 
 
@@ -161,8 +161,8 @@ def test_build_lead_query_prospect_id_substring_match():
     )
     sql = _compile(statement)
 
-    assert "source_lead_records.prospect_id ILIKE '%%abc123%%'" in sql
-    assert "source_lead_records.prospect_id = 'abc123'" not in sql
+    assert "analytics.crm_lead_record.prospect_id ILIKE '%%abc123%%'" in sql
+    assert "analytics.crm_lead_record.prospect_id = 'abc123'" not in sql
 
 
 def test_build_lead_count_query_wraps_filtered_lead_scope():
@@ -174,11 +174,11 @@ def test_build_lead_count_query_wraps_filtered_lead_scope():
     sql = _compile(statement)
 
     assert "SELECT count(*) AS count_1" in sql
-    assert "source_lead_records.mql_score >= 5" in sql
+    assert "analytics.crm_lead_record.mql_score >= 5" in sql
 
 
 def test_map_call_listing_row_preserves_existing_api_shape_with_eval_overlay():
-    call = SourceCallRecord(
+    call = CrmCallRecord(
         tenant_id=uuid.uuid4(),
         app_id="inside-sales",
         source_system="lsq",
@@ -213,7 +213,7 @@ def test_map_call_listing_row_preserves_existing_api_shape_with_eval_overlay():
 
 
 def test_map_lead_listing_row_preserves_existing_api_shape():
-    lead = SourceLeadRecord(
+    lead = CrmLeadRecord(
         tenant_id=uuid.uuid4(),
         app_id="inside-sales",
         source_system="lsq",
@@ -245,8 +245,8 @@ def test_map_lead_listing_row_preserves_existing_api_shape():
 class _FakeFreshnessSession:
     """Fake AsyncSession matching the 2-scalar pattern of `get_collection_freshness`.
 
-    Call 1: latest successful `SourceSyncRun` (full row, via completed-filter query)
-    Call 2: a running `SourceSyncRun.id` or None
+    Call 1: latest successful `LogCrmSourceSync` (full row, via completed-filter query)
+    Call 2: a running `LogCrmSourceSync.id` or None
     """
 
     def __init__(self, latest_successful, running_sync_id=None):

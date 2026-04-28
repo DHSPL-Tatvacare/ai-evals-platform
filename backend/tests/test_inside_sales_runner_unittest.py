@@ -123,7 +123,7 @@ class InsideSalesRunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
             output_schema={"type": "object"},
         )
         load_evaluators_session = _FakeSession(scalar_results=[fake_evaluator])
-        # The runner pre-fetches lead names from ``source_lead_records`` in
+        # The runner pre-fetches lead names from ``crm_lead_record`` in
         # one bulk query; surface a row matching the resolved call so the
         # snapshot picks up the synced first/last name.
         lead_name_session = _FakeSession(execute_results=[

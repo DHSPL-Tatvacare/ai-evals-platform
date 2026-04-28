@@ -18,14 +18,14 @@ from app.services.chat_engine import sql_agent
 async def test_generate_sql_returns_output_columns() -> None:
     fake_json = json.dumps({
         "sql": "SELECT evaluator_name, AVG(result_score) AS avg_score "
-               "FROM analytics_eval_facts GROUP BY 1",
+               "FROM fact_evaluation GROUP BY 1",
         "chart_title": "Avg score by evaluator",
         "output_columns": [
             {
                 "alias": "evaluator_name",
                 "role_hint": "dimension",
                 "type_hint": "nominal",
-                "source_column": "analytics_eval_facts.evaluator_name",
+                "source_column": "fact_evaluation.evaluator_name",
             },
             {
                 "alias": "avg_score",
@@ -95,7 +95,7 @@ async def test_generate_sql_rejects_alias_that_relabels_known_field() -> None:
     fake_json = json.dumps({
         "sql": (
             "SELECT cf.criterion_label AS rule_id "
-            "FROM analytics_criterion_facts cf "
+            "FROM fact_evaluation_criterion cf "
             "WHERE cf.app_id = :app_id"
         ),
         "chart_title": "Pass rate by rule id",
@@ -104,7 +104,7 @@ async def test_generate_sql_rejects_alias_that_relabels_known_field() -> None:
                 "alias": "rule_id",
                 "role_hint": "dimension",
                 "type_hint": "nominal",
-                "source_column": "analytics_criterion_facts.criterion_label",
+                "source_column": "fact_evaluation_criterion.criterion_label",
                 "semantic_type_hint": None,
             },
         ],

@@ -13,7 +13,7 @@ from sqlalchemy import asc, cast, desc, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analytics_facts import AnalyticsCriterionFact, AnalyticsEvalFact, AnalyticsRunFact
+from app.models.analytics_facts import FactEvaluationCriterion, FactEvaluation, AggEvaluationRun
 from app.models.eval_run import EvalRun
 from app.services.access_control import readable_scope_clause
 from app.services.chat_engine import reason_codes
@@ -32,9 +32,9 @@ _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _TIMESTAMP_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}')
 
 _ORM_REGISTRY: dict[str, Any] = {
-    'AnalyticsRunFact': AnalyticsRunFact,
-    'AnalyticsEvalFact': AnalyticsEvalFact,
-    'AnalyticsCriterionFact': AnalyticsCriterionFact,
+    'AggEvaluationRun': AggEvaluationRun,
+    'FactEvaluation': FactEvaluation,
+    'FactEvaluationCriterion': FactEvaluationCriterion,
     'EvalRun': EvalRun,
 }
 
@@ -152,9 +152,9 @@ def build_catalog_allowlist(app_id: str) -> list[str]:
 # ``data_check`` helper. Manifest-driven; the entries here mirror the
 # declared ``catalog_tables`` across all registered manifests.
 _ORM_REGISTRY_TO_TABLE = {
-    'analytics_run_facts': AnalyticsRunFact,
-    'analytics_eval_facts': AnalyticsEvalFact,
-    'analytics_criterion_facts': AnalyticsCriterionFact,
+    'agg_evaluation_run': AggEvaluationRun,
+    'fact_evaluation': FactEvaluation,
+    'fact_evaluation_criterion': FactEvaluationCriterion,
     'eval_runs': EvalRun,
 }
 

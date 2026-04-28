@@ -1,35 +1,35 @@
 version: "3.0"
 
 tables:
-  analytics_eval_facts:
+  fact_evaluation:
     description: >
       Per-evaluator results for Voice Rx audio recordings (item_type is 'listing').
       result_status is a lifecycle status ('completed'), not a quality verdict.
       Custom evaluators appear with UUID evaluator_name values — use lookup to enumerate them.
-      No analytics_criterion_facts rows exist for this app.
+      No fact_evaluation_criterion rows exist for this app.
 
 dimensions:
   - name: run_name
-    table: analytics_run_facts
+    table: agg_evaluation_run
     expression: "run_name"
     description: "User-given run name when present"
   - name: eval_type
-    table: analytics_run_facts
+    table: agg_evaluation_run
     expression: "eval_type"
     description: "Type of evaluation run: custom or full_evaluation"
   - name: evaluator_type
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "evaluator_type"
     description: "Evaluation type: critique or custom"
   - name: evaluator_name
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "evaluator_name"
     description: "Evaluator name. Custom evaluators appear as UUIDs — use lookup('evaluator_name') to enumerate available evaluators."
   - name: result_status
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "result_status"
     description: "Set to 'completed' only for evaluator_type='critique'. NULL for all custom evaluators. Not a quality verdict — quality is in result_score or result_detail."
   - name: item_id
-    table: analytics_eval_facts
+    table: fact_evaluation
     expression: "item_id"
     description: "Recording or listing identifier (item_type is always 'listing' for this app)"

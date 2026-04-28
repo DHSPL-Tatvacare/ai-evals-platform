@@ -16,7 +16,7 @@ Takes the raw payload from :mod:`models_dev_client` plus a pre-computed
 
 Never raises for missing optional rate fields; missing cache/reasoning
 prices fall through to :mod:`provider_map` heuristics and are flagged in
-``cost_breakdown.derived_pricing_fields`` via the ``ModelPricing.notes`` column.
+``cost_breakdown.derived_pricing_fields`` via the ``RefLlmModelPricing.notes`` column.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from typing import Any, Iterable
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cost import ModelPricing, ModelsDevCatalog, ModelsDevSnapshot
+from app.models.cost import RefLlmModelPricing, RefLlmModelsCatalog, SnapshotLlmModelsCatalog
 from app.services.cost_tracking.provider_map import (
     ALLOWLIST,
     PROVIDER_DERIVED_PRICING,
@@ -63,8 +63,8 @@ async def apply_refresh(
     expected_pairs = {(row['provider'], row['model']) for row in flattened}
 
     latest_stmt = (
-        select(ModelsDevSnapshot)
-        .order_by(ModelsDevSnapshot.fetched_at.desc())
+        select(SnapshotLlmModelsCatalog)
+        .order_by(SnapshotLlmModelsCatalog.fetched_at.desc())
         .limit(1)
     )
     latest = (await db.execute(latest_stmt)).scalars().first()
@@ -74,7 +74,7 @@ async def apply_refresh(
         and await _catalog_covers_payload(db, expected_pairs)
     )
 
-    snapshot = ModelsDevSnapshot(
+    snapshot = SnapshotLlmModelsCatalog(
         id=uuid.uuid4(),
         fetched_at=now,
         actor_id=actor_id,
@@ -133,8 +133,8 @@ async def apply_refresh(
             unchanged += 1
 
     # ── Deprecation pass ─────────────────────────────────────────
-    catalog_stmt = select(ModelsDevCatalog).where(
-        ModelsDevCatalog.status == 'active',
+    catalog_stmt = select(RefLlmModelsCatalog).where(
+        RefLlmModelsCatalog.status == 'active',
     )
     removed = 0
     for cat in (await db.execute(catalog_stmt)).scalars().all():
@@ -169,8 +169,8 @@ async def _catalog_covers_payload(
 
     catalog_rows = (
         await db.execute(
-            select(ModelsDevCatalog.provider, ModelsDevCatalog.model).where(
-                ModelsDevCatalog.status == 'active',
+            select(RefLlmModelsCatalog.provider, RefLlmModelsCatalog.model).where(
+                RefLlmModelsCatalog.status == 'active',
             )
         )
     ).all()
@@ -283,18 +283,18 @@ async def _upsert_catalog(
     *,
     snapshot_id: uuid.UUID,
     now: datetime,
-) -> ModelsDevCatalog:
+) -> RefLlmModelsCatalog:
     existing = (
         await db.execute(
-            select(ModelsDevCatalog).where(
-                ModelsDevCatalog.provider == row['provider'],
-                ModelsDevCatalog.model == row['model'],
+            select(RefLlmModelsCatalog).where(
+                RefLlmModelsCatalog.provider == row['provider'],
+                RefLlmModelsCatalog.model == row['model'],
             )
         )
     ).scalars().first()
 
     if existing is None:
-        catalog = ModelsDevCatalog(
+        catalog = RefLlmModelsCatalog(
             provider_key=row['provider_key'],
             provider=row['provider'],
             model_id=row['source_model_id'],
@@ -407,11 +407,11 @@ async def _apply_pricing_row(
     """Compare rates to the currently active row; close + insert if different."""
     current = (
         await db.execute(
-            select(ModelPricing)
+            select(RefLlmModelPricing)
             .where(
-                ModelPricing.provider == provider,
-                ModelPricing.model == model,
-                ModelPricing.effective_to.is_(None),
+                RefLlmModelPricing.provider == provider,
+                RefLlmModelPricing.model == model,
+                RefLlmModelPricing.effective_to.is_(None),
             )
             .limit(1)
         )
@@ -422,12 +422,12 @@ async def _apply_pricing_row(
 
     if current is not None:
         await db.execute(
-            update(ModelPricing)
-            .where(ModelPricing.id == current.id)
+            update(RefLlmModelPricing)
+            .where(RefLlmModelPricing.id == current.id)
             .values(effective_to=now)
         )
 
-    new_row = ModelPricing(
+    new_row = RefLlmModelPricing(
         provider=provider,
         model=model,
         effective_from=now,
@@ -449,7 +449,7 @@ async def _apply_pricing_row(
     return 'added' if current is None else 'updated'
 
 
-def _rates_equal(current: ModelPricing, rates: dict[str, Decimal]) -> bool:
+def _rates_equal(current: RefLlmModelPricing, rates: dict[str, Decimal]) -> bool:
     for key, value in rates.items():
         current_value = getattr(current, key, Decimal('0')) or Decimal('0')
         if _coerce_decimal(current_value) != value:

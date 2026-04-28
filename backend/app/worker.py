@@ -59,7 +59,7 @@ async def run_worker() -> None:
     # before this process started. Log the alembic head for diagnostics.
     async with engine.begin() as _boot_conn:
         _head_row = (
-            await _boot_conn.execute(text("SELECT version_num FROM alembic_version"))
+            await _boot_conn.execute(text("SELECT version_num FROM public.alembic_version"))
         ).first()
         logger.info(
             "alembic_head=%s",

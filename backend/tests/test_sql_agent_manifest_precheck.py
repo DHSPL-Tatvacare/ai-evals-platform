@@ -17,7 +17,7 @@ def setup_function(_):
 def test_accepts_real_columns():
     sql = (
         "SELECT rf.run_id, rf.pass_rate "
-        "FROM analytics_run_facts rf "
+        "FROM agg_evaluation_run rf "
         "WHERE rf.app_id = :app_id"
     )
     validate_sql_columns_against_manifest(sql, app_id="kaira-bot")  # must not raise
@@ -37,7 +37,7 @@ def test_rejects_hallucinated_criterion_rule_column():
     # "cf.rule" is a known LLM hallucination — real column is criterion_label.
     sql = (
         "SELECT cf.rule, COUNT(*) "
-        "FROM analytics_criterion_facts cf "
+        "FROM fact_evaluation_criterion cf "
         "WHERE cf.app_id = :app_id "
         "GROUP BY cf.rule"
     )
@@ -47,7 +47,7 @@ def test_rejects_hallucinated_criterion_rule_column():
 
 def test_ignores_cte_aliases():
     sql = (
-        "WITH latest AS (SELECT rf.run_id, rf.pass_rate FROM analytics_run_facts rf) "
+        "WITH latest AS (SELECT rf.run_id, rf.pass_rate FROM agg_evaluation_run rf) "
         "SELECT latest.run_id FROM latest"
     )
     validate_sql_columns_against_manifest(sql, app_id="kaira-bot")  # must not raise

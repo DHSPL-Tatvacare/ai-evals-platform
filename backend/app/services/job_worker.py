@@ -430,7 +430,7 @@ async def recover_stale_source_sync_runs(
     Kept generic on purpose (``source_sync_runs`` is a platform table, not
     app-specific); any app that populates it gets reconciled for free.
     """
-    from app.models.source_records import SourceSyncRun
+    from app.models.source_records import LogCrmSourceSync
 
     stale_minutes = stale_minutes or settings.JOB_STALE_TIMEOUT_MINUTES
     now = now or datetime.now(timezone.utc)
@@ -439,20 +439,20 @@ async def recover_stale_source_sync_runs(
     async with async_session() as db:
         # Case 1: linked job already terminal
         linked_terminal_stmt = (
-            select(SourceSyncRun)
-            .join(Job, SourceSyncRun.job_id == Job.id)
+            select(LogCrmSourceSync)
+            .join(Job, LogCrmSourceSync.job_id == Job.id)
             .where(
-                SourceSyncRun.status == "running",
+                LogCrmSourceSync.status == "running",
                 Job.status.in_(("failed", "cancelled", "completed")),
             )
         )
         # Case 2: unlinked + old
-        unlinked_stale_stmt = select(SourceSyncRun).where(
-            SourceSyncRun.status == "running",
-            SourceSyncRun.job_id.is_(None),
-            SourceSyncRun.started_at < cutoff,
+        unlinked_stale_stmt = select(LogCrmSourceSync).where(
+            LogCrmSourceSync.status == "running",
+            LogCrmSourceSync.job_id.is_(None),
+            LogCrmSourceSync.started_at < cutoff,
         )
-        recovered: list[SourceSyncRun] = []
+        recovered: list[LogCrmSourceSync] = []
 
         rows = (await db.execute(linked_terminal_stmt)).scalars().all()
         for sync_run in rows:
