@@ -12,6 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 MANIFESTS_DIR = Path(__file__).parent / "manifests"
 
+# Roadmap 01 groundwork: every catalog table has an effective Postgres
+# schema. Manifests stay unqualified for Phase 1 (no ``schema:`` key in YAML),
+# so unset declarations fall back to ``public`` — the only schema in use today.
+# When revision 0006 moves application tables into ``platform``/``analytics``,
+# manifests start declaring ``schema:`` and the same helpers route correctly.
+DEFAULT_SCHEMA = "public"
+
 ColumnRole = Literal[
     "dimension", "measure", "temporal", "ordered_categorical", "key", "identifier"
 ]
@@ -62,7 +69,18 @@ class CatalogTable(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     orm: str
     alias: str | None = None
+    # Postgres schema this table physically lives in. ``None`` resolves to
+    # ``DEFAULT_SCHEMA`` (``public``) for Phase 1 — no manifest declares a
+    # schema yet because no tables have moved. Roadmap 01 §9.6.
+    # Named ``pg_schema`` (not ``schema``) because Pydantic ``BaseModel``
+    # exposes a deprecated ``schema()`` classmethod.
+    pg_schema: str | None = None
     columns: dict[str, ManifestColumn]
+
+    @property
+    def effective_schema(self) -> str:
+        """Return the resolved schema name (``public`` when unset)."""
+        return self.pg_schema or DEFAULT_SCHEMA
 
 
 EXTERNAL_SURFACE_SOURCES: frozenset[str] = frozenset({
@@ -115,19 +133,45 @@ class AppManifest(BaseModel):
         return self
 
     def lookup_column(self, qualified_name: str) -> ManifestColumn | None:
-        """Resolve a ``table.column`` dotted name to its ManifestColumn.
+        """Resolve a dotted name to its ``ManifestColumn``.
 
-        Returns ``None`` for unqualified names, unknown tables, and unknown
-        columns. Used by the result-set typer to resolve passthrough columns
-        via the SQL generator's ``output_columns[*].source_column`` hint.
+        Accepts either ``table.column`` or ``schema.table.column``. The
+        schema-qualified form is honored only when the schema matches the
+        table's declared ``effective_schema``; an explicit mismatch returns
+        ``None`` rather than silently masking a wrong-schema lookup.
+
+        Returns ``None`` for unqualified names, unknown tables, unknown
+        columns, or schema mismatches.
         """
         if "." not in qualified_name:
             return None
-        table_name, col_name = qualified_name.split(".", 1)
+        parts = qualified_name.split(".")
+        if len(parts) == 2:
+            table_name, col_name = parts
+            schema_name: str | None = None
+        elif len(parts) == 3:
+            schema_name, table_name, col_name = parts
+        else:
+            return None
         table = self.catalog_tables.get(table_name)
         if table is None:
             return None
+        if schema_name is not None and schema_name != table.effective_schema:
+            return None
         return table.columns.get(col_name)
+
+    def qualified_table_name(self, table_name: str) -> str | None:
+        """Return ``"<schema>.<table>"`` for a declared catalog table.
+
+        ``None`` if the table is not in the manifest. Helpers that emit
+        SQL or pg_description rows MUST schema-qualify via this method —
+        per Roadmap 01 §9.6, application code never relies on
+        ``search_path``.
+        """
+        table = self.catalog_tables.get(table_name)
+        if table is None:
+            return None
+        return f"{table.effective_schema}.{table_name}"
 
 
 def load_manifest_from_path(path: Path) -> AppManifest:
@@ -192,6 +236,40 @@ def table_column_names(app_id: str) -> dict[str, set[str]]:
         name.lower(): {c.lower() for c in table.columns}
         for name, table in manifest.catalog_tables.items()
     }
+
+
+def table_schema_map(app_id: str) -> dict[str, str]:
+    """Return ``{table_name: effective_schema}`` for an app.
+
+    Used by helpers that issue ``information_schema``/``pg_catalog`` queries
+    or emit ``COMMENT ON COLUMN`` statements. Empty dict if the app has no
+    manifest. Roadmap 01 §9.6.
+    """
+    try:
+        manifest = get_manifest(app_id)
+    except KeyError:
+        return {}
+    return {
+        name: table.effective_schema
+        for name, table in manifest.catalog_tables.items()
+    }
+
+
+def known_schemas() -> frozenset[str]:
+    """Return every effective schema declared by any loaded manifest.
+
+    Always includes ``DEFAULT_SCHEMA``. Used by SQL-side validators that
+    need to recognize a schema prefix (``platform.foo``, ``analytics.bar``)
+    as a legitimate qualifier rather than a column reference. Today this is
+    just ``{"public"}`` — the set widens automatically as manifests start
+    declaring ``pg_schema``.
+    """
+    cache = load_all_manifests()
+    schemas = {DEFAULT_SCHEMA}
+    for manifest in cache.values():
+        for table in manifest.catalog_tables.values():
+            schemas.add(table.effective_schema)
+    return frozenset(schemas)
 
 
 def column_synonym_sets(app_id: str) -> dict[tuple[str, str], list[str]]:

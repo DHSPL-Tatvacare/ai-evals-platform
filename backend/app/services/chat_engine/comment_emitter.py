@@ -41,21 +41,29 @@ def emit_column_comments(*, app_id: str | None = None) -> list[str]:
     """Return a list of ``COMMENT ON COLUMN …`` SQL statements.
 
     If ``app_id`` is given, only that app's manifest contributes. Otherwise
-    all registered manifests contribute, de-duplicated by (table, column).
+    all registered manifests contribute, de-duplicated by ``(schema, table,
+    column)``.
+
+    Statements are schema-qualified using each table's ``effective_schema``
+    (``public`` for Phase 1; ``platform``/``analytics`` once revision 0006+
+    moves tables). Roadmap 01 §9.6 — application code MUST schema-qualify
+    every reference.
     """
     manifests: list[AppManifest]
     manifests = [get_manifest(app_id)] if app_id else list(load_all_manifests().values())
 
     stmts: list[str] = []
-    emitted: set[tuple[str, str]] = set()
+    emitted: set[tuple[str, str, str]] = set()
     for manifest in manifests:
         for table_name, table in manifest.catalog_tables.items():
+            schema_name = table.effective_schema
             for col_name, col in table.columns.items():
-                if (table_name, col_name) in emitted:
+                key = (schema_name, table_name, col_name)
+                if key in emitted:
                     continue
                 body = _render_comment_body(col).replace("'", "''")
                 stmts.append(
-                    f"COMMENT ON COLUMN {table_name}.{col_name} IS '{body}'"
+                    f"COMMENT ON COLUMN {schema_name}.{table_name}.{col_name} IS '{body}'"
                 )
-                emitted.add((table_name, col_name))
+                emitted.add(key)
     return stmts

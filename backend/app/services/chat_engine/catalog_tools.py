@@ -19,7 +19,7 @@ from app.services.access_control import readable_scope_clause
 from app.services.chat_engine import reason_codes
 from app.services.chat_engine.artifact import ToolEnvelope, build_envelope, error_envelope
 from app.services.chat_engine.data_surfaces import app_access_clause_for_surfaces
-from app.services.chat_engine.manifest import get_manifest
+from app.services.chat_engine.manifest import DEFAULT_SCHEMA, get_manifest
 from app.services.chat_engine.sql_agent import load_app_config, load_semantic_model
 
 _COMMENT_FIELD_PATTERN = re.compile(
@@ -47,6 +47,24 @@ def get_catalog_model_map(app_id: str) -> dict[str, Any]:
         for table_name, table in manifest.catalog_tables.items()
         if table.orm in _ORM_REGISTRY
     }
+
+
+def _schema_for_table(app_id: str, table_name: str) -> str:
+    """Return the manifest-declared schema for ``table_name``.
+
+    Falls back to ``DEFAULT_SCHEMA`` when the manifest is missing or the
+    table is unknown — keeps catalog tooling resilient when the live DB
+    still has tables in ``public`` and a manifest hasn't yet been
+    schema-qualified. Roadmap 01 §9.6.
+    """
+    try:
+        manifest = get_manifest(app_id)
+    except KeyError:
+        return DEFAULT_SCHEMA
+    table = manifest.catalog_tables.get(table_name)
+    if table is None:
+        return DEFAULT_SCHEMA
+    return table.effective_schema
 
 
 def parse_column_comment(comment_text: str | None) -> dict[str, Any]:
@@ -169,7 +187,8 @@ async def catalog_inspect(
     if validation_error is not None:
         return validation_error
 
-    params: dict[str, Any] = {'table': table}
+    schema_name = _schema_for_table(app_id, table)
+    params: dict[str, Any] = {'table': table, 'schema': schema_name}
     column_filter = ''
     if column:
         params['column'] = column
@@ -192,7 +211,7 @@ async def catalog_inspect(
             LEFT JOIN pg_catalog.pg_description pgd
                 ON pgd.objoid = st.relid
                AND pgd.objsubid = c.ordinal_position
-            WHERE c.table_schema = 'public'
+            WHERE c.table_schema = :schema
               AND c.table_name = :table
               {column_filter}
             ORDER BY c.ordinal_position
@@ -208,25 +227,25 @@ async def catalog_inspect(
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
              AND tc.table_schema = kcu.table_schema
-            WHERE tc.table_schema = 'public'
+            WHERE tc.table_schema = :schema
               AND tc.table_name = :table
               AND tc.constraint_type = 'PRIMARY KEY'
             ORDER BY kcu.ordinal_position
             """
         ),
-        {'table': table},
+        {'table': table, 'schema': schema_name},
     )
     index_result = await db.execute(
         text(
             """
             SELECT indexname, indexdef
             FROM pg_indexes
-            WHERE schemaname = 'public'
+            WHERE schemaname = :schema
               AND tablename = :table
             ORDER BY indexname
             """
         ),
-        {'table': table},
+        {'table': table, 'schema': schema_name},
     )
 
     primary_key = [
@@ -308,6 +327,7 @@ async def catalog_relations(
     if validation_error is not None:
         return validation_error
 
+    schema_name = _schema_for_table(app_id, table)
     relation_result = await db.execute(
         text(
             """
@@ -324,13 +344,13 @@ async def catalog_relations(
             JOIN information_schema.constraint_column_usage ccu
               ON ccu.constraint_name = tc.constraint_name
              AND ccu.table_schema = tc.table_schema
-            WHERE tc.table_schema = 'public'
+            WHERE tc.table_schema = :schema
               AND tc.constraint_type = 'FOREIGN KEY'
               AND (kcu.table_name = :table OR ccu.table_name = :table)
             ORDER BY kcu.table_name, kcu.column_name
             """
         ),
-        {'table': table},
+        {'table': table, 'schema': schema_name},
     )
 
     relations = []

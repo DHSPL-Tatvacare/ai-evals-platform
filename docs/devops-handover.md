@@ -119,7 +119,7 @@ These should be present in App Service configuration before the first live deplo
 | `CORS_ORIGINS` | Public allowed origin list |
 | `APP_BASE_URL` | Public base URL used in generated links |
 | `JWT_SECRET` | Required JWT signing secret |
-| `JOB_RUN_EMBEDDED_WORKER` | Set to `false` because production has a dedicated worker service |
+| `JOB_RUN_EMBEDDED_WORKER` | Default `True`. Set to `false` only if a dedicated worker container is being deployed alongside the backend. As of 2026-04-28, the repo's `.github/workflows/ai-evals-be-prod-*.yml` deploys a single backend Container App (`ai-evals-be-prod`) with no separate worker pipeline, so the prod backend runs the embedded worker by default. If a worker container is added later, override this to `false` on the backend and `true` on the worker. |
 
 Bootstrap values for first startup against an empty database:
 
@@ -256,11 +256,21 @@ Expected result:
 
 ### What to check if jobs are not progressing
 
-1. confirm the `worker` container is present in the deployed compose stack
-2. confirm `JOB_RUN_EMBEDDED_WORKER=false`
+The deployed topology determines which checks apply.
+
+**Single-container deploy (current prod, `ai-evals-be-prod`, embedded worker):**
+
+1. confirm `JOB_RUN_EMBEDDED_WORKER` is unset or `true` on `ai-evals-be-prod`
+2. inspect Container App logs for the in-process worker loop messages (look for `app.worker` / `JobRunner`)
+3. confirm the backend has the same database and storage settings the API uses (it's the same container — they share env)
+4. inspect `/api/admin` operational surfaces if your deployment exposes them to administrators
+
+**Split deploy (when a dedicated worker container is added):**
+
+1. confirm the `worker` container is present in the deployed stack
+2. confirm `JOB_RUN_EMBEDDED_WORKER=false` on the backend and the worker is running its own `python -m app.worker`
 3. confirm the worker has the same database and storage settings as the API
-4. inspect App Service logs for the `worker` process
-5. inspect `/api/admin` operational surfaces if your deployment exposes them to administrators
+4. inspect logs for the `worker` process
 
 ### What to check if file-backed workflows fail
 

@@ -12,20 +12,27 @@ def setup_function(_):
 def test_emits_comment_for_pass_rate_with_role_measure():
     stmts = emit_column_comments(app_id="kaira-bot")
     joined = "\n".join(stmts)
-    assert "COMMENT ON COLUMN analytics_run_facts.pass_rate" in joined
+    # Roadmap 01 §9.6: COMMENT ON COLUMN must be schema-qualified.
+    # Phase 1 manifests don't declare ``pg_schema``, so all tables resolve
+    # to ``public``.
+    assert "COMMENT ON COLUMN public.analytics_run_facts.pass_rate" in joined
     assert "Role: measure" in joined
 
 
 def test_emits_measure_kind_and_unit_on_pass_rate():
     stmts = emit_column_comments(app_id="kaira-bot")
-    pass_rate_stmt = next(s for s in stmts if "analytics_run_facts.pass_rate" in s)
+    pass_rate_stmt = next(
+        s for s in stmts if "public.analytics_run_facts.pass_rate" in s
+    )
     assert "MeasureKind: percent" in pass_rate_stmt
     assert "Unit: percent" in pass_rate_stmt
 
 
 def test_emits_allowed_values_for_enum_columns():
     stmts = emit_column_comments(app_id="kaira-bot")
-    difficulty_stmt = next(s for s in stmts if "analytics_eval_facts.difficulty" in s)
+    difficulty_stmt = next(
+        s for s in stmts if "public.analytics_eval_facts.difficulty" in s
+    )
     assert "EASY" in difficulty_stmt
     assert "MORIARTY" in difficulty_stmt
 

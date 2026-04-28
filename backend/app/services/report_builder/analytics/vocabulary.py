@@ -52,11 +52,18 @@ class BlockTypeSpec:
 
 @dataclass(frozen=True)
 class ColumnTarget:
-    """One possible canonical (table, column) target for an alias."""
+    """One possible canonical ``(schema, table, column)`` target for an alias.
+
+    ``schema`` carries the manifest's ``effective_schema`` so callers that
+    need to schema-qualify (e.g. SQL generators) have it without re-reading
+    the manifest. Defaults to ``"public"`` when the manifest leaves
+    ``pg_schema`` unset — Phase 1 behavior. Roadmap 01 §9.6.
+    """
     table: str
     column: str
     role: str
     semantic_type: str | None = None
+    schema: str = "public"
 
 
 # ── Alias resolution ─────────────────────────────────────────────────
@@ -133,19 +140,34 @@ class ToolVocabulary:
         *,
         preferred_table: str | None = None,
     ) -> ColumnResolution:
-        """Resolve a column name or synonym to a canonical ``(table, column)``.
+        """Resolve a column name or synonym to a canonical target.
 
+        Accepts ``column``, ``table.column``, or ``schema.table.column``.
         ``preferred_table`` narrows an otherwise-ambiguous match to the
         given table if possible. An ambiguous match that cannot be narrowed
         stays ambiguous — the caller must return a disambiguation error.
+
+        Schema-qualified ``schema.table.column`` form (Roadmap 01 §9.6) is
+        accepted now so later phases that move tables out of ``public``
+        don't need new plumbing here. Today every ColumnTarget.schema is
+        ``"public"``, so the check is a no-op.
         """
         if not term or not term.strip():
             return ColumnResolution(status='unknown', term=term)
 
-        # Canonical (table.column or bare column) match first.
         stripped = term.strip()
-        if '.' in stripped:
-            table, column = stripped.split('.', 1)
+        parts = stripped.split('.')
+        if len(parts) == 3:
+            schema, table, column = parts
+            targets = self.column_alias_index.get(_normalize_alias(column), ())
+            scoped = tuple(
+                t for t in targets
+                if t.table == table and t.column == column and t.schema == schema
+            )
+            if scoped:
+                return ColumnResolution(status='unique', term=term, canonical=scoped[0])
+        elif len(parts) == 2:
+            table, column = parts
             targets = self.column_alias_index.get(_normalize_alias(column), ())
             scoped = tuple(t for t in targets if t.table == table and t.column == column)
             if scoped:
@@ -313,6 +335,7 @@ def build_tool_vocabulary(
                 column=column_name,
                 role=column.role,
                 semantic_type=column.semantic_type,
+                schema=table.effective_schema,
             )
             # Canonical column name also indexes itself — enables lookup by
             # "criterion_label" without having to know every synonym.

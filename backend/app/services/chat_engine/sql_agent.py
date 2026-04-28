@@ -246,20 +246,28 @@ def validate_sql_columns_against_manifest(sql: str, *, app_id: str) -> None:
     can include the real column list instead of relying on Postgres to reject
     it with a generic "column does not exist" on attempt N.
     """
-    from app.services.chat_engine.manifest import table_column_names
+    from app.services.chat_engine.manifest import known_schemas, table_column_names
 
     table_columns = table_column_names(app_id)
     if not table_columns:
         return  # no manifest -> skip check gracefully
     aliases = _extract_table_aliases(sql)
+    # Roadmap 01 §9.6: ``platform``/``analytics`` join ``public`` and the
+    # postgres metadata schemas as legitimate qualifiers — Sherlock SQL may
+    # legitimately write ``analytics.fact_x.col`` once tables move. Treat
+    # any declared manifest schema as a passthrough prefix here.
+    schema_prefixes = {
+        'pg_catalog',
+        'information_schema',
+    } | {s.lower() for s in known_schemas()}
 
     # Find every <ident>.<ident> reference that isn't a JSON operator or function.
     dotted = re.findall(r'(?<![\w\."])(\w+)\.(\w+)', sql)
     unknown: list[str] = []
     for left, right in dotted:
         left_l, right_l = left.lower(), right.lower()
-        # Ignore schema prefixes like 'public.table' or keyword-like matches.
-        if left_l in {'pg_catalog', 'information_schema', 'public'}:
+        # Ignore schema prefixes like 'public.table' / 'platform.foo' / etc.
+        if left_l in schema_prefixes:
             continue
         table_name = aliases.get(left_l, left_l)
         if table_name not in table_columns:

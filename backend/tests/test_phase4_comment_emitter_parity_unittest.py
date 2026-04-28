@@ -83,8 +83,13 @@ class CommentEmitterParityGate(unittest.TestCase):
 
         stmts = emit_column_comments()
         comment_by_col: dict[tuple[str, str], str] = {}
+        # Roadmap 01 §9.6: emitter writes schema-qualified
+        # ``COMMENT ON COLUMN <schema>.<table>.<column>``. Capture all three
+        # parts but key by ``(table, column)`` for parity-checking against
+        # the manifest, which doesn't yet declare schemas.
         stmt_re = re.compile(
-            r"^COMMENT ON COLUMN (?P<table>[^.]+)\.(?P<col>[^\s]+) IS '(?P<body>.*)'$"
+            r"^COMMENT ON COLUMN (?P<schema>[^.]+)\.(?P<table>[^.]+)\.(?P<col>[^\s]+) "
+            r"IS '(?P<body>.*)'$"
         )
         for stmt in stmts:
             m = stmt_re.match(stmt)

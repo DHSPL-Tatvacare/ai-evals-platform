@@ -1,8 +1,12 @@
 """Cross-check manifests against live Postgres. Run at every backend/worker boot.
 
-Refuses startup if any manifest declares a table or column that doesn't actually
-exist in the public schema. This is the one place drift between the manifest
-(logical truth) and Postgres (physical truth) gets caught.
+Refuses startup if any manifest declares a table or column that doesn't
+actually exist in its effective schema. This is the one place drift between
+the manifest (logical truth) and Postgres (physical truth) gets caught.
+
+Roadmap 01 §9.6: each ``CatalogTable`` carries an ``effective_schema``
+(``public`` until tables move). The validator queries ``information_schema``
+per-table using that schema rather than a hard-coded ``'public'``.
 """
 from __future__ import annotations
 
@@ -49,13 +53,15 @@ def validate_manifest_taxonomy(manifest: AppManifest, strict: bool = False) -> l
     return warnings + errors
 
 
-async def _db_columns_for(db: AsyncSession, table_name: str) -> dict[str, str]:
+async def _db_columns_for(
+    db: AsyncSession, schema_name: str, table_name: str
+) -> dict[str, str]:
     result = await db.execute(
         text(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = :t"
+            "WHERE table_schema = :schema AND table_name = :t"
         ),
-        {"t": table_name},
+        {"schema": schema_name, "t": table_name},
     )
     return {row.column_name: row.data_type for row in result}
 
@@ -63,20 +69,45 @@ async def _db_columns_for(db: AsyncSession, table_name: str) -> dict[str, str]:
 async def validate_manifest_against_postgres(
     manifest: AppManifest, db: AsyncSession
 ) -> None:
+    """Validate every catalog table in the manifest against live Postgres.
+
+    Each table is checked against its declared ``effective_schema``.
+    Manifests that omit ``pg_schema`` resolve to ``DEFAULT_SCHEMA``
+    (``public``) — Phase 1 behavior, identical to before.
+
+    Phase 1 policy: a manifest entry whose declared physical reference
+    cannot be resolved is fatal (boot blocks). Unqualified column refs
+    *within manifest text* are not currently parsed here; that responsibility
+    is Sherlock's during SQL validation. ``warnings`` are emitted (not
+    raised) so callers can collect them without aborting boot when the
+    drift is informational.
+    """
     drift: list[str] = []
+    warnings_out: list[str] = []
     for table_name, table in manifest.catalog_tables.items():
-        db_cols = await _db_columns_for(db, table_name)
+        schema_name = table.effective_schema
+        if table.pg_schema is None:
+            # Phase 1: unqualified manifests are expected. Warn so the
+            # signal is visible in logs but never block boot.
+            warnings_out.append(
+                f"[{manifest.app_id}] table {table_name!r} has no pg_schema declared; "
+                f"defaulting to {schema_name!r}"
+            )
+        db_cols = await _db_columns_for(db, schema_name, table_name)
         if not db_cols:
             drift.append(
-                f"[{manifest.app_id}] table {table_name!r} does not exist in public schema"
+                f"[{manifest.app_id}] table {schema_name}.{table_name!r} does not exist"
             )
             continue
         for col_name in table.columns:
             if col_name not in db_cols:
                 drift.append(
-                    f"[{manifest.app_id}] {table_name}.{col_name!r} declared in manifest "
-                    f"but not in information_schema.columns"
+                    f"[{manifest.app_id}] {schema_name}.{table_name}.{col_name!r} "
+                    f"declared in manifest but not in information_schema.columns"
                 )
+    if warnings_out:
+        for msg in warnings_out:
+            logger.warning(msg)
     if drift:
         raise ManifestDriftError(
             f"Manifest drift detected ({len(drift)} issue(s)):\n  - "

@@ -69,9 +69,17 @@ def _include_object(object_, name, type_, reflected, compare_to):
 
     ``include_object`` is called once per database object Alembic considers
     for the diff. Returning False excludes the object entirely.
+
+    With ``include_schemas=True`` (Roadmap 01 §9.5), ``name`` for an index
+    may arrive as either ``"idx_…"`` or ``"<schema>.idx_…"`` depending on
+    SQLAlchemy version and reflection path. Match on the trailing identifier
+    so the bucket-C filter keeps working as application tables move from
+    ``public`` to ``platform`` / ``analytics``.
     """
-    if type_ == "index" and name in _AUTOGEN_IGNORED_INDEXES:
-        return False
+    if type_ == "index":
+        bare_name = name.rsplit(".", 1)[-1] if name else name
+        if bare_name in _AUTOGEN_IGNORED_INDEXES:
+            return False
     return True
 
 
@@ -161,6 +169,8 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        include_schemas=True,
+        version_table_schema="public",
         include_object=_include_object,
         process_revision_directives=_process_revision_directives,
     )
@@ -169,13 +179,23 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Sync helper invoked from inside `connection.run_sync(...)`."""
+    """Sync helper invoked from inside `connection.run_sync(...)`.
+
+    Roadmap 01 groundwork: ``include_schemas=True`` so future revisions
+    (rename chain, OLTP/OLAP split) can address ``platform`` and
+    ``analytics`` schemas. ``version_table_schema='public'`` pins
+    ``alembic_version`` to ``public`` for the duration of Roadmap 01 — see
+    docs/plans/2026-04-24-implementation-sequence/roadmap-01-foundation-postgres-two-schemas.md
+    §9.5. Moving the version table out of ``public`` is explicitly out of
+    scope for this roadmap (§18).
+    """
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
-        include_schemas=False,
+        include_schemas=True,
+        version_table_schema="public",
         include_object=_include_object,
         process_revision_directives=_process_revision_directives,
     )
