@@ -20,7 +20,7 @@ from app.models.app import App
 from app.models.role import Role, RoleAppAccess
 from app.models.eval_template import EvaluationTemplate
 from app.models.evaluator import Evaluator
-from app.models.report_config import ReportConfig
+from app.models.report_config import ReportConfiguration
 from app.models.mixins.shareable import Visibility
 from app.schemas.app_config import AppConfig
 from app.services.asset_policy import default_app_authorization_config
@@ -2812,11 +2812,11 @@ async def _seed_report_configs(session: AsyncSession) -> None:
 
     for seed in _build_default_report_config_seeds():
         existing = await session.scalar(
-            select(ReportConfig).where(
-                ReportConfig.tenant_id == seed["tenant_id"],
-                ReportConfig.user_id == seed["user_id"],
-                ReportConfig.app_id == seed["app_id"],
-                ReportConfig.report_id == seed["report_id"],
+            select(ReportConfiguration).where(
+                ReportConfiguration.tenant_id == seed["tenant_id"],
+                ReportConfiguration.user_id == seed["user_id"],
+                ReportConfiguration.app_id == seed["app_id"],
+                ReportConfiguration.report_id == seed["report_id"],
             )
         )
 
@@ -2836,7 +2836,7 @@ async def _seed_report_configs(session: AsyncSession) -> None:
             existing.version = seed["version"]
             continue
 
-        session.add(ReportConfig(**seed))
+        session.add(ReportConfiguration(**seed))
 
     await session.flush()
 

@@ -10,13 +10,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 
 
-class ReportArtifact(Base, TimestampMixin):
-    __tablename__ = "report_artifacts"
+class ReportGeneratedArtifact(Base, TimestampMixin):
+    __tablename__ = "report_generated_artifacts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     report_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("platform.report_runs.id", ondelete="CASCADE"),
+        ForeignKey("platform.report_generation_runs.id", ondelete="CASCADE"),
         nullable=False,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -38,8 +38,8 @@ class ReportArtifact(Base, TimestampMixin):
     latest_source_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("report_run_id", name="uq_report_artifacts_report_run"),
-        Index("idx_report_artifacts_tenant_app_scope", "tenant_id", "app_id", "scope"),
-        Index("idx_report_artifacts_content_hash", "content_hash"),
+        UniqueConstraint("report_run_id", name="uq_report_generated_artifacts_report_run"),
+        Index("idx_report_generated_artifacts_tenant_app_scope", "tenant_id", "app_id", "scope"),
+        Index("idx_report_generated_artifacts_content_hash", "content_hash"),
         {"schema": "platform"},
     )

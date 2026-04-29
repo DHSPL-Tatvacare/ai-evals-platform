@@ -11,8 +11,8 @@ from sqlalchemy import desc, select
 from app.database import async_session
 from app.models.app import App
 from app.models.eval_run import EvaluationRun
-from app.models.report_artifact import ReportArtifact
-from app.models.report_run import ReportRun
+from app.models.report_artifact import ReportGeneratedArtifact
+from app.models.report_run import ReportGenerationRun
 from app.schemas.app_config import AppConfig as AppConfigSchema
 from app.services.reports.asset_resolver import resolve_report_config_assets
 from app.services.reports.config_models import (
@@ -217,7 +217,7 @@ async def _compose_single_run_payload(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     run: EvaluationRun,
-    report_run: ReportRun,
+    report_run: ReportGenerationRun,
     report_config,
     llm_provider: str | None,
     llm_model: str | None,
@@ -362,11 +362,11 @@ async def _load_latest_single_run_payloads(
         report_id=None,
     )
     stmt = (
-        select(ReportRun, ReportArtifact)
-        .join(ReportArtifact, ReportArtifact.report_run_id == ReportRun.id)
+        select(ReportGenerationRun, ReportGeneratedArtifact)
+        .join(ReportGeneratedArtifact, ReportGeneratedArtifact.report_run_id == ReportGenerationRun.id)
         .where(
             readable_scope_clause(
-                ReportRun,
+                ReportGenerationRun,
                 type(
                     'AccessUser',
                     (),
@@ -377,13 +377,13 @@ async def _load_latest_single_run_payloads(
                     },
                 )(),
             ),
-            ReportRun.app_id == app_id,
-            ReportRun.scope == 'single_run',
-            ReportRun.report_id == single_run_config.report_id,
-            ReportRun.status == 'completed',
-            ReportRun.source_eval_run_id.is_not(None),
+            ReportGenerationRun.app_id == app_id,
+            ReportGenerationRun.scope == 'single_run',
+            ReportGenerationRun.report_id == single_run_config.report_id,
+            ReportGenerationRun.status == 'completed',
+            ReportGenerationRun.source_eval_run_id.is_not(None),
         )
-        .order_by(desc(ReportRun.completed_at), desc(ReportArtifact.computed_at))
+        .order_by(desc(ReportGenerationRun.completed_at), desc(ReportGeneratedArtifact.computed_at))
     )
     rows = (await db.execute(stmt)).all()
 

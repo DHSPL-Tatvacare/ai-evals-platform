@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
-from app.models.history import History
+from app.models.history import ApplicationEventHistory
 from app.schemas.history import HistoryCreate, HistoryUpdate, HistoryResponse
 
 router = APIRouter(prefix="/api/history", tags=["history"])
@@ -30,24 +30,24 @@ async def query_history(
 ):
     """Query history with multiple optional filters and pagination."""
     query = (
-        select(History)
+        select(ApplicationEventHistory)
         .where(
-            History.tenant_id == auth.tenant_id,
-            History.user_id == auth.user_id,
+            ApplicationEventHistory.tenant_id == auth.tenant_id,
+            ApplicationEventHistory.user_id == auth.user_id,
         )
-        .order_by(desc(History.timestamp))
+        .order_by(desc(ApplicationEventHistory.timestamp))
     )
 
     if app_id:
-        query = query.where(History.app_id == app_id)
+        query = query.where(ApplicationEventHistory.app_id == app_id)
     if entity_type:
-        query = query.where(History.entity_type == entity_type)
+        query = query.where(ApplicationEventHistory.entity_type == entity_type)
     if entity_id:
-        query = query.where(History.entity_id == entity_id)
+        query = query.where(ApplicationEventHistory.entity_id == entity_id)
     if source_type:
-        query = query.where(History.source_type == source_type)
+        query = query.where(ApplicationEventHistory.source_type == source_type)
     if source_id:
-        query = query.where(History.source_id == source_id)
+        query = query.where(ApplicationEventHistory.source_id == source_id)
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
@@ -62,10 +62,10 @@ async def get_history(
 ):
     """Get a single history record by ID."""
     result = await db.execute(
-        select(History).where(
-            History.id == history_id,
-            History.tenant_id == auth.tenant_id,
-            History.user_id == auth.user_id,
+        select(ApplicationEventHistory).where(
+            ApplicationEventHistory.id == history_id,
+            ApplicationEventHistory.tenant_id == auth.tenant_id,
+            ApplicationEventHistory.user_id == auth.user_id,
         )
     )
     history = result.scalar_one_or_none()
@@ -82,7 +82,7 @@ async def create_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new history record."""
-    history = History(
+    history = ApplicationEventHistory(
         **body.model_dump(),
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
@@ -103,10 +103,10 @@ async def update_history(
 ):
     """Update a history record. Only provided fields are updated."""
     result = await db.execute(
-        select(History).where(
-            History.id == history_id,
-            History.tenant_id == auth.tenant_id,
-            History.user_id == auth.user_id,
+        select(ApplicationEventHistory).where(
+            ApplicationEventHistory.id == history_id,
+            ApplicationEventHistory.tenant_id == auth.tenant_id,
+            ApplicationEventHistory.user_id == auth.user_id,
         )
     )
     history = result.scalar_one_or_none()
@@ -131,10 +131,10 @@ async def delete_history(
 ):
     """Delete a history record."""
     result = await db.execute(
-        select(History).where(
-            History.id == history_id,
-            History.tenant_id == auth.tenant_id,
-            History.user_id == auth.user_id,
+        select(ApplicationEventHistory).where(
+            ApplicationEventHistory.id == history_id,
+            ApplicationEventHistory.tenant_id == auth.tenant_id,
+            ApplicationEventHistory.user_id == auth.user_id,
         )
     )
     history = result.scalar_one_or_none()

@@ -1222,7 +1222,7 @@ async def _hydrate_entity_display_names(
     from app.models.eval_run import EvaluationRun
     from app.models.job import Job
     from app.models.listing import Listing
-    from app.models.report_run import ReportRun
+    from app.models.report_run import ReportGenerationRun
     from app.models.sherlock_runtime import SherlockConversationTurn
 
     ids_by_type: dict[str, set[uuid.UUID]] = {}
@@ -1267,8 +1267,8 @@ async def _hydrate_entity_display_names(
 
     if report_ids := ids_by_type.get('report_run'):
         res = await db.execute(
-            select(ReportRun.id, ReportRun.report_id, ReportRun.scope)
-            .where(ReportRun.id.in_(report_ids))
+            select(ReportGenerationRun.id, ReportGenerationRun.report_id, ReportGenerationRun.scope)
+            .where(ReportGenerationRun.id.in_(report_ids))
         )
         for report_run_id, report_id, scope in res.all():
             out[('report_run', report_run_id)] = f'{report_id} · {scope}' if scope else str(report_id)

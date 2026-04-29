@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.report_config import ReportConfig
+from app.models.report_config import ReportConfiguration
 from app.services.access_control import readable_scope_clause
 
 
@@ -19,7 +19,7 @@ async def resolve_report_config(
     app_id: str,
     scope: str,
     report_id: str | None = None,
-) -> ReportConfig:
+) -> ReportConfiguration:
     access_user = type(
         'AccessUser',
         (),
@@ -30,21 +30,21 @@ async def resolve_report_config(
         },
     )()
 
-    async def _load_selected(selected_report_id: str | None) -> ReportConfig | None:
+    async def _load_selected(selected_report_id: str | None) -> ReportConfiguration | None:
         stmt = (
-            select(ReportConfig)
+            select(ReportConfiguration)
             .where(
-                ReportConfig.app_id == app_id,
-                ReportConfig.scope == scope,
-                ReportConfig.status == 'active',
-                readable_scope_clause(ReportConfig, access_user),
+                ReportConfiguration.app_id == app_id,
+                ReportConfiguration.scope == scope,
+                ReportConfiguration.status == 'active',
+                readable_scope_clause(ReportConfiguration, access_user),
             )
-            .order_by(ReportConfig.updated_at.desc())
+            .order_by(ReportConfiguration.updated_at.desc())
         )
         if selected_report_id:
-            stmt = stmt.where(ReportConfig.report_id == selected_report_id)
+            stmt = stmt.where(ReportConfiguration.report_id == selected_report_id)
         else:
-            stmt = stmt.where(ReportConfig.is_default == True)
+            stmt = stmt.where(ReportConfiguration.is_default == True)
         return await db.scalar(stmt)
 
     selected = await _load_selected(report_id)

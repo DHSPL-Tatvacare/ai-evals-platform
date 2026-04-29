@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval_run import EvaluationRun
 from app.models.mixins.shareable import Visibility
-from app.models.report_artifact import ReportArtifact
-from app.models.report_run import ReportRun
+from app.models.report_artifact import ReportGeneratedArtifact
+from app.models.report_run import ReportGenerationRun
 from app.services.access_control import readable_scope_clause
 
 
@@ -46,7 +46,7 @@ async def ensure_report_run(
     shared_at: datetime | None = None,
     llm_provider: str | None,
     llm_model: str | None,
-) -> ReportRun:
+) -> ReportGenerationRun:
     now = datetime.now(timezone.utc)
     effective_visibility = Visibility.normalize(visibility) or report_config.default_report_run_visibility
     effective_shared_by, effective_shared_at = (
@@ -59,9 +59,9 @@ async def ensure_report_run(
         effective_shared_at = None
 
     existing = await db.scalar(
-        select(ReportRun).where(
-            ReportRun.tenant_id == tenant_id,
-            ReportRun.job_id == job_id,
+        select(ReportGenerationRun).where(
+            ReportGenerationRun.tenant_id == tenant_id,
+            ReportGenerationRun.job_id == job_id,
         )
     )
     if existing is not None:
@@ -77,7 +77,7 @@ async def ensure_report_run(
         existing.completed_at = None
         return existing
 
-    report_run = ReportRun(
+    report_run = ReportGenerationRun(
         tenant_id=tenant_id,
         user_id=user_id,
         app_id=report_config.app_id,
@@ -102,13 +102,13 @@ async def ensure_report_run(
 async def persist_report_artifact(
     db: AsyncSession,
     *,
-    report_run: ReportRun,
+    report_run: ReportGenerationRun,
     artifact_data: dict,
     source_run_count: int | None,
     latest_source_run_at: datetime | None,
-) -> ReportArtifact:
+) -> ReportGeneratedArtifact:
     existing = await db.scalar(
-        select(ReportArtifact).where(ReportArtifact.report_run_id == report_run.id)
+        select(ReportGeneratedArtifact).where(ReportGeneratedArtifact.report_run_id == report_run.id)
     )
     digest = _content_hash(artifact_data)
     if existing is not None:
@@ -119,7 +119,7 @@ async def persist_report_artifact(
         existing.latest_source_run_at = latest_source_run_at
         return existing
 
-    artifact = ReportArtifact(
+    artifact = ReportGeneratedArtifact(
         report_run_id=report_run.id,
         tenant_id=report_run.tenant_id,
         app_id=report_run.app_id,
@@ -155,18 +155,18 @@ async def fetch_single_run_artifact(
         },
     )()
     stmt = (
-        select(ReportArtifact.artifact_data)
-        .join(ReportRun, ReportRun.id == ReportArtifact.report_run_id)
-        .join(EvaluationRun, EvaluationRun.id == ReportRun.source_eval_run_id)
+        select(ReportGeneratedArtifact.artifact_data)
+        .join(ReportGenerationRun, ReportGenerationRun.id == ReportGeneratedArtifact.report_run_id)
+        .join(EvaluationRun, EvaluationRun.id == ReportGenerationRun.source_eval_run_id)
         .where(
             readable_scope_clause(EvaluationRun, access_user),
-            ReportRun.app_id == app_id,
-            ReportRun.report_id == report_id,
-            ReportRun.scope == 'single_run',
+            ReportGenerationRun.app_id == app_id,
+            ReportGenerationRun.report_id == report_id,
+            ReportGenerationRun.scope == 'single_run',
             EvaluationRun.id == run_id,
-            ReportRun.status == 'completed',
+            ReportGenerationRun.status == 'completed',
         )
-        .order_by(desc(ReportRun.completed_at), desc(ReportArtifact.computed_at))
+        .order_by(desc(ReportGenerationRun.completed_at), desc(ReportGeneratedArtifact.computed_at))
     )
     return await db.scalar(stmt)
 
@@ -178,7 +178,7 @@ async def fetch_report_run_artifact(
     user_id: uuid.UUID,
     app_access: frozenset[str],
     report_run_id: uuid.UUID,
-) -> tuple[ReportRun, ReportArtifact] | None:
+) -> tuple[ReportGenerationRun, ReportGeneratedArtifact] | None:
     access_user = type(
         'AccessUser',
         (),
@@ -189,9 +189,9 @@ async def fetch_report_run_artifact(
         },
     )()
     row = await db.execute(
-        select(ReportRun, ReportArtifact)
-        .join(ReportArtifact, ReportArtifact.report_run_id == ReportRun.id)
-        .where(ReportRun.id == report_run_id)
+        select(ReportGenerationRun, ReportGeneratedArtifact)
+        .join(ReportGeneratedArtifact, ReportGeneratedArtifact.report_run_id == ReportGenerationRun.id)
+        .where(ReportGenerationRun.id == report_run_id)
     )
     result = row.first()
     if result is None:
@@ -199,9 +199,9 @@ async def fetch_report_run_artifact(
     report_run, artifact = result
     if report_run.source_eval_run_id is None:
         if not await db.scalar(
-            select(ReportRun.id).where(
-                ReportRun.id == report_run_id,
-                readable_scope_clause(ReportRun, access_user),
+            select(ReportGenerationRun.id).where(
+                ReportGenerationRun.id == report_run_id,
+                readable_scope_clause(ReportGenerationRun, access_user),
             )
         ):
             return None

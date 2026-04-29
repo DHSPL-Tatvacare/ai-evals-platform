@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.models.mixins.shareable import Visibility
-from app.models.report_artifact import ReportArtifact
-from app.models.report_run import ReportRun
+from app.models.report_artifact import ReportGeneratedArtifact
+from app.models.report_run import ReportGenerationRun
 from app.services.reports.report_run_store import (
     ensure_report_run,
     fetch_single_run_artifact,
@@ -44,7 +44,7 @@ def _report_config(**overrides):
     return SimpleNamespace(**defaults)
 
 
-class ReportRunStoreTests(unittest.IsolatedAsyncioTestCase):
+class ReportGenerationRunStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_ensure_report_run_creates_row_with_report_config_defaults(self):
         report_config = _report_config()
         job_id = uuid.uuid4()
@@ -65,7 +65,7 @@ class ReportRunStoreTests(unittest.IsolatedAsyncioTestCase):
             llm_model='gpt-5.4',
         )
 
-        self.assertIsInstance(report_run, ReportRun)
+        self.assertIsInstance(report_run, ReportGenerationRun)
         self.assertEqual(report_run.tenant_id, tenant_id)
         self.assertEqual(report_run.user_id, user_id)
         self.assertEqual(report_run.job_id, job_id)
@@ -78,7 +78,7 @@ class ReportRunStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(db.added), 1)
 
     async def test_persist_report_artifact_upserts_composed_output(self):
-        report_run = ReportRun(
+        report_run = ReportGenerationRun(
             tenant_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
             app_id='inside-sales',
@@ -87,7 +87,7 @@ class ReportRunStoreTests(unittest.IsolatedAsyncioTestCase):
             visibility=Visibility.SHARED,
         )
         report_run.id = uuid.uuid4()
-        existing = ReportArtifact(
+        existing = ReportGeneratedArtifact(
             report_run_id=report_run.id,
             tenant_id=report_run.tenant_id,
             app_id=report_run.app_id,

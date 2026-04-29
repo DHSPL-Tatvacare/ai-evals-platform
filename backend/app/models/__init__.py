@@ -11,7 +11,7 @@ from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
 from app.models.chat import ChatSession, ChatMessage
-from app.models.history import History
+from app.models.history import ApplicationEventHistory
 from app.models.setting import Setting
 from app.models.adversarial_test_case import AdversarialSavedTestCase
 from app.models.tag import Tag
@@ -23,9 +23,9 @@ from app.models.eval_run import (
     EvaluationRunApiCallLog,
 )
 from app.models.review import EvaluationReview, EvaluationReviewItem
-from app.models.report_config import ReportConfig
-from app.models.report_run import ReportRun
-from app.models.report_artifact import ReportArtifact
+from app.models.report_config import ReportConfiguration
+from app.models.report_run import ReportGenerationRun
+from app.models.report_artifact import ReportGeneratedArtifact
 from app.models.invite_link import InviteLink
 from app.models.tenant_config import TenantConfig
 from app.models.source_records import CrmCallRecord, CrmLeadRecord, LogCrmSourceSync
@@ -57,11 +57,11 @@ __all__ = [
     "Tenant", "TenantConfig", "User", "RefreshToken", "InviteLink",
     "App", "Role", "RoleAppAccess", "RolePermission", "AuditLog",
     "Listing", "FileRecord", "Prompt", "Schema", "Evaluator",
-    "ChatSession", "ChatMessage", "History", "Setting", "AdversarialSavedTestCase", "Tag",
+    "ChatSession", "ChatMessage", "ApplicationEventHistory", "Setting", "AdversarialSavedTestCase", "Tag",
     "Job",
     "EvaluationRun", "EvaluationRunThreadResult", "EvaluationRunAdversarialResult",
     "EvaluationRunApiCallLog", "EvaluationReview", "EvaluationReviewItem",
-    "ReportConfig", "ReportRun", "ReportArtifact",
+    "ReportConfiguration", "ReportGenerationRun", "ReportGeneratedArtifact",
     "CrmCallRecord", "CrmLeadRecord", "LogCrmSourceSync",
     "ExternalAgent",
     "ScheduledJob", "SchedulerHeartbeat",

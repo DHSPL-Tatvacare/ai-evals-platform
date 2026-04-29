@@ -30,7 +30,8 @@
 | Revision `0010` (drop legacy `evaluation_analytics` cache table) | ✅ Shipped |
 | Revision `0011` (Sherlock platform-table rename within `platform`) | ✅ Shipped |
 | Revision `0012` (Evaluation platform-table rename within `platform`) | ✅ Shipped |
-| Revisions `0013`–`0018` | ⏳ |
+| Revision `0013` (Reports + history platform-table rename within `platform`) | ✅ Shipped |
+| Revisions `0014`–`0018` | ⏳ |
 
 ---
 
@@ -485,7 +486,15 @@ In `backend/app/services/analytics/fact_populator.py`:
 
 ### 8.5 LLM extraction schema extension
 
-In `backend/app/services/evaluators/inside_sales_runner.py`, extend the evaluator's output JSON schema with a `signals` array:
+In `backend/app/services/evaluators/inside_sales_runner.py`, extend the **runtime structured-output schema** with a `signals` array:
+
+1. **Do not rely on manually editing persisted evaluator records.** The runner currently builds JSON Schema from each evaluator's stored `output_schema` via `generate_json_schema(output_schema)`. For Phase `0018`, build a runtime-only augmented schema copy and append a required top-level `signals` field **before** calling `generate_json_schema()`.
+2. **Do not mutate the original stored `output_schema` used for scoring / visible breakdown.** `primary_score()` and summary helpers continue to use the evaluator's original rubric fields only.
+3. Each evaluator response therefore returns its normal rubric output **plus** a top-level `signals` array. Missing / null values are normalized to `[]`.
+4. Because one call may run through multiple evaluators, the runner must merge + de-duplicate all per-evaluator `signals` arrays into one canonical `platform.evaluation_run_thread_results.result.signals` array at the persisted thread-result top level.
+5. `result.signals` is the **authoritative analytics contract** consumed by `populate-analytics`. Nested per-evaluator copies may remain in `result.evaluations[*].output.signals`, but downstream extractors do not read them.
+
+The augmented `signals` array shape is:
 
 ```json
 {
@@ -502,7 +511,26 @@ In `backend/app/services/evaluators/inside_sales_runner.py`, extend the evaluato
 }
 ```
 
-Every entry conforms 1:1 to `analytics.fact_lead_signal` row shape. Unknown-unknowns use `signal_type='other_notable_signal'` with freeform `attributes.signal_type_raw`. Additive to existing `result` payload — no existing column renamed or dropped.
+Every entry conforms 1:1 to `analytics.fact_lead_signal` row shape. Unknown-unknowns use `signal_type='other_notable_signal'` with freeform `attributes.signal_type_raw`. Additive to the existing result contract — no existing rubric field is renamed or dropped. The persisted thread-result shape after this phase is therefore:
+
+```json
+{
+  "evaluations": [
+    {
+      "evaluator_id": "...",
+      "evaluator_name": "...",
+      "output": {
+        "...existing rubric fields...": "...",
+        "signals": [ "...per-evaluator extraction..." ]
+      }
+    }
+  ],
+  "signals": [ "...canonical merged/deduped thread-level signals..." ],
+  "transcript": "...",
+  "call_metadata": { "...": "..." },
+  "source_snapshot": { "...": "..." }
+}
+```
 
 ## 9. Migration plan
 
@@ -707,7 +735,7 @@ Explicit dependency callouts so the chain is unambiguous:
 ### Backend — changed
 - `backend/app/models/__init__.py` — export new models, update `__tablename__` per rename revision, add `__table_args__ = {"schema": "platform" | "analytics"}`.
 - `backend/app/services/inside_sales_sync.py` — transactional side-effects for leads, calls, new activities path; reference final table names.
-- `backend/app/services/evaluators/inside_sales_runner.py` — extend output JSON schema with `signals`.
+- `backend/app/services/evaluators/inside_sales_runner.py` — append a runtime-only required `signals` field before `generate_json_schema()`, then persist canonical top-level `result.signals`.
 - `backend/app/services/analytics/fact_populator.py` — register `SignalExtractor`; reference final table names.
 - `backend/app/services/chat_engine/manifests/inside-sales.yaml` — add four new table blocks + vocabulary labels. Schema-qualify all references.
 - `backend/app/services/chat_engine/manifests/<other-app>.yaml` — schema-qualify renamed tables.
@@ -726,6 +754,7 @@ Explicit dependency callouts so the chain is unambiguous:
 - Layer 1 prune (rolling 7d source records — `analytics.crm_*_record`) MUST NOT touch any fact / aggregate / dim table. Prune scope stays `crm_*_record` only.
 - `analytics.fact_lead_stage_transition.detected_at` is observation time, not transition time. Column comment is load-bearing.
 - `analytics.fact_lead_signal` is the only inside-sales fact using delete-then-insert. The other three are append-only.
+- `platform.evaluation_run_thread_results.result.signals` is the canonical thread-level signal payload consumed by analytics. It is produced by runtime schema augmentation + merge/de-dupe inside `inside_sales_runner.py`, not by manual evaluator-record edits.
 - Signal extraction never triggers an LLM call at populator time. Re-running `populate-analytics` reads only from `platform.evaluation_run_thread_results.result.signals`.
 - Sync-side side-effects share the sync transaction. No separate transaction commits.
 - No app name (`inside-sales`, `kaira-bot`) appears in any new table, column, index, or service module except the scheduler workload registry.

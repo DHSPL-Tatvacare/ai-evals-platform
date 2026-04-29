@@ -1,4 +1,4 @@
-"""History model - audit log for evaluator runs and events."""
+"""ApplicationEventHistory model - audit log for evaluator runs and events."""
 import uuid
 from sqlalchemy import String, Float, BigInteger, JSON, Index
 from sqlalchemy.dialects.postgresql import UUID
@@ -6,8 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TenantUserMixin
 
 
-class History(Base, TenantUserMixin):
-    __tablename__ = "history"
+class ApplicationEventHistory(Base, TenantUserMixin):
+    __tablename__ = "application_event_history"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     app_id: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -24,12 +24,12 @@ class History(Base, TenantUserMixin):
     timestamp: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (
-        Index("idx_history_timestamp", "timestamp"),
-        Index("idx_history_entity", "entity_type", "entity_id", "timestamp"),
-        Index("idx_history_source", "source_type", "source_id", "timestamp"),
-        Index("idx_history_app_source", "app_id", "source_type", "timestamp"),
-        Index("idx_history_entity_source", "entity_id", "source_type", "source_id", "timestamp"),
-        Index("idx_history_tenant", "tenant_id"),
-        Index("idx_history_tenant_user", "tenant_id", "user_id"),
+        Index("idx_application_event_history_timestamp", "timestamp"),
+        Index("idx_application_event_history_entity", "entity_type", "entity_id", "timestamp"),
+        Index("idx_application_event_history_source", "source_type", "source_id", "timestamp"),
+        Index("idx_application_event_history_app_source", "app_id", "source_type", "timestamp"),
+        Index("idx_application_event_history_entity_source", "entity_id", "source_type", "source_id", "timestamp"),
+        Index("idx_application_event_history_tenant", "tenant_id"),
+        Index("idx_application_event_history_tenant_user", "tenant_id", "user_id"),
         {"schema": "platform"},
     )

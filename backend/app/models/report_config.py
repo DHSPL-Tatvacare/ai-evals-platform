@@ -10,8 +10,8 @@ from app.models.base import Base, TenantUserMixin, TimestampMixin
 from app.models.mixins.shareable import ShareableMixin, Visibility
 
 
-class ReportConfig(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
-    __tablename__ = "report_configs"
+class ReportConfiguration(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
+    __tablename__ = "report_configurations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     app_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -39,8 +39,8 @@ class ReportConfig(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "report_id", name="uq_report_configs_tenant_app_report"),
-        Index("idx_report_configs_tenant_app_scope", "tenant_id", "app_id", "scope"),
-        Index("idx_report_configs_tenant_app_default", "tenant_id", "app_id", "is_default"),
+        UniqueConstraint("tenant_id", "app_id", "report_id", name="uq_report_configurations_tenant_app_report"),
+        Index("idx_report_configurations_tenant_app_scope", "tenant_id", "app_id", "scope"),
+        Index("idx_report_configurations_tenant_app_default", "tenant_id", "app_id", "is_default"),
         {"schema": "platform"},
     )

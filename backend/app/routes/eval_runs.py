@@ -15,7 +15,7 @@ from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, Evalua
 from app.models.listing import Listing
 from app.models.job import Job
 from app.models.user import User
-from app.models.report_run import ReportRun
+from app.models.report_run import ReportGenerationRun
 from app.schemas.base import CamelModel
 from app.schemas.eval_run import EvalRunVisibilityUpdate
 from app.services.evaluators.adversarial_canonical import enrich_adversarial_result_for_api
@@ -570,9 +570,9 @@ async def patch_eval_run_visibility(
         run.shared_at = None
     report_runs = (
         await db.execute(
-            select(ReportRun).where(
-                ReportRun.source_eval_run_id == run_id,
-                ReportRun.tenant_id == auth.tenant_id,
+            select(ReportGenerationRun).where(
+                ReportGenerationRun.source_eval_run_id == run_id,
+                ReportGenerationRun.tenant_id == auth.tenant_id,
             )
         )
     ).scalars().all()

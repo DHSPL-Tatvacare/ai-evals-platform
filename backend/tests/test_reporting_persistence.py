@@ -5,15 +5,15 @@ from app.models.analytics_dashboard import AnalyticsDashboard
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.models.eval_run import EvaluationRun
 from app.models.mixins.shareable import Visibility
-from app.models.report_artifact import ReportArtifact
-from app.models.report_config import ReportConfig
-from app.models.report_run import ReportRun
+from app.models.report_artifact import ReportGeneratedArtifact
+from app.models.report_config import ReportConfiguration
+from app.models.report_run import ReportGenerationRun
 from app.services.seed_defaults import _build_default_report_config_seeds
 
 
 def test_report_config_and_run_models_expose_phase_two_columns():
-    report_config_columns = ReportConfig.__table__.columns.keys()
-    report_run_columns = ReportRun.__table__.columns.keys()
+    report_config_columns = ReportConfiguration.__table__.columns.keys()
+    report_run_columns = ReportGenerationRun.__table__.columns.keys()
 
     assert "source_session_id" in report_config_columns
     assert "visibility" in report_config_columns
@@ -36,7 +36,7 @@ def test_report_config_and_run_models_expose_phase_two_columns():
 
 
 def test_report_artifact_inherits_visibility_from_report_run():
-    report_artifact_columns = ReportArtifact.__table__.columns.keys()
+    report_artifact_columns = ReportGeneratedArtifact.__table__.columns.keys()
 
     assert "report_run_id" in report_artifact_columns
     assert "artifact_data" in report_artifact_columns

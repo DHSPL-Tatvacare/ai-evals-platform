@@ -22,7 +22,7 @@ from app.models.prompt import Prompt
 from app.models.schema import Schema
 from app.models.evaluator import Evaluator
 from app.models.job import Job
-from app.models.history import History
+from app.models.history import ApplicationEventHistory
 from app.models.setting import Setting
 from app.models.mixins.shareable import Visibility
 from app.models.tag import Tag
@@ -118,7 +118,7 @@ async def get_stats(
         ("listings", Listing, Listing.app_id),
         ("eval_runs", EvaluationRun, EvaluationRun.app_id),
         ("chat_sessions", ChatSession, ChatSession.app_id),
-        ("history", History, History.app_id),
+        ("history", ApplicationEventHistory, ApplicationEventHistory.app_id),
         ("tags", Tag, Tag.app_id),
     ]:
         total = await count_table(model, col)
@@ -532,9 +532,9 @@ async def erase_data(
 
     # ── 11. history ──
     if erase_all or "history" in targets:
-        q = delete(History).where(History.tenant_id == auth.tenant_id)
+        q = delete(ApplicationEventHistory).where(ApplicationEventHistory.tenant_id == auth.tenant_id)
         if app_id:
-            q = q.where(History.app_id == app_id)
+            q = q.where(ApplicationEventHistory.app_id == app_id)
         result = await db.execute(q)
         deleted["history"] = result.rowcount
 

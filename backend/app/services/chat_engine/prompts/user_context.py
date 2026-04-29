@@ -25,7 +25,7 @@ async def render(session: dict[str, Any], db: AsyncSession) -> str:
             text(
                 """
                 SELECT name
-                FROM report_configs
+                FROM platform.report_configurations
                 WHERE tenant_id = :tenant_id
                   AND user_id = :user_id
                   AND app_id = :app_id

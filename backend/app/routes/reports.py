@@ -14,8 +14,8 @@ from app.auth.context import AuthContext
 from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.eval_run import EvaluationRun
-from app.models.report_config import ReportConfig
-from app.models.report_run import ReportRun
+from app.models.report_config import ReportConfiguration
+from app.models.report_run import ReportGenerationRun
 from app.schemas.base import CamelModel
 from app.schemas.reporting import ReportConfigResponse, ReportRunResponse
 from app.services.access_control import readable_scope_clause
@@ -64,16 +64,16 @@ async def _get_visible_report_run(
     *,
     report_run_id: UUID,
     auth: AuthContext,
-) -> ReportRun:
-    report_run = await db.scalar(select(ReportRun).where(ReportRun.id == report_run_id))
+) -> ReportGenerationRun:
+    report_run = await db.scalar(select(ReportGenerationRun).where(ReportGenerationRun.id == report_run_id))
     if not report_run:
         raise HTTPException(status_code=404, detail="Report run not found")
     if report_run.source_eval_run_id is not None:
         await _get_visible_eval_run(db, run_id=report_run.source_eval_run_id, auth=auth)
     elif not await db.scalar(
-        select(ReportRun.id).where(
-            ReportRun.id == report_run_id,
-            readable_scope_clause(ReportRun, auth),
+        select(ReportGenerationRun.id).where(
+            ReportGenerationRun.id == report_run_id,
+            readable_scope_clause(ReportGenerationRun, auth),
         )
     ):
         raise HTTPException(status_code=404, detail="Report run not found")
@@ -99,8 +99,8 @@ def _load_report_payload(artifact_data: dict, *, detail: str, log_message: str) 
 def _compose_export_document(
     *,
     payload: PlatformRunReportPayload,
-    report_run: ReportRun,
-    report_config: ReportConfig,
+    report_run: ReportGenerationRun,
+    report_config: ReportConfiguration,
 ) -> str:
     presentation_config = PresentationConfig.model_validate(report_config.presentation_config or {})
     export_config = ExportConfig.model_validate(report_config.export_config or {})
@@ -131,14 +131,14 @@ async def list_report_configs(
     db: AsyncSession = Depends(get_db),
 ):
     query = (
-        select(ReportConfig)
+        select(ReportConfiguration)
         .where(
-            ReportConfig.app_id == app_id,
-            ReportConfig.scope == scope,
-            ReportConfig.status == 'active',
-            readable_scope_clause(ReportConfig, auth),
+            ReportConfiguration.app_id == app_id,
+            ReportConfiguration.scope == scope,
+            ReportConfiguration.status == 'active',
+            readable_scope_clause(ReportConfiguration, auth),
         )
-        .order_by(desc(ReportConfig.is_default), desc(ReportConfig.updated_at))
+        .order_by(desc(ReportConfiguration.is_default), desc(ReportConfiguration.updated_at))
     )
     result = await db.execute(query)
     return result.scalars().all()
@@ -165,7 +165,7 @@ async def create_report_config_from_blueprint(
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Persist a Sherlock-composed blueprint as a reusable single-run ReportConfig.
+    """Persist a Sherlock-composed blueprint as a reusable single-run ReportConfiguration.
 
     Bypasses the chat/LLM tool flow so the frontend Save button is deterministic.
     """
@@ -205,10 +205,10 @@ async def create_report_config_from_blueprint(
 
     await db.commit()
 
-    config_query = select(ReportConfig).where(
-        ReportConfig.tenant_id == auth.tenant_id,
-        ReportConfig.app_id == payload.app_id,
-        ReportConfig.report_id == result['report_id'],
+    config_query = select(ReportConfiguration).where(
+        ReportConfiguration.tenant_id == auth.tenant_id,
+        ReportConfiguration.app_id == payload.app_id,
+        ReportConfiguration.report_id == result['report_id'],
     )
     config_result = await db.execute(config_query)
     config = config_result.scalar_one()
@@ -226,11 +226,11 @@ async def _load_owned_report_config(
     *,
     config_id: UUID,
     auth: AuthContext,
-) -> ReportConfig:
-    """Fetch a ReportConfig the caller is allowed to mutate (owner within tenant)."""
-    stmt = select(ReportConfig).where(
-        ReportConfig.id == config_id,
-        ReportConfig.tenant_id == auth.tenant_id,
+) -> ReportConfiguration:
+    """Fetch a ReportConfiguration the caller is allowed to mutate (owner within tenant)."""
+    stmt = select(ReportConfiguration).where(
+        ReportConfiguration.id == config_id,
+        ReportConfiguration.tenant_id == auth.tenant_id,
     )
     result = await db.execute(stmt)
     config = result.scalar_one_or_none()
@@ -270,14 +270,14 @@ async def update_report_config(
         changed = True
     if payload.is_default is True and not config.is_default:
         await db.execute(
-            update(ReportConfig)
+            update(ReportConfiguration)
             .where(
-                ReportConfig.tenant_id == auth.tenant_id,
-                ReportConfig.user_id == auth.user_id,
-                ReportConfig.app_id == config.app_id,
-                ReportConfig.scope == config.scope,
-                ReportConfig.id != config.id,
-                ReportConfig.is_default.is_(True),
+                ReportConfiguration.tenant_id == auth.tenant_id,
+                ReportConfiguration.user_id == auth.user_id,
+                ReportConfiguration.app_id == config.app_id,
+                ReportConfiguration.scope == config.scope,
+                ReportConfiguration.id != config.id,
+                ReportConfiguration.is_default.is_(True),
             )
             .values(is_default=False)
         )
@@ -323,21 +323,21 @@ async def list_report_runs(
             raise HTTPException(status_code=404, detail="Evaluation run not found")
 
     query = (
-        select(ReportRun)
+        select(ReportGenerationRun)
         .where(
-            ReportRun.app_id == app_id,
-            ReportRun.scope == scope,
-            ReportRun.tenant_id == auth.tenant_id,
+            ReportGenerationRun.app_id == app_id,
+            ReportGenerationRun.scope == scope,
+            ReportGenerationRun.tenant_id == auth.tenant_id,
         )
-        .order_by(desc(ReportRun.completed_at), desc(ReportRun.created_at))
+        .order_by(desc(ReportGenerationRun.completed_at), desc(ReportGenerationRun.created_at))
         .limit(limit)
     )
     if source_eval_run_id is None:
-        query = query.where(readable_scope_clause(ReportRun, auth))
+        query = query.where(readable_scope_clause(ReportGenerationRun, auth))
     if source_eval_run_id is not None:
-        query = query.where(ReportRun.source_eval_run_id == source_eval_run_id)
+        query = query.where(ReportGenerationRun.source_eval_run_id == source_eval_run_id)
     if report_id:
-        query = query.where(ReportRun.report_id == report_id)
+        query = query.where(ReportGenerationRun.report_id == report_id)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -499,15 +499,15 @@ async def export_report_pdf(
             report_run = None
     if report_run is None:
         report_run = await db.scalar(
-            select(ReportRun).where(
-                ReportRun.app_id == run.app_id,
-                ReportRun.scope == 'single_run',
-                ReportRun.report_id == report_config.report_id,
-                ReportRun.source_eval_run_id == UUID(run_id),
-                ReportRun.status == 'completed',
-                ReportRun.tenant_id == auth.tenant_id,
+            select(ReportGenerationRun).where(
+                ReportGenerationRun.app_id == run.app_id,
+                ReportGenerationRun.scope == 'single_run',
+                ReportGenerationRun.report_id == report_config.report_id,
+                ReportGenerationRun.source_eval_run_id == UUID(run_id),
+                ReportGenerationRun.status == 'completed',
+                ReportGenerationRun.tenant_id == auth.tenant_id,
             )
-            .order_by(desc(ReportRun.completed_at), desc(ReportRun.created_at))
+            .order_by(desc(ReportGenerationRun.completed_at), desc(ReportGenerationRun.created_at))
         )
     if report_run is None:
         raise HTTPException(status_code=404, detail="Report run not found")

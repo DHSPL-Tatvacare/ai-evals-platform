@@ -11,8 +11,8 @@ from app.models.base import Base, TenantUserMixin, TimestampMixin
 from app.models.mixins.shareable import ShareableMixin
 
 
-class ReportRun(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
-    __tablename__ = "report_runs"
+class ReportGenerationRun(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
+    __tablename__ = "report_generation_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     app_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -38,9 +38,9 @@ class ReportRun(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        Index("idx_report_runs_tenant_app_report", "tenant_id", "app_id", "report_id"),
-        Index("idx_report_runs_tenant_app_scope", "tenant_id", "app_id", "scope"),
-        Index("idx_report_runs_tenant_status_created", "tenant_id", "status", "created_at"),
-        Index("idx_report_runs_job_id", "job_id"),
+        Index("idx_report_generation_runs_tenant_app_report", "tenant_id", "app_id", "report_id"),
+        Index("idx_report_generation_runs_tenant_app_scope", "tenant_id", "app_id", "scope"),
+        Index("idx_report_generation_runs_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("idx_report_generation_runs_job_id", "job_id"),
         {"schema": "platform"},
     )

@@ -830,9 +830,9 @@ async def handle_save_template(
     session: dict[str, Any] | None = None,
     **_kwargs: Any,
 ) -> ToolEnvelopeModel:
-    """Persist as a new ReportConfig row."""
+    """Persist as a new ReportConfiguration row."""
     try:
-        from app.models.report_config import ReportConfig
+        from app.models.report_config import ReportConfiguration
 
         report_id = f"custom-{uuid.uuid4().hex[:8]}"
         presentation_config = {
@@ -863,7 +863,7 @@ async def handle_save_template(
         if isinstance(session, dict) and session.get('chat_session_id'):
             source_session_id = uuid.UUID(str(session['chat_session_id']))
 
-        config = ReportConfig(
+        config = ReportConfiguration(
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
             app_id=app_id,
@@ -942,21 +942,21 @@ async def handle_blueprint_list(
 ) -> ToolEnvelopeModel:
     from sqlalchemy import desc, select
 
-    from app.models.report_config import ReportConfig
+    from app.models.report_config import ReportConfiguration
     from app.services.access_control import readable_scope_clause
     from app.services.chat_engine.artifact import build_envelope
 
     query = (
-        select(ReportConfig)
+        select(ReportConfiguration)
         .where(
-            ReportConfig.scope == 'single_run',
-            ReportConfig.status == 'active',
-            readable_scope_clause(ReportConfig, auth),
+            ReportConfiguration.scope == 'single_run',
+            ReportConfiguration.status == 'active',
+            readable_scope_clause(ReportConfiguration, auth),
         )
-        .order_by(desc(ReportConfig.updated_at), desc(ReportConfig.created_at))
+        .order_by(desc(ReportConfiguration.updated_at), desc(ReportConfiguration.created_at))
     )
     if app_id:
-        query = query.where(ReportConfig.app_id == app_id)
+        query = query.where(ReportConfiguration.app_id == app_id)
 
     rows = (await db.execute(query)).scalars().all()
     blueprints = [
