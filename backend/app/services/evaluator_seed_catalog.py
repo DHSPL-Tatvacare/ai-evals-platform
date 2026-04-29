@@ -367,7 +367,7 @@ async def ensure_seeded_evaluator_unique_index(session: AsyncSession) -> None:
         text(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluators_seed_scope
-            ON evaluators (tenant_id, app_id, COALESCE(seed_variant, ''), seed_key)
+            ON platform.evaluators (tenant_id, app_id, COALESCE(seed_variant, ''), seed_key)
             WHERE listing_id IS NULL
               AND forked_from IS NULL
               AND seed_key IS NOT NULL
