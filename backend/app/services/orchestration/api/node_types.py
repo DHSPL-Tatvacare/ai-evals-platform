@@ -27,6 +27,11 @@ _LABELS: dict[str, tuple[str, str]] = {
     "crm.send_sms":          ("Send SMS",               "Sends an SMS via configured provider."),
     "crm.lsq_update_stage":  ("LSQ Update Stage",       "Sets ProspectStage on each recipient."),
     "crm.lsq_log_activity":  ("LSQ Log Activity",       "Logs ProspectActivity on each recipient."),
+    "clinical.schedule_lab":          ("Schedule Lab",       "Queue lab order to EMR via clinical action outbox."),
+    "clinical.assign_care_team_task": ("Assign Care Team",   "Queue task to care manager / physician / etc."),
+    "clinical.send_pro_assessment":   ("Send PRO",           "Send PHQ-9 / DDS / MMAS link to patient."),
+    "clinical.emr_write":             ("EMR Write",          "Write structured note / observation to EMR."),
+    "clinical.escalation_uptier":     ("Escalation",         "Escalate to physician / specialist with urgency."),
 }
 
 

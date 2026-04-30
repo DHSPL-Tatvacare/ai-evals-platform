@@ -39,4 +39,10 @@ def build_service_registry() -> ServiceRegistry:
             base_url=settings.SMS_BASE_URL,
         )
 
+    # ClinicalOutboxWriter has no external creds — always wired (Phase 9).
+    from app.services.orchestration.integrations.clinical_outbox import (
+        ClinicalOutboxWriter,
+    )
+    reg.clinical_outbox = ClinicalOutboxWriter()
+
     return reg

@@ -57,6 +57,7 @@ from app.models.cost import (
     RefLlmModelsCatalog,
     SnapshotLlmModelsCatalog,
 )
+from app.models.clinical_outbox import LogClinicalActionOutbox
 from app.models.orchestration import (
     Workflow,
     WorkflowVersion,
@@ -95,4 +96,5 @@ __all__ = [
     "Workflow", "WorkflowVersion", "WorkflowTrigger", "WorkflowActionTemplate",
     "WorkflowConsentRecord", "WorkflowRun", "WorkflowRunNodeStep",
     "WorkflowRunRecipientState", "WorkflowRunRecipientAction", "WorkflowRunRecipientOverride",
+    "LogClinicalActionOutbox",
 ]
