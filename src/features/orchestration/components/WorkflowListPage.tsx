@@ -140,17 +140,19 @@ export function WorkflowListPage() {
     {
       key: '_actions',
       header: '',
-      width: '180px',
+      width: '120px',
       render: (r) =>
         r.source === 'platform' ? (
           <Button
             size="sm"
+            variant="secondary"
+            className="whitespace-nowrap"
             onClick={(e) => {
               e.stopPropagation();
               setCloneSource(r);
             }}
           >
-            Clone for Tenant
+            Clone
           </Button>
         ) : (
           <Button

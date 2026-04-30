@@ -122,8 +122,8 @@ describe('WorkflowListPage', () => {
   it('opens clone dialog and clones a system workflow', async () => {
     render(<WorkflowListPage />);
 
-    await screen.findByText('Clone for Tenant');
-    fireEvent.click(screen.getByText('Clone for Tenant'));
+    await screen.findByRole('button', { name: 'Clone' });
+    fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
 
     expect(screen.getByText('Clone System Workflow')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Display Name'), {
