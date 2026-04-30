@@ -34,6 +34,7 @@ from app.services.orchestration.cohort_stream import CohortStream
 from app.services.orchestration.node_context import NodeContext, ServiceRegistry
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import resolve_handler
+from app.services.orchestration.sse_publisher import publish_event
 from app.services.orchestration.traversal import RunExecutor
 
 _log = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ async def run_workflow_job(
         if job_id is not None:
             run.job_id = job_id
         await db.flush()
+        await publish_event(
+            run_id=run.id, event={"type": "run.started", "run_id": str(run.id)},
+        )
 
     services = _build_service_registry()
     executor = RunExecutor(
@@ -116,8 +120,16 @@ async def run_workflow_job(
             await _persist_failed_run(db, run_id, repr(exc))
         except Exception:
             _log.exception("run-workflow: failed to persist failure status for %s", run_id)
+        await publish_event(
+            run_id=run.id,
+            event={"type": "run.failed", "run_id": str(run.id), "error": repr(exc)},
+        )
         raise
 
+    await publish_event(
+        run_id=run.id,
+        event={"type": "run.completed", "run_id": str(run.id), "status": run.status},
+    )
     return {"status": run.status, "run_id": str(run.id)}
 
 

@@ -30,6 +30,7 @@ from app.services.orchestration.cohort_stream import CohortStream
 from app.services.orchestration.node_context import NodeContext, ServiceRegistry
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import resolve_handler
+from app.services.orchestration.sse_publisher import publish_event
 
 
 class RunExecutor:
@@ -119,6 +120,17 @@ class RunExecutor:
         self.db.add(node_step)
         await self.db.flush()
 
+        await publish_event(
+            run_id=self.run.id,
+            event={
+                "type": "node_step.started",
+                "node_step_id": str(node_step_id),
+                "node_id": node_id,
+                "node_type": node["type"],
+                "input_cohort_size": len(cohort_payloads),
+            },
+        )
+
         # Mark recipients 'running' so a concurrent worker tick doesn't pick them up.
         await self.db.execute(
             update(WorkflowRunRecipientState)
@@ -161,6 +173,15 @@ class RunExecutor:
                 .values(status="failed", error=repr(exc))
             )
             await self.db.flush()
+            await publish_event(
+                run_id=self.run.id,
+                event={
+                    "type": "node_step.failed",
+                    "node_step_id": str(node_step_id),
+                    "node_id": node_id,
+                    "error": repr(exc),
+                },
+            )
             raise
 
         await self._advance_recipients(node_id, result, cohort_payloads)
@@ -172,6 +193,15 @@ class RunExecutor:
         }
         node_step.completed_at = datetime.now(timezone.utc)
         await self.db.flush()
+        await publish_event(
+            run_id=self.run.id,
+            event={
+                "type": "node_step.completed",
+                "node_step_id": str(node_step_id),
+                "node_id": node_id,
+                "outputs_summary": node_step.outputs_summary,
+            },
+        )
 
     async def _apply_overrides(self, recipient_ids: list[str]) -> None:
         """Honour latest unconsumed override per (run_id, recipient_id)."""
