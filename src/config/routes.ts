@@ -71,6 +71,10 @@ export const routes = {
     analytics: '/inside-sales/analytics',
     analyticsChart: (chartId: string) => `/inside-sales/analytics/charts/${chartId}`,
     analyticsDashboard: (dashboardId: string) => `/inside-sales/analytics/dashboards/${dashboardId}`,
+    campaigns: '/inside-sales/orchestration',
+    campaignBuilder: (workflowId: string) => `/inside-sales/orchestration/workflows/${workflowId}`,
+    campaignRuns: '/inside-sales/orchestration/runs',
+    campaignRunDetail: (runId: string) => `/inside-sales/orchestration/runs/${runId}`,
   },
 };
 
