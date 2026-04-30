@@ -45,13 +45,57 @@ def _auth_params() -> dict[str, str]:
 class LsqWriter:
     """Async POSTs to LSQ Lead.Update and ProspectActivity.Create.
 
-    Construction takes no args — credentials and rate limiter are module-level
-    in lsq_client (existing pattern).
+    Two construction modes:
+
+    * ``LsqWriter()`` — no args. Reads URL + auth from the module-level
+      ``lsq_client`` globals (legacy path, used by historical inside-sales
+      flows + the orchestration env-bootstrapped default).
+    * ``LsqWriter.with_config({...})`` — Phase 10 commit 2. The decrypted
+      provider-connection config (``access_key``, ``secret_key``,
+      ``region_host``) overrides the module globals so per-tenant
+      orchestration runs use their own credentials. The shared rate
+      limiter in ``lsq_client._rate_limited_request`` is reused — there
+      is one global pacer regardless of how many tenants dispatch
+      concurrently.
     """
 
+    def __init__(
+        self,
+        *,
+        access_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        region_host: Optional[str] = None,
+    ) -> None:
+        self._access_key = access_key
+        self._secret_key = secret_key
+        self._region_host = region_host
+
+    @classmethod
+    def with_config(cls, config: dict[str, Any]) -> "LsqWriter":
+        """Build a writer from a decrypted provider_connections config dict."""
+        return cls(
+            access_key=config.get("access_key"),
+            secret_key=config.get("secret_key"),
+            region_host=config.get("region_host"),
+        )
+
+    def _resolved_base_url(self) -> str:
+        if self._region_host:
+            return self._region_host.rstrip("/")
+        return _base_url()
+
+    def _resolved_auth_params(self) -> dict[str, str]:
+        if self._access_key and self._secret_key:
+            return {"accessKey": self._access_key, "secretKey": self._secret_key}
+        return _auth_params()
+
     async def update_stage(self, *, prospect_id: str, stage: str) -> None:
-        url = f"{_base_url()}/LeadManagement.svc/Lead.Update"
-        params = {**_auth_params(), "leadId": prospect_id, "postUpdatedLead": "false"}
+        url = f"{self._resolved_base_url()}/LeadManagement.svc/Lead.Update"
+        params = {
+            **self._resolved_auth_params(),
+            "leadId": prospect_id,
+            "postUpdatedLead": "false",
+        }
         body = [{"Attribute": "ProspectStage", "Value": stage}]
         async with _make_client() as client:
             try:
@@ -71,8 +115,8 @@ class LsqWriter:
         note: str,
         fields: Optional[list[dict[str, Any]]] = None,
     ) -> None:
-        url = f"{_base_url()}/ProspectActivity.svc/Create"
-        params = _auth_params()
+        url = f"{self._resolved_base_url()}/ProspectActivity.svc/Create"
+        params = self._resolved_auth_params()
         body = {
             "RelatedProspectId": prospect_id,
             "ActivityEvent": activity_event,

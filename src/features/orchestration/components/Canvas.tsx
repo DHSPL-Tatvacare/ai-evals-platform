@@ -1,6 +1,7 @@
 import {
   Background,
   Controls,
+  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -19,6 +20,7 @@ import type {
   NodeTypeDescriptor,
   WorkflowDefinitionNode,
 } from '@/features/orchestration/types';
+import { resolveColor } from '@/utils/statusColors';
 import { CustomNode } from './CustomNode';
 
 const nodeTypes = { custom: CustomNode };
@@ -74,10 +76,18 @@ function CanvasInner() {
           id: n.id,
           type: 'custom',
           position: n.position,
+          // Explicit width/height so the MiniMap has bounding boxes to
+          // render before ResizeObserver measurement lands. Matches the
+          // NodeCard's `min-w-[220px]` and a typical 2-line content
+          // height; the React Flow layout still uses measured values
+          // for canvas positioning.
+          width: 240,
+          height: 80,
           data: {
             label: desc?.label ?? n.type,
             nodeType: n.type,
             category: desc?.category ?? 'logic',
+            description: desc?.description,
             outputEdges: deriveOutputEdges(n, desc),
           },
         };
@@ -124,6 +134,13 @@ function CanvasInner() {
     for (const c of changes) {
       if (c.type === 'remove') s.removeEdge(c.id);
     }
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    // Clicking the empty canvas deselects, which unmounts the inspector rail.
+    // ReactFlow will not fire onPaneClick when a node-click is handled, so
+    // this is safe alongside the node-select path in onNodesChange.
+    useWorkflowBuilderStore.getState().clearSelection();
   }, []);
 
   const onConnect = useCallback((conn: Connection) => {
@@ -195,12 +212,60 @@ function CanvasInner() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onMoveEnd={onMoveEnd}
+        onPaneClick={onPaneClick}
         // Only autofit when there's no saved viewport; once the user has
         // panned/zoomed at least once, restoring fitView would discard that.
         fitView={savedViewport == null}
+        // ReactFlow's "powered by" badge is overlaid on the bottom-right.
+        // Hidden so the canvas reads as part of the product chrome.
+        proOptions={{ hideAttribution: true }}
       >
         <Background />
-        <Controls />
+        <Controls
+          showInteractive={false}
+          // Dark-mode legibility: ReactFlow's default control buttons use
+          // baked-in #fefefe / #555 values. Override against design tokens
+          // so light + dark both look right without per-theme overrides
+          // in globals.css.
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-default)',
+            color: 'var(--text-primary)',
+          }}
+        />
+        <MiniMap
+          pannable
+          zoomable
+          ariaLabel="Workflow minimap"
+          // SVG `fill` attribute does not resolve CSS variables across all
+          // browsers — and React Flow's MiniMap reads `nodeColor` straight
+          // into a `<rect fill={...}>`. Resolve to computed hex up-front
+          // so nodes actually render in the minimap.
+          nodeColor={(n) => {
+            const cat = (n.data as { category?: string } | undefined)?.category;
+            const token = (() => {
+              switch (cat) {
+                case 'source':
+                case 'filter':
+                  return 'var(--color-success)';
+                case 'logic':
+                  return 'var(--color-warning)';
+                case 'action':
+                  return 'var(--color-info)';
+                case 'escalation':
+                  return 'var(--color-error)';
+                default:
+                  return 'var(--text-secondary)';
+              }
+            })();
+            return resolveColor(token);
+          }}
+          nodeStrokeColor={resolveColor('var(--bg-elevated)')}
+          nodeStrokeWidth={2}
+          nodeBorderRadius={3}
+          maskColor={resolveColor('var(--bg-overlay)')}
+        />
       </ReactFlow>
     </div>
   );

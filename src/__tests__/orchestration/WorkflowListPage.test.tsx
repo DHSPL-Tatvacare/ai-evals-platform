@@ -22,6 +22,19 @@ vi.mock('@/services/notifications', () => ({
   },
 }));
 
+vi.mock('@/config/pageMetadata', async () => {
+  const actual = await vi.importActual<typeof import('@/config/pageMetadata')>(
+    '@/config/pageMetadata',
+  );
+  return {
+    ...actual,
+    usePageMetadata: () => ({
+      icon: actual.PAGE_METADATA.campaigns.icon,
+      title: 'Campaigns',
+    }),
+  };
+});
+
 import {
   cloneSystemWorkflow,
   listSystemWorkflows,
@@ -71,23 +84,39 @@ describe('WorkflowListPage', () => {
     });
   });
 
-  it('loads tenant and system workflows with workflow-type filters', async () => {
+  it('renders both tenant and system rows in a single unified table with Source badges', async () => {
     render(<WorkflowListPage />);
 
-    await waitFor(() => expect(listWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales', workflowType: undefined }));
-    expect(listSystemWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales', workflowType: undefined });
-    expect(screen.getByText('Your Workflows')).toBeInTheDocument();
-    expect(screen.getByText('System Starters')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Clinical'));
-
     await waitFor(() =>
-      expect(listWorkflows).toHaveBeenLastCalledWith({ appId: 'inside-sales', workflowType: 'clinical' }),
+      expect(listWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales' }),
     );
-    expect(listSystemWorkflows).toHaveBeenLastCalledWith({
-      appId: 'inside-sales',
-      workflowType: 'clinical',
-    });
+    expect(listSystemWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales' });
+
+    expect(await screen.findByText('Tenant Campaign')).toBeInTheDocument();
+    expect(screen.getByText('DM2 Adherence Watch')).toBeInTheDocument();
+    expect(screen.getByText('Custom')).toBeInTheDocument();
+    expect(screen.getByText('Platform')).toBeInTheDocument();
+    // Old section headers must be gone — single unified table.
+    expect(screen.queryByText('Your Workflows')).not.toBeInTheDocument();
+    expect(screen.queryByText('System Starters')).not.toBeInTheDocument();
+  });
+
+  it('Source filter narrows visible rows without re-fetching', async () => {
+    render(<WorkflowListPage />);
+
+    await screen.findByText('Tenant Campaign');
+
+    fireEvent.click(screen.getByText('Custom'));
+    expect(screen.getByText('Tenant Campaign')).toBeInTheDocument();
+    expect(screen.queryByText('DM2 Adherence Watch')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Platform'));
+    expect(screen.queryByText('Tenant Campaign')).not.toBeInTheDocument();
+    expect(screen.getByText('DM2 Adherence Watch')).toBeInTheDocument();
+
+    // Filter is purely client-side; backend is fetched once.
+    expect(listWorkflows).toHaveBeenCalledTimes(1);
+    expect(listSystemWorkflows).toHaveBeenCalledTimes(1);
   });
 
   it('opens clone dialog and clones a system workflow', async () => {

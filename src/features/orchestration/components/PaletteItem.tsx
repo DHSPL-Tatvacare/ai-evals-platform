@@ -1,34 +1,31 @@
 import type { DragEvent } from 'react';
 
-import { cn } from '@/utils';
 import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 
-const CATEGORY_COLOR: Record<string, string> = {
-  source: 'var(--color-success)',
-  filter: 'var(--color-success)',
-  logic: 'var(--color-warning)',
-  action: 'var(--color-info)',
-  escalation: 'var(--color-error)',
-  sink: 'var(--text-secondary)',
-};
+import { NodeCard } from './NodeCard';
 
-export function PaletteItem({ desc }: { desc: NodeTypeDescriptor }) {
+interface Props {
+  desc: NodeTypeDescriptor;
+}
+
+/** Drag-source tile rendered in the left rail. Composes the shared
+ *  `NodeCard` primitive in `palette` density so the palette and canvas
+ *  stay in lockstep — change the visual once in `NodeCard`, both
+ *  surfaces follow. */
+export function PaletteItem({ desc }: Props) {
   const onDragStart = (event: DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('application/orchestration-node', JSON.stringify(desc));
     event.dataTransfer.effectAllowed = 'move';
   };
+
   return (
-    <div
+    <NodeCard
+      variant="palette"
+      label={desc.label}
+      description={desc.description}
+      category={desc.category}
       draggable
       onDragStart={onDragStart}
-      className={cn(
-        'cursor-grab rounded-[var(--radius-default)] border bg-[var(--bg-elevated)] px-2 py-1 text-xs shadow-sm',
-      )}
-      style={{ borderColor: CATEGORY_COLOR[desc.category] ?? 'var(--border-default)' }}
-      title={desc.description}
-    >
-      <div className="font-medium text-[var(--text-primary)]">{desc.label}</div>
-      <div className="text-[10px] text-[var(--text-secondary)]">{desc.nodeType}</div>
-    </div>
+    />
   );
 }

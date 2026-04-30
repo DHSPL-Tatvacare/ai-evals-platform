@@ -31,6 +31,7 @@ from app.models.orchestration import (
     WorkflowVersion,
 )
 from app.services.orchestration.cohort_stream import CohortStream
+from app.services.orchestration.connections.resolver import ConnectionResolver
 from app.services.orchestration.node_context import NodeContext, ServiceRegistry
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import resolve_handler
@@ -94,9 +95,12 @@ async def run_workflow_job(
         )
 
     services = _build_service_registry()
+    connections = ConnectionResolver(
+        db, tenant_id=run.tenant_id, app_id=run.app_id,
+    )
     executor = RunExecutor(
         db=db, run=run, version=version, workflow=workflow,
-        job_id=job_id, services=services,
+        job_id=job_id, services=services, connections=connections,
     )
 
     try:
@@ -248,6 +252,7 @@ async def _execute_source_nodes(executor: RunExecutor) -> None:
             workflow_id=executor.workflow.id, workflow_version_id=executor.version.id,
             run_id=executor.run.id, node_step_id=node_step_id, current_node_id=node["id"],
             services=executor.services, job_id=executor.job_id,
+            connections=executor.connections,
         )
         empty_cohort = CohortStream([])
         result: NodeResult = await handler.execute(empty_cohort, config, ctx)

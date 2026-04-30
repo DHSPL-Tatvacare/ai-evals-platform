@@ -1,6 +1,11 @@
-"""crm.lsq_log_activity — POSTs ProspectActivity.Create per recipient via LsqWriter."""
+"""crm.lsq_log_activity — POSTs ProspectActivity.Create per recipient via LsqWriter.
+
+Phase 10 commit 2: per-tenant LSQ credentials come from
+``ctx.connections.lsq(config.connection_id)``.
+"""
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -15,6 +20,10 @@ from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    connection_id: uuid.UUID = Field(
+        ...,
+        json_schema_extra={"x-type": "connection_picker", "x-provider": "lsq"},
+    )
     activity_event_code: int  # e.g. 212 — configured per LSQ tenant
     note: str                 # supports {{var}} substitution against payload
     fields: list[dict[str, Any]] = Field(default_factory=list)
@@ -35,8 +44,11 @@ class _Handler:
     category = "action"
 
     async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
-        if ctx.services.lsq is None:
-            raise RuntimeError("crm.lsq_log_activity requires LsqWriter")
+        if ctx.connections is None:
+            raise RuntimeError(
+                "crm.lsq_log_activity requires ctx.connections — wire ConnectionResolver in run_handler"
+            )
+        writer = await ctx.connections.lsq(config.connection_id)
 
         success: list[RecipientOutcome] = []
         failed: list[RecipientOutcome] = []
@@ -66,7 +78,7 @@ class _Handler:
                 )
                 continue
             try:
-                await ctx.services.lsq.log_activity(
+                await writer.log_activity(
                     prospect_id=rid,
                     activity_event=config.activity_event_code,
                     note=note,

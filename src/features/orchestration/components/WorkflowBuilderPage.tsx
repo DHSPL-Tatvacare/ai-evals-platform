@@ -1,7 +1,11 @@
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { LoadingState } from '@/components/ui/LoadingState';
+import { PageSurface } from '@/components/ui/PageSurface';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { ApiError } from '@/services/api/client';
 import { getWorkflow, listVersions } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
@@ -13,9 +17,18 @@ import { WorkflowHeaderBar } from './WorkflowHeaderBar';
 
 export function WorkflowBuilderPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
+  const { icon, title } = usePageMetadata('campaigns');
   const reset = useWorkflowBuilderStore((s) => s.reset);
   const setMetadata = useWorkflowBuilderStore((s) => s.setMetadata);
   const hydrate = useWorkflowBuilderStore((s) => s.hydrate);
+  const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  const clearSelection = useWorkflowBuilderStore((s) => s.clearSelection);
+  const pendingDeleteNodeId = useWorkflowBuilderStore((s) => s.pendingDeleteNodeId);
+  const cancelDeleteNode = useWorkflowBuilderStore((s) => s.cancelDeleteNode);
+  const removeNode = useWorkflowBuilderStore((s) => s.removeNode);
+  const pendingDeleteNode = useWorkflowBuilderStore((s) =>
+    s.nodes.find((n) => n.id === s.pendingDeleteNodeId) ?? null,
+  );
 
   useEffect(() => {
     if (!workflowId) return;
@@ -54,18 +67,59 @@ export function WorkflowBuilderPage() {
     };
   }, [workflowId, reset, setMetadata, hydrate]);
 
+  // ESC clears selection so the inspector unmounts. The pane click handler
+  // covers the canvas-click case (see Canvas.tsx).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedNodeId !== null) clearSelection();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedNodeId, clearSelection]);
+
   if (!workflowId) return <LoadingState />;
 
   return (
-    <div className="flex h-full flex-col">
+    <>
+    <PageSurface icon={icon} title={title} showHeader={false} bleed>
       <WorkflowHeaderBar />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Palette />
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <Canvas />
         </div>
-        <NodeConfigPanel />
+        <AnimatePresence initial={false}>
+          {selectedNodeId !== null ? (
+            <motion.div
+              key="inspector"
+              initial={{ x: 16, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 16, opacity: 0 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full flex-shrink-0"
+            >
+              <NodeConfigPanel />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
-    </div>
+    </PageSurface>
+    <ConfirmDialog
+      isOpen={pendingDeleteNodeId !== null}
+      onClose={cancelDeleteNode}
+      onConfirm={() => {
+        if (pendingDeleteNodeId) removeNode(pendingDeleteNodeId);
+        cancelDeleteNode();
+      }}
+      title="Remove node from canvas?"
+      description={
+        pendingDeleteNode
+          ? `Remove "${(pendingDeleteNode.data?.label as string) ?? pendingDeleteNode.type}" and any edges connected to it. This affects the draft only — the change is undone if you reload without saving.`
+          : ''
+      }
+      confirmLabel="Remove"
+      variant="danger"
+    />
+    </>
   );
 }

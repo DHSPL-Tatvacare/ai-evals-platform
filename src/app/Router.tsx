@@ -46,6 +46,7 @@ const WorkflowListPage = lazyWithRetry(() => import('@/features/orchestration/co
 const WorkflowBuilderPage = lazyWithRetry(() => import('@/features/orchestration/components/WorkflowBuilderPage').then(m => ({ default: m.WorkflowBuilderPage })));
 const InsideSalesCampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/components/InsideSalesCampaignRunsPage').then(m => ({ default: m.InsideSalesCampaignRunsPage })));
 const RunDetailPage = lazyWithRetry(() => import('@/features/orchestration/components/RunDetailPage').then(m => ({ default: m.RunDetailPage })));
+const ConnectionsPage = lazyWithRetry(() => import('@/features/orchestration/components/connections/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
 
 const ROUTE_FALLBACK = <LoadingState />;
 
@@ -175,6 +176,7 @@ export function Router() {
             <Route path="/inside-sales/orchestration/workflows/:workflowId" element={<Suspense fallback={ROUTE_FALLBACK}><WorkflowBuilderPage /></Suspense>} />
             <Route path={routes.insideSales.campaignRuns} element={<Suspense fallback={ROUTE_FALLBACK}><InsideSalesCampaignRunsPage /></Suspense>} />
             <Route path="/inside-sales/orchestration/runs/:runId" element={<Suspense fallback={ROUTE_FALLBACK}><RunDetailPage /></Suspense>} />
+            <Route path={routes.insideSales.connections} element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><ConnectionsPage /></Suspense></RequirePermission>} />
           </Route>
 
           {/* Admin routes */}

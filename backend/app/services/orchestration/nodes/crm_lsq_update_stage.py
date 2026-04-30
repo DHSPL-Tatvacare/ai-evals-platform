@@ -1,7 +1,15 @@
-"""crm.lsq_update_stage — sets ProspectStage on each recipient via LsqWriter."""
+"""crm.lsq_update_stage — sets ProspectStage on each recipient via LsqWriter.
+
+Phase 10 commit 2: per-tenant LSQ credentials come from
+``ctx.connections.lsq(config.connection_id)``; the resolver builds an
+``LsqWriter`` bound to the decrypted config. Existing module-level
+``lsq_client`` rate limiter is reused via the writer.
+"""
 from __future__ import annotations
 
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, Field
 
 from app.services.orchestration.integrations.lsq import LsqWriteError
 from app.services.orchestration.node_protocol import (
@@ -13,6 +21,10 @@ from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    connection_id: uuid.UUID = Field(
+        ...,
+        json_schema_extra={"x-type": "connection_picker", "x-provider": "lsq"},
+    )
     target_stage: str  # e.g. "Slot Confirmed"
 
 
@@ -24,8 +36,11 @@ class _Handler:
     category = "action"
 
     async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
-        if ctx.services.lsq is None:
-            raise RuntimeError("crm.lsq_update_stage requires LsqWriter")
+        if ctx.connections is None:
+            raise RuntimeError(
+                "crm.lsq_update_stage requires ctx.connections — wire ConnectionResolver in run_handler"
+            )
+        writer = await ctx.connections.lsq(config.connection_id)
 
         success: list[RecipientOutcome] = []
         failed: list[RecipientOutcome] = []
@@ -47,7 +62,7 @@ class _Handler:
                 )
                 continue
             try:
-                await ctx.services.lsq.update_stage(prospect_id=rid, stage=config.target_stage)
+                await writer.update_stage(prospect_id=rid, stage=config.target_stage)
                 await ctx.update_action_result(
                     r.action_id, status="success",
                     response={"stage": config.target_stage},

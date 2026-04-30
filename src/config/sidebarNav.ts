@@ -13,6 +13,7 @@ import {
   DollarSign,
   CalendarClock,
   Workflow,
+  Plug,
 } from 'lucide-react';
 import { routes } from './routes';
 import type { AppId } from '@/types';
@@ -49,6 +50,7 @@ const INSIDE_SALES_NAV: SidebarNavItem[] = [
   { to: routes.insideSales.evaluators, icon: FileText, label: 'Evaluators' },
   { to: routes.insideSales.runs, icon: ListChecks, label: 'Runs' },
   { to: routes.insideSales.campaigns, icon: Workflow, label: 'Campaigns' },
+  { to: routes.insideSales.connections, icon: Plug, label: 'Connections' },
   { to: routes.insideSales.logs, icon: ScrollText, label: 'Logs' },
   { to: routes.insideSales.analytics, icon: ChartArea, label: 'Analytics' },
 ];

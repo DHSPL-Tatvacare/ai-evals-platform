@@ -4,6 +4,12 @@ import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { cn } from '@/utils';
 
+import { ConnectionPicker } from './connections/ConnectionPicker';
+import {
+  VariableMappingField,
+  type VariableMapping,
+} from './VariableMappingField';
+
 interface JsonSchemaProperty {
   type?: string;
   title?: string;
@@ -13,6 +19,15 @@ interface JsonSchemaProperty {
   items?: JsonSchemaProperty;
   properties?: Record<string, JsonSchemaProperty>;
   required?: string[];
+  /** Backend-emitted hint: render as a password input. On edit forms (when
+   *  `secretsOptional` is true) blanks are interpreted as "leave the stored
+   *  value unchanged" and never submitted. */
+  'x-secret'?: boolean;
+  /** Backend-emitted hint: swap the default renderer for a specialised
+   *  field. Currently `connection_picker` and `variable_mapping_list`. */
+  'x-type'?: string;
+  'x-provider'?: string;
+  'x-providers'?: string[];
 }
 
 export interface JsonSchema extends JsonSchemaProperty {
@@ -27,9 +42,28 @@ interface Props {
    *  hide source-node fields like ``next_node_id`` whose values come from the
    *  visual graph at save-time, not from manual entry. */
   hiddenFields?: ReadonlySet<string>;
+  /** Required by `connection_picker` fields so they can list connections
+   *  scoped to the current app. Surfaces from the page's app context. */
+  appId?: string;
+  /** When true, blank `x-secret` inputs render with a "leave blank to keep
+   *  current value" placeholder and are not submitted on change. Used by
+   *  ConnectionForm in edit mode. */
+  secretsOptional?: boolean;
+  /** Connection id used by `variable_mapping_list` fields to introspect
+   *  agent variables. Optional — the field falls back to free-text input
+   *  when no connection has been selected yet. */
+  connectionIdForVariables?: string;
 }
 
-export function DynamicConfigForm({ schema, value, onChange, hiddenFields }: Props) {
+export function DynamicConfigForm({
+  schema,
+  value,
+  onChange,
+  hiddenFields,
+  appId,
+  secretsOptional,
+  connectionIdForVariables,
+}: Props) {
   if (!schema?.properties) return null;
   const required = new Set(schema.required ?? []);
 
@@ -64,6 +98,9 @@ export function DynamicConfigForm({ schema, value, onChange, hiddenFields }: Pro
               fieldValue={fieldValue}
               label={label}
               onChange={handleField}
+              appId={appId}
+              secretsOptional={secretsOptional}
+              connectionIdForVariables={connectionIdForVariables}
             />
           </div>
         );
@@ -86,6 +123,9 @@ interface FieldRendererProps {
   fieldValue: unknown;
   label: string;
   onChange: (key: string, value: unknown) => void;
+  appId?: string;
+  secretsOptional?: boolean;
+  connectionIdForVariables?: string;
 }
 
 function FieldRenderer({
@@ -95,7 +135,78 @@ function FieldRenderer({
   fieldValue,
   label,
   onChange,
+  appId,
+  secretsOptional,
+  connectionIdForVariables,
 }: FieldRendererProps) {
+  // Specialised x-type renderers run before the generic type/enum
+  // dispatch so they can override the default password / array behavior.
+  if (prop['x-type'] === 'connection_picker') {
+    if (!appId) {
+      return (
+        <p className="text-xs text-[var(--color-error)]">
+          Connection picker requires an app context.
+        </p>
+      );
+    }
+    const providers = prop['x-providers'];
+    const provider = prop['x-provider'];
+    const valueStr = typeof fieldValue === 'string' ? fieldValue : '';
+    if (providers && providers.length > 0) {
+      return (
+        <ConnectionPicker
+          appId={appId}
+          providers={providers}
+          value={valueStr}
+          onChange={(next) => onChange(fieldKey, next)}
+        />
+      );
+    }
+    return (
+      <ConnectionPicker
+        appId={appId}
+        provider={provider ?? ''}
+        value={valueStr}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  if (prop['x-type'] === 'variable_mapping_list') {
+    return (
+      <VariableMappingField
+        value={Array.isArray(fieldValue) ? (fieldValue as VariableMapping[]) : []}
+        onChange={(next) => onChange(fieldKey, next)}
+        connectionId={connectionIdForVariables}
+      />
+    );
+  }
+  if (prop['x-secret']) {
+    // For edit forms (`secretsOptional`), an empty submission means "leave
+    // the stored value unchanged" — we never push the empty string back to
+    // the parent, which would otherwise overwrite the stored credential.
+    return (
+      <Input
+        id={fieldId}
+        type="password"
+        autoComplete="new-password"
+        placeholder={
+          secretsOptional ? 'Leave blank to keep current value' : '••••••••'
+        }
+        value={typeof fieldValue === 'string' ? fieldValue : ''}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (secretsOptional && next === '') {
+            // Surface as undefined so the parent strips this key from the
+            // PATCH body. The form submitter is responsible for honouring
+            // the convention.
+            onChange(fieldKey, undefined);
+            return;
+          }
+          onChange(fieldKey, next);
+        }}
+      />
+    );
+  }
   if (prop.enum) {
     return (
       <Select
@@ -145,6 +256,9 @@ function FieldRenderer({
           schema={prop as JsonSchema}
           value={(fieldValue as Record<string, unknown>) ?? {}}
           onChange={(next) => onChange(fieldKey, next)}
+          appId={appId}
+          secretsOptional={secretsOptional}
+          connectionIdForVariables={connectionIdForVariables}
         />
       </div>
     );

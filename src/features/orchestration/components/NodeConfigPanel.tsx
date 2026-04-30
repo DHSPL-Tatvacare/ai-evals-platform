@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { X } from 'lucide-react';
 
 import {
   isSourceNodeType,
@@ -15,6 +16,7 @@ export function NodeConfigPanel() {
   );
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
   const updateConfig = useWorkflowBuilderStore((s) => s.updateNodeConfig);
+  const clearSelection = useWorkflowBuilderStore((s) => s.clearSelection);
 
   const hiddenFields = useMemo<ReadonlySet<string> | undefined>(() => {
     if (!node) return undefined;
@@ -25,9 +27,20 @@ export function NodeConfigPanel() {
     return isSourceNodeType(node.type) ? SOURCE_HIDDEN_FIELDS : undefined;
   }, [node]);
 
+  const closeButton = (
+    <button
+      type="button"
+      onClick={clearSelection}
+      aria-label="Close inspector"
+      className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+    >
+      <X className="h-3.5 w-3.5" />
+    </button>
+  );
+
   if (!node) {
     return (
-      <div className="flex h-full w-80 items-center justify-center border-l border-[var(--border-default)] p-4 text-sm text-[var(--text-secondary)]">
+      <div className="flex h-full w-80 items-center justify-center border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
         Select a node to edit its config.
       </div>
     );
@@ -35,16 +48,26 @@ export function NodeConfigPanel() {
   const desc = palette.find((p) => p.nodeType === node.type);
   if (!desc) {
     return (
-      <div className="w-80 border-l border-[var(--border-default)] p-4 text-sm text-[var(--text-secondary)]">
-        Unknown node type: {node.type}
+      <div className="flex h-full w-80 flex-col border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <span>Unknown node type: {node.type}</span>
+          {closeButton}
+        </div>
       </div>
     );
   }
   return (
-    <div className="flex h-full w-80 flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] p-4">
-      <div>
-        <div className="font-medium text-[var(--text-primary)]">{desc.label}</div>
-        <div className="text-xs text-[var(--text-secondary)]">{desc.nodeType}</div>
+    <div className="flex h-full w-80 flex-col gap-3 overflow-y-auto border-l border-[var(--border-subtle)] p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate font-medium text-[var(--text-primary)]">
+            {desc.label}
+          </div>
+          <div className="truncate text-xs text-[var(--text-secondary)]">
+            {desc.nodeType}
+          </div>
+        </div>
+        {closeButton}
       </div>
       {isSourceNodeType(node.type) && (
         <p className="rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
@@ -58,6 +81,12 @@ export function NodeConfigPanel() {
         value={node.config}
         onChange={(next) => updateConfig(node.id, next)}
         hiddenFields={hiddenFields}
+        appId="inside-sales"
+        connectionIdForVariables={
+          typeof node.config.connection_id === 'string'
+            ? node.config.connection_id
+            : undefined
+        }
       />
     </div>
   );

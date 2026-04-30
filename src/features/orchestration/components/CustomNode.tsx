@@ -1,15 +1,8 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import { cn } from '@/utils';
-
-const CATEGORY_COLOR: Record<string, string> = {
-  source: 'var(--color-success)',
-  filter: 'var(--color-success)',
-  logic: 'var(--color-warning)',
-  action: 'var(--color-info)',
-  escalation: 'var(--color-error)',
-  sink: 'var(--text-secondary)',
-};
+import { getCategoryDef } from '@/features/orchestration/config/categories';
+import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import { NodeCard } from './NodeCard';
 
 export type NodeOverlayStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
@@ -22,6 +15,7 @@ export interface CustomNodeData extends Record<string, unknown> {
   label: string;
   nodeType: string;
   category: string;
+  description?: string;
   outputEdges: string[];
   /** Optional run-view overlay. When present, renders a status pill +
    *  cohort-size badge. Set by the run canvas only — never the builder. */
@@ -60,6 +54,7 @@ function asCustomData(value: unknown): CustomNodeData {
     label: typeof v.label === 'string' ? v.label : fallback.label,
     nodeType: typeof v.nodeType === 'string' ? v.nodeType : fallback.nodeType,
     category: typeof v.category === 'string' ? v.category : fallback.category,
+    description: typeof v.description === 'string' ? v.description : undefined,
     outputEdges: Array.isArray(v.outputEdges)
       ? (v.outputEdges as unknown[]).filter((x): x is string => typeof x === 'string')
       : fallback.outputEdges,
@@ -83,40 +78,55 @@ const OVERLAY_STATUS_LABEL: Record<NodeOverlayStatus, string> = {
   skipped: 'Skipped',
 };
 
-export function CustomNode({ data: rawData, selected }: NodeProps) {
+const HANDLE_BASE: React.CSSProperties = {
+  width: 12,
+  height: 6,
+  borderRadius: 999,
+  border: 0,
+};
+
+export function CustomNode({ id, data: rawData, selected }: NodeProps) {
   const data = asCustomData(rawData);
-  const color = CATEGORY_COLOR[data.category] ?? 'var(--text-primary)';
+  const cat = getCategoryDef(data.category);
   const outputs = data.outputEdges.length > 0 ? data.outputEdges : ['default'];
   const overlay = data.overlay;
-  return (
-    <div
-      className={cn(
-        'min-w-44 rounded-[var(--radius-default)] border-2 bg-[var(--bg-elevated)] px-3 py-2 text-sm shadow-sm',
-        selected && 'ring-2 ring-[var(--color-brand-accent)]',
-      )}
-      style={{ borderColor: color }}
+
+  // Run canvas (overlay present) is read-only; only the builder canvas
+  // exposes the per-node delete affordance, which routes through a
+  // confirm dialog in the builder page (see WorkflowBuilderPage).
+  const onDelete = overlay
+    ? undefined
+    : () => useWorkflowBuilderStore.getState().requestDeleteNode(id);
+
+  const barTrailing = overlay ? (
+    <span
+      className="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+      style={{
+        borderColor: OVERLAY_STATUS_COLOR[overlay.status],
+        color: OVERLAY_STATUS_COLOR[overlay.status],
+      }}
     >
-      <Handle type="target" position={Position.Top} style={{ background: color }} />
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-medium text-[var(--text-primary)]">{data.label}</div>
-        {overlay ? (
-          <span
-            className="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{
-              borderColor: OVERLAY_STATUS_COLOR[overlay.status],
-              color: OVERLAY_STATUS_COLOR[overlay.status],
-            }}
-          >
-            {OVERLAY_STATUS_LABEL[overlay.status]}
-          </span>
-        ) : null}
+      {OVERLAY_STATUS_LABEL[overlay.status]}
+    </span>
+  ) : null;
+
+  const footer =
+    overlay?.cohortSize !== undefined ? (
+      <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+        Cohort:{' '}
+        <span className="font-semibold text-[var(--text-primary)]">
+          {overlay.cohortSize}
+        </span>
       </div>
-      <div className="text-xs text-[var(--text-secondary)]">{data.nodeType}</div>
-      {overlay?.cohortSize !== undefined ? (
-        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Cohort: <span className="font-semibold text-[var(--text-primary)]">{overlay.cohortSize}</span>
-        </div>
-      ) : null}
+    ) : null;
+
+  const handles = (
+    <>
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ ...HANDLE_BASE, background: cat.accentVar, top: -3 }}
+      />
       {outputs.map((label, idx) => (
         <Handle
           key={label}
@@ -124,11 +134,28 @@ export function CustomNode({ data: rawData, selected }: NodeProps) {
           position={Position.Bottom}
           id={label}
           style={{
-            background: color,
+            ...HANDLE_BASE,
+            background: cat.accentVar,
+            bottom: -3,
             left: `${((idx + 1) / (outputs.length + 1)) * 100}%`,
           }}
         />
       ))}
-    </div>
+    </>
+  );
+
+  return (
+    <NodeCard
+      variant="canvas"
+      label={data.label}
+      description={data.description}
+      fallbackSubtitle={data.nodeType}
+      category={data.category}
+      selected={Boolean(selected)}
+      barTrailing={barTrailing}
+      footer={footer}
+      handles={handles}
+      onDelete={onDelete}
+    />
   );
 }

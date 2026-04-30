@@ -1,6 +1,10 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { routes } from '@/config/routes';
 import { ApiError } from '@/services/api/client';
 import {
   createDraftVersion,
@@ -18,6 +22,7 @@ function describeError(e: unknown, fallback: string): string {
 }
 
 export function WorkflowHeaderBar() {
+  const navigate = useNavigate();
   const workflowId = useWorkflowBuilderStore((s) => s.workflowId);
   const versionId = useWorkflowBuilderStore((s) => s.versionId);
   const name = useWorkflowBuilderStore((s) => s.workflowName);
@@ -28,6 +33,15 @@ export function WorkflowHeaderBar() {
   );
 
   const [busy, setBusy] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+  const handleBack = () => {
+    if (dirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(routes.insideSales.campaigns);
+  };
 
   const saveDraft = async (): Promise<string | null> => {
     if (!workflowId || !workflowType) return null;
@@ -109,8 +123,18 @@ export function WorkflowHeaderBar() {
   const runDisabled = busy || !isPublished;
 
   return (
-    <div className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-2">
+    <>
+    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2">
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex h-7 shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+          aria-label="Back to campaigns"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span>Campaigns</span>
+        </button>
         <span className="font-medium text-[var(--text-primary)]">
           {name || 'Untitled Workflow'}
         </span>
@@ -133,6 +157,20 @@ export function WorkflowHeaderBar() {
         </Button>
       </div>
     </div>
+    <ConfirmDialog
+      isOpen={showLeaveConfirm}
+      onClose={() => setShowLeaveConfirm(false)}
+      onConfirm={() => {
+        setShowLeaveConfirm(false);
+        navigate(routes.insideSales.campaigns);
+      }}
+      title="Discard unsaved edits?"
+      description="You have unsaved changes to this workflow. Leaving the builder will lose them — save the draft first if you want to keep them."
+      confirmLabel="Leave"
+      cancelLabel="Stay"
+      variant="warning"
+    />
+    </>
   );
 }
 

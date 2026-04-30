@@ -38,7 +38,14 @@ class ServiceRegistry:
 
 @dataclass
 class NodeContext:
-    """Per-node-execution context handed to handler.execute()."""
+    """Per-node-execution context handed to handler.execute().
+
+    ``connections`` is a tenant+app-scoped ``ConnectionResolver`` that
+    resolves credential-backed CRM nodes (WATI, Bolna, LSQ, SMS) by
+    ``connection_id`` against ``orchestration.provider_connections``
+    (Phase 10 commit 2). ``services`` only carries ``clinical_outbox``
+    today — every other channel routes through ``connections``.
+    """
 
     db: AsyncSession
     tenant_id: uuid.UUID
@@ -50,6 +57,7 @@ class NodeContext:
     current_node_id: str
     services: ServiceRegistry
     job_id: Optional[uuid.UUID]
+    connections: Any = None
 
     def idempotency_key(self, recipient_id: str, *parts: str) -> str:
         return _gen_idempotency_key(

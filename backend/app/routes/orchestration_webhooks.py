@@ -2,11 +2,19 @@
 
 These routes intentionally OMIT ``Depends(get_auth_context)``: this repo uses
 route-level auth, so omitting the dependency is the auth-allowlist mechanism.
-The only authentication is a URL-segment secret compared via ``secrets.compare_digest``.
 
-v1 resolves tenant/app from a single env-configured pair
-(``ORCHESTRATION_DEFAULT_TENANT_ID`` / ``ORCHESTRATION_DEFAULT_APP_ID``) per
-deployment. Multi-tenant secret→tenant lookup is a v2 feature.
+Phase 10 commit 2 routes inbound provider callbacks (Bolna voice, WATI
+WhatsApp) per-connection: the trailing URL segment is the
+``orchestration.provider_connections.webhook_token`` for an active row,
+which carries its own ``tenant_id`` + ``app_id``. Revoking the
+connection (``active=False``) makes the URL dead instantly. Unknown
+tokens fail closed with 404.
+
+LSQ does not issue per-connection callbacks — its webhook is for inbound
+event ingest, not status callbacks — and ``provider_specs`` marks
+``supports_webhook=False`` for LSQ. The LSQ + generic event routes
+therefore continue to authenticate via the original env-shared secret +
+``ORCHESTRATION_DEFAULT_TENANT_ID`` resolver.
 """
 from __future__ import annotations
 
@@ -15,10 +23,12 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models.provider_connection import ProviderConnection
 
 
 router = APIRouter(prefix="/api/orchestration/webhooks", tags=["orchestration-webhooks"])
@@ -31,7 +41,7 @@ def _check_secret(received: str, expected: str) -> None:
 
 
 def _resolve_tenant_for_provider() -> tuple[uuid.UUID, str]:
-    """v1: single tenant + app per deployment. Override per-deployment via env."""
+    """Env-secret fallback used by LSQ + generic-event webhooks (no per-connection token)."""
     try:
         tenant_id = uuid.UUID(settings.ORCHESTRATION_DEFAULT_TENANT_ID)
     except (ValueError, AttributeError):
@@ -39,28 +49,48 @@ def _resolve_tenant_for_provider() -> tuple[uuid.UUID, str]:
     return tenant_id, settings.ORCHESTRATION_DEFAULT_APP_ID
 
 
-@router.post("/wati/{secret}", status_code=200)
+async def _resolve_connection_by_token(
+    db: AsyncSession, *, provider: str, token: str,
+) -> tuple[uuid.UUID, str]:
+    """Look up an active connection by ``(provider, webhook_token)``.
+
+    Returns ``(tenant_id, app_id)`` on success. Raises 404 when the
+    token is missing, unknown, mapped to a different provider, or the
+    connection is inactive.
+    """
+    if not token:
+        raise HTTPException(status_code=404, detail="not found")
+    row = await db.scalar(
+        select(ProviderConnection).where(
+            ProviderConnection.webhook_token == token,
+            ProviderConnection.active.is_(True),
+        )
+    )
+    if row is None or row.provider != provider:
+        raise HTTPException(status_code=404, detail="not found")
+    return row.tenant_id, row.app_id
+
+
+@router.post("/wati/{token}", status_code=200)
 async def wati_webhook(
-    secret: str = Path(...),
+    token: str = Path(...),
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    _check_secret(secret, settings.WATI_WEBHOOK_SECRET)
-    tenant_id, app_id = _resolve_tenant_for_provider()
+    tenant_id, app_id = await _resolve_connection_by_token(db, provider="wati", token=token)
     from app.services.orchestration.webhook_handlers.wati import handle_wati_event
     await handle_wati_event(db, tenant_id=tenant_id, app_id=app_id, payload=payload)
     await db.commit()
     return {"status": "ok"}
 
 
-@router.post("/bolna/{secret}", status_code=200)
+@router.post("/bolna/{token}", status_code=200)
 async def bolna_webhook(
-    secret: str = Path(...),
+    token: str = Path(...),
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    _check_secret(secret, settings.BOLNA_WEBHOOK_SECRET)
-    tenant_id, app_id = _resolve_tenant_for_provider()
+    tenant_id, app_id = await _resolve_connection_by_token(db, provider="bolna", token=token)
     from app.services.orchestration.webhook_handlers.bolna import handle_bolna_event
     await handle_bolna_event(db, tenant_id=tenant_id, app_id=app_id, payload=payload)
     await db.commit()
@@ -76,7 +106,8 @@ async def lsq_webhook(
     # LSQ has its OWN secret. Do not fall back to WATI_WEBHOOK_SECRET — that
     # would let anyone holding the WATI secret hit the LSQ trust boundary
     # and trigger LSQ-event workflows. ``_check_secret`` fails closed (404)
-    # when ``LSQ_WEBHOOK_SECRET`` is unset.
+    # when ``LSQ_WEBHOOK_SECRET`` is unset. LSQ is intentionally NOT
+    # per-connection — provider_specs marks supports_webhook=False.
     _check_secret(secret, settings.LSQ_WEBHOOK_SECRET)
     tenant_id, app_id = _resolve_tenant_for_provider()
     from app.services.orchestration.webhook_handlers.generic_event import EventPayloadContractError

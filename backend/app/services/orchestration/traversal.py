@@ -45,6 +45,7 @@ class RunExecutor:
         workflow: Workflow,
         job_id: Optional[uuid.UUID],
         services: Optional[ServiceRegistry] = None,
+        connections: Optional[Any] = None,
     ) -> None:
         self.db = db
         self.run = run
@@ -52,6 +53,7 @@ class RunExecutor:
         self.workflow = workflow
         self.job_id = job_id
         self.services = services or ServiceRegistry()
+        self.connections = connections
 
         nodes = version.definition.get("nodes", [])
         edges = version.definition.get("edges", [])
@@ -155,6 +157,7 @@ class RunExecutor:
             current_node_id=node_id,
             services=self.services,
             job_id=self.job_id,
+            connections=self.connections,
         )
         cohort_stream = CohortStream(cohort_payloads)
 

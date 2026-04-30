@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { FilterPills } from '@/components/ui/FilterPills';
+import { PageSurface } from '@/components/ui/PageSurface';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { routes } from '@/config/routes';
-import type { Workflow, WorkflowType } from '@/features/orchestration/types';
+import type { Workflow } from '@/features/orchestration/types';
 import { ApiError } from '@/services/api/client';
 import { listSystemWorkflows, listWorkflows } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
@@ -14,118 +17,40 @@ import { CreateWorkflowDialog } from './CreateWorkflowDialog';
 
 const APP_ID = 'inside-sales';
 
-const FILTER_OPTIONS: Array<{ id: 'all' | WorkflowType; label: string }> = [
+type SourceFilter = 'all' | 'custom' | 'platform';
+
+const SOURCE_FILTERS: Array<{ id: SourceFilter; label: string }> = [
   { id: 'all', label: 'All' },
-  { id: 'crm', label: 'CRM' },
-  { id: 'clinical', label: 'Clinical' },
+  { id: 'custom', label: 'Custom' },
+  { id: 'platform', label: 'Platform' },
 ];
 
-const tenantColumns: ColumnDef<Workflow>[] = [
-  {
-    key: 'name',
-    header: 'Name',
-    render: (r) => <span className="text-[var(--text-primary)]">{r.name}</span>,
-  },
-  {
-    key: 'workflowType',
-    header: 'Type',
-    render: (r) => (
-      <span className="text-[var(--text-secondary)] uppercase">{r.workflowType}</span>
-    ),
-  },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (r) =>
-      r.currentPublishedVersionId ? (
-        <span className="text-[var(--color-success)]">Published</span>
-      ) : (
-        <span className="text-[var(--text-secondary)]">Draft</span>
-      ),
-  },
-  {
-    key: 'updatedAt',
-    header: 'Updated',
-    render: (r) => (
-      <span className="text-[var(--text-secondary)]">
-        {new Date(r.updatedAt).toLocaleString()}
-      </span>
-    ),
-  },
-];
+interface UnifiedRow extends Workflow {
+  source: 'custom' | 'platform';
+}
 
-const systemColumns = (
-  onClone: (workflow: Workflow) => void,
-): ColumnDef<Workflow>[] => [
-  {
-    key: 'name',
-    header: 'Name',
-    render: (workflow) => (
-      <div className="flex flex-col gap-1">
-        <span className="text-[var(--text-primary)]">{workflow.name}</span>
-        {workflow.description ? (
-          <span className="text-xs text-[var(--text-secondary)]">{workflow.description}</span>
-        ) : null}
-      </div>
-    ),
-  },
-  {
-    key: 'workflowType',
-    header: 'Type',
-    render: (workflow) => (
-      <span className="text-[var(--text-secondary)] uppercase">{workflow.workflowType}</span>
-    ),
-  },
-  {
-    key: 'slug',
-    header: 'Slug',
-    render: (workflow) => (
-      <span className="font-mono text-xs text-[var(--text-secondary)]">{workflow.slug}</span>
-    ),
-  },
-  {
-    key: 'updatedAt',
-    header: 'Updated',
-    render: (workflow) => (
-      <span className="text-[var(--text-secondary)]">
-        {new Date(workflow.updatedAt).toLocaleString()}
-      </span>
-    ),
-  },
-  {
-    key: '_clone',
-    header: '',
-    width: '140px',
-    render: (workflow) => (
-      <Button
-        size="sm"
-        onClick={(event) => {
-          event.stopPropagation();
-          onClone(workflow);
-        }}
-      >
-        Clone for Tenant
-      </Button>
-    ),
-  },
-];
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
 
 export function WorkflowListPage() {
+  const { icon, title } = usePageMetadata('campaigns');
   const [tenantRows, setTenantRows] = useState<Workflow[]>([]);
   const [systemRows, setSystemRows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [activeType, setActiveType] = useState<'all' | WorkflowType>('all');
+  const [activeSource, setActiveSource] = useState<SourceFilter>('all');
   const [cloneSource, setCloneSource] = useState<Workflow | null>(null);
   const navigate = useNavigate();
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const workflowType = activeType === 'all' ? undefined : activeType;
       const [tenantWorkflows, systemWorkflows] = await Promise.all([
-        listWorkflows({ appId: APP_ID, workflowType }),
-        listSystemWorkflows({ appId: APP_ID, workflowType }),
+        listWorkflows({ appId: APP_ID }),
+        listSystemWorkflows({ appId: APP_ID }),
       ]);
       setTenantRows(tenantWorkflows);
       setSystemRows(systemWorkflows);
@@ -140,50 +65,138 @@ export function WorkflowListPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeType]);
+  }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  const allRows = useMemo<UnifiedRow[]>(() => {
+    const merged: UnifiedRow[] = [
+      ...tenantRows.map((w) => ({ ...w, source: 'custom' as const })),
+      ...systemRows.map((w) => ({ ...w, source: 'platform' as const })),
+    ];
+    merged.sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
+    return merged;
+  }, [tenantRows, systemRows]);
+
+  const visibleRows = useMemo(() => {
+    if (activeSource === 'all') return allRows;
+    return allRows.filter((r) => r.source === activeSource);
+  }, [allRows, activeSource]);
+
+  const columns: ColumnDef<UnifiedRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[var(--text-primary)]">{r.name}</span>
+          {r.description ? (
+            <span className="text-xs text-[var(--text-secondary)]">{r.description}</span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: 'source',
+      header: 'Source',
+      render: (r) =>
+        r.source === 'custom' ? (
+          <Badge variant="success" size="sm">Custom</Badge>
+        ) : (
+          <Badge variant="neutral" size="sm">Platform</Badge>
+        ),
+    },
+    {
+      key: 'workflowType',
+      header: 'Type',
+      render: (r) => (
+        <span className="uppercase text-[var(--text-secondary)]">{r.workflowType}</span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) =>
+        r.source === 'platform' ? (
+          <span className="text-[var(--text-secondary)]">—</span>
+        ) : r.currentPublishedVersionId ? (
+          <span className="text-[var(--color-success)]">Published</span>
+        ) : (
+          <span className="text-[var(--text-secondary)]">Draft</span>
+        ),
+    },
+    {
+      key: 'updatedAt',
+      header: 'Updated',
+      render: (r) => (
+        <span className="text-[var(--text-secondary)]">{fmtDate(r.updatedAt)}</span>
+      ),
+    },
+    {
+      key: '_actions',
+      header: '',
+      width: '180px',
+      render: (r) =>
+        r.source === 'platform' ? (
+          <Button
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              setCloneSource(r);
+            }}
+          >
+            Clone for Tenant
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(routes.insideSales.campaignBuilder(r.id));
+            }}
+          >
+            Edit
+          </Button>
+        ),
+    },
+  ];
+
   return (
-    <div className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Workflows</h1>
-        <Button onClick={() => setShowCreate(true)}>New Workflow</Button>
-      </div>
-      <div className="mb-3">
-        <FilterPills
-          options={FILTER_OPTIONS}
-          active={activeType}
-          onChange={(id) => setActiveType(id as 'all' | WorkflowType)}
-        />
-      </div>
-      <div className="flex flex-col gap-6">
-        <section className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="text-sm font-medium text-[var(--text-primary)]">Your Workflows</div>
-          <DataTable<Workflow>
-            data={tenantRows}
-            columns={tenantColumns}
-            keyExtractor={(workflow) => workflow.id}
+    <>
+      <PageSurface
+        icon={icon}
+        title={title}
+        filters={(
+          <FilterPills
+            options={SOURCE_FILTERS}
+            active={activeSource}
+            onChange={(id) => setActiveSource(id as SourceFilter)}
+          />
+        )}
+        actions={<Button onClick={() => setShowCreate(true)}>New Workflow</Button>}
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          <DataTable<UnifiedRow>
+            data={visibleRows}
+            columns={columns}
+            keyExtractor={(r) => `${r.source}:${r.id}`}
             loading={loading}
             emptyTitle="No workflows yet"
-            emptyDescription="Create a workflow to start designing an orchestration."
-            onRowClick={(workflow) => navigate(routes.insideSales.campaignBuilder(workflow.id))}
+            emptyDescription="Create a custom workflow or clone a platform starter to get going."
+            onRowClick={(r) => {
+              if (r.source === 'custom') {
+                navigate(routes.insideSales.campaignBuilder(r.id));
+              }
+            }}
           />
-        </section>
-        <section className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="text-sm font-medium text-[var(--text-primary)]">System Starters</div>
-          <DataTable<Workflow>
-            data={systemRows}
-            columns={systemColumns(setCloneSource)}
-            keyExtractor={(workflow) => workflow.id}
-            loading={loading}
-            emptyTitle="No system workflows available"
-            emptyDescription="System-seeded starter workflows appear here when available for your app."
-          />
-        </section>
-      </div>
+        </div>
+      </PageSurface>
       {showCreate && (
         <CreateWorkflowDialog
           onClose={() => setShowCreate(false)}
@@ -204,6 +217,6 @@ export function WorkflowListPage() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }

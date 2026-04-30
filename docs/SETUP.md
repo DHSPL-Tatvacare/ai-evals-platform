@@ -414,23 +414,38 @@ PYTHONPATH=backend python -m app.worker
 
 ---
 
-## 9. Orchestration — Tenant Rollout (AI Concierge replacement)
+## 9. Orchestration — Tenant Rollout (Connections-driven, Phase 10)
 
-The "Default MQL Concierge" workflow ships as a system seed (since Phase 8,
-2026-04-30). To enable it for a tenant:
+Provider credentials are now tenant-owned, per-account, and configured via
+the in-app **Connections** page — env vars are honoured only as a one-time
+bootstrap on first boot. To enable the seeded "Default MQL Concierge"
+workflow for a tenant:
 
-1. **Set provider credentials** (env-level, shared across tenants for now):
-   - `WATI_BASE_URL`, `WATI_TENANT_ID`, `WATI_API_TOKEN`, `WATI_WEBHOOK_SECRET`
-   - `BOLNA_BASE_URL`, `BOLNA_API_KEY`, `BOLNA_WEBHOOK_SECRET`, `BOLNA_FROM_PHONE`
-   - LSQ credentials (already wired via `LSQ_*` env vars)
-2. **Create the Bolna agent** in your Bolna dashboard. Copy the `agent_id`.
-3. **Replace `REPLACE_WITH_BOLNA_AGENT_ID`** in the cloned tenant's
-   `concierge_confirmation` template (UI: Templates → Bolna →
-   `concierge_confirmation` → edit `payload_schema.agent_id`).
-4. **Set `CONCIERGE_LSQ_ACTIVITY_EVENT_CODE`** to the LSQ activity event
-   code created in your LSQ admin UI. Update the cloned workflow's
-   `lsq_log_confirmed` node config with this number.
-5. **Clone the seeded workflow:**
+1. **Set the encryption key.** A single process-level Fernet key is
+   required. Generate with `python -c "from cryptography.fernet import
+   Fernet; print(Fernet.generate_key().decode())"` and set
+   `ORCHESTRATION_CONNECTION_KEY=<base64 fernet key>` on the backend.
+   Treat with the same rigor as `JWT_SECRET` — losing it makes every
+   stored connection unreadable.
+2. **(Optional) Set `ORCHESTRATION_PUBLIC_BASE_URL`** to your backend
+   origin (e.g. `https://api.example.com`). Used to compose full
+   webhook URLs in the connections list. Without it, the UI shows a
+   relative path the operator can prepend manually.
+3. **Open the Connections page** at
+   `/inside-sales/orchestration/connections`. Create one connection per
+   provider you intend to use:
+   - **Bolna** — paste `api_key`, `base_url` (default
+     `https://api.bolna.ai`), and your `from_phone`. The connection's
+     **Webhook URL** is shown as a copy-to-clipboard button — paste it
+     into your Bolna dashboard so call-end events route back to this
+     tenant.
+   - **WATI** — paste `base_url`, `wati_tenant_id`, `api_token`. Copy the
+     webhook URL into your WATI dashboard.
+   - **LeadSquared** — paste `access_key`, `secret_key`, `region_host`.
+     LSQ is outbound-only; no webhook URL is generated.
+   - **MSG91 / AiSensy** — fill the matching fields when needed.
+   Click **Test** on each row to verify credentials before publishing.
+4. **Clone the seeded workflow:**
    ```bash
    POST /api/orchestration/workflows/clone
    {
@@ -440,17 +455,29 @@ The "Default MQL Concierge" workflow ships as a system seed (since Phase 8,
      "targetAppId": "inside-sales"
    }
    ```
-   (or use the UI: Workflows → "Default MQL Concierge" (system) →
-   "Clone for my tenant".)
+   (or use the UI: Campaigns → row with **Platform** badge → **Clone for
+   Tenant**.) The clone strips any system-owned `connection_id`s; if any
+   were stripped the cloned workflow lands as a draft with rebind-required
+   fields highlighted in the builder.
+5. **Bind connections in the builder.** Open the cloned workflow, click
+   each `crm.*` node, and pick the matching connection from the
+   **Connection** combobox in the inspector. For Bolna calls and WATI
+   sends, expand the **Variable mappings** field to bind agent variables
+   to recipient payload fields or static values.
 6. **Configure WATI templates** in your Meta-approved WATI dashboard —
    names must match the seeded `template_name` values
    (`concierge_priority_v1`, `concierge_qualify_v1`,
    `concierge_nurture_v1`).
-7. **Set the WATI webhook URL** to
-   `https://<your-domain>/api/orchestration/webhooks/wati/<WATI_WEBHOOK_SECRET>`.
-8. **Set the Bolna webhook URL** to
-   `https://<your-domain>/api/orchestration/webhooks/bolna/<BOLNA_WEBHOOK_SECRET>`.
-9. **Add a cron trigger** to the cloned workflow: `0 9 * * *` for daily
+7. **Add a cron trigger** to the cloned workflow: `0 9 * * *` for daily
    9 AM IST runs.
-10. **Test:** click "Run Now" on the workflow, watch the run-detail page
-    via the live SSE canvas, and verify recipients move through the canvas.
+8. **Test:** click **Run Now** on the workflow, watch the run-detail
+   page via the live SSE canvas, and verify recipients move through the
+   pipeline.
+
+> **Deprecation note.** Pre-Phase-10 env vars
+> (`BOLNA_API_KEY`, `BOLNA_BASE_URL`, `BOLNA_WEBHOOK_SECRET`,
+> `BOLNA_FROM_PHONE`, `WATI_*`, `AISENSY_*`, `MSG91_*`, orchestration's
+> `LSQ_*`) are read once on first boot to seed default connections, then
+> ignored at runtime. New deployments should configure connections in the
+> UI directly — env values are advisory and will be removed in a later
+> phase.

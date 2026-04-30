@@ -23,6 +23,8 @@ EXPECTED_TABLES = {
     "workflow_run_recipient_states",
     "workflow_run_recipient_actions",
     "workflow_run_recipient_overrides",
+    # Phase 10 commit 1
+    "provider_connections",
 }
 
 
@@ -116,6 +118,8 @@ async def test_cross_schema_fks_to_platform(db_session):
         "workflow_action_templates",
         "workflow_consent_records",
         "workflow_runs",
+        # Phase 10 commit 1 — provider_connections.tenant_id → platform.tenants.id.
+        "provider_connections",
     }
     assert set(tenant_fks) == expected_fk_tables, (
         f"tenant_id FK targets mismatch. expected={expected_fk_tables}, got={set(tenant_fks)}"

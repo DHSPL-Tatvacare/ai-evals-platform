@@ -2,6 +2,22 @@
 
 The label/description map is maintained inline so a new node only needs an
 entry alongside its handler module.
+
+Phase 10 commit 1 contract: handler ``config_schema`` Pydantic models can
+declare per-field metadata via ``json_schema_extra``. Three keys are
+honoured by the frontend builder (DynamicConfigForm):
+
+  ``x-secret``    : bool — render as a password input; treat blanks on
+                    edit as "leave the stored value alone".
+  ``x-provider``  : str  — narrow the connection picker to one provider
+                    (e.g. ``crm.place_bolna_call`` → ``"bolna"``).
+  ``x-providers`` : list[str] — multi-provider picker (e.g.
+                    ``crm.send_sms`` → ``["aisensy", "msg91"]``).
+
+Pydantic v2 propagates ``json_schema_extra`` through ``model_json_schema``
+verbatim, so this module passes the schema through unchanged. Commit 2
+adds the keys to the actual handler config models when the connection_id
+fields are introduced.
 """
 from __future__ import annotations
 

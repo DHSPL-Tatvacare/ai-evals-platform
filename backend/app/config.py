@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     ORCHESTRATION_DEFAULT_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
     ORCHESTRATION_DEFAULT_APP_ID: str = "inside-sales"
 
+    # Process-level Fernet key encrypting orchestration.provider_connections
+    # config_encrypted blobs. Required — validated on startup. Loss = all
+    # tenant credentials become unreadable; back up like JWT_SECRET.
+    ORCHESTRATION_CONNECTION_KEY: str = ""
+
+    # Public webhook URL prefix used when composing per-connection webhook URLs
+    # in CRUD responses. Falls back to APP_BASE_URL when blank.
+    ORCHESTRATION_PUBLIC_BASE_URL: str = ""
+
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 100  # enforced in file upload route
     ALLOWED_UPLOAD_MIMES: str = (

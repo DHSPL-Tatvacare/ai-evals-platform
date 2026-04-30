@@ -23,6 +23,8 @@ import {
   CalendarClock,
   Users,
   HelpCircle,
+  Workflow,
+  Plug,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -58,6 +60,8 @@ export const PAGE_METADATA: Record<PageType, PageMetadataEntry> = {
   cost:               { icon: DollarSign,      title: 'Cost' },
   scheduledJobs:      { icon: CalendarClock,   title: 'Scheduled Jobs' },
   adminUsers:         { icon: Users,           title: 'Admin Users' },
+  campaigns:          { icon: Workflow,        title: 'Campaigns' },
+  connections:        { icon: Plug,            title: 'Connections' },
   chat:               { icon: MessagesSquare,  title: 'Chat' },
 };
 

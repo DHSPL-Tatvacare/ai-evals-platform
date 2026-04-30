@@ -27,14 +27,17 @@ from app.models.orchestration import (
 
 @pytest.mark.asyncio
 async def test_webhook_route_does_not_require_auth():
-    """Hitting the webhook URL without a Bearer token must NOT 401."""
+    """Hitting the webhook URL without a Bearer token must NOT 401.
+
+    Phase 10 commit 2: wati / bolna paths look up the trailing segment as
+    a per-connection ``webhook_token`` against
+    ``orchestration.provider_connections``. Unknown tokens fail closed
+    with 404 — never 401."""
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.post("/api/orchestration/webhooks/wati/wrongsecret", json={})
+        r = await client.post("/api/orchestration/webhooks/wati/wrongtoken", json={})
     assert r.status_code != 401
-    # With an empty WATI_WEBHOOK_SECRET (default in tests) ANY value is rejected
-    # by _check_secret since `expected` is falsy → 404.
     assert r.status_code == 404
 
 
@@ -48,11 +51,38 @@ def _override_db_with_session(db_session):
 
 
 @pytest.mark.asyncio
-async def test_wati_webhook_with_correct_secret_dispatches(db_session, seed_full_run, monkeypatch):
+async def test_wati_webhook_with_per_connection_token_dispatches(
+    db_session, seed_full_run, monkeypatch,
+):
+    """Phase 10 commit 2: WATI/Bolna webhooks now authenticate via the
+    per-connection ``webhook_token``. Detailed coverage (revoked /
+    unknown-token / cross-provider) lives in
+    ``test_orchestration_webhook_per_connection_unittest.py``; this test
+    verifies the route ends up persisting a wa_delivered row, exercising
+    the full happy path."""
+    import secrets as _secrets
+    from cryptography.fernet import Fernet
+
+    from app.models.provider_connection import ProviderConnection
+    from app.services.orchestration.connections import crypto
+
     run, version, workflow, node_step, tenant_id, app_id = seed_full_run
-    monkeypatch.setattr(settings, "ORCHESTRATION_DEFAULT_TENANT_ID", str(tenant_id))
-    monkeypatch.setattr(settings, "ORCHESTRATION_DEFAULT_APP_ID", app_id)
-    monkeypatch.setattr(settings, "WATI_WEBHOOK_SECRET", "shh-wati")
+    # Use monkeypatch so the key doesn't leak into subsequent tests.
+    monkeypatch.setattr(
+        "app.config.settings.ORCHESTRATION_CONNECTION_KEY",
+        Fernet.generate_key().decode(),
+    )
+
+    token = _secrets.token_urlsafe(16)
+    db_session.add(ProviderConnection(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+        provider="wati", name=f"wati-route-{uuid.uuid4().hex[:8]}",
+        config_encrypted=crypto.encrypt({
+            "base_url": "https://w", "wati_tenant_id": "1", "api_token": "t",
+        }),
+        webhook_token=token, active=True,
+        created_by=run.triggered_by_user_id or SYSTEM_USER_ID,
+    ))
 
     local_msg_id = f"lm-{uuid.uuid4().hex[:8]}"
     db_session.add(WorkflowRunRecipientAction(
@@ -71,7 +101,7 @@ async def test_wati_webhook_with_correct_secret_dispatches(db_session, seed_full
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             r = await client.post(
-                "/api/orchestration/webhooks/wati/shh-wati",
+                f"/api/orchestration/webhooks/wati/{token}",
                 json={"eventType": "sentMessageDELIVERED_v2", "localMessageId": local_msg_id},
             )
         assert r.status_code == 200, r.text
@@ -186,11 +216,15 @@ async def test_lsq_webhook_rejects_payload_without_lead_identifier(
 
 
 @pytest.mark.asyncio
-async def test_bolna_webhook_404_on_empty_secret_setting():
-    # WATI/Bolna/etc. secrets are blank by default in tests. compare_digest
-    # against an empty expected fails closed → 404.
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        r = await client.post("/api/orchestration/webhooks/bolna/anything", json={})
-    assert r.status_code == 404
+async def test_bolna_webhook_404_on_unknown_token(db_session):
+    """Phase 10 commit 2: per-connection lookup. Random token with no
+    matching ``provider_connections`` row fails closed with 404."""
+    _override_db_with_session(db_session)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post("/api/orchestration/webhooks/bolna/anything", json={})
+        assert r.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_db, None)

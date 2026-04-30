@@ -32,6 +32,15 @@ interface WorkflowBuilderState {
 
   paletteCatalog: NodeTypeDescriptor[];
   paletteLoading: boolean;
+  /** Whether the left rail is collapsed to its compact icon-only state.
+   *  Persists for the lifetime of the store instance so toggling the
+   *  inspector or panning the canvas doesn't reset the rail. */
+  paletteCollapsed: boolean;
+  /** Node id queued for deletion confirmation. The builder page renders
+   *  a `ConfirmDialog` against this slot so per-card delete buttons
+   *  never trigger a destructive action without an explicit yes. Cleared
+   *  on confirm or cancel. */
+  pendingDeleteNodeId: string | null;
 
   reset(): void;
   hydrate(definition: WorkflowDefinition): void;
@@ -45,6 +54,9 @@ interface WorkflowBuilderState {
   setCurrentPublishedVersionId(versionId: string | null): void;
   setPaletteCatalog(catalog: NodeTypeDescriptor[]): void;
   setPaletteLoading(loading: boolean): void;
+  setPaletteCollapsed(collapsed: boolean): void;
+  requestDeleteNode(nodeId: string): void;
+  cancelDeleteNode(): void;
 
   addNode(node: WorkflowDefinitionNode): void;
   updateNodePosition(nodeId: string, position: { x: number; y: number }): void;
@@ -55,6 +67,10 @@ interface WorkflowBuilderState {
   removeEdge(edgeId: string): void;
 
   setSelectedNode(nodeId: string | null): void;
+  /** Clear the current selection. Equivalent to setSelectedNode(null) but
+   *  expressed as its own action so callers (Canvas pane click, ESC handler,
+   *  inspector close button) read intent at the call site. */
+  clearSelection(): void;
   setViewport(viewport: ViewportState | null): void;
 
   toDefinition(): WorkflowDefinition;
@@ -103,6 +119,8 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
 
   paletteCatalog: [],
   paletteLoading: false,
+  paletteCollapsed: false,
+  pendingDeleteNodeId: null,
 
   reset: () =>
     set({
@@ -144,6 +162,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
 
   setPaletteCatalog: (catalog) => set({ paletteCatalog: catalog }),
   setPaletteLoading: (loading) => set({ paletteLoading: loading }),
+  setPaletteCollapsed: (collapsed) => set({ paletteCollapsed: collapsed }),
+  requestDeleteNode: (nodeId) => set({ pendingDeleteNodeId: nodeId }),
+  cancelDeleteNode: () => set({ pendingDeleteNodeId: null }),
 
   addNode: (node) =>
     set((s) => ({
@@ -184,6 +205,8 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
     })),
 
   setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
+
+  clearSelection: () => set({ selectedNodeId: null }),
 
   setViewport: (viewport) => {
     // Updating the viewport must NOT flip dirty; pan/zoom are presentation-

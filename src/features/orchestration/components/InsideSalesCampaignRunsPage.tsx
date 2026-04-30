@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { FilterPills } from '@/components/ui/FilterPills';
+import { PageSurface } from '@/components/ui/PageSurface';
+import { usePageMetadata } from '@/config/pageMetadata';
 import { routes } from '@/config/routes';
 import { listRuns, listWorkflows } from '@/services/api/orchestration';
 import type { RunStatus, Workflow, WorkflowRun } from '@/features/orchestration/types';
@@ -26,6 +28,7 @@ function fmtDate(s: string | null): string {
 /** App-owned cross-campaign run log. Filters by status. Click row → run detail. */
 export function InsideSalesCampaignRunsPage() {
   const navigate = useNavigate();
+  const { icon } = usePageMetadata('runs');
   const [rows, setRows] = useState<WorkflowRun[]>([]);
   const [workflowsById, setWorkflowsById] = useState<Record<string, Workflow>>({});
   const [activeStatus, setActiveStatus] = useState<'all' | RunStatus>('all');
@@ -88,16 +91,18 @@ export function InsideSalesCampaignRunsPage() {
   ];
 
   return (
-    <div className="flex h-full flex-col p-4">
-      <h1 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Campaign Runs</h1>
-      <div className="mb-3">
+    <PageSurface
+      icon={icon}
+      title="Campaign Runs"
+      filters={(
         <FilterPills
           options={STATUS_FILTERS}
           active={activeStatus}
           onChange={(id) => setActiveStatus(id as 'all' | RunStatus)}
         />
-      </div>
-      <div className="min-h-0 flex-1">
+      )}
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
         <DataTable
           data={rows}
           columns={columns}
@@ -108,6 +113,6 @@ export function InsideSalesCampaignRunsPage() {
           onRowClick={(r) => navigate(routes.insideSales.campaignRunDetail(r.id))}
         />
       </div>
-    </div>
+    </PageSurface>
   );
 }

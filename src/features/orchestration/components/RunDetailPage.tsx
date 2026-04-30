@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { LoadingState } from '@/components/ui';
+import { PageSurface } from '@/components/ui/PageSurface';
 import { Tabs } from '@/components/ui/Tabs';
+import { usePageMetadata } from '@/config/pageMetadata';
 import {
   fetchNodeTypes,
   getRun,
@@ -33,6 +35,7 @@ interface LoadedState {
  *  Subscribes to the SSE stream for the lifetime of the page. */
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
+  const { icon, title } = usePageMetadata('campaigns');
   const [loaded, setLoaded] = useState<LoadedState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,9 +72,9 @@ export function RunDetailPage() {
 
   if (error) {
     return (
-      <div className="p-6 text-sm text-[var(--color-error)]">
-        {error}
-      </div>
+      <PageSurface icon={icon} title={title} showHeader={false} bleed>
+        <div className="p-6 text-sm text-[var(--color-error)]">{error}</div>
+      </PageSurface>
     );
   }
   if (!loaded) return <LoadingState />;
@@ -79,10 +82,10 @@ export function RunDetailPage() {
   const { run, workflow, version, nodeTypes } = loaded;
 
   return (
-    <div className="flex h-full flex-col">
+    <PageSurface icon={icon} title={title} showHeader={false} bleed>
       <div
-        className="border-b px-4 py-3"
-        style={{ borderColor: 'var(--border-default)' }}
+        className="border-b px-5 py-3"
+        style={{ borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-baseline justify-between gap-3">
           <div>
@@ -130,6 +133,6 @@ export function RunDetailPage() {
           ]}
         />
       </div>
-    </div>
+    </PageSurface>
   );
 }
