@@ -178,5 +178,6 @@ async def _maybe_complete_run(db: AsyncSession, run: WorkflowRun) -> None:
 
 
 def _build_service_registry() -> ServiceRegistry:
-    """Phase 1: empty. Phase 3 wires real channel services."""
-    return ServiceRegistry()
+    """Wires real channel services from settings (WATI / Bolna / LSQ / SMS)."""
+    from app.services.orchestration.integrations import build_service_registry
+    return build_service_registry()

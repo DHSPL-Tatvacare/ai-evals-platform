@@ -62,6 +62,21 @@ class Settings(BaseSettings):
     LSQ_ACCESS_KEY: str = ""
     LSQ_SECRET_KEY: str = ""
 
+    # ─── Orchestration integrations ────────────────────────────────────
+    WATI_BASE_URL: str = ""           # https://live-mt-server.wati.io
+    WATI_TENANT_ID: str = ""          # numeric WATI tenant ID
+    WATI_API_TOKEN: str = ""
+    WATI_WEBHOOK_SECRET: str = ""
+
+    BOLNA_BASE_URL: str = "https://api.bolna.ai"
+    BOLNA_API_KEY: str = ""
+    BOLNA_WEBHOOK_SECRET: str = ""
+    BOLNA_FROM_PHONE: str = ""
+
+    SMS_PROVIDER: str = ""            # 'gupshup' | 'twilio' | ''
+    SMS_API_KEY: str = ""
+    SMS_BASE_URL: str = ""
+
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 100  # enforced in file upload route
     ALLOWED_UPLOAD_MIMES: str = (

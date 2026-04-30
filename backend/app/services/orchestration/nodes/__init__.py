@@ -15,11 +15,18 @@ from app.services.orchestration.nodes import (  # noqa: F401
     logic_merge,
     core_webhook_out,
     sink_complete,
+    crm_send_wati,
+    crm_place_bolna_call,
+    crm_send_sms,
+    crm_lsq_update_stage,
+    crm_lsq_log_activity,
 )
 
 # Boot-time visibility — confirm registration in live process logs.
 from app.services.orchestration.node_registry import NODE_REGISTRY as _REG
 _shared = sorted(k[1] for k in _REG if k[0] == "*" and not k[1].startswith("test."))
+_crm = sorted(k[1] for k in _REG if k[0] == "crm" and not k[1].startswith("test."))
 _logging.getLogger(__name__).info(
-    "orchestration nodes registered: count=%d types=%s", len(_shared), _shared
+    "orchestration nodes registered: shared=%d %s | crm=%d %s",
+    len(_shared), _shared, len(_crm), _crm,
 )
