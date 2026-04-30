@@ -5,6 +5,7 @@ import { ApiError } from '@/services/api/client';
 import {
   createDraftVersion,
   fireManualRun,
+  getWorkflow,
   publishVersion,
 } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
@@ -22,6 +23,9 @@ export function WorkflowHeaderBar() {
   const name = useWorkflowBuilderStore((s) => s.workflowName);
   const dirty = useWorkflowBuilderStore((s) => s.dirty);
   const workflowType = useWorkflowBuilderStore((s) => s.workflowType);
+  const currentPublishedVersionId = useWorkflowBuilderStore(
+    (s) => s.currentPublishedVersionId,
+  );
 
   const [busy, setBusy] = useState(false);
 
@@ -32,6 +36,19 @@ export function WorkflowHeaderBar() {
     store.setMetadata({ workflowId, versionId: v.id, name, workflowType });
     store.hydrate(v.definition);
     return v.id;
+  };
+
+  const refreshPublishState = async () => {
+    if (!workflowId) return;
+    try {
+      const wf = await getWorkflow(workflowId);
+      useWorkflowBuilderStore
+        .getState()
+        .setCurrentPublishedVersionId(wf.currentPublishedVersionId);
+    } catch {
+      // Non-fatal — header state is best-effort. Real failures still surface
+      // via Save / Publish toasts elsewhere.
+    }
   };
 
   const handleSave = async () => {
@@ -60,6 +77,10 @@ export function WorkflowHeaderBar() {
         return;
       }
       await publishVersion(workflowId, target);
+      // Refresh publish state so Run Now becomes enabled and the header
+      // status pill flips from Draft → Published. Without this the user
+      // has to reload to see the change.
+      await refreshPublishState();
       notificationService.success('Published');
     } catch (e) {
       notificationService.error(describeError(e, 'Publish failed'));
@@ -81,13 +102,19 @@ export function WorkflowHeaderBar() {
     }
   };
 
+  const isPublished = Boolean(currentPublishedVersionId);
+  // Disable Run Now until the workflow has a published version. Backend will
+  // reject otherwise with `workflow has no published version`; failing in the
+  // UI gives a clearer affordance.
+  const runDisabled = busy || !isPublished;
+
   return (
     <div className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-2">
-      <div className="font-medium text-[var(--text-primary)]">
-        {name || 'Untitled Workflow'}
-        {dirty && (
-          <span className="ml-2 text-xs text-[var(--color-warning)]">(unsaved)</span>
-        )}
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-[var(--text-primary)]">
+          {name || 'Untitled Workflow'}
+        </span>
+        <PublishStatusPill isPublished={isPublished} dirty={dirty} />
       </div>
       <div className="flex gap-2">
         <Button variant="secondary" onClick={handleSave} disabled={busy || !dirty}>
@@ -96,10 +123,48 @@ export function WorkflowHeaderBar() {
         <Button variant="primary" onClick={handlePublish} disabled={busy}>
           Publish
         </Button>
-        <Button variant="secondary" onClick={handleRun} disabled={busy}>
+        <Button
+          variant="secondary"
+          onClick={handleRun}
+          disabled={runDisabled}
+          title={runDisabled && !isPublished ? 'Publish a version before running' : undefined}
+        >
           Run Now
         </Button>
       </div>
     </div>
+  );
+}
+
+function PublishStatusPill({
+  isPublished,
+  dirty,
+}: {
+  isPublished: boolean;
+  dirty: boolean;
+}) {
+  let label: string;
+  let bg: string;
+  let fg: string;
+  if (!isPublished) {
+    label = dirty ? 'Draft (unsaved)' : 'Draft';
+    bg = 'var(--surface-warning)';
+    fg = 'var(--color-warning)';
+  } else if (dirty) {
+    label = 'Published · unsaved edits';
+    bg = 'var(--surface-warning)';
+    fg = 'var(--color-warning)';
+  } else {
+    label = 'Published';
+    bg = 'var(--surface-brand-subtle)';
+    fg = 'var(--color-success)';
+  }
+  return (
+    <span
+      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={{ backgroundColor: bg, color: fg }}
+    >
+      {label}
+    </span>
   );
 }

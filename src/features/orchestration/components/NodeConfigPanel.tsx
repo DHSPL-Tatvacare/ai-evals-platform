@@ -1,5 +1,12 @@
-import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import { useMemo } from 'react';
+
+import {
+  isSourceNodeType,
+  useWorkflowBuilderStore,
+} from '@/features/orchestration/store/workflowBuilderStore';
 import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
+
+const SOURCE_HIDDEN_FIELDS: ReadonlySet<string> = new Set(['next_node_id']);
 
 export function NodeConfigPanel() {
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
@@ -8,6 +15,15 @@ export function NodeConfigPanel() {
   );
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
   const updateConfig = useWorkflowBuilderStore((s) => s.updateNodeConfig);
+
+  const hiddenFields = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!node) return undefined;
+    // Source-node ``next_node_id`` is auto-derived from the outgoing default
+    // edge at save time; surfacing the manual field would let an author enter
+    // a value that drifts away from the visual graph and silently fail to
+    // publish.
+    return isSourceNodeType(node.type) ? SOURCE_HIDDEN_FIELDS : undefined;
+  }, [node]);
 
   if (!node) {
     return (
@@ -30,10 +46,18 @@ export function NodeConfigPanel() {
         <div className="font-medium text-[var(--text-primary)]">{desc.label}</div>
         <div className="text-xs text-[var(--text-secondary)]">{desc.nodeType}</div>
       </div>
+      {isSourceNodeType(node.type) && (
+        <p className="rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
+          Source nodes route to the next node via the visual edge — connect this
+          node to the next node on the canvas instead of editing
+          <code className="mx-1">next_node_id</code> by hand.
+        </p>
+      )}
       <DynamicConfigForm
         schema={desc.configSchema as unknown as JsonSchema}
         value={node.config}
         onChange={(next) => updateConfig(node.id, next)}
+        hiddenFields={hiddenFields}
       />
     </div>
   );

@@ -33,6 +33,7 @@ export function WorkflowBuilderPage() {
           versionId: targetVersion?.id ?? null,
           name: wf.name,
           workflowType: wf.workflowType,
+          currentPublishedVersionId: wf.currentPublishedVersionId,
         });
         if (targetVersion) {
           hydrate(targetVersion.definition);
