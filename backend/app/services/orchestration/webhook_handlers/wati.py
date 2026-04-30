@@ -1,0 +1,140 @@
+"""Parse WATI webhook events and route them to the engine.
+
+Per concierge spec §5.5:
+  Event types we handle:
+    sentMessageDELIVERED_v2, sentMessageREAD_v2, sentMessageREPLIED_v2,
+    messageReceived, templateMessageFailed
+  Match prior dispatch via response.localMessageId.
+  STOP / UNSUB(SCRIBE) keyword in messageReceived → opt-out consent flip.
+Idempotent: deterministic idempotency_key derived from event_type + localMessageId
+  so re-deliveries are absorbed by the unique constraint on
+  (tenant_id, recipient_id, idempotency_key).
+"""
+from __future__ import annotations
+
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.orchestration import (
+    WorkflowConsentRecord,
+    WorkflowRunRecipientAction,
+    WorkflowRunRecipientState,
+)
+
+
+_STOP_RE = re.compile(r"^\s*(stop|unsub(scribe)?)\s*$", re.IGNORECASE)
+
+
+# event_type → (action_type_to_write, should_flip_waiting_to_ready)
+_EVENT_TO_ACTION: dict[str, tuple[str, bool]] = {
+    "sentMessageDELIVERED_v2": ("wa_delivered", False),
+    "sentMessageREAD_v2": ("wa_read", False),
+    "sentMessageREPLIED_v2": ("wa_replied", True),
+    "messageReceived": ("wa_replied", True),
+    "templateMessageFailed": ("wa_failed", False),
+}
+
+
+async def handle_wati_event(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    payload: dict[str, Any],
+    recipient_id_override: Optional[str] = None,
+) -> None:
+    event_type = payload.get("eventType")
+    body = payload.get("messageBody") or ""
+
+    # STOP / UNSUB → consent flip; do not write a regular action row.
+    if _STOP_RE.match(body):
+        recipient_id = (
+            recipient_id_override
+            or await _resolve_recipient_from_localid(db, tenant_id=tenant_id, payload=payload)
+        )
+        if recipient_id:
+            db.add(WorkflowConsentRecord(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id, app_id=app_id,
+                recipient_id=recipient_id, channel="wa",
+                status="opted_out", source="wa_reply_stop",
+                evidence={"webhook": payload},
+            ))
+            await db.flush()
+        return
+
+    if event_type not in _EVENT_TO_ACTION:
+        return
+
+    new_action_type, should_resume = _EVENT_TO_ACTION[event_type]
+    parent = await _find_parent_action(db, tenant_id=tenant_id, payload=payload)
+    if parent is None:
+        return
+
+    local_msg_id = payload.get("localMessageId") or ""
+    idem = f"webhook|{event_type}|{local_msg_id}"
+    stmt = pg_insert(WorkflowRunRecipientAction).values(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id, app_id=app_id,
+        workflow_id=parent.workflow_id, workflow_version_id=parent.workflow_version_id,
+        run_id=parent.run_id, node_step_id=parent.node_step_id,
+        recipient_id=parent.recipient_id, channel="wati",
+        action_type=new_action_type, status="success",
+        idempotency_key=idem,
+        payload={"event": event_type},
+        response=payload,
+        parent_action_id=parent.id,
+        completed_at=datetime.now(timezone.utc),
+    ).on_conflict_do_nothing(constraint="uq_workflow_run_recipient_actions_idempotency")
+    await db.execute(stmt)
+
+    if should_resume:
+        await _flip_waiting_to_ready(db, run_id=parent.run_id, recipient_id=parent.recipient_id)
+    await db.flush()
+
+
+async def _find_parent_action(
+    db: AsyncSession, *, tenant_id: uuid.UUID, payload: dict[str, Any]
+) -> Optional[WorkflowRunRecipientAction]:
+    local_msg_id = payload.get("localMessageId")
+    if not local_msg_id:
+        return None
+    stmt = select(WorkflowRunRecipientAction).where(
+        WorkflowRunRecipientAction.tenant_id == tenant_id,
+        WorkflowRunRecipientAction.channel == "wati",
+        WorkflowRunRecipientAction.action_type == "wa_dispatched",
+        WorkflowRunRecipientAction.response["localMessageId"].astext == str(local_msg_id),
+    ).limit(1)
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def _resolve_recipient_from_localid(
+    db: AsyncSession, *, tenant_id: uuid.UUID, payload: dict[str, Any]
+) -> Optional[str]:
+    parent = await _find_parent_action(db, tenant_id=tenant_id, payload=payload)
+    return parent.recipient_id if parent else None
+
+
+async def _flip_waiting_to_ready(
+    db: AsyncSession, *, run_id: uuid.UUID, recipient_id: str
+) -> None:
+    """If a recipient is parked at any node in 'waiting' status, flip to 'ready'.
+
+    The resume poller (Task 5) is responsible for advancing current_node_id
+    along the appropriate edge.
+    """
+    await db.execute(
+        update(WorkflowRunRecipientState)
+        .where(
+            WorkflowRunRecipientState.run_id == run_id,
+            WorkflowRunRecipientState.recipient_id == recipient_id,
+            WorkflowRunRecipientState.status == "waiting",
+        )
+        .values(status="ready", wakeup_at=None)
+    )

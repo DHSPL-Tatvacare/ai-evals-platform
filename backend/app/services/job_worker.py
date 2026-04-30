@@ -1533,3 +1533,30 @@ async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, use
         result = await run_workflow_job(run_id, db, params=params, job_id=job_id)
         await db.commit()
         return result
+
+
+@register_job_handler(
+    "resume-waiting-cohorts",
+    queue_class="standard",
+    priority=4,
+    retry_safe=True,
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Orchestration · resume waiting cohorts",
+    schedule_description=(
+        "Polls orchestration.workflow_run_recipient_states for due/ready rows, "
+        "advances them along the appropriate edge, and submits run-workflow jobs."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
+async def handle_resume_waiting_cohorts(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> dict:
+    """Tick the resume poller. Idempotent at row grain (FOR UPDATE SKIP LOCKED)."""
+    from app.services.orchestration.resume_poller import poll_and_resume
+
+    async with async_session() as db:
+        n = await poll_and_resume(db)
+        await db.commit()
+        return {"resumed": n}

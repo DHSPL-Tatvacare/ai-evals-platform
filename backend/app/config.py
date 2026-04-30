@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     SMS_API_KEY: str = ""
     SMS_BASE_URL: str = ""
 
+    # Orchestration webhooks — public routes guarded by URL-segment secret
+    LSQ_WEBHOOK_SECRET: str = ""
+    ORCHESTRATION_EVENT_WEBHOOK_SECRET: str = ""
+    # v1 single tenant + app per provider; multi-tenant secret→tenant lookup is v2.
+    ORCHESTRATION_DEFAULT_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
+    ORCHESTRATION_DEFAULT_APP_ID: str = "inside-sales"
+
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 100  # enforced in file upload route
     ALLOWED_UPLOAD_MIMES: str = (

@@ -277,6 +277,7 @@ from app.routes.reviews import router as reviews_router
 from app.routes.analytics_library import router as analytics_library_router
 from app.routes.cost import router as cost_router, admin_router as cost_admin_router
 from app.routes.scheduled_jobs import router as scheduled_jobs_router
+from app.routes.orchestration_webhooks import router as orchestration_webhooks_router
 app.include_router(auth_router)
 app.include_router(listings_router)
 app.include_router(files_router)
@@ -306,3 +307,4 @@ app.include_router(analytics_library_router)
 app.include_router(cost_router)
 app.include_router(cost_admin_router)
 app.include_router(scheduled_jobs_router)
+app.include_router(orchestration_webhooks_router)
