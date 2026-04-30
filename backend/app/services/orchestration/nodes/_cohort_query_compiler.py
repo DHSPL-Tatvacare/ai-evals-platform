@@ -30,7 +30,13 @@ class CohortQueryCompileError(ValueError):
     pass
 
 
-_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+# Plain column identifiers may NOT contain dots. Dots are only legal for
+# ``source_table`` (schema-qualified). Reusing one regex for both let bad
+# config like ``payload_columns=['some.col']`` survive validation and emit
+# ``src.some.col`` SQL — a dotted column reference confuses the planner and
+# fails downstream with an opaque "column does not exist" error.
+_PLAIN_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+_QUALIFIED_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$")
 _SUPPORTED_OPS = {"eq", "neq", "gte", "gt", "lte", "lt", "in", "not_in", "contains"}
 
 
@@ -42,7 +48,7 @@ class CohortQueryFilter(BaseModel):
     @field_validator("column")
     @classmethod
     def _validate_column(cls, v: str) -> str:
-        if not _IDENT_RE.match(v):
+        if not _PLAIN_IDENT_RE.match(v):
             raise CohortQueryCompileError(f"unsafe column name: {v!r}")
         return v
 
@@ -66,7 +72,8 @@ class CohortQueryConfig(BaseModel):
     @field_validator("source_table")
     @classmethod
     def _validate_source(cls, v: str) -> str:
-        if not _IDENT_RE.match(v):
+        # Schema-qualified names like ``analytics.crm_lead_record`` are valid here.
+        if not _QUALIFIED_IDENT_RE.match(v):
             raise CohortQueryCompileError(f"unsafe source_table: {v!r}")
         return v
 
@@ -75,7 +82,7 @@ class CohortQueryConfig(BaseModel):
     def _validate_optional_column(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
-        if not _IDENT_RE.match(v):
+        if not _PLAIN_IDENT_RE.match(v):
             raise CohortQueryCompileError(f"unsafe column: {v!r}")
         return v
 
@@ -83,7 +90,7 @@ class CohortQueryConfig(BaseModel):
     @classmethod
     def _validate_payload(cls, cols: list[str]) -> list[str]:
         for c in cols:
-            if not _IDENT_RE.match(c):
+            if not _PLAIN_IDENT_RE.match(c):
                 raise CohortQueryCompileError(f"unsafe payload column: {c!r}")
         return cols
 

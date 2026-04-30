@@ -227,7 +227,11 @@ async def test_create_cron_trigger_inserts_scheduled_job(client, db_session):
         )
     )).scalar_one()
     assert sched.cron == "0 9 * * *"
-    assert sched.job_type == "run-workflow"
+    # Cron triggers must NOT enqueue ``run-workflow`` directly — that handler
+    # requires a pre-existing ``run_id`` and would no-op without one. The
+    # scheduler enqueues ``fire-orchestration-trigger`` which creates the run
+    # then queues a ``run-workflow`` job pointing at it.
+    assert sched.job_type == "fire-orchestration-trigger"
     assert sched.params["trigger_id"] == body["id"]
     assert sched.enabled is True
 

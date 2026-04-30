@@ -485,6 +485,60 @@ async def recover_stale_source_sync_runs(
             )
 
 
+async def recover_stale_workflow_runs():
+    """Reconcile orchestration.workflow_runs stuck in 'pending'/'running'/'waiting'
+    whose owning BackgroundJob is already terminal.
+
+    This handles:
+      - the worker crashed between executing nodes and updating run-status,
+      - the job's failure path crashed before the WorkflowRun repair landed,
+      - a docker restart killed the worker mid-traversal.
+
+    Call on startup AFTER recover_stale_jobs() so jobs are in their correct
+    terminal state. Mirrors recover_stale_eval_runs.
+    """
+    from app.models.orchestration import (
+        WorkflowRun as _WfRunRecover,
+        WorkflowRunNodeStep as _WfStepRecover,
+    )
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(_WfRunRecover)
+            .join(BackgroundJob, _WfRunRecover.job_id == BackgroundJob.id)
+            .where(
+                _WfRunRecover.status.in_(("pending", "running", "waiting")),
+                BackgroundJob.status.in_(["completed", "failed", "cancelled"]),
+            )
+        )
+        stale_runs = result.scalars().all()
+        for run in stale_runs:
+            job = await db.get(BackgroundJob, run.job_id) if run.job_id else None
+            terminal_status = (
+                "cancelled" if (job is not None and job.status == "cancelled") else "failed"
+            )
+            run.status = terminal_status
+            run.error = "Run was recovered after a server restart."
+            run.completed_at = datetime.now(timezone.utc)
+            await db.execute(
+                update(_WfStepRecover)
+                .where(
+                    _WfStepRecover.run_id == run.id,
+                    _WfStepRecover.status == "running",
+                )
+                .values(status="failed", completed_at=run.completed_at)
+            )
+            logger.warning(
+                "Recovered stale workflow_run %s (job %s was %s)",
+                run.id,
+                run.job_id,
+                getattr(job, "status", "missing"),
+            )
+        if stale_runs:
+            await db.commit()
+            logger.info("Recovered %d stale workflow_run(s)", len(stale_runs))
+
+
 async def recover_stale_eval_runs():
     """Reconcile evaluation_runs stuck in 'running' whose job is already terminal.
 
@@ -954,6 +1008,38 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                         error_message=j.error_message,
                                         completed_at=j.completed_at,
                                     )
+                                )
+                                # Mirror the EvaluationRun repair for orchestration
+                                # WorkflowRun — keyed by job_id. Also fail any
+                                # still-running node steps so observability isn't
+                                # stuck on intermediate state.
+                                from app.models.orchestration import (
+                                    WorkflowRun as _WfRunRepair,
+                                    WorkflowRunNodeStep as _WfStepRepair,
+                                )
+                                await db2.execute(
+                                    update(_WfRunRepair)
+                                    .where(
+                                        _WfRunRepair.job_id == job_id,
+                                        _WfRunRepair.status.in_(("pending", "running", "waiting")),
+                                    )
+                                    .values(
+                                        status="failed",
+                                        error=j.error_message,
+                                        completed_at=j.completed_at,
+                                    )
+                                )
+                                await db2.execute(
+                                    update(_WfStepRepair)
+                                    .where(
+                                        _WfStepRepair.run_id.in_(
+                                            select(_WfRunRepair.id).where(
+                                                _WfRunRepair.job_id == job_id
+                                            )
+                                        ),
+                                        _WfStepRepair.status == "running",
+                                    )
+                                    .values(status="failed", completed_at=j.completed_at)
                                 )
                                 await cascade_dependency_failures(db=db2, commit=False)
                             await db2.commit()
@@ -1521,6 +1607,10 @@ async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, use
         run_id: UUID of the orchestration.workflow_runs row to execute.
     Optional params:
         resume_recipient_ids: list[str] — when present, switches to resume mode (Phase 4).
+
+    Threads ``tenant_id`` into the inner handler so the run cannot be exec'd
+    against a foreign tenant if a misrouted/forged job pointed at someone
+    else's run_id.
     """
     from app.services.orchestration.run_handler import run_workflow_job
 
@@ -1530,9 +1620,112 @@ async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, use
     run_id = uuid.UUID(str(run_id_raw))
 
     async with async_session() as db:
-        result = await run_workflow_job(run_id, db, params=params, job_id=job_id)
+        result = await run_workflow_job(
+            run_id, db, params=params, job_id=job_id, tenant_id=tenant_id,
+        )
         await db.commit()
         return result
+
+
+@register_job_handler(
+    "fire-orchestration-trigger",
+    queue_class="standard",
+    priority=5,
+    retry_safe=True,
+)
+async def handle_fire_orchestration_trigger(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Materialize a WorkflowRun from a cron WorkflowTrigger and queue run-workflow.
+
+    The scheduler enqueues ONE row of this job-type per cron tick — it cannot
+    enqueue ``run-workflow`` directly because ``run-workflow`` requires a
+    pre-existing ``run_id``. This handler bridges the gap:
+        1. load the trigger (tenant-scoped)
+        2. load the workflow + verify it has a published version
+        3. INSERT one orchestration.workflow_runs row
+        4. INSERT one platform.background_jobs row of type ``run-workflow``
+           with ``params={'run_id': ...}`` for the worker to pick up.
+
+    Required params:
+        trigger_id: UUID of the orchestration.workflow_triggers row.
+    """
+    from app.constants import SYSTEM_USER_ID
+    from app.models.job import BackgroundJob as _BgJob
+    from app.models.orchestration import (
+        Workflow as _Wf,
+        WorkflowRun as _WfRun,
+        WorkflowTrigger as _WfTrig,
+    )
+
+    trigger_id_raw = params.get("trigger_id")
+    if not trigger_id_raw:
+        raise ValueError("trigger_id is required")
+    trigger_id = uuid.UUID(str(trigger_id_raw))
+
+    async with async_session() as db:
+        trig = (await db.execute(
+            select(_WfTrig).where(
+                _WfTrig.id == trigger_id,
+                _WfTrig.tenant_id == tenant_id,
+            )
+        )).scalar_one_or_none()
+        if trig is None:
+            logger.warning(
+                "fire-orchestration-trigger: trigger %s not found for tenant %s",
+                trigger_id, tenant_id,
+            )
+            return {"status": "trigger_not_found"}
+        if not trig.active:
+            return {"status": "trigger_inactive", "trigger_id": str(trigger_id)}
+
+        wf = (await db.execute(
+            select(_Wf).where(_Wf.id == trig.workflow_id, _Wf.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+        if wf is None or wf.current_published_version_id is None:
+            logger.warning(
+                "fire-orchestration-trigger: workflow %s not publishable",
+                trig.workflow_id,
+            )
+            return {"status": "workflow_not_publishable", "trigger_id": str(trigger_id)}
+
+        run = _WfRun(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            app_id=trig.app_id,
+            workflow_id=wf.id,
+            workflow_version_id=wf.current_published_version_id,
+            trigger_id=trig.id,
+            triggered_by=trig.kind,
+            triggered_by_user_id=trig.created_by or SYSTEM_USER_ID,
+            status="pending",
+            params=trig.params or {},
+        )
+        db.add(run)
+        await db.flush()
+
+        next_job = _BgJob(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            app_id=trig.app_id,
+            user_id=trig.created_by or user_id or SYSTEM_USER_ID,
+            job_type="run-workflow",
+            queue_class="standard",
+            priority=5,
+            params={"run_id": str(run.id)},
+            status="queued",
+        )
+        db.add(next_job)
+        await db.flush()
+        run.job_id = next_job.id
+        await db.commit()
+
+        return {
+            "status": "queued",
+            "trigger_id": str(trigger_id),
+            "run_id": str(run.id),
+            "next_job_id": str(next_job.id),
+        }
 
 
 @register_job_handler(

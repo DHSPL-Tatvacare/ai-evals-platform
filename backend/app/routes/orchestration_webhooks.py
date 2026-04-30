@@ -73,8 +73,11 @@ async def lsq_webhook(
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    expected = settings.LSQ_WEBHOOK_SECRET or settings.WATI_WEBHOOK_SECRET
-    _check_secret(secret, expected)
+    # LSQ has its OWN secret. Do not fall back to WATI_WEBHOOK_SECRET — that
+    # would let anyone holding the WATI secret hit the LSQ trust boundary
+    # and trigger LSQ-event workflows. ``_check_secret`` fails closed (404)
+    # when ``LSQ_WEBHOOK_SECRET`` is unset.
+    _check_secret(secret, settings.LSQ_WEBHOOK_SECRET)
     tenant_id, app_id = _resolve_tenant_for_provider()
     from app.services.orchestration.webhook_handlers.lsq import handle_lsq_event
     created = await handle_lsq_event(db, tenant_id=tenant_id, app_id=app_id, payload=payload)

@@ -1,8 +1,14 @@
 """Trigger CRUD with cron→platform.scheduled_job_definitions sync.
 
 Cron triggers atomically materialize one ScheduledJobDefinition row that fires
-``run-workflow`` with ``params={trigger_id}``. Update / delete cascades to the
-linked schedule row in the same transaction.
+``fire-orchestration-trigger`` with ``params={'trigger_id': ...}``. The
+``fire-orchestration-trigger`` job handler (job_worker.py) then loads the
+trigger, creates a fresh WorkflowRun, and queues a ``run-workflow`` job
+pointing at that run. We deliberately do NOT point the schedule at
+``run-workflow`` directly — ``run-workflow`` requires a pre-existing
+``run_id`` and would no-op without one.
+
+Update / delete cascades to the linked schedule row in the same transaction.
 
 Uses the ScheduledJobDefinition ORM (not raw SQL) so column names stay correct
 with the live schema (``job_type`` / ``cron`` / ``enabled`` etc.).
@@ -69,7 +75,7 @@ async def create_trigger(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
             app_id=wf.app_id,
-            job_type="run-workflow",
+            job_type="fire-orchestration-trigger",
             schedule_key=_schedule_key_for_trigger(trigger.id),
             name=f"orch-trigger-{trigger.id}",
             description=f"Orchestration cron trigger for workflow {wf.id}",

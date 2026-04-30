@@ -141,12 +141,14 @@ async def lifespan(app: FastAPI):
             recover_stale_jobs,
             recover_stale_eval_runs,
             recover_stale_source_sync_runs,
+            recover_stale_workflow_runs,
             worker_loop,
             recovery_loop,
         )
         await recover_stale_jobs()
         await recover_stale_eval_runs()
         await recover_stale_source_sync_runs()
+        await recover_stale_workflow_runs()
 
         # Start background job worker and periodic recovery loop
         worker_task = asyncio.create_task(worker_loop())

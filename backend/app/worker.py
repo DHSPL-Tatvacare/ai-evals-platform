@@ -11,6 +11,7 @@ from app.services.job_worker import (
     recover_stale_jobs,
     recover_stale_eval_runs,
     recover_stale_source_sync_runs,
+    recover_stale_workflow_runs,
     recovery_loop,
     worker_loop,
 )
@@ -80,6 +81,7 @@ async def run_worker() -> None:
     await recover_stale_jobs()
     await recover_stale_eval_runs()
     await recover_stale_source_sync_runs()
+    await recover_stale_workflow_runs()
 
     worker_task = asyncio.create_task(worker_loop())
     recovery_task = asyncio.create_task(recovery_loop())

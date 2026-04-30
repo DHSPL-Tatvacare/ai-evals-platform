@@ -41,6 +41,9 @@ _EVENT_TO_ACTION: dict[str, tuple[str, bool]] = {
 }
 
 
+_INBOUND_REPLY_EVENTS = frozenset({"messageReceived", "sentMessageREPLIED_v2"})
+
+
 async def handle_wati_event(
     db: AsyncSession,
     *,
@@ -52,8 +55,12 @@ async def handle_wati_event(
     event_type = payload.get("eventType")
     body = payload.get("messageBody") or ""
 
-    # STOP / UNSUB → consent flip; do not write a regular action row.
-    if _STOP_RE.match(body):
+    # STOP / UNSUB consent flip MUST only fire for genuine inbound replies.
+    # WATI also emits delivery/read receipts that echo the outbound body
+    # (which can include a "STOP" compliance footer); treating those as
+    # opt-outs would silently break running campaigns. Validate event_type
+    # FIRST, then test for STOP only on reply-shaped events.
+    if event_type in _INBOUND_REPLY_EVENTS and _STOP_RE.match(body):
         recipient_id = (
             recipient_id_override
             or await _resolve_recipient_from_localid(db, tenant_id=tenant_id, payload=payload)

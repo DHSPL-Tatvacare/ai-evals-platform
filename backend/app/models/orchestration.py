@@ -156,7 +156,20 @@ class WorkflowTrigger(Base):
 
 class WorkflowActionTemplate(Base):
     __tablename__ = "workflow_action_templates"
-    __table_args__ = ({"schema": "orchestration"},)
+    # SQL-side enforcement lives in migration 0019 as a UNIQUE INDEX over
+    # COALESCE(tenant_id, ZERO_UUID) and COALESCE(app_id, '') — that's the
+    # only way to deduplicate "system default" rows where tenant_id and
+    # app_id are NULL. The Index() declaration here mirrors the DDL so
+    # ``Base.metadata`` reflects the constraint, but the COALESCE-driven
+    # uniqueness is owned by the migration, not by SQLAlchemy.
+    __table_args__ = (
+        Index(
+            "uq_workflow_action_templates_scope_channel_slug_orm",
+            "tenant_id", "app_id", "channel", "slug",
+            unique=False,  # real uniqueness is the COALESCE-based DB index
+        ),
+        {"schema": "orchestration"},
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
