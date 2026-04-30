@@ -89,6 +89,9 @@ async def lifespan(app: FastAPI):
     # (Aliased import: the lifespan param is named ``app``, shadowing the
     # top-level ``app`` package.)
     import app.services.job_worker as _register_job_handlers  # noqa: F401
+    # Register the orchestration shared node handlers (10 nodes — source/filter/logic/core/sink).
+    # The package __init__ imports each module so @register_node fires.
+    import app.services.orchestration.nodes as _register_orch_nodes  # noqa: F401
 
     # Schema is owned by Alembic; migrations were applied by entrypoint.sh's
     # `alembic upgrade head` before this process started. Log the alembic head

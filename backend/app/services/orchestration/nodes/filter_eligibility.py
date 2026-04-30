@@ -1,0 +1,34 @@
+"""filter.eligibility — splits cohort into 'passed' and 'skipped' edges by predicate."""
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel
+
+from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
+from app.services.orchestration.node_registry import register_node
+from app.services.orchestration.nodes._predicate import evaluate_predicate
+
+
+class _Config(BaseModel):
+    predicate: dict[str, Any]
+
+
+@register_node(workflow_type="*", node_type="filter.eligibility")
+class _Handler:
+    node_type = "filter.eligibility"
+    config_schema = _Config
+    output_edges = ["passed", "skipped"]
+    category = "filter"
+
+    async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
+        passed: list[RecipientOutcome] = []
+        skipped: list[RecipientOutcome] = []
+        async for rid, payload in input_cohort:
+            (passed if evaluate_predicate(config.predicate, payload) else skipped).append(
+                RecipientOutcome(recipient_id=rid)
+            )
+        return NodeResult(
+            by_edge_label={"passed": passed, "skipped": skipped},
+            summary={"passed_count": len(passed), "skipped_count": len(skipped)},
+        )
