@@ -49,7 +49,7 @@ export function CreateWorkflowDialog({ onClose, onCreated }: Props) {
   };
 
   return (
-    <Modal isOpen onClose={onClose} title="New Campaign">
+    <Modal isOpen onClose={onClose} title="New Workflow">
       <div className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm text-[var(--text-primary)]">
           Workflow Type

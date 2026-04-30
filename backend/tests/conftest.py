@@ -132,6 +132,11 @@ def _resolve_test_database_url() -> str:
     return "postgresql+asyncpg://evals_user:evals_pass@localhost:5433/ai_evals_platform"
 
 
+# Keep direct asyncpg call sites (e.g. orchestration SSE LISTEN/NOTIFY) on the
+# same live Postgres target as the db_session fixture.
+os.environ.setdefault("TEST_DATABASE_URL", _resolve_test_database_url())
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     """Module-scoped-style async engine. Disposed at test end."""

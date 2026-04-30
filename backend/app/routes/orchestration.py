@@ -106,6 +106,24 @@ async def list_workflows(
     )
 
 
+@router.get("/system-workflows", response_model=list[WorkflowResponse])
+async def list_system_workflows(
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+    app_id: Optional[str] = Query(None, alias="appId"),
+    workflow_type: Optional[str] = Query(None, alias="workflowType"),
+):
+    """List cloneable system-seeded workflows visible to the caller's app scope."""
+    if app_id is not None:
+        await ensure_registered_app_access(db, auth, app_id)
+        return await wf_service.list_system_workflows(
+            db, app_id=app_id, workflow_type=workflow_type,
+        )
+    return await wf_service.list_system_workflows(
+        db, workflow_type=workflow_type, app_ids=frozenset(auth.app_access),
+    )
+
+
 @router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
     workflow_id: uuid.UUID,

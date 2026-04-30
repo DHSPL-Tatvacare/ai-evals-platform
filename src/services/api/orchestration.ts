@@ -22,6 +22,17 @@ export async function listWorkflows(params?: {
   return apiRequest<Workflow[]>(`/api/orchestration/workflows${qs ? `?${qs}` : ''}`);
 }
 
+export async function listSystemWorkflows(params?: {
+  appId?: string;
+  workflowType?: WorkflowType;
+}): Promise<Workflow[]> {
+  const q = new URLSearchParams();
+  if (params?.appId) q.set('appId', params.appId);
+  if (params?.workflowType) q.set('workflowType', params.workflowType);
+  const qs = q.toString();
+  return apiRequest<Workflow[]>(`/api/orchestration/system-workflows${qs ? `?${qs}` : ''}`);
+}
+
 export async function createWorkflow(body: {
   appId: string;
   workflowType: WorkflowType;
@@ -51,6 +62,18 @@ export async function updateWorkflow(
 
 export async function archiveWorkflow(id: string): Promise<void> {
   await apiRequest<void>(`/api/orchestration/workflows/${id}`, { method: 'DELETE' });
+}
+
+export async function cloneSystemWorkflow(body: {
+  sourceWorkflowId: string;
+  newSlug: string;
+  newName: string;
+  targetAppId: string;
+}): Promise<Workflow> {
+  return apiRequest<Workflow>('/api/orchestration/workflows/clone', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export async function listVersions(workflowId: string): Promise<WorkflowVersion[]> {

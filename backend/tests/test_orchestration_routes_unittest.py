@@ -35,14 +35,18 @@ def _override_db(db_session):
 
 
 def _override_auth():
+    return _override_auth_for_tenant(SYSTEM_TENANT_ID)
+
+
+def _override_auth_for_tenant(tenant_id, *, app_access=frozenset({"voice-rx", "kaira-bot", "inside-sales"})):
     auth = AuthContext(
         user_id=SYSTEM_USER_ID,
-        tenant_id=SYSTEM_TENANT_ID,
+        tenant_id=tenant_id,
         email="test@orchestration.local",
         role_id=uuid.uuid4(),
         is_owner=True,
         permissions=frozenset(),
-        app_access=frozenset({"voice-rx", "kaira-bot", "inside-sales"}),
+        app_access=app_access,
     )
     fastapi_app.dependency_overrides[get_auth_context] = lambda: auth
     return auth
@@ -107,6 +111,29 @@ async def test_list_workflows_filters_by_app(client):
     assert r.status_code == 200
     slugs = [w["slug"] for w in r.json()]
     assert s1 in slugs and s2 not in slugs
+
+
+@pytest.mark.asyncio
+async def test_list_system_workflows_returns_seeded_rows_for_non_system_tenant(db_session):
+    from app.services.orchestration_seed import seed_orchestration_defaults
+
+    _override_db(db_session)
+    _override_auth_for_tenant(uuid.uuid4())
+    try:
+        await seed_orchestration_defaults(db_session)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=fastapi_app), base_url="http://test"
+        ) as client:
+            r = await client.get(
+                "/api/orchestration/system-workflows?appId=inside-sales&workflowType=crm"
+            )
+        assert r.status_code == 200, r.text
+        slugs = [w["slug"] for w in r.json()]
+        assert "mql-concierge-default" in slugs
+        assert "dm2-adherence-watch" not in slugs
+    finally:
+        fastapi_app.dependency_overrides.pop(get_db, None)
+        fastapi_app.dependency_overrides.pop(get_auth_context, None)
 
 
 @pytest.mark.asyncio

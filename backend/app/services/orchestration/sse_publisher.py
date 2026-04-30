@@ -27,10 +27,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Any, AsyncIterator
 
 import asyncpg
+from sqlalchemy.engine import make_url
 
 from app.database import engine
 
@@ -54,8 +56,16 @@ def _truncate_oversized(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _asyncpg_connect_kwargs() -> dict[str, Any]:
-    """Translate the SQLAlchemy URL into asyncpg.connect kwargs."""
-    url = engine.url
+    """Translate the runtime DB URL into asyncpg.connect kwargs.
+
+    The pub/sub path uses direct asyncpg connections rather than the SQLAlchemy
+    pool. Tests may point live-DB fixtures at a different port via
+    ``TEST_DATABASE_URL``, so honor that explicit override first.
+    """
+    raw_url = os.environ.get("TEST_DATABASE_URL") or engine.url.render_as_string(
+        hide_password=False
+    )
+    url = make_url(raw_url)
     return {
         "user": url.username,
         "password": url.password,
