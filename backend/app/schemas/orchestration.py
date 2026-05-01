@@ -107,6 +107,13 @@ class WorkflowResponse(CamelORMModel):
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    # Most-recent ``WorkflowRun`` for this workflow, projected here so the
+    # campaigns list can render a "Last run" column + click-through without
+    # a second round-trip per row. All three fields are NULL when the
+    # workflow has never been run.
+    last_run_id: Optional[uuid.UUID] = None
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[str] = None
 
 
 # ─── Workflow Versions ───────────────────────────────────────────────────────
@@ -241,6 +248,13 @@ class RunResponse(CamelORMModel):
     error: Optional[str]
     params: dict[str, Any]
     created_at: datetime
+
+
+class RunListResponse(CamelModel):
+    runs: list[RunResponse]
+    total: int
+    limit: int
+    offset: int
 
 
 # ─── Recipient state / actions ──────────────────────────────────────────────
@@ -380,7 +394,7 @@ __all__ = [
     "TriggerCreateRequest", "TriggerUpdateRequest", "TriggerResponse",
     "ActionTemplateUpsertRequest", "ActionTemplateResponse",
     "ConsentSetRequest", "ConsentResponse",
-    "RunCreateRequest", "RunResponse",
+    "RunCreateRequest", "RunResponse", "RunListResponse",
     "RecipientStateResponse", "ActionResponse",
     "OverrideRequest", "OverrideResponse",
     "NodeTypeDescriptor", "NodeOutputEdge",

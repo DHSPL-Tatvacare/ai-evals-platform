@@ -253,6 +253,9 @@ async def _execute_source_nodes(executor: RunExecutor) -> None:
             run_id=executor.run.id, node_step_id=node_step_id, current_node_id=node["id"],
             services=executor.services, job_id=executor.job_id,
             connections=executor.connections,
+            outgoing_targets={
+                k: list(v) for k, v in executor._edge_index.get(node["id"], {}).items()
+            },
         )
         empty_cohort = CohortStream([])
         result: NodeResult = await handler.execute(empty_cohort, config, ctx)

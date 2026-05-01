@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 
 import { LoadingState } from '@/components/ui';
 import { PageSurface } from '@/components/ui/PageSurface';
@@ -18,6 +19,8 @@ import type {
   WorkflowVersion,
 } from '@/features/orchestration/types';
 import { useRunStream } from '@/features/orchestration/hooks/useRunStream';
+import { useRunStatusToasts } from '@/features/orchestration/hooks/useRunStatusToasts';
+import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import { useRunOverlayStore } from '@/features/orchestration/store/runOverlayStore';
 import { logger } from '@/services/logger';
 import { ActionLogTab } from './ActionLogTab';
@@ -36,10 +39,12 @@ interface LoadedState {
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   const { icon, title } = usePageMetadata('campaigns');
+  const orchestrationRoutes = useOrchestrationRoutes();
   const [loaded, setLoaded] = useState<LoadedState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useRunStream(runId);
+  useRunStatusToasts(runId);
 
   const streamStatus = useRunOverlayStore((s) => s.streamStatus);
   const runStatus = useRunOverlayStore((s) => s.runStatus);
@@ -88,12 +93,19 @@ export function RunDetailPage() {
         style={{ borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-baseline justify-between gap-3">
-          <div>
+          <div className="flex flex-col gap-1">
+            <Link
+              to={orchestrationRoutes.campaignBuilder(workflow.id)}
+              className="inline-flex w-fit items-center gap-1 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>{workflow.name}</span>
+            </Link>
             <div className="text-lg font-semibold text-[var(--text-primary)]">
-              {workflow.name}
+              Run {run.id.slice(0, 8)}
             </div>
             <div className="text-xs text-[var(--text-secondary)]">
-              Run {run.id.slice(0, 8)} · {run.triggeredBy} · cohort {run.cohortSizeAtEntry}
+              {run.triggeredBy} · cohort {run.cohortSizeAtEntry}
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs">

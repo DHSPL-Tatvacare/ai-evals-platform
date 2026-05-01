@@ -83,15 +83,23 @@ async def poll_and_resume(db: AsyncSession, *, batch_limit: int = 1000) -> int:
 
     for run_id, recipient_ids in by_run.items():
         run = runs_by_id[run_id]
+        job_user_id = run.triggered_by_user_id or SYSTEM_USER_ID
         job = BackgroundJob(
             id=uuid.uuid4(),
             tenant_id=run.tenant_id,
             app_id=run.app_id,
-            user_id=run.triggered_by_user_id or SYSTEM_USER_ID,
+            user_id=job_user_id,
             job_type="run-workflow",
             queue_class="standard",
             priority=5,
-            params={"run_id": str(run_id), "resume_recipient_ids": recipient_ids},
+            # ``process_job`` reads tenant_id / user_id off ``params``;
+            # every run-workflow submission has to echo them.
+            params={
+                "run_id": str(run_id),
+                "resume_recipient_ids": recipient_ids,
+                "tenant_id": str(run.tenant_id),
+                "user_id": str(job_user_id),
+            },
             status="queued",
         )
         db.add(job)

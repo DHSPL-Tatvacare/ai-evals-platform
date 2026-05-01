@@ -447,8 +447,10 @@ async def test_list_and_get_run(client):
     )).json()
     rl = await client.get(f"/api/orchestration/runs?workflowId={wf['id']}")
     assert rl.status_code == 200
-    ids = [r["id"] for r in rl.json()]
+    body = rl.json()
+    ids = [r["id"] for r in body["runs"]]
     assert run["id"] in ids
+    assert body["total"] == len(body["runs"])
 
     detail = await client.get(f"/api/orchestration/runs/{run['id']}")
     assert detail.status_code == 200

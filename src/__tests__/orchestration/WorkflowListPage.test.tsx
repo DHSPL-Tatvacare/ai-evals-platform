@@ -44,6 +44,7 @@ import {
   listSystemWorkflows,
   listWorkflows,
 } from '@/services/api/orchestration';
+import { useAppStore } from '@/stores/appStore';
 import { WorkflowListPage } from '@/features/orchestration/components/WorkflowListPage';
 
 const tenantWorkflow = {
@@ -58,6 +59,8 @@ const tenantWorkflow = {
   createdBy: 'user-1',
   createdAt: '2026-04-30T00:00:00Z',
   updatedAt: '2026-04-30T00:00:00Z',
+  lastRunAt: null,
+  lastRunStatus: null,
 };
 
 const systemWorkflow = {
@@ -72,10 +75,16 @@ const systemWorkflow = {
   createdBy: 'system-user',
   createdAt: '2026-04-30T00:00:00Z',
   updatedAt: '2026-04-30T00:00:00Z',
+  lastRunAt: null,
+  lastRunStatus: null,
 };
 
 describe('WorkflowListPage', () => {
   beforeEach(() => {
+    // The orchestration components read the current app id from
+    // ``useCurrentAppId``; tests need to anchor it explicitly so the
+    // route resolver finds the right resolver branch.
+    useAppStore.setState({ currentApp: 'inside-sales' });
     vi.clearAllMocks();
     (listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([tenantWorkflow]);
     (listSystemWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([systemWorkflow]);
@@ -159,7 +168,7 @@ describe('WorkflowListPage', () => {
     render(<WorkflowListPage />);
 
     await screen.findByText('Tenant Campaign');
-    fireEvent.click(screen.getByRole('button', { name: 'Run Now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
 
     await waitFor(() => expect(fireManualRun).toHaveBeenCalledWith('wf-tenant'));
     expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/orchestration/runs/run-1');

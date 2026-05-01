@@ -4,10 +4,6 @@
   "name": "Concierge — Qualify Lane",
   "payload_schema": {
     "template_name": "concierge_qualify_v1",
-    "broadcast_name": "concierge_qualify",
-    "parameter_map": [
-      { "name": "patient_name", "source": "first_name" },
-      { "name": "preferred_time", "source": "preferred_time" }
-    ]
+    "broadcast_name": "concierge_qualify"
   }
 }

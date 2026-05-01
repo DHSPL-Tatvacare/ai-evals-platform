@@ -234,61 +234,16 @@ _CRM_NODE_PROVIDER_CHANNEL: dict[str, tuple[str, Optional[str]]] = {
 }
 
 
-async def _action_template_variable_map(
-    db: AsyncSession, *, channel: str, slug: str,
-) -> list[dict[str, str]]:
-    """Return the system action template's ``parameter_map`` /
-    ``user_data_map`` for a given (channel, slug). Empty list if missing."""
-    tmpl = await db.scalar(
-        select(WorkflowActionTemplate).where(
-            WorkflowActionTemplate.tenant_id.is_(None),
-            WorkflowActionTemplate.app_id.is_(None),
-            WorkflowActionTemplate.channel == channel,
-            WorkflowActionTemplate.slug == slug,
-        )
-    )
-    if tmpl is None:
-        return []
-    payload = tmpl.payload_schema or {}
-    return list(payload.get("user_data_map") or payload.get("parameter_map") or [])
-
-
-def _materialize_variable_mappings(
-    template_var_map: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    """Convert template-level ``[{name, source}]`` into node-level
-    ``variable_mappings`` rows. ``source`` always refers to a recipient
-    payload column for the seeded workflow, so source_kind='payload'.
-    Operators can flip individual rows to 'static' in the builder.
-    """
-    out: list[dict[str, str]] = []
-    for entry in template_var_map:
-        name = entry.get("name", "")
-        source = entry.get("source", "")
-        if not name:
-            continue
-        out.append(
-            {
-                "agent_variable": name,
-                "source_kind": "payload",
-                "payload_field": source,
-            }
-        )
-    return out
-
-
 async def _inject_seeded_connection_ids_and_mappings(
     db: AsyncSession, *, definition: dict[str, Any], app_id: str,
 ) -> dict[str, Any]:
     """Return a deep copy of ``definition`` with each credential-backed
-    ``crm.*`` node augmented with a ``connection_id`` and (for template-
-    backed nodes) ``variable_mappings`` rows.
+    ``crm.*`` node augmented with a ``connection_id`` resolved from
+    env-bootstrapped system connections.
 
-    No-op for nodes whose provider has no env-bootstrapped connection (e.g.
-    the seed includes an LSQ stage update but the operator never set
-    ``LSQ_*`` env vars). Keeps existing seeded behaviour working —
-    handlers that still read ``ctx.services.*`` continue to dispatch via
-    env-backed services until commit 2 flips the resolver in.
+    Variable mappings are NOT injected here — workflows declare them
+    directly on each node (single source of truth). No-op for nodes whose
+    provider has no env-bootstrapped connection.
     """
     by_provider = await _system_connection_id_by_provider(db, app_id=app_id)
     if not by_provider:
@@ -299,19 +254,12 @@ async def _inject_seeded_connection_ids_and_mappings(
         node_type = node.get("type")
         if node_type not in _CRM_NODE_PROVIDER_CHANNEL:
             continue
-        provider, channel = _CRM_NODE_PROVIDER_CHANNEL[node_type]
+        provider = _CRM_NODE_PROVIDER_CHANNEL[node_type][0]
         cid = by_provider.get(provider)
         if cid is None:
             continue
         config = node.setdefault("config", {})
         config["connection_id"] = str(cid)
-        if channel is not None and "variable_mappings" not in config:
-            slug = config.get("template_slug")
-            if slug:
-                tpl_map = await _action_template_variable_map(
-                    db, channel=channel, slug=slug,
-                )
-                config["variable_mappings"] = _materialize_variable_mappings(tpl_map)
     return enriched
 
 

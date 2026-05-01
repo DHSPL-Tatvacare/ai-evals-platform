@@ -105,11 +105,11 @@ def _patch_module_make_client(monkeypatch, mod, handler):
 
 
 @pytest.mark.asyncio
-async def test_crm_send_wati_per_recipient_template_fallback(
+async def test_crm_send_wati_per_recipient_with_node_mappings(
     db_session, seed_full_run, monkeypatch,
 ):
-    """No node-level variable_mappings → handler falls back to template
-    parameter_map. This is the migration-bridge case for older seeds."""
+    """Node-level variable_mappings drive WATI parameters end-to-end.
+    The template carries only static metadata (template_name, broadcast_name)."""
     from app.services.orchestration.integrations import wati as wati_mod
     from app.services.orchestration.nodes.crm_send_wati import _Config, _Handler
 
@@ -121,10 +121,6 @@ async def test_crm_send_wati_per_recipient_template_fallback(
         payload_schema={
             "template_name": "welcome_v1",
             "broadcast_name": "concierge_welcome",
-            "parameter_map": [
-                {"name": "patient_name", "source": "first_name"},
-                {"name": "city", "source": "city"},
-            ],
         },
     ))
     for rid, fname in [("L-1", "Aarti"), ("L-2", "Bilal")]:
@@ -157,6 +153,12 @@ async def test_crm_send_wati_per_recipient_template_fallback(
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="whatsapp_number",
+        variable_mappings=[
+            {"agent_variable": "patient_name", "source_kind": "payload",
+             "payload_field": "first_name"},
+            {"agent_variable": "city", "source_kind": "payload",
+             "payload_field": "city"},
+        ],
     )
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="wati",
@@ -183,27 +185,26 @@ async def test_crm_send_wati_per_recipient_template_fallback(
     for atype, st, payload in rows:
         assert atype == "wa_dispatched"
         assert st == "success"
-        # Template-level parameter_map projected through fallback path.
         names = [p["name"] for p in payload["parameters"]]
         assert names == ["patient_name", "city"]
 
 
 @pytest.mark.asyncio
-async def test_crm_send_wati_node_mappings_override_template(
+async def test_crm_send_wati_static_mappings_passthrough(
     db_session, seed_full_run, monkeypatch,
 ):
+    """Static rows render verbatim into the WATI parameters list."""
     from app.services.orchestration.integrations import wati as wati_mod
     from app.services.orchestration.nodes.crm_send_wati import _Config, _Handler
 
     run, version, workflow, _step, tenant_id, app_id = seed_full_run
-    slug = f"override-{uuid.uuid4().hex[:8]}"
+    slug = f"static-{uuid.uuid4().hex[:8]}"
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
-        channel="wati", slug=slug, name="Override",
+        channel="wati", slug=slug, name="Static",
         payload_schema={
-            "template_name": "override_v1",
+            "template_name": "static_v1",
             "broadcast_name": "concierge",
-            "parameter_map": [{"name": "patient_name", "source": "first_name"}],
         },
     ))
     step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
@@ -241,7 +242,6 @@ async def test_crm_send_wati_node_mappings_override_template(
     assert [o.recipient_id for o in result.by_output_id["success"]] == ["L-1"]
     assert len(captured) == 1
     body = captured[0].content.decode()
-    # Override took precedence over template fallback.
     assert "STATIC-NAME" in body
     assert "fall-2026" in body
     assert "Aarti" not in body
@@ -256,7 +256,7 @@ async def test_crm_send_wati_missing_phone_field(db_session, seed_full_run):
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="t2",
-        payload_schema={"template_name": "t2", "broadcast_name": "b", "parameter_map": []},
+        payload_schema={"template_name": "t2", "broadcast_name": "b"},
     ))
     step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
                               tenant_id=tenant_id, app_id=app_id,
@@ -287,7 +287,7 @@ async def test_crm_send_wati_failure_emits_failed_edge(
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="t1",
-        payload_schema={"template_name": "t1", "broadcast_name": "b", "parameter_map": []},
+        payload_schema={"template_name": "t1", "broadcast_name": "b"},
     ))
     db_session.add(WorkflowRunRecipientState(
         id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
@@ -324,9 +324,11 @@ async def test_crm_send_wati_failure_emits_failed_edge(
 
 
 @pytest.mark.asyncio
-async def test_crm_place_bolna_call_template_fallback(
+async def test_crm_place_bolna_call_with_node_mappings(
     db_session, seed_full_run, monkeypatch,
 ):
+    """Node-level variable_mappings drive Bolna user_data end-to-end.
+    The template carries only static metadata (agent_id, retry_config)."""
     from app.services.orchestration.integrations import bolna as bolna_mod
     from app.services.orchestration.nodes.crm_place_bolna_call import _Config, _Handler
 
@@ -337,10 +339,6 @@ async def test_crm_place_bolna_call_template_fallback(
         channel="bolna", slug=slug, name="Slot Confirmation",
         payload_schema={
             "agent_id": "agent-confirm-1",
-            "user_data_map": [
-                {"name": "first_name", "source": "first_name"},
-                {"name": "slot", "source": "slot"},
-            ],
             "retry_config": {
                 "enabled": True, "max_retries": 2,
                 "retry_on_statuses": ["no-answer", "busy"],
@@ -365,6 +363,12 @@ async def test_crm_place_bolna_call_template_fallback(
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="phone",
+        variable_mappings=[
+            {"agent_variable": "first_name", "source_kind": "payload",
+             "payload_field": "first_name"},
+            {"agent_variable": "slot", "source_kind": "payload",
+             "payload_field": "slot"},
+        ],
     )
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="bn",
@@ -376,27 +380,25 @@ async def test_crm_place_bolna_call_template_fallback(
     assert [o.recipient_id for o in result.by_output_id["success"]] == ["L-1"]
     assert len(captured) == 1
     body = captured[0].content.decode()
-    # Template-level user_data_map projected via fallback.
     assert "Aarti" in body and "5pm" in body
     assert "agent-confirm-1" in body
 
 
 @pytest.mark.asyncio
-async def test_crm_place_bolna_call_node_mappings_override_template(
+async def test_crm_place_bolna_call_remapping_payload_field(
     db_session, seed_full_run, monkeypatch,
 ):
+    """Node mapping reads from a non-default payload field — proves the
+    resolver projects exactly what's declared on the node."""
     from app.services.orchestration.integrations import bolna as bolna_mod
     from app.services.orchestration.nodes.crm_place_bolna_call import _Config, _Handler
 
     run, version, workflow, _step, tenant_id, app_id = seed_full_run
-    slug = f"override-{uuid.uuid4().hex[:8]}"
+    slug = f"remap-{uuid.uuid4().hex[:8]}"
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="bolna", slug=slug, name="O",
-        payload_schema={
-            "agent_id": "ag-1",
-            "user_data_map": [{"name": "first_name", "source": "first_name"}],
-        },
+        payload_schema={"agent_id": "ag-1"},
     ))
     step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
                               tenant_id=tenant_id, app_id=app_id,
@@ -431,10 +433,8 @@ async def test_crm_place_bolna_call_node_mappings_override_template(
     )
     assert [o.recipient_id for o in result.by_output_id["success"]] == ["L-1"]
     body = captured[0].content.decode()
-    # Node mapping reads payload['fn'] not payload['first_name'] — so the
-    # override path projects 'Bilal' into user_data.first_name and the
-    # template fallback that would have read payload['first_name']='Aarti'
-    # is NOT used.
+    # Node mapping reads payload['fn'] (declared on the node), so user_data.first_name = 'Bilal'.
+    # payload['first_name']='Aarti' is unused because no node row points at it.
     assert "Bilal" in body
     assert "demo-2026" in body
     assert "Aarti" not in body

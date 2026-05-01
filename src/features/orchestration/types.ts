@@ -102,14 +102,22 @@ export interface WorkflowDefinitionEdge {
   source: string;
   target: string;
   /**
-   * Phase 11 routing key — the stable machine id of the source node's output edge.
-   * Always populated on canonical (post-normalization) definitions.
+   * Canonical Phase 11 routing key. Matches the persisted JSONB shape
+   * (snake_case) — the wire format from
+   * ``GET /api/orchestration/workflows/{id}/versions`` returns ``output_id``
+   * because ``WorkflowDefinition.edges`` is typed as a raw dict on the
+   * backend and bypasses the camelCase alias generator. Frontend persists
+   * with this key too so round-trips stay lossless.
+   */
+  output_id?: string;
+  /**
+   * Legacy alias — older saved definitions and earlier frontend builds
+   * persisted ``outputId`` (camelCase). Accepted on read; never written.
    */
   outputId?: string;
   /**
-   * Legacy field — superseded by `outputId`. Still accepted on read for back-compat
-   * with pre-Phase-11 saved definitions; the backend's normalization layer rewrites
-   * it to `outputId` at publish time.
+   * Pre-Phase-11 legacy field — accepted on read so old saved definitions
+   * still hydrate. Backend normalizer migrates ``label → output_id``.
    */
   label?: string;
 }
@@ -132,6 +140,12 @@ export interface Workflow {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Most-recent run id / timestamp / status, projected by the backend.
+   *  All three are NULL when the workflow has never been run. System
+   *  workflows always carry NULLs (templates aren't runnable directly). */
+  lastRunId: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: RunStatus | null;
 }
 
 export interface WorkflowVersion {
@@ -209,7 +223,7 @@ export interface ActionRow {
  * may still carry only `label`.
  */
 export function getEdgeOutputId(edge: WorkflowDefinitionEdge): string {
-  return edge.outputId ?? edge.label ?? 'default';
+  return edge.output_id ?? edge.outputId ?? edge.label ?? 'default';
 }
 
 // ─── Phase 11 (Commit 2) — specialized editor contracts ─────────────────────

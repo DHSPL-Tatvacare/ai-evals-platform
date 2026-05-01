@@ -1,15 +1,13 @@
 """crm.place_bolna_call — outbound AI voice call via the configured Bolna account.
 
-Phase 11 (Commit 2): the node declares a Phase-11 contract with workflow-visible
-``success`` / ``exhausted`` outputs. Per-attempt retries are governed by the
-node's ``attempt_policy`` (the helper runs them inline; see
+Workflow-visible outputs: ``success`` / ``exhausted``. Per-attempt retries are
+governed by the node's ``attempt_policy`` (the helper runs them inline; see
 :mod:`attempt_policy` for the backoff caveat). Bolna's own provider-side
 ``retry_config`` continues to govern *within-call* dial retries.
 
-Phase 10: the Bolna service is resolved per-call from
-``ctx.connections.bolna(config.connection_id)``. ``variable_mappings``
-overrides the template's ``user_data_map`` and falls back to the template
-default when empty.
+The Bolna service is resolved per-call from
+``ctx.connections.bolna(config.connection_id)``. ``variable_mappings`` is the
+sole source of Bolna ``user_data`` — there is no template-side fallback.
 
 Action row: ``action_type='bolna_queued'``. The Bolna ``call_id`` (when
 returned) is emitted into payload as ``bolna_call_id`` so inbound result
@@ -50,6 +48,11 @@ class _Config(BaseModel):
     )
     template_slug: str
     override_agent_id: Optional[str] = None
+    # Optional outbound caller-id override. Falls back to
+    # ``template.payload_schema['from_phone']`` and then to the agent's
+    # default in Bolna when neither is set. Mirrors the
+    # ``from_phone_number`` field in the public Bolna POST /call body.
+    override_from_phone: Optional[str] = None
     phone_field: str = "phone"  # E.164 with '+'
     variable_mappings: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -89,8 +92,8 @@ class _Handler:
         except TemplateNotFound as exc:
             raise RuntimeError(f"crm.place_bolna_call: {exc}") from exc
 
-        template_user_map = tmpl.payload_schema.get("user_data_map", []) or []
         agent_id = config.override_agent_id or tmpl.payload_schema["agent_id"]
+        from_phone = config.override_from_phone or tmpl.payload_schema.get("from_phone")
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
@@ -104,7 +107,6 @@ class _Handler:
             user_data = apply_variable_mappings_dict(
                 config.variable_mappings,
                 payload,
-                template_fallback=template_user_map,
             )
             idem = ctx.idempotency_key(rid, "bolna", config.template_slug)
             results = await ctx.dispatch_actions([
@@ -139,6 +141,7 @@ class _Handler:
                     agent_id=agent_id,
                     recipient_phone=_phone,
                     user_data=_user_data,
+                    from_phone=from_phone,
                     retry_config=tmpl.payload_schema.get("retry_config"),
                 )
 

@@ -8,6 +8,7 @@ import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { Modal } from '@/components/ui/Modal';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { usePageMetadata } from '@/config/pageMetadata';
+import { useCurrentAppId } from '@/hooks';
 import { ApiError } from '@/services/api/client';
 import {
   archiveConnection,
@@ -20,8 +21,6 @@ import { notificationService } from '@/services/notifications';
 import { logger } from '@/services/logger';
 
 import { ConnectionForm } from './ConnectionForm';
-
-const APP_ID = 'inside-sales';
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -41,6 +40,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function ConnectionsPage() {
+  const appId = useCurrentAppId();
   const { icon, title } = usePageMetadata('connections');
   const [rows, setRows] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export function ConnectionsPage() {
     setLoading(true);
     try {
       const result = await listConnections({
-        appId: APP_ID,
+        appId: appId,
         includeInactive: true,
       });
       setRows(result);
@@ -69,7 +69,7 @@ export function ConnectionsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appId]);
 
   useEffect(() => {
     void refresh();
@@ -286,7 +286,7 @@ export function ConnectionsPage() {
       >
         {creating ? (
           <ConnectionForm
-            appId={APP_ID}
+            appId={appId}
             onClose={() => setCreating(false)}
             onSaved={() => {
               setCreating(false);
@@ -303,7 +303,7 @@ export function ConnectionsPage() {
       >
         {editing ? (
           <ConnectionForm
-            appId={APP_ID}
+            appId={appId}
             existing={editing}
             onClose={() => setEditing(null)}
             onSaved={() => {

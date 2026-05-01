@@ -14,6 +14,7 @@ describe('VariableMappingField', () => {
     (getAgentVariables as ReturnType<typeof vi.fn>).mockResolvedValue({
       provider: 'bolna',
       variables: ['user_name', 'preferred_time'],
+      error: null,
     });
   });
 

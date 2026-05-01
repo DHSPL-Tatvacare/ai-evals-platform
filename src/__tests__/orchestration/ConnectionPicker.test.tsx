@@ -7,6 +7,7 @@ vi.mock('@/services/api/orchestrationConnections', () => ({
 }));
 
 import { listConnections } from '@/services/api/orchestrationConnections';
+import { useAppStore } from '@/stores/appStore';
 import { ConnectionPicker } from '@/features/orchestration/components/connections/ConnectionPicker';
 
 function makeConnection(overrides: Partial<Record<string, unknown>> = {}) {
@@ -30,6 +31,8 @@ function makeConnection(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('ConnectionPicker', () => {
   beforeEach(() => {
+    // Anchor the current app so ``useOrchestrationRoutes`` resolves.
+    useAppStore.setState({ currentApp: 'inside-sales' });
     vi.clearAllMocks();
   });
 

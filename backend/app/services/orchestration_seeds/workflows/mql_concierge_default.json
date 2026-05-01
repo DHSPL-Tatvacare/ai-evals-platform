@@ -50,21 +50,42 @@
         "type": "crm.send_wati",
         "position": { "x": -240, "y": 380 },
         "data": { "label": "WATI — Priority", "nodeType": "crm.send_wati" },
-        "config": { "template_slug": "concierge_priority", "phone_field": "whatsapp_number" }
+        "config": {
+          "template_slug": "concierge_priority",
+          "phone_field": "whatsapp_number",
+          "variable_mappings": [
+            { "agent_variable": "patient_name", "source_kind": "payload", "payload_field": "first_name" },
+            { "agent_variable": "city",         "source_kind": "payload", "payload_field": "city" },
+            { "agent_variable": "hba1c",        "source_kind": "payload", "payload_field": "hba1c" }
+          ]
+        }
       },
       {
         "id": "wati_qualify",
         "type": "crm.send_wati",
         "position": { "x": 60, "y": 380 },
         "data": { "label": "WATI — Qualify", "nodeType": "crm.send_wati" },
-        "config": { "template_slug": "concierge_qualify", "phone_field": "whatsapp_number" }
+        "config": {
+          "template_slug": "concierge_qualify",
+          "phone_field": "whatsapp_number",
+          "variable_mappings": [
+            { "agent_variable": "patient_name",   "source_kind": "payload", "payload_field": "first_name" },
+            { "agent_variable": "preferred_time", "source_kind": "payload", "payload_field": "preferred_time" }
+          ]
+        }
       },
       {
         "id": "wati_nurture",
         "type": "crm.send_wati",
         "position": { "x": 360, "y": 380 },
         "data": { "label": "WATI — Nurture", "nodeType": "crm.send_wati" },
-        "config": { "template_slug": "concierge_nurture", "phone_field": "whatsapp_number" }
+        "config": {
+          "template_slug": "concierge_nurture",
+          "phone_field": "whatsapp_number",
+          "variable_mappings": [
+            { "agent_variable": "patient_name", "source_kind": "payload", "payload_field": "first_name" }
+          ]
+        }
       },
       {
         "id": "wait_priority",
@@ -99,14 +120,30 @@
         "type": "crm.place_bolna_call",
         "position": { "x": -360, "y": 800 },
         "data": { "label": "Bolna — Confirmation", "nodeType": "crm.place_bolna_call" },
-        "config": { "template_slug": "concierge_confirmation", "phone_field": "phone" }
+        "config": {
+          "template_slug": "concierge_confirmation",
+          "phone_field": "phone",
+          "variable_mappings": [
+            { "agent_variable": "first_name",     "source_kind": "payload", "payload_field": "first_name" },
+            { "agent_variable": "preferred_slot", "source_kind": "payload", "payload_field": "preferred_slot" },
+            { "agent_variable": "city",           "source_kind": "payload", "payload_field": "city" }
+          ]
+        }
       },
       {
         "id": "bolna_call_qualify",
         "type": "crm.place_bolna_call",
         "position": { "x": 60, "y": 800 },
         "data": { "label": "Bolna — Confirmation", "nodeType": "crm.place_bolna_call" },
-        "config": { "template_slug": "concierge_confirmation", "phone_field": "phone" }
+        "config": {
+          "template_slug": "concierge_confirmation",
+          "phone_field": "phone",
+          "variable_mappings": [
+            { "agent_variable": "first_name",     "source_kind": "payload", "payload_field": "first_name" },
+            { "agent_variable": "preferred_slot", "source_kind": "payload", "payload_field": "preferred_slot" },
+            { "agent_variable": "city",           "source_kind": "payload", "payload_field": "city" }
+          ]
+        }
       },
       {
         "id": "lsq_stage_confirmed",

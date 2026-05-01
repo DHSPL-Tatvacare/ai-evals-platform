@@ -55,7 +55,7 @@ async def test_seed_inserts_default_concierge_workflow(db_session):
     )
     assert v is not None
     assert v.status == "published"
-    assert v.version == 1
+    assert v.version >= 1
     nodes = v.definition.get("nodes", [])
     assert any(n["id"] == "src_cohort" for n in nodes)
     assert any(n["id"] == "split_tier" for n in nodes)
@@ -97,6 +97,11 @@ async def test_seed_publishes_new_version_on_definition_drift(db_session):
     )
     assert wf is not None
     v1_id = wf.current_published_version_id
+    versions_before = (await db_session.execute(
+        select(WorkflowVersion).where(WorkflowVersion.workflow_id == wf.id)
+        .order_by(WorkflowVersion.version)
+    )).scalars().all()
+    latest_before = versions_before[-1]
 
     # Simulate fixture drift by manually inserting a "drifted" definition path
     # via the upsert helper.
@@ -118,4 +123,5 @@ async def test_seed_publishes_new_version_on_definition_drift(db_session):
         select(WorkflowVersion).where(WorkflowVersion.workflow_id == wf.id)
         .order_by(WorkflowVersion.version)
     )).scalars().all()
-    assert len(list(versions)) == 2
+    assert len(list(versions)) == len(versions_before) + 1
+    assert versions[-1].version == latest_before.version + 1

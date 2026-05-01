@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.auth import AuthContext
@@ -151,18 +152,30 @@ async def db_engine():
 async def db_session(db_engine):
     """Async session bound to the live local docker DB.
 
-    Each test runs in a transaction that is rolled back at teardown so test data
-    does not persist. Tests that need a committed row (e.g. to span multiple
-    sessions) can call await session.commit() inside the test — the rollback at
-    teardown will still clear anything left in the open transaction.
+    Each test runs inside an outer transaction plus a nested savepoint. Tests
+    may call ``commit()`` and keep working within the same test, but teardown
+    still rolls back the outer transaction so no rows leak into later tests.
     """
-    Session = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    connection = await db_engine.connect()
+    outer = await connection.begin()
+    Session = async_sessionmaker(bind=connection, expire_on_commit=False, class_=AsyncSession)
     session = Session()
+    await session.begin_nested()
+
+    @event.listens_for(session.sync_session, "after_transaction_end")
+    def _restart_savepoint(sync_session, transaction):
+        parent = getattr(transaction, "parent", None) or getattr(transaction, "_parent", None)
+        if transaction.nested and (parent is None or not parent.nested):
+            sync_session.begin_nested()
+
     try:
         yield session
     finally:
-        await session.rollback()
+        event.remove(session.sync_session, "after_transaction_end", _restart_savepoint)
         await session.close()
+        if outer.is_active:
+            await outer.rollback()
+        await connection.close()
 
 
 @pytest_asyncio.fixture

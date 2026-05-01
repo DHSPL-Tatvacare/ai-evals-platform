@@ -49,6 +49,15 @@ def _clear_provider_env(monkeypatch):
         monkeypatch.setattr(f"app.config.settings.{var}", "")
 
 
+def _bootstrapped_names() -> tuple[str, ...]:
+    from app.services.orchestration_seed import _bootstrapped_connection_name
+
+    return tuple(
+        _bootstrapped_connection_name(provider)
+        for provider in ("bolna", "wati", "lsq")
+    )
+
+
 @pytest.mark.asyncio
 async def test_bootstrap_inserts_when_env_set(db_session, monkeypatch):
     _set_bolna_env(monkeypatch)
@@ -108,6 +117,15 @@ async def test_bootstrap_skips_partial_bolna_env(db_session, monkeypatch):
 
     from app.services.orchestration_seed import _bootstrap_default_connections_from_env
 
+    before = (await db_session.execute(
+        select(ProviderConnection).where(
+            ProviderConnection.tenant_id == SYSTEM_TENANT_ID,
+            ProviderConnection.provider == "bolna",
+            ProviderConnection.app_id == "inside-sales",
+            ProviderConnection.name == "Default bolna (env-bootstrapped)",
+        )
+    )).scalars().all()
+
     await _bootstrap_default_connections_from_env(db_session)
 
     rows = (await db_session.execute(
@@ -115,9 +133,10 @@ async def test_bootstrap_skips_partial_bolna_env(db_session, monkeypatch):
             ProviderConnection.tenant_id == SYSTEM_TENANT_ID,
             ProviderConnection.provider == "bolna",
             ProviderConnection.app_id == "inside-sales",
+            ProviderConnection.name == "Default bolna (env-bootstrapped)",
         )
     )).scalars().all()
-    assert rows == []
+    assert len(rows) == len(before)
 
 
 @pytest.mark.asyncio
@@ -127,14 +146,24 @@ async def test_bootstrap_skips_provider_without_env(db_session, monkeypatch):
 
     from app.services.orchestration_seed import _bootstrap_default_connections_from_env
 
+    names = _bootstrapped_names()
+    before = (await db_session.execute(
+        select(ProviderConnection).where(
+            ProviderConnection.tenant_id == SYSTEM_TENANT_ID,
+            ProviderConnection.app_id == "inside-sales",
+            ProviderConnection.name.in_(names),
+        )
+    )).scalars().all()
+
     await _bootstrap_default_connections_from_env(db_session)
     rows = (await db_session.execute(
         select(ProviderConnection).where(
             ProviderConnection.tenant_id == SYSTEM_TENANT_ID,
             ProviderConnection.app_id == "inside-sales",
+            ProviderConnection.name.in_(names),
         )
     )).scalars().all()
-    assert rows == []
+    assert len(rows) == len(before)
 
 
 @pytest.mark.asyncio
@@ -171,16 +200,18 @@ async def test_seed_workflow_injects_connection_ids_and_mappings(
     assert wati_nodes and bolna_nodes
     for node in wati_nodes:
         assert "connection_id" in node["config"]
-        # parameter_map → variable_mappings
-        assert isinstance(node["config"].get("variable_mappings"), list)
-        if node["config"]["variable_mappings"]:
-            entry = node["config"]["variable_mappings"][0]
+        # Workflows now declare variable_mappings directly per node — no
+        # template-side materialization. Each row carries the canonical
+        # source_kind / payload_field / agent_variable shape.
+        mappings = node["config"].get("variable_mappings")
+        assert isinstance(mappings, list) and mappings
+        for entry in mappings:
             assert "agent_variable" in entry
-            assert entry["source_kind"] == "payload"
+            assert entry["source_kind"] in ("payload", "static")
     for node in bolna_nodes:
         assert "connection_id" in node["config"]
-        # user_data_map → variable_mappings
-        assert isinstance(node["config"].get("variable_mappings"), list)
+        mappings = node["config"].get("variable_mappings")
+        assert isinstance(mappings, list) and mappings
 
 
 @pytest.mark.asyncio

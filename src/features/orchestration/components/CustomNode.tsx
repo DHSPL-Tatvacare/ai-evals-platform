@@ -1,7 +1,16 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import {
+  CheckCircle2,
+  Circle,
+  Loader2,
+  MinusCircle,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 
 import { getCategoryDef } from '@/features/orchestration/config/categories';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import { cn } from '@/utils/cn';
 import { NodeCard } from './NodeCard';
 
 export type NodeOverlayStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -104,6 +113,14 @@ const OVERLAY_STATUS_LABEL: Record<NodeOverlayStatus, string> = {
   skipped: 'Skipped',
 };
 
+const OVERLAY_STATUS_ICON: Record<NodeOverlayStatus, LucideIcon> = {
+  pending: Circle,
+  running: Loader2,
+  completed: CheckCircle2,
+  failed: XCircle,
+  skipped: MinusCircle,
+};
+
 const HANDLE_BASE: React.CSSProperties = {
   width: 12,
   height: 6,
@@ -127,17 +144,26 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
     ? undefined
     : () => useWorkflowBuilderStore.getState().requestDeleteNode(id);
 
-  const barTrailing = overlay ? (
-    <span
-      className="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-      style={{
-        borderColor: OVERLAY_STATUS_COLOR[overlay.status],
-        color: OVERLAY_STATUS_COLOR[overlay.status],
-      }}
-    >
-      {OVERLAY_STATUS_LABEL[overlay.status]}
-    </span>
-  ) : null;
+  const barTrailing = overlay
+    ? (() => {
+        const StatusIcon = OVERLAY_STATUS_ICON[overlay.status];
+        return (
+          <span
+            className="inline-flex h-4 w-4 items-center justify-center"
+            style={{ color: OVERLAY_STATUS_COLOR[overlay.status] }}
+            title={OVERLAY_STATUS_LABEL[overlay.status]}
+            aria-label={OVERLAY_STATUS_LABEL[overlay.status]}
+          >
+            <StatusIcon
+              className={cn(
+                'h-3.5 w-3.5',
+                overlay.status === 'running' && 'animate-spin',
+              )}
+            />
+          </span>
+        );
+      })()
+    : null;
 
   const footer =
     overlay?.cohortSize !== undefined ? (

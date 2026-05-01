@@ -18,21 +18,51 @@ from app.services.orchestration.api.clone import (
     CloneError,
     clone_system_workflow,
 )
-from app.services.orchestration_seed import seed_orchestration_defaults
+
+
+async def _seed_system_workflow_without_connections(db_session, *, app_id: str) -> Workflow:
+    workflow = Workflow(
+        id=uuid.uuid4(),
+        tenant_id=SYSTEM_TENANT_ID,
+        app_id=app_id,
+        workflow_type="crm",
+        slug=f"clone-source-{uuid.uuid4().hex[:8]}",
+        name="Clone Source",
+        created_by=SYSTEM_USER_ID,
+    )
+    db_session.add(workflow)
+    await db_session.flush()
+
+    version = WorkflowVersion(
+        id=uuid.uuid4(),
+        tenant_id=SYSTEM_TENANT_ID,
+        app_id=app_id,
+        workflow_id=workflow.id,
+        version=1,
+        definition={
+            "nodes": [
+                {
+                    "id": "src",
+                    "type": "source.cohort_query",
+                    "config": {"source_table": "x", "id_column": "id"},
+                },
+                {"id": "done", "type": "sink.complete", "config": {}},
+            ],
+            "edges": [{"source": "src", "target": "done"}],
+        },
+        status="published",
+    )
+    db_session.add(version)
+    await db_session.flush()
+    workflow.current_published_version_id = version.id
+    await db_session.flush()
+    return workflow
 
 
 @pytest.mark.asyncio
 async def test_clone_creates_tenant_copy_with_v1_published(db_session, seed_tenant_user_app):
     tenant_id, user_id, app_id = seed_tenant_user_app
-    await seed_orchestration_defaults(db_session)
-
-    src = await db_session.scalar(
-        select(Workflow).where(
-            Workflow.tenant_id == SYSTEM_TENANT_ID,
-            Workflow.slug == "mql-concierge-default",
-        )
-    )
-    assert src is not None
+    src = await _seed_system_workflow_without_connections(db_session, app_id=app_id)
 
     cloned = await clone_system_workflow(
         db_session,

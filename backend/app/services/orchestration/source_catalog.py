@@ -65,18 +65,30 @@ _CATALOG: dict[str, CohortSource] = {
         workflow_types=["crm"],
         app_ids=["inside-sales"],
         schema_qualified_table="analytics.crm_lead_record",
-        id_column="lead_id",
+        # Phase 11 (Commit 2 hotfix): the actual recipient id column on
+        # ``analytics.crm_lead_record`` is ``prospect_id`` — there is no
+        # ``lead_id`` column. The cohort query compiler emits
+        # ``src.{id_column}::text`` so a wrong value here fails at runtime
+        # with ``UndefinedColumn``.
+        id_column="prospect_id",
+        # Allowed columns must match the actual model
+        # (``app/models/source_records.py::CrmLeadRecord``). The original
+        # list aspirated columns that don't exist on this table.
         allowed_payload_columns=[
-            "first_name", "last_name", "city", "phone", "whatsapp_number",
-            "mql_score", "hba1c", "prospect_stage", "created_on",
-            "callback_adherence_seconds", "days_since_last_contact",
-            "preferred_language", "lead_source",
+            "prospect_id", "first_name", "last_name", "phone", "email",
+            "city", "prospect_stage", "plan_name", "age_group", "condition",
+            "hba1c_band", "intent_to_pay", "mql_score", "source",
+            "source_campaign", "agent_name", "created_on", "first_activity_on",
+            "last_activity_on", "rnr_count", "answered_count", "total_dials",
+            "connect_rate", "frt_seconds", "lead_age_days",
+            "days_since_last_contact",
         ],
         allowed_filter_columns=[
-            "prospect_stage", "mql_score", "hba1c", "city",
-            "lead_source", "created_on", "preferred_language",
+            "prospect_id", "prospect_stage", "plan_name", "city", "source",
+            "agent_name", "mql_score", "created_on", "last_activity_on",
+            "condition", "hba1c_band",
         ],
-        allowed_lookback_columns=["created_on"],
+        allowed_lookback_columns=["created_on", "last_activity_on"],
     ),
     "clinical.dim_patient": CohortSource(
         source_ref="clinical.dim_patient",

@@ -42,7 +42,7 @@ describe('source-node successor derives from outgoing edge (Phase 11 §6.1)', ()
       data: { label: 'End', nodeType: 'sink.complete' },
       config: {},
     });
-    s.addEdge({ id: 'e1', source: 'src', target: 'tgt', outputId: 'default' });
+    s.addEdge({ id: 'e1', source: 'src', target: 'tgt', output_id: 'default' });
     const def = useWorkflowBuilderStore.getState().toDefinition();
     const src = def.nodes.find((n) => n.id === 'src');
     expect(src?.config).not.toHaveProperty('next_node_id');

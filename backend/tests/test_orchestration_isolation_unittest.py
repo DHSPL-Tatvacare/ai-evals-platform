@@ -382,5 +382,7 @@ async def test_no_app_access_list_runs_filters_unreachable_apps(client):
                          app_access=frozenset({"voice-rx"})))
     r = await client.get("/api/orchestration/runs")
     assert r.status_code == 200
-    ids = [x["id"] for x in r.json()]
+    body = r.json()
+    ids = [x["id"] for x in body["runs"]]
     assert run["id"] not in ids
+    assert body["total"] == len(body["runs"])

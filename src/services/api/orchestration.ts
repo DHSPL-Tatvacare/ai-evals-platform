@@ -135,19 +135,26 @@ export async function fireManualRun(
   });
 }
 
+export interface RunListResponse {
+  runs: WorkflowRun[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export async function listRuns(params?: {
   workflowId?: string;
   status?: string;
   limit?: number;
   offset?: number;
-}): Promise<WorkflowRun[]> {
+}): Promise<RunListResponse> {
   const q = new URLSearchParams();
   if (params?.workflowId) q.set('workflowId', params.workflowId);
   if (params?.status) q.set('status', params.status);
   if (params?.limit !== undefined) q.set('limit', String(params.limit));
   if (params?.offset !== undefined) q.set('offset', String(params.offset));
   const qs = q.toString();
-  return apiRequest<WorkflowRun[]>(`/api/orchestration/runs${qs ? `?${qs}` : ''}`);
+  return apiRequest<RunListResponse>(`/api/orchestration/runs${qs ? `?${qs}` : ''}`);
 }
 
 export async function getRun(id: string): Promise<WorkflowRun> {

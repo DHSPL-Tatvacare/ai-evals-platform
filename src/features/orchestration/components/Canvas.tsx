@@ -10,9 +10,10 @@ import {
   type EdgeChange,
   type Node,
   type NodeChange,
+  type ReactFlowInstance,
   type Viewport,
 } from '@xyflow/react';
-import { useCallback, useEffect, useMemo, useRef, type DragEvent } from 'react';
+import { useCallback, useMemo, useRef, type DragEvent } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { getCategoryAccentToken } from '@/features/orchestration/config/categories';
@@ -115,14 +116,10 @@ function CanvasInner() {
   const nodes = useWorkflowBuilderStore((s) => s.nodes);
   const edges = useWorkflowBuilderStore((s) => s.edges);
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
-  const savedViewport = useWorkflowBuilderStore((s) => s.viewport);
+  const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
 
   const reactFlow = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  // Track whether we've already restored the saved viewport; one-shot per mount
-  // so a later store update during the same session doesn't snap-back the user's
-  // manual pan/zoom.
-  const viewportRestored = useRef(false);
 
   const rfNodes: Node[] = useMemo(
     () =>
@@ -132,6 +129,12 @@ function CanvasInner() {
           id: n.id,
           type: 'custom',
           position: n.position,
+          // Zustand owns selection; mirror it onto React Flow's per-node
+          // ``selected`` flag so RF and the inspector cannot drift. Without
+          // this, RF caches its own selection state and skips firing
+          // ``onNodeClick`` when the same node is clicked twice in a row
+          // after the inspector closes.
+          selected: n.id === selectedNodeId,
           // Explicit width/height so the MiniMap has bounding boxes to
           // render before ResizeObserver measurement lands. Matches the
           // NodeCard's `min-w-[220px]` and a typical 2-line content
@@ -150,7 +153,7 @@ function CanvasInner() {
           },
         };
       }),
-    [nodes, palette],
+    [nodes, palette, selectedNodeId],
   );
 
   const rfEdges: Edge[] = useMemo(
@@ -171,14 +174,20 @@ function CanvasInner() {
     [edges, palette, nodes],
   );
 
-  // Restore saved viewport once the ReactFlow instance is ready. Falls back to
-  // fitView (via the ReactFlow `fitView` prop below) when no viewport exists.
-  useEffect(() => {
-    if (viewportRestored.current) return;
-    if (!savedViewport) return;
-    reactFlow.setViewport(savedViewport);
-    viewportRestored.current = true;
-  }, [savedViewport, reactFlow]);
+  // ReactFlow's ``onInit`` fires once nodes are placed in the layout.
+  // Centering the canvas at this point avoids the race that
+  // ``fitView`` + a follow-up ``setViewport`` effect produced (the latter
+  // could overwrite the auto-fit before nodes were measured, leaving the
+  // graph anchored to the upper-left). When the workflow has a persisted
+  // viewport we restore it; otherwise we fit to nodes with a margin.
+  const onInit = useCallback((rf: ReactFlowInstance) => {
+    const saved = useWorkflowBuilderStore.getState().viewport;
+    if (saved) {
+      rf.setViewport(saved);
+    } else {
+      rf.fitView({ padding: 0.2 });
+    }
+  }, []);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const s = useWorkflowBuilderStore.getState();
@@ -187,10 +196,16 @@ function CanvasInner() {
         s.updateNodePosition(c.id, c.position);
       } else if (c.type === 'remove') {
         s.removeNode(c.id);
-      } else if (c.type === 'select') {
-        s.setSelectedNode(c.selected ? c.id : null);
       }
+      // ``select`` changes are intentionally ignored — Zustand owns the
+      // selection (see ``onNodeClick`` and ``onPaneClick``); RF's own
+      // selection state is mirrored onto each node via the ``selected``
+      // field in ``rfNodes`` above.
     }
+  }, []);
+
+  const onNodeClick = useCallback((_: unknown, node: Node) => {
+    useWorkflowBuilderStore.getState().setSelectedNode(node.id);
   }, []);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
@@ -210,14 +225,15 @@ function CanvasInner() {
   const onConnect = useCallback((conn: Connection) => {
     const s = useWorkflowBuilderStore.getState();
     if (!conn.source || !conn.target) return;
-    // Phase 11: persist the canonical ``outputId`` instead of the legacy
-    // ``label``. The handle id IS the output id (set on the React Flow
-    // Handle via ``id={oid}`` in CustomNode).
+    // Phase 11: persist the canonical snake_case ``output_id`` (matches
+    // the JSONB blob and the backend's ``WorkflowDefinitionEdge`` shape).
+    // Earlier builds wrote ``outputId``; both still hydrate via
+    // ``getEdgeOutputId``.
     s.addEdge({
       id: `e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       source: conn.source,
       target: conn.target,
-      outputId: conn.sourceHandle ?? 'default',
+      output_id: conn.sourceHandle ?? 'default',
     });
   }, []);
 
@@ -275,14 +291,13 @@ function CanvasInner() {
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        onInit={onInit}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
         onConnect={onConnect}
         onMoveEnd={onMoveEnd}
         onPaneClick={onPaneClick}
-        // Only autofit when there's no saved viewport; once the user has
-        // panned/zoomed at least once, restoring fitView would discard that.
-        fitView={savedViewport == null}
         // ReactFlow's "powered by" badge is overlaid on the bottom-right.
         // Hidden so the canvas reads as part of the product chrome.
         proOptions={{ hideAttribution: true }}

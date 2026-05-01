@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
-import { routes } from '@/config/routes';
+import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import {
   listConnections,
   type Connection,
@@ -36,6 +36,7 @@ export type ConnectionPickerProps = SingleProviderProps | MultiProviderProps;
  *  page so they can create one without losing their place. */
 export function ConnectionPicker(props: ConnectionPickerProps) {
   const { appId, value, onChange, disabled, emptyCreateRoute } = props;
+  const orchestrationRoutes = useOrchestrationRoutes();
   const providers = useMemo<readonly string[]>(() => {
     if ('providers' in props && props.providers) return props.providers;
     if ('provider' in props && props.provider) return [props.provider];
@@ -77,7 +78,7 @@ export function ConnectionPicker(props: ConnectionPickerProps) {
     }));
   }, [rows]);
 
-  const createRoute = emptyCreateRoute ?? routes.insideSales.connections;
+  const createRoute = emptyCreateRoute ?? orchestrationRoutes.connections;
   const placeholder =
     rows === null ? 'Loading…' : 'Select a connection…';
 

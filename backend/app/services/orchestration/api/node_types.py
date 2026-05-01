@@ -23,7 +23,9 @@ verbatim, so this module passes the schema through unchanged.
 """
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import Any, Optional, cast
+
+from pydantic.alias_generators import to_camel
 
 from app.schemas.orchestration import (
     LegacyNodeCategory,
@@ -32,6 +34,18 @@ from app.schemas.orchestration import (
 )
 from app.services.orchestration.node_descriptors import build_descriptor
 from app.services.orchestration.node_registry import NODE_REGISTRY
+
+
+def _camelize_keys(d: dict[str, Any]) -> dict[str, Any]:
+    """Project snake_case keys to camelCase for a wire-format dict.
+
+    The Phase 11 descriptor sub-models (``EditorHints``, ``GraphRules``,
+    ``RuntimeContract``) are typed as raw ``dict[str, Any]`` on
+    ``NodeTypeDescriptor`` so the response model's ``alias_generator``
+    doesn't reach inside them. The frontend reads ``editorHints.preferredEditor``
+    etc. — camelCase — so we re-key here before serialization.
+    """
+    return {to_camel(k): v for k, v in d.items()}
 
 
 _LEGACY_CATEGORY_BY_PREFIX: dict[str, LegacyNodeCategory] = {
@@ -73,7 +87,7 @@ def list_node_types(workflow_type: Optional[str] = None) -> list[NodeTypeDescrip
             description=d.description,
             authoring_status=d.authoring_status,
             config_schema=d.config_schema,
-            editor_hints=d.editor_hints.model_dump(),
+            editor_hints=_camelize_keys(d.editor_hints.model_dump()),
             required_payload_fields=d.required_payload_fields,
             emitted_payload_fields=d.emitted_payload_fields,
             output_edges=[
@@ -83,8 +97,8 @@ def list_node_types(workflow_type: Optional[str] = None) -> list[NodeTypeDescrip
                 )
                 for e in d.output_edges
             ],
-            graph_rules=d.graph_rules.model_dump(),
-            runtime_contract=d.runtime_contract.model_dump(),
+            graph_rules=_camelize_keys(d.graph_rules.model_dump()),
+            runtime_contract=_camelize_keys(d.runtime_contract.model_dump()),
             category=_legacy_category_for(node_type, handler.category),
             label=d.display_label,
         ))

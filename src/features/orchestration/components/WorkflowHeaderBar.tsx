@@ -4,7 +4,6 @@ import { ArrowLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { routes } from '@/config/routes';
 import { ApiError } from '@/services/api/client';
 import {
   createDraftVersion,
@@ -14,6 +13,7 @@ import {
 } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 
 function describeError(e: unknown, fallback: string): string {
   if (e instanceof ApiError) return e.message;
@@ -23,6 +23,7 @@ function describeError(e: unknown, fallback: string): string {
 
 export function WorkflowHeaderBar() {
   const navigate = useNavigate();
+  const orchestrationRoutes = useOrchestrationRoutes();
   const workflowId = useWorkflowBuilderStore((s) => s.workflowId);
   const versionId = useWorkflowBuilderStore((s) => s.versionId);
   const name = useWorkflowBuilderStore((s) => s.workflowName);
@@ -40,7 +41,7 @@ export function WorkflowHeaderBar() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate(routes.insideSales.campaigns);
+    navigate(orchestrationRoutes.campaigns);
   };
 
   const saveDraft = async (): Promise<string | null> => {
@@ -162,7 +163,7 @@ export function WorkflowHeaderBar() {
       onClose={() => setShowLeaveConfirm(false)}
       onConfirm={() => {
         setShowLeaveConfirm(false);
-        navigate(routes.insideSales.campaigns);
+        navigate(orchestrationRoutes.campaigns);
       }}
       title="Discard unsaved edits?"
       description="You have unsaved changes to this workflow. Leaving the builder will lose them — save the draft first if you want to keep them."

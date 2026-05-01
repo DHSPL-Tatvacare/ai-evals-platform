@@ -16,6 +16,8 @@ interface RunOverlayState {
   streamStatus: RunStreamStatus;
   /** Lifecycle status of the run as reported by run.* events. */
   runStatus: 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+  /** Last error string reported by `run.failed`, used by toast surface. */
+  runError: string | null;
   /** Per-node aggregated state (latest event wins). */
   byNodeId: Record<string, NodeStepState>;
 
@@ -27,10 +29,16 @@ interface RunOverlayState {
 export const useRunOverlayStore = create<RunOverlayState>((set) => ({
   streamStatus: 'idle',
   runStatus: 'pending',
+  runError: null,
   byNodeId: {},
 
   reset: () =>
-    set({ streamStatus: 'idle', runStatus: 'pending', byNodeId: {} }),
+    set({
+      streamStatus: 'idle',
+      runStatus: 'pending',
+      runError: null,
+      byNodeId: {},
+    }),
 
   setStreamStatus: (s) => set({ streamStatus: s }),
 
@@ -45,7 +53,10 @@ export const useRunOverlayStore = create<RunOverlayState>((set) => ({
           return { runStatus: status };
         }
         case 'run.failed':
-          return { runStatus: 'failed' };
+          return {
+            runStatus: 'failed',
+            runError: typeof e.error === 'string' ? e.error : null,
+          };
         case 'node_step.started':
           if (!nid) return {};
           return {

@@ -76,6 +76,10 @@ export function VariableMappingField({
       .then((res) => {
         if (!alive) return;
         setAgentVars(res.variables);
+        // Soft upstream error (e.g. Bolna 404 for the configured agent
+        // id) — the endpoint returns 200 + ``error`` so we stay editable
+        // but surface the cause instead of pretending nothing happened.
+        setAgentVarsError(res.error ?? null);
       })
       .catch((err: unknown) => {
         if (!alive) return;

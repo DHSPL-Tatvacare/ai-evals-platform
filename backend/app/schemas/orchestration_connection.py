@@ -95,6 +95,13 @@ class AgentVariablesResponse(CamelModel):
     Provider-aware introspection surface for variable-mapping UIs.
     The caller may pass `agentId` and/or `templateSlug`; the backend resolves
     template defaults as needed and caches results per connection revision.
+
+    ``error`` carries a soft, user-facing string when the upstream provider
+    couldn't be queried (e.g. 404 because the agent id doesn't exist under
+    this account, or a transient transport error). The endpoint stays at
+    HTTP 200 so the picker keeps working — the user can still type variable
+    names manually — but the UI surfaces the message inline.
     """
     provider: str
     variables: list[str]
+    error: Optional[str] = None

@@ -10,6 +10,7 @@ then app-gate using ``run.app_id``.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import AuthContext, get_auth_context
 from app.auth.app_scope import ensure_registered_app_access
 from app.database import get_db
+from app.models.orchestration import Workflow
 from app.schemas.orchestration import (
     ActionResponse,
     ActionTemplateResponse,
@@ -31,6 +33,7 @@ from app.schemas.orchestration import (
     OverrideResponse,
     RecipientStateResponse,
     RunCreateRequest,
+    RunListResponse,
     RunResponse,
     TriggerCreateRequest,
     TriggerUpdateRequest,
@@ -89,6 +92,40 @@ async def _load_and_gate_workflow(db: AsyncSession, auth: AuthContext, workflow_
     return wf
 
 
+_NO_RUN: tuple[Optional[uuid.UUID], Optional[datetime], Optional[str]] = (
+    None, None, None,
+)
+
+
+def _to_workflow_response(
+    wf: Workflow,
+    last_run: tuple[Optional[uuid.UUID], Optional[datetime], Optional[str]] = _NO_RUN,
+) -> WorkflowResponse:
+    """Project a Workflow ORM row + its latest run summary into the API
+    response. Centralised so list and single-get share the identical
+    field-population path — keeps ``last_run_*`` consistent."""
+    resp = WorkflowResponse.model_validate(wf)
+    resp.last_run_id = last_run[0]
+    resp.last_run_at = last_run[1]
+    resp.last_run_status = last_run[2]
+    return resp
+
+
+async def _attach_last_runs(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    workflows: list[Workflow],
+) -> list[WorkflowResponse]:
+    last_runs = await run_service.latest_runs_by_workflow_ids(
+        db, tenant_id=tenant_id, workflow_ids=[w.id for w in workflows],
+    )
+    return [
+        _to_workflow_response(w, last_runs.get(w.id, _NO_RUN))
+        for w in workflows
+    ]
+
+
 @router.get("/workflows", response_model=list[WorkflowResponse])
 async def list_workflows(
     auth: AuthContext = Depends(get_auth_context),
@@ -98,14 +135,16 @@ async def list_workflows(
 ):
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
-        return await wf_service.list_workflows(
+        wfs = await wf_service.list_workflows(
             db, tenant_id=auth.tenant_id, app_id=app_id, workflow_type=workflow_type,
         )
-    # No explicit app filter — restrict to apps the caller can reach.
-    return await wf_service.list_workflows(
-        db, tenant_id=auth.tenant_id, workflow_type=workflow_type,
-        app_ids=frozenset(auth.app_access),
-    )
+    else:
+        # No explicit app filter — restrict to apps the caller can reach.
+        wfs = await wf_service.list_workflows(
+            db, tenant_id=auth.tenant_id, workflow_type=workflow_type,
+            app_ids=frozenset(auth.app_access),
+        )
+    return await _attach_last_runs(db, tenant_id=auth.tenant_id, workflows=wfs)
 
 
 @router.get("/system-workflows", response_model=list[WorkflowResponse])
@@ -115,15 +154,21 @@ async def list_system_workflows(
     app_id: Optional[str] = Query(None, alias="appId"),
     workflow_type: Optional[str] = Query(None, alias="workflowType"),
 ):
-    """List cloneable system-seeded workflows visible to the caller's app scope."""
+    """List cloneable system-seeded workflows visible to the caller's app scope.
+
+    System workflows are templates — never directly run — so ``last_run_*``
+    is left as ``None``. Tenant clones expose their own run history.
+    """
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
-        return await wf_service.list_system_workflows(
+        wfs = await wf_service.list_system_workflows(
             db, app_id=app_id, workflow_type=workflow_type,
         )
-    return await wf_service.list_system_workflows(
-        db, workflow_type=workflow_type, app_ids=frozenset(auth.app_access),
-    )
+    else:
+        wfs = await wf_service.list_system_workflows(
+            db, workflow_type=workflow_type, app_ids=frozenset(auth.app_access),
+        )
+    return [_to_workflow_response(w) for w in wfs]
 
 
 @router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
@@ -132,7 +177,11 @@ async def get_workflow(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _load_and_gate_workflow(db, auth, workflow_id)
+    wf = await _load_and_gate_workflow(db, auth, workflow_id)
+    last_runs = await run_service.latest_runs_by_workflow_ids(
+        db, tenant_id=auth.tenant_id, workflow_ids=[wf.id],
+    )
+    return _to_workflow_response(wf, last_runs.get(wf.id, _NO_RUN))
 
 
 @router.patch("/workflows/{workflow_id}", response_model=WorkflowResponse)
@@ -400,7 +449,7 @@ async def _load_and_gate_run(db: AsyncSession, auth: AuthContext, run_id: uuid.U
     return run
 
 
-@router.get("/runs", response_model=list[RunResponse])
+@router.get("/runs", response_model=RunListResponse)
 async def list_runs(
     workflow_id: Optional[uuid.UUID] = Query(None, alias="workflowId"),
     status: Optional[str] = None,
@@ -417,7 +466,7 @@ async def list_runs(
         if wf is None:
             raise HTTPException(status_code=404, detail="workflow not found")
         await ensure_registered_app_access(db, auth, wf.app_id)
-    return await run_service.list_runs(
+    items, total = await run_service.list_runs(
         db,
         tenant_id=auth.tenant_id,
         workflow_id=workflow_id,
@@ -425,6 +474,12 @@ async def list_runs(
         limit=limit,
         offset=offset,
         app_ids=None if workflow_id is not None else frozenset(auth.app_access),
+    )
+    return RunListResponse(
+        runs=[RunResponse.model_validate(r) for r in items],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

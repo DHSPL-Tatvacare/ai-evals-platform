@@ -139,15 +139,22 @@ async def fire_event(
         db.add(run)
         await db.flush()  # ensure run.id is materialized for FK on job
 
+        job_user_id = triggered_by_user_id or trigger.created_by or SYSTEM_USER_ID
         job = BackgroundJob(
             id=uuid.uuid4(),
             tenant_id=tenant_id,
             app_id=trigger.app_id,
-            user_id=triggered_by_user_id or trigger.created_by or SYSTEM_USER_ID,
+            user_id=job_user_id,
             job_type="run-workflow",
             queue_class="standard",
             priority=5,
-            params={"run_id": str(run.id)},
+            # ``process_job`` reads tenant_id / user_id off ``params``;
+            # every run-workflow submission has to echo them.
+            params={
+                "run_id": str(run.id),
+                "tenant_id": str(tenant_id),
+                "user_id": str(job_user_id),
+            },
             status="queued",
         )
         db.add(job)

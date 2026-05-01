@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { X } from 'lucide-react';
 
+import { useCurrentAppId } from '@/hooks';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type {
   MergePolicy,
@@ -19,9 +20,8 @@ import { SourceSelector } from './editors/SourceSelector';
 import { SplitBranchEditor } from './editors/SplitBranchEditor';
 import { WaitConditionEditor } from './editors/WaitConditionEditor';
 
-const APP_ID = 'inside-sales';
-
 export function NodeConfigPanel() {
+  const appId = useCurrentAppId();
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
   const node = useWorkflowBuilderStore((s) =>
     s.nodes.find((n) => n.id === selectedNodeId) ?? null,
@@ -98,7 +98,7 @@ export function NodeConfigPanel() {
         <>
           <SourceSelector
             workflowType={wfType}
-            appId={APP_ID}
+            appId={appId}
             value={config}
             onChange={(next) => setConfig({ ...config, ...next })}
           />
@@ -180,7 +180,7 @@ export function NodeConfigPanel() {
           value={config}
           onChange={setConfig}
           hiddenFields={hiddenFields}
-          appId={APP_ID}
+          appId={appId}
           connectionIdForVariables={
             typeof config.connection_id === 'string' ? config.connection_id : undefined
           }
@@ -211,7 +211,7 @@ export function NodeConfigPanel() {
               'field_mappings',
               'structured_fields',
             ])}
-            appId={APP_ID}
+            appId={appId}
             connectionIdForVariables={
               typeof config.connection_id === 'string' ? config.connection_id : undefined
             }
@@ -240,7 +240,7 @@ export function NodeConfigPanel() {
           value={config}
           onChange={setConfig}
           hiddenFields={hiddenFields}
-          appId={APP_ID}
+          appId={appId}
           connectionIdForVariables={
             typeof config.connection_id === 'string' ? config.connection_id : undefined
           }

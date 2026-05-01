@@ -17,9 +17,10 @@ import pytest_asyncio
 from cryptography.fernet import Fernet
 
 from app.auth import AuthContext, get_auth_context
-from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from app.constants import SYSTEM_USER_ID
 from app.database import get_db
 from app.main import app as fastapi_app
+from app.models.tenant import Tenant
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,7 @@ def _override_db(db_session):
     db_session.commit = db_session.flush  # type: ignore[assignment]
 
 
-def _override_auth(tenant_id=SYSTEM_TENANT_ID):
+def _override_auth(tenant_id: uuid.UUID):
     auth = AuthContext(
         user_id=SYSTEM_USER_ID,
         tenant_id=tenant_id,
@@ -52,9 +53,22 @@ def _override_auth(tenant_id=SYSTEM_TENANT_ID):
 
 
 @pytest_asyncio.fixture
-async def client(db_session):
+async def route_tenant_id(db_session) -> uuid.UUID:
+    tenant_id = uuid.uuid4()
+    db_session.add(Tenant(
+        id=tenant_id,
+        name=f"route-test-{tenant_id.hex[:8]}",
+        slug=f"route-test-{tenant_id.hex[:8]}",
+        is_active=True,
+    ))
+    await db_session.flush()
+    return tenant_id
+
+
+@pytest_asyncio.fixture
+async def client(db_session, route_tenant_id):
     _override_db(db_session)
-    _override_auth()
+    _override_auth(route_tenant_id)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=fastapi_app), base_url="http://test",

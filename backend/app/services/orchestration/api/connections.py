@@ -27,12 +27,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.provider_connection import ProviderConnection
-from app.services.orchestration.integrations.bolna import BolnaService
+from app.services.orchestration.integrations.bolna import (
+    BolnaService,
+    BolnaServiceError,
+)
 from app.services.orchestration.integrations.template_resolver import (
     TemplateNotFound,
     resolve_template,
 )
-from app.services.orchestration.integrations.wati import WatiService
+from app.services.orchestration.integrations.wati import WatiService, WatiServiceError
 from app.services.orchestration.connections import crypto, health, provider_specs
 
 
@@ -137,19 +140,6 @@ def _unique_names(values: Iterable[str]) -> list[str]:
     return out
 
 
-def _names_from_mapping_rows(rows: Iterable[dict[str, Any]]) -> list[str]:
-    out: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        for key in ("name", "agent_variable", "variable", "key"):
-            raw = row.get(key)
-            if isinstance(raw, str):
-                out.append(raw)
-                break
-    return _unique_names(out)
-
-
 def _coerce_variable_names(value: Any) -> list[str]:
     if isinstance(value, str):
         return _unique_names([value])
@@ -181,8 +171,6 @@ def _extract_variable_names(payload: Any) -> list[str]:
         "prompt_variables",
         "agent_variables",
         "dynamic_variables",
-        "user_data_map",
-        "parameter_map",
         "parameters",
         "placeholders",
     }
@@ -449,18 +437,26 @@ async def get_agent_variables(
     )
     cached = _get_cached_variables(cache_key)
     if cached is not None:
-        return {"provider": row.provider, "variables": cached}
+        return {"provider": row.provider, "variables": cached, "error": None}
 
     config = crypto.decrypt(row.config_encrypted)
-    variables = await _provider_agent_variables(
-        db,
-        row=row,
-        config=config,
-        agent_id=agent_id,
-        template_slug=template_slug,
-    )
+    try:
+        variables = await _provider_agent_variables(
+            db,
+            row=row,
+            config=config,
+            agent_id=agent_id,
+            template_slug=template_slug,
+        )
+    except (BolnaServiceError, WatiServiceError) as exc:
+        # Provider responded (or refused to respond) — that's a config /
+        # data condition, not a server bug. Surface the message inline so
+        # the variable-mapping UI can keep accepting manual entries while
+        # the operator chases down the upstream issue. Do NOT cache; a
+        # transient 4xx shouldn't poison the picker for the cache TTL.
+        return {"provider": row.provider, "variables": [], "error": str(exc)}
     _put_cached_variables(cache_key, variables)
-    return {"provider": row.provider, "variables": variables}
+    return {"provider": row.provider, "variables": variables, "error": None}
 
 
 async def _provider_agent_variables(
@@ -490,9 +486,10 @@ async def _agent_variables_for_bolna(
     agent_id: Optional[str],
     template_slug: Optional[str],
 ) -> list[str]:
-    template_fallback: list[str] = []
+    """Variable names declared by the Bolna agent. Provider-live only —
+    templates carry no mapping shape."""
     resolved_agent_id = agent_id
-    if template_slug:
+    if not resolved_agent_id and template_slug:
         try:
             template = await resolve_template(
                 db,
@@ -501,25 +498,21 @@ async def _agent_variables_for_bolna(
                 channel="bolna",
                 slug=template_slug,
             )
-            payload = template.payload_schema or {}
-            template_fallback = _names_from_mapping_rows(payload.get("user_data_map") or [])
-            if not resolved_agent_id:
-                raw_agent_id = payload.get("agent_id")
-                if isinstance(raw_agent_id, str) and raw_agent_id.strip():
-                    resolved_agent_id = raw_agent_id.strip()
+            raw_agent_id = (template.payload_schema or {}).get("agent_id")
+            if isinstance(raw_agent_id, str) and raw_agent_id.strip():
+                resolved_agent_id = raw_agent_id.strip()
         except TemplateNotFound:
             pass
 
     if not resolved_agent_id:
-        return template_fallback
+        return []
 
     service = BolnaService(
         base_url=str(config.get("base_url") or ""),
         api_key=str(config.get("api_key") or ""),
     )
     payload = await service.get_agent(agent_id=resolved_agent_id)
-    live = _extract_variable_names(payload)
-    return live or template_fallback
+    return _extract_variable_names(payload)
 
 
 async def _agent_variables_for_wati(
@@ -529,8 +522,9 @@ async def _agent_variables_for_wati(
     config: dict[str, Any],
     template_slug: Optional[str],
 ) -> list[str]:
+    """Variable names declared by the WATI message template. Provider-live only —
+    seeded templates carry no mapping shape."""
     template_name: Optional[str] = None
-    template_fallback: list[str] = []
     if template_slug:
         try:
             template = await resolve_template(
@@ -540,16 +534,14 @@ async def _agent_variables_for_wati(
                 channel="wati",
                 slug=template_slug,
             )
-            payload = template.payload_schema or {}
-            template_name_raw = payload.get("template_name")
+            template_name_raw = (template.payload_schema or {}).get("template_name")
             if isinstance(template_name_raw, str) and template_name_raw.strip():
                 template_name = template_name_raw.strip()
-            template_fallback = _names_from_mapping_rows(payload.get("parameter_map") or [])
         except TemplateNotFound:
             pass
 
     if not template_name:
-        return template_fallback
+        return []
 
     service = WatiService(
         base_url=str(config.get("base_url") or ""),
@@ -557,8 +549,7 @@ async def _agent_variables_for_wati(
         api_token=str(config.get("api_token") or ""),
     )
     payload = await service.get_message_templates()
-    live = _extract_wati_template_variables(payload, template_name=template_name)
-    return live or template_fallback
+    return _extract_wati_template_variables(payload, template_name=template_name)
 
 
 def _extract_wati_template_variables(payload: Any, *, template_name: str) -> list[str]:

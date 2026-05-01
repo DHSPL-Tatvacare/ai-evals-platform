@@ -1,21 +1,14 @@
 """crm.send_wati — WhatsApp template dispatch via the configured WATI account.
 
-Phase 11 (Commit 2): the node now declares a Phase-11 contract:
+Workflow-visible outputs collapse to ``success`` / ``exhausted`` (Phase 11 §6.6);
+per-attempt retry stays inside the node via
+:func:`attempt_policy.run_with_attempt_policy`. ``attempt_policy`` is part of
+the user-facing config; tenants can raise ``max_attempts`` without authoring
+a graph retry loop.
 
-  - workflow-visible outputs collapse to ``success`` / ``exhausted``
-    (Phase 11 §6.6) — per-attempt retry stays inside the node via
-    :func:`attempt_policy.run_with_attempt_policy`.
-  - ``attempt_policy`` is part of the user-facing config; tenants can
-    raise ``max_attempts`` without authoring a graph retry loop.
-
-Phase 10 ground rules remain:
-
-  - the WATI service is resolved per-call from
-    ``ctx.connections.wati(config.connection_id)`` rather than read off
-    ``ctx.services.wati``.
-  - ``variable_mappings`` overrides the template's default
-    ``parameter_map``; an empty list falls back to the template defaults
-    so older seed JSON keeps working.
+The WATI service is resolved per-call from
+``ctx.connections.wati(config.connection_id)``. ``variable_mappings`` is the
+sole source of WATI parameters — there is no template-side fallback.
 
 Persists one ``workflow_run_recipient_actions`` row per recipient with
 ``action_type='wa_dispatched'``. Idempotency key is deterministic from
@@ -98,7 +91,6 @@ class _Handler:
         except TemplateNotFound as exc:
             raise RuntimeError(f"crm.send_wati: {exc}") from exc
 
-        template_param_map = template.payload_schema.get("parameter_map", []) or []
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
@@ -112,7 +104,6 @@ class _Handler:
             params_built = apply_variable_mappings_list(
                 config.variable_mappings,
                 payload,
-                template_fallback=template_param_map,
             )
 
             idem = ctx.idempotency_key(rid, "wati", config.template_slug)

@@ -55,6 +55,11 @@ export interface ConnectionTestResponse {
 export interface AgentVariablesResponse {
   provider: string;
   variables: string[];
+  /** Soft, user-facing message when the upstream provider couldn't be
+   *  queried (e.g. agent id unknown, transient transport error). The
+   *  endpoint stays at HTTP 200 in that case so the picker keeps working;
+   *  callers should display this inline. */
+  error: string | null;
 }
 
 export interface AgentVariablesParams {

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
+import { useCurrentAppId } from '@/hooks';
 import { ApiError } from '@/services/api/client';
 import { createWorkflow } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export function CreateWorkflowDialog({ onClose, onCreated }: Props) {
+  const appId = useCurrentAppId();
   const [workflowType, setWorkflowType] = useState<WorkflowType>('crm');
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
@@ -29,7 +31,7 @@ export function CreateWorkflowDialog({ onClose, onCreated }: Props) {
     setBusy(true);
     try {
       const wf = await createWorkflow({
-        appId: 'inside-sales',
+        appId,
         workflowType,
         slug: slug.trim(),
         name: name.trim(),
