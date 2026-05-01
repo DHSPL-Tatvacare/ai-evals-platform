@@ -12,11 +12,9 @@ import { cn } from '@/utils';
 
 import { PaletteItem } from './PaletteItem';
 
-// Consent-gate depends on a consent-ingestion path we do not have yet. Keep the
-// node implemented in the runtime/catalog so existing definitions remain
-// inspectable, but hide it from authoring until that upstream contract exists.
-const HIDDEN_NODE_TYPES = new Set(['filter.consent_gate']);
-
+// Phase 11: nodes with `authoringStatus !== 'active'` are not authorable.
+// They still validate and execute when present in saved definitions —
+// see Phase 11 §6.2 (consent_gate) for the canonical example.
 const CATEGORY_ORDER: NodeCategory[] = [
   'source',
   'filter',
@@ -61,7 +59,7 @@ export function Palette() {
       key,
       label: getCategoryDef(key).label,
       items: palette.filter(
-        (p) => p.category === key && !HIDDEN_NODE_TYPES.has(p.nodeType),
+        (p) => p.category === key && p.authoringStatus === 'active',
       ),
     })).filter((g) => g.items.length > 0);
   }, [palette]);

@@ -1,8 +1,19 @@
 """Workflow version create / list / publish.
 
-Publish validates ``definition.nodes[*].type`` against the node registry and
-checks each node's config against ``handler.config_schema``. Only a successful
-validation flips status to 'published' and points the workflow at the version.
+Publish runs the Phase 11 contract pipeline:
+
+  1. ``definition_normalizer.normalize_definition`` — rewrites pre-Phase-11
+     edge labels, source ``next_node_id`` pointers, split branch labels,
+     wait config, merge config, and consent_gate config into the canonical
+     shape.
+  2. ``definition_validator.validate_definition`` — enforces graph rules,
+     per-node-config validity, source / sink / split / wait routing
+     constraints. Aggregates errors and raises ``VersionPublishError`` with
+     a human-readable list.
+
+Successful validation persists the canonical (post-normalization)
+definition and flips the version to 'published'. Pointing the workflow at
+the version is the same row update.
 """
 from __future__ import annotations
 
@@ -14,7 +25,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.orchestration import Workflow, WorkflowVersion
-from app.services.orchestration.node_registry import NodeRegistryError, resolve_handler
+from app.services.orchestration.definition_normalizer import normalize_definition
+from app.services.orchestration.definition_validator import (
+    DefinitionValidationError,
+    validate_definition,
+)
 
 
 class VersionPublishError(ValueError):
@@ -91,8 +106,15 @@ async def publish_version(
     if wf is None:
         return None
 
-    _validate_definition(v.definition, workflow_type=wf.workflow_type)
+    canonical = normalize_definition(v.definition)
+    try:
+        validate_definition(canonical, workflow_type=wf.workflow_type)
+    except DefinitionValidationError as exc:
+        # Surface the structured error list under the same VersionPublishError
+        # type the route handler already maps to a 400.
+        raise VersionPublishError(str(exc)) from exc
 
+    v.definition = canonical
     v.status = "published"
     v.published_by = published_by
     v.published_at = datetime.now(timezone.utc)
@@ -100,21 +122,3 @@ async def publish_version(
     await db.commit()
     await db.refresh(v)
     return v
-
-
-def _validate_definition(definition: dict[str, Any], *, workflow_type: str) -> None:
-    """Walk every node's type through the registry; raise VersionPublishError on miss."""
-    for n in definition.get("nodes", []):
-        node_type = n.get("type")
-        if not node_type:
-            raise VersionPublishError(f"node {n.get('id')!r} missing 'type'")
-        try:
-            handler = resolve_handler(workflow_type=workflow_type, node_type=node_type)
-        except NodeRegistryError as exc:
-            raise VersionPublishError(
-                f"unknown node type {node_type!r} for workflow_type={workflow_type!r}: {exc}"
-            )
-        try:
-            handler.config_schema(**(n.get("config") or {}))
-        except Exception as exc:
-            raise VersionPublishError(f"node {n.get('id')!r} config invalid: {exc}")

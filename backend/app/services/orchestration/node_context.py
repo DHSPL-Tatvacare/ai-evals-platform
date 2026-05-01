@@ -45,6 +45,12 @@ class NodeContext:
     ``connection_id`` against ``orchestration.provider_connections``
     (Phase 10 commit 2). ``services`` only carries ``clinical_outbox``
     today — every other channel routes through ``connections``.
+
+    ``outgoing_targets`` maps each declared ``output_id`` of the current
+    node to the target node ids reachable along that edge. Source nodes
+    use this (via :meth:`resolve_default_target`) to discover the next
+    node in the graph instead of carrying a ``next_node_id`` in node
+    config — see Phase 11 §6.1.
     """
 
     db: AsyncSession
@@ -58,6 +64,29 @@ class NodeContext:
     services: ServiceRegistry
     job_id: Optional[uuid.UUID]
     connections: Any = None
+    outgoing_targets: Optional[dict[str, list[str]]] = None
+
+    def resolve_default_target(self) -> str:
+        """Return the single target node id wired to this node's ``default`` output.
+
+        Used by source nodes (``source.cohort_query``, ``source.event_trigger``)
+        to find the successor in the graph instead of reading it from node
+        config. The validator guarantees source nodes have exactly one
+        outgoing ``default`` edge before publish, so any failure here is a
+        misnormalized definition that bypassed validation.
+        """
+        if self.outgoing_targets is None:
+            raise RuntimeError(
+                "NodeContext.outgoing_targets is not populated — the executor "
+                "must set it before invoking handlers that route by output_id."
+            )
+        targets = self.outgoing_targets.get("default") or []
+        if not targets:
+            raise RuntimeError(
+                f"node {self.current_node_id!r} has no outgoing 'default' edge — "
+                "publish-time validation should have rejected this definition."
+            )
+        return targets[0]
 
     def idempotency_key(self, recipient_id: str, *parts: str) -> str:
         return _gen_idempotency_key(

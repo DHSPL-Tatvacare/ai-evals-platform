@@ -1,14 +1,23 @@
 """filter.consent_gate — checks workflow_consent_records for the channel.
 
-require_explicit_optin:
-  False — opted_out blocks; unknown allows (implicit consent treated as opt-in)
-  True  — only opted_in allows; everything else blocks (strict, for sensitive channels)
+Phase 11 contract:
+  - ``authoring_status='hidden'`` — kept executable for definitions that
+    already reference it but removed from the palette until consent
+    ingestion lands.
+  - ``consent_policy`` is now an explicit enum instead of a permissive bool:
+      - ``permissive``    — only ``opted_out`` blocks; ``unknown`` allows
+                            (matches the historical default).
+      - ``explicit_optin`` — only ``opted_in`` allows; everything else
+                            blocks (sensitive channels).
+
+Legacy ``{ require_explicit_optin: bool }`` configs are coerced to the new
+``consent_policy`` enum so old saved definitions and seed JSON still load.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from app.models.orchestration import WorkflowConsentRecord
@@ -16,9 +25,25 @@ from app.services.orchestration.node_protocol import NodeResult, RecipientOutcom
 from app.services.orchestration.node_registry import register_node
 
 
+ConsentPolicy = Literal["permissive", "explicit_optin"]
+
+
 class _Config(BaseModel):
     channel: Literal["wa", "voice", "sms", "email"]
-    require_explicit_optin: bool = False
+    consent_policy: ConsentPolicy = "permissive"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict) or "consent_policy" in raw:
+            return raw
+        if "require_explicit_optin" in raw:
+            new_raw = dict(raw)
+            new_raw["consent_policy"] = (
+                "explicit_optin" if new_raw.pop("require_explicit_optin") else "permissive"
+            )
+            return new_raw
+        return raw
 
 
 @register_node(workflow_type="*", node_type="filter.consent_gate")
@@ -59,12 +84,12 @@ class _Handler:
         blocked: list[RecipientOutcome] = []
         for rid in recipient_ids:
             status = latest.get(rid)
-            if config.require_explicit_optin:
+            if config.consent_policy == "explicit_optin":
                 if status == "opted_in":
                     allowed.append(RecipientOutcome(recipient_id=rid))
                 else:
                     blocked.append(RecipientOutcome(recipient_id=rid))
-            else:
+            else:  # permissive
                 if status == "opted_out":
                     blocked.append(RecipientOutcome(recipient_id=rid))
                 else:
@@ -72,5 +97,9 @@ class _Handler:
 
         return NodeResult(
             by_edge_label={"allowed": allowed, "blocked": blocked},
-            summary={"allowed_count": len(allowed), "blocked_count": len(blocked)},
+            summary={
+                "allowed_count": len(allowed),
+                "blocked_count": len(blocked),
+                "consent_policy": config.consent_policy,
+            },
         )

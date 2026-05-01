@@ -27,6 +27,7 @@ from app.models.orchestration import (
     WorkflowVersion,
 )
 from app.services.orchestration.cohort_stream import CohortStream
+from app.services.orchestration.definition_normalizer import normalize_definition
 from app.services.orchestration.node_context import NodeContext, ServiceRegistry
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import resolve_handler
@@ -55,13 +56,19 @@ class RunExecutor:
         self.services = services or ServiceRegistry()
         self.connections = connections
 
-        nodes = version.definition.get("nodes", [])
-        edges = version.definition.get("edges", [])
+        # Normalize on read so older saved definitions (legacy ``label``
+        # edges, source ``next_node_id``, label-keyed split branches, etc.)
+        # execute under the canonical Phase 11 contract without forcing an
+        # operator re-publish.
+        canonical = normalize_definition(version.definition)
+        nodes = canonical.get("nodes", [])
+        edges = canonical.get("edges", [])
         self._nodes_by_id: dict[str, dict[str, Any]] = {n["id"]: n for n in nodes}
-        # edge_index[source_node_id][label] -> [target_node_id, ...]
+        # edge_index[source_node_id][output_id] -> [target_node_id, ...]
         self._edge_index: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
         for e in edges:
-            self._edge_index[e["source"]][e.get("label", "default")].append(e["target"])
+            output_id = e.get("output_id") or e.get("label") or "default"
+            self._edge_index[e["source"]][output_id].append(e["target"])
 
     async def run_until_quiescent(self, max_iterations: int = 1000) -> None:
         """Loop until no recipients are in 'ready' status. Safety bound to prevent infinite loops."""
@@ -158,6 +165,7 @@ class RunExecutor:
             services=self.services,
             job_id=self.job_id,
             connections=self.connections,
+            outgoing_targets={k: list(v) for k, v in self._edge_index.get(node_id, {}).items()},
         )
         cohort_stream = CohortStream(cohort_payloads)
 

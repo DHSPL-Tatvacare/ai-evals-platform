@@ -3,19 +3,27 @@
 Materializes the entry cohort directly into workflow_run_recipient_states in
 one round-trip. Set algebra at the boundary; per-recipient walking downstream.
 
-Config shape:
-  source_table:        FROM target ('analytics.crm_lead_record', 'clinical.dim_patient', ...)
-  id_column:           recipient_id source ('lead_id', 'patient_id')
-  filters:             list of {column, op, value} — column names regex-validated
-  payload_columns:     list of column names to carry into payload JSONB
-  lookback_hours:      optional N — adds 'lookback_column >= now() - N hours'
-  lookback_column:     required when lookback_hours set
+Phase 11 config (canonical):
+  source_ref:           registered cohort-source key (e.g. 'crm.lead_record')
+  filters:              list of {column, op, value} — column names regex-validated
+  payload_fields:       list of column names to carry into payload JSONB
+  lookback_hours:       optional N — adds 'lookback_column >= now() - N hours'
+  lookback_column:      required when lookback_hours set
   consent_gate_channel: optional channel — adds NOT EXISTS subquery on workflow_consent_records
 
+Phase 11 routing: ``next_node_id`` is no longer part of node config. The
+engine reads the successor from the outgoing ``default`` edge in the graph
+and passes it to ``compile_cohort_query``.
+
+Legacy config keys (``source_table`` / ``id_column`` / ``payload_columns``)
+are still accepted on input — the model maps them to the canonical fields
+so old saved definitions and seed JSON keep loading.
+
 SAFETY:
-  - All column names and source_table validated against ^[a-zA-Z_][a-zA-Z0-9_.]*$
-  - All filter values bound as named params (never interpolated)
-  - tenant_id always added to WHERE clause
+  - All column names and ``schema_qualified_table`` validated against
+    ``^[a-zA-Z_][a-zA-Z0-9_.]*$`` before use in raw SQL.
+  - All filter values bound as named params (never interpolated).
+  - tenant_id always added to WHERE clause.
 """
 from __future__ import annotations
 
@@ -23,7 +31,12 @@ import re
 import uuid
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.services.orchestration.source_catalog import (
+    SourceCatalogError,
+    lookup_source,
+)
 
 
 class CohortQueryCompileError(ValueError):
@@ -61,17 +74,41 @@ class CohortQueryFilter(BaseModel):
 
 
 class CohortQueryConfig(BaseModel):
-    source_table: str
-    id_column: str
-    filters: list[CohortQueryFilter] = Field(default_factory=list)
+    """Canonical Phase 11 cohort-query config.
+
+    Either ``source_ref`` (preferred) or the legacy
+    ``source_table`` + ``id_column`` pair must be provided. When both are
+    given, ``source_ref`` wins and the legacy fields are ignored.
+    """
+
+    # Canonical Phase 11 selector — keyed into the source catalog.
+    source_ref: Optional[str] = None
+    payload_fields: list[str] = Field(default_factory=list)
+
+    # Legacy selector — accepted for back-compat with pre-Phase-11
+    # definitions. The normalization layer rewrites these to ``source_ref``
+    # at publish time, but the runtime still tolerates them so old saved
+    # definitions keep executing without a forced re-publish.
+    source_table: Optional[str] = None
+    id_column: Optional[str] = None
     payload_columns: list[str] = Field(default_factory=list)
+
+    filters: list[CohortQueryFilter] = Field(default_factory=list)
     lookback_hours: Optional[int] = None
     lookback_column: Optional[str] = None
     consent_gate_channel: Optional[str] = None
 
+    # Legacy authoring field — Phase 11 reads the successor from the
+    # outgoing ``default`` edge instead. Accepted on input so pre-Phase-11
+    # saved definitions and unit tests that construct configs directly
+    # keep working; the normalizer drops it from canonical definitions.
+    next_node_id: Optional[str] = None
+
     @field_validator("source_table")
     @classmethod
-    def _validate_source(cls, v: str) -> str:
+    def _validate_source(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         # Schema-qualified names like ``analytics.crm_lead_record`` are valid here.
         if not _QUALIFIED_IDENT_RE.match(v):
             raise CohortQueryCompileError(f"unsafe source_table: {v!r}")
@@ -86,13 +123,39 @@ class CohortQueryConfig(BaseModel):
             raise CohortQueryCompileError(f"unsafe column: {v!r}")
         return v
 
-    @field_validator("payload_columns")
+    @field_validator("payload_columns", "payload_fields")
     @classmethod
     def _validate_payload(cls, cols: list[str]) -> list[str]:
         for c in cols:
             if not _PLAIN_IDENT_RE.match(c):
                 raise CohortQueryCompileError(f"unsafe payload column: {c!r}")
         return cols
+
+    @model_validator(mode="after")
+    def _require_one_selector(self) -> "CohortQueryConfig":
+        if self.source_ref is None and not (self.source_table and self.id_column):
+            raise CohortQueryCompileError(
+                "cohort_query config must declare 'source_ref' "
+                "(or legacy 'source_table' + 'id_column' for back-compat)"
+            )
+        return self
+
+    def resolve_table_and_id(self) -> tuple[str, str]:
+        """Return ``(schema_qualified_table, id_column)`` honouring source_ref first."""
+        if self.source_ref is not None:
+            entry = lookup_source(self.source_ref)
+            if entry is None:
+                raise SourceCatalogError(f"unknown source_ref: {self.source_ref!r}")
+            return entry.schema_qualified_table, entry.id_column
+        # back-compat path — already validated above
+        assert self.source_table and self.id_column  # narrowed by model_validator
+        return self.source_table, self.id_column
+
+    def resolve_payload_columns(self) -> list[str]:
+        """Effective list of columns projected into the recipient payload JSONB."""
+        if self.payload_fields:
+            return list(self.payload_fields)
+        return list(self.payload_columns)
 
 
 def compile_cohort_query(
@@ -105,7 +168,14 @@ def compile_cohort_query(
     app_id: str,
     next_node_id: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Return (sql_string, bind_params)."""
+    """Return (sql_string, bind_params).
+
+    ``next_node_id`` is supplied by the caller (the executor reads it from
+    the outgoing ``default`` edge, not from node config — see Phase 11 §6.1).
+    """
+
+    schema_qualified_table, id_column = cfg.resolve_table_and_id()
+    payload_columns = cfg.resolve_payload_columns()
 
     # Casts disambiguate asyncpg parameter type inference — same param used in
     # both INSERT VALUES (varchar column) and WHERE (varchar column) confuses
@@ -158,7 +228,7 @@ def compile_cohort_query(
             "NOT EXISTS ("
             "  SELECT 1 FROM orchestration.workflow_consent_records c"
             "  WHERE c.tenant_id = (:tenant_id)::uuid AND c.app_id = (:app_id)::text"
-            f"    AND c.recipient_id = (src.{cfg.id_column})::text"
+            f"    AND c.recipient_id = (src.{id_column})::text"
             "    AND c.channel = (:consent_channel)::text"
             "    AND c.status = 'opted_out'"
             ")"
@@ -167,8 +237,8 @@ def compile_cohort_query(
 
     where_clause = " AND ".join(where_parts)
 
-    if cfg.payload_columns:
-        payload_args = ", ".join(f"'{c}', src.{c}" for c in cfg.payload_columns)
+    if payload_columns:
+        payload_args = ", ".join(f"'{c}', src.{c}" for c in payload_columns)
         payload_expr = f"jsonb_build_object({payload_args})"
     else:
         payload_expr = "'{}'::jsonb"
@@ -187,12 +257,12 @@ def compile_cohort_query(
             (:workflow_id)::uuid,
             (:workflow_version_id)::uuid,
             (:run_id)::uuid,
-            src.{cfg.id_column}::text,
+            src.{id_column}::text,
             (:next_node_id)::text,
             'ready',
             {payload_expr},
             now()
-        FROM {cfg.source_table} src
+        FROM {schema_qualified_table} src
         WHERE {where_clause}
         ON CONFLICT (run_id, recipient_id) DO NOTHING
         RETURNING recipient_id

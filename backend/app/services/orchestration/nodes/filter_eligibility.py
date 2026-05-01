@@ -1,4 +1,9 @@
-"""filter.eligibility — splits cohort into 'passed' and 'skipped' edges by predicate."""
+"""filter.eligibility — splits cohort into 'passed' and 'skipped' edges by predicate.
+
+Phase 11 contract: predicate is the typed AST defined in
+``predicate_contract`` (parsed from the persisted JSON). Persistence shape
+remains a dict so existing definitions parse without migration.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -7,7 +12,7 @@ from pydantic import BaseModel
 
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
 from app.services.orchestration.node_registry import register_node
-from app.services.orchestration.nodes._predicate import evaluate_predicate
+from app.services.orchestration.predicate_contract import evaluate as evaluate_predicate
 
 
 class _Config(BaseModel):

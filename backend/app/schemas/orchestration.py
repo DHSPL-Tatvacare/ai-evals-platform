@@ -24,8 +24,43 @@ ConsentChannel = Literal["wa", "voice", "sms", "email"]
 ConsentStatus = Literal["opted_in", "opted_out", "unknown"]
 
 
+class WorkflowDefinitionNode(CamelModel):
+    """One node in a persisted workflow definition.
+
+    ``data.label`` is purely a cached display string. Routing and execution
+    must derive from ``id`` and ``type`` only — never from ``data.label``.
+    """
+    id: str
+    type: str
+    position: dict[str, float] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowDefinitionEdge(CamelModel):
+    """One edge in a persisted workflow definition.
+
+    Phase 11 routing key is ``output_id`` — a stable machine string matching
+    the source node's declared output edge. The legacy ``label`` field is
+    accepted on input for backward compatibility and is mapped to
+    ``output_id`` by the normalization layer; new persisted edges carry
+    ``output_id`` only.
+    """
+    id: str
+    source: str
+    target: str
+    output_id: Optional[str] = None
+    label: Optional[str] = None  # legacy — superseded by output_id; preserved for migration only
+
+
 class WorkflowDefinition(CamelModel):
-    """The JSONB shape stored in workflow_versions.definition."""
+    """The JSONB shape stored in workflow_versions.definition.
+
+    Kept permissive at the boundary (raw ``dict`` lists) because the
+    Phase 11 normalization layer is the single place that reshapes legacy
+    persisted definitions. Strict validation lives in
+    ``definition_validator.validate_definition`` and runs at publish time.
+    """
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
     canvas: dict[str, Any] = Field(default_factory=dict)
@@ -266,19 +301,64 @@ class OverrideResponse(CamelORMModel):
 # ─── Node type catalog (for frontend palette) ───────────────────────────────
 
 
+# Legacy categories — preserved for the back-compat ``category`` field on
+# ``NodeTypeDescriptor`` so older frontend code does not break before the
+# builder picks up the Phase 11 ``displayCategory`` field.
+LegacyNodeCategory = Literal["source", "filter", "logic", "action", "escalation", "sink"]
+
+
+class NodeOutputEdge(CamelModel):
+    """One outgoing edge slot — Phase 11 contract.
+
+    ``id`` is the stable routing key (matches ``output_id`` on persisted
+    edges). ``label`` is display-only.
+    """
+    id: str
+    label: str
+    cardinality: Literal["one", "many"] = "one"
+    dynamic: bool = False
+
+
 class NodeTypeDescriptor(CamelORMModel):
-    """One entry per registered handler — fetched by frontend to render palette."""
+    """One entry per registered handler — fetched by frontend to render palette.
+
+    Phase 11 surfaces the rich descriptor (display label, display category,
+    authoring status, payload IO, output-edge metadata, graph rules, runtime
+    contract). The legacy ``category`` and the original flat ``output_edges``
+    list are preserved as back-compat fields so existing builder code keeps
+    rendering until it migrates to the new fields.
+    """
     node_type: str
     workflow_type: str  # '*' for shared
-    category: Literal["source", "filter", "logic", "action", "escalation", "sink"]
-    label: str
+
+    # Phase 11 canonical fields
+    display_label: str
+    display_category: Literal[
+        "ingress", "qualification", "routing", "suspension",
+        "synchronization", "dispatch", "mutation", "termination",
+    ]
     description: str
-    output_edges: list[str]
+    authoring_status: Literal["active", "hidden", "experimental", "deprecated"] = "active"
+
     config_schema: dict[str, Any]
+    editor_hints: dict[str, Any] = Field(default_factory=dict)
+
+    required_payload_fields: list[str] = Field(default_factory=list)
+    emitted_payload_fields: list[str] = Field(default_factory=list)
+
+    output_edges: list[NodeOutputEdge] = Field(default_factory=list)
+
+    graph_rules: dict[str, Any] = Field(default_factory=dict)
+    runtime_contract: dict[str, Any] = Field(default_factory=dict)
+
+    # Back-compat fields — populated alongside the canonical ones so the
+    # frontend keeps working through the migration window.
+    category: LegacyNodeCategory  # legacy bucket name (`source` / `logic` / ...)
+    label: str  # mirrors `display_label`
 
 
 __all__ = [
-    "WorkflowDefinition",
+    "WorkflowDefinition", "WorkflowDefinitionNode", "WorkflowDefinitionEdge",
     "WorkflowCreateRequest", "WorkflowUpdateRequest", "WorkflowResponse",
     "CloneSystemWorkflowRequest",
     "WorkflowVersionCreateRequest", "WorkflowVersionResponse",
@@ -288,5 +368,5 @@ __all__ = [
     "RunCreateRequest", "RunResponse",
     "RecipientStateResponse", "ActionResponse",
     "OverrideRequest", "OverrideResponse",
-    "NodeTypeDescriptor",
+    "NodeTypeDescriptor", "NodeOutputEdge",
 ]

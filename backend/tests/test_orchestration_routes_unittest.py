@@ -77,6 +77,30 @@ def _wf_body(slug: str, **overrides: Any) -> dict:
     return body
 
 
+# Phase 11 publish validates graph shape. The smallest definition that
+# passes is one ingress -> one terminal with a single 'default' edge.
+_MIN_VALID_DEFINITION = {
+    "nodes": [
+        {
+            "id": "src",
+            "type": "source.cohort_query",
+            "position": {"x": 0, "y": 0},
+            "data": {},
+            "config": {"source_ref": "crm.lead_record", "payload_fields": []},
+        },
+        {
+            "id": "done",
+            "type": "sink.complete",
+            "position": {"x": 0, "y": 200},
+            "data": {},
+            "config": {},
+        },
+    ],
+    "edges": [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}],
+    "canvas": {},
+}
+
+
 # ─── Workflows ───────────────────────────────────────────────────────────────
 
 
@@ -182,12 +206,12 @@ async def test_publish_sets_current_published_version_id(client):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     r = await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.json()["status"] == "published"
     wf2 = (await client.get(f"/api/orchestration/workflows/{wf['id']}")).json()
     assert wf2["currentPublishedVersionId"] == v["id"]
@@ -393,7 +417,7 @@ async def test_manual_fire_creates_run_and_job(client, db_session):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     r = await client.post("/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}})
@@ -415,7 +439,7 @@ async def test_list_and_get_run(client):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(
@@ -439,7 +463,7 @@ async def test_cancel_run(client, db_session):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(
@@ -462,7 +486,7 @@ async def test_override_creates_row(client, db_session):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(

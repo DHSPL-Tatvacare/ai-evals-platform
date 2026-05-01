@@ -43,7 +43,7 @@ function deriveOutputEdges(
       .filter((s) => s.length > 0);
     if (labels.length > 0) return labels;
   }
-  const fromDesc = desc?.outputEdges ?? [];
+  const fromDesc = (desc?.outputEdges ?? []).map((oe) => oe.id);
   return fromDesc.length > 0 ? fromDesc : ['default'];
 }
 

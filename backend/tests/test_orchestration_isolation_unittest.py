@@ -77,6 +77,29 @@ def _wf_body(slug: str, **overrides: Any) -> dict:
     return body
 
 
+# Phase 11 publish validates graph shape — empty definitions no longer pass.
+_MIN_VALID_DEFINITION = {
+    "nodes": [
+        {
+            "id": "src",
+            "type": "source.cohort_query",
+            "position": {"x": 0, "y": 0},
+            "data": {},
+            "config": {"source_ref": "crm.lead_record", "payload_fields": []},
+        },
+        {
+            "id": "done",
+            "type": "sink.complete",
+            "position": {"x": 0, "y": 200},
+            "data": {},
+            "config": {},
+        },
+    ],
+    "edges": [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}],
+    "canvas": {},
+}
+
+
 @pytest_asyncio.fixture
 async def seed_other_tenant(db_session):
     """Seed a second tenant + system user for cross-tenant assertions.
@@ -200,7 +223,7 @@ async def test_cross_tenant_run_endpoints_return_404(client, seed_other_tenant):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(
@@ -291,7 +314,7 @@ async def test_no_app_access_run_endpoints_return_403(client):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(
@@ -348,7 +371,7 @@ async def test_no_app_access_list_runs_filters_unreachable_apps(client):
     )).json()
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+        json={"definition": _MIN_VALID_DEFINITION},
     )).json()
     await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
     run = (await client.post(

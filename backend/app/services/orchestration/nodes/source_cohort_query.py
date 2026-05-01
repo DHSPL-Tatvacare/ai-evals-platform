@@ -1,4 +1,13 @@
-"""source.cohort_query — entry node. Materializes the entry cohort via one CTE."""
+"""source.cohort_query — entry node. Materializes the entry cohort via one CTE.
+
+Phase 11 contract:
+  - User config selects a cohort source via ``source_ref`` (or legacy
+    ``source_table`` + ``id_column``) plus filters / payload fields /
+    optional lookback / optional consent gate.
+  - The successor node is **never** part of node config. The executor
+    reads the outgoing ``default`` edge target via
+    ``ctx.resolve_default_target()`` and passes that to the SQL compiler.
+"""
 from __future__ import annotations
 
 from sqlalchemy import text, update
@@ -7,24 +16,40 @@ from app.models.orchestration import WorkflowRun
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import register_node
 from app.services.orchestration.nodes._cohort_query_compiler import (
-    CohortQueryConfig as _CompilerConfig,
+    CohortQueryConfig,
     compile_cohort_query,
 )
 
 
-class _Config(_CompilerConfig):
-    """Adds next_node_id — the target node recipients flow to after this entry node."""
-    next_node_id: str
+# ``_Config`` is an alias for ``CohortQueryConfig`` — back-compat for tests
+# and any caller that imports the canonical handler config under the
+# convention every other node uses.
+_Config = CohortQueryConfig
+
+
+def _next_target(ctx, config: CohortQueryConfig) -> str:
+    """Phase 11: prefer the graph-derived ``default`` target. Fall back to a
+    legacy ``next_node_id`` if the executor did not populate
+    ``outgoing_targets`` (test mode or pre-Phase-11 saved definition that
+    bypassed normalization)."""
+    if ctx.outgoing_targets:
+        targets = ctx.outgoing_targets.get("default") or []
+        if targets:
+            return targets[0]
+    if config.next_node_id:
+        return config.next_node_id
+    return ctx.resolve_default_target()  # raises with a structured message
 
 
 @register_node(workflow_type="*", node_type="source.cohort_query")
 class _Handler:
     node_type = "source.cohort_query"
-    config_schema = _Config
+    config_schema = CohortQueryConfig
     output_edges = ["default"]
     category = "source"
 
-    async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
+    async def execute(self, input_cohort, config: CohortQueryConfig, ctx) -> NodeResult:
+        next_node_id = _next_target(ctx, config)
         sql, params = compile_cohort_query(
             config,
             run_id=ctx.run_id,
@@ -32,7 +57,7 @@ class _Handler:
             workflow_version_id=ctx.workflow_version_id,
             tenant_id=ctx.tenant_id,
             app_id=ctx.app_id,
-            next_node_id=config.next_node_id,
+            next_node_id=next_node_id,
         )
         result = await ctx.db.execute(text(sql), params)
         rows = result.all()

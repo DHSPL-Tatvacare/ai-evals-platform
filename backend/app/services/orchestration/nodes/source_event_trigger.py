@@ -1,19 +1,22 @@
 """source.event_trigger — entry from a webhook event.
 
-Reads the run's ``event_payload`` (set by webhook ingress) and seeds one
-``WorkflowRunRecipientState`` per element in ``event_payload['recipients']``.
-
-Webhook ingress is responsible for normalizing provider-specific payloads
-into this canonical recipient shape — LSQ pulls ``LeadId``, generic events
-expect the caller to populate ``recipients`` directly. Logging a loud warning
-on zero-recipient entry lets ops catch silent no-ops introduced by mis-shaped
-external payloads.
+Phase 11 contract:
+  - User config is empty. The successor comes from the outgoing ``default``
+    edge in the graph, not from a node-config ``next_node_id`` field.
+  - Reads the run's ``event_payload`` (set by webhook ingress) and seeds one
+    ``WorkflowRunRecipientState`` per element in
+    ``event_payload['recipients']``.
+  - Webhook ingress is responsible for normalizing provider-specific
+    payloads into this canonical recipient shape — LSQ pulls ``LeadId``,
+    generic events expect the caller to populate ``recipients`` directly.
+    Logging a loud warning on zero-recipient entry lets ops catch silent
+    no-ops introduced by mis-shaped external payloads.
 """
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel
 from sqlalchemy import select, update
@@ -26,7 +29,22 @@ _log = logging.getLogger(__name__)
 
 
 class _Config(BaseModel):
-    next_node_id: str
+    """Phase 11 contract: empty in canonical form. The legacy ``next_node_id``
+    field is kept as Optional so unit tests and pre-Phase-11 saved
+    definitions still load — the normalizer drops it from canonical
+    definitions and the executor prefers the graph-derived target.
+    """
+    next_node_id: Optional[str] = None
+
+
+def _next_target(ctx, config: _Config) -> str:
+    if ctx.outgoing_targets:
+        targets = ctx.outgoing_targets.get("default") or []
+        if targets:
+            return targets[0]
+    if config.next_node_id:
+        return config.next_node_id
+    return ctx.resolve_default_target()
 
 
 @register_node(workflow_type="*", node_type="source.event_trigger")
@@ -37,6 +55,7 @@ class _Handler:
     category = "source"
 
     async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
+        next_node_id = _next_target(ctx, config)
         result = await ctx.db.execute(
             select(WorkflowRun.params).where(WorkflowRun.id == ctx.run_id)
         )
@@ -59,7 +78,7 @@ class _Handler:
                 workflow_id=ctx.workflow_id, workflow_version_id=ctx.workflow_version_id,
                 run_id=ctx.run_id,
                 recipient_id=str(recipient_id),
-                current_node_id=config.next_node_id,
+                current_node_id=next_node_id,
                 status="ready",
                 payload=r.get("payload") or {},
             ))

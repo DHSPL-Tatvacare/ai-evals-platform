@@ -1,54 +1,59 @@
 """Builds the palette descriptor list — fed to the frontend builder.
 
-The label/description map is maintained inline so a new node only needs an
-entry alongside its handler module.
+Phase 11: descriptor metadata (display label, display category, authoring
+status, payload IO, output-edge metadata, graph rules, runtime contract)
+lives in ``node_descriptors.build_descriptor``. This module is now a thin
+adapter that walks the registry and projects each handler through the
+canonical descriptor model.
 
-Phase 10 commit 1 contract: handler ``config_schema`` Pydantic models can
-declare per-field metadata via ``json_schema_extra``. Three keys are
-honoured by the frontend builder (DynamicConfigForm):
+Back-compat fields — ``category`` (legacy bucket) and ``label`` (mirrors
+``display_label``) — are populated alongside the canonical fields so older
+frontend code keeps rendering until it migrates to the Phase 11 fields.
+
+Pydantic config-schema metadata keys honoured by the frontend builder:
 
   ``x-secret``    : bool — render as a password input; treat blanks on
                     edit as "leave the stored value alone".
   ``x-provider``  : str  — narrow the connection picker to one provider
                     (e.g. ``crm.place_bolna_call`` → ``"bolna"``).
-  ``x-providers`` : list[str] — multi-provider picker (e.g.
-                    ``crm.send_sms`` → ``["aisensy", "msg91"]``).
+  ``x-providers`` : list[str] — multi-provider picker.
 
 Pydantic v2 propagates ``json_schema_extra`` through ``model_json_schema``
-verbatim, so this module passes the schema through unchanged. Commit 2
-adds the keys to the actual handler config models when the connection_id
-fields are introduced.
+verbatim, so this module passes the schema through unchanged.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, cast
 
-from app.schemas.orchestration import NodeTypeDescriptor
+from app.schemas.orchestration import (
+    LegacyNodeCategory,
+    NodeOutputEdge,
+    NodeTypeDescriptor,
+)
+from app.services.orchestration.node_descriptors import build_descriptor
 from app.services.orchestration.node_registry import NODE_REGISTRY
 
 
-_LABELS: dict[str, tuple[str, str]] = {
-    "source.cohort_query":   ("Cohort Query (SQL)",     "Materialize entry cohort from a source table."),
-    "source.event_trigger":  ("Event Trigger",          "Entry from an external event (webhook, sync)."),
-    "filter.eligibility":    ("Eligibility",            "Predicate filter — passed / skipped."),
-    "filter.consent_gate":   ("Consent Gate",           "Drops opted-out recipients."),
-    "logic.conditional":     ("Conditional",            "Branch on a payload predicate (true / false)."),
-    "logic.split":           ("Split",                  "N-way split by field value or random %."),
-    "logic.wait":            ("Wait",                   "Pause for a duration or until a datetime."),
-    "logic.merge":           ("Merge",                  "Union multiple input edges (with optional dedupe)."),
-    "core.webhook_out":      ("Webhook Out",            "POST a JSON body to an external URL."),
-    "sink.complete":         ("Complete",               "Terminal — marks recipient completed."),
-    "crm.send_wati":         ("Send WhatsApp (WATI)",   "Sends a WATI template per recipient."),
-    "crm.place_bolna_call":  ("Place AI Call (Bolna)",  "Places an outbound AI voice call."),
-    "crm.send_sms":          ("Send SMS",               "Sends an SMS via configured provider."),
-    "crm.lsq_update_stage":  ("LSQ Update Stage",       "Sets ProspectStage on each recipient."),
-    "crm.lsq_log_activity":  ("LSQ Log Activity",       "Logs ProspectActivity on each recipient."),
-    "clinical.schedule_lab":          ("Schedule Lab",       "Queue lab order to EMR via clinical action outbox."),
-    "clinical.assign_care_team_task": ("Assign Care Team",   "Queue task to care manager / physician / etc."),
-    "clinical.send_pro_assessment":   ("Send PRO",           "Send PHQ-9 / DDS / MMAS link to patient."),
-    "clinical.emr_write":             ("EMR Write",          "Write structured note / observation to EMR."),
-    "clinical.escalation_uptier":     ("Escalation",         "Escalate to physician / specialist with urgency."),
+_LEGACY_CATEGORY_BY_PREFIX: dict[str, LegacyNodeCategory] = {
+    "source.": "source",
+    "filter.": "filter",
+    "logic.":  "logic",
+    "sink.":   "sink",
+    "crm.":    "action",
+    "core.":   "action",
+    "clinical.": "action",
 }
+
+
+def _legacy_category_for(node_type: str, handler_category: str) -> LegacyNodeCategory:
+    """Pick the legacy bucket. Falls back to the handler's ``category`` attribute
+    if the prefix is unrecognized — covers test-only registrations cleanly."""
+    for prefix, bucket in _LEGACY_CATEGORY_BY_PREFIX.items():
+        if node_type.startswith(prefix):
+            return bucket
+    if handler_category in {"source", "filter", "logic", "action", "escalation", "sink"}:
+        return cast(LegacyNodeCategory, handler_category)
+    return "logic"
 
 
 def list_node_types(workflow_type: Optional[str] = None) -> list[NodeTypeDescriptor]:
@@ -58,14 +63,29 @@ def list_node_types(workflow_type: Optional[str] = None) -> list[NodeTypeDescrip
             continue
         if workflow_type and wf_match not in (workflow_type, "*"):
             continue
-        label, description = _LABELS.get(node_type, (node_type, ""))
+
+        d = build_descriptor(node_type=node_type, workflow_type=wf_match)
         out.append(NodeTypeDescriptor(
-            node_type=node_type,
-            workflow_type=wf_match,
-            category=handler.category,
-            label=label,
-            description=description,
-            output_edges=list(handler.output_edges),
-            config_schema=handler.config_schema.model_json_schema(),
+            node_type=d.node_type,
+            workflow_type=d.workflow_type,
+            display_label=d.display_label,
+            display_category=d.display_category,
+            description=d.description,
+            authoring_status=d.authoring_status,
+            config_schema=d.config_schema,
+            editor_hints=d.editor_hints.model_dump(),
+            required_payload_fields=d.required_payload_fields,
+            emitted_payload_fields=d.emitted_payload_fields,
+            output_edges=[
+                NodeOutputEdge(
+                    id=e.id, label=e.label,
+                    cardinality=e.cardinality, dynamic=e.dynamic,
+                )
+                for e in d.output_edges
+            ],
+            graph_rules=d.graph_rules.model_dump(),
+            runtime_contract=d.runtime_contract.model_dump(),
+            category=_legacy_category_for(node_type, handler.category),
+            label=d.display_label,
         ))
-    return sorted(out, key=lambda n: (n.category, n.node_type))
+    return sorted(out, key=lambda n: (n.display_category, n.node_type))
