@@ -26,7 +26,7 @@ def upgrade() -> None:
             app_id VARCHAR(64) NOT NULL,
             name VARCHAR(200) NOT NULL,
             description TEXT,
-            created_by UUID NOT NULL REFERENCES platform.users(id),
+            created_by UUID NOT NULL REFERENCES platform.users(id) ON DELETE RESTRICT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT uq_cohort_datasets_scope_name UNIQUE (tenant_id, app_id, name)
@@ -52,7 +52,7 @@ def upgrade() -> None:
             id_strategy VARCHAR(16) NOT NULL,
             id_column VARCHAR(200),
             schema_descriptor JSONB NOT NULL,
-            imported_by UUID NOT NULL REFERENCES platform.users(id),
+            imported_by UUID NOT NULL REFERENCES platform.users(id) ON DELETE RESTRICT,
             imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT uq_dataset_version_number UNIQUE (dataset_id, version_number),
             CONSTRAINT ck_dataset_id_strategy CHECK (id_strategy IN ('column','uuid')),
@@ -64,7 +64,7 @@ def upgrade() -> None:
     )
     op.execute(
         "CREATE INDEX idx_dataset_versions_tenant_dataset "
-        "ON orchestration.cohort_dataset_versions (tenant_id, dataset_id, version_number DESC)"
+        "ON orchestration.cohort_dataset_versions (dataset_id, version_number DESC)"
     )
 
     op.execute(

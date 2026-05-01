@@ -26,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -492,6 +493,7 @@ class CohortDataset(Base):
     __tablename__ = "cohort_datasets"
     __table_args__ = (
         UniqueConstraint("tenant_id", "app_id", "name", name="uq_cohort_datasets_scope_name"),
+        Index("idx_cohort_datasets_tenant_app", "tenant_id", "app_id"),
         {"schema": "orchestration"},
     )
 
@@ -505,7 +507,9 @@ class CohortDataset(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("platform.users.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("platform.users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -522,6 +526,21 @@ class CohortDatasetVersion(Base):
     __tablename__ = "cohort_dataset_versions"
     __table_args__ = (
         UniqueConstraint("dataset_id", "version_number", name="uq_dataset_version_number"),
+        CheckConstraint(
+            "id_strategy IN ('column','uuid')", name="ck_dataset_id_strategy"
+        ),
+        CheckConstraint(
+            "source_type IN ('csv','gsheet','api')", name="ck_dataset_source_type"
+        ),
+        CheckConstraint(
+            "id_strategy <> 'column' OR id_column IS NOT NULL",
+            name="ck_dataset_id_column_when_column",
+        ),
+        Index(
+            "idx_dataset_versions_tenant_dataset",
+            "dataset_id",
+            text("version_number DESC"),
+        ),
         {"schema": "orchestration"},
     )
 
@@ -541,7 +560,9 @@ class CohortDatasetVersion(Base):
     id_column: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     schema_descriptor: Mapped[dict] = mapped_column(JSONB, nullable=False)
     imported_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("platform.users.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("platform.users.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -550,7 +571,20 @@ class CohortDatasetVersion(Base):
 
 class CohortDatasetRow(Base):
     __tablename__ = "cohort_dataset_rows"
-    __table_args__ = ({"schema": "orchestration"},)
+    __table_args__ = (
+        Index(
+            "idx_dataset_rows_version_recipient",
+            "dataset_version_id",
+            "recipient_id",
+        ),
+        Index(
+            "idx_dataset_rows_payload_gin",
+            "payload",
+            postgresql_using="gin",
+            postgresql_ops={"payload": "jsonb_path_ops"},
+        ),
+        {"schema": "orchestration"},
+    )
 
     dataset_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
