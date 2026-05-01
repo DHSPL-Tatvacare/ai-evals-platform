@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -484,6 +485,84 @@ class WorkflowRunRecipientOverride(Base):
     consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+# ─── Cohort dataset tier (Phase 12) ──────────────────────────────────────────
+
+
+class CohortDataset(Base):
+    __tablename__ = "cohort_datasets"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "app_id", "name", name="uq_cohort_datasets_scope_name"),
+        {"schema": "orchestration"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform.users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class CohortDatasetVersion(Base):
+    __tablename__ = "cohort_dataset_versions"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "version_number", name="uq_dataset_version_number"),
+        {"schema": "orchestration"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration.cohort_datasets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="csv")
+    source_filename: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    source_byte_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_strategy: Mapped[str] = mapped_column(String(16), nullable=False)
+    id_column: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    schema_descriptor: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    imported_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform.users.id"), nullable=False
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CohortDatasetRow(Base):
+    __tablename__ = "cohort_dataset_rows"
+    __table_args__ = ({"schema": "orchestration"},)
+
+    dataset_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration.cohort_dataset_versions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    row_seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    recipient_id: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
 __all__ = [
     "Workflow",
     "WorkflowVersion",
@@ -495,4 +574,7 @@ __all__ = [
     "WorkflowRunRecipientState",
     "WorkflowRunRecipientAction",
     "WorkflowRunRecipientOverride",
+    "CohortDataset",
+    "CohortDatasetVersion",
+    "CohortDatasetRow",
 ]
