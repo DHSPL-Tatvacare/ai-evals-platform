@@ -19,6 +19,10 @@ from app.services.orchestration.nodes._cohort_query_compiler import (
     CohortQueryConfig,
     compile_cohort_query,
 )
+from app.services.orchestration.source_catalog import (
+    ResolvedSource,
+    resolve_source,
+)
 
 
 # ``_Config`` is an alias for ``CohortQueryConfig`` — back-compat for tests
@@ -50,6 +54,22 @@ class _Handler:
 
     async def execute(self, input_cohort, config: CohortQueryConfig, ctx) -> NodeResult:
         next_node_id = _next_target(ctx, config)
+
+        # Phase 12: route through the async resolver so dataset sources
+        # (``source_ref='dataset.<uuid>'``) hit ``orchestration.cohort_dataset_rows``
+        # while the static catalog entries continue to hit their backing
+        # ``schema.table``. The legacy ``source_table``/``id_column`` config
+        # path bypasses ``resolved_source`` and lets the compiler fall back
+        # to ``cfg.resolve_table_and_id()`` — preserves pre-Phase-12 saved
+        # definitions that never got re-normalized.
+        resolved: ResolvedSource | None = None
+        if config.source_ref is not None:
+            resolved = await resolve_source(
+                config.source_ref,
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+            )
+
         sql, params = compile_cohort_query(
             config,
             run_id=ctx.run_id,
@@ -58,6 +78,7 @@ class _Handler:
             tenant_id=ctx.tenant_id,
             app_id=ctx.app_id,
             next_node_id=next_node_id,
+            resolved_source=resolved,
         )
         result = await ctx.db.execute(text(sql), params)
         rows = result.all()

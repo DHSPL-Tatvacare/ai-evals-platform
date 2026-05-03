@@ -15,6 +15,12 @@ Phase 11 routing: ``next_node_id`` is no longer part of node config. The
 engine reads the successor from the outgoing ``default`` edge in the graph
 and passes it to ``compile_cohort_query``.
 
+Phase 12: when the resolved source is a ``DatasetSource`` (DB-backed CSV
+upload, ``source_ref='dataset.<uuid>'``), compilation switches to a JSONB
+branch: rows live in ``orchestration.cohort_dataset_rows.payload`` and
+filters become ``(src.payload->>'col')::cast`` expressions, with the cast
+derived from the dataset's stored ``schema_descriptor.columns[*].type``.
+
 Legacy config keys (``source_table`` / ``id_column`` / ``payload_columns``)
 are still accepted on input — the model maps them to the canonical fields
 so old saved definitions and seed JSON keep loading.
@@ -29,11 +35,14 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services.orchestration.source_catalog import (
+    CohortSource,
+    DatasetSource,
+    ResolvedSource,
     SourceCatalogError,
     lookup_source,
 )
@@ -51,6 +60,56 @@ class CohortQueryCompileError(ValueError):
 _PLAIN_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _QUALIFIED_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$")
 _SUPPORTED_OPS = {"eq", "neq", "gte", "gt", "lte", "lt", "in", "not_in", "contains"}
+
+
+# Schema-descriptor type → Postgres cast. Unknown types fall back to ``text``
+# (safe, SQL-correct). Mirrors the inference in ``datasets/csv_importer.py``.
+_DATASET_TYPE_CASTS: dict[str, str] = {
+    "integer": "bigint",
+    "number": "numeric",
+    "boolean": "boolean",
+    "datetime": "timestamptz",
+    "string": "text",
+}
+
+
+# Column resolvers map a filter column name to the SQL expression that
+# yields its value. The static branch resolves to ``src.{col}`` (bare
+# column on the source table); the dataset branch resolves to
+# ``(src.payload->>'col')::cast`` (JSONB extraction with a typed cast).
+ColumnResolver = Callable[[str], str]
+
+
+def _static_column_resolver(allowed: Optional[set[str]] = None) -> ColumnResolver:
+    """Resolver for the static (CohortSource) branch — emits bare ``src.{col}``.
+
+    ``allowed`` is reserved for future per-source allowed_filter_columns
+    enforcement; today the static branch trusts the catalog + the
+    field_validator on ``CohortQueryFilter.column`` for safety.
+    """
+    def _resolve(col: str) -> str:
+        return f"src.{col}"
+    return _resolve
+
+
+def jsonb_column_resolver(declared_types: dict[str, str]) -> ColumnResolver:
+    """Build a resolver that emits ``(src.payload->>'col')::cast``.
+
+    ``declared_types`` is built from the dataset version's
+    ``schema_descriptor.columns`` (``{name -> type}``). Unknown columns
+    raise ``CohortQueryCompileError`` — that surfaces when v2 of a dataset
+    drops a column that v1's workflow filters on, instead of failing
+    downstream with an opaque Postgres error.
+    """
+    def _resolve(col: str) -> str:
+        if col not in declared_types:
+            raise CohortQueryCompileError(
+                f"unknown filter column {col!r} "
+                f"(allowed: {sorted(declared_types)})"
+            )
+        cast = _DATASET_TYPE_CASTS.get(declared_types[col], "text")
+        return f"(src.payload->>'{col}')::{cast}"
+    return _resolve
 
 
 class CohortQueryFilter(BaseModel):
@@ -141,7 +200,12 @@ class CohortQueryConfig(BaseModel):
         return self
 
     def resolve_table_and_id(self) -> tuple[str, str]:
-        """Return ``(schema_qualified_table, id_column)`` honouring source_ref first."""
+        """Return ``(schema_qualified_table, id_column)`` honouring source_ref first.
+
+        Static-source path only. Dataset sources never call this — the
+        compiler routes them through ``_compile_dataset`` which targets
+        ``orchestration.cohort_dataset_rows`` directly.
+        """
         if self.source_ref is not None:
             entry = lookup_source(self.source_ref)
             if entry is None:
@@ -158,6 +222,42 @@ class CohortQueryConfig(BaseModel):
         return list(self.payload_columns)
 
 
+def _filter_to_sql(
+    f: CohortQueryFilter,
+    idx: int,
+    *,
+    column_resolver: ColumnResolver,
+) -> tuple[str, dict[str, Any]]:
+    """Emit ``(where_fragment, bind_params)`` for one filter.
+
+    The column reference comes from ``column_resolver(col)`` — bare
+    ``src.{col}`` for static sources, ``(src.payload->>'col')::cast`` for
+    dataset sources. The op-to-operator mapping is identical in both.
+    """
+    bind_name = f"filter_{idx}"
+    col_sql = column_resolver(f.column)
+    if f.op == "eq":
+        return f"{col_sql} = :{bind_name}", {bind_name: f.value}
+    if f.op == "neq":
+        return f"{col_sql} <> :{bind_name}", {bind_name: f.value}
+    if f.op == "gte":
+        return f"{col_sql} >= :{bind_name}", {bind_name: f.value}
+    if f.op == "gt":
+        return f"{col_sql} > :{bind_name}", {bind_name: f.value}
+    if f.op == "lte":
+        return f"{col_sql} <= :{bind_name}", {bind_name: f.value}
+    if f.op == "lt":
+        return f"{col_sql} < :{bind_name}", {bind_name: f.value}
+    if f.op == "in":
+        return f"{col_sql} = ANY(:{bind_name})", {bind_name: f.value}
+    if f.op == "not_in":
+        return f"{col_sql} <> ALL(:{bind_name})", {bind_name: f.value}
+    if f.op == "contains":
+        return f"{col_sql} ILIKE :{bind_name}", {bind_name: f"%{f.value}%"}
+    # Unreachable — _SUPPORTED_OPS gates this at validation time.
+    raise CohortQueryCompileError(f"unsupported filter op: {f.op!r}")
+
+
 def compile_cohort_query(
     cfg: CohortQueryConfig,
     *,
@@ -167,14 +267,121 @@ def compile_cohort_query(
     tenant_id: uuid.UUID,
     app_id: str,
     next_node_id: str,
+    resolved_source: Optional[ResolvedSource] = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (sql_string, bind_params).
 
     ``next_node_id`` is supplied by the caller (the executor reads it from
     the outgoing ``default`` edge, not from node config — see Phase 11 §6.1).
-    """
 
+    ``resolved_source`` is supplied by the caller after calling
+    ``resolve_source(...)`` (Phase 12 / Task 5). When ``None``, the legacy
+    static-only path is taken via ``cfg.resolve_table_and_id()`` — keeps
+    pre-Phase-12 callers (and most unit tests) working unchanged.
+    """
+    if resolved_source is None:
+        # Legacy entry: derive a CohortSource shim from the catalog or the
+        # legacy source_table+id_column config. Dataset sources never reach
+        # this branch — they require an async DB read at the call site.
+        return _compile_static_legacy(
+            cfg,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            next_node_id=next_node_id,
+        )
+
+    if isinstance(resolved_source, CohortSource):
+        return _compile_static(
+            cfg,
+            source=resolved_source,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            next_node_id=next_node_id,
+        )
+    if isinstance(resolved_source, DatasetSource):
+        return _compile_dataset(
+            cfg,
+            source=resolved_source,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            next_node_id=next_node_id,
+        )
+    raise CohortQueryCompileError(
+        f"unknown resolved source type: {type(resolved_source).__name__}"
+    )
+
+
+def _compile_static_legacy(
+    cfg: CohortQueryConfig,
+    *,
+    run_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    workflow_version_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    next_node_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Pre-Phase-12 static path: resolve table + id from cfg, emit SQL."""
     schema_qualified_table, id_column = cfg.resolve_table_and_id()
+    return _emit_static_sql(
+        cfg,
+        schema_qualified_table=schema_qualified_table,
+        id_column=id_column,
+        run_id=run_id,
+        workflow_id=workflow_id,
+        workflow_version_id=workflow_version_id,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        next_node_id=next_node_id,
+    )
+
+
+def _compile_static(
+    cfg: CohortQueryConfig,
+    *,
+    source: CohortSource,
+    run_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    workflow_version_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    next_node_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Phase 12 static path: source already resolved by the caller."""
+    return _emit_static_sql(
+        cfg,
+        schema_qualified_table=source.schema_qualified_table,
+        id_column=source.id_column,
+        run_id=run_id,
+        workflow_id=workflow_id,
+        workflow_version_id=workflow_version_id,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        next_node_id=next_node_id,
+    )
+
+
+def _emit_static_sql(
+    cfg: CohortQueryConfig,
+    *,
+    schema_qualified_table: str,
+    id_column: str,
+    run_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    workflow_version_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    next_node_id: str,
+) -> tuple[str, dict[str, Any]]:
     payload_columns = cfg.resolve_payload_columns()
 
     # Casts disambiguate asyncpg parameter type inference — same param used in
@@ -191,29 +398,11 @@ def compile_cohort_query(
         "next_node_id": next_node_id,
     }
 
+    resolver = _static_column_resolver()
     for i, f in enumerate(cfg.filters):
-        bind_name = f"filter_{i}"
-        if f.op == "eq":
-            where_parts.append(f"src.{f.column} = :{bind_name}")
-        elif f.op == "neq":
-            where_parts.append(f"src.{f.column} <> :{bind_name}")
-        elif f.op == "gte":
-            where_parts.append(f"src.{f.column} >= :{bind_name}")
-        elif f.op == "gt":
-            where_parts.append(f"src.{f.column} > :{bind_name}")
-        elif f.op == "lte":
-            where_parts.append(f"src.{f.column} <= :{bind_name}")
-        elif f.op == "lt":
-            where_parts.append(f"src.{f.column} < :{bind_name}")
-        elif f.op == "in":
-            where_parts.append(f"src.{f.column} = ANY(:{bind_name})")
-        elif f.op == "not_in":
-            where_parts.append(f"src.{f.column} <> ALL(:{bind_name})")
-        elif f.op == "contains":
-            where_parts.append(f"src.{f.column} ILIKE :{bind_name}")
-            params[bind_name] = f"%{f.value}%"
-            continue
-        params[bind_name] = f.value
+        fragment, bind = _filter_to_sql(f, i, column_resolver=resolver)
+        where_parts.append(fragment)
+        params.update(bind)
 
     if cfg.lookback_hours is not None:
         if not cfg.lookback_column:
@@ -263,6 +452,101 @@ def compile_cohort_query(
             {payload_expr},
             now()
         FROM {schema_qualified_table} src
+        WHERE {where_clause}
+        ON CONFLICT (run_id, recipient_id) DO NOTHING
+        RETURNING recipient_id
+    """.strip()
+
+    return sql, params
+
+
+def _compile_dataset(
+    cfg: CohortQueryConfig,
+    *,
+    source: DatasetSource,
+    run_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    workflow_version_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    next_node_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Phase 12 dataset path: emit SQL against ``orchestration.cohort_dataset_rows``.
+
+    Predicates compile to ``(src.payload->>'col')::cast`` via the JSONB
+    column resolver. The whole row payload is carried into the recipient
+    state (no per-column projection in v1) — downstream nodes pick what
+    they need from ``payload``.
+
+    v1 limitations (raised as ``CohortQueryCompileError`` if configured):
+      - ``lookback_hours`` is not supported. Datetime payload values are
+        stored as JSON strings; ``now() - INTERVAL`` against a string cast
+        is doable but the schema-descriptor inference is the source of
+        truth for "is this column a datetime", and porting the lookback
+        invariant to the JSONB path is out of scope for the linchpin.
+      - ``consent_gate_channel`` is not supported. The consent table joins
+        on the source's natural id column, which datasets don't have a
+        stable equivalent for in v1 (recipient_id is per-version).
+      - ``payload_fields`` is honored only as documentation — the runtime
+        always emits ``src.payload AS row_payload`` (full payload).
+    """
+    if cfg.lookback_hours is not None:
+        raise CohortQueryCompileError(
+            "lookback_hours is not supported for dataset sources in v1"
+        )
+    if cfg.consent_gate_channel:
+        raise CohortQueryCompileError(
+            "consent_gate_channel is not supported for dataset sources in v1"
+        )
+
+    declared_types = {
+        c.get("name"): c.get("type", "string")
+        for c in source.schema_descriptor.get("columns", [])
+        if isinstance(c, dict) and c.get("name")
+    }
+    resolver = jsonb_column_resolver(declared_types)
+
+    where_parts: list[str] = [
+        "src.dataset_version_id = (:dataset_version_id)::uuid",
+        "src.tenant_id = (:tenant_id)::uuid",
+    ]
+    params: dict[str, Any] = {
+        "run_id": run_id,
+        "workflow_id": workflow_id,
+        "workflow_version_id": workflow_version_id,
+        "tenant_id": tenant_id,
+        "app_id": app_id,
+        "next_node_id": next_node_id,
+        "dataset_version_id": source.dataset_version_id,
+    }
+
+    for i, f in enumerate(cfg.filters):
+        fragment, bind = _filter_to_sql(f, i, column_resolver=resolver)
+        where_parts.append(fragment)
+        params.update(bind)
+
+    where_clause = " AND ".join(where_parts)
+
+    # Full-payload projection. v1 doesn't honor cfg.payload_fields for
+    # datasets — the whole row payload travels with the recipient. If a
+    # downstream node needs a subset, it can read it out of `payload`.
+    sql = f"""
+        INSERT INTO orchestration.workflow_run_recipient_states
+            (id, tenant_id, app_id, workflow_id, workflow_version_id,
+             run_id, recipient_id, current_node_id, status, payload, enrolled_at)
+        SELECT
+            gen_random_uuid(),
+            (:tenant_id)::uuid,
+            (:app_id)::text,
+            (:workflow_id)::uuid,
+            (:workflow_version_id)::uuid,
+            (:run_id)::uuid,
+            src.recipient_id::text,
+            (:next_node_id)::text,
+            'ready',
+            src.payload,
+            now()
+        FROM orchestration.cohort_dataset_rows src
         WHERE {where_clause}
         ON CONFLICT (run_id, recipient_id) DO NOTHING
         RETURNING recipient_id
