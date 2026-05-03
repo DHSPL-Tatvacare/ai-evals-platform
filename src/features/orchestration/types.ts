@@ -228,10 +228,18 @@ export function getEdgeOutputId(edge: WorkflowDefinitionEdge): string {
 
 // ─── Phase 11 (Commit 2) — specialized editor contracts ─────────────────────
 
+export type CohortSourceKind = 'static' | 'dataset';
+
 export interface CohortSource {
   sourceRef: string;
   displayLabel: string;
   description: string;
+  /** Discriminates the engineering-owned static catalog (``'static'``) from
+   *  tenant-owned dataset versions (``'dataset'``) added in Phase 12. The
+   *  backend derives the dataset shape's allowed-column lists from the
+   *  persisted ``schema_descriptor``; the frontend treats both the same
+   *  except for grouping in the source picker. */
+  kind: CohortSourceKind;
   workflowTypes: string[];
   appIds: string[];
   idColumn: string;

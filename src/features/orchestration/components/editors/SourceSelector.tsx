@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
-import {
-  fetchCohortSources,
-} from '@/services/api/orchestration';
+import { DatasetSourcePicker } from '@/features/orchestration/components/datasets/DatasetSourcePicker';
 import type {
   CohortSource,
   WorkflowType,
@@ -42,50 +40,25 @@ interface Props {
  * the successor (Phase 11 §6.1).
  */
 export function SourceSelector({ workflowType, appId, value, onChange }: Props) {
-  const [sources, setSources] = useState<CohortSource[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The picker owns the source-catalog fetch; we only need the *selected*
+  // entry here so the payload-field / lookback-column UI can hydrate from
+  // the entry's allowed-column lists. Stash whatever the picker hands
+  // back when the operator switches sources.
+  const [selected, setSelected] = useState<CohortSource | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    fetchCohortSources({ workflowType, appId })
-      .then((rows) => {
-        if (!alive) return;
-        setSources(rows);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setSources([]);
-        setError(err instanceof Error ? err.message : 'Failed to load sources');
-      });
-    return () => {
-      alive = false;
-    };
-  }, [workflowType, appId]);
-
-  const selected = useMemo(
-    () => sources?.find((s) => s.sourceRef === value.source_ref) ?? null,
-    [sources, value.source_ref],
-  );
-
-  const setSourceRef = (next: string) => {
-    // Preserve filters / payload selections when the operator switches
-    // sources only if the columns still exist on the new source. Otherwise
-    // drop them — silently retaining columns the new source can't project
-    // would create a definition that fails validation at publish time.
-    const nextSource = sources?.find((s) => s.sourceRef === next) ?? null;
-    const allowedPayload = new Set(nextSource?.allowedPayloadColumns ?? []);
-    const allowedFilters = new Set(nextSource?.allowedFilterColumns ?? []);
+  const setSourceRef = (next: string, entry: CohortSource) => {
+    setSelected(entry);
+    // Switching sources clears filters / payload selections — column sets
+    // diverge between the static catalog and dataset entries, and silently
+    // retaining columns the new source can't project would create a
+    // definition that fails validation at publish time. (v1: clear and
+    // let the operator reselect; migrating column-by-column is a follow-up.)
     onChange({
       ...value,
       source_ref: next,
-      payload_fields: (value.payload_fields ?? []).filter((c) =>
-        allowedPayload.has(c),
-      ),
-      filters: (value.filters ?? []).filter((f) =>
-        f.column ? allowedFilters.has(f.column) : false,
-      ),
-      lookback_column: nextSource?.allowedLookbackColumns.includes(
+      payload_fields: [],
+      filters: [],
+      lookback_column: entry.allowedLookbackColumns.includes(
         value.lookback_column ?? '',
       )
         ? value.lookback_column
@@ -100,35 +73,29 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
     onChange({ ...value, payload_fields: Array.from(current) });
   };
 
-  const sourceOptions = useMemo(
-    () =>
-      (sources ?? []).map((s) => ({
-        value: s.sourceRef,
-        label: s.displayLabel,
-        meta: s.sourceRef,
-        searchText: `${s.displayLabel} ${s.sourceRef} ${s.description}`,
-      })),
-    [sources],
+  // When the picker's catalog fetch resolves, look up the saved
+  // ``source_ref`` so the payload-field / lookback-column UI can hydrate
+  // without the operator re-clicking the dropdown.
+  const handleSourcesLoaded = useCallback(
+    (sources: CohortSource[]) => {
+      const ref = value.source_ref;
+      if (!ref) return;
+      const match = sources.find((s) => s.sourceRef === ref) ?? null;
+      setSelected((prev) => (prev?.sourceRef === match?.sourceRef ? prev : match));
+    },
+    [value.source_ref],
   );
 
   return (
     <div className="flex flex-col gap-3">
       <Field label="Source">
-        <Combobox
-          value={value.source_ref ?? ''}
+        <DatasetSourcePicker
+          appId={appId}
+          workflowType={workflowType}
+          value={value.source_ref ?? null}
           onChange={setSourceRef}
-          options={sourceOptions}
-          placeholder={sources === null ? 'Loading sources…' : 'Pick a source'}
-          disabled={sources === null}
+          onSourcesLoaded={handleSourcesLoaded}
         />
-        {selected ? (
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            {selected.description}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mt-1 text-xs text-[var(--color-error)]">{error}</p>
-        ) : null}
       </Field>
 
       {selected ? (
