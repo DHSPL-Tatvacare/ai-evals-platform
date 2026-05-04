@@ -241,7 +241,11 @@ async def test_publish_rejects_invalid_node_config(client):
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"cfg-{uuid.uuid4().hex[:8]}")
     )).json()
-    # crm.send_wati requires template_slug. Omit it → handler.config_schema raises.
+    # Phase 13/Phase C activated the publish-gate validator: a crm.send_wati
+    # node with empty config now fails the gate (missing connection_id /
+    # template_name / channel_number / broadcast_name) before the structural
+    # validator's config_schema check ever runs. Route returns 422 with a
+    # structured detail body.
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
         json={"definition": {
@@ -252,7 +256,12 @@ async def test_publish_rejects_invalid_node_config(client):
     r = await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
-    assert r.status_code == 400
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, list) and detail
+    fields = {entry["field"] for entry in detail}
+    assert "template_name" in fields
+    assert "channel_number" in fields
 
 
 # ─── Triggers + cron sync ───────────────────────────────────────────────────

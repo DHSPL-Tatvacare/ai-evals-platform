@@ -79,6 +79,21 @@ export interface ProviderAgentsListResponse {
   error: string | null;
 }
 
+export interface ProviderTemplateSummary {
+  name: string;
+  language: string;
+  status: string;
+  /** Ordered placeholder names declared by the WATI template. Empty array
+   *  when the upstream payload didn't expose any. */
+  parameters: string[];
+}
+
+export interface ProviderTemplatesListResponse {
+  provider: string;
+  items: ProviderTemplateSummary[];
+  error: string | null;
+}
+
 export interface AgentVariablesResponse {
   provider: string;
   variables: string[];
@@ -206,6 +221,18 @@ export async function listConnectionAgents(
   const qs = q.toString();
   return apiRequest<ProviderAgentsListResponse>(
     `/api/orchestration/connections/${connectionId}/agents${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function listConnectionTemplates(
+  connectionId: string,
+  params?: { refresh?: boolean },
+): Promise<ProviderTemplatesListResponse> {
+  const q = new URLSearchParams();
+  if (params?.refresh) q.set('refresh', 'true');
+  const qs = q.toString();
+  return apiRequest<ProviderTemplatesListResponse>(
+    `/api/orchestration/connections/${connectionId}/templates${qs ? `?${qs}` : ''}`,
   );
 }
 

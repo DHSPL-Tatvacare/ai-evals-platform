@@ -1,0 +1,112 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/services/api/orchestrationConnections', () => ({
+  listConnectionTemplates: vi.fn(),
+}));
+
+import { listConnectionTemplates } from '@/services/api/orchestrationConnections';
+import { WatiTemplatePicker } from '@/features/orchestration/components/connections/WatiTemplatePicker';
+
+const mockedList = listConnectionTemplates as ReturnType<typeof vi.fn>;
+
+function renderPicker(props: Partial<React.ComponentProps<typeof WatiTemplatePicker>> = {}) {
+  return render(
+    <WatiTemplatePicker
+      connectionId="conn-1"
+      value=""
+      onChange={vi.fn()}
+      {...props}
+    />,
+  );
+}
+
+describe('WatiTemplatePicker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the placeholder + skips fetching when no connection is selected', () => {
+    renderPicker({ connectionId: undefined });
+    expect(
+      screen.getByText(/Pick a WATI connection/i),
+    ).toBeInTheDocument();
+    expect(listConnectionTemplates).not.toHaveBeenCalled();
+  });
+
+  it('loads templates and selects one through the combobox', async () => {
+    mockedList.mockResolvedValue({
+      provider: 'wati',
+      items: [
+        { name: 'concierge_qualify_v1', language: 'en', status: 'APPROVED', parameters: ['1'] },
+        { name: 'concierge_priority_v1', language: 'en', status: 'APPROVED', parameters: ['1', '2'] },
+      ],
+      error: null,
+    });
+    const onChange = vi.fn();
+    renderPicker({ onChange });
+
+    await waitFor(() =>
+      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: false }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Select a template/i }));
+    fireEvent.click(await screen.findByText('concierge_priority_v1'));
+    expect(onChange).toHaveBeenCalledWith('concierge_priority_v1');
+  });
+
+  it('renders the empty-state hint when no templates come back', async () => {
+    mockedList.mockResolvedValue({ provider: 'wati', items: [], error: null });
+    renderPicker();
+    expect(
+      await screen.findByText(/No templates found/i),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces the soft error from the upstream call', async () => {
+    mockedList.mockResolvedValue({
+      provider: 'wati',
+      items: [],
+      error: 'WATI 401: unauthorized',
+    });
+    renderPicker();
+    expect(
+      await screen.findByText(/WATI 401: unauthorized/i),
+    ).toBeInTheDocument();
+  });
+
+  it('forwards refresh=true when the operator clicks Refresh', async () => {
+    mockedList.mockResolvedValue({ provider: 'wati', items: [], error: null });
+    renderPicker();
+
+    await waitFor(() =>
+      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: false }),
+    );
+    mockedList.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Refresh templates/i }));
+    await waitFor(() =>
+      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: true }),
+    );
+  });
+
+  it('fires onTemplateLoaded with the matching template when value is set', async () => {
+    mockedList.mockResolvedValue({
+      provider: 'wati',
+      items: [
+        { name: 'concierge_qualify_v1', language: 'en', status: 'APPROVED', parameters: ['first_name'] },
+      ],
+      error: null,
+    });
+    const onTemplateLoaded = vi.fn();
+    renderPicker({ value: 'concierge_qualify_v1', onTemplateLoaded });
+
+    await waitFor(() => {
+      expect(onTemplateLoaded).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'concierge_qualify_v1',
+          parameters: ['first_name'],
+        }),
+      );
+    });
+  });
+});

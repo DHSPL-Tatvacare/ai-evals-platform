@@ -151,3 +151,67 @@ async def list_connection_bolna_agents(
 
     _store(key, items)
     return {"provider": "bolna", "items": items, "error": None}
+
+
+async def list_connection_wati_templates(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    connection_id: uuid.UUID,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Phase 13/C.1 — same shape as ``list_connection_bolna_agents`` but for
+    the WATI ``getMessageTemplates`` surface. Templates are normalized to
+    ``{name, language, status, parameters}`` so the frontend picker can
+    drive both selection and the variable-mapping editor's parameter
+    list off a single payload.
+    """
+    key = _CacheKey(connection_id=connection_id, bucket="wati:templates")
+    if refresh:
+        _bust(key)
+    cached = _cached(key)
+    if cached is not None:
+        return {"provider": "wati", "items": cached, "error": None}
+
+    config = await _load_connection(
+        db,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        connection_id=connection_id,
+        expected_provider="wati",
+    )
+    if config is None:
+        return {
+            "provider": "wati",
+            "items": [],
+            "error": "Connection not found, archived, or not a WATI connection.",
+        }
+
+    from app.services.orchestration.integrations.wati import (
+        WatiService,
+        WatiServiceError,
+    )
+
+    try:
+        service = WatiService(
+            base_url=str(config.get("base_url") or ""),
+            wati_tenant_id=str(config.get("wati_tenant_id") or ""),
+            api_token=str(config.get("api_token") or ""),
+        )
+    except ValueError as exc:
+        return {"provider": "wati", "items": [], "error": str(exc)}
+
+    try:
+        items = await service.list_message_templates_summary()
+    except WatiServiceError as exc:
+        return {"provider": "wati", "items": [], "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — soft error contract
+        return {
+            "provider": "wati",
+            "items": [],
+            "error": f"WATI upstream error: {exc.__class__.__name__}",
+        }
+
+    _store(key, items)
+    return {"provider": "wati", "items": items, "error": None}

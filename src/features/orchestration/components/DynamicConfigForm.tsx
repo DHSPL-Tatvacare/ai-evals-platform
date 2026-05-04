@@ -10,6 +10,8 @@ import { cn } from '@/utils';
 
 import { BolnaAgentPicker } from './connections/BolnaAgentPicker';
 import { ConnectionPicker } from './connections/ConnectionPicker';
+import { WatiChannelPicker } from './connections/WatiChannelPicker';
+import { WatiTemplatePicker } from './connections/WatiTemplatePicker';
 import { AttemptPolicyEditor } from './editors/AttemptPolicyEditor';
 import { StructuredRequestBodyEditor } from './editors/StructuredRequestBodyEditor';
 import {
@@ -195,6 +197,24 @@ function FieldRenderer({
   if (prop['x-type'] === 'bolna_agent_picker') {
     return (
       <BolnaAgentPicker
+        connectionId={connectionIdForVariables}
+        value={typeof fieldValue === 'string' ? fieldValue : ''}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  if (prop['x-type'] === 'wati_template_picker') {
+    return (
+      <WatiTemplatePicker
+        connectionId={connectionIdForVariables}
+        value={typeof fieldValue === 'string' ? fieldValue : ''}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  if (prop['x-type'] === 'wati_channel_picker') {
+    return (
+      <WatiChannelPicker
         connectionId={connectionIdForVariables}
         value={typeof fieldValue === 'string' ? fieldValue : ''}
         onChange={(next) => onChange(fieldKey, next)}

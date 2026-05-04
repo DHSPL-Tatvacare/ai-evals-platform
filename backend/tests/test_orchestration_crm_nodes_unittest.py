@@ -109,7 +109,9 @@ async def test_crm_send_wati_per_recipient_with_node_mappings(
     db_session, seed_full_run, monkeypatch,
 ):
     """Node-level variable_mappings drive WATI parameters end-to-end.
-    The template carries only static metadata (template_name, broadcast_name)."""
+    template_name / broadcast_name / channel_number are UI-supplied per
+    Phase 13 keystone #1; template payload_schema carries no provider
+    identifiers."""
     from app.services.orchestration.integrations import wati as wati_mod
     from app.services.orchestration.nodes.crm_send_wati import _Config, _Handler
 
@@ -118,10 +120,7 @@ async def test_crm_send_wati_per_recipient_with_node_mappings(
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="Welcome",
-        payload_schema={
-            "template_name": "welcome_v1",
-            "broadcast_name": "concierge_welcome",
-        },
+        payload_schema={},
     ))
     for rid, fname in [("L-1", "Aarti"), ("L-2", "Bilal")]:
         db_session.add(WorkflowRunRecipientState(
@@ -153,6 +152,9 @@ async def test_crm_send_wati_per_recipient_with_node_mappings(
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="whatsapp_number",
+        template_name="welcome_v1",
+        broadcast_name="concierge_welcome",
+        channel_number="+919999990000",
         variable_mappings=[
             {"agent_variable": "patient_name", "source_kind": "payload",
              "payload_field": "first_name"},
@@ -202,10 +204,7 @@ async def test_crm_send_wati_static_mappings_passthrough(
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="Static",
-        payload_schema={
-            "template_name": "static_v1",
-            "broadcast_name": "concierge",
-        },
+        payload_schema={},
     ))
     step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
                               tenant_id=tenant_id, app_id=app_id,
@@ -225,6 +224,9 @@ async def test_crm_send_wati_static_mappings_passthrough(
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="whatsapp_number",
+        template_name="static_v1",
+        broadcast_name="concierge",
+        channel_number="+919999990000",
         variable_mappings=[
             {"agent_variable": "patient_name", "source_kind": "static",
              "static_value": "STATIC-NAME"},
@@ -256,7 +258,7 @@ async def test_crm_send_wati_missing_phone_field(db_session, seed_full_run):
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="t2",
-        payload_schema={"template_name": "t2", "broadcast_name": "b"},
+        payload_schema={},
     ))
     step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
                               tenant_id=tenant_id, app_id=app_id,
@@ -267,6 +269,7 @@ async def test_crm_send_wati_missing_phone_field(db_session, seed_full_run):
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="whatsapp_number",
+        template_name="t2", broadcast_name="b", channel_number="+919999990000",
     )
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="wati",
@@ -287,7 +290,7 @@ async def test_crm_send_wati_failure_emits_failed_edge(
     db_session.add(WorkflowActionTemplate(
         id=uuid.uuid4(), tenant_id=None, app_id=None,
         channel="wati", slug=slug, name="t1",
-        payload_schema={"template_name": "t1", "broadcast_name": "b"},
+        payload_schema={},
     ))
     db_session.add(WorkflowRunRecipientState(
         id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
@@ -309,6 +312,7 @@ async def test_crm_send_wati_failure_emits_failed_edge(
     cfg = _Config(
         connection_id=uuid.uuid4(),
         template_slug=slug, phone_field="whatsapp_number",
+        template_name="t1", broadcast_name="b", channel_number="+919999990000",
     )
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="wati",
@@ -318,6 +322,37 @@ async def test_crm_send_wati_failure_emits_failed_edge(
     )
     assert [o.recipient_id for o in result.by_output_id["exhausted"]] == ["L-bad"]
     assert result.by_output_id["success"] == []
+
+
+@pytest.mark.asyncio
+async def test_crm_send_wati_blank_template_name_raises(db_session, seed_full_run):
+    """Phase 13/C.2 — template_name / channel_number / broadcast_name are
+    UI-supplied; runtime fails fast when any are blank."""
+    from app.services.orchestration.nodes.crm_send_wati import _Config, _Handler
+
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    slug = f"unset-{uuid.uuid4().hex[:8]}"
+    db_session.add(WorkflowActionTemplate(
+        id=uuid.uuid4(), tenant_id=None, app_id=None,
+        channel="wati", slug=slug, name="Unset",
+        payload_schema={},
+    ))
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="wati", node_type="crm.send_wati")
+    await db_session.flush()
+
+    cfg = _Config(
+        connection_id=uuid.uuid4(),
+        template_slug=slug,
+        # template_name/channel_number/broadcast_name intentionally left blank.
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="wati",
+                    step_id=step_id, connections=_FakeResolver(wati=None))
+    cohort = CohortStream([("L-1", {"whatsapp_number": "919999990001"})])
+    with pytest.raises(RuntimeError, match="template_name is required"):
+        await _Handler().execute(cohort, cfg, ctx)
 
 
 # ─── crm.place_bolna_call ────────────────────────────────────────────────

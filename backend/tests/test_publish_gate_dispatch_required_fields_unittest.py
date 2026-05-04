@@ -93,6 +93,63 @@ def test_validator_aggregates_errors_across_nodes():
     }
 
 
+def _wati_node(*, node_id: str, **config_overrides) -> dict:
+    config = {
+        "connection_id": str(uuid.uuid4()),
+        "template_slug": "concierge_qualify",
+        "template_name": "concierge_qualify_v1",
+        "channel_number": "+919999990000",
+        "broadcast_name": "concierge_qualify",
+    }
+    config.update(config_overrides)
+    return {
+        "id": node_id,
+        "type": "crm.send_wati",
+        "config": config,
+    }
+
+
+def test_validator_passes_when_wati_required_fields_present():
+    definition = {"nodes": [_wati_node(node_id="w-1")], "edges": []}
+    assert validate_dispatch_required_fields(definition) == []
+
+
+def test_validator_flags_each_missing_wati_field():
+    """Phase 13/C.2 — template_name / channel_number / broadcast_name all
+    gate publish."""
+    definition = {
+        "nodes": [
+            _wati_node(
+                node_id="w-1",
+                template_name="",
+                channel_number="",
+                broadcast_name="",
+            ),
+        ],
+        "edges": [],
+    }
+    errors = validate_dispatch_required_fields(definition)
+    fields = {e["field"] for e in errors}
+    assert fields == {"template_name", "channel_number", "broadcast_name"}
+
+
+def test_validator_aggregates_across_dispatch_kinds():
+    """Mixed-graph publish surfaces every missing field across providers."""
+    definition = {
+        "nodes": [
+            _bolna_node(node_id="bn-1", agent_id=""),
+            _wati_node(node_id="wt-1", channel_number=""),
+        ],
+        "edges": [],
+    }
+    errors = validate_dispatch_required_fields(definition)
+    keys = {(e["node_id"], e["field"]) for e in errors}
+    assert keys == {
+        ("bn-1", "agent_id"),
+        ("wt-1", "channel_number"),
+    }
+
+
 def test_validator_ignores_non_dispatch_nodes():
     definition = {
         "nodes": [

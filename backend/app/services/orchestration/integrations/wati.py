@@ -82,3 +82,105 @@ class WatiService:
                 raise WatiServiceError(f"WATI {resp.status_code}: {err_body}")
             resp.raise_for_status()
             return resp.json()
+
+    async def list_message_templates_summary(self) -> list[dict[str, Any]]:
+        """Phase 13/C.1 — fetch templates and normalise into the
+        ``[{name, language, status, parameters}]`` shape the frontend
+        picker consumes.
+
+        WATI's payload varies between deployments — sometimes a list at
+        the top, sometimes a dict with ``messageTemplates``/``templates``/
+        ``data``/``result``. Parameter placeholders inside body components
+        are extracted as the canonical ordered list of ``{{N}}`` numbered
+        slots so the variable-mapping editor can drive off them.
+        """
+        payload = await self.get_message_templates()
+        candidates: list[dict[str, Any]] = []
+        if isinstance(payload, list):
+            candidates = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            for key in ("messageTemplates", "templates", "data", "result"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    candidates = [item for item in value if isinstance(item, dict)]
+                    break
+
+        out: list[dict[str, Any]] = []
+        for candidate in candidates:
+            name = (
+                candidate.get("template_name")
+                or candidate.get("templateName")
+                or candidate.get("elementName")
+                or candidate.get("name")
+                or ""
+            )
+            if not name:
+                continue
+            out.append({
+                "name": str(name),
+                "language": str(
+                    candidate.get("language")
+                    or candidate.get("templateLanguage")
+                    or ""
+                ),
+                "status": str(
+                    candidate.get("status")
+                    or candidate.get("templateStatus")
+                    or ""
+                ),
+                "parameters": _extract_template_parameters(candidate),
+            })
+        return out
+
+
+def _extract_template_parameters(candidate: dict[str, Any]) -> list[str]:
+    """Return the ordered list of template placeholder names.
+
+    Strategy:
+      1. If the template carries a ``parameters`` / ``placeholders`` /
+         ``variables`` list, take it verbatim. WATI templates that
+         pre-declare names (e.g. ``["first_name", "city"]``) take this
+         path.
+      2. Otherwise scan ``components[].text`` (and a few legacy keys
+         that surface the body string) for ``{{N}}`` placeholders and
+         return them as ordered ``["1", "2", ...]`` strings, so the
+         downstream variable-mapping editor at least knows the slot
+         count.
+    """
+    for key in ("parameters", "placeholders", "variables"):
+        value = candidate.get(key)
+        if isinstance(value, list) and value:
+            names: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    names.append(item)
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("key") or item.get("id")
+                    if isinstance(name, str) and name:
+                        names.append(name)
+            if names:
+                return names
+
+    body_strings: list[str] = []
+    components = candidate.get("components")
+    if isinstance(components, list):
+        for component in components:
+            if isinstance(component, dict):
+                text = component.get("text") or component.get("body")
+                if isinstance(text, str):
+                    body_strings.append(text)
+    for legacy in ("body", "text", "message"):
+        v = candidate.get(legacy)
+        if isinstance(v, str):
+            body_strings.append(v)
+
+    import re
+    found: list[str] = []
+    seen: set[str] = set()
+    for text in body_strings:
+        for match in re.finditer(r"\{\{\s*([^}\s]+)\s*\}\}", text):
+            slot = match.group(1).strip()
+            if slot and slot not in seen:
+                found.append(slot)
+                seen.add(slot)
+    return found

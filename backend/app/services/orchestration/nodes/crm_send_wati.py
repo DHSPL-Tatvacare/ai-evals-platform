@@ -51,6 +51,36 @@ class _Config(BaseModel):
         json_schema_extra={"x-type": "connection_picker", "x-provider": "wati"},
     )
     template_slug: str
+    # WATI template name — UI-supplied per Phase 13 keystone #1. Required at
+    # publish time (publish-gate validator); drafts may persist with the
+    # default empty string while authors complete the form.
+    template_name: str = Field(
+        "",
+        title="WATI Template",
+        description="Pick the live WATI template the cohort receives.",
+        json_schema_extra={"x-type": "wati_template_picker"},
+    )
+    # Channel number (sender) the message goes from. Picked from the
+    # ``channel_numbers`` declared on the WATI connection — no template-side
+    # fallback. Required at publish time.
+    channel_number: str = Field(
+        "",
+        title="Channel Number",
+        description="Pick the WhatsApp sender number this campaign goes from.",
+        json_schema_extra={"x-type": "wati_channel_picker"},
+    )
+    # Free-form campaign label sent in the WATI ``broadcast_name`` field.
+    # Required at publish time so analytics can split conversion by
+    # campaign without having to derive it from template_name.
+    broadcast_name: str = Field(
+        "",
+        title="Broadcast Name",
+        description=(
+            "Campaign label sent to WATI as broadcast_name. Free-form text; "
+            "tenants typically use a date-stamped slug like "
+            "concierge_priority_2026_05."
+        ),
+    )
     phone_field: str = "whatsapp_number"  # E.164 digits, no '+'
     variable_mappings: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -81,16 +111,34 @@ class _Handler:
             raise RuntimeError(
                 "crm.send_wati requires ctx.connections — wire ConnectionResolver in run_handler"
             )
+        # Per Phase 13 keystones #1/#3, all provider identifiers come from the
+        # node config. The publish-gate catches blanks earlier; runtime here
+        # is the defensive backstop.
+        if not config.template_name:
+            raise RuntimeError(
+                "crm.send_wati: template_name is required (Phase 13 — supply via the template picker)."
+            )
+        if not config.channel_number:
+            raise RuntimeError(
+                "crm.send_wati: channel_number is required (Phase 13 — supply via the channel picker)."
+            )
+        if not config.broadcast_name:
+            raise RuntimeError(
+                "crm.send_wati: broadcast_name is required (Phase 13 — set the campaign label)."
+            )
         service = await ctx.connections.wati(config.connection_id)
 
         try:
-            template = await resolve_template(
+            await resolve_template(
                 ctx.db, tenant_id=ctx.tenant_id, app_id=ctx.app_id,
                 channel="wati", slug=config.template_slug,
             )
         except TemplateNotFound as exc:
             raise RuntimeError(f"crm.send_wati: {exc}") from exc
 
+        template_name = config.template_name
+        broadcast_name = config.broadcast_name
+        channel_number = config.channel_number
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
@@ -114,8 +162,9 @@ class _Handler:
                     action_type="wa_dispatched",
                     idempotency_key=idem,
                     payload={
-                        "template_name": template.payload_schema["template_name"],
-                        "broadcast_name": template.payload_schema.get("broadcast_name", "concierge"),
+                        "template_name": template_name,
+                        "broadcast_name": broadcast_name,
+                        "channel_number": channel_number,
                         "parameters": params_built,
                         "whatsapp_number": wa_number,
                     },
@@ -133,9 +182,10 @@ class _Handler:
                 del _n
                 return await service.send_template(
                     whatsapp_number=_wa,
-                    template_name=template.payload_schema["template_name"],
-                    broadcast_name=template.payload_schema.get("broadcast_name", "concierge"),
+                    template_name=template_name,
+                    broadcast_name=broadcast_name,
                     parameters=_params,
+                    channel_number=channel_number,
                 )
 
             outcome = await run_with_attempt_policy(
