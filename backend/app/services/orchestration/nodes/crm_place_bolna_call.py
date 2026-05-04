@@ -12,6 +12,16 @@ sole source of Bolna ``user_data`` — there is no template-side fallback.
 Action row: ``action_type='bolna_queued'``. The Bolna ``call_id`` (when
 returned) is emitted into payload as ``bolna_call_id`` so inbound result
 webhooks can correlate back to the parked recipient.
+
+Phase 13/D.3: cohort dispatch splits at ``BATCH_THRESHOLD`` (10, matching
+Bolna's paid-tier outbound concurrency cap). Below the threshold the
+node walks the cohort sequentially via ``POST /call``; at or above the
+threshold it serialises the cohort to CSV and submits a single
+``POST /batches``. Each recipient still gets one
+``workflow_run_recipient_actions`` row — the row's ``response`` carries
+``mode={"single"|"batch"}`` plus the upstream correlation ids
+(``execution_id`` and/or ``batch_id``) so the Phase E poller can
+reconcile post-execution state.
 """
 from __future__ import annotations
 
@@ -29,6 +39,17 @@ from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_dict,
 )
 from app.services.orchestration.integrations.bolna import BolnaServiceError
+from app.services.orchestration.integrations.bolna_batch import (
+    build_cohort_csv,
+)
+
+
+# Cohort threshold above which dispatch flips from sequential POST /call to
+# multipart POST /batches. Matches Bolna paid-tier outbound concurrency
+# cap (10) per https://www.bolna.ai/docs/outbound-calling-concurrency.
+# Promotable to a per-connection setting if a tenant asks; today's
+# constant suffices.
+BATCH_THRESHOLD = 10
 from app.services.orchestration.integrations.template_resolver import (
     TemplateNotFound,
     resolve_template,
@@ -116,11 +137,45 @@ class _Handler:
 
         agent_id = config.agent_id
         from_phone = config.from_phone or None
-        success: list[RecipientOutcome] = []
-        exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
 
+        # Materialise the cohort so we can pick the dispatch mode. The
+        # in-memory cost is small (a few hundred dicts even at the upper
+        # end of typical campaigns); if a future tenant pushes 100k+
+        # rows we revisit with a streaming CSV writer.
+        cohort: list[tuple[str, dict[str, Any]]] = []
         async for rid, payload in input_cohort:
+            cohort.append((rid, payload))
+
+        if len(cohort) >= BATCH_THRESHOLD:
+            return await self._dispatch_batch(
+                ctx=ctx,
+                config=config,
+                tmpl=tmpl,
+                cohort=cohort,
+                agent_id=agent_id,
+                from_phone=from_phone,
+                on_exhausted=on_exhausted,
+            )
+        return await self._dispatch_sequential(
+            ctx=ctx,
+            service=service,
+            config=config,
+            tmpl=tmpl,
+            cohort=cohort,
+            agent_id=agent_id,
+            from_phone=from_phone,
+            on_exhausted=on_exhausted,
+        )
+
+    async def _dispatch_sequential(
+        self, *, ctx, service, config, tmpl, cohort, agent_id, from_phone, on_exhausted,
+    ) -> NodeResult:
+        """Per-recipient ``POST /call`` flow used for cohorts below the
+        batch threshold. Identical semantics to the pre-Phase-D handler."""
+        success: list[RecipientOutcome] = []
+        exhausted: list[RecipientOutcome] = []
+        for rid, payload in cohort:
             phone = payload.get(config.phone_field)
             if not phone:
                 exhausted.append(RecipientOutcome(recipient_id=rid))
@@ -138,6 +193,7 @@ class _Handler:
                     action_type="bolna_queued",
                     idempotency_key=idem,
                     payload={
+                        "mode": "single",
                         "agent_id": agent_id,
                         "recipient_phone": phone,
                         "user_data": user_data,
@@ -176,7 +232,7 @@ class _Handler:
                 resp = outcome.payload or {}
                 await ctx.update_action_result(
                     r.action_id, status="success",
-                    response={**resp, "attempts": outcome.attempts},
+                    response={**resp, "mode": "single", "attempts": outcome.attempts},
                 )
                 payload_delta: dict[str, Any] = {}
                 call_id = _extract_bolna_call_id(resp)
@@ -193,6 +249,163 @@ class _Handler:
         return NodeResult(
             by_output_id={"success": success, on_exhausted: exhausted},
             summary={
+                "mode": "single",
+                "success_count": len(success),
+                "exhausted_count": len(exhausted),
+                "template_slug": config.template_slug,
+            },
+        )
+
+    async def _dispatch_batch(
+        self, *, ctx, config, tmpl, cohort, agent_id, from_phone, on_exhausted,
+    ) -> NodeResult:
+        """Cohort dispatch via ``POST /batches``. Bolna queues the
+        dial-out internally; per-execution status is reconciled by the
+        Phase E poller (``poll-bolna-executions``).
+
+        Recipients without a phone number short-circuit to ``exhausted``
+        before the batch is built — Bolna would reject the row anyway,
+        and we'd rather surface the failure as a per-recipient outcome.
+        """
+        success: list[RecipientOutcome] = []
+        exhausted: list[RecipientOutcome] = []
+        dispatched: list[tuple[str, dict[str, Any], dict[str, Any], str]] = []
+
+        for rid, payload in cohort:
+            phone = payload.get(config.phone_field)
+            if not phone:
+                exhausted.append(RecipientOutcome(recipient_id=rid))
+                continue
+            user_data = apply_variable_mappings_dict(
+                config.variable_mappings,
+                payload,
+            )
+            idem = ctx.idempotency_key(rid, "bolna", config.template_slug)
+            dispatched.append((rid, {"phone": phone, **user_data}, user_data, idem))
+
+        if not dispatched:
+            return NodeResult(
+                by_output_id={"success": success, on_exhausted: exhausted},
+                summary={
+                    "mode": "batch",
+                    "success_count": 0,
+                    "exhausted_count": len(exhausted),
+                    "template_slug": config.template_slug,
+                },
+            )
+
+        # Persist one pending action row per recipient first. The
+        # idempotency constraint short-circuits any recipient already
+        # dispatched on a prior run pass.
+        action_results = await ctx.dispatch_actions([
+            ActionDispatch(
+                recipient_id=rid,
+                channel="bolna",
+                action_type="bolna_queued",
+                idempotency_key=idem,
+                payload={
+                    "mode": "batch",
+                    "agent_id": agent_id,
+                    "recipient_phone": csv_payload["phone"],
+                    "user_data": user_data,
+                    "retry_config": tmpl.payload_schema.get("retry_config"),
+                },
+            )
+            for rid, csv_payload, user_data, idem in dispatched
+        ])
+        action_by_recipient = {r.recipient_id: r for r in action_results}
+
+        # Build the CSV from the recipients whose action is pending
+        # (exclude any already-completed-from-prior-run rows).
+        pending = [
+            (rid, csv_payload, user_data)
+            for (rid, csv_payload, user_data, _idem) in dispatched
+            if action_by_recipient[rid].status == "pending"
+        ]
+        for rid, _csv_payload, _ud, _idem in dispatched:
+            r = action_by_recipient[rid]
+            if r.status == "success":
+                success.append(RecipientOutcome(recipient_id=rid))
+            elif r.status == "failed":
+                exhausted.append(RecipientOutcome(recipient_id=rid))
+        if not pending:
+            return NodeResult(
+                by_output_id={"success": success, on_exhausted: exhausted},
+                summary={
+                    "mode": "batch",
+                    "success_count": len(success),
+                    "exhausted_count": len(exhausted),
+                    "template_slug": config.template_slug,
+                    "skipped_already_dispatched": True,
+                },
+            )
+
+        extra_columns = sorted({
+            k for _rid, _csv, ud in pending for k in ud.keys()
+        })
+        csv_rows = [
+            (rid, {"contact_number": csv_payload["phone"], **user_data})
+            for rid, csv_payload, user_data in pending
+        ]
+        csv_bytes = build_cohort_csv(csv_rows, extra_columns=extra_columns)
+
+        batch_service = await ctx.connections.bolna_batch(config.connection_id)
+        try:
+            batch_resp = await batch_service.create_batch(
+                agent_id=agent_id,
+                from_phone_numbers=[from_phone] if from_phone else [],
+                csv_bytes=csv_bytes,
+                filename=f"{config.template_slug}.csv",
+                batch_name=f"{config.template_slug}-{ctx.run_id}",
+            )
+        except BolnaServiceError as exc:
+            for rid, _csv, _ud in pending:
+                action = action_by_recipient[rid]
+                await ctx.update_action_result(
+                    action.action_id, status="failed",
+                    error=f"batch create failed: {exc}",
+                )
+                exhausted.append(RecipientOutcome(recipient_id=rid))
+            return NodeResult(
+                by_output_id={"success": success, on_exhausted: exhausted},
+                summary={
+                    "mode": "batch",
+                    "success_count": len(success),
+                    "exhausted_count": len(exhausted),
+                    "template_slug": config.template_slug,
+                    "batch_error": str(exc),
+                },
+            )
+
+        batch_id = (
+            batch_resp.get("batch_id")
+            or batch_resp.get("id")
+            or batch_resp.get("batchId")
+        )
+        for rid, _csv, _ud in pending:
+            action = action_by_recipient[rid]
+            await ctx.update_action_result(
+                action.action_id, status="success",
+                response={
+                    "mode": "batch",
+                    "batch_id": batch_id,
+                    "batch_status": batch_resp.get("status"),
+                    "execution_id": None,
+                },
+            )
+            # Recipients flow to ``success`` immediately; per-execution
+            # outcome (transcript, recording, hangup reason) is filled in
+            # by the Phase E poller via the bolna_reconciler.
+            success.append(RecipientOutcome(
+                recipient_id=rid,
+                payload_delta={"bolna_batch_id": str(batch_id) if batch_id else ""},
+            ))
+
+        return NodeResult(
+            by_output_id={"success": success, on_exhausted: exhausted},
+            summary={
+                "mode": "batch",
+                "batch_id": str(batch_id) if batch_id else None,
                 "success_count": len(success),
                 "exhausted_count": len(exhausted),
                 "template_slug": config.template_slug,

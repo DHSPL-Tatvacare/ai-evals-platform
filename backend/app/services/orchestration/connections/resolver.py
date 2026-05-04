@@ -100,8 +100,31 @@ class ConnectionResolver:
         svc = BolnaService(
             base_url=config["base_url"],
             api_key=config["api_key"],
+            # Pass through so the in-process token bucket (Phase D) is
+            # keyed correctly per tenant connection.
+            connection_id=connection_id,
         )
         self._service_cache[connection_id] = svc
+        return svc
+
+    async def bolna_batch(self, connection_id: uuid.UUID) -> Any:
+        """Phase 13/D.2 — separate cache key from ``bolna`` because the
+        batch service is a different class with a different transport
+        shape. Both share the same rate-limit bucket via the connection
+        id."""
+        cache_key = uuid.UUID(int=connection_id.int ^ (1 << 127))
+        if cache_key in self._service_cache:
+            return self._service_cache[cache_key]
+        config = await self._load(connection_id, expected_provider="bolna")
+        from app.services.orchestration.integrations.bolna_batch import (
+            BolnaBatchService,
+        )
+        svc = BolnaBatchService(
+            base_url=config["base_url"],
+            api_key=config["api_key"],
+            connection_id=connection_id,
+        )
+        self._service_cache[cache_key] = svc
         return svc
 
     async def wati(self, connection_id: uuid.UUID) -> Any:

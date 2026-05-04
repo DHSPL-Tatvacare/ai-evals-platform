@@ -37,10 +37,11 @@ class _FakeResolver:
 
     def __init__(
         self, *,
-        bolna=None, wati=None, lsq=None,
+        bolna=None, bolna_batch=None, wati=None, lsq=None,
         sms_config: dict | None = None,
     ) -> None:
         self._bolna = bolna
+        self._bolna_batch = bolna_batch
         self._wati = wati
         self._lsq = lsq
         self._sms_config = sms_config or {}
@@ -49,6 +50,11 @@ class _FakeResolver:
         if self._bolna is None:
             raise AssertionError("test did not seed a Bolna service")
         return self._bolna
+
+    async def bolna_batch(self, _connection_id):
+        if self._bolna_batch is None:
+            raise AssertionError("test did not seed a BolnaBatchService")
+        return self._bolna_batch
 
     async def wati(self, _connection_id):
         if self._wati is None:

@@ -8,13 +8,27 @@ Per concierge spec §5.4:
 Retries are delegated to Bolna's built-in retry_config — we do not schedule
 our own retry jobs. This eliminates a class of double-call races.
 4xx → BolnaServiceError. 5xx / network → httpx.HTTPError (retry-safe).
+
+Phase 13/D.1: every outbound call now passes through the in-process token
+bucket (``_rate_limiter.acquire_bolna``) keyed by ``connection_id``.
+Buckets default to wait-acquire with a short timeout; on exhaustion the
+service raises :class:`RateLimitedError`, which the dispatch loop's
+``attempt_policy`` retries per its config. Connections constructed
+without a ``connection_id`` (legacy test fixtures) skip the limiter so
+existing unit tests don't have to thread it through.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any, Optional
 
 import httpx
+
+from app.services.orchestration.integrations._rate_limiter import (
+    RateLimitedError as RateLimitedError,  # re-exported for dispatch nodes
+    acquire_bolna,
+)
 
 
 class BolnaServiceError(RuntimeError):
@@ -27,7 +41,14 @@ def _make_client(timeout: float) -> httpx.AsyncClient:
 
 
 class BolnaService:
-    def __init__(self, *, base_url: str, api_key: str, timeout: float = 30.0):
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout: float = 30.0,
+        connection_id: Optional[uuid.UUID] = None,
+    ):
         if not base_url or not api_key:
             raise ValueError("BolnaService requires base_url and api_key")
         self._url = base_url.rstrip("/")
@@ -36,6 +57,15 @@ class BolnaService:
             "Content-Type": "application/json",
         }
         self._timeout = timeout
+        # When None, the rate limiter is bypassed — used by legacy unit
+        # fixtures that construct the service inline. Production callers
+        # always thread the connection id through ConnectionResolver.
+        self._connection_id = connection_id
+
+    async def _acquire(self, *bucket_names: str) -> None:
+        if self._connection_id is None:
+            return
+        await acquire_bolna(self._connection_id, *bucket_names)
 
     async def place_call(
         self,
@@ -47,6 +77,7 @@ class BolnaService:
         retry_config: Optional[dict[str, Any]] = None,
         scheduled_at: Optional[datetime] = None,
     ) -> dict[str, Any]:
+        await self._acquire("bolna:call")
         body: dict[str, Any] = {
             "agent_id": agent_id,
             "recipient_phone_number": recipient_phone,
@@ -73,6 +104,7 @@ class BolnaService:
     async def get_agent(self, *, agent_id: str) -> dict[str, Any]:
         if not agent_id:
             raise ValueError("BolnaService.get_agent requires agent_id")
+        await self._acquire("bolna:agent")
         async with _make_client(self._timeout) as client:
             resp = await client.get(f"{self._url}/agents/{agent_id}", headers=self._headers)
             if 400 <= resp.status_code < 500:
@@ -92,11 +124,11 @@ class BolnaService:
         ``[{id, name, status, type}]`` shape so the agent picker doesn't
         have to know about the upstream field names.
 
-        Note: the in-process token bucket arrives with Phase D; until then
-        the caller (api/agents.py) caches responses for 30s, which
-        comfortably stays under Bolna's 500/min /v2/agent bucket for any
-        realistic UI traffic.
+        Phase D wires this through the ``bolna:agent`` token bucket so
+        burst traffic (e.g. an admin opening multiple builder tabs)
+        can't exceed Bolna's 500/min quota.
         """
+        await self._acquire("bolna:agent")
         async with _make_client(self._timeout) as client:
             resp = await client.get(f"{self._url}/v2/agent/all", headers=self._headers)
             if 400 <= resp.status_code < 500:
