@@ -4,6 +4,7 @@ import type {
   CohortSource,
   NodeTypeDescriptor,
   RecipientState,
+  RunOverlaySnapshot,
   Workflow,
   WorkflowDefinition,
   WorkflowRun,
@@ -159,6 +160,10 @@ export async function listRuns(params?: {
 
 export async function getRun(id: string): Promise<WorkflowRun> {
   return apiRequest<WorkflowRun>(`/api/orchestration/runs/${id}`);
+}
+
+export async function getRunOverlaySnapshot(runId: string): Promise<RunOverlaySnapshot> {
+  return apiRequest<RunOverlaySnapshot>(`/api/orchestration/runs/${runId}/overlay`);
 }
 
 export async function listRunRecipients(

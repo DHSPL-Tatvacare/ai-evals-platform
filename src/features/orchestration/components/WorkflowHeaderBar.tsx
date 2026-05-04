@@ -11,6 +11,7 @@ import {
   getWorkflow,
   publishVersion,
 } from '@/services/api/orchestration';
+import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
@@ -21,7 +22,11 @@ function describeError(e: unknown, fallback: string): string {
   return fallback;
 }
 
-export function WorkflowHeaderBar() {
+interface WorkflowHeaderBarProps {
+  onRunStarted?: (run: WorkflowRun) => void;
+}
+
+export function WorkflowHeaderBar({ onRunStarted }: WorkflowHeaderBarProps) {
   const navigate = useNavigate();
   const orchestrationRoutes = useOrchestrationRoutes();
   const workflowId = useWorkflowBuilderStore((s) => s.workflowId);
@@ -110,6 +115,7 @@ export function WorkflowHeaderBar() {
     try {
       const run = await fireManualRun(workflowId);
       notificationService.success(`Run started: ${run.id.slice(0, 8)}`);
+      onRunStarted?.(run);
     } catch (e) {
       notificationService.error(describeError(e, 'Run failed'));
     } finally {

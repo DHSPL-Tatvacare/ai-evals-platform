@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field
@@ -203,6 +204,9 @@ class DatasetSource:
     id_strategy: str  # 'column' or 'uuid'
     id_column: Optional[str]
     schema_descriptor: dict
+    version_number: int = 0
+    row_count: int = 0
+    imported_at: Optional[datetime] = None
 
 
 ResolvedSource = Union[CohortSource, DatasetSource]
@@ -219,6 +223,9 @@ def _row_to_dataset_source(
         display_label=f"{dataset.name} (v{version.version_number})",
         workflow_types=["*"],
         app_id=dataset.app_id,
+        version_number=version.version_number,
+        row_count=version.row_count,
+        imported_at=version.imported_at,
         id_strategy=version.id_strategy,
         id_column=version.id_column,
         schema_descriptor=dict(version.schema_descriptor or {}),
@@ -283,27 +290,33 @@ async def list_dataset_sources(
     *,
     tenant_id: uuid.UUID,
     app_id: Optional[str] = None,
+    app_ids: Optional[list[str]] = None,
 ) -> list[DatasetSource]:
-    """Return latest version per dataset for the given tenant (and optional app)."""
-    # DISTINCT ON (dataset_id) ordered by version_number DESC keeps only the
-    # latest version per dataset in a single round-trip — same idea as
-    # MAX(version_number) GROUP BY dataset_id but without the second join.
+    """Return all dataset versions for the given tenant and app scope.
+
+    Version pinning is the Phase 12 contract: re-uploading creates v2, but
+    workflows pinned to v1 must still be authorable/viewable. The source
+    catalog therefore exposes every version, not just the latest.
+    """
     stmt = (
         select(CohortDatasetVersion, CohortDataset)
         .join(CohortDataset, CohortDatasetVersion.dataset_id == CohortDataset.id)
         .where(CohortDataset.tenant_id == tenant_id)
-        .distinct(CohortDatasetVersion.dataset_id)
         .order_by(
-            CohortDatasetVersion.dataset_id,
+            CohortDataset.name.asc(),
             CohortDatasetVersion.version_number.desc(),
         )
     )
     if app_id is not None:
         stmt = stmt.where(CohortDataset.app_id == app_id)
+    elif app_ids is not None:
+        if not app_ids:
+            return []
+        stmt = stmt.where(CohortDataset.app_id.in_(app_ids))
 
     result = await db.execute(stmt)
     sources = [_row_to_dataset_source(version, dataset) for version, dataset in result.all()]
-    return sorted(sources, key=lambda s: s.display_label)
+    return sources
 
 
 __all__ = [

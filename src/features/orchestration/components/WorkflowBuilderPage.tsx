@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -8,8 +8,10 @@ import { PageSurface } from '@/components/ui/PageSurface';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { ApiError } from '@/services/api/client';
 import { getWorkflow, listVersions } from '@/services/api/orchestration';
+import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import { BuilderLiveRunPanel } from './BuilderLiveRunPanel';
 import { Canvas } from './Canvas';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { Palette } from './Palette';
@@ -18,6 +20,7 @@ import { WorkflowHeaderBar } from './WorkflowHeaderBar';
 export function WorkflowBuilderPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const { icon, title } = usePageMetadata('campaigns');
+  const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
   const reset = useWorkflowBuilderStore((s) => s.reset);
   const setMetadata = useWorkflowBuilderStore((s) => s.setMetadata);
   const hydrate = useWorkflowBuilderStore((s) => s.hydrate);
@@ -82,26 +85,31 @@ export function WorkflowBuilderPage() {
   return (
     <>
     <PageSurface icon={icon} title={title} showHeader={false} bleed>
-      <WorkflowHeaderBar />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Palette />
-        <div className="min-w-0 flex-1">
-          <Canvas />
+      <WorkflowHeaderBar onRunStarted={setActiveRun} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <Palette />
+          <div className="min-w-0 flex-1">
+            <Canvas />
+          </div>
+          <AnimatePresence initial={false}>
+            {selectedNodeId !== null ? (
+              <motion.div
+                key="inspector"
+                initial={{ x: 16, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 16, opacity: 0 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="h-full flex-shrink-0"
+              >
+                <NodeConfigPanel />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
-        <AnimatePresence initial={false}>
-          {selectedNodeId !== null ? (
-            <motion.div
-              key="inspector"
-              initial={{ x: 16, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 16, opacity: 0 }}
-              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              className="h-full flex-shrink-0"
-            >
-              <NodeConfigPanel />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        {activeRun?.workflowId === workflowId ? (
+          <BuilderLiveRunPanel runId={activeRun.id} onClose={() => setActiveRun(null)} />
+        ) : null}
       </div>
     </PageSurface>
     <ConfirmDialog

@@ -10,6 +10,7 @@ import { fetchCohortSources } from '@/services/api/orchestration';
 import type { CohortSource } from '@/features/orchestration/types';
 import { useAppStore } from '@/stores/appStore';
 import { DatasetSourcePicker } from '@/features/orchestration/components/datasets/DatasetSourcePicker';
+import { SourceSelector } from '@/features/orchestration/components/editors/SourceSelector';
 
 function makeStatic(overrides: Partial<CohortSource> = {}): CohortSource {
   return {
@@ -39,6 +40,15 @@ function makeDataset(overrides: Partial<CohortSource> = {}): CohortSource {
     allowedPayloadColumns: ['recipient_id', 'name', 'phone', 'enrolled_at'],
     allowedFilterColumns: ['recipient_id', 'name', 'phone', 'enrolled_at'],
     allowedLookbackColumns: ['enrolled_at'],
+    schemaDescriptor: {
+      columns: [
+        { name: 'recipient_id', type: 'string' },
+        { name: 'name', type: 'string' },
+        { name: 'phone', type: 'string' },
+        { name: 'enrolled_at', type: 'datetime' },
+      ],
+      rowCount: 100,
+    },
     ...overrides,
   };
 }
@@ -169,5 +179,56 @@ describe('DatasetSourcePicker', () => {
     fireEvent.click(screen.getByText('Retry'));
     fireEvent.click(await screen.findByRole('button', { name: /Pick a source/ }));
     expect(await screen.findByText('CRM Leads')).toBeInTheDocument();
+  });
+});
+
+describe('SourceSelector dataset filters', () => {
+  beforeEach(() => {
+    useAppStore.setState({ currentApp: 'inside-sales' });
+    vi.clearAllMocks();
+  });
+
+  it('renders a filter editor driven by the selected dataset source', async () => {
+    const ds = makeDataset({
+      allowedFilterColumns: ['mql_score', 'city'],
+      allowedPayloadColumns: ['mql_score', 'city'],
+      schemaDescriptor: {
+        columns: [
+          { name: 'mql_score', type: 'integer' },
+          { name: 'city', type: 'string' },
+        ],
+        rowCount: 3,
+      },
+    });
+    (fetchCohortSources as ReturnType<typeof vi.fn>).mockResolvedValue([ds]);
+    const onChange = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <SourceSelector
+          appId='inside-sales'
+          workflowType='crm'
+          value={{ source_ref: ds.sourceRef }}
+          onChange={onChange}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Filters')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add filter' }));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filters: [
+            expect.objectContaining({
+              column: 'mql_score',
+              op: 'gte',
+              value: 0,
+            }),
+          ],
+        }),
+      ),
+    );
   });
 });

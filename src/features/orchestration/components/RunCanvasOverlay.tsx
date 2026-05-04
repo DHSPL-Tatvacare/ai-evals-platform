@@ -2,15 +2,16 @@ import {
   Background,
   Controls,
   ReactFlow,
+  ReactFlowProvider,
   type Edge,
   type Node,
+  type ReactFlowInstance,
 } from '@xyflow/react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import type {
   NodeTypeDescriptor,
-  Workflow,
   WorkflowVersion,
 } from '@/features/orchestration/types';
 import { useRunOverlayStore } from '@/features/orchestration/store/runOverlayStore';
@@ -21,7 +22,6 @@ const nodeTypes = { custom: CustomNode };
 /** Read-only run view of the workflow canvas. Same node primitive as the
  *  builder; `data.overlay` carries the live status pill + cohort badge. */
 interface RunCanvasOverlayProps {
-  workflow: Workflow;
   version: WorkflowVersion;
   /** Optional registry — used only to colour the node category. Falls back to
    *  the value already stored on the node definition (or 'logic'). */
@@ -29,7 +29,17 @@ interface RunCanvasOverlayProps {
 }
 
 export function RunCanvasOverlay({
-  workflow: _workflow,
+  version,
+  nodeTypesRegistry,
+}: RunCanvasOverlayProps) {
+  return (
+    <ReactFlowProvider>
+      <RunCanvasOverlayInner version={version} nodeTypesRegistry={nodeTypesRegistry} />
+    </ReactFlowProvider>
+  );
+}
+
+function RunCanvasOverlayInner({
   version,
   nodeTypesRegistry,
 }: RunCanvasOverlayProps) {
@@ -40,6 +50,15 @@ export function RunCanvasOverlay({
     (nodeTypesRegistry ?? []).forEach((d) => map.set(d.nodeType, d.category));
     return map;
   }, [nodeTypesRegistry]);
+
+  const onInit = useCallback((rf: ReactFlowInstance<Node<CustomNodeData>, Edge>) => {
+    const saved = version.definition.canvas?.viewport;
+    if (saved) {
+      rf.setViewport(saved);
+      return;
+    }
+    rf.fitView({ padding: 0.2 });
+  }, [version.definition.canvas?.viewport]);
 
   const rfNodes: Node<CustomNodeData>[] = useMemo(
     () =>
@@ -86,7 +105,7 @@ export function RunCanvasOverlay({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        fitView
+        onInit={onInit}
       >
         <Background />
         <Controls showInteractive={false} />

@@ -34,6 +34,8 @@ from app.schemas.orchestration import (
     RecipientStateResponse,
     RunCreateRequest,
     RunListResponse,
+    RunNodeStepResponse,
+    RunOverlaySnapshotResponse,
     RunResponse,
     TriggerCreateRequest,
     TriggerUpdateRequest,
@@ -492,6 +494,22 @@ async def get_run(
     return await _load_and_gate_run(db, auth, run_id)
 
 
+@router.get("/runs/{run_id}/overlay", response_model=RunOverlaySnapshotResponse)
+async def get_run_overlay(
+    run_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    run = await _load_and_gate_run(db, auth, run_id)
+    node_steps = await run_service.list_latest_node_steps(
+        db, tenant_id=auth.tenant_id, run_id=run_id,
+    )
+    return RunOverlaySnapshotResponse(
+        run=RunResponse.model_validate(run),
+        node_steps=[RunNodeStepResponse.model_validate(step) for step in node_steps],
+    )
+
+
 @router.get("/runs/{run_id}/recipients", response_model=list[RecipientStateResponse])
 async def list_run_recipients(
     run_id: uuid.UUID,
@@ -646,9 +664,15 @@ async def get_source_catalog(
     vs ``"dataset"``); the underlying schema-qualified table is never
     surfaced. Dataset entries are tenant-scoped via ``auth.tenant_id``.
     """
+    scoped_app_ids: list[str] | None = None
+    if app_id is not None:
+        await ensure_registered_app_access(db, auth, app_id)
+    else:
+        scoped_app_ids = sorted(auth.app_access)
     return await list_cohort_sources(
         db,
         tenant_id=auth.tenant_id,
         workflow_type=workflow_type,
         app_id=app_id,
+        app_ids=scoped_app_ids,
     )

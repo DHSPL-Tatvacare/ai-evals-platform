@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { listRunActions } from '@/services/api/orchestration';
-import type { ActionRow } from '@/features/orchestration/types';
+import { isRunActive, type ActionRow, type RunStatus } from '@/features/orchestration/types';
 
 const PAGE_SIZE = 100;
+const ACTIVE_REFRESH_MS = 5000;
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -23,7 +24,7 @@ function detail(r: ActionRow): string {
   }
 }
 
-export function ActionLogTab({ runId }: { runId: string }) {
+export function ActionLogTab({ runId, runStatus }: { runId: string; runStatus: RunStatus }) {
   const [rows, setRows] = useState<ActionRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -40,6 +41,14 @@ export function ActionLogTab({ runId }: { runId: string }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isRunActive(runStatus)) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, ACTIVE_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [refresh, runStatus]);
 
   const columns: ColumnDef<ActionRow>[] = [
     {

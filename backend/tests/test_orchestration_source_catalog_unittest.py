@@ -231,7 +231,7 @@ async def test_resolve_source_unknown_prefix_raises(db_session, seed_tenant_user
 
 
 @pytest.mark.asyncio
-async def test_list_dataset_sources_returns_latest_version_per_dataset(
+async def test_list_dataset_sources_returns_all_versions_per_dataset(
     db_session, seed_tenant_user_app,
 ):
     tenant_id, user_id, _ = seed_tenant_user_app
@@ -270,8 +270,8 @@ async def test_list_dataset_sources_returns_latest_version_per_dataset(
 
     out = await list_dataset_sources(db_session, tenant_id=tenant_id, app_id=APP_ID)
     matching = [d for d in out if d.dataset_id == dataset_a_id]
-    assert len(matching) == 1
-    assert matching[0].dataset_version_id == v2.id
+    assert {d.dataset_version_id for d in matching} == {v1.id, v2.id}
+    assert [d.display_label for d in matching] == [f"{name_a} (v2)", f"{name_a} (v1)"]
     assert all(d.app_id == APP_ID for d in out)
 
 
@@ -377,6 +377,25 @@ async def test_source_catalog_route_returns_static_and_dataset_kinds(
     assert "phone" in entry["allowedPayloadColumns"]
     assert entry["allowedLookbackColumns"] == ["joined_at"]
     assert entry["idColumn"] == "recipient_id"  # uuid strategy default
+    assert entry["schemaDescriptor"]["columns"][0]["name"] == "phone"
+
+
+@pytest.mark.asyncio
+async def test_source_catalog_route_rejects_inaccessible_app(
+    route_client, route_tenant_id,
+):
+    fastapi_app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+        user_id=SYSTEM_USER_ID,
+        tenant_id=route_tenant_id,
+        email="src-cat-route@orchestration.local",
+        role_id=uuid.uuid4(),
+        is_owner=False,
+        permissions=frozenset(),
+        app_access=frozenset({"voice-rx"}),
+    )
+    r = await route_client.get(f"/api/orchestration/source_catalog?appId={APP_ID}")
+    assert r.status_code == 403
+    assert r.json()["detail"] == f"No access to app: {APP_ID}"
 
 
 @pytest.mark.asyncio

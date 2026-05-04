@@ -12,6 +12,7 @@ from app.models.job import BackgroundJob
 from app.models.orchestration import (
     Workflow,
     WorkflowRun,
+    WorkflowRunNodeStep,
     WorkflowRunRecipientAction,
     WorkflowRunRecipientOverride,
     WorkflowRunRecipientState,
@@ -161,6 +162,33 @@ async def get_run(
     return (await db.execute(
         select(WorkflowRun).where(WorkflowRun.id == run_id, WorkflowRun.tenant_id == tenant_id)
     )).scalar_one_or_none()
+
+
+async def list_latest_node_steps(
+    db: AsyncSession, *, tenant_id: uuid.UUID, run_id: uuid.UUID,
+) -> list[WorkflowRunNodeStep]:
+    """Return the latest node-step row per node for one run.
+
+    The run viewer needs a deterministic current-state snapshot to hydrate the
+    canvas before live SSE events arrive (and after reconnect gaps). Multiple
+    cohorts can execute the same node over time, so we collapse to the latest
+    row per ``node_id`` rather than returning the full execution history.
+    """
+    stmt = (
+        select(WorkflowRunNodeStep)
+        .where(
+            WorkflowRunNodeStep.run_id == run_id,
+            WorkflowRunNodeStep.tenant_id == tenant_id,
+        )
+        .order_by(
+            WorkflowRunNodeStep.node_id,
+            WorkflowRunNodeStep.started_at.desc().nullslast(),
+            WorkflowRunNodeStep.completed_at.desc().nullslast(),
+            WorkflowRunNodeStep.id.desc(),
+        )
+        .distinct(WorkflowRunNodeStep.node_id)
+    )
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def list_recipients(

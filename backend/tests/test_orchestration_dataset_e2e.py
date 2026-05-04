@@ -309,7 +309,7 @@ async def test_e2e_jsonb_filter_narrows_cohort(
         resolved_source=resolved,
     )
     # Sanity-check the emitted SQL on the way through.
-    assert "(src.payload->>'mql_score')::bigint >= :filter_0" in sql
+    assert "NULLIF(src.payload->>'mql_score', '')::bigint >= :filter_0" in sql
 
     result = await db_session.execute(text(sql), params)
     inserted = sorted(r[0] for r in result.all())

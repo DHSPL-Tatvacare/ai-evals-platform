@@ -108,6 +108,8 @@ def jsonb_column_resolver(declared_types: dict[str, str]) -> ColumnResolver:
                 f"(allowed: {sorted(declared_types)})"
             )
         cast = _DATASET_TYPE_CASTS.get(declared_types[col], "text")
+        if cast != "text":
+            return f"NULLIF(src.payload->>'{col}', '')::{cast}"
         return f"(src.payload->>'{col}')::{cast}"
     return _resolve
 
@@ -479,21 +481,12 @@ def _compile_dataset(
     they need from ``payload``.
 
     v1 limitations (raised as ``CohortQueryCompileError`` if configured):
-      - ``lookback_hours`` is not supported. Datetime payload values are
-        stored as JSON strings; ``now() - INTERVAL`` against a string cast
-        is doable but the schema-descriptor inference is the source of
-        truth for "is this column a datetime", and porting the lookback
-        invariant to the JSONB path is out of scope for the linchpin.
       - ``consent_gate_channel`` is not supported. The consent table joins
         on the source's natural id column, which datasets don't have a
         stable equivalent for in v1 (recipient_id is per-version).
       - ``payload_fields`` is honored only as documentation — the runtime
         always emits ``src.payload AS row_payload`` (full payload).
     """
-    if cfg.lookback_hours is not None:
-        raise CohortQueryCompileError(
-            "lookback_hours is not supported for dataset sources in v1"
-        )
     if cfg.consent_gate_channel:
         raise CohortQueryCompileError(
             "consent_gate_channel is not supported for dataset sources in v1"
@@ -527,6 +520,18 @@ def _compile_dataset(
         fragment, bind = _filter_to_sql(f, i, column_resolver=resolver)
         where_parts.append(fragment)
         params.update(bind)
+
+    if cfg.lookback_hours is not None:
+        if not cfg.lookback_column:
+            raise CohortQueryCompileError("lookback_column required when lookback_hours is set")
+        if declared_types.get(cfg.lookback_column) != "datetime":
+            raise CohortQueryCompileError(
+                f"lookback_column {cfg.lookback_column!r} must be a datetime column"
+            )
+        lookback_sql = resolver(cfg.lookback_column)
+        where_parts.append(
+            f"{lookback_sql} >= now() - INTERVAL '{int(cfg.lookback_hours)} hours'"
+        )
 
     where_clause = " AND ".join(where_parts)
 

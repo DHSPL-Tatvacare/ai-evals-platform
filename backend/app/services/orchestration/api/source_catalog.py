@@ -55,6 +55,9 @@ def _dataset_to_response(ds: DatasetSource) -> CohortSourceResponse:
         allowed_payload_columns=list(column_names),
         allowed_filter_columns=list(column_names),
         allowed_lookback_columns=list(lookback_names),
+        schema_descriptor=ds.schema_descriptor,
+        row_count=ds.row_count,
+        imported_at=ds.imported_at,
     )
 
 
@@ -64,6 +67,7 @@ async def list_cohort_sources(
     tenant_id: uuid.UUID,
     workflow_type: Optional[str] = None,
     app_id: Optional[str] = None,
+    app_ids: Optional[list[str]] = None,
 ) -> list[CohortSourceResponse]:
     """Return registered cohort sources, filtered by workflow type / app id.
 
@@ -77,6 +81,7 @@ async def list_cohort_sources(
     authors select sources by ``source_ref``; the underlying table is an
     engineering concern and not authoring config.
     """
+    static_app_ids = [app_id] if app_id is not None else (app_ids or None)
     static_entries = [
         CohortSourceResponse(
             source_ref=s.source_ref,
@@ -91,10 +96,13 @@ async def list_cohort_sources(
             allowed_lookback_columns=list(s.allowed_lookback_columns),
         )
         for s in list_sources(workflow_type=workflow_type, app_id=app_id)
+        if static_app_ids is None or any(a in static_app_ids for a in s.app_ids)
     ]
     dataset_entries = [
         _dataset_to_response(ds)
-        for ds in await list_dataset_sources(db, tenant_id=tenant_id, app_id=app_id)
+        for ds in await list_dataset_sources(
+            db, tenant_id=tenant_id, app_id=app_id, app_ids=app_ids,
+        )
     ]
     return static_entries + dataset_entries
 

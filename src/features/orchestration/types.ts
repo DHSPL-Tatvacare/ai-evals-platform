@@ -34,6 +34,12 @@ export type TriggerKind = 'cron' | 'event' | 'manual';
 export type WorkflowVersionStatus = 'draft' | 'published' | 'archived';
 export type OverrideAction = 'pause' | 'resume' | 'jump_to_node' | 'remove' | 'complete';
 
+export const ACTIVE_RUN_STATUSES: RunStatus[] = ['pending', 'running', 'waiting'];
+
+export function isRunActive(status: RunStatus): boolean {
+  return ACTIVE_RUN_STATUSES.includes(status);
+}
+
 export interface NodeOutputEdge {
   id: string;
   label: string;
@@ -187,6 +193,23 @@ export interface WorkflowRun {
   createdAt: string;
 }
 
+export interface WorkflowRunNodeStep {
+  id: string;
+  nodeId: string;
+  nodeType: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  inputsSummary: Record<string, unknown>;
+  outputsSummary: Record<string, unknown> | null;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface RunOverlaySnapshot {
+  run: WorkflowRun;
+  nodeSteps: WorkflowRunNodeStep[];
+}
+
 export interface RecipientState {
   recipientId: string;
   currentNodeId: string | null;
@@ -229,6 +252,17 @@ export function getEdgeOutputId(edge: WorkflowDefinitionEdge): string {
 // ─── Phase 11 (Commit 2) — specialized editor contracts ─────────────────────
 
 export type CohortSourceKind = 'static' | 'dataset';
+export type CohortColumnType = 'integer' | 'number' | 'boolean' | 'datetime' | 'string';
+
+export interface CohortSourceSchemaDescriptor {
+  columns: Array<{
+    name: string;
+    type: CohortColumnType;
+    sampleValues?: string[];
+    distinctCount?: number;
+  }>;
+  rowCount?: number;
+}
 
 export interface CohortSource {
   sourceRef: string;
@@ -246,6 +280,9 @@ export interface CohortSource {
   allowedPayloadColumns: string[];
   allowedFilterColumns: string[];
   allowedLookbackColumns: string[];
+  schemaDescriptor?: CohortSourceSchemaDescriptor | null;
+  rowCount?: number | null;
+  importedAt?: string | null;
 }
 
 /** Backoff strategy for retry-capable dispatch nodes. ``immediate`` means

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 
 import { useRunOverlayStore } from '@/features/orchestration/store/runOverlayStore';
+import type { RunStatus } from '@/features/orchestration/types';
+import { isRunActive } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 
 /**
@@ -14,16 +16,24 @@ import { notificationService } from '@/services/notifications';
  * triggered it explicitly.
  */
 export function useRunStatusToasts(runId: string | undefined): void {
+  const activeRunId = useRunOverlayStore((s) => s.runId);
   const runStatus = useRunOverlayStore((s) => s.runStatus);
   const runError = useRunOverlayStore((s) => s.runError);
-  const previous = useRef<typeof runStatus>('pending');
+  const previous = useRef<RunStatus | null>(null);
+  const previousRunId = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!runId) return;
+    if (previousRunId.current !== runId || activeRunId !== runId) {
+      previousRunId.current = runId;
+      previous.current = runStatus;
+      return;
+    }
+
     const prev = previous.current;
     previous.current = runStatus;
 
-    if (prev === runStatus) return;
+    if (!prev || prev === runStatus || !isRunActive(prev)) return;
 
     const shortId = runId.slice(0, 8);
     if (runStatus === 'completed') {
@@ -33,5 +43,5 @@ export function useRunStatusToasts(runId: string | undefined): void {
         runError ? `Run ${shortId} failed: ${runError}` : `Run ${shortId} failed`,
       );
     }
-  }, [runId, runStatus, runError]);
+  }, [activeRunId, runId, runStatus, runError]);
 }

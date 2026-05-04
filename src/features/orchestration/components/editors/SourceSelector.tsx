@@ -1,9 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { DatasetSourcePicker } from '@/features/orchestration/components/datasets/DatasetSourcePicker';
 import type {
+  CohortColumnType,
   CohortSource,
   WorkflowType,
 } from '@/features/orchestration/types';
@@ -11,7 +13,7 @@ import { cn } from '@/utils';
 
 interface CohortQueryConfig {
   source_ref?: string;
-  filters?: Array<{ column?: string; op?: string; value?: unknown }>;
+  filters?: CohortFilter[];
   payload_fields?: string[];
   lookback_hours?: number | null;
   lookback_column?: string;
@@ -21,6 +23,61 @@ interface CohortQueryConfig {
   id_column?: string;
   payload_columns?: string[];
 }
+
+interface CohortFilter {
+  column?: string;
+  op?: string;
+  value?: unknown;
+}
+
+interface SourceColumn {
+  name: string;
+  type: CohortColumnType;
+}
+
+const TYPE_LABELS: Record<CohortColumnType, string> = {
+  integer: 'number',
+  number: 'number',
+  boolean: 'boolean',
+  datetime: 'datetime',
+  string: 'text',
+};
+
+const OP_OPTIONS_BY_TYPE: Record<CohortColumnType, Array<{ value: string; label: string }>> = {
+  integer: [
+    { value: 'gte', label: '>=' },
+    { value: 'gt', label: '>' },
+    { value: 'lte', label: '<=' },
+    { value: 'lt', label: '<' },
+    { value: 'eq', label: '=' },
+    { value: 'neq', label: '!=' },
+  ],
+  number: [
+    { value: 'gte', label: '>=' },
+    { value: 'gt', label: '>' },
+    { value: 'lte', label: '<=' },
+    { value: 'lt', label: '<' },
+    { value: 'eq', label: '=' },
+    { value: 'neq', label: '!=' },
+  ],
+  boolean: [
+    { value: 'eq', label: '=' },
+    { value: 'neq', label: '!=' },
+  ],
+  datetime: [
+    { value: 'gte', label: 'on/after' },
+    { value: 'gt', label: 'after' },
+    { value: 'lte', label: 'on/before' },
+    { value: 'lt', label: 'before' },
+    { value: 'eq', label: '=' },
+    { value: 'neq', label: '!=' },
+  ],
+  string: [
+    { value: 'eq', label: '=' },
+    { value: 'neq', label: '!=' },
+    { value: 'contains', label: 'contains' },
+  ],
+};
 
 interface Props {
   workflowType: WorkflowType;
@@ -45,6 +102,17 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
   // the entry's allowed-column lists. Stash whatever the picker hands
   // back when the operator switches sources.
   const [selected, setSelected] = useState<CohortSource | null>(null);
+
+  const filterColumns = useMemo<SourceColumn[]>(() => {
+    if (!selected) return [];
+    const descriptorColumns = selected.schemaDescriptor?.columns ?? [];
+    if (descriptorColumns.length > 0) {
+      return descriptorColumns
+        .filter((c) => selected.allowedFilterColumns.includes(c.name))
+        .map((c) => ({ name: c.name, type: c.type }));
+    }
+    return selected.allowedFilterColumns.map((name) => ({ name, type: 'string' }));
+  }, [selected]);
 
   const setSourceRef = (next: string, entry: CohortSource) => {
     setSelected(entry);
@@ -127,6 +195,14 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
             </div>
           </Field>
 
+          <Field label="Filters">
+            <FilterEditor
+              columns={filterColumns}
+              value={value.filters ?? []}
+              onChange={(filters) => onChange({ ...value, filters })}
+            />
+          </Field>
+
           <Field label="Lookback (hours)">
             <Input
               type="number"
@@ -173,4 +249,167 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+function FilterEditor({
+  columns,
+  value,
+  onChange,
+}: {
+  columns: SourceColumn[];
+  value: CohortFilter[];
+  onChange(next: CohortFilter[]): void;
+}) {
+  const byName = useMemo(
+    () => new Map(columns.map((c) => [c.name, c])),
+    [columns],
+  );
+
+  const makeDefaultFilter = (): CohortFilter | null => {
+    const first = columns[0];
+    if (!first) return null;
+    return {
+      column: first.name,
+      op: defaultOp(first.type),
+      value: defaultValue(first.type),
+    };
+  };
+
+  const addFilter = () => {
+    const next = makeDefaultFilter();
+    if (next) onChange([...value, next]);
+  };
+
+  const updateAt = (idx: number, patch: Partial<CohortFilter>) => {
+    onChange(value.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+  };
+
+  const removeAt = (idx: number) => {
+    onChange(value.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {value.length === 0 ? (
+        <p className="text-xs text-[var(--text-secondary)]">
+          No filters. The workflow starts with every row in the selected source.
+        </p>
+      ) : null}
+      {value.map((filter, idx) => {
+        const column = byName.get(filter.column ?? '') ?? columns[0];
+        const type = column?.type ?? 'string';
+        return (
+          <div
+            key={idx}
+            className="grid grid-cols-[minmax(0,1.2fr)_96px_minmax(0,1fr)_auto] items-center gap-2"
+          >
+            <Select
+              value={filter.column ?? ''}
+              onChange={(columnName) => {
+                const nextColumn = byName.get(columnName);
+                const nextType = nextColumn?.type ?? 'string';
+                updateAt(idx, {
+                  column: columnName,
+                  op: defaultOp(nextType),
+                  value: defaultValue(nextType),
+                });
+              }}
+              options={columns.map((c) => ({
+                value: c.name,
+                label: `${c.name} (${TYPE_LABELS[c.type]})`,
+              }))}
+              placeholder="Column"
+              size="sm"
+            />
+            <Select
+              value={filter.op ?? defaultOp(type)}
+              onChange={(op) => updateAt(idx, { op })}
+              options={OP_OPTIONS_BY_TYPE[type]}
+              placeholder="Op"
+              size="sm"
+            />
+            <FilterValueInput
+              type={type}
+              value={filter.value}
+              onChange={(nextValue) => updateAt(idx, { value: nextValue })}
+            />
+            <button
+              type="button"
+              onClick={() => removeAt(idx)}
+              className={cn(
+                'rounded-[var(--radius-default)] border border-[var(--border-default)]',
+                'px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]',
+              )}
+            >
+              Remove
+            </button>
+          </div>
+        );
+      })}
+      <div>
+        <button
+          type="button"
+          onClick={addFilter}
+          disabled={columns.length === 0}
+          className={cn(
+            'rounded-[var(--radius-default)] border border-[var(--border-default)]',
+            'px-2.5 py-1 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+          )}
+        >
+          Add filter
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FilterValueInput({
+  type,
+  value,
+  onChange,
+}: {
+  type: CohortColumnType;
+  value: unknown;
+  onChange(next: unknown): void;
+}) {
+  if (type === 'boolean') {
+    return (
+      <Select
+        value={value === false ? 'false' : 'true'}
+        onChange={(next) => onChange(next === 'true')}
+        options={[
+          { value: 'true', label: 'true' },
+          { value: 'false', label: 'false' },
+        ]}
+        size="sm"
+      />
+    );
+  }
+  const inputType = type === 'integer' || type === 'number' ? 'number' : 'text';
+  return (
+    <Input
+      type={inputType}
+      value={value === null || value === undefined ? '' : String(value)}
+      onChange={(e) => {
+        if (type === 'integer' || type === 'number') {
+          onChange(e.target.value === '' ? null : Number(e.target.value));
+          return;
+        }
+        onChange(e.target.value);
+      }}
+      placeholder={type === 'datetime' ? '2026-05-01T00:00:00Z' : 'Value'}
+    />
+  );
+}
+
+function defaultOp(type: CohortColumnType): string {
+  if (type === 'integer' || type === 'number' || type === 'datetime') return 'gte';
+  return 'eq';
+}
+
+function defaultValue(type: CohortColumnType): unknown {
+  if (type === 'integer' || type === 'number') return 0;
+  if (type === 'boolean') return true;
+  return '';
 }

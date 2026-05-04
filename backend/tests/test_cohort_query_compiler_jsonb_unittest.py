@@ -94,7 +94,7 @@ def test_dataset_filter_integer_emits_bigint_cast():
         filters=[{"column": "mql_score", "op": "gte", "value": 70}],
     )
     sql, params = _compile(cfg, src)
-    assert "(src.payload->>'mql_score')::bigint >= :filter_0" in sql
+    assert "NULLIF(src.payload->>'mql_score', '')::bigint >= :filter_0" in sql
     assert params["filter_0"] == 70
 
 
@@ -120,7 +120,7 @@ def test_dataset_filter_boolean_emits_boolean_cast():
         filters=[{"column": "active", "op": "eq", "value": True}],
     )
     sql, _ = _compile(cfg, src)
-    assert "(src.payload->>'active')::boolean = :filter_0" in sql
+    assert "NULLIF(src.payload->>'active', '')::boolean = :filter_0" in sql
 
 
 def test_dataset_filter_datetime_emits_timestamptz_cast():
@@ -134,7 +134,7 @@ def test_dataset_filter_datetime_emits_timestamptz_cast():
         ],
     )
     sql, _ = _compile(cfg, src)
-    assert "(src.payload->>'first_seen_at')::timestamptz >= :filter_0" in sql
+    assert "NULLIF(src.payload->>'first_seen_at', '')::timestamptz >= :filter_0" in sql
 
 
 def test_dataset_filter_number_emits_numeric_cast():
@@ -146,7 +146,7 @@ def test_dataset_filter_number_emits_numeric_cast():
         filters=[{"column": "price", "op": "lt", "value": 9.99}],
     )
     sql, _ = _compile(cfg, src)
-    assert "(src.payload->>'price')::numeric < :filter_0" in sql
+    assert "NULLIF(src.payload->>'price', '')::numeric < :filter_0" in sql
 
 
 def test_dataset_filter_unknown_type_falls_back_to_text():
@@ -211,7 +211,7 @@ def test_static_branch_unaffected_when_resolved_source_is_cohort_source():
 # ─── 8. v1 limitations on dataset branch ───────────────────────────────────
 
 
-def test_dataset_lookback_hours_rejected_in_v1():
+def test_dataset_lookback_hours_emits_jsonb_datetime_filter():
     src = _dataset_source([
         {"name": "first_seen_at", "type": "datetime"},
     ])
@@ -220,7 +220,23 @@ def test_dataset_lookback_hours_rejected_in_v1():
         lookback_hours=24,
         lookback_column="first_seen_at",
     )
-    with pytest.raises(CohortQueryCompileError, match="lookback_hours"):
+    sql, _ = _compile(cfg, src)
+    assert (
+        "NULLIF(src.payload->>'first_seen_at', '')::timestamptz "
+        ">= now() - INTERVAL '24 hours'"
+    ) in sql
+
+
+def test_dataset_lookback_hours_rejects_non_datetime_column():
+    src = _dataset_source([
+        {"name": "city", "type": "string"},
+    ])
+    cfg = CohortQueryConfig(
+        source_ref=src.source_ref,
+        lookback_hours=24,
+        lookback_column="city",
+    )
+    with pytest.raises(CohortQueryCompileError, match="datetime"):
         _compile(cfg, src)
 
 
@@ -247,10 +263,10 @@ def test_jsonb_column_resolver_round_trip():
         "t": "datetime",
         "u": "spaceship",  # unknown → text fallback
     })
-    assert resolver("n") == "(src.payload->>'n')::bigint"
+    assert resolver("n") == "NULLIF(src.payload->>'n', '')::bigint"
     assert resolver("s") == "(src.payload->>'s')::text"
-    assert resolver("b") == "(src.payload->>'b')::boolean"
-    assert resolver("t") == "(src.payload->>'t')::timestamptz"
+    assert resolver("b") == "NULLIF(src.payload->>'b', '')::boolean"
+    assert resolver("t") == "NULLIF(src.payload->>'t', '')::timestamptz"
     assert resolver("u") == "(src.payload->>'u')::text"
     with pytest.raises(CohortQueryCompileError):
         resolver("missing")

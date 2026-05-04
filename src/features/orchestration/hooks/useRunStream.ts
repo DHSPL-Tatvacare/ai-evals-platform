@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 
+import { getRunOverlaySnapshot } from '@/services/api/orchestration';
 import { useAuthStore } from '@/stores/authStore';
 import { useRunOverlayStore } from '@/features/orchestration/store/runOverlayStore';
+import { isRunActive } from '@/features/orchestration/types';
 import { logger } from '@/services/logger';
 
 /**
@@ -15,18 +17,71 @@ import { logger } from '@/services/logger';
  */
 export function useRunStream(runId: string | undefined): void {
   useEffect(() => {
-    if (!runId) return;
+    if (!runId) {
+      useRunOverlayStore.getState().reset();
+      return;
+    }
     const token = useAuthStore.getState().accessToken;
-    if (!token) return;
+    if (!token) {
+      useRunOverlayStore.getState().reset();
+      return;
+    }
 
-    useRunOverlayStore.getState().reset();
-    useRunOverlayStore.getState().setStreamStatus('connecting');
+    const store = useRunOverlayStore.getState();
+    store.activateRun(runId);
 
-    const abort = new AbortController();
     let cancelled = false;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    let abort: AbortController | null = null;
+
+    const clearReconnect = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
+
+    const setStreamStatus = (status: 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error') => {
+      useRunOverlayStore.getState().setStreamStatus(runId, status);
+    };
+
+    const hydrateSnapshot = async (): Promise<void> => {
+      const snapshot = await getRunOverlaySnapshot(runId);
+      if (cancelled) return;
+      useRunOverlayStore.getState().hydrateSnapshot(runId, snapshot);
+    };
+
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      const current = useRunOverlayStore.getState();
+      if (current.runId !== runId || !isRunActive(current.runStatus)) {
+        setStreamStatus('closed');
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+      reconnectAttempt += 1;
+      setStreamStatus('reconnecting');
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        void syncAndPump();
+      }, delay);
+    };
 
     const pump = async () => {
+      abort?.abort();
+      abort = new AbortController();
       try {
+        await hydrateSnapshot();
+        if (cancelled) return;
+        const currentState = useRunOverlayStore.getState();
+        if (currentState.runId !== runId) return;
+        if (!isRunActive(currentState.runStatus)) {
+          setStreamStatus('closed');
+          return;
+        }
+        setStreamStatus(reconnectAttempt > 0 ? 'reconnecting' : 'connecting');
+
         const resp = await fetch(`/api/orchestration/runs/${runId}/stream`, {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
@@ -34,10 +89,12 @@ export function useRunStream(runId: string | undefined): void {
           signal: abort.signal,
         });
         if (!resp.ok || !resp.body) {
-          useRunOverlayStore.getState().setStreamStatus('error');
+          setStreamStatus('error');
+          scheduleReconnect();
           return;
         }
-        useRunOverlayStore.getState().setStreamStatus('open');
+        setStreamStatus('open');
+        reconnectAttempt = 0;
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -63,7 +120,7 @@ export function useRunStream(runId: string | undefined): void {
             if (dataLines.length > 0) {
               try {
                 const data = JSON.parse(dataLines.join('\n'));
-                useRunOverlayStore.getState().applyEvent({ ...data, type: eventType });
+                useRunOverlayStore.getState().applyEvent(runId, { ...data, type: eventType });
               } catch (err) {
                 logger.warn('useRunStream: malformed SSE frame', { err: String(err) });
               }
@@ -71,20 +128,38 @@ export function useRunStream(runId: string | undefined): void {
             boundary = buffer.indexOf('\n\n');
           }
         }
-        useRunOverlayStore.getState().setStreamStatus('closed');
+        const latestState = useRunOverlayStore.getState();
+        if (latestState.runId !== runId) return;
+        if (isRunActive(latestState.runStatus)) {
+          scheduleReconnect();
+        } else {
+          setStreamStatus('closed');
+        }
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || abort?.signal.aborted) return;
         logger.warn('useRunStream: stream failed', { err: String(err) });
-        useRunOverlayStore.getState().setStreamStatus('error');
+        setStreamStatus('error');
+        scheduleReconnect();
       }
     };
 
-    void pump();
+    const syncAndPump = async () => {
+      try {
+        await pump();
+      } catch (err) {
+        if (cancelled) return;
+        logger.warn('useRunStream: reconnect loop failed', { err: String(err) });
+        scheduleReconnect();
+      }
+    };
+
+    void syncAndPump();
 
     return () => {
       cancelled = true;
-      abort.abort();
-      useRunOverlayStore.getState().setStreamStatus('closed');
+      clearReconnect();
+      abort?.abort();
+      useRunOverlayStore.getState().clearRun(runId);
     };
   }, [runId]);
 }

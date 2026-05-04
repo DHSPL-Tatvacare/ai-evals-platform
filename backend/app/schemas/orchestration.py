@@ -250,6 +250,23 @@ class RunResponse(CamelORMModel):
     created_at: datetime
 
 
+class RunNodeStepResponse(CamelORMModel):
+    id: uuid.UUID
+    node_id: str
+    node_type: str
+    status: str
+    inputs_summary: dict[str, Any]
+    outputs_summary: Optional[dict[str, Any]]
+    error: Optional[str]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+
+
+class RunOverlaySnapshotResponse(CamelModel):
+    run: RunResponse
+    node_steps: list[RunNodeStepResponse]
+
+
 class RunListResponse(CamelModel):
     runs: list[RunResponse]
     total: int
@@ -390,6 +407,9 @@ class CohortSourceResponse(CamelModel):
     allowed_payload_columns: list[str] = Field(default_factory=list)
     allowed_filter_columns: list[str] = Field(default_factory=list)
     allowed_lookback_columns: list[str] = Field(default_factory=list)
+    schema_descriptor: Optional[dict[str, Any]] = None
+    row_count: Optional[int] = None
+    imported_at: Optional[datetime] = None
 
 
 __all__ = [
@@ -400,7 +420,8 @@ __all__ = [
     "TriggerCreateRequest", "TriggerUpdateRequest", "TriggerResponse",
     "ActionTemplateUpsertRequest", "ActionTemplateResponse",
     "ConsentSetRequest", "ConsentResponse",
-    "RunCreateRequest", "RunResponse", "RunListResponse",
+    "RunCreateRequest", "RunResponse", "RunNodeStepResponse",
+    "RunOverlaySnapshotResponse", "RunListResponse",
     "RecipientStateResponse", "ActionResponse",
     "OverrideRequest", "OverrideResponse",
     "NodeTypeDescriptor", "NodeOutputEdge",

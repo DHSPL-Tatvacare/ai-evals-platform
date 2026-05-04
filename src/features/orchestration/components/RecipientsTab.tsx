@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { listRunRecipients } from '@/services/api/orchestration';
-import type { RecipientState } from '@/features/orchestration/types';
+import { isRunActive, type RecipientState, type RunStatus } from '@/features/orchestration/types';
 import { OverrideMenu } from './OverrideMenu';
 
 const PAGE_SIZE = 50;
+const ACTIVE_REFRESH_MS = 5000;
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -14,7 +15,7 @@ function fmtDate(s: string | null): string {
   return d.toLocaleString();
 }
 
-export function RecipientsTab({ runId }: { runId: string }) {
+export function RecipientsTab({ runId, runStatus }: { runId: string; runStatus: RunStatus }) {
   const [rows, setRows] = useState<RecipientState[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -35,6 +36,18 @@ export function RecipientsTab({ runId }: { runId: string }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!isRunActive(runStatus)) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, ACTIVE_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [refresh, runStatus]);
 
   const columns: ColumnDef<RecipientState>[] = [
     {
