@@ -57,6 +57,30 @@ def test_filter_eq_renders_safe_named_param():
     assert params["filter_0"] == "warm"
 
 
+def test_filter_in_renders_any_named_param():
+    cfg = _make_config(filters=[{"column": "stage", "op": "in", "value": ["warm", "hot"]}])
+    sql, params = compile_cohort_query(
+        cfg,
+        run_id=uuid.uuid4(), workflow_id=uuid.uuid4(),
+        workflow_version_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
+        app_id="x", next_node_id="n1",
+    )
+    assert "stage = ANY(:filter_0)" in sql
+    assert params["filter_0"] == ["warm", "hot"]
+
+
+def test_filter_not_in_renders_all_named_param():
+    cfg = _make_config(filters=[{"column": "stage", "op": "not_in", "value": ["junk", "duplicate"]}])
+    sql, params = compile_cohort_query(
+        cfg,
+        run_id=uuid.uuid4(), workflow_id=uuid.uuid4(),
+        workflow_version_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
+        app_id="x", next_node_id="n1",
+    )
+    assert "stage <> ALL(:filter_0)" in sql
+    assert params["filter_0"] == ["junk", "duplicate"]
+
+
 def test_lookback_hours_uses_now_interval():
     cfg = _make_config(lookback_hours=24, lookback_column="created_on")
     sql, _ = compile_cohort_query(

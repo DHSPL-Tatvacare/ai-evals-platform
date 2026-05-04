@@ -106,7 +106,7 @@ export interface AgentVariablesResponse {
 
 export interface AgentVariablesParams {
   agentId?: string;
-  templateSlug?: string;
+  templateName?: string;
 }
 
 export interface CreateConnectionBody {
@@ -243,7 +243,7 @@ export async function getAgentVariables(
 ): Promise<AgentVariablesResponse> {
   const q = new URLSearchParams();
   if (params?.agentId) q.set('agentId', params.agentId);
-  if (params?.templateSlug) q.set('templateSlug', params.templateSlug);
+  if (params?.templateName) q.set('templateName', params.templateName);
   const qs = q.toString();
   return apiRequest<AgentVariablesResponse>(
     `/api/orchestration/connections/${connectionId}/agent-variables${qs ? `?${qs}` : ''}`,

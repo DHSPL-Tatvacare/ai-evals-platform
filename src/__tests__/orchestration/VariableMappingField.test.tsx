@@ -63,8 +63,24 @@ describe('VariableMappingField', () => {
     await waitFor(() =>
       expect(getAgentVariables).toHaveBeenCalledWith('conn-1', {
         agentId: 'agent-7',
-        templateSlug: undefined,
+        templateName: undefined,
       }),
     );
+  });
+
+  it('uses selected template parameters directly without refetching', async () => {
+    render(
+      <VariableMappingField
+        value={[{ agent_variable: '', source_kind: 'payload', payload_field: '' }]}
+        onChange={vi.fn()}
+        connectionId="conn-1"
+        templateName="concierge_qualify_v1"
+        templateParameters={['first_name', 'city']}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getAgentVariables).not.toHaveBeenCalled();
+    });
   });
 });

@@ -103,4 +103,38 @@ describe('ConnectionPicker', () => {
       '/inside-sales/orchestration/connections',
     );
   });
+
+  it('does not refetch or fall back to the raw id on unrelated rerenders', async () => {
+    (listConnections as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeConnection({ id: 'conn-1', name: 'Primary WATI', provider: 'wati' }),
+    ]);
+    const { rerender } = render(
+      <MemoryRouter>
+        <ConnectionPicker
+          appId="inside-sales"
+          provider="wati"
+          value="conn-1"
+          onChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('button', { name: /Primary WATI/ })).toBeInTheDocument();
+    expect(listConnections).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MemoryRouter>
+        <ConnectionPicker
+          appId="inside-sales"
+          provider="wati"
+          value="conn-1"
+          onChange={vi.fn()}
+          disabled={false}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: /Primary WATI/ })).toBeInTheDocument();
+    expect(listConnections).toHaveBeenCalledTimes(1);
+  });
 });

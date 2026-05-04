@@ -231,4 +231,77 @@ describe('SourceSelector dataset filters', () => {
       ),
     );
   });
+
+  it('renders filters and lookback controls inside dedicated inspector sections', async () => {
+    const ds = makeDataset();
+    (fetchCohortSources as ReturnType<typeof vi.fn>).mockResolvedValue([ds]);
+
+    render(
+      <MemoryRouter>
+        <SourceSelector
+          appId='inside-sales'
+          workflowType='crm'
+          value={{ source_ref: ds.sourceRef, filters: [], payload_fields: ['name'] }}
+          onChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Payload fields')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /name/ })).toBeInTheDocument();
+    expect(screen.getByText('Filters')).toBeInTheDocument();
+    expect(screen.getByText('Lookback window')).toBeInTheDocument();
+  });
+
+  it('uses a multi-select combobox instead of payload chips', async () => {
+    const ds = makeDataset();
+    (fetchCohortSources as ReturnType<typeof vi.fn>).mockResolvedValue([ds]);
+    const onChange = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <SourceSelector
+          appId='inside-sales'
+          workflowType='crm'
+          value={{ source_ref: ds.sourceRef, payload_fields: [] }}
+          onChange={onChange}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Select payload fields/ }));
+    fireEvent.click(await screen.findByText('phone'));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ payload_fields: ['phone'] }),
+    );
+  });
+
+  it('renders list-style filter values for in/not_in operators', async () => {
+    const ds = makeDataset({
+      allowedFilterColumns: ['city'],
+      allowedPayloadColumns: ['city'],
+      schemaDescriptor: {
+        columns: [{ name: 'city', type: 'string' }],
+        rowCount: 3,
+      },
+    });
+    (fetchCohortSources as ReturnType<typeof vi.fn>).mockResolvedValue([ds]);
+
+    render(
+      <MemoryRouter>
+        <SourceSelector
+          appId='inside-sales'
+          workflowType='crm'
+          value={{
+            source_ref: ds.sourceRef,
+            filters: [{ column: 'city', op: 'in', value: ['Mumbai', 'Delhi'] }],
+          }}
+          onChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByDisplayValue('Mumbai, Delhi')).toBeInTheDocument();
+  });
 });

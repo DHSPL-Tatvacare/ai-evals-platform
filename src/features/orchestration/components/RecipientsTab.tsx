@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { listRunRecipients } from '@/services/api/orchestration';
 import { isRunActive, type RecipientState, type RunStatus } from '@/features/orchestration/types';
@@ -13,6 +14,59 @@ function fmtDate(s: string | null): string {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleString();
+}
+
+interface OutcomeChip {
+  label: string;
+  variant: BadgeVariant;
+  tooltip: string;
+}
+
+const POSITIVE_OUTCOMES = new Set([
+  'completed',
+  'answered',
+  'success',
+  'wa_replied',
+  'wa_read',
+  'bolna_answered',
+]);
+
+const NEGATIVE_OUTCOMES = new Set([
+  'failed',
+  'error',
+  'wa_failed',
+  'bolna_failed',
+]);
+
+const NEUTRAL_OUTCOMES = new Set([
+  'no-answer',
+  'rnr',
+  'busy',
+  'cancelled',
+  'canceled',
+  'stopped',
+  'balance-low',
+  'bolna_rnr',
+]);
+
+function lastOutcomeChip(r: RecipientState): OutcomeChip | null {
+  const payload = (r.payload ?? {}) as Record<string, unknown>;
+  const raw = payload.last_outcome;
+  const label = typeof raw === 'string' && raw ? raw : null;
+  if (!label) return null;
+  const lower = label.toLowerCase();
+  let variant: BadgeVariant = 'info';
+  if (POSITIVE_OUTCOMES.has(lower)) variant = 'success';
+  else if (NEGATIVE_OUTCOMES.has(lower)) variant = 'error';
+  else if (NEUTRAL_OUTCOMES.has(lower)) variant = 'warning';
+  else if (lower === 'wa_delivered' || lower === 'bolna_queued') variant = 'info';
+  return { label, variant, tooltip: label };
+}
+
+function getLastEventAt(r: RecipientState): string | null {
+  const payload = (r.payload ?? {}) as Record<string, unknown>;
+  const raw = payload.last_event_at;
+  return typeof raw === 'string' && raw ? raw : null;
 }
 
 export function RecipientsTab({ runId, runStatus }: { runId: string; runStatus: RunStatus }) {
@@ -68,6 +122,24 @@ export function RecipientsTab({ runId, runStatus }: { runId: string; runStatus: 
       render: (r) => (
         <span className="text-[var(--text-primary)]">{r.status}</span>
       ),
+    },
+    {
+      key: '_lastOutcome',
+      header: 'Last Outcome',
+      render: (r) => {
+        const chip = lastOutcomeChip(r);
+        if (!chip) return <span className="text-xs text-[var(--text-secondary)]">—</span>;
+        return (
+          <span title={chip.tooltip}>
+            <Badge variant={chip.variant}>{chip.label}</Badge>
+          </span>
+        );
+      },
+    },
+    {
+      key: '_lastEventAt',
+      header: 'Last Event At',
+      render: (r) => fmtDate(getLastEventAt(r)),
     },
     {
       key: 'enrolledAt',

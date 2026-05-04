@@ -31,10 +31,6 @@ from app.services.orchestration.integrations.bolna import (
     BolnaService,
     BolnaServiceError,
 )
-from app.services.orchestration.integrations.template_resolver import (
-    TemplateNotFound,
-    resolve_template,
-)
 from app.services.orchestration.integrations.wati import WatiService, WatiServiceError
 from app.services.orchestration.connections import crypto, health, provider_specs
 
@@ -426,14 +422,14 @@ async def get_agent_variables(
     tenant_id: uuid.UUID,
     connection_id: uuid.UUID,
     agent_id: Optional[str] = None,
-    template_slug: Optional[str] = None,
+    template_name: Optional[str] = None,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
     cache_key = (
         str(row.id),
         row.provider,
         agent_id or "",
-        template_slug or "",
+        template_name or "",
         row.updated_at.isoformat() if row.updated_at else "",
     )
     cached = _get_cached_variables(cache_key)
@@ -443,11 +439,10 @@ async def get_agent_variables(
     config = crypto.decrypt(row.config_encrypted)
     try:
         variables = await _provider_agent_variables(
-            db,
             row=row,
             config=config,
             agent_id=agent_id,
-            template_slug=template_slug,
+            template_name=template_name,
         )
     except (BolnaServiceError, WatiServiceError) as exc:
         # Provider responded (or refused to respond) — that's a config /
@@ -461,86 +456,42 @@ async def get_agent_variables(
 
 
 async def _provider_agent_variables(
-    db: AsyncSession,
     *,
     row: ProviderConnection,
     config: dict[str, Any],
     agent_id: Optional[str],
-    template_slug: Optional[str],
+    template_name: Optional[str],
 ) -> list[str]:
     if row.provider == "bolna":
-        return await _agent_variables_for_bolna(
-            db, row=row, config=config, agent_id=agent_id, template_slug=template_slug,
-        )
+        return await _agent_variables_for_bolna(config=config, agent_id=agent_id)
     if row.provider == "wati":
-        return await _agent_variables_for_wati(
-            db, row=row, config=config, template_slug=template_slug,
-        )
+        return await _agent_variables_for_wati(config=config, template_name=template_name)
     return []
 
 
 async def _agent_variables_for_bolna(
-    db: AsyncSession,
     *,
-    row: ProviderConnection,
     config: dict[str, Any],
     agent_id: Optional[str],
-    template_slug: Optional[str],
 ) -> list[str]:
-    """Variable names declared by the Bolna agent. Provider-live only —
-    templates carry no mapping shape."""
-    resolved_agent_id = agent_id
-    if not resolved_agent_id and template_slug:
-        try:
-            template = await resolve_template(
-                db,
-                tenant_id=row.tenant_id,
-                app_id=row.app_id,
-                channel="bolna",
-                slug=template_slug,
-            )
-            raw_agent_id = (template.payload_schema or {}).get("agent_id")
-            if isinstance(raw_agent_id, str) and raw_agent_id.strip():
-                resolved_agent_id = raw_agent_id.strip()
-        except TemplateNotFound:
-            pass
-
-    if not resolved_agent_id:
+    """Variable names declared by the selected live Bolna agent."""
+    if not agent_id:
         return []
 
     service = BolnaService(
         base_url=str(config.get("base_url") or ""),
         api_key=str(config.get("api_key") or ""),
     )
-    payload = await service.get_agent(agent_id=resolved_agent_id)
+    payload = await service.get_agent(agent_id=agent_id)
     return _extract_variable_names(payload)
 
 
 async def _agent_variables_for_wati(
-    db: AsyncSession,
     *,
-    row: ProviderConnection,
     config: dict[str, Any],
-    template_slug: Optional[str],
+    template_name: Optional[str],
 ) -> list[str]:
-    """Variable names declared by the WATI message template. Provider-live only —
-    seeded templates carry no mapping shape."""
-    template_name: Optional[str] = None
-    if template_slug:
-        try:
-            template = await resolve_template(
-                db,
-                tenant_id=row.tenant_id,
-                app_id=row.app_id,
-                channel="wati",
-                slug=template_slug,
-            )
-            template_name_raw = (template.payload_schema or {}).get("template_name")
-            if isinstance(template_name_raw, str) and template_name_raw.strip():
-                template_name = template_name_raw.strip()
-        except TemplateNotFound:
-            pass
-
+    """Variable names declared by the selected live WATI template."""
     if not template_name:
         return []
 
@@ -549,30 +500,12 @@ async def _agent_variables_for_wati(
         wati_tenant_id=str(config.get("wati_tenant_id") or ""),
         api_token=str(config.get("api_token") or ""),
     )
-    payload = await service.get_message_templates()
-    return _extract_wati_template_variables(payload, template_name=template_name)
-
-
-def _extract_wati_template_variables(payload: Any, *, template_name: str) -> list[str]:
-    candidates: list[dict[str, Any]] = []
-    if isinstance(payload, list):
-        candidates = [item for item in payload if isinstance(item, dict)]
-    elif isinstance(payload, dict):
-        for key in ("templates", "messageTemplates", "data", "result"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                candidates = [item for item in value if isinstance(item, dict)]
-                break
-    for candidate in candidates:
-        names = [
-            candidate.get("template_name"),
-            candidate.get("templateName"),
-            candidate.get("elementName"),
-            candidate.get("name"),
-        ]
-        if template_name not in names:
+    summaries = await service.list_message_templates_summary()
+    for summary in summaries:
+        if summary.get("name") != template_name:
             continue
-        extracted = _extract_variable_names(candidate)
-        if extracted:
-            return extracted
+        parameters = summary.get("parameters")
+        if not isinstance(parameters, list):
+            return []
+        return [str(item) for item in parameters if isinstance(item, str) and item]
     return []

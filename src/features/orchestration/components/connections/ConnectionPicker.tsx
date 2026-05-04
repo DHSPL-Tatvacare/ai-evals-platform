@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
+import { getConnectionProviderLabel } from '@/features/orchestration/components/connections/providerOptions';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import {
   listConnections,
@@ -37,50 +38,76 @@ export type ConnectionPickerProps = SingleProviderProps | MultiProviderProps;
 export function ConnectionPicker(props: ConnectionPickerProps) {
   const { appId, value, onChange, disabled, emptyCreateRoute } = props;
   const orchestrationRoutes = useOrchestrationRoutes();
+  const singleProvider = 'provider' in props ? props.provider : undefined;
+  const multiProviders = 'providers' in props ? props.providers : undefined;
   const providers = useMemo<readonly string[]>(() => {
-    if ('providers' in props && props.providers) return props.providers;
-    if ('provider' in props && props.provider) return [props.provider];
+    if (multiProviders) return multiProviders;
+    if (singleProvider) return [singleProvider];
     return [];
-  }, [props]);
+  }, [multiProviders, singleProvider]);
+  const providerKey = useMemo(() => providers.join('|'), [providers]);
+  const providerFilter = useMemo(
+    () => (providerKey ? providerKey.split('|') : []),
+    [providerKey],
+  );
+  const queryKey = `${appId}:${providerKey}`;
 
-  const [rows, setRows] = useState<Connection[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    rows: Connection[];
+    error: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
-    setError(null);
-    setRows(null);
     listConnections({
       appId,
-      providers: providers.length > 0 ? Array.from(providers) : undefined,
+      providers: providerFilter.length > 0 ? providerFilter : undefined,
     })
       .then((result) => {
         if (!alive) return;
-        setRows(result);
+        setLoaded({
+          key: queryKey,
+          rows: result,
+          error: null,
+        });
       })
       .catch((err: unknown) => {
         if (!alive) return;
-        setError(err instanceof Error ? err.message : 'Failed to load connections');
-        setRows([]);
+        setLoaded({
+          key: queryKey,
+          rows: [],
+          error: err instanceof Error ? err.message : 'Failed to load connections',
+        });
       });
     return () => {
       alive = false;
     };
-  }, [appId, providers]);
+  }, [appId, providerFilter, queryKey]);
+
+  const rows = useMemo(
+    () => (loaded?.key === queryKey ? loaded.rows : []),
+    [loaded, queryKey],
+  );
+  const error = useMemo(
+    () => (loaded?.key === queryKey ? loaded.error : null),
+    [loaded, queryKey],
+  );
+  const loading = loaded?.key !== queryKey;
 
   const options: ComboboxOption[] = useMemo(() => {
-    if (!rows) return [];
     return rows.map((c) => ({
       value: c.id,
       label: c.name,
-      meta: c.provider,
-      searchText: `${c.provider} ${c.name}`,
+      meta: getConnectionProviderLabel(c.provider),
+      searchText: `${c.provider} ${getConnectionProviderLabel(c.provider)} ${c.name}`,
     }));
   }, [rows]);
 
   const createRoute = emptyCreateRoute ?? orchestrationRoutes.connections;
   const placeholder =
-    rows === null ? 'Loading…' : 'Select a connection…';
+    loading && rows.length === 0 ? 'Loading…' : 'Select a connection…';
+  const emptyLabel = providers.length === 1 ? getConnectionProviderLabel(providers[0]) : 'matching';
 
   return (
     <div className="flex flex-col gap-1">
@@ -89,15 +116,15 @@ export function ConnectionPicker(props: ConnectionPickerProps) {
         onChange={onChange}
         options={options}
         placeholder={placeholder}
-        disabled={disabled || rows === null}
+        disabled={disabled || (loading && rows.length === 0)}
       />
-      {rows && rows.length === 0 ? (
+      {!loading && rows.length === 0 ? (
         <p className="text-xs text-[var(--text-secondary)]">
           No active{' '}
           {providers.length === 1 ? (
-            <span className="font-medium">{providers[0]}</span>
+            <span className="font-medium">{emptyLabel}</span>
           ) : (
-            'matching'
+            emptyLabel
           )}{' '}
           connections.{' '}
           <Link

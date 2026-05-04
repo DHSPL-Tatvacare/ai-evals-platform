@@ -138,8 +138,8 @@ class AgentVariablesResponse(CamelModel):
     """Returned by GET /api/orchestration/connections/{id}/agent-variables.
 
     Provider-aware introspection surface for variable-mapping UIs.
-    The caller may pass `agentId` and/or `templateSlug`; the backend resolves
-    template defaults as needed and caches results per connection revision.
+    The caller passes the runtime-selected provider entity:
+    `agentId` for Bolna, `templateName` for WATI. No seeded-template fallback.
 
     ``error`` carries a soft, user-facing string when the upstream provider
     couldn't be queried (e.g. 404 because the agent id doesn't exist under

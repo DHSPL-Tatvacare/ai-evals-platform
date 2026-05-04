@@ -1,10 +1,9 @@
 """WatiService — POST WATI templated messages.
 
-Per concierge spec §5.3:
-  Base URL has tenant ID in path: https://live-mt-server.wati.io/{tenantId}
-  Auth: Authorization: Bearer <token>
-  Send: POST /api/v2/sendTemplateMessage?whatsappNumber=<E164-no-plus>
-  Response: {localMessageId, whatsappMessageId, ...}
+Per WATI's current docs, the workspace exposes an "API Endpoint URL" plus
+Bearer token. Some existing connections still save only the host and rely on
+``wati_tenant_id`` to build the tenant-scoped endpoint. We normalize both
+shapes to one per-tenant API root before calling v2 endpoints.
 
 Tests monkeypatch _make_client to inject httpx.MockTransport (no respx dep).
 4xx → WatiServiceError (non-retryable). 5xx / network → httpx.HTTPError (retry-safe).
@@ -12,6 +11,7 @@ Tests monkeypatch _make_client to inject httpx.MockTransport (no respx dep).
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -25,11 +25,29 @@ def _make_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout)
 
 
+def resolve_wati_api_endpoint(base_url: str, wati_tenant_id: str) -> str:
+    """Return the tenant-scoped WATI API endpoint without double-appending.
+
+    WATI's UI now exposes a tenant-scoped "API Endpoint URL", but older saved
+    connections in this codebase may still carry only the host. Accept both so
+    existing connections keep working while new entries can paste the endpoint
+    directly from WATI.
+    """
+    base = base_url.strip().rstrip("/")
+    tenant = wati_tenant_id.strip().strip("/")
+    parts = urlsplit(base)
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if not segments or segments[-1] != tenant:
+        segments.append(tenant)
+    path = "/" + "/".join(segments)
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 class WatiService:
     def __init__(self, *, base_url: str, wati_tenant_id: str, api_token: str, timeout: float = 30.0):
         if not base_url or not wati_tenant_id or not api_token:
             raise ValueError("WatiService requires base_url, wati_tenant_id, api_token")
-        self._url = f"{base_url.rstrip('/')}/{wati_tenant_id}"
+        self._url = resolve_wati_api_endpoint(base_url, wati_tenant_id)
         self._headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",

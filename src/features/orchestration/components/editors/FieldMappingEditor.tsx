@@ -3,6 +3,11 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import {
+  InspectorCard,
+  InspectorEmptyState,
+  InspectorField,
+} from '@/features/orchestration/components/inspector/InspectorPrimitives';
 
 export type FieldMappingSource = 'payload' | 'static';
 
@@ -50,69 +55,72 @@ export function FieldMappingEditor({ value, onChange, targetLabel }: Props) {
     ]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2">
+    <div className="flex flex-col gap-3 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
       {rows.length === 0 ? (
-        <p className="px-1 text-xs text-[var(--text-secondary)]">
+        <InspectorEmptyState>
           No mappings — click Add to bind a {targetLabel ?? 'target field'}.
-        </p>
+        </InspectorEmptyState>
       ) : null}
       {rows.map((row, idx) => (
-        <div
-          key={idx}
-          className="flex items-start gap-2 rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2"
-        >
-          <div className="grid flex-1 grid-cols-3 gap-2">
-            <FieldCell label={targetLabel ?? 'Target field'}>
-              <Input
-                value={row.target_field}
-                onChange={(e) =>
-                  update(idx, { target_field: e.target.value })
-                }
-                placeholder="target field"
-              />
-            </FieldCell>
-            <FieldCell label="Source">
-              <Select
-                value={row.source_kind}
-                onChange={(next) =>
-                  update(idx, {
-                    source_kind: next === 'static' ? 'static' : 'payload',
-                  })
-                }
-                options={SOURCE_OPTIONS}
-              />
-            </FieldCell>
-            <FieldCell
-              label={row.source_kind === 'payload' ? 'Payload field' : 'Value'}
-            >
-              {row.source_kind === 'payload' ? (
-                <Input
-                  value={row.payload_field ?? ''}
-                  onChange={(e) =>
-                    update(idx, { payload_field: e.target.value })
+        <InspectorCard key={idx}>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <FieldCell label={targetLabel ?? 'Target field'}>
+                  <Input
+                    value={row.target_field}
+                    onChange={(e) =>
+                      update(idx, { target_field: e.target.value })
+                    }
+                    placeholder="target field"
+                  />
+                </FieldCell>
+              </div>
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                className="rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
+                aria-label={`Remove mapping ${idx + 1}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+              <FieldCell label="Source">
+                <Select
+                  value={row.source_kind}
+                  onChange={(next) =>
+                    update(idx, {
+                      source_kind: next === 'static' ? 'static' : 'payload',
+                    })
                   }
-                  placeholder="recipient payload field"
+                  options={SOURCE_OPTIONS}
                 />
-              ) : (
-                <Input
-                  value={row.static_value ?? ''}
-                  onChange={(e) =>
-                    update(idx, { static_value: e.target.value })
-                  }
-                  placeholder="literal value"
-                />
-              )}
-            </FieldCell>
+              </FieldCell>
+              <FieldCell
+                label={row.source_kind === 'payload' ? 'Payload field' : 'Value'}
+              >
+                {row.source_kind === 'payload' ? (
+                  <Input
+                    value={row.payload_field ?? ''}
+                    onChange={(e) =>
+                      update(idx, { payload_field: e.target.value })
+                    }
+                    placeholder="recipient payload field"
+                  />
+                ) : (
+                  <Input
+                    value={row.static_value ?? ''}
+                    onChange={(e) =>
+                      update(idx, { static_value: e.target.value })
+                    }
+                    placeholder="literal value"
+                  />
+                )}
+              </FieldCell>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => remove(idx)}
-            className="text-[var(--text-muted)] hover:text-[var(--color-error)]"
-            aria-label={`Remove mapping ${idx + 1}`}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        </InspectorCard>
       ))}
       <Button variant="secondary" size="sm" onClick={add}>
         <Plus className="mr-1 h-3.5 w-3.5" />
@@ -130,11 +138,8 @@ function FieldCell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-        {label}
-      </span>
+    <InspectorField label={label} className="gap-1">
       {children}
-    </div>
+    </InspectorField>
   );
 }

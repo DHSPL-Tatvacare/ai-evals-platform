@@ -9,7 +9,11 @@ import httpx
 import pytest
 
 from app.services.orchestration.integrations import wati as wati_mod
-from app.services.orchestration.integrations.wati import WatiService, WatiServiceError
+from app.services.orchestration.integrations.wati import (
+    WatiService,
+    WatiServiceError,
+    resolve_wati_api_endpoint,
+)
 
 
 def _patch_transport(monkeypatch, handler):
@@ -35,7 +39,7 @@ async def test_send_template_happy_path(monkeypatch):
 
     _patch_transport(monkeypatch, _handler)
     svc = WatiService(
-        base_url="https://live-mt-server.wati.io",
+        base_url="https://live-mt-server.wati.io/12345",
         wati_tenant_id="12345", api_token="t",
     )
     out = await svc.send_template(
@@ -47,10 +51,22 @@ async def test_send_template_happy_path(monkeypatch):
     assert out["localMessageId"] == "lm-abc"
     assert out["whatsappMessageId"] == "wm-xyz"
     assert "12345/api/v2/sendTemplateMessage" in captured["url"]
+    assert "12345/12345" not in captured["url"]
     assert "whatsappNumber=919999999999" in captured["url"]
     assert "welcome_v1" in captured["body"]
     assert "Aarti" in captured["body"]
     assert captured["auth"] == "Bearer t"
+
+
+def test_resolve_wati_api_endpoint_accepts_host_only_or_full_endpoint():
+    assert (
+        resolve_wati_api_endpoint("https://live-mt-server.wati.io", "12345")
+        == "https://live-mt-server.wati.io/12345"
+    )
+    assert (
+        resolve_wati_api_endpoint("https://live-mt-server.wati.io/12345", "12345")
+        == "https://live-mt-server.wati.io/12345"
+    )
 
 
 @pytest.mark.asyncio
@@ -96,13 +112,14 @@ async def test_get_message_templates_happy_path(monkeypatch):
 
     _patch_transport(monkeypatch, _handler)
     svc = WatiService(
-        base_url="https://live-mt-server.wati.io",
+        base_url="https://live-mt-server.wati.io/12345",
         wati_tenant_id="12345",
         api_token="t",
     )
     out = await svc.get_message_templates()
     assert out["templates"][0]["template_name"] == "welcome_v1"
     assert "12345/api/v2/getMessageTemplates" in captured["url"]
+    assert "12345/12345" not in captured["url"]
     assert captured["auth"] == "Bearer t"
 
 

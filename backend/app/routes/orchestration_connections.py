@@ -199,7 +199,7 @@ async def get_agent_variables(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
     agent_id: Optional[str] = Query(None, alias="agentId"),
-    template_slug: Optional[str] = Query(None, alias="templateSlug"),
+    template_name: Optional[str] = Query(None, alias="templateName"),
 ):
     await _load_and_gate_connection(db, auth, connection_id)
     return await conn_service.get_agent_variables(
@@ -207,7 +207,7 @@ async def get_agent_variables(
         tenant_id=auth.tenant_id,
         connection_id=connection_id,
         agent_id=agent_id,
-        template_slug=template_slug,
+        template_name=template_name,
     )
 
 

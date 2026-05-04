@@ -18,13 +18,13 @@ describe('PredicateBuilder', () => {
 
     fireEvent.click(screen.getByText('AND'));
     expect(onChange).toHaveBeenCalledWith({
-      all: [{ field: '', op: 'eq', value: '' }],
+      and: [{ field: '', op: 'eq', value: '' }],
     });
 
     onChange.mockClear();
     fireEvent.click(screen.getByText('OR'));
     expect(onChange).toHaveBeenCalledWith({
-      any: [{ field: '', op: 'eq', value: '' }],
+      or: [{ field: '', op: 'eq', value: '' }],
     });
 
     onChange.mockClear();
@@ -34,9 +34,9 @@ describe('PredicateBuilder', () => {
     });
   });
 
-  it('hides the value input for is_null / is_not_null ops', () => {
+  it('hides the value input for exists / missing ops', () => {
     const onChange = vi.fn();
-    const value: LeafPredicate = { field: 'phone', op: 'is_null' };
+    const value: LeafPredicate = { field: 'phone', op: 'exists' };
     render(<PredicateBuilder value={value} onChange={onChange} />);
     expect(screen.getByText('(no value needed)')).toBeInTheDocument();
   });

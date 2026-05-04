@@ -107,6 +107,21 @@ def _webhook_create_body(name: str | None = None) -> dict[str, Any]:
     }
 
 
+def _wati_create_body(name: str | None = None) -> dict[str, Any]:
+    return {
+        "appId": "inside-sales",
+        "provider": "wati",
+        "name": name or f"wati-{uuid.uuid4().hex[:8]}",
+        "config": {
+            "base_url": "https://live-mt-server.wati.io/123",
+            "wati_tenant_id": "123",
+            "api_token": "wati-secret",
+            "channel_numbers": ["+919999990000"],
+        },
+        "active": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_create_then_get_never_returns_secret_value(client):
     body = _bolna_create_body()
@@ -323,6 +338,39 @@ async def test_agent_variables_route_uses_live_provider_lookup(client, monkeypat
     assert r.status_code == 200, r.text
     assert r.json()["provider"] == "bolna"
     assert r.json()["variables"] == ["user_name", "preferred_time"]
+
+
+@pytest.mark.asyncio
+async def test_agent_variables_route_uses_selected_wati_template_name(client, monkeypatch):
+    async def _fake_list_templates(self):
+        return [
+            {
+                "name": "concierge_qualify_v1",
+                "language": "en",
+                "status": "APPROVED",
+                "parameters": ["first_name", "city"],
+            },
+            {
+                "name": "concierge_priority_v1",
+                "language": "en",
+                "status": "APPROVED",
+                "parameters": ["lead_stage"],
+            },
+        ]
+
+    monkeypatch.setattr(
+        "app.services.orchestration.api.connections.WatiService.list_message_templates_summary",
+        _fake_list_templates,
+    )
+
+    create = await client.post("/api/orchestration/connections", json=_wati_create_body())
+    cid = create.json()["id"]
+    r = await client.get(
+        f"/api/orchestration/connections/{cid}/agent-variables?templateName=concierge_qualify_v1"
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["provider"] == "wati"
+    assert r.json()["variables"] == ["first_name", "city"]
 
 
 @pytest.mark.asyncio

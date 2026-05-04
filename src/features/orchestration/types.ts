@@ -312,15 +312,16 @@ export const DEFAULT_ATTEMPT_POLICY: AttemptPolicy = {
  *  ``backend/app/services/orchestration/predicate_contract.py``. */
 export type PredicateOp =
   | 'eq'
-  | 'ne'
+  | 'neq'
   | 'gt'
   | 'gte'
   | 'lt'
   | 'lte'
   | 'in'
   | 'not_in'
-  | 'is_null'
-  | 'is_not_null';
+  | 'contains'
+  | 'exists'
+  | 'missing';
 
 export interface LeafPredicate {
   field: string;
@@ -329,11 +330,11 @@ export interface LeafPredicate {
 }
 
 export interface AndPredicate {
-  all: PredicateAst[];
+  and: PredicateAst[];
 }
 
 export interface OrPredicate {
-  any: PredicateAst[];
+  or: PredicateAst[];
 }
 
 export interface NotPredicate {

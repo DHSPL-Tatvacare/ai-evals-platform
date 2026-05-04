@@ -13,6 +13,7 @@ import type {
 } from '@/features/orchestration/types';
 
 import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
+import { InspectorSection } from './inspector/InspectorPrimitives';
 import { FieldMappingEditor, type FieldMapping } from './editors/FieldMappingEditor';
 import { MergePolicyEditor } from './editors/MergePolicyEditor';
 import { PredicateBuilder } from './editors/PredicateBuilder';
@@ -95,18 +96,12 @@ export function NodeConfigPanel() {
   switch (preferredEditor) {
     case 'SourceSelector': {
       body = (
-        <>
-          <SourceSelector
-            workflowType={wfType}
-            appId={appId}
-            value={config}
-            onChange={(next) => setConfig({ ...config, ...next })}
-          />
-          <p className="rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
-            Successor comes from the visual graph — connect this node to its
-            next node on the canvas.
-          </p>
-        </>
+        <SourceSelector
+          workflowType={wfType}
+          appId={appId}
+          value={config}
+          onChange={(next) => setConfig({ ...config, ...next })}
+        />
       );
       break;
     }
@@ -189,8 +184,8 @@ export function NodeConfigPanel() {
               ? config.agent_id
               : undefined
           }
-          templateSlugForVariables={
-            typeof config.template_slug === 'string' ? config.template_slug : undefined
+          templateNameForVariables={
+            typeof config.template_name === 'string' ? config.template_name : undefined
           }
         />
       );
@@ -220,8 +215,8 @@ export function NodeConfigPanel() {
                 ? config.agent_id
                 : undefined
             }
-            templateSlugForVariables={
-              typeof config.template_slug === 'string' ? config.template_slug : undefined
+            templateNameForVariables={
+              typeof config.template_name === 'string' ? config.template_name : undefined
             }
           />
           <FieldMappingSlotsForNode
@@ -249,8 +244,8 @@ export function NodeConfigPanel() {
               ? config.agent_id
               : undefined
           }
-          templateSlugForVariables={
-            typeof config.template_slug === 'string' ? config.template_slug : undefined
+          templateNameForVariables={
+            typeof config.template_name === 'string' ? config.template_name : undefined
           }
         />
       );
@@ -362,19 +357,15 @@ function SlotLabel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-[var(--text-primary)]">
-        {label}
-      </span>
+    <InspectorSection title={label}>
       {children}
-    </div>
+    </InspectorSection>
   );
 }
 
 function FieldHint({ label, fields }: { label: string; fields: string[] }) {
   return (
-    <div className="rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs">
-      <div className="mb-1 font-medium text-[var(--text-secondary)]">{label}</div>
+    <InspectorSection title={label}>
       <div className="flex flex-wrap gap-1">
         {fields.map((f) => (
           <code
@@ -385,6 +376,6 @@ function FieldHint({ label, fields }: { label: string; fields: string[] }) {
           </code>
         ))}
       </div>
-    </div>
+    </InspectorSection>
   );
 }

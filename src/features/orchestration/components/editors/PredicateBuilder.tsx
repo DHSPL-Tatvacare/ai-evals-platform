@@ -4,6 +4,11 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
+import {
+  InspectorCard,
+  InspectorEmptyState,
+  InspectorField,
+} from '@/features/orchestration/components/inspector/InspectorPrimitives';
 import type {
   AndPredicate,
   LeafPredicate,
@@ -24,23 +29,24 @@ interface Props {
 
 const OP_OPTIONS: { value: PredicateOp; label: string; needsValue: boolean }[] = [
   { value: 'eq',          label: '= equals',         needsValue: true },
-  { value: 'ne',          label: '≠ not equals',     needsValue: true },
+  { value: 'neq',         label: '≠ not equals',     needsValue: true },
   { value: 'gt',          label: '> greater than',   needsValue: true },
   { value: 'gte',         label: '≥ greater or eq',  needsValue: true },
   { value: 'lt',          label: '< less than',      needsValue: true },
   { value: 'lte',         label: '≤ less or eq',     needsValue: true },
   { value: 'in',          label: 'in (list)',        needsValue: true },
   { value: 'not_in',      label: 'not in (list)',    needsValue: true },
-  { value: 'is_null',     label: 'is null',          needsValue: false },
-  { value: 'is_not_null', label: 'is not null',      needsValue: false },
+  { value: 'contains',    label: 'contains',         needsValue: true },
+  { value: 'exists',      label: 'exists',           needsValue: false },
+  { value: 'missing',     label: 'missing',          needsValue: false },
 ];
 
 type PredicateKind = 'leaf' | 'and' | 'or' | 'not';
 
 function kindOf(p: PredicateAst | undefined): PredicateKind {
   if (!p) return 'leaf';
-  if ('all' in p) return 'and';
-  if ('any' in p) return 'or';
+  if ('and' in p) return 'and';
+  if ('or' in p) return 'or';
   if ('not' in p) return 'not';
   return 'leaf';
 }
@@ -65,8 +71,8 @@ export function PredicateBuilder({ value, onChange, fieldOptions }: Props) {
   const setKind = (next: PredicateKind) => {
     if (next === kind) return;
     if (next === 'leaf') onChange(emptyLeaf());
-    else if (next === 'and') onChange({ all: [emptyLeaf()] } as AndPredicate);
-    else if (next === 'or') onChange({ any: [emptyLeaf()] } as OrPredicate);
+    else if (next === 'and') onChange({ and: [emptyLeaf()] } as AndPredicate);
+    else if (next === 'or') onChange({ or: [emptyLeaf()] } as OrPredicate);
     else if (next === 'not') onChange({ not: emptyLeaf() } as NotPredicate);
   };
 
@@ -89,16 +95,15 @@ export function PredicateBuilder({ value, onChange, fieldOptions }: Props) {
         />
       ) : null}
       {kind === 'not' ? (
-        <div className="flex flex-col gap-1 rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2">
-          <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-            NOT (inner)
-          </span>
-          <PredicateBuilder
-            value={(value as NotPredicate).not}
-            onChange={(inner) => onChange({ not: inner } as NotPredicate)}
-            fieldOptions={fieldOptions}
-          />
-        </div>
+        <InspectorCard>
+          <InspectorField label="NOT (inner)" className="gap-2">
+            <PredicateBuilder
+              value={(value as NotPredicate).not}
+              onChange={(inner) => onChange({ not: inner } as NotPredicate)}
+              fieldOptions={fieldOptions}
+            />
+          </InspectorField>
+        </InspectorCard>
       ) : null}
     </div>
   );
@@ -150,10 +155,7 @@ function LeafEditor({
   const opMeta = OP_OPTIONS.find((o) => o.value === value.op);
   return (
     <div className="grid grid-cols-3 gap-2">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-          Field
-        </span>
+      <InspectorField label="Field" className="gap-1">
         {fieldOptions && fieldOptions.length > 0 ? (
           <Combobox
             size="sm"
@@ -169,11 +171,8 @@ function LeafEditor({
             placeholder="payload field"
           />
         )}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-          Op
-        </span>
+      </InspectorField>
+      <InspectorField label="Op" className="gap-1">
         <Combobox
           size="sm"
           value={value.op}
@@ -182,11 +181,8 @@ function LeafEditor({
           }
           options={OP_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
         />
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-          Value
-        </span>
+      </InspectorField>
+      <InspectorField label="Value" className="gap-1">
         {opMeta?.needsValue ? (
           <Input
             value={
@@ -219,7 +215,7 @@ function LeafEditor({
             (no value needed)
           </span>
         )}
-      </div>
+      </InspectorField>
     </div>
   );
 }
@@ -236,13 +232,13 @@ function CompoundEditor({
   fieldOptions?: string[];
 }) {
   const children = useMemo<PredicateAst[]>(
-    () => (kind === 'and' ? (value as AndPredicate).all : (value as OrPredicate).any),
+    () => (kind === 'and' ? (value as AndPredicate).and : (value as OrPredicate).or),
     [value, kind],
   );
 
   const setChildren = (next: PredicateAst[]) => {
-    if (kind === 'and') onChange({ all: next } as AndPredicate);
-    else onChange({ any: next } as OrPredicate);
+    if (kind === 'and') onChange({ and: next } as AndPredicate);
+    else onChange({ or: next } as OrPredicate);
   };
 
   const updateChild = (idx: number, next: PredicateAst) => {
@@ -257,11 +253,11 @@ function CompoundEditor({
 
   return (
     <div className="flex flex-col gap-2">
+      {children.length === 0 ? (
+        <InspectorEmptyState>No clauses yet — click Add clause.</InspectorEmptyState>
+      ) : null}
       {children.map((child, idx) => (
-        <div
-          key={idx}
-          className="rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2"
-        >
+        <InspectorCard key={idx}>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
               {kind === 'and' ? `Clause ${idx + 1} (AND)` : `Clause ${idx + 1} (OR)`}
@@ -280,7 +276,7 @@ function CompoundEditor({
             onChange={(next) => updateChild(idx, next)}
             fieldOptions={fieldOptions}
           />
-        </div>
+        </InspectorCard>
       ))}
       <Button variant="secondary" size="sm" onClick={addChild}>
         <Plus className="mr-1 h-3.5 w-3.5" />

@@ -51,4 +51,9 @@ describe('CustomNode redesign', () => {
     renderWithCategory('source', 'No-desc Node');
     expect(screen.getByText('cat.source')).toBeInTheDocument();
   });
+
+  it('keeps the canvas card overflow visible so handles remain connectable', () => {
+    const { container } = renderWithCategory('source', 'Connectable Node');
+    expect(container.querySelector('.overflow-visible')).toBeInTheDocument();
+  });
 });

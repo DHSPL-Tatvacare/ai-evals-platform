@@ -110,7 +110,7 @@ export function NodeCard({
       onDragStart={onDragStart}
       title={title}
       className={cn(
-        'group relative min-w-[220px] max-w-[280px] overflow-hidden rounded-[var(--radius-default)] border-2',
+        'group relative min-w-[220px] max-w-[280px] overflow-visible rounded-[var(--radius-default)] border-2',
         'bg-[var(--bg-elevated)] shadow-sm transition-shadow',
         selected ? 'ring-2 ring-[var(--color-brand-accent)]/30' : 'hover:shadow-md',
         className,

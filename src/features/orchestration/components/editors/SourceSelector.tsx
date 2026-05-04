@@ -4,6 +4,12 @@ import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { DatasetSourcePicker } from '@/features/orchestration/components/datasets/DatasetSourcePicker';
+import {
+  InspectorCard,
+  InspectorEmptyState,
+  InspectorField,
+  InspectorSection,
+} from '@/features/orchestration/components/inspector/InspectorPrimitives';
 import type {
   CohortColumnType,
   CohortSource,
@@ -49,6 +55,8 @@ const OP_OPTIONS_BY_TYPE: Record<CohortColumnType, Array<{ value: string; label:
     { value: 'gt', label: '>' },
     { value: 'lte', label: '<=' },
     { value: 'lt', label: '<' },
+    { value: 'in', label: 'in list' },
+    { value: 'not_in', label: 'not in list' },
     { value: 'eq', label: '=' },
     { value: 'neq', label: '!=' },
   ],
@@ -57,6 +65,8 @@ const OP_OPTIONS_BY_TYPE: Record<CohortColumnType, Array<{ value: string; label:
     { value: 'gt', label: '>' },
     { value: 'lte', label: '<=' },
     { value: 'lt', label: '<' },
+    { value: 'in', label: 'in list' },
+    { value: 'not_in', label: 'not in list' },
     { value: 'eq', label: '=' },
     { value: 'neq', label: '!=' },
   ],
@@ -69,10 +79,14 @@ const OP_OPTIONS_BY_TYPE: Record<CohortColumnType, Array<{ value: string; label:
     { value: 'gt', label: 'after' },
     { value: 'lte', label: 'on/before' },
     { value: 'lt', label: 'before' },
+    { value: 'in', label: 'in list' },
+    { value: 'not_in', label: 'not in list' },
     { value: 'eq', label: '=' },
     { value: 'neq', label: '!=' },
   ],
   string: [
+    { value: 'in', label: 'in list' },
+    { value: 'not_in', label: 'not in list' },
     { value: 'eq', label: '=' },
     { value: 'neq', label: '!=' },
     { value: 'contains', label: 'contains' },
@@ -114,6 +128,20 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
     return selected.allowedFilterColumns.map((name) => ({ name, type: 'string' }));
   }, [selected]);
 
+  const payloadFieldOptions = useMemo(() => {
+    if (!selected) return [];
+    const declaredTypes = new Map(
+      (selected.schemaDescriptor?.columns ?? []).map((column) => [column.name, column.type]),
+    );
+    return selected.allowedPayloadColumns.map((column) => ({
+      value: column,
+      label: column,
+      meta: declaredTypes.has(column)
+        ? TYPE_LABELS[declaredTypes.get(column) as CohortColumnType]
+        : undefined,
+    }));
+  }, [selected]);
+
   const setSourceRef = (next: string, entry: CohortSource) => {
     setSelected(entry);
     // Switching sources clears filters / payload selections — column sets
@@ -134,13 +162,6 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
     });
   };
 
-  const togglePayloadField = (col: string) => {
-    const current = new Set(value.payload_fields ?? []);
-    if (current.has(col)) current.delete(col);
-    else current.add(col);
-    onChange({ ...value, payload_fields: Array.from(current) });
-  };
-
   // When the picker's catalog fetch resolves, look up the saved
   // ``source_ref`` so the payload-field / lookback-column UI can hydrate
   // without the operator re-clicking the dropdown.
@@ -155,8 +176,11 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
   );
 
   return (
-    <div className="flex flex-col gap-3">
-      <Field label="Source">
+    <div className="flex flex-col gap-4">
+      <Field
+        label="Source"
+        description="Successor routing comes from the visual graph — connect this node to the next node on the canvas."
+      >
         <DatasetSourcePicker
           appId={appId}
           workflowType={workflowType}
@@ -168,86 +192,109 @@ export function SourceSelector({ workflowType, appId, value, onChange }: Props) 
 
       {selected ? (
         <>
-          <Field label="Payload fields">
-            <p className="mb-1 text-[11px] text-[var(--text-secondary)]">
-              Recipient payload exposed to downstream nodes. Engineering-owned —
-              tenants cannot project arbitrary columns.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {selected.allowedPayloadColumns.map((col) => {
-                const active = (value.payload_fields ?? []).includes(col);
-                return (
-                  <button
-                    key={col}
-                    type="button"
-                    onClick={() => togglePayloadField(col)}
-                    className={cn(
-                      'rounded-[var(--radius-default)] border px-2 py-0.5 text-xs',
-                      active
-                        ? 'border-[var(--color-brand)] bg-[var(--bg-brand-soft)] text-[var(--text-brand)]'
-                        : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]',
-                    )}
-                  >
-                    {col}
-                  </button>
-                );
-              })}
-            </div>
-          </Field>
+          <Section
+            title="Payload fields"
+            description="Recipient payload exposed to downstream nodes. Engineering-owned — tenants cannot project arbitrary columns."
+          >
+            {payloadFieldOptions.length === 0 ? (
+              <InspectorEmptyState>
+                This source does not expose selectable payload fields.
+              </InspectorEmptyState>
+            ) : (
+              <Combobox
+                multi
+                value={value.payload_fields ?? []}
+                onChange={(next) => onChange({ ...value, payload_fields: next })}
+                options={payloadFieldOptions}
+                placeholder="Select payload fields"
+              />
+            )}
+          </Section>
 
-          <Field label="Filters">
+          <Section
+            title="Filters"
+            description="Narrow the selected source before the workflow starts processing recipients."
+          >
             <FilterEditor
               columns={filterColumns}
               value={value.filters ?? []}
               onChange={(filters) => onChange({ ...value, filters })}
             />
-          </Field>
+          </Section>
 
-          <Field label="Lookback (hours)">
-            <Input
-              type="number"
-              min={0}
-              value={value.lookback_hours ?? ''}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  lookback_hours:
-                    e.target.value === '' ? null : Number(e.target.value),
-                })
-              }
-              placeholder="optional — leave blank for no lookback"
-            />
-          </Field>
+          <Section
+            title="Lookback window"
+            description="Optionally restrict the source to recent rows before downstream dispatch and delivery."
+          >
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+              <Field label="Lookback (hours)">
+                <Input
+                  type="number"
+                  min={0}
+                  value={value.lookback_hours ?? ''}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      lookback_hours:
+                        e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                  placeholder="optional — leave blank for no lookback"
+                />
+              </Field>
 
-          {selected.allowedLookbackColumns.length > 0 ? (
-            <Field label="Lookback column">
-              <Combobox
-                value={value.lookback_column ?? ''}
-                onChange={(next) =>
-                  onChange({ ...value, lookback_column: next })
-                }
-                options={selected.allowedLookbackColumns.map((c) => ({
-                  value: c,
-                  label: c,
-                }))}
-                placeholder="Pick a timestamp column"
-              />
-            </Field>
-          ) : null}
+              {selected.allowedLookbackColumns.length > 0 ? (
+                <Field label="Lookback column">
+                  <Combobox
+                    value={value.lookback_column ?? ''}
+                    onChange={(next) =>
+                      onChange({ ...value, lookback_column: next })
+                    }
+                    options={selected.allowedLookbackColumns.map((c) => ({
+                      value: c,
+                      label: c,
+                    }))}
+                    placeholder="Pick a timestamp column"
+                  />
+                </Field>
+              ) : null}
+            </div>
+          </Section>
         </>
       ) : null}
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-[var(--text-primary)]">
-        {label}
-      </span>
+    <InspectorField label={label} description={description}>
       {children}
-    </div>
+    </InspectorField>
+  );
+}
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <InspectorSection title={title} description={description}>
+      {children}
+    </InspectorSection>
   );
 }
 
@@ -289,61 +336,70 @@ function FilterEditor({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       {value.length === 0 ? (
-        <p className="text-xs text-[var(--text-secondary)]">
+        <InspectorEmptyState>
           No filters. The workflow starts with every row in the selected source.
-        </p>
+        </InspectorEmptyState>
       ) : null}
       {value.map((filter, idx) => {
         const column = byName.get(filter.column ?? '') ?? columns[0];
         const type = column?.type ?? 'string';
+        const operator = filter.op ?? defaultOp(type);
         return (
-          <div
-            key={idx}
-            className="grid grid-cols-[minmax(0,1.2fr)_96px_minmax(0,1fr)_auto] items-center gap-2"
-          >
-            <Select
-              value={filter.column ?? ''}
-              onChange={(columnName) => {
-                const nextColumn = byName.get(columnName);
-                const nextType = nextColumn?.type ?? 'string';
-                updateAt(idx, {
-                  column: columnName,
-                  op: defaultOp(nextType),
-                  value: defaultValue(nextType),
-                });
-              }}
-              options={columns.map((c) => ({
-                value: c.name,
-                label: `${c.name} (${TYPE_LABELS[c.type]})`,
-              }))}
-              placeholder="Column"
-              size="sm"
-            />
-            <Select
-              value={filter.op ?? defaultOp(type)}
-              onChange={(op) => updateAt(idx, { op })}
-              options={OP_OPTIONS_BY_TYPE[type]}
-              placeholder="Op"
-              size="sm"
-            />
-            <FilterValueInput
-              type={type}
-              value={filter.value}
-              onChange={(nextValue) => updateAt(idx, { value: nextValue })}
-            />
-            <button
-              type="button"
-              onClick={() => removeAt(idx)}
-              className={cn(
-                'rounded-[var(--radius-default)] border border-[var(--border-default)]',
-                'px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]',
-              )}
-            >
-              Remove
-            </button>
-          </div>
+          <InspectorCard key={idx}>
+            <div className="flex items-start gap-3">
+              <div className="grid min-w-0 flex-1 gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+                <Field label="Column">
+                  <Select
+                    value={filter.column ?? ''}
+                    onChange={(columnName) => {
+                      const nextColumn = byName.get(columnName);
+                      const nextType = nextColumn?.type ?? 'string';
+                      updateAt(idx, {
+                        column: columnName,
+                        op: defaultOp(nextType),
+                        value: defaultValue(nextType),
+                      });
+                    }}
+                    options={columns.map((c) => ({
+                      value: c.name,
+                      label: `${c.name} (${TYPE_LABELS[c.type]})`,
+                    }))}
+                    placeholder="Column"
+                    size="sm"
+                  />
+                </Field>
+                <Field label="Operator">
+                  <Select
+                    value={operator}
+                    onChange={(op) => updateAt(idx, { op })}
+                    options={OP_OPTIONS_BY_TYPE[type]}
+                    placeholder="Operator"
+                    size="sm"
+                  />
+                </Field>
+                <Field label="Value">
+                  <FilterValueInput
+                    type={type}
+                    op={operator}
+                    value={filter.value}
+                    onChange={(nextValue) => updateAt(idx, { value: nextValue })}
+                  />
+                </Field>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeAt(idx)}
+                className={cn(
+                  'rounded-[var(--radius-default)] border border-[var(--border-default)]',
+                  'px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]',
+                )}
+              >
+                Remove
+              </button>
+            </div>
+          </InspectorCard>
         );
       })}
       <div>
@@ -366,13 +422,35 @@ function FilterEditor({
 
 function FilterValueInput({
   type,
+  op,
   value,
   onChange,
 }: {
   type: CohortColumnType;
+  op: string;
   value: unknown;
   onChange(next: unknown): void;
 }) {
+  if (op === 'in' || op === 'not_in') {
+    return (
+      <Input
+        type="text"
+        value={Array.isArray(value) ? value.join(', ') : ''}
+        onChange={(e) => {
+          const rawItems = e.target.value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+          if (type === 'integer' || type === 'number') {
+            onChange(rawItems.map((entry) => Number(entry)).filter((entry) => !Number.isNaN(entry)));
+            return;
+          }
+          onChange(rawItems);
+        }}
+        placeholder="a, b, c"
+      />
+    );
+  }
   if (type === 'boolean') {
     return (
       <Select

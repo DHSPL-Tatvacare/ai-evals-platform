@@ -18,6 +18,9 @@ import {
   DynamicConfigForm,
   type JsonSchema,
 } from '../DynamicConfigForm';
+import {
+  CONNECTION_PROVIDER_OPTIONS,
+} from './providerOptions';
 
 interface Props {
   appId: string;
@@ -28,14 +31,7 @@ interface Props {
   onSaved(connection: Connection): void;
 }
 
-const PROVIDER_OPTIONS: { value: string; label: string }[] = [
-  { value: 'bolna', label: 'Bolna (AI Voice)' },
-  { value: 'wati', label: 'WATI (WhatsApp)' },
-  { value: 'aisensy', label: 'AiSensy (WhatsApp)' },
-  { value: 'lsq', label: 'LeadSquared' },
-  { value: 'msg91', label: 'MSG91 (SMS)' },
-  { value: 'webhook', label: 'Generic Webhook' },
-];
+const E164_REGEX = /^\+\d{8,15}$/;
 
 /** Drop `undefined` keys so the JSON payload doesn't carry blank-secret
  *  hints (the backend rejects empty secret strings; absent keys preserve
@@ -47,10 +43,16 @@ function stripUndefined(input: Record<string, unknown>): ConnectionConfig {
     if (typeof v === 'string') {
       out[k] = v;
     } else if (Array.isArray(v) && v.every((item) => typeof item === 'string')) {
-      out[k] = v as string[];
+      out[k] = v.map((item) => item.trim()).filter(Boolean) as string[];
     }
   }
   return out;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
@@ -94,6 +96,40 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
     () => (schema ? (schema.jsonSchema as unknown as JsonSchema) : null),
     [schema],
   );
+  const channelNumbersField = useMemo(
+    () => schema?.fields.find((field) => field.name === 'channel_numbers') ?? null,
+    [schema],
+  );
+  const channelNumbers = useMemo(
+    () => asStringArray(config.channel_numbers),
+    [config],
+  );
+  const invalidChannelNumbers = channelNumbers.filter((value) => {
+    const trimmed = value.trim();
+    return trimmed !== '' && !E164_REGEX.test(trimmed);
+  });
+
+  function updateChannelNumber(index: number, nextValue: string) {
+    setConfig((current) => {
+      const next = asStringArray(current.channel_numbers);
+      next[index] = nextValue;
+      return { ...current, channel_numbers: next };
+    });
+  }
+
+  function addChannelNumber() {
+    setConfig((current) => ({
+      ...current,
+      channel_numbers: [...asStringArray(current.channel_numbers), ''],
+    }));
+  }
+
+  function removeChannelNumber(index: number) {
+    setConfig((current) => ({
+      ...current,
+      channel_numbers: asStringArray(current.channel_numbers).filter((_, i) => i !== index),
+    }));
+  }
 
   async function handleSave() {
     if (!schema) return;
@@ -141,7 +177,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         <Select
           value={provider}
           onChange={(next) => setProvider(next)}
-          options={PROVIDER_OPTIONS}
+          options={CONNECTION_PROVIDER_OPTIONS}
           placeholder="Select provider"
           disabled={isEdit}
         />
@@ -157,13 +193,75 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         />
       </div>
       {jsonSchema ? (
-        <DynamicConfigForm
-          schema={jsonSchema}
-          value={config}
-          onChange={setConfig}
-          appId={appId}
-          secretsOptional={isEdit}
-        />
+        <>
+          <DynamicConfigForm
+            schema={jsonSchema}
+            value={config}
+            onChange={setConfig}
+            appId={appId}
+            secretsOptional={isEdit}
+            hiddenFields={provider === 'wati' ? new Set(['channel_numbers']) : undefined}
+          />
+          {provider === 'wati' ? (
+            <div className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-[var(--text-primary)]">
+                  {channelNumbersField?.title || 'Channel Numbers'}
+                </label>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  {channelNumbersField?.description
+                    || 'Add the WhatsApp sender numbers available on this WATI workspace.'}
+                </p>
+              </div>
+              {channelNumbers.length === 0 ? (
+                <p className="text-xs text-[var(--text-secondary)]">
+                  No channel numbers added yet.
+                </p>
+              ) : null}
+              {channelNumbers.map((value, index) => {
+                const trimmed = value.trim();
+                const invalid = trimmed !== '' && !E164_REGEX.test(trimmed);
+                return (
+                  <div key={`${index}-${value}`} className="flex flex-col gap-1">
+                    <div className="flex items-start gap-2">
+                      <Input
+                        value={value}
+                        onChange={(e) => updateChannelNumber(index, e.target.value)}
+                        placeholder="+919999990000"
+                      />
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => removeChannelNumber(index)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    {invalid ? (
+                      <p className="text-xs text-[var(--color-error)]">
+                        Must be E.164 — start with &quot;+&quot; followed by 8–15 digits.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between gap-3">
+                <Button variant="secondary" size="sm" onClick={addChannelNumber}>
+                  Add channel number
+                </Button>
+                {invalidChannelNumbers.length === 0 ? (
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Leave a row blank to drop it on save.
+                  </p>
+                ) : (
+                  <p className="text-xs text-[var(--color-error)]">
+                    Fix invalid numbers before saving.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : (
         <p className="text-xs text-[var(--text-secondary)]">
           Loading provider fields…
@@ -176,7 +274,10 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         <Button variant="secondary" onClick={onClose} disabled={saving}>
           Cancel
         </Button>
-        <Button onClick={handleSave} disabled={saving || !name || !schema}>
+        <Button
+          onClick={handleSave}
+          disabled={saving || !name || !schema || invalidChannelNumbers.length > 0}
+        >
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create'}
         </Button>
       </div>
