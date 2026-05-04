@@ -1753,3 +1753,39 @@ async def handle_resume_waiting_cohorts(
         n = await poll_and_resume(db)
         await db.commit()
         return {"resumed": n}
+
+
+@register_job_handler(
+    "poll-bolna-executions",
+    queue_class="standard",
+    priority=4,
+    retry_safe=True,
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Orchestration · poll Bolna executions",
+    schedule_description=(
+        "Sweeps open crm.place_bolna_call dispatch rows (provider_terminal=FALSE), "
+        "fetches per-call status (singles) or batch executions (cohorts), and "
+        "reconciles terminal events through the same path the Bolna webhook "
+        "uses. Phase 13 / E.4."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
+async def handle_poll_bolna_executions(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> dict:
+    """Tick the Bolna execution poller. Idempotent — already-reconciled
+    rows are filtered out at the open-rows query."""
+    from app.services.orchestration.dispatch.bolna_poller import run_once
+
+    async with async_session() as db:
+        stats = await run_once(db)
+        await db.commit()
+        return {
+            "actions_scanned": stats.actions_scanned,
+            "singles_polled": stats.singles_polled,
+            "batches_polled": stats.batches_polled,
+            "events_reconciled": stats.events_reconciled,
+            "errors": stats.errors,
+        }

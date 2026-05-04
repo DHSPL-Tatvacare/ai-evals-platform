@@ -230,14 +230,16 @@ class _Handler:
             )
             if outcome.status == "success":
                 resp = outcome.payload or {}
+                execution_id = _extract_bolna_call_id(resp)
                 await ctx.update_action_result(
                     r.action_id, status="success",
                     response={**resp, "mode": "single", "attempts": outcome.attempts},
+                    bolna_execution_id=execution_id,
+                    provider_status=str(resp.get("status") or "queued").lower(),
                 )
                 payload_delta: dict[str, Any] = {}
-                call_id = _extract_bolna_call_id(resp)
-                if call_id is not None:
-                    payload_delta["bolna_call_id"] = call_id
+                if execution_id is not None:
+                    payload_delta["bolna_call_id"] = execution_id
                 success.append(RecipientOutcome(recipient_id=rid, payload_delta=payload_delta))
             else:
                 await ctx.update_action_result(
@@ -392,6 +394,8 @@ class _Handler:
                     "batch_status": batch_resp.get("status"),
                     "execution_id": None,
                 },
+                bolna_batch_id=str(batch_id) if batch_id else None,
+                provider_status=str(batch_resp.get("status") or "queued").lower(),
             )
             # Recipients flow to ``success`` immediately; per-execution
             # outcome (transcript, recording, hangup reason) is filled in

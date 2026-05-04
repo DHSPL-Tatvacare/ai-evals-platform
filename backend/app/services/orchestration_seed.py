@@ -55,17 +55,28 @@ RESUME_POLLER_SCHEDULE_KEY = "platform:orchestration:resume-waiting-cohorts"
 # matches the temporal/airflow default poll cadence.
 RESUME_POLLER_CRON = "* * * * *"
 
+# Phase 13 / E.4 — Bolna execution sweeper. Runs every minute (cron's
+# coarsest unit). The plan called for 30s but the scheduler engine only
+# expresses crontab granularity; running every minute still keeps the
+# typical "webhook missed → poller catches it" gap inside the SLA the
+# run-detail UI expects.
+BOLNA_EXEC_POLLER_APP_ID = ""
+BOLNA_EXEC_POLLER_JOB_TYPE = "poll-bolna-executions"
+BOLNA_EXEC_POLLER_SCHEDULE_KEY = "platform:orchestration:poll-bolna-executions"
+BOLNA_EXEC_POLLER_CRON = "* * * * *"
+
 
 async def seed_orchestration_defaults(db: AsyncSession) -> None:
     """Insert orchestration system defaults. Idempotent.
 
-    Order matters: scheduled poller first (no dependencies), then action
+    Order matters: scheduled pollers first (no dependencies), then action
     templates (referenced by node configs in workflow definitions), then
     bootstrap of default provider connections from env vars (so the
     workflow-fixture loader can resolve connection_ids for the system
     workflow JSON), then seeded workflows.
     """
     await _ensure_resume_poller_scheduled(db)
+    await _ensure_bolna_exec_poller_scheduled(db)
     await _seed_system_action_templates(db)
     await _bootstrap_default_connections_from_env(db)
     await _seed_workflow_fixtures(db)
@@ -412,6 +423,68 @@ async def _upsert_seeded_workflow(db: AsyncSession, spec: dict[str, Any]) -> Non
         "orchestration.seed.workflow.updated slug=%s app_id=%s version=%d",
         slug, app_id, next_version,
     )
+
+
+async def _ensure_bolna_exec_poller_scheduled(
+    db: AsyncSession, *, now: datetime | None = None
+) -> bool:
+    """Insert the singleton poll-bolna-executions schedule row if absent."""
+    current = now or datetime.now(timezone.utc)
+
+    existing = await db.scalar(
+        select(ScheduledJobDefinition).where(
+            ScheduledJobDefinition.tenant_id == SYSTEM_TENANT_ID,
+            ScheduledJobDefinition.app_id == BOLNA_EXEC_POLLER_APP_ID,
+            ScheduledJobDefinition.job_type == BOLNA_EXEC_POLLER_JOB_TYPE,
+            ScheduledJobDefinition.schedule_key == BOLNA_EXEC_POLLER_SCHEDULE_KEY,
+        )
+    )
+    if existing is not None:
+        return False
+
+    tenant = await db.get(Tenant, SYSTEM_TENANT_ID)
+    if tenant is None:
+        _log.warning(
+            "orchestration.bolna_exec_poller.seed.missing_system_tenant tenant_id=%s — skipping",
+            SYSTEM_TENANT_ID,
+        )
+        return False
+    system_user = await db.get(User, SYSTEM_USER_ID)
+    created_by = SYSTEM_USER_ID if system_user is not None else None
+
+    from app.services.scheduler.engine import next_cron_tick
+
+    schedule = ScheduledJobDefinition(
+        id=uuid.uuid4(),
+        tenant_id=SYSTEM_TENANT_ID,
+        app_id=BOLNA_EXEC_POLLER_APP_ID,
+        job_type=BOLNA_EXEC_POLLER_JOB_TYPE,
+        schedule_key=BOLNA_EXEC_POLLER_SCHEDULE_KEY,
+        name="Platform · Bolna execution poller",
+        description=(
+            "Sweeps open crm.place_bolna_call dispatch rows every minute, "
+            "fetches per-call status (singles) or batch executions (cohorts), "
+            "and reconciles terminal events through the same path the Bolna "
+            "webhook uses (Phase 13 / E.4)."
+        ),
+        cron=BOLNA_EXEC_POLLER_CRON,
+        params={},
+        override={},
+        enabled=True,
+        next_check_at=next_cron_tick(BOLNA_EXEC_POLLER_CRON, current),
+        current_cycle_attempts=0,
+        created_by=created_by,
+        created_at=current,
+        updated_at=current,
+    )
+    db.add(schedule)
+    await db.flush()
+    _log.info(
+        "orchestration.bolna_exec_poller.seed.inserted schedule_id=%s cron=%r",
+        schedule.id,
+        BOLNA_EXEC_POLLER_CRON,
+    )
+    return True
 
 
 async def _ensure_resume_poller_scheduled(

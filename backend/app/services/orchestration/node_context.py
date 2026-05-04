@@ -163,17 +163,35 @@ class NodeContext:
         status: str,
         response: Optional[dict[str, Any]] = None,
         error: Optional[str] = None,
+        bolna_execution_id: Optional[str] = None,
+        bolna_batch_id: Optional[str] = None,
+        provider_status: Optional[str] = None,
     ) -> None:
-        """Used by handlers after the provider call completes to mark the action success/failed."""
+        """Used by handlers after the provider call completes to mark the
+        action success/failed.
+
+        Phase 13/E.2: handlers may pass ``bolna_execution_id`` /
+        ``bolna_batch_id`` so the poller can correlate this row against
+        Bolna's executions surface. ``provider_status`` captures the
+        upstream-side queue status (e.g. ``queued`` for /call,
+        ``queued`` / ``in-progress`` for /batches).
+        """
+        values: dict[str, Any] = {
+            "status": status,
+            "response": response,
+            "error": error,
+            "completed_at": datetime.now(timezone.utc),
+        }
+        if bolna_execution_id is not None:
+            values["bolna_execution_id"] = bolna_execution_id
+        if bolna_batch_id is not None:
+            values["bolna_batch_id"] = bolna_batch_id
+        if provider_status is not None:
+            values["provider_status"] = provider_status
         await self.db.execute(
             update(WorkflowRunRecipientAction)
             .where(WorkflowRunRecipientAction.id == uuid.UUID(action_id))
-            .values(
-                status=status,
-                response=response,
-                error=error,
-                completed_at=datetime.now(timezone.utc),
-            )
+            .values(**values)
         )
         await self.db.flush()
 

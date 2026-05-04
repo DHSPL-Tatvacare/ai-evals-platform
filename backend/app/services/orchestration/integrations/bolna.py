@@ -106,7 +106,39 @@ class BolnaService:
             raise ValueError("BolnaService.get_agent requires agent_id")
         await self._acquire("bolna:agent")
         async with _make_client(self._timeout) as client:
-            resp = await client.get(f"{self._url}/agents/{agent_id}", headers=self._headers)
+            # Bolna's documented agent-fetch is ``GET /v2/agent/{agent_id}``
+            # (singular, v2-prefixed) — see
+            # https://www.bolna.ai/docs/api-reference/agent/v2/get. The
+            # bare ``/agents/{id}`` legacy path that previous builds used
+            # is not served by api.bolna.ai and 404s, which surfaces in
+            # the variable-mapping picker as ``Bolna 404: {'detail': 'Not Found'}``.
+            resp = await client.get(f"{self._url}/v2/agent/{agent_id}", headers=self._headers)
+            if 400 <= resp.status_code < 500:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = {"text": resp.text[:200]}
+                raise BolnaServiceError(f"Bolna {resp.status_code}: {err}")
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_execution(self, *, execution_id: str) -> dict[str, Any]:
+        """Phase 13/E.3 — fetch a single call's terminal state.
+
+        Used by the ``poll-bolna-executions`` job to reconcile any open
+        single-call dispatch row whose webhook never landed (or when
+        webhooks are disabled at the provider end). Bolna's documented
+        endpoint is ``GET /executions/{execution_id}`` — the same payload
+        their webhook delivers, so the reconciler can consume both
+        without branching.
+        """
+        if not execution_id:
+            raise ValueError("BolnaService.get_execution requires execution_id")
+        await self._acquire("bolna:executions")
+        async with _make_client(self._timeout) as client:
+            resp = await client.get(
+                f"{self._url}/executions/{execution_id}", headers=self._headers,
+            )
             if 400 <= resp.status_code < 500:
                 try:
                     err = resp.json()

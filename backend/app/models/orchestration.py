@@ -435,6 +435,14 @@ class WorkflowRunRecipientAction(Base):
     parent_action_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("orchestration.workflow_run_recipient_actions.id")
     )
+    # Phase 13 / E.2 — provider correlation ids and status hints. Populated
+    # by the dispatch nodes when the row is created and by the reconciler
+    # when a terminal event arrives. Indexed via a partial index restricted
+    # to open rows so the 30s poller's scan stays cheap.
+    bolna_execution_id: Mapped[Optional[str]] = mapped_column(String(128))
+    bolna_batch_id: Mapped[Optional[str]] = mapped_column(String(128))
+    provider_status: Mapped[Optional[str]] = mapped_column(String(64))
+    provider_terminal: Mapped[bool] = mapped_column(default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 

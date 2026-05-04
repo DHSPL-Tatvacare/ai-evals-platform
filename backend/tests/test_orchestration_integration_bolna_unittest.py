@@ -102,7 +102,10 @@ async def test_get_agent_happy_path(monkeypatch):
     svc = BolnaService(base_url="https://api.bolna.ai", api_key="k")
     out = await svc.get_agent(agent_id="agent-9")
     assert out["agent"]["prompt_variables"][0]["name"] == "user_name"
-    assert "/agents/agent-9" in captured["url"]
+    # Bolna's documented agent-fetch path is ``/v2/agent/{id}`` (singular).
+    # Anchoring on the full path catches a regression to the legacy
+    # ``/agents/{id}`` shape that 404s in production.
+    assert "/v2/agent/agent-9" in captured["url"]
     assert captured["auth"] == "Bearer k"
 
 
