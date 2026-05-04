@@ -26,7 +26,10 @@ const BACKOFF_OPTIONS: { value: AttemptBackoffKind; label: string; help: string 
  * graph.
  */
 export function AttemptPolicyEditor({ value, onChange }: Props) {
-  const v = value ?? DEFAULT_ATTEMPT_POLICY;
+  // Merge stored value with defaults so partial payloads (e.g. legacy node
+  // configs missing `retry_on`) don't crash on `.join()` / `.map()`.
+  const v: AttemptPolicy = { ...DEFAULT_ATTEMPT_POLICY, ...(value ?? {}) };
+  const retryOn = Array.isArray(v.retry_on) ? v.retry_on : [];
 
   const update = (patch: Partial<AttemptPolicy>) => {
     onChange({ ...v, ...patch });
@@ -74,7 +77,7 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
       ) : null}
       <Field label="Retry on (comma-separated tokens)">
         <Input
-          value={v.retry_on.join(', ')}
+          value={retryOn.join(', ')}
           onChange={(e) =>
             update({
               retry_on: e.target.value

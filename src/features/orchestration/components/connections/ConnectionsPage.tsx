@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { Copy, RefreshCw, X } from 'lucide-react';
+import { Archive, Copy, Pencil, PlugZap, RefreshCw, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +21,7 @@ import { notificationService } from '@/services/notifications';
 import { logger } from '@/services/logger';
 
 import { ConnectionForm } from './ConnectionForm';
+import { getConnectionProviderLabel } from './providerOptions';
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -155,7 +156,7 @@ export function ConnectionsPage() {
       header: 'Provider',
       render: (c) => (
         <Badge variant="neutral" size="sm">
-          {c.provider}
+          {getConnectionProviderLabel(c.provider)}
         </Badge>
       ),
     },
@@ -207,55 +208,64 @@ export function ConnectionsPage() {
     {
       key: '_actions',
       header: '',
-      width: '320px',
+      width: '180px',
       render: (c) => (
         <div className="flex items-center justify-end gap-1">
           <Button
             size="sm"
             variant="secondary"
+            iconOnly
+            icon={PlugZap}
+            isLoading={testingId === c.id}
             onClick={(e) => {
               e.stopPropagation();
               void handleTest(c);
             }}
             disabled={testingId === c.id}
-          >
-            {testingId === c.id ? 'Testing…' : 'Test'}
-          </Button>
+            aria-label="Test connection"
+            title={testingId === c.id ? 'Testing…' : 'Test connection'}
+          />
           <Button
             size="sm"
             variant="secondary"
+            iconOnly
+            icon={Pencil}
             onClick={(e) => {
               e.stopPropagation();
               setEditing(c);
             }}
-          >
-            Edit
-          </Button>
+            aria-label="Edit connection"
+            title="Edit"
+          />
           {c.webhookUrl ? (
             <Button
               size="sm"
               variant="secondary"
+              iconOnly
+              icon={RefreshCw}
+              isLoading={rotatingId === c.id}
               onClick={(e) => {
                 e.stopPropagation();
                 void handleRotate(c);
               }}
               disabled={rotatingId === c.id}
-              icon={RefreshCw}
-            >
-              {rotatingId === c.id ? 'Rotating…' : 'Rotate'}
-            </Button>
+              aria-label="Rotate webhook URL"
+              title={rotatingId === c.id ? 'Rotating…' : 'Rotate webhook URL'}
+            />
           ) : null}
           {c.active ? (
             <Button
               size="sm"
               variant="danger-outline"
+              iconOnly
+              icon={Archive}
               onClick={(e) => {
                 e.stopPropagation();
                 setArchiveTarget(c);
               }}
-            >
-              Archive
-            </Button>
+              aria-label="Archive connection"
+              title="Archive"
+            />
           ) : null}
         </div>
       ),

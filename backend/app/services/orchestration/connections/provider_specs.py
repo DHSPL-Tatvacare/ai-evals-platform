@@ -87,12 +87,12 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
             FieldSpec(
                 "base_url", "string",
                 title="API Endpoint",
-                description="Per-tenant WATI endpoint, e.g. https://live-mt-server.wati.io/{tenant_id}",
+                description="Per-tenant WATI API endpoint from the WATI API Docs page, e.g. https://live-mt-server.wati.io/12345. Older host-only entries are also accepted and the tenant id is appended automatically.",
             ),
             FieldSpec(
                 "wati_tenant_id", "string",
                 title="WATI Tenant ID",
-                description="Numeric tenant id from your WATI workspace settings.",
+                description="Numeric tenant id from your WATI workspace URL (the path segment right after the host).",
             ),
             FieldSpec(
                 "api_token", "string",

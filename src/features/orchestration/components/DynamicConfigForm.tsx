@@ -1,13 +1,22 @@
+import { Eye, EyeOff } from 'lucide-react';
+import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import type { ProviderTemplateSummary } from '@/services/api/orchestrationConnections';
 import type {
   AttemptPolicy,
   StructuredRequestBody,
 } from '@/features/orchestration/types';
 import { cn } from '@/utils';
 
+import {
+  InspectorCard,
+  InspectorEmptyState,
+  InspectorField,
+} from './inspector/InspectorPrimitives';
 import { BolnaAgentPicker } from './connections/BolnaAgentPicker';
 import { ConnectionPicker } from './connections/ConnectionPicker';
 import { WatiChannelPicker } from './connections/WatiChannelPicker';
@@ -67,7 +76,7 @@ interface Props {
    *  when no connection has been selected yet. */
   connectionIdForVariables?: string;
   agentIdForVariables?: string;
-  templateSlugForVariables?: string;
+  templateNameForVariables?: string;
 }
 
 export function DynamicConfigForm({
@@ -79,10 +88,17 @@ export function DynamicConfigForm({
   secretsOptional,
   connectionIdForVariables,
   agentIdForVariables,
-  templateSlugForVariables,
+  templateNameForVariables,
 }: Props) {
-  if (!schema?.properties) return null;
+  const [selectedWatiTemplate, setSelectedWatiTemplate] =
+    useState<ProviderTemplateSummary | null>(null);
+  const properties = schema?.properties;
+  if (!properties) return null;
   const required = new Set(schema.required ?? []);
+  const templateParametersForVariables =
+    templateNameForVariables && selectedWatiTemplate?.name === templateNameForVariables
+      ? selectedWatiTemplate.parameters
+      : undefined;
 
   const handleField = (key: string, fieldValue: unknown) => {
     onChange({ ...value, [key]: fieldValue });
@@ -90,24 +106,21 @@ export function DynamicConfigForm({
 
   return (
     <div className="space-y-4">
-      {Object.entries(schema.properties).map(([key, prop]) => {
+      {Object.entries(properties).map(([key, prop]) => {
         if (hiddenFields?.has(key)) return null;
         const fieldValue = value[key] ?? prop.default ?? defaultForType(prop);
         const label = prop.title ?? key;
         const isRequired = required.has(key);
         const fieldId = `field-${key}`;
         return (
-          <div key={key} className="flex flex-col gap-1">
-            <label
-              htmlFor={fieldId}
-              className={cn('text-sm font-medium text-[var(--text-primary)]')}
-            >
-              {label}
-              {isRequired && <span className="ml-1 text-[var(--color-error)]">*</span>}
-            </label>
-            {prop.description && (
-              <p className="text-xs text-[var(--text-secondary)]">{prop.description}</p>
-            )}
+          <InspectorField
+            key={key}
+            label={label}
+            htmlFor={fieldId}
+            required={isRequired}
+            description={prop.description}
+            className="gap-2"
+          >
             <FieldRenderer
               fieldId={fieldId}
               fieldKey={key}
@@ -115,13 +128,15 @@ export function DynamicConfigForm({
               fieldValue={fieldValue}
               label={label}
               onChange={handleField}
-               appId={appId}
-               secretsOptional={secretsOptional}
-               connectionIdForVariables={connectionIdForVariables}
-               agentIdForVariables={agentIdForVariables}
-               templateSlugForVariables={templateSlugForVariables}
-             />
-          </div>
+              appId={appId}
+              secretsOptional={secretsOptional}
+              connectionIdForVariables={connectionIdForVariables}
+              agentIdForVariables={agentIdForVariables}
+              templateNameForVariables={templateNameForVariables}
+              templateParametersForVariables={templateParametersForVariables}
+              onWatiTemplateLoaded={setSelectedWatiTemplate}
+            />
+          </InspectorField>
         );
       })}
     </div>
@@ -146,7 +161,9 @@ interface FieldRendererProps {
   secretsOptional?: boolean;
   connectionIdForVariables?: string;
   agentIdForVariables?: string;
-  templateSlugForVariables?: string;
+  templateNameForVariables?: string;
+  templateParametersForVariables?: string[];
+  onWatiTemplateLoaded?: (template: ProviderTemplateSummary | null) => void;
 }
 
 function FieldRenderer({
@@ -160,7 +177,9 @@ function FieldRenderer({
   secretsOptional,
   connectionIdForVariables,
   agentIdForVariables,
-  templateSlugForVariables,
+  templateNameForVariables,
+  templateParametersForVariables,
+  onWatiTemplateLoaded,
 }: FieldRendererProps) {
   // Specialised x-type renderers run before the generic type/enum
   // dispatch so they can override the default password / array behavior.
@@ -209,6 +228,7 @@ function FieldRenderer({
         connectionId={connectionIdForVariables}
         value={typeof fieldValue === 'string' ? fieldValue : ''}
         onChange={(next) => onChange(fieldKey, next)}
+        onTemplateLoaded={onWatiTemplateLoaded}
       />
     );
   }
@@ -223,14 +243,15 @@ function FieldRenderer({
   }
   if (prop['x-type'] === 'variable_mapping_list') {
     return (
-        <VariableMappingField
-          value={Array.isArray(fieldValue) ? (fieldValue as VariableMapping[]) : []}
-          onChange={(next) => onChange(fieldKey, next)}
-          connectionId={connectionIdForVariables}
-          agentId={agentIdForVariables}
-          templateSlug={templateSlugForVariables}
-        />
-      );
+      <VariableMappingField
+        value={Array.isArray(fieldValue) ? (fieldValue as VariableMapping[]) : []}
+        onChange={(next) => onChange(fieldKey, next)}
+        connectionId={connectionIdForVariables}
+        agentId={agentIdForVariables}
+        templateName={templateNameForVariables}
+        templateParameters={templateParametersForVariables}
+      />
+    );
   }
   if (prop['x-type'] === 'structured_request_body') {
     return (
@@ -249,29 +270,13 @@ function FieldRenderer({
     );
   }
   if (prop['x-secret']) {
-    // For edit forms (`secretsOptional`), an empty submission means "leave
-    // the stored value unchanged" — we never push the empty string back to
-    // the parent, which would otherwise overwrite the stored credential.
     return (
-      <Input
-        id={fieldId}
-        type="password"
-        autoComplete="new-password"
-        placeholder={
-          secretsOptional ? 'Leave blank to keep current value' : '••••••••'
-        }
-        value={typeof fieldValue === 'string' ? fieldValue : ''}
-        onChange={(e) => {
-          const next = e.target.value;
-          if (secretsOptional && next === '') {
-            // Surface as undefined so the parent strips this key from the
-            // PATCH body. The form submitter is responsible for honouring
-            // the convention.
-            onChange(fieldKey, undefined);
-            return;
-          }
-          onChange(fieldKey, next);
-        }}
+      <SecretField
+        fieldId={fieldId}
+        fieldKey={fieldKey}
+        fieldValue={fieldValue}
+        secretsOptional={secretsOptional}
+        onChange={onChange}
       />
     );
   }
@@ -319,7 +324,7 @@ function FieldRenderer({
   }
   if (prop.type === 'object' && prop.properties) {
     return (
-      <div className="rounded-[var(--radius-default)] border border-[var(--border-default)] p-3">
+      <InspectorCard className="bg-[var(--bg-primary)]">
         <DynamicConfigForm
           schema={prop as JsonSchema}
           value={(fieldValue as Record<string, unknown>) ?? {}}
@@ -328,9 +333,9 @@ function FieldRenderer({
           secretsOptional={secretsOptional}
           connectionIdForVariables={connectionIdForVariables}
           agentIdForVariables={agentIdForVariables}
-          templateSlugForVariables={templateSlugForVariables}
+          templateNameForVariables={templateNameForVariables}
         />
-      </div>
+      </InspectorCard>
     );
   }
   return (
@@ -340,6 +345,59 @@ function FieldRenderer({
       value={String(fieldValue ?? '')}
       onChange={(e) => onChange(fieldKey, e.target.value)}
     />
+  );
+}
+
+interface SecretFieldProps {
+  fieldId: string;
+  fieldKey: string;
+  fieldValue: unknown;
+  secretsOptional?: boolean;
+  onChange: (key: string, value: unknown) => void;
+}
+
+function SecretField({
+  fieldId,
+  fieldKey,
+  fieldValue,
+  secretsOptional,
+  onChange,
+}: SecretFieldProps) {
+  const [revealed, setRevealed] = useState(false);
+  const valueStr = typeof fieldValue === 'string' ? fieldValue : '';
+  return (
+    <div className="relative">
+      <Input
+        id={fieldId}
+        type={revealed ? 'text' : 'password'}
+        autoComplete="new-password"
+        placeholder={
+          secretsOptional ? 'Leave blank to keep current value' : '••••••••'
+        }
+        value={valueStr}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (secretsOptional && next === '') {
+            onChange(fieldKey, undefined);
+            return;
+          }
+          onChange(fieldKey, next);
+        }}
+        className="pr-9"
+      />
+      <button
+        type="button"
+        onClick={() => setRevealed((v) => !v)}
+        aria-label={revealed ? 'Hide value' : 'Show value'}
+        title={revealed ? 'Hide' : 'Show'}
+        className={cn(
+          'absolute inset-y-0 right-2 flex items-center text-[var(--text-secondary)]',
+          'hover:text-[var(--text-primary)] focus:outline-none',
+        )}
+      >
+        {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
   );
 }
 
@@ -373,17 +431,13 @@ function ArrayField({ items, value, onChange }: ArrayFieldProps) {
 
   const isObjectItem = items.type === 'object' && Boolean(items.properties);
   return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2">
-      {value.length === 0 && (
-        <p className="px-1 text-xs text-[var(--text-secondary)]">
-          No entries — click Add to insert one.
-        </p>
-      )}
+    <div className="flex flex-col gap-3 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+      {value.length === 0 ? (
+        <InspectorEmptyState>No entries — click Add to insert one.</InspectorEmptyState>
+      ) : null}
       {value.map((entry, idx) => (
-        <div
-          key={idx}
-          className="flex items-start gap-2 rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2"
-        >
+        <InspectorCard key={idx}>
+          <div className="flex items-start gap-3">
           <div className="flex-1">
             {isObjectItem ? (
               <DynamicConfigForm
@@ -403,7 +457,8 @@ function ArrayField({ items, value, onChange }: ArrayFieldProps) {
           >
             Remove
           </Button>
-        </div>
+          </div>
+        </InspectorCard>
       ))}
       <div>
         <Button variant="secondary" size="sm" onClick={addItem}>

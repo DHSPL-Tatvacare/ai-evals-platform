@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from app.services.orchestration.integrations.wati import resolve_wati_api_endpoint
+
 
 _TIMEOUT_SECONDS = 10.0
 
@@ -44,7 +46,7 @@ async def probe_bolna(config: dict[str, Any]) -> dict[str, Any]:
     if not base or not api_key:
         return _fail("missing base_url or api_key")
     return await _probe_get(
-        f"{base}/agents",
+        f"{base}/v2/agent/all",
         headers={"Authorization": f"Bearer {api_key}"},
     )
 
@@ -56,7 +58,7 @@ async def probe_wati(config: dict[str, Any]) -> dict[str, Any]:
     if not base or not tid or not token:
         return _fail("missing base_url, wati_tenant_id, or api_token")
     return await _probe_get(
-        f"{base}/{tid}/api/v2/contacts?limit=1",
+        f"{resolve_wati_api_endpoint(base, tid)}/api/v2/getMessageTemplates",
         headers={"Authorization": f"Bearer {token}"},
     )
 
