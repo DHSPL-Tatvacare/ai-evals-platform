@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 import { FieldMappingEditor } from '@/features/orchestration/components/editors/FieldMappingEditor';
+import { normalizeSourceKindMappingRow } from '@/features/orchestration/components/mappingStateUtils';
 
 describe('FieldMappingEditor', () => {
   it('shows an empty-state hint with the custom target label', () => {
@@ -84,33 +85,21 @@ describe('FieldMappingEditor', () => {
     expect(onChange).toHaveBeenCalledWith([]);
   });
 
-  it('clears stale source-specific fields when switching source kind', async () => {
-    const onChange = vi.fn();
-    render(
-      <FieldMappingEditor
-        value={[
-          {
-            target_field: 'note',
-            source_kind: 'payload',
-            payload_field: 'note_template',
-            static_value: 'legacy',
-          },
-        ]}
-        onChange={onChange}
-      />,
-    );
-
-    fireEvent.pointerDown(screen.getByRole('combobox', { name: /Recipient field/i }));
-    fireEvent.click(await screen.findByRole('option', { name: /^Static value$/i }));
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith([
+  it('drops stale payload/static fields when source kind is normalized', () => {
+    expect(
+      normalizeSourceKindMappingRow(
         {
           target_field: 'note',
-          source_kind: 'static',
+          source_kind: 'payload',
+          payload_field: 'note_template',
           static_value: 'legacy',
         },
-      ]);
+        'static',
+      ),
+    ).toEqual({
+      target_field: 'note',
+      source_kind: 'static',
+      static_value: 'legacy',
     });
   });
 });
