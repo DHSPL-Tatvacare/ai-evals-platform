@@ -29,6 +29,11 @@ import { CustomNode, type NodeOverlay } from './CustomNode';
 
 const nodeTypes = { custom: CustomNode };
 
+// Stable empty fallback for the run overlay slice so ``activeOverlay``
+// keeps the same reference between renders when no run is in flight.
+// Avoids re-running the rfNodes / rfEdges memos on every keystroke.
+const EMPTY_OVERLAY: Record<string, NodeStepState> = Object.freeze({});
+
 /** Derive the runtime output-handle labels for a node.
  *
  * Most nodes carry static handles from their palette descriptor
@@ -174,9 +179,12 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   const overlayRunId = useRunOverlayStore((s) => s.runId);
   const overlayByNodeId = useRunOverlayStore((s) => s.byNodeId);
   // Only consume overlay state when the active run still owns the store.
-  // Stale runs from a previous workflow tab are ignored.
-  const activeOverlay: Record<string, NodeStepState> =
-    activeRunId && overlayRunId === activeRunId ? overlayByNodeId : {};
+  // Stale runs from a previous workflow tab are ignored. Memoised so the
+  // node/edge useMemo dependency arrays remain stable across renders.
+  const activeOverlay: Record<string, NodeStepState> = useMemo(
+    () => (activeRunId && overlayRunId === activeRunId ? overlayByNodeId : EMPTY_OVERLAY),
+    [activeRunId, overlayRunId, overlayByNodeId],
+  );
 
   const reactFlow = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);

@@ -10,8 +10,9 @@ import { ApiError } from '@/services/api/client';
 import { getWorkflow, listVersions } from '@/services/api/orchestration';
 import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
+import { useRunStream } from '@/features/orchestration/hooks/useRunStream';
+import { useRunStatusToasts } from '@/features/orchestration/hooks/useRunStatusToasts';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
-import { BuilderLiveRunPanel } from './BuilderLiveRunPanel';
 import { Canvas } from './Canvas';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { Palette } from './Palette';
@@ -82,15 +83,23 @@ export function WorkflowBuilderPage() {
 
   if (!workflowId) return <LoadingState />;
 
+  // Live run state renders directly on the builder canvas (node status
+  // pills + edge traversal highlights via ``Canvas``'s ``activeRunId``
+  // prop). The session hooks below own the SSE stream and toast surface
+  // — no panel, no split, no second canvas. Phase-13 UX rule.
+  const liveRunId =
+    activeRun && activeRun.workflowId === workflowId ? activeRun.id : undefined;
+
   return (
     <>
     <PageSurface icon={icon} title={title} showHeader={false} bleed>
       <WorkflowHeaderBar onRunStarted={setActiveRun} />
+      <RunSession runId={liveRunId} />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Palette />
           <div className="min-w-0 flex-1">
-            <Canvas />
+            <Canvas activeRunId={liveRunId} />
           </div>
           <AnimatePresence initial={false}>
             {selectedNodeId !== null ? (
@@ -107,9 +116,6 @@ export function WorkflowBuilderPage() {
             ) : null}
           </AnimatePresence>
         </div>
-        {activeRun?.workflowId === workflowId ? (
-          <BuilderLiveRunPanel runId={activeRun.id} onClose={() => setActiveRun(null)} />
-        ) : null}
       </div>
     </PageSurface>
     <ConfirmDialog
@@ -130,4 +136,16 @@ export function WorkflowBuilderPage() {
     />
     </>
   );
+}
+
+/** Invisible host for the per-run side-effects: SSE stream that drives
+ *  ``runOverlayStore`` (which the builder ``Canvas`` reads for node
+ *  pills + edge highlights) and the toast surface for run.started /
+ *  run.completed / run.failed. Mounted once when a run is in flight on
+ *  the current workflow; unmounts (and tears the stream down) when the
+ *  run is dismissed or the user switches workflow. */
+function RunSession({ runId }: { runId: string | undefined }) {
+  useRunStream(runId);
+  useRunStatusToasts(runId);
+  return null;
 }

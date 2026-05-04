@@ -45,12 +45,21 @@ describe('WorkflowHeaderBar', () => {
     });
   });
 
-  it('navigates to the live run canvas after starting a manual run', async () => {
-    render(<WorkflowHeaderBar />);
+  it('starts a manual run and surfaces it via onRunStarted, staying on the builder', async () => {
+    // Phase 13 UX: Run Now keeps the user on the builder canvas. Live node
+    // pills + edge highlights render in-place via runOverlayStore. The page
+    // host receives the run through ``onRunStarted`` to drive the SSE
+    // session; navigation is reserved for the explicit "Open run" action
+    // on the run-detail surface, never automatic.
+    const onRunStarted = vi.fn();
+    render(<WorkflowHeaderBar onRunStarted={onRunStarted} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Run Now' }));
 
     await waitFor(() => expect(fireManualRun).toHaveBeenCalledWith('wf-1'));
-    expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/orchestration/runs/run-live-1');
+    await waitFor(() =>
+      expect(onRunStarted).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-live-1' })),
+    );
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
