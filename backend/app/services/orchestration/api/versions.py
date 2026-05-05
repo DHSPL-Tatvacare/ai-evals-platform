@@ -35,7 +35,21 @@ from app.services.orchestration.definition_validator import (
 
 
 class VersionPublishError(ValueError):
-    pass
+    """Phase 14 / Phase E — carries a structured ``errors: list[dict]`` so
+    the route layer can return HTTP 400 with the same
+    ``{node_id, field, message}`` shape that 422 dispatch errors already
+    use. ``str(exc)`` keeps the legacy bullet-list format for logs and
+    backward-compatible callers. ``errors`` is empty when the failure is
+    a freeform message (e.g. legacy ``raise VersionPublishError("...")``)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        errors: "Optional[list[dict[str, str | None]]]" = None,
+    ) -> None:
+        self.errors = list(errors or [])
+        super().__init__(message)
 
 
 async def create_draft_version(
@@ -120,8 +134,10 @@ async def publish_version(
         validate_definition(canonical, workflow_type=wf.workflow_type)
     except DefinitionValidationError as exc:
         # Surface the structured error list under the same VersionPublishError
-        # type the route handler already maps to a 400.
-        raise VersionPublishError(str(exc)) from exc
+        # type the route handler already maps to a 400. Phase E: also carry
+        # the per-node/field list so the FE renders both 400 and 422 through
+        # the shared ``PublishErrorPanel``.
+        raise VersionPublishError(str(exc), errors=exc.errors) from exc
 
     v.definition = canonical
     v.status = "published"

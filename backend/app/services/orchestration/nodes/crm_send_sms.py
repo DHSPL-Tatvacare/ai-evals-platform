@@ -40,12 +40,15 @@ from app.services.orchestration.node_protocol import (
     RecipientOutcome,
 )
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration._config_strictness import strict_node_config_dict
 
 
 _SUPPORTED_SMS_PROVIDERS = ("msg91", "aisensy")
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     connection_id: uuid.UUID = Field(
         ...,
         json_schema_extra={

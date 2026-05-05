@@ -19,8 +19,8 @@ function bolnaAction(overrides: Partial<ActionRow> = {}): ActionRow {
       provider_terminal: true,
       transcript: 'Hello, how are you?',
       recording_url: 'https://example.com/recording.mp3',
-      total_cost: 0.123,
-      cost_breakdown: { llm: 0.05, network: 0.07, platform: 0.003 },
+      total_cost: 0.0012,
+      cost_breakdown: { llm: 0.0005, network: 0.0007, platform: 0.0 },
       telephony_provider: 'twilio',
       hangup_reason: 'caller_hangup',
       duration_sec: 75,
@@ -66,25 +66,28 @@ describe('ActionDetailPanel', () => {
   it('renders the Bolna variant with audio, transcript, costs, and telephony', () => {
     render(<ActionDetailPanel action={bolnaAction()} open onClose={vi.fn()} />);
 
-    expect(screen.getByText(/Recipient L-1/)).toBeInTheDocument();
+    expect(screen.getByText('L-1')).toBeInTheDocument();
     // Status badge + timeline both render the terminal label.
     expect(screen.getAllByText('completed').length).toBeGreaterThanOrEqual(1);
     // Telephony + hangup reason rows.
     expect(screen.getByText('twilio')).toBeInTheDocument();
     expect(screen.getByText('caller_hangup')).toBeInTheDocument();
     // Cost breakdown line items rendered.
-    expect(screen.getByText('llm')).toBeInTheDocument();
-    expect(screen.getByText('platform')).toBeInTheDocument();
+    expect(screen.getByText('LLM')).toBeInTheDocument();
+    expect(screen.getByText('Platform')).toBeInTheDocument();
+    expect(screen.getByText('$0.0012')).toBeInTheDocument();
+    expect(screen.getByText('$0.0005')).toBeInTheDocument();
     // Recording link.
     expect(screen.getByText(/Open in new tab/)).toBeInTheDocument();
     // Execution id.
     expect(screen.getByText('ex-1')).toBeInTheDocument();
+    expect(screen.getByText('Raw JSON')).toBeInTheDocument();
   });
 
   it('renders the WATI variant with template info, channel, and variables table', () => {
     render(<ActionDetailPanel action={watiAction()} open onClose={vi.fn()} />);
 
-    expect(screen.getByText(/Recipient L-2/)).toBeInTheDocument();
+    expect(screen.getByText('L-2')).toBeInTheDocument();
     expect(screen.getByText('mql_followup')).toBeInTheDocument();
     expect(screen.getByText('mql_2026_05_04')).toBeInTheDocument();
     expect(screen.getByText('+919999999999')).toBeInTheDocument();
@@ -111,8 +114,8 @@ describe('ActionDetailPanel', () => {
     };
     render(<ActionDetailPanel action={generic} open onClose={vi.fn()} />);
 
-    expect(screen.getByText('sms')).toBeInTheDocument();
-    expect(screen.getByText('sms_sent')).toBeInTheDocument();
+    expect(screen.getByText('SMS')).toBeInTheDocument();
+    expect(screen.getAllByText('SMS Sent').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('provider unreachable')).toBeInTheDocument();
   });
 
@@ -129,5 +132,33 @@ describe('ActionDetailPanel', () => {
     expect(screen.getAllByText('no-answer').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/Open in new tab/)).toBeNull();
     expect(screen.getByText(/No cost recorded/)).toBeInTheDocument();
+  });
+
+  it('renders nested Bolna cost breakdowns as structured sections instead of inline JSON blobs', () => {
+    const detailed = bolnaAction({
+      response: {
+        execution_id: 'ex-9',
+        provider_status: 'completed',
+        provider_terminal: true,
+        total_cost: 0.2704,
+        cost_breakdown: {
+          llm: 0.0391,
+          network: 0.015,
+          llm_breakdown: {
+            conversation: 0.038,
+            summary: 0.0007,
+          },
+          synthesizer_breakdown: {
+            conversation: 0.1614,
+          },
+        },
+      },
+    });
+    render(<ActionDetailPanel action={detailed} open onClose={vi.fn()} />);
+
+    expect(screen.getByText('LLM Breakdown')).toBeInTheDocument();
+    expect(screen.getByText('Synthesizer Breakdown')).toBeInTheDocument();
+    expect(screen.getAllByText('Conversation').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('$0.0380')).toBeInTheDocument();
   });
 });

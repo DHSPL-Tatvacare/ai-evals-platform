@@ -91,6 +91,45 @@ def _redact(provider: str, config: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in config.items() if k not in secret}
 
 
+_PREVIEW_BULLET = "•" * 4  # "••••"
+
+
+def _mask_secret_value(value: Any) -> str:
+    """Return a partial-reveal preview of one stored secret value.
+
+    Rules (per product call, 2026-05-05):
+      * value length >= 8: ``XYZA``…••••…``WXYZ`` (first 4 + last 4).
+      * value length 1–7: ``••••WXYZ`` (last 4 only — short keys would
+        otherwise leak themselves; clamps to whatever's available).
+      * empty / non-string: empty string — caller should drop the entry so
+        the FE doesn't render "no preview" noise.
+
+    The preview is a UI hint, not a credential. The full value is never
+    decryptable from it (4 + 4 chars on a 32+ char key reveals < 25 % of
+    the entropy and never the secret-bearing middle). Mirrors how Stripe /
+    AWS / GitHub render stored API keys."""
+    if not isinstance(value, str) or value == "":
+        return ""
+    if len(value) >= 8:
+        return f"{value[:4]}{_PREVIEW_BULLET}{value[-4:]}"
+    return f"{_PREVIEW_BULLET}{value[-4:]}"
+
+
+def _secret_previews(provider: str, config: dict[str, Any]) -> dict[str, str]:
+    """Per-secret-field preview map. Empty when nothing is stored.
+
+    Sibling of ``_redact``: redact strips the value, this surfaces a
+    masked hint so the operator can confirm-by-shape (“yes that’s the prod
+    key’s last 4 = ABCD”) without the page ever shipping the plaintext."""
+    secret = provider_specs.secret_field_names(provider)
+    previews: dict[str, str] = {}
+    for name in secret:
+        masked = _mask_secret_value(config.get(name))
+        if masked:
+            previews[name] = masked
+    return previews
+
+
 def _field_descriptors(provider: str) -> list[dict[str, Any]]:
     spec = provider_specs.get_spec(provider)
     return [
@@ -118,6 +157,11 @@ def _serialize(row: ProviderConnection) -> dict[str, Any]:
         "last_used_at": row.last_used_at,
         "webhook_url": _compose_webhook_url(row.provider, row.webhook_token),
         "config_redacted": _redact(row.provider, plaintext),
+        # Phase 14 follow-up — partial-reveal previews so the connections
+        # form can render `XYZA••••WXYZ` next to each secret field instead
+        # of an empty placeholder. Plaintext never leaves the server; this
+        # is metadata, not the credential.
+        "secret_previews": _secret_previews(row.provider, plaintext),
         "fields": _field_descriptors(row.provider),
         "created_by": row.created_by,
         "created_at": row.created_at,

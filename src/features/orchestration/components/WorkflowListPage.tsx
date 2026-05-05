@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Archive, Copy, History, Pencil, Play } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Archive, ChartGantt, Copy, History, Pencil, Play } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 import { Badge } from '@/components/ui/Badge';
@@ -27,6 +27,7 @@ import { notificationService } from '@/services/notifications';
 import { CloneSystemWorkflowDialog } from './CloneSystemWorkflowDialog';
 import { CreateWorkflowDialog } from './CreateWorkflowDialog';
 import { WorkflowRunHistoryOverlay } from './WorkflowRunHistoryOverlay';
+import { RunInspectorOverlay } from './runs/RunInspectorOverlay';
 
 type SourceFilter = 'all' | 'custom' | 'platform';
 
@@ -87,7 +88,15 @@ export function WorkflowListPage() {
   const [activeSource, setActiveSource] = useState<SourceFilter>('all');
   const [cloneSource, setCloneSource] = useState<Workflow | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Workflow | null>(null);
+  // History modal — list of runs for one workflow.
   const [historyTarget, setHistoryTarget] = useState<Workflow | null>(null);
+  // Run inspector overlay state — opens on this page (no navigation).
+  // `null` when closed; `{ workflowId, runId }` while open. The same
+  // RunInspectorOverlay used in the builder takes both ids; the overlay
+  // itself fetches + paints recipients/actions for the selected run.
+  const [inspectorState, setInspectorState] = useState<
+    { workflowId: string; runId: string | null } | null
+  >(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -142,7 +151,12 @@ export function WorkflowListPage() {
     try {
       const run = await fireManualRun(workflow.id);
       notificationService.success(`Run started: ${run.id.slice(0, 8)}`);
-      navigate(orchestrationRoutes.campaignRunDetail(run.id));
+      // Phase-14 follow-up — open the unified run inspector on the
+      // builder rather than navigating to the legacy standalone
+      // RunDetailPage. Same code path as clicking the last-run cell.
+      navigate(
+        `${orchestrationRoutes.campaignBuilder(workflow.id)}?run=${run.id}`,
+      );
     } catch (e) {
       const msg =
         e instanceof ApiError
@@ -194,17 +208,6 @@ export function WorkflowListPage() {
       ),
     },
     {
-      key: 'source',
-      header: 'Source',
-      width: 'w-[110px]',
-      render: (r) =>
-        r.source === 'custom' ? (
-          <Badge variant="success" size="sm">Custom</Badge>
-        ) : (
-          <Badge variant="neutral" size="sm">Platform</Badge>
-        ),
-    },
-    {
       key: 'workflowType',
       header: 'Type',
       width: 'w-[100px]',
@@ -226,38 +229,60 @@ export function WorkflowListPage() {
         ),
     },
     {
+      key: 'createdBy',
+      header: 'Created by',
+      width: 'min-w-[160px]',
+      // Phase-14 follow-up — backend resolves the creator via a join
+      // on `platform.users`. System-seeded workflows have no resolvable
+      // creator; render an em-dash. Email-only fallback handles the
+      // case where the user row exists but has a blank display name.
+      render: (r) => {
+        if (r.source === 'platform') {
+          return <span className="text-[var(--text-muted)]">—</span>;
+        }
+        const name = r.createdByName?.trim();
+        const email = r.createdByEmail?.trim();
+        if (!name && !email) {
+          return <span className="text-[var(--text-muted)]">—</span>;
+        }
+        return (
+          <div className="flex flex-col gap-0.5" title={email ?? undefined}>
+            <span className="truncate text-[var(--text-primary)]">
+              {name || email}
+            </span>
+            {name && email ? (
+              <span className="truncate text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
+                {email}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
       key: 'lastRun',
       header: 'Last run',
       width: 'min-w-[170px]',
+      // Phase-14 follow-up — single-line "8h ago · running" with a
+      // middle-dot separator. Display-only; drilling into the run is
+      // exclusively via the row's [Timeline] icon in the actions column.
       render: (r) => {
         if (r.source === 'platform' || !r.lastRunAt) {
           return <span className="text-[var(--text-muted)]">—</span>;
         }
-        const time = (
-          <span className="tabular-nums">{fmtRelative(r.lastRunAt)}</span>
-        );
-        const chip = r.lastRunStatus ? (
-          <RunStatusChip status={r.lastRunStatus} />
-        ) : null;
-        const inner = (
+        return (
           <div
-            className="flex flex-col gap-1"
+            className="flex items-center gap-1.5 whitespace-nowrap text-[var(--text-secondary)]"
             title={fmtDateTime(r.lastRunAt)}
           >
-            {time}
-            {chip}
+            <span className="tabular-nums">{fmtRelative(r.lastRunAt)}</span>
+            {r.lastRunStatus ? (
+              <>
+                <span aria-hidden="true" className="text-[var(--text-muted)]">·</span>
+                <RunStatusChip status={r.lastRunStatus} />
+              </>
+            ) : null}
           </div>
-        );
-        return r.lastRunId ? (
-          <Link
-            to={orchestrationRoutes.campaignRunDetail(r.lastRunId)}
-            onClick={(e) => e.stopPropagation()}
-            className="block text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-          >
-            {inner}
-          </Link>
-        ) : (
-          <div className="text-[var(--text-secondary)]">{inner}</div>
         );
       },
     },
@@ -293,6 +318,8 @@ export function WorkflowListPage() {
           </div>
         ) : (
           <div className="flex items-center justify-end gap-1">
+            {/* History — list of runs for this workflow. Opens the
+             *  existing modal on the same page; no navigation. */}
             <IconButton
               icon={History}
               variant="ghost"
@@ -301,6 +328,22 @@ export function WorkflowListPage() {
               onClick={(e) => {
                 e.stopPropagation();
                 setHistoryTarget(r);
+              }}
+            />
+            {/* Timeline — opens the run inspector overlay on this page
+             *  with the most recent run pre-selected. The picker inside
+             *  the overlay lets the operator switch runs. No navigation
+             *  to the builder. Disabled until at least one run exists. */}
+            <IconButton
+              icon={ChartGantt}
+              variant="ghost"
+              size="sm"
+              label="Run timeline"
+              disabled={!r.lastRunId}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!r.lastRunId) return;
+                setInspectorState({ workflowId: r.id, runId: r.lastRunId });
               }}
             />
             <IconButton
@@ -410,12 +453,30 @@ export function WorkflowListPage() {
         confirmLabel={archivingId === archiveTarget?.id ? 'Archiving…' : 'Archive'}
         variant="danger"
       />
-      {historyTarget && (
+      {historyTarget ? (
         <WorkflowRunHistoryOverlay
           workflow={historyTarget}
           onClose={() => setHistoryTarget(null)}
         />
-      )}
+      ) : null}
+      {inspectorState ? (
+        // Phase-14 follow-up — same RunInspectorOverlay used in the
+        // builder, mounted directly on the listing so the operator
+        // sees recipients/actions without leaving the campaigns page.
+        // `actionId` and `tabId` props are omitted here, so the
+        // overlay falls back to its uncontrolled local state for
+        // those (URL bookmarkability stays in the builder context).
+        <RunInspectorOverlay
+          workflowId={inspectorState.workflowId}
+          runId={inspectorState.runId}
+          onChangeRunId={(next) =>
+            setInspectorState((prev) =>
+              prev ? { ...prev, runId: next } : prev,
+            )
+          }
+          onClose={() => setInspectorState(null)}
+        />
+      ) : null}
     </>
   );
 }

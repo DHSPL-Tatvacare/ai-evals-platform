@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import (
     ActionDispatch,
     NodeResult,
@@ -18,6 +19,8 @@ from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     note_type: Literal[
         "progress_note", "observation", "encounter", "care_plan_update"
     ] = "progress_note"

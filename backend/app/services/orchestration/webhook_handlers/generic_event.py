@@ -127,7 +127,7 @@ async def fire_event(
             await db.execute(select(Workflow).where(Workflow.id == trigger.workflow_id))
         ).scalar_one()
         workflows_by_trigger[trigger.id] = wf
-        if wf.current_published_version_id is None:
+        if not wf.active or wf.current_published_version_id is None:
             unpublished.append(str(wf.id))
     if unpublished:
         raise EventTriggerConfigurationError(

@@ -47,7 +47,7 @@ describe('WatiTemplatePicker', () => {
     renderPicker({ onChange });
 
     await waitFor(() =>
-      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: false }),
+      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1'),
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Select a template/i }));
@@ -79,14 +79,38 @@ describe('WatiTemplatePicker', () => {
     mockedList.mockResolvedValue({ provider: 'wati', items: [], error: null });
     renderPicker();
 
-    await waitFor(() =>
-      expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: false }),
-    );
+    // Phase 14 — TanStack Query schedules the post-fetch state flush via its
+    // own queue, so the Refresh button stays disabled until isFetching
+    // settles to false. Wait for the button to become enabled (the empty-
+    // state hint appearing is a proxy for "initial fetch complete").
+    const refreshBtn = await screen.findByRole('button', {
+      name: /Refresh templates/i,
+    });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
     mockedList.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: /Refresh templates/i }));
+    fireEvent.click(refreshBtn);
     await waitFor(() =>
       expect(listConnectionTemplates).toHaveBeenCalledWith('conn-1', { refresh: true }),
     );
+  });
+
+  it('surfaces refresh failures through query error state', async () => {
+    mockedList
+      .mockResolvedValueOnce({
+        provider: 'wati',
+        items: [{ name: 'seed', language: 'en', status: 'APPROVED', parameters: [] }],
+        error: null,
+      })
+      .mockRejectedValueOnce(new Error('Refresh failed'));
+    renderPicker();
+
+    const refreshBtn = await screen.findByRole('button', {
+      name: /Refresh templates/i,
+    });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
+    fireEvent.click(refreshBtn);
+
+    expect(await screen.findByText(/Refresh failed/i)).toBeInTheDocument();
   });
 
   it('keeps the combobox row shrink-safe when a long template is selected', async () => {

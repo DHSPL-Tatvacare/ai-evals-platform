@@ -24,11 +24,13 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
 from app.services.orchestration.node_registry import register_node
 
 
 class _Branch(BaseModel):
+    model_config = strict_node_config_dict()
     """One branch on a split.
 
     ``id`` is the stable routing key — matches the source edge's
@@ -56,6 +58,8 @@ class _Branch(BaseModel):
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     mode: Literal["by_field", "random"]
     field: Optional[str] = None
     branches: list[_Branch] = Field(min_length=2)

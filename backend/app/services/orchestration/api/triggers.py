@@ -158,6 +158,15 @@ async def update_trigger(
     if trig is None:
         return None
 
+    wf = (await db.execute(
+        select(Workflow).where(
+            Workflow.id == trig.workflow_id,
+            Workflow.tenant_id == tenant_id,
+        )
+    )).scalar_one_or_none()
+    if wf is None:
+        return None
+
     sched = None
     if trig.scheduled_job_id is not None:
         sched = (await db.execute(
@@ -174,17 +183,12 @@ async def update_trigger(
     if params is not None:
         trig.params = params
 
+    if trig.active and not wf.active:
+        return None
+
     if trig.kind == "cron":
         desired_cron = trig.cron_expression or ""
         if trig.active and sched is None:
-            wf = (await db.execute(
-                select(Workflow).where(
-                    Workflow.id == trig.workflow_id,
-                    Workflow.tenant_id == tenant_id,
-                )
-            )).scalar_one_or_none()
-            if wf is None:
-                return None
             sched = await _create_scheduled_job(
                 db,
                 tenant_id=tenant_id,

@@ -12,7 +12,6 @@ import {
 import {
   formatStringListInputValue,
   isListOperator,
-  normalizePredicateValueForOperator,
   parseStringListInputValue,
   PREDICATE_OPERATOR_OPTIONS,
   predicateOperatorNeedsValue,
@@ -170,12 +169,12 @@ function LeafEditor({
           size="sm"
           value={value.op}
           onChange={(next) => {
-            const nextOp = next as PredicateOp;
-            onChange({
-              ...value,
-              op: nextOp,
-              value: normalizePredicateValueForOperator(value.value, nextOp),
-            });
+            // Phase 14 / Phase D — value normalisation moved to the parse
+            // boundary. The Zod leaf-predicate `.transform` runs
+            // `normalizePredicateValueForOperator` whenever the parent
+            // node config is parsed (every `updateNodeConfig`), so writing
+            // the raw value here is enough — the store canonicalises it.
+            onChange({ ...value, op: next as PredicateOp });
           }}
           options={PREDICATE_OPERATOR_OPTIONS.map((o) => ({
             value: o.value,

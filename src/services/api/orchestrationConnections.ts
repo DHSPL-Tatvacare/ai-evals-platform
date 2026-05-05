@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { apiQueryFn } from './queryFn';
 
 /** Provider known to the backend `provider_specs` registry. New providers
  *  are surfaced via the schema endpoint at runtime, but the literal union
@@ -52,6 +53,13 @@ export interface Connection {
   webhookUrl: string | null;
   /** Plaintext non-secret fields ONLY. Secret values are never returned. */
   configRedacted: ConnectionConfig;
+  /** Partial-reveal previews of stored secret values, keyed by field name.
+   *  Format: `XYZA••••WXYZ` for values ≥ 8 chars, `••••WXYZ` for shorter
+   *  values. Absent / empty when nothing is stored. UI hint only — not a
+   *  credential. Surfaces in the form so operators can confirm by shape
+   *  ("yes that's the prod key, last 4 = WXYZ") without the page ever
+   *  shipping plaintext. */
+  secretPreviews?: Record<string, string>;
   fields: ConnectionFieldDescriptor[];
   createdBy: string;
   createdAt: string;
@@ -219,7 +227,7 @@ export async function listConnectionAgents(
   const q = new URLSearchParams();
   if (params?.refresh) q.set('refresh', 'true');
   const qs = q.toString();
-  return apiRequest<ProviderAgentsListResponse>(
+  return apiQueryFn<ProviderAgentsListResponse>(
     `/api/orchestration/connections/${connectionId}/agents${qs ? `?${qs}` : ''}`,
   );
 }
@@ -231,7 +239,7 @@ export async function listConnectionTemplates(
   const q = new URLSearchParams();
   if (params?.refresh) q.set('refresh', 'true');
   const qs = q.toString();
-  return apiRequest<ProviderTemplatesListResponse>(
+  return apiQueryFn<ProviderTemplatesListResponse>(
     `/api/orchestration/connections/${connectionId}/templates${qs ? `?${qs}` : ''}`,
   );
 }

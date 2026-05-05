@@ -214,15 +214,25 @@ function ScorecardContent({
   overallScore: number | null;
   threadId: string;
 }) {
-  const maxMap = new Map(reasoningItems.map((r) => [normalizeLabel(r.dimension), r.max]));
-
   return (
     <div className="space-y-0">
       {dimensions.map(([key, val]) => {
         const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
         const score = val as number;
-        const dimMax = maxMap.get(normalizeLabel(label)) ?? (score <= 15 ? 15 : 100);
-        const ratio = dimMax > 0 ? score / dimMax : 0;
+        const dimMax = findReasoningMax(key, reasoningItems);
+
+        if (dimMax === null) {
+          return (
+            <div key={`${threadId}:${key}`} className="py-2 border-b border-[var(--border-subtle)] last:border-b-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-primary)] flex-1 min-w-0">{label}</span>
+                <span className="text-xs font-bold tabular-nums text-[var(--text-primary)]">{score}</span>
+              </div>
+            </div>
+          );
+        }
+
+        const ratio = score / dimMax;
         const pctVal = Math.min(100, Math.max(0, ratio * 100));
         const bandColor = dimensionBandColor(ratio);
         const band = dimensionBand(ratio);
@@ -495,8 +505,18 @@ interface ReasoningItem {
   explanation: string;
 }
 
-function normalizeLabel(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function findReasoningMax(scorecardKey: string, reasoningItems: ReasoningItem[]): number | null {
+  const keyTokens = scorecardKey.toLowerCase().split('_').filter(Boolean);
+  if (!keyTokens.length) return null;
+
+  for (const item of reasoningItems) {
+    if (typeof item.max !== 'number' || item.max <= 0) continue;
+    const itemNorm = item.dimension.toLowerCase();
+    if (keyTokens.every((t) => itemNorm.includes(t))) {
+      return item.max;
+    }
+  }
+  return null;
 }
 
 function parseReasoningString(text: string): ReasoningItem[] {

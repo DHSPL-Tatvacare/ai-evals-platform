@@ -31,6 +31,13 @@ export function NodeConfigPanel() {
   const workflowType = useWorkflowBuilderStore((s) => s.workflowType);
   const updateConfig = useWorkflowBuilderStore((s) => s.updateNodeConfig);
   const clearSelection = useWorkflowBuilderStore((s) => s.clearSelection);
+  // Phase-14 follow-up — view mode renders the same inspector body
+  // wrapped in a disabled fieldset. Browser-native disabling propagates
+  // to every form input and button inside, so we don't have to thread a
+  // `readOnly` prop through every specialised editor.
+  const viewMode = useWorkflowBuilderStore((s) => s.viewMode);
+  const setViewMode = useWorkflowBuilderStore((s) => s.setViewMode);
+  const readOnly = viewMode === 'view';
 
   // Descriptor lookup must come before any conditional rendering so the
   // hooks below see a stable input identity regardless of node selection.
@@ -275,6 +282,18 @@ export function NodeConfigPanel() {
         </div>
         {closeButton}
       </div>
+      {readOnly ? (
+        <div className="flex items-center justify-between gap-2 rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
+          <span>Read-only — switch to Edit to change this node.</span>
+          <button
+            type="button"
+            onClick={() => setViewMode('edit')}
+            className="text-xs font-medium text-[var(--color-brand)] hover:underline"
+          >
+            Switch to Edit
+          </button>
+        </div>
+      ) : null}
       {desc.authoringStatus === 'hidden' ? (
         <p className="rounded-[var(--radius-default)] bg-[var(--bg-warning-soft)] p-2 text-xs text-[var(--text-warning)]">
           This node is hidden from the palette. Existing definitions still
@@ -286,19 +305,24 @@ export function NodeConfigPanel() {
           {emptyState}
         </p>
       ) : null}
-      {body}
-      {desc.requiredPayloadFields && desc.requiredPayloadFields.length > 0 ? (
-        <FieldHint
-          label="Requires payload fields"
-          fields={desc.requiredPayloadFields}
-        />
-      ) : null}
-      {desc.emittedPayloadFields && desc.emittedPayloadFields.length > 0 ? (
-        <FieldHint
-          label="Emits payload fields"
-          fields={desc.emittedPayloadFields}
-        />
-      ) : null}
+      {/* Browser-native fieldset disable: every form input + button inside
+       *  becomes non-interactive when `disabled` is set. Cheaper than
+       *  threading a `readOnly` prop through every specialised editor. */}
+      <fieldset disabled={readOnly} className="contents">
+        {body}
+        {desc.requiredPayloadFields && desc.requiredPayloadFields.length > 0 ? (
+          <FieldHint
+            label="Requires payload fields"
+            fields={desc.requiredPayloadFields}
+          />
+        ) : null}
+        {desc.emittedPayloadFields && desc.emittedPayloadFields.length > 0 ? (
+          <FieldHint
+            label="Emits payload fields"
+            fields={desc.emittedPayloadFields}
+          />
+        ) : null}
+      </fieldset>
     </div>
   );
 }

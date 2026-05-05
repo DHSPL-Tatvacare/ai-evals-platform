@@ -8,6 +8,7 @@ existing webhook unit suite doesn't cover:
 - capture-field extraction from telephony_data,
 - recipient state payload merge with bolna_recording_url / duration /
   transcript / total_cost when the upstream supplies them.
+- cost normalization from Bolna provider subunits into major units.
 """
 from __future__ import annotations
 
@@ -79,7 +80,15 @@ async def test_apply_event_captures_telephony_data(db_session, seed_full_run):
         "status": "completed",
         "status_reason": "answered",
         "transcript": "hi - bye",
-        "total_cost": "0.034",
+        "total_cost": "3.4",
+        "cost_breakdown": {
+            "llm": 1.2,
+            "telephony": 2.2,
+            "llm_breakdown": {
+                "conversation": 1.0,
+                "summary": 0.2,
+            },
+        },
         "telephony_data": {
             "recording_url": "https://r.example/rec/ex-cap.wav",
             "duration": 42,
@@ -102,6 +111,15 @@ async def test_apply_event_captures_telephony_data(db_session, seed_full_run):
     assert refreshed.response["recording_url"] == "https://r.example/rec/ex-cap.wav"
     assert refreshed.response["duration_sec"] == 42
     assert refreshed.response["transcript"] == "hi - bye"
+    assert refreshed.response["total_cost"] == 0.034
+    assert refreshed.response["cost_breakdown"] == {
+        "llm": 0.012,
+        "telephony": 0.022,
+        "llm_breakdown": {
+            "conversation": 0.01,
+            "summary": 0.002,
+        },
+    }
 
     # Recipient state state flipped + payload merged.
     state = (await db_session.execute(
@@ -116,6 +134,7 @@ async def test_apply_event_captures_telephony_data(db_session, seed_full_run):
     assert payload["bolna_recording_url"] == "https://r.example/rec/ex-cap.wav"
     assert payload["bolna_duration_sec"] == 42
     assert payload["bolna_transcript"] == "hi - bye"
+    assert payload["bolna_total_cost"] == 0.034
 
     # Audit child action persisted.
     child_types = (await db_session.execute(
@@ -124,6 +143,14 @@ async def test_apply_event_captures_telephony_data(db_session, seed_full_run):
         )
     )).scalars().all()
     assert "bolna_answered" in child_types
+    child_response = (await db_session.execute(
+        select(WorkflowRunRecipientAction.response).where(
+            WorkflowRunRecipientAction.parent_action_id == parent.id,
+            WorkflowRunRecipientAction.action_type == "bolna_answered",
+        )
+    )).scalar_one()
+    assert child_response["total_cost"] == 0.034
+    assert child_response["last_event"]["total_cost"] == "3.4"
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
-import {
-  listConnectionTemplates,
-  type ProviderTemplateSummary,
-} from '@/services/api/orchestrationConnections';
+import type { ProviderTemplateSummary } from '@/services/api/orchestrationConnections';
+import { useWatiTemplates } from '@/features/orchestration/queries/referenceData';
 
 interface Props {
   /** WATI connection UUID. The picker is disabled until a connection is
@@ -20,48 +18,34 @@ interface Props {
   onTemplateLoaded?(template: ProviderTemplateSummary | null): void;
 }
 
-/** Phase 13 / Phase C — live WATI template picker.
+/** Phase 14 — WATI template picker, now backed by TanStack Query.
  *
- *  Replaces the legacy free-text template_name input. Backed by
- *  GET /api/orchestration/connections/{id}/templates which caches for
- *  30s on the server; Refresh bypasses the cache for the rare "I just
- *  approved a template in WATI" case. */
+ *  Replaces the Phase-13 hand-rolled `useEffect` + `useState` fetch loop.
+ *  Two pickers on the same connection now share one query; reopening the
+ *  inspector within the 30 s `staleTime` reuses the cached data without a
+ *  network roundtrip. The Refresh button calls `refresh()` which bypasses
+ *  both the FE cache and the backend's 30 s in-process cache. */
 export function WatiTemplatePicker({
   connectionId,
   value,
   onChange,
   onTemplateLoaded,
 }: Props) {
-  const [items, setItems] = useState<ProviderTemplateSummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isFetching, error, refresh } = useWatiTemplates(connectionId);
 
-  const fetchTemplates = useCallback(
-    async (refresh: boolean) => {
-      if (!connectionId) {
-        setItems([]);
-        setError(null);
-        return;
-      }
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await listConnectionTemplates(connectionId, { refresh });
-        setItems(res.items);
-        setError(res.error);
-      } catch (err) {
-        setItems([]);
-        setError(err instanceof Error ? err.message : 'Failed to load templates');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [connectionId],
-  );
-
-  useEffect(() => {
-    void fetchTemplates(false);
-  }, [fetchTemplates]);
+  // Stabilise items reference so the onTemplateLoaded effect below doesn't
+  // re-fire on every render. `data` only changes when the cache hands back a
+  // new response object.
+  const items: ProviderTemplateSummary[] = useMemo(() => data?.items ?? [], [data]);
+  // The backend returns a soft `error` field in the response body for partial
+  // failures (e.g. WATI returned a templates list but flagged it stale). The
+  // hard error from TQ takes precedence; otherwise surface the soft one.
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : data?.error
+        ? data.error
+        : null;
 
   // Whenever the items list or the selected name changes, surface the
   // template back to the inspector so the variable-mapping editor can
@@ -98,27 +82,27 @@ export function WatiTemplatePicker({
             options={options}
             value={value}
             onChange={onChange}
-            placeholder={loading ? 'Loading templates…' : 'Select a template'}
-            disabled={loading && items.length === 0}
-            loading={loading}
+            placeholder={isFetching ? 'Loading templates…' : 'Select a template'}
+            disabled={isFetching && items.length === 0}
+            loading={isFetching}
           />
         </div>
         <Button
           variant="secondary"
           size="sm"
           icon={RefreshCw}
-          onClick={() => void fetchTemplates(true)}
-          disabled={loading}
+          onClick={() => void refresh()}
+          disabled={isFetching}
           aria-label="Refresh templates"
           className="shrink-0 whitespace-nowrap"
         >
           Refresh
         </Button>
       </div>
-      {error && (
-        <p className="text-xs text-[var(--color-error)]">{error}</p>
+      {errorMessage && (
+        <p className="text-xs text-[var(--color-error)]">{errorMessage}</p>
       )}
-      {!loading && !error && items.length === 0 && (
+      {!isFetching && !errorMessage && items.length === 0 && (
         <p className="text-xs text-[var(--text-secondary)]">
           No templates found. Approve a template in WATI and click Refresh.
         </p>

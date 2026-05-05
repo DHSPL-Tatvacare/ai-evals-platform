@@ -47,7 +47,7 @@ describe('BolnaAgentPicker', () => {
     renderPicker({ onChange });
 
     await waitFor(() =>
-      expect(listConnectionAgents).toHaveBeenCalledWith('conn-1', { refresh: false }),
+      expect(listConnectionAgents).toHaveBeenCalledWith('conn-1'),
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Select an agent/i }));
@@ -79,13 +79,37 @@ describe('BolnaAgentPicker', () => {
     mockedList.mockResolvedValue({ provider: 'bolna', items: [], error: null });
     renderPicker();
 
-    await waitFor(() =>
-      expect(listConnectionAgents).toHaveBeenCalledWith('conn-1', { refresh: false }),
-    );
+    // Phase 14 — TanStack Query schedules the post-fetch state flush via its
+    // own queue, so the Refresh button stays disabled until isFetching
+    // settles to false. Wait for the button to become enabled before
+    // clicking it.
+    const refreshBtn = await screen.findByRole('button', {
+      name: /Refresh agents/i,
+    });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
     mockedList.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: /Refresh agents/i }));
+    fireEvent.click(refreshBtn);
     await waitFor(() =>
       expect(listConnectionAgents).toHaveBeenCalledWith('conn-1', { refresh: true }),
     );
+  });
+
+  it('surfaces refresh failures through query error state', async () => {
+    mockedList
+      .mockResolvedValueOnce({
+        provider: 'bolna',
+        items: [{ id: 'agent-a', name: 'Concierge', status: 'active', type: 'outbound' }],
+        error: null,
+      })
+      .mockRejectedValueOnce(new Error('Refresh failed'));
+    renderPicker();
+
+    const refreshBtn = await screen.findByRole('button', {
+      name: /Refresh agents/i,
+    });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
+    fireEvent.click(refreshBtn);
+
+    expect(await screen.findByText(/Refresh failed/i)).toBeInTheDocument();
   });
 });

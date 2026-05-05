@@ -114,7 +114,12 @@ def jsonb_column_resolver(declared_types: dict[str, str]) -> ColumnResolver:
     return _resolve
 
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
+
+
 class CohortQueryFilter(BaseModel):
+    model_config = strict_node_config_dict()
+
     column: str
     op: str
     value: Any
@@ -157,6 +162,8 @@ class CohortQueryConfig(BaseModel):
     ``source_table`` + ``id_column`` pair must be provided. When both are
     given, ``source_ref`` wins and the legacy fields are ignored.
     """
+
+    model_config = strict_node_config_dict()
 
     # Canonical Phase 11 selector — keyed into the source catalog.
     source_ref: Optional[str] = None

@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.attempt_policy import (
     AttemptPolicy,
     attempt_policy_json_schema_extra,
@@ -22,6 +23,8 @@ from app.services.orchestration.nodes._clinical_outbox_dispatch import (
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     test_code: str = Field(..., description="Lab test code (LOINC or local).")
     test_name: str
     frequency: Literal["once", "monthly", "quarterly", "biannual", "annual"] = "once"

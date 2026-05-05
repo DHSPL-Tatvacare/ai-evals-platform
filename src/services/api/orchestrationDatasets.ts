@@ -14,6 +14,7 @@
  */
 
 import { ApiError, apiRequest } from './client';
+import { parseApiErrorResponse } from './errorHandling';
 import { useAuthStore } from '@/stores/authStore';
 
 const API_BASE = '';
@@ -73,20 +74,6 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function parseDetail(text: string): { errorData: unknown; detail: string | null } {
-  let errorData: unknown = text;
-  try {
-    errorData = JSON.parse(text);
-  } catch {
-    /* keep as plain text */
-  }
-  const detail =
-    typeof errorData === 'object' && errorData !== null && 'detail' in errorData
-      ? String((errorData as Record<string, unknown>).detail)
-      : null;
-  return { errorData, detail };
-}
-
 /**
  * Multipart upload that carries extra form fields. Mirrors the auth-retry
  * flow in `apiUpload` from `client.ts`; the difference is the FormData is
@@ -122,7 +109,7 @@ async function uploadDatasetVersionRequest(
 
   if (!response.ok) {
     const text = await response.text();
-    const { errorData, detail } = parseDetail(text);
+    const { errorData, detail } = parseApiErrorResponse(text);
     throw new ApiError(
       response.status,
       detail || `Upload failed: ${response.statusText}`,

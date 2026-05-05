@@ -27,6 +27,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import register_node
 from app.services.orchestration.predicate_contract import parse as parse_predicate
@@ -43,6 +44,8 @@ class _EventCorrelation(BaseModel):
     extend this with provider-specific correlation (e.g. ``wati_message_id``
     -> action row -> recipient).
     """
+    model_config = strict_node_config_dict()
+
     recipient_id_field: str
 
 
@@ -52,6 +55,8 @@ class _Config(BaseModel):
     The ``model_validator`` below enforces shape per mode so authoring tools
     surface clear errors instead of relying on per-mode subclasses.
     """
+    model_config = strict_node_config_dict()
+
     mode: WaitMode = "duration"
 
     duration_hours: Optional[float] = None

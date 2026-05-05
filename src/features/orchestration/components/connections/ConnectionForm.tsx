@@ -200,6 +200,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
             onChange={setConfig}
             appId={appId}
             secretsOptional={isEdit}
+            secretPreviews={isEdit ? existing?.secretPreviews : undefined}
             hiddenFields={provider === 'wati' ? new Set(['channel_numbers']) : undefined}
           />
           {provider === 'wati' ? (

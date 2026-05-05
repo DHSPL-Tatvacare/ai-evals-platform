@@ -23,20 +23,24 @@ interface CategoryGroup {
 }
 
 /**
- * Phase 11 (Commit 2) — palette grouped by neutral, functional
- * ``displayCategory`` (Phase 11 §4) instead of the legacy product buckets.
+ * Loads the node-type catalog into `workflowBuilderStore.paletteCatalog`.
  *
- * Nodes whose ``authoringStatus !== 'active'`` are filtered out — they
- * still validate and execute when present in saved definitions but are
- * hidden from new authoring (Phase 11 §6.2).
+ * **Why it lives outside <Palette>:** the canvas reads the catalog to
+ * derive each node's display category, output handles, and labels. View
+ * mode hides the palette but the canvas still needs the catalog — so the
+ * fetch must run regardless of palette visibility. Mount this hook in
+ * `WorkflowBuilderPage` (which is mounted in both view and edit modes).
+ *
+ * Pre-Phase-14 the fetch was bundled into the <Palette> component's own
+ * useEffect, which broke the canvas the moment view mode unmounted the
+ * palette: every node fell back to "ROUTING" (yellow) and lost its
+ * declared output handles, so edges using non-`default` `output_id`s
+ * had no handle to attach to. Decoupling is the fix.
  */
-export function Palette() {
+export function usePaletteCatalogLoader() {
   const workflowType = useWorkflowBuilderStore((s) => s.workflowType);
-  const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
-  const collapsed = useWorkflowBuilderStore((s) => s.paletteCollapsed);
   const setCatalog = useWorkflowBuilderStore((s) => s.setPaletteCatalog);
   const setLoading = useWorkflowBuilderStore((s) => s.setPaletteLoading);
-  const setCollapsed = useWorkflowBuilderStore((s) => s.setPaletteCollapsed);
 
   useEffect(() => {
     if (!workflowType) return;
@@ -53,6 +57,20 @@ export function Palette() {
       alive = false;
     };
   }, [workflowType, setCatalog, setLoading]);
+}
+
+/**
+ * Phase 11 (Commit 2) — palette grouped by neutral, functional
+ * ``displayCategory`` (Phase 11 §4) instead of the legacy product buckets.
+ *
+ * Nodes whose ``authoringStatus !== 'active'`` are filtered out — they
+ * still validate and execute when present in saved definitions but are
+ * hidden from new authoring (Phase 11 §6.2).
+ */
+export function Palette() {
+  const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
+  const collapsed = useWorkflowBuilderStore((s) => s.paletteCollapsed);
+  const setCollapsed = useWorkflowBuilderStore((s) => s.setPaletteCollapsed);
 
   const groups = useMemo<CategoryGroup[]>(() => {
     return DISPLAY_CATEGORY_ORDER.map((key) => ({

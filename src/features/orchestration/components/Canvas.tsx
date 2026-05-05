@@ -18,7 +18,11 @@ import '@xyflow/react/dist/style.css';
 
 import { getCategoryAccentToken } from '@/features/orchestration/config/categories';
 import { useRunOverlayStore, type NodeStepState } from '@/features/orchestration/store/runOverlayStore';
-import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import {
+  usePublishErrorsByNodeId,
+  useWorkflowBuilderStore,
+} from '@/features/orchestration/store/workflowBuilderStore';
+import type { FieldErrorItem } from '@/features/orchestration/contracts/errorDecoder';
 import {
   getEdgeOutputId,
   type NodeTypeDescriptor,
@@ -175,6 +179,15 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   const edges = useWorkflowBuilderStore((s) => s.edges);
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  // Phase-14 follow-up — view mode disables every write affordance on
+  // the canvas (drop, connect, edge-remove, per-node delete). Click-to-
+  // select still works so the inspector can render the node read-only.
+  const viewMode = useWorkflowBuilderStore((s) => s.viewMode);
+  const isEdit = viewMode === 'edit';
+  // Phase 14 / Phase E — last publish failure, grouped by node id. The
+  // CustomNode renders a red badge when its id has at least one entry.
+  const publishErrorsByNode: Record<string, FieldErrorItem[]> =
+    usePublishErrorsByNodeId();
 
   const overlayRunId = useRunOverlayStore((s) => s.runId);
   const overlayByNodeId = useRunOverlayStore((s) => s.byNodeId);
@@ -219,10 +232,19 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
             outputEdges: deriveOutputEdges(n, desc),
             outputEdgeLabels: deriveOutputEdgeLabels(n, desc),
             overlay: deriveNodeOverlay(activeOverlay[n.id]),
+            // Phase 14 / Phase E — surface the publish-failure entries
+            // for this node so the CustomNode renders the red badge.
+            // Empty for nodes without errors; CustomNode treats `[]` and
+            // `undefined` the same.
+            publishErrors: publishErrorsByNode[n.id],
+            // Phase-14 follow-up — when false, the per-node delete affordance
+            // hides and the card stays read-only. Click-to-select still
+            // works so the inspector can show the config.
+            editable: isEdit,
           },
         };
       }),
-    [nodes, palette, selectedNodeId, activeOverlay],
+    [nodes, palette, selectedNodeId, activeOverlay, publishErrorsByNode, isEdit],
   );
 
   const rfEdges: Edge[] = useMemo(
@@ -262,10 +284,16 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const s = useWorkflowBuilderStore.getState();
+    const editable = s.viewMode === 'edit';
     for (const c of changes) {
       if (c.type === 'position' && c.position) {
+        // Position changes are layout-only and Phase 14 routes them through
+        // a separate hash, so they're allowed in view mode too — but in
+        // practice React Flow's drag handles only fire when interactive
+        // mode is on, which we gate via the `nodesDraggable` prop below.
         s.updateNodePosition(c.id, c.position);
       } else if (c.type === 'remove') {
+        if (!editable) continue;
         s.removeNode(c.id);
       }
       // ``select`` changes are intentionally ignored — Zustand owns the
@@ -281,6 +309,7 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const s = useWorkflowBuilderStore.getState();
+    if (s.viewMode !== 'edit') return;
     for (const c of changes) {
       if (c.type === 'remove') s.removeEdge(c.id);
     }
@@ -295,6 +324,7 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
 
   const onConnect = useCallback((conn: Connection) => {
     const s = useWorkflowBuilderStore.getState();
+    if (s.viewMode !== 'edit') return;
     if (!conn.source || !conn.target) return;
     // Phase 11: persist the canonical snake_case ``output_id`` (matches
     // the JSONB blob and the backend's ``WorkflowDefinitionEdge`` shape).
@@ -324,6 +354,8 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   const onDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
+      const s = useWorkflowBuilderStore.getState();
+      if (s.viewMode !== 'edit') return;
       const dataStr = event.dataTransfer.getData('application/orchestration-node');
       if (!dataStr) return;
       let desc: NodeTypeDescriptor;
@@ -369,6 +401,13 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
         onConnect={onConnect}
         onMoveEnd={onMoveEnd}
         onPaneClick={onPaneClick}
+        // Phase-14 follow-up — view mode locks every write affordance at
+        // the React Flow layer so the cursor and handle highlights match
+        // the disabled state. Click-to-select still works.
+        nodesDraggable={isEdit}
+        nodesConnectable={isEdit}
+        edgesFocusable={isEdit}
+        elementsSelectable
         // ReactFlow's "powered by" badge is overlaid on the bottom-right.
         // Hidden so the canvas reads as part of the product chrome.
         proOptions={{ hideAttribution: true }}

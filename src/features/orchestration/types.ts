@@ -95,12 +95,26 @@ export interface NodeTypeDescriptor {
   label: string;
 }
 
+/** One parse issue annotated onto a node by the Zod boundary. Mirrors
+ *  `FieldErrorItem` so the canvas banner can render through the same
+ *  `<PublishErrorPanel>` renderer downstream. */
+export interface NodeParseIssue {
+  field: string;
+  message: string;
+  code: string;
+}
+
 export interface WorkflowDefinitionNode {
   id: string;
   type: string;
   position: { x: number; y: number };
   data: { label?: string; nodeType?: string };
   config: Record<string, unknown>;
+  /** Phase 14 / Phase D — populated by the store when `parseNodeConfig`
+   *  returns issues at hydrate or `updateNodeConfig`. UI surfaces this on
+   *  the canvas banner (see `Canvas.tsx`); the field is stripped before
+   *  the node hits the wire (`toDefinition`). Never persisted. */
+  _parseIssues?: NodeParseIssue[];
 }
 
 export interface WorkflowDefinitionEdge {
@@ -144,6 +158,12 @@ export interface Workflow {
   description: string | null;
   currentPublishedVersionId: string | null;
   createdBy: string;
+  /** Resolved display name of the creator. `null` when the workflow was
+   *  seeded by the system user, or when the creator's row was deleted.
+   *  Surfaces in the campaigns listing's "Created by" column. */
+  createdByName: string | null;
+  /** Resolved email of the creator. Same null-cases as `createdByName`. */
+  createdByEmail: string | null;
   createdAt: string;
   updatedAt: string;
   /** Most-recent run id / timestamp / status, projected by the backend.

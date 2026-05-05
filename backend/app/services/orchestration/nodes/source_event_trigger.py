@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from app.models.orchestration import WorkflowRun, WorkflowRunRecipientState
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import register_node
 
@@ -34,6 +35,8 @@ class _Config(BaseModel):
     definitions still load — the normalizer drops it from canonical
     definitions and the executor prefers the graph-derived target.
     """
+    model_config = strict_node_config_dict()
+
     next_node_id: Optional[str] = None
 
 

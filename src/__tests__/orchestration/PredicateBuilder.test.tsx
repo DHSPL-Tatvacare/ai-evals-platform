@@ -70,7 +70,14 @@ describe('PredicateBuilder', () => {
     expect(valueInput.value).toBe('lost,');
   });
 
-  it('clears stale values when switching to valueless operators', async () => {
+  it('emits the new operator on switch — value normalisation runs at the parse boundary', async () => {
+    // Phase 14 / Phase D: PredicateBuilder no longer calls
+    // `normalizePredicateValueForOperator` at event-time. Switching the
+    // operator just emits `{...value, op: newOp}` — the
+    // `LeafPredicateSchema.transform()` (run on the next `parseNodeConfig`
+    // inside the store) drops the value for valueless ops. This test
+    // verifies the editor now writes the raw shape; the
+    // `nodeConfig.test.ts` suite covers the transform itself.
     const onChange = vi.fn();
     const value: LeafPredicate = { field: 'phone', op: 'eq', value: '919999999999' };
     render(<PredicateBuilder value={value} onChange={onChange} />);
@@ -82,7 +89,7 @@ describe('PredicateBuilder', () => {
       expect(onChange).toHaveBeenCalledWith({
         field: 'phone',
         op: 'exists',
-        value: undefined,
+        value: '919999999999',
       });
     });
   });

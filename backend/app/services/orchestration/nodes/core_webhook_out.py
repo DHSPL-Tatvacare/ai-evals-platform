@@ -25,6 +25,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from pydantic import BaseModel, Field
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.attempt_policy import (
     AttemptPolicy,
     attempt_policy_json_schema_extra,
@@ -40,6 +41,8 @@ from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     connection_id: Optional[uuid.UUID] = Field(
         default=None,
         json_schema_extra={"x-type": "connection_picker", "x-provider": "webhook"},

@@ -19,6 +19,8 @@ from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.database import get_db
 from app.main import app as fastapi_app
 from app.models.orchestration import (
+    Workflow,
+    WorkflowRun,
     WorkflowRunRecipientOverride,
     WorkflowTrigger,
 )
@@ -175,6 +177,79 @@ async def test_patch_workflow_updates_name(client):
     )
     assert r.status_code == 200
     assert r.json()["name"] == "New"
+
+
+@pytest.mark.asyncio
+async def test_archive_workflow_soft_deletes_and_hides_from_listing(client, db_session):
+    slug = f"archive-{uuid.uuid4().hex[:8]}"
+    wf = (await client.post(
+        "/api/orchestration/workflows", json=_wf_body(slug, name="Archive Me")
+    )).json()
+    version = (await client.post(
+        f"/api/orchestration/workflows/{wf['id']}/versions",
+        json={"definition": _MIN_VALID_DEFINITION},
+    )).json()
+    published = await client.post(
+        f"/api/orchestration/workflows/{wf['id']}/versions/{version['id']}/publish"
+    )
+    assert published.status_code == 200, published.text
+
+    fired = await client.post(
+        "/api/orchestration/runs",
+        json={"workflowId": wf["id"], "params": {}},
+    )
+    assert fired.status_code == 201, fired.text
+
+    archived = await client.delete(f"/api/orchestration/workflows/{wf['id']}")
+    assert archived.status_code == 204, archived.text
+
+    row = (await db_session.execute(
+        select(Workflow).where(Workflow.id == uuid.UUID(wf["id"]))
+    )).scalar_one()
+    assert row.active is False
+
+    run = (await db_session.execute(
+        select(WorkflowRun).where(WorkflowRun.workflow_id == uuid.UUID(wf["id"]))
+    )).scalar_one_or_none()
+    assert run is not None
+
+    listed = await client.get("/api/orchestration/workflows?appId=inside-sales")
+    assert listed.status_code == 200, listed.text
+    slugs = [item["slug"] for item in listed.json()]
+    assert slug not in slugs
+
+    cannot_run = await client.post(
+        "/api/orchestration/runs",
+        json={"workflowId": wf["id"], "params": {}},
+    )
+    assert cannot_run.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_archive_workflow_deactivates_triggers_and_schedules(client, db_session):
+    slug = f"archive-trig-{uuid.uuid4().hex[:8]}"
+    wf = (await client.post(
+        "/api/orchestration/workflows", json=_wf_body(slug, name="Archive Trigger")
+    )).json()
+    trigger = (await client.post(
+        f"/api/orchestration/workflows/{wf['id']}/triggers",
+        json={"kind": "cron", "cronExpression": "0 9 * * *", "active": True},
+    )).json()
+
+    archived = await client.delete(f"/api/orchestration/workflows/{wf['id']}")
+    assert archived.status_code == 204, archived.text
+
+    trig = (await db_session.execute(
+        select(WorkflowTrigger).where(WorkflowTrigger.id == uuid.UUID(trigger["id"]))
+    )).scalar_one()
+    assert trig.active is False
+
+    sched = (await db_session.execute(
+        select(ScheduledJobDefinition).where(
+            ScheduledJobDefinition.id == trig.scheduled_job_id
+        )
+    )).scalar_one()
+    assert sched.enabled is False
 
 
 # ─── Versions ───────────────────────────────────────────────────────────────

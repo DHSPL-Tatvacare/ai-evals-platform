@@ -58,7 +58,7 @@ def test_duplicate_node_id_fails():
     ]
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(_wf(nodes, []), workflow_type="crm")
-    assert any("duplicate node id" in e for e in exc_info.value.errors)
+    assert any("duplicate node id" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_edge_references_unknown_node_fails():
@@ -66,14 +66,14 @@ def test_edge_references_unknown_node_fails():
     defn["edges"].append({"id": "e2", "source": "ghost", "target": "done", "output_id": "default"})
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ghost" in e for e in exc_info.value.errors)
+    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_unknown_node_type_fails():
     nodes = [{"id": "x", "type": "not.a.real.type", "position": {"x": 0, "y": 0}, "data": {}, "config": {}}]
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(_wf(nodes, []), workflow_type="crm")
-    assert any("not.a.real.type" in e for e in exc_info.value.errors)
+    assert any("not.a.real.type" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_invalid_node_config_fails():
@@ -106,7 +106,7 @@ def test_invalid_filter_predicate_contract_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("does not accept a value" in e for e in exc_info.value.errors)
+    assert any("does not accept a value" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_invalid_cohort_filter_value_shape_fails():
@@ -123,7 +123,7 @@ def test_invalid_cohort_filter_value_shape_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("non-empty list value" in e for e in exc_info.value.errors)
+    assert any("non-empty list value" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_split_rejects_stale_random_fields_in_by_field_mode():
@@ -150,7 +150,7 @@ def test_split_rejects_stale_random_fields_in_by_field_mode():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("must not carry random 'weight'" in e for e in exc_info.value.errors)
+    assert any("must not carry random 'weight'" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_split_rejects_stale_by_field_fields_in_random_mode():
@@ -179,7 +179,7 @@ def test_split_rejects_stale_by_field_fields_in_random_mode():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("'field' is not allowed when mode='random'" in e for e in exc_info.value.errors)
+    assert any("'field' is not allowed when mode='random'" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_invalid_wait_event_match_predicate_fails():
@@ -204,14 +204,14 @@ def test_invalid_wait_event_match_predicate_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("non-empty list value" in e for e in exc_info.value.errors)
+    assert any("non-empty list value" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_no_ingress_node_fails():
     defn = _wf([_VALID_SINK_NODE], [])
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ingress" in e for e in exc_info.value.errors)
+    assert any("ingress" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_source_must_have_exactly_one_default_edge():
@@ -244,7 +244,7 @@ def test_sink_with_outgoing_edges_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("must not have outgoing" in e for e in exc_info.value.errors)
+    assert any("must not have outgoing" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_split_branch_id_stability_required():
@@ -300,7 +300,7 @@ def test_split_routes_unknown_branch_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ghost" in e for e in exc_info.value.errors)
+    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_wait_event_mode_with_only_wakeup_edge_fails():
@@ -324,7 +324,7 @@ def test_wait_event_mode_with_only_wakeup_edge_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    msgs = exc_info.value.errors
+    msgs = [it["message"] or "" for it in exc_info.value.errors]
     assert any("wakeup" in m and "not valid" in m for m in msgs)
 
 
@@ -345,7 +345,7 @@ def test_wait_duration_mode_with_event_edge_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("event" in e for e in exc_info.value.errors)
+    assert any("event" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_cycle_detected():
@@ -362,7 +362,7 @@ def test_cycle_detected():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("cycle" in e for e in exc_info.value.errors)
+    assert any("cycle" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
 def test_scenario_a_passes_after_normalization_of_legacy_input():

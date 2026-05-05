@@ -1,5 +1,16 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Coins,
+  FileCode2,
+  Headphones,
+  type LucideIcon,
+  Phone,
+  Waves,
+  X,
+} from 'lucide-react';
 
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
@@ -17,6 +28,12 @@ interface Props {
 }
 
 const HEADING_ID = 'orchestration-action-detail-heading';
+const USD_CURRENCY_FMT = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
+});
 
 export function ActionDetailPanel({ action, open, onClose }: Props) {
   return (
@@ -24,7 +41,7 @@ export function ActionDetailPanel({ action, open, onClose }: Props) {
       isOpen={open}
       onClose={onClose}
       labelledBy={HEADING_ID}
-      widthClassName="w-[var(--overlay-width-md)] max-w-[90vw]"
+      widthClassName="w-[var(--overlay-width-lg)] max-w-[92vw]"
     >
       {action ? <PanelBody action={action} onClose={onClose} /> : null}
     </RightSlideOverShell>
@@ -50,23 +67,43 @@ function PanelBody({ action, onClose }: { action: ActionRow; onClose: () => void
 }
 
 function Header({ action, onClose }: { action: ActionRow; onClose: () => void }) {
+  const providerStatus = getActionProviderStatus(action);
+  const providerTerminal = isActionProviderTerminal(action);
+  const channelLabel = action.channel.toUpperCase();
+  const actionLabel = humanizeToken(action.actionType);
+  const statusLabel = providerStatus ?? action.status;
+  const statusVariant =
+    (action.channel || '').toLowerCase() === 'bolna'
+      ? bolnaStatusVariant(providerStatus, providerTerminal)
+      : action.status === 'failed'
+        ? 'error'
+        : action.status === 'success'
+          ? 'success'
+          : 'info';
+
   return (
     <div
-      className="flex items-start justify-between gap-3 border-b px-5 py-4"
+      className="flex items-start justify-between gap-3 border-b px-5 py-5"
       style={{ borderColor: 'var(--border-subtle)' }}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-          {action.channel} · {action.actionType}
+        <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+          <span>{channelLabel}</span>
+          <span className="text-[var(--text-muted)]">·</span>
+          <span>{actionLabel}</span>
         </div>
         <h2
           id={HEADING_ID}
-          className="mt-1 truncate text-base font-semibold text-[var(--text-primary)]"
+          className="mt-2 truncate text-lg font-semibold text-[var(--text-primary)]"
         >
-          Recipient {action.recipientId}
+          {action.recipientId}
         </h2>
-        <div className="mt-1 text-xs text-[var(--text-secondary)]">
-          {fmtDate(action.createdAt)}
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+          <Badge variant={statusVariant}>{statusLabel}</Badge>
+          <span className="inline-flex items-center gap-1">
+            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+            {fmtDate(action.createdAt)}
+          </span>
         </div>
       </div>
       <button
@@ -102,6 +139,8 @@ function BolnaBody({ action }: { action: ActionRow }) {
   const duration = response.duration_sec;
   const executionId = stringField(response.execution_id);
   const batchId = stringField(response.batch_id);
+  const costSummary = summarizeCostBreakdown(costBreakdown);
+  const costDetails = detailCostBreakdown(costBreakdown);
 
   const stageReached = providerTerminal
     ? 'terminal'
@@ -110,74 +149,123 @@ function BolnaBody({ action }: { action: ActionRow }) {
       : 'queued';
 
   return (
-    <div className="space-y-5">
-      <Timeline stages={BOLNA_TIMELINE} reached={stageReached} terminalLabel={providerStatus} />
-
-      <Section title="Call">
-        <KeyValueRow label="Status">
-          <BolnaStatusBadge status={providerStatus} terminal={providerTerminal} />
-        </KeyValueRow>
-        {executionId ? (
-          <KeyValueRow label="Execution">
-            <span className="font-mono text-xs">{executionId}</span>
-          </KeyValueRow>
-        ) : null}
-        {batchId ? (
-          <KeyValueRow label="Batch">
-            <span className="font-mono text-xs">{batchId}</span>
-          </KeyValueRow>
-        ) : null}
-        {telephonyProvider ? (
-          <KeyValueRow label="Telephony">{telephonyProvider}</KeyValueRow>
-        ) : null}
-        {hangupReason ? <KeyValueRow label="Hangup reason">{hangupReason}</KeyValueRow> : null}
-        {duration !== undefined && duration !== null ? (
-          <KeyValueRow label="Duration">{fmtDuration(duration)}</KeyValueRow>
-        ) : null}
-      </Section>
+    <div className="space-y-4">
+      <SectionCard>
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-full bg-[var(--bg-tertiary)] p-2 text-[var(--text-secondary)]">
+            <Phone className="h-4 w-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <SectionEyebrow>Call progress</SectionEyebrow>
+              <Timeline stages={BOLNA_TIMELINE} reached={stageReached} terminalLabel={providerStatus} />
+            </div>
+            <MetricGrid>
+              <KeyValueRow label="Status">
+                <BolnaStatusBadge status={providerStatus} terminal={providerTerminal} />
+              </KeyValueRow>
+              {executionId ? (
+                <KeyValueRow label="Execution">
+                  <span className="font-mono text-xs">{executionId}</span>
+                </KeyValueRow>
+              ) : null}
+              {batchId ? (
+                <KeyValueRow label="Batch">
+                  <span className="font-mono text-xs">{batchId}</span>
+                </KeyValueRow>
+              ) : null}
+              {telephonyProvider ? (
+                <KeyValueRow label="Telephony">{telephonyProvider}</KeyValueRow>
+              ) : null}
+              {hangupReason ? <KeyValueRow label="Hangup reason">{hangupReason}</KeyValueRow> : null}
+              {duration !== undefined && duration !== null ? (
+                <KeyValueRow label="Duration">{fmtDuration(duration)}</KeyValueRow>
+              ) : null}
+            </MetricGrid>
+          </div>
+        </div>
+      </SectionCard>
 
       {recordingUrl ? (
-        <Section title="Recording">
-          <audio controls preload="none" src={recordingUrl} className="w-full">
+        <SectionCard>
+          <SectionHeading
+            icon={Headphones}
+            title="Recording"
+            description="Open the call recording inline or in a new tab."
+          />
+          <audio controls preload="none" src={recordingUrl} className="mt-3 w-full">
             <track kind="captions" />
           </audio>
           <a
             href={recordingUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-2 inline-block text-xs text-[var(--text-brand)] underline"
+            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[var(--text-brand)] underline underline-offset-2"
           >
             Open in new tab
           </a>
-        </Section>
+        </SectionCard>
       ) : null}
 
       {transcript ? (
-        <Collapsible title="Transcript" defaultOpen={false}>
-          <pre className="whitespace-pre-wrap break-words rounded bg-[var(--bg-secondary)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-primary)]">
-            {transcript}
-          </pre>
-        </Collapsible>
+        <SectionCard>
+          <Collapsible title="Transcript" defaultOpen={false}>
+            <pre className="whitespace-pre-wrap break-words rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-primary)]">
+              {transcript}
+            </pre>
+          </Collapsible>
+        </SectionCard>
       ) : null}
 
-      <Section title="Cost">
+      <SectionCard>
+        <SectionHeading
+          icon={Coins}
+          title="Cost"
+          description="Operational totals with structured provider breakdown. All amounts are in USD."
+        />
         {totalCost !== undefined && totalCost !== null ? (
-          <KeyValueRow label="Total">{fmtMoney(totalCost)}</KeyValueRow>
+          <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              Total cost
+            </div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
+              {fmtMoney(totalCost)}
+            </div>
+          </div>
         ) : null}
-        {Object.keys(costBreakdown).length > 0 ? (
-          <div className="mt-1 space-y-1">
-            {Object.entries(costBreakdown).map(([k, v]) => (
-              <KeyValueRow key={k} label={k}>
-                {fmtMoney(v)}
+
+        {costSummary.length > 0 ? (
+          <MetricGrid className="mt-3">
+            {costSummary.map((row) => (
+              <KeyValueRow key={row.label} label={row.label}>
+                {row.value}
               </KeyValueRow>
             ))}
-          </div>
+          </MetricGrid>
         ) : totalCost === undefined || totalCost === null ? (
-          <div className="text-xs text-[var(--text-secondary)]">No cost recorded.</div>
+          <div className="mt-3 text-xs text-[var(--text-secondary)]">No cost recorded.</div>
         ) : null}
-      </Section>
 
-      <RawJsonSection action={action} />
+        {costDetails.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {costDetails.map((detail) => (
+              <Collapsible key={detail.title} title={detail.title} defaultOpen>
+                <MetricGrid>
+                  {detail.rows.map((row) => (
+                    <KeyValueRow key={row.label} label={row.label}>
+                      {row.value}
+                    </KeyValueRow>
+                  ))}
+                </MetricGrid>
+              </Collapsible>
+            ))}
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard>
+        <RawJsonSection action={action} />
+      </SectionCard>
     </div>
   );
 }
@@ -228,46 +316,66 @@ function WatiBody({ action }: { action: ActionRow }) {
   const reached = inferWatiStage(action);
 
   return (
-    <div className="space-y-5">
-      <Timeline stages={WATI_TIMELINE} reached={reached} terminalLabel={action.actionType} />
-
-      <Section title="Template">
-        {templateName ? <KeyValueRow label="Name">{templateName}</KeyValueRow> : null}
-        {broadcastName ? <KeyValueRow label="Broadcast">{broadcastName}</KeyValueRow> : null}
-        {channelNumber ? (
-          <KeyValueRow label="Channel">
-            <span className="font-mono text-xs">{channelNumber}</span>
-          </KeyValueRow>
-        ) : null}
-        {localMessageId ? (
-          <KeyValueRow label="Local message">
-            <span className="font-mono text-xs">{localMessageId}</span>
-          </KeyValueRow>
-        ) : null}
-      </Section>
+    <div className="space-y-4">
+      <SectionCard>
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-full bg-[var(--bg-tertiary)] p-2 text-[var(--text-secondary)]">
+            <Waves className="h-4 w-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <SectionEyebrow>Delivery progress</SectionEyebrow>
+              <Timeline stages={WATI_TIMELINE} reached={reached} terminalLabel={humanizeToken(action.actionType)} />
+            </div>
+            <MetricGrid>
+              {templateName ? <KeyValueRow label="Template">{templateName}</KeyValueRow> : null}
+              {broadcastName ? <KeyValueRow label="Broadcast">{broadcastName}</KeyValueRow> : null}
+              {channelNumber ? (
+                <KeyValueRow label="Channel">
+                  <span className="font-mono text-xs">{channelNumber}</span>
+                </KeyValueRow>
+              ) : null}
+              {localMessageId ? (
+                <KeyValueRow label="Local message">
+                  <span className="font-mono text-xs">{localMessageId}</span>
+                </KeyValueRow>
+              ) : null}
+            </MetricGrid>
+          </div>
+        </div>
+      </SectionCard>
 
       {variables.length > 0 ? (
-        <Section title="Variables">
-          <table className="w-full text-xs">
-            <thead className="text-left text-[var(--text-secondary)]">
-              <tr>
-                <th className="py-1 pr-3 font-medium">Key</th>
-                <th className="py-1 font-medium">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {variables.map((row, i) => (
-                <tr key={`${row.key}-${i}`} className="border-t border-[var(--border-subtle)]">
-                  <td className="py-1 pr-3 font-mono text-[var(--text-primary)]">{row.key}</td>
-                  <td className="py-1 font-mono text-[var(--text-secondary)]">{row.value}</td>
+        <SectionCard>
+          <SectionHeading
+            icon={FileCode2}
+            title="Template variables"
+            description="Resolved variables sent with the outbound message."
+          />
+          <div className="mt-3 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--bg-tertiary)] text-left text-[var(--text-secondary)]">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Key</th>
+                  <th className="px-3 py-2 font-medium">Value</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Section>
+              </thead>
+              <tbody>
+                {variables.map((row, i) => (
+                  <tr key={`${row.key}-${i}`} className="border-t border-[var(--border-subtle)]">
+                    <td className="px-3 py-2 font-mono text-[var(--text-primary)]">{row.key}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--text-secondary)]">{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
       ) : null}
 
-      <RawJsonSection action={action} />
+      <SectionCard>
+        <RawJsonSection action={action} />
+      </SectionCard>
     </div>
   );
 }
@@ -309,33 +417,92 @@ function collectWatiVariables(input: unknown): { key: string; value: string }[] 
 
 function GenericBody({ action }: { action: ActionRow }) {
   return (
-    <div className="space-y-5">
-      <Section title="Action">
-        <KeyValueRow label="Channel">{action.channel}</KeyValueRow>
-        <KeyValueRow label="Type">{action.actionType}</KeyValueRow>
-        <KeyValueRow label="Status">{action.status}</KeyValueRow>
-        {action.error ? (
-          <KeyValueRow label="Error">
-            <span className="text-[var(--color-error)]">{action.error}</span>
-          </KeyValueRow>
-        ) : null}
-      </Section>
-      <RawJsonSection action={action} />
+    <div className="space-y-4">
+      <SectionCard>
+        <SectionHeading
+          icon={FileCode2}
+          title="Action summary"
+          description="Normalized action metadata for channels without a specialized renderer."
+        />
+        <MetricGrid className="mt-3">
+          <KeyValueRow label="Channel">{action.channel}</KeyValueRow>
+          <KeyValueRow label="Type">{humanizeToken(action.actionType)}</KeyValueRow>
+          <KeyValueRow label="Status">{action.status}</KeyValueRow>
+          {action.error ? (
+            <KeyValueRow label="Error">
+              <span className="text-[var(--color-error)]">{action.error}</span>
+            </KeyValueRow>
+          ) : null}
+        </MetricGrid>
+      </SectionCard>
+      <SectionCard>
+        <RawJsonSection action={action} />
+      </SectionCard>
     </div>
   );
 }
 
 // ─── Shared building blocks ─────────────────────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <section>
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-        {title}
-      </h3>
-      <div className="space-y-1">{children}</div>
+    <section
+      className={cn(
+        'rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4',
+        className,
+      )}
+    >
+      {children}
     </section>
   );
+}
+
+function SectionHeading({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="rounded-full bg-[var(--bg-tertiary)] p-2 text-[var(--text-secondary)]">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </div>
+      <div className="min-w-0">
+        <SectionEyebrow>{title}</SectionEyebrow>
+        {description ? (
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">{description}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SectionEyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+      {children}
+    </div>
+  );
+}
+
+function MetricGrid({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cn('space-y-2', className)}>{children}</div>;
 }
 
 function KeyValueRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -422,26 +589,28 @@ function Collapsible({
 }
 
 function RawJsonSection({ action }: { action: ActionRow }) {
-  const json = useMemo(() => {
-    try {
-      return JSON.stringify(
-        {
-          payload: action.payload,
-          response: action.response,
-        },
-        null,
-        2,
-      );
-    } catch {
-      return '/* unserializable */';
-    }
-  }, [action]);
+  const payloadJson = useMemo(() => prettyJson(action.payload), [action.payload]);
+  const responseJson = useMemo(() => prettyJson(action.response), [action.response]);
   return (
     <Collapsible title="Raw JSON" defaultOpen={false}>
-      <pre className="max-h-[320px] overflow-auto rounded bg-[var(--bg-secondary)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-primary)]">
-        {json}
-      </pre>
+      <div className="space-y-3">
+        <JsonBlock title="Payload" body={payloadJson} />
+        <JsonBlock title="Response" body={responseJson} />
+      </div>
     </Collapsible>
+  );
+}
+
+function JsonBlock({ title, body }: { title: string; body: string }) {
+  return (
+    <div>
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+        {title}
+      </div>
+      <pre className="max-h-[260px] overflow-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-primary)]">
+        {body}
+      </pre>
+    </div>
   );
 }
 
@@ -472,9 +641,68 @@ function fmtDuration(seconds: unknown): string {
 
 function fmtMoney(value: unknown): string {
   if (value == null) return '—';
-  if (typeof value === 'number') {
-    return value.toFixed(4);
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (Number.isFinite(numeric)) {
+    return USD_CURRENCY_FMT.format(numeric);
   }
   if (typeof value === 'string' && value.length > 0) return value;
   return JSON.stringify(value);
+}
+
+function summarizeCostBreakdown(
+  costBreakdown: Record<string, unknown>,
+): Array<{ label: string; value: string }> {
+  return Object.entries(costBreakdown)
+    .filter(([, value]) => value == null || typeof value !== 'object')
+    .map(([key, value]) => ({
+      label: humanizeToken(key),
+      value: fmtMoney(value),
+    }));
+}
+
+function detailCostBreakdown(
+  costBreakdown: Record<string, unknown>,
+): Array<{ title: string; rows: Array<{ label: string; value: string }> }> {
+  return Object.entries(costBreakdown)
+    .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))
+    .map(([key, value]) => ({
+      title: humanizeToken(key),
+      rows: Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => ({
+        label: humanizeToken(childKey),
+        value: fmtMoney(childValue),
+      })),
+    }))
+    .filter((detail) => detail.rows.length > 0);
+}
+
+function humanizeToken(value: string | null | undefined): string {
+  if (!value) return 'Unknown';
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((token) => {
+      const lower = token.toLowerCase();
+      if (lower === 'llm') return 'LLM';
+      if (lower === 'sms') return 'SMS';
+      if (lower === 'api') return 'API';
+      if (lower === 'id') return 'ID';
+      if (lower === 'url') return 'URL';
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return '/* unserializable */';
+  }
 }

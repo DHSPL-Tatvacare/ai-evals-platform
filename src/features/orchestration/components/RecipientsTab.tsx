@@ -10,7 +10,6 @@ import {
   type RecipientState,
   type RunStatus,
 } from '@/features/orchestration/types';
-import { OverrideMenu } from './OverrideMenu';
 
 const PAGE_SIZE = 50;
 const ACTIVE_REFRESH_MS = 5000;
@@ -107,6 +106,8 @@ export function RecipientsTab({ runId, runStatus }: { runId: string; runStatus: 
     return () => window.clearInterval(interval);
   }, [refresh, rows, runStatus]);
 
+  const showWakeupColumn = rows.some((row) => Boolean(row.wakeupAt));
+
   const columns: ColumnDef<RecipientState>[] = [
     {
       key: 'recipientId',
@@ -150,20 +151,15 @@ export function RecipientsTab({ runId, runStatus }: { runId: string; runStatus: 
       header: 'Enrolled',
       render: (r) => fmtDate(r.enrolledAt),
     },
-    {
+  ];
+
+  if (showWakeupColumn) {
+    columns.push({
       key: 'wakeupAt',
       header: 'Wake-up',
       render: (r) => fmtDate(r.wakeupAt),
-    },
-    {
-      key: '_override',
-      header: '',
-      width: '48px',
-      render: (r) => (
-        <OverrideMenu runId={runId} recipientId={r.recipientId} onApplied={refresh} />
-      ),
-    },
-  ];
+    });
+  }
 
   // Page size is fixed at 50 here; total page count is unknown from this API
   // (no count returned), so we infer "there might be a next page" when the

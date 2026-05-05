@@ -105,6 +105,13 @@ class WorkflowResponse(CamelORMModel):
     description: Optional[str]
     current_published_version_id: Optional[uuid.UUID]
     created_by: uuid.UUID
+    # Human-readable creator fields, resolved at the route layer via a
+    # left join on ``platform.users``. Both are ``None`` for system
+    # workflows whose creator is the system user, or when the creator
+    # row was deleted. Operators see the display name in the listing
+    # without a separate users-lookup endpoint.
+    created_by_name: Optional[str] = None
+    created_by_email: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     # Most-recent ``WorkflowRun`` for this workflow, projected here so the

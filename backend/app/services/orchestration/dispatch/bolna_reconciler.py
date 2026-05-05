@@ -13,6 +13,7 @@ The actual persistence happens in ``_reconciler.apply_terminal_event``.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,8 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({
 # routing outcomes our graphs use. Order matters — RNR-shaped reasons
 # attached to a "completed" status fall into ``rnr``, not ``answered``.
 _RNR_TOKENS = ("no-answer", "rnr", "busy")
+_BOLNA_COST_DIVISOR = Decimal("100")
+_BOLNA_COST_PRECISION = Decimal("0.0001")
 
 
 def is_terminal(status: Optional[str]) -> bool:
@@ -67,6 +70,35 @@ def classify_outcome(status: Optional[str], status_reason: Optional[str]) -> str
     if any(tok in s or tok in r for tok in _RNR_TOKENS):
         return "bolna_rnr"
     return "bolna_failed"
+
+
+def _normalize_cost_scalar(value: Any) -> Any:
+    """Normalize Bolna's cost subunits into major-unit decimals.
+
+    Bolna execution payloads expose ``total_cost`` / ``cost_breakdown`` in
+    provider subunits (for example ``27.04`` for a dashboard value shown as
+    ``0.2704``). Persist normalized major-unit values on the action/recipient
+    surfaces while preserving the raw upstream event under ``last_event``.
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    try:
+        numeric = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return value
+    normalized = (numeric / _BOLNA_COST_DIVISOR).quantize(
+        _BOLNA_COST_PRECISION,
+        rounding=ROUND_HALF_UP,
+    )
+    return float(normalized)
+
+
+def _normalize_cost_tree(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _normalize_cost_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_cost_tree(item) for item in value]
+    return _normalize_cost_scalar(value)
 
 
 def _extract_post_call_payload(event: dict[str, Any]) -> dict[str, Any]:
@@ -97,8 +129,8 @@ def _extract_post_call_payload(event: dict[str, Any]) -> dict[str, Any]:
         "transcript": _pick("transcript"),
         "recording_url": _pick("recording_url", "recordingUrl"),
         "duration_sec": _pick("duration", "duration_seconds"),
-        "total_cost": _pick("total_cost", "cost"),
-        "cost_breakdown": _pick("cost_breakdown"),
+        "total_cost": _normalize_cost_scalar(_pick("total_cost", "cost")),
+        "cost_breakdown": _normalize_cost_tree(_pick("cost_breakdown")),
         "error_message": _pick("error_message", "error"),
         "extracted_data": _pick("extracted_data"),
         "hangup_reason": _pick("hangup_reason", "status_reason"),
@@ -169,7 +201,6 @@ async def apply_event(
         provider_status=(status or "").lower(),
         child_action_type=outcome,
         child_idempotency_key=child_idem,
-        child_response=event,
     )
 
 

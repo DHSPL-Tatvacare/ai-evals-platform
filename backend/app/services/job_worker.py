@@ -1708,7 +1708,7 @@ async def handle_fire_orchestration_trigger(
         wf = (await db.execute(
             select(_Wf).where(_Wf.id == trig.workflow_id, _Wf.tenant_id == tenant_id)
         )).scalar_one_or_none()
-        if wf is None or wf.current_published_version_id is None:
+        if wf is None or not wf.active or wf.current_published_version_id is None:
             logger.warning(
                 "fire-orchestration-trigger: workflow %s not publishable",
                 trig.workflow_id,

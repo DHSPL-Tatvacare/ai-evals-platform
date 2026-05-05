@@ -1,5 +1,6 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react';
 import {
+  AlertCircle,
   CheckCircle2,
   Circle,
   Loader2,
@@ -40,6 +41,15 @@ export interface CustomNodeData extends Record<string, unknown> {
   /** Optional run-view overlay. When present, renders a status pill +
    *  cohort-size badge. Set by the run canvas only — never the builder. */
   overlay?: NodeOverlay;
+  /** Phase 14 / Phase E — publish-failure summaries keyed onto this node.
+   *  Each entry is `{field, message}` from the structured 400/422 body.
+   *  Renders a red alert badge on the canvas card; click focuses the
+   *  inspector + centers React Flow on the node. Builder canvas only. */
+  publishErrors?: Array<{ field?: string | null; message: string }>;
+  /** Phase-14 follow-up — when false, the per-node delete affordance
+   *  hides. Defaults to true if not provided to keep older callers
+   *  (run-canvas overlay, fixture data) rendering as before. */
+  editable?: boolean;
 }
 
 function asOverlay(value: unknown): NodeOverlay | undefined {
@@ -59,6 +69,22 @@ function asOverlay(value: unknown): NodeOverlay | undefined {
     status,
     cohortSize: typeof v.cohortSize === 'number' ? v.cohortSize : undefined,
   };
+}
+
+function asPublishErrors(
+  value: unknown,
+): Array<{ field?: string | null; message: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: Array<{ field?: string | null; message: string }> = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    const message = typeof r.message === 'string' ? r.message : null;
+    if (!message) continue;
+    const field = typeof r.field === 'string' ? r.field : null;
+    out.push({ field, message });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function asCustomData(value: unknown): CustomNodeData {
@@ -94,6 +120,8 @@ function asCustomData(value: unknown): CustomNodeData {
       : fallback.outputEdges,
     outputEdgeLabels,
     overlay: asOverlay(v.overlay),
+    publishErrors: asPublishErrors(v.publishErrors),
+    editable: typeof v.editable === 'boolean' ? v.editable : true,
   };
 }
 
@@ -130,19 +158,54 @@ const HANDLE_BASE: React.CSSProperties = {
 
 export function CustomNode({ id, data: rawData, selected }: NodeProps) {
   const data = asCustomData(rawData);
+  const reactFlow = useReactFlow();
   // Prefer the Phase 11 ``displayCategory`` token; fall back to the
   // legacy ``category`` so saved-state hydration paths that still carry
   // only ``category`` keep rendering.
   const cat = getCategoryDef(data.displayCategory ?? data.category);
   const outputs = data.outputEdges.length > 0 ? data.outputEdges : ['default'];
   const overlay = data.overlay;
+  const publishErrors = data.publishErrors;
 
   // Run canvas (overlay present) is read-only; only the builder canvas
   // exposes the per-node delete affordance, which routes through a
-  // confirm dialog in the builder page (see WorkflowBuilderPage).
-  const onDelete = overlay
-    ? undefined
-    : () => useWorkflowBuilderStore.getState().requestDeleteNode(id);
+  // confirm dialog in the builder page (see WorkflowBuilderPage). The
+  // `editable` flag (Phase-14 follow-up) further hides the delete in
+  // view mode even when no run overlay is present.
+  const onDelete =
+    overlay || !data.editable
+      ? undefined
+      : () => useWorkflowBuilderStore.getState().requestDeleteNode(id);
+
+  // Phase 14 / Phase E — clicking the publish-error badge centers the
+  // node and selects it so the inspector opens to the right form. The
+  // builder canvas suppresses the badge during a live run (overlay set).
+  const onClickErrorBadge = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const node = reactFlow.getNode(id);
+    if (node) {
+      const x = node.position.x + (node.measured?.width ?? node.width ?? 240) / 2;
+      const y = node.position.y + (node.measured?.height ?? node.height ?? 80) / 2;
+      reactFlow.setCenter(x, y, { zoom: reactFlow.getZoom(), duration: 300 });
+    }
+    useWorkflowBuilderStore.getState().setSelectedNode(id);
+  };
+
+  const errorBadge =
+    !overlay && publishErrors && publishErrors.length > 0 ? (
+      <button
+        type="button"
+        onClick={onClickErrorBadge}
+        aria-label={`Publish error on ${data.label || data.nodeType}`}
+        title={publishErrors
+          .map((p) => (p.field ? `${p.field}: ${p.message}` : p.message))
+          .join('\n')}
+        data-testid="custom-node-publish-error-badge"
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--color-error)] hover:bg-[var(--surface-error-subtle,var(--bg-tertiary))]"
+      >
+        <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    ) : null;
 
   const barTrailing = overlay
     ? (() => {
@@ -163,7 +226,7 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
           </span>
         );
       })()
-    : null;
+    : errorBadge;
 
   const footer =
     overlay?.cohortSize !== undefined ? (

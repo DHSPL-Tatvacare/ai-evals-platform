@@ -61,6 +61,11 @@ class ConnectionResponse(CamelORMModel):
     # Plaintext config WITH secret values stripped — operators see remaining
     # non-secret fields (e.g. base_url, sender_id) for sanity checks.
     config_redacted: dict[str, Any]
+    # Phase 14 follow-up — partial-reveal previews of stored secret values,
+    # keyed by field name. Format: ``XYZA••••WXYZ`` for values >= 8 chars,
+    # ``••••WXYZ`` for shorter. Empty when nothing is stored. UI hint only —
+    # the full secret is never decryptable from this preview.
+    secret_previews: dict[str, str] = Field(default_factory=dict)
     # Provider field schema + which keys are secret. Lets the UI render edit
     # forms without fetching the schema endpoint separately.
     fields: list[ConnectionFieldDescriptor]

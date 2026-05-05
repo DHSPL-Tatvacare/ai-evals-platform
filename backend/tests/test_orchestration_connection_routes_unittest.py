@@ -142,6 +142,48 @@ async def test_create_then_get_never_returns_secret_value(client):
 
 
 @pytest.mark.asyncio
+async def test_get_returns_partial_reveal_secret_preview(client):
+    """Phase 14 follow-up: stored secrets surface as a `secretPreviews`
+    map keyed by field name. Format `XYZA••••WXYZ` for values ≥ 8 chars,
+    `••••WXYZ` for shorter. The full secret is still stripped from
+    ``configRedacted`` — only the masked preview leaves the server."""
+    body = _bolna_create_body()
+    # Use a deterministic secret long enough to hit the first-4 + last-4 path.
+    body["config"]["api_key"] = "AAAAxxxxxxxxZZZZ"
+    r = await client.post("/api/orchestration/connections", json=body)
+    assert r.status_code == 201, r.text
+    cid = r.json()["id"]
+
+    g = await client.get(f"/api/orchestration/connections/{cid}")
+    assert g.status_code == 200, g.text
+    payload = g.json()
+    assert "api_key" not in payload["configRedacted"]
+    previews = payload.get("secretPreviews") or {}
+    assert previews.get("api_key") == "AAAA••••ZZZZ", previews
+    # The preview itself is partial — does not let a viewer reconstruct
+    # the secret. Spot-check: the middle chars never appear in the
+    # preview.
+    assert "xxxxxxxx" not in previews["api_key"]
+
+
+@pytest.mark.asyncio
+async def test_get_secret_preview_clamps_short_values_to_last_four(client):
+    """Short secrets (< 8 chars) collapse to last-4 only — surfacing the
+    first-4 of a 5-char key would leak too much. Empty / missing values
+    drop out of the preview map entirely."""
+    body = _bolna_create_body()
+    body["config"]["api_key"] = "abc12"  # 5 chars
+    r = await client.post("/api/orchestration/connections", json=body)
+    assert r.status_code == 201, r.text
+    cid = r.json()["id"]
+
+    g = await client.get(f"/api/orchestration/connections/{cid}")
+    assert g.status_code == 200, g.text
+    previews = g.json().get("secretPreviews") or {}
+    assert previews.get("api_key") == "••••bc12", previews
+
+
+@pytest.mark.asyncio
 async def test_webhook_connection_redacts_secret_and_has_no_webhook_url(client):
     r = await client.post("/api/orchestration/connections", json=_webhook_create_body())
     assert r.status_code == 201, r.text

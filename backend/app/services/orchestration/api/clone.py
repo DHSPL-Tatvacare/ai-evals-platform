@@ -103,6 +103,7 @@ async def clone_system_workflow(
         select(Workflow).where(
             Workflow.id == source_workflow_id,
             Workflow.tenant_id == SYSTEM_TENANT_ID,
+            Workflow.active == True,
         )
     )
     if src is None:

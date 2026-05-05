@@ -14,12 +14,14 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthContext, get_auth_context
 from app.auth.app_scope import ensure_registered_app_access
 from app.database import get_db
 from app.models.orchestration import Workflow
+from app.models.user import User
 from app.schemas.orchestration import (
     ActionResponse,
     ActionTemplateResponse,
@@ -87,10 +89,21 @@ async def create_workflow(
     return wf
 
 
-async def _load_and_gate_workflow(db: AsyncSession, auth: AuthContext, workflow_id: uuid.UUID):
+async def _load_and_gate_workflow(
+    db: AsyncSession,
+    auth: AuthContext,
+    workflow_id: uuid.UUID,
+    *,
+    require_active: bool = True,
+):
     """Load a workflow scoped to ``auth.tenant_id`` and verify the caller has
     access to its ``app_id``. Returns the workflow or raises HTTPException(404)."""
-    wf = await wf_service.get_workflow(db, tenant_id=auth.tenant_id, workflow_id=workflow_id)
+    wf = await wf_service.get_workflow(
+        db,
+        tenant_id=auth.tenant_id,
+        workflow_id=workflow_id,
+        active_only=require_active,
+    )
     if wf is None:
         raise HTTPException(status_code=404, detail="workflow not found")
     await ensure_registered_app_access(db, auth, wf.app_id)
@@ -102,18 +115,45 @@ _NO_RUN: tuple[Optional[uuid.UUID], Optional[datetime], Optional[str]] = (
 )
 
 
+_NO_CREATOR: tuple[Optional[str], Optional[str]] = (None, None)
+
+
 def _to_workflow_response(
     wf: Workflow,
     last_run: tuple[Optional[uuid.UUID], Optional[datetime], Optional[str]] = _NO_RUN,
+    creator: tuple[Optional[str], Optional[str]] = _NO_CREATOR,
 ) -> WorkflowResponse:
-    """Project a Workflow ORM row + its latest run summary into the API
-    response. Centralised so list and single-get share the identical
-    field-population path — keeps ``last_run_*`` consistent."""
+    """Project a Workflow ORM row + its latest run summary + creator
+    profile into the API response. Centralised so list and single-get
+    share the identical field-population path — keeps ``last_run_*`` /
+    ``created_by_name`` / ``created_by_email`` consistent."""
     resp = WorkflowResponse.model_validate(wf)
     resp.last_run_id = last_run[0]
     resp.last_run_at = last_run[1]
     resp.last_run_status = last_run[2]
+    resp.created_by_name = creator[0]
+    resp.created_by_email = creator[1]
     return resp
+
+
+async def _resolve_creators(
+    db: AsyncSession,
+    *,
+    workflows: list[Workflow],
+) -> dict[uuid.UUID, tuple[Optional[str], Optional[str]]]:
+    """Bulk-resolve `(created_by) -> (display_name, email)` so the listing
+    avoids N+1 lookups. Tenant-agnostic on purpose: a workflow's creator
+    might be the system user (cross-tenant), so we look up by id alone.
+    Missing rows fall through to (None, None)."""
+    ids = list({w.created_by for w in workflows if w.created_by})
+    if not ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(User.id, User.display_name, User.email).where(User.id.in_(ids))
+        )
+    ).all()
+    return {r.id: (r.display_name, r.email) for r in rows}
 
 
 async def _attach_last_runs(
@@ -125,8 +165,13 @@ async def _attach_last_runs(
     last_runs = await run_service.latest_runs_by_workflow_ids(
         db, tenant_id=tenant_id, workflow_ids=[w.id for w in workflows],
     )
+    creators = await _resolve_creators(db, workflows=workflows)
     return [
-        _to_workflow_response(w, last_runs.get(w.id, _NO_RUN))
+        _to_workflow_response(
+            w,
+            last_runs.get(w.id, _NO_RUN),
+            creators.get(w.created_by, _NO_CREATOR),
+        )
         for w in workflows
     ]
 
@@ -182,11 +227,16 @@ async def get_workflow(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    wf = await _load_and_gate_workflow(db, auth, workflow_id)
+    wf = await _load_and_gate_workflow(db, auth, workflow_id, require_active=False)
     last_runs = await run_service.latest_runs_by_workflow_ids(
         db, tenant_id=auth.tenant_id, workflow_ids=[wf.id],
     )
-    return _to_workflow_response(wf, last_runs.get(wf.id, _NO_RUN))
+    creators = await _resolve_creators(db, workflows=[wf])
+    return _to_workflow_response(
+        wf,
+        last_runs.get(wf.id, _NO_RUN),
+        creators.get(wf.created_by, _NO_CREATOR),
+    )
 
 
 @router.patch("/workflows/{workflow_id}", response_model=WorkflowResponse)
@@ -287,7 +337,7 @@ async def list_versions(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_workflow(db, auth, workflow_id)
+    await _load_and_gate_workflow(db, auth, workflow_id, require_active=False)
     return await ver_service.list_versions(
         db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
     )
@@ -303,7 +353,7 @@ async def get_version(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_workflow(db, auth, workflow_id)
+    await _load_and_gate_workflow(db, auth, workflow_id, require_active=False)
     v = await ver_service.get_version(db, tenant_id=auth.tenant_id, version_id=version_id)
     if v is None or v.workflow_id != workflow_id:
         raise HTTPException(status_code=404, detail="version not found")
@@ -329,6 +379,13 @@ async def publish_version(
     except DispatchRequiredFieldsError as exc:
         raise HTTPException(status_code=422, detail=exc.errors)
     except ver_service.VersionPublishError as exc:
+        # Phase 14 / Phase E — when the publish failure carries a
+        # structured ``errors`` list (the normal validator path), surface
+        # it as the ``detail`` array so the FE renders 400 and 422 the
+        # same way. Bare freeform-message failures still 400 with the
+        # legacy string body.
+        if exc.errors:
+            raise HTTPException(status_code=400, detail=exc.errors)
         raise HTTPException(status_code=400, detail=str(exc))
     if v is None:
         raise HTTPException(status_code=404, detail="version not found")
@@ -469,7 +526,9 @@ async def list_runs(
     # Otherwise restrict to apps in the caller's app_access set so a tenant
     # admin without app A's grant can't see app A's runs.
     if workflow_id is not None:
-        wf = await wf_service.get_workflow(db, tenant_id=auth.tenant_id, workflow_id=workflow_id)
+        wf = await wf_service.get_workflow(
+            db, tenant_id=auth.tenant_id, workflow_id=workflow_id, active_only=False,
+        )
         if wf is None:
             raise HTTPException(status_code=404, detail="workflow not found")
         await ensure_registered_app_access(db, auth, wf.app_id)

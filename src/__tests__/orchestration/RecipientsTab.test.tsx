@@ -5,10 +5,6 @@ vi.mock('@/services/api/orchestration', () => ({
   listRunRecipients: vi.fn(),
 }));
 
-vi.mock('@/features/orchestration/components/OverrideMenu', () => ({
-  OverrideMenu: () => <div data-testid="override-menu">override</div>,
-}));
-
 import { listRunRecipients } from '@/services/api/orchestration';
 import { RecipientsTab } from '@/features/orchestration/components/RecipientsTab';
 
@@ -100,5 +96,37 @@ describe('RecipientsTab', () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(mockedListRunRecipients).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides the wake-up column when no recipient is suspended', async () => {
+    render(<RecipientsTab runId="run-1" runStatus="completed" />);
+
+    await waitFor(() => expect(mockedListRunRecipients).toHaveBeenCalled());
+
+    expect(screen.queryByText('Wake-up')).not.toBeInTheDocument();
+  });
+
+  it('shows the wake-up column when at least one recipient is waiting on a timer', async () => {
+    mockedListRunRecipients.mockResolvedValueOnce([
+      {
+        recipientId: 'lead-2',
+        currentNodeId: 'logic.wait',
+        status: 'waiting',
+        wakeupAt: '2026-05-04T13:00:00Z',
+        payload: {},
+        enrolledAt: '2026-05-04T10:00:00Z',
+        completedAt: null,
+        error: null,
+      },
+    ]);
+
+    render(<RecipientsTab runId="run-1" runStatus="waiting" />);
+
+    await waitFor(() => expect(mockedListRunRecipients).toHaveBeenCalled());
+
+    expect(screen.getByText('Wake-up')).toBeInTheDocument();
+    expect(
+      screen.getByText(new Date('2026-05-04T13:00:00Z').toLocaleString()),
+    ).toBeInTheDocument();
   });
 });

@@ -6,11 +6,14 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     reason: Optional[str] = None
 
 

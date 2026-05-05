@@ -11,6 +11,7 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.integrations.lsq import LsqWriteError
 from app.services.orchestration.node_protocol import (
     ActionDispatch,
@@ -21,6 +22,8 @@ from app.services.orchestration.node_registry import register_node
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     connection_id: uuid.UUID = Field(
         ...,
         json_schema_extra={"x-type": "connection_picker", "x-provider": "lsq"},

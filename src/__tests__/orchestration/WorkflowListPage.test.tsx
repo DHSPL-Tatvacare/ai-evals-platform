@@ -171,7 +171,12 @@ describe('WorkflowListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
 
     await waitFor(() => expect(fireManualRun).toHaveBeenCalledWith('wf-tenant'));
-    expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/orchestration/runs/run-1');
+    // Phase-14 follow-up — Run Now from the listing now navigates to the
+    // builder with `?run=<id>` (unified inspector overlay) instead of the
+    // legacy standalone /runs/:runId page.
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/inside-sales/orchestration/workflows/wf-tenant?run=run-1',
+    );
   });
 
   it('archives a custom workflow from the unified table', async () => {

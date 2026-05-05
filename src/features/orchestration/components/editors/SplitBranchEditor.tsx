@@ -12,7 +12,6 @@ import type {
 } from '@/features/orchestration/types';
 
 import { PredicateBuilder } from './PredicateBuilder';
-import { normalizeSplitConfigForMode } from './splitBranchUtils';
 
 interface SplitConfig {
   mode?: SplitMode;
@@ -56,7 +55,13 @@ export function SplitBranchEditor({ value, onChange, fieldOptions }: Props) {
   const branches = useMemo(() => value.branches ?? [], [value.branches]);
 
   const setMode = (next: SplitMode) => {
-    onChange(normalizeSplitConfigForMode(value, next));
+    // Phase 14 / Phase D — branch shape normalisation lives in the Zod
+    // `LogicSplitConfigSchema.transform()`. Writing only the new mode is
+    // enough: the store's `updateNodeConfig` parses the result and prunes
+    // mode-incompatible branch fields automatically. The previous
+    // event-time `normalizeSplitConfigForMode` call duplicated work and
+    // could miss configs mutated through other code paths.
+    onChange({ ...value, mode: next });
   };
 
   const updateBranch = (idx: number, patch: Partial<SplitBranch>) => {

@@ -54,16 +54,18 @@ describe('audit #12 — viewport round-trip + non-dirty pan/zoom', () => {
     useWorkflowBuilderStore.getState().reset();
   });
 
-  it('setViewport does NOT mark draft dirty', () => {
-    const s = useWorkflowBuilderStore.getState();
-    expect(s.dirty).toBe(false);
-    s.setViewport({ x: 100, y: 50, zoom: 1.5 });
-    expect(useWorkflowBuilderStore.getState().dirty).toBe(false);
-    expect(useWorkflowBuilderStore.getState().viewport).toEqual({
-      x: 100,
-      y: 50,
-      zoom: 1.5,
-    });
+  it('setViewport does NOT mark draft dirty (data hash unchanged)', () => {
+    // Start from a hydrated baseline so committedDataHash is set; otherwise
+    // the post-reset state is `committedDataHash: null` by design.
+    useWorkflowBuilderStore.getState().hydrate({ nodes: [], edges: [] });
+    const initial = useWorkflowBuilderStore.getState();
+    const initialHash = initial.currentDataHash;
+    expect(initial.committedDataHash).toBe(initial.currentDataHash);
+    initial.setViewport({ x: 100, y: 50, zoom: 1.5 });
+    const after = useWorkflowBuilderStore.getState();
+    expect(after.currentDataHash).toBe(initialHash);
+    expect(after.committedDataHash).toBe(after.currentDataHash);
+    expect(after.viewport).toEqual({ x: 100, y: 50, zoom: 1.5 });
   });
 
   it('toDefinition includes canvas.viewport when set', () => {
@@ -73,7 +75,7 @@ describe('audit #12 — viewport round-trip + non-dirty pan/zoom', () => {
     expect(def.canvas?.viewport).toEqual({ x: 12, y: 34, zoom: 2 });
   });
 
-  it('hydrate from definition restores viewport and resets dirty', () => {
+  it('hydrate from definition restores viewport and re-stamps committed snapshot', () => {
     const s = useWorkflowBuilderStore.getState();
     s.addNode({
       id: 'a',
@@ -82,14 +84,17 @@ describe('audit #12 — viewport round-trip + non-dirty pan/zoom', () => {
       data: { label: 'A', nodeType: 'sink.complete' },
       config: {},
     });
-    expect(useWorkflowBuilderStore.getState().dirty).toBe(true);
+    {
+      const live = useWorkflowBuilderStore.getState();
+      expect(live.currentDataHash).not.toBe(live.committedDataHash);
+    }
     s.hydrate({
       nodes: [],
       edges: [],
       canvas: { viewport: { x: 5, y: 6, zoom: 0.8 } },
     });
     const after = useWorkflowBuilderStore.getState();
-    expect(after.dirty).toBe(false);
+    expect(after.currentDataHash).toBe(after.committedDataHash);
     expect(after.viewport).toEqual({ x: 5, y: 6, zoom: 0.8 });
   });
 });

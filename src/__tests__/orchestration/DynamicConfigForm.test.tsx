@@ -2,32 +2,44 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+// Phase 14 / C4 — DynamicConfigForm now derives WATI template parameters
+// from the TanStack Query cache keyed by connection id. The mock picker
+// simply triggers the value change; the TQ-backed `useWatiTemplates` hook
+// supplies the parameter list via the mocked `listConnectionTemplates`.
+vi.mock('@/services/api/orchestrationConnections', () => ({
+  listConnectionTemplates: vi.fn().mockResolvedValue({
+    provider: 'wati',
+    items: [
+      {
+        name: 'legacy_template',
+        language: 'en',
+        status: 'APPROVED',
+        parameters: ['legacy_var'],
+      },
+      {
+        name: 'document_approved_latest',
+        language: 'en',
+        status: 'APPROVED',
+        parameters: ['name', 'documentType'],
+      },
+    ],
+    error: null,
+  }),
+  listConnectionAgents: vi.fn(),
+  getAgentVariables: vi.fn().mockResolvedValue({ items: [] }),
+}));
+
 vi.mock('@/features/orchestration/components/connections/WatiTemplatePicker', () => ({
   WatiTemplatePicker: ({
     value,
     onChange,
-    onTemplateLoaded,
   }: {
     value: string;
     onChange(next: string): void;
-    onTemplateLoaded?(template: {
-      name: string;
-      language: string;
-      status: string;
-      parameters: string[];
-    } | null): void;
   }) => (
     <button
       type="button"
-      onClick={() => {
-        onChange('document_approved_latest');
-        onTemplateLoaded?.({
-          name: 'document_approved_latest',
-          language: 'en',
-          status: 'APPROVED',
-          parameters: ['name', 'documentType'],
-        });
-      }}
+      onClick={() => onChange('document_approved_latest')}
     >
       {value || 'Select mock WATI template'}
     </button>

@@ -23,12 +23,15 @@ from sqlalchemy import select
 from app.models.orchestration import WorkflowConsentRecord
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration._config_strictness import strict_node_config_dict
 
 
 ConsentPolicy = Literal["permissive", "explicit_optin"]
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     channel: Literal["wa", "voice", "sms", "email"]
     consent_policy: ConsentPolicy = "permissive"
 

@@ -33,6 +33,7 @@ from pydantic import BaseModel, model_validator
 
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration._config_strictness import strict_node_config_dict
 
 
 MergePolicy = Literal["dedupe", "first_wins", "last_wins"]
@@ -40,6 +41,8 @@ PayloadPolicy = Literal["first_wins", "last_wins", "shallow_merge"]
 
 
 class _Config(BaseModel):
+    model_config = strict_node_config_dict()
+
     merge_policy: MergePolicy = "dedupe"
     payload_policy: PayloadPolicy = "last_wins"
 

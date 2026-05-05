@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
-import {
-  listConnectionAgents,
-  type ProviderAgentSummary,
-} from '@/services/api/orchestrationConnections';
+import { useBolnaAgents } from '@/features/orchestration/queries/referenceData';
 
 interface Props {
   /** Connection UUID this dispatch node points at. The picker is disabled
@@ -17,43 +13,23 @@ interface Props {
   onChange(next: string): void;
 }
 
-/** Phase 13 / Phase B — live Bolna agent picker.
+/** Phase 14 — Bolna agent picker, now backed by TanStack Query.
  *
- *  Replaces the legacy free-text ``override_agent_id`` input. Backed by the
- *  ``GET /api/orchestration/connections/{id}/agents`` endpoint which caches
- *  for 30s on the server; the Refresh button bypasses the cache for the
- *  rare "I just created the agent in Bolna" case. */
+ *  Replaces the Phase-13 hand-rolled `useEffect` + `useState` fetch loop.
+ *  Reopening the inspector within the 30 s `staleTime` reuses the cached
+ *  data without a network roundtrip. The Refresh button calls `refresh()`
+ *  which bypasses both the FE and BE caches for the rare "I just created
+ *  the agent in Bolna" case. */
 export function BolnaAgentPicker({ connectionId, value, onChange }: Props) {
-  const [agents, setAgents] = useState<ProviderAgentSummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isFetching, error, refresh } = useBolnaAgents(connectionId);
 
-  const fetchAgents = useCallback(
-    async (refresh: boolean) => {
-      if (!connectionId) {
-        setAgents([]);
-        setError(null);
-        return;
-      }
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await listConnectionAgents(connectionId, { refresh });
-        setAgents(res.items);
-        setError(res.error);
-      } catch (err) {
-        setAgents([]);
-        setError(err instanceof Error ? err.message : 'Failed to load agents');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [connectionId],
-  );
-
-  useEffect(() => {
-    void fetchAgents(false);
-  }, [fetchAgents]);
+  const agents = data?.items ?? [];
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : data?.error
+        ? data.error
+        : null;
 
   const options: ComboboxOption[] = agents.map((a) => ({
     value: a.id,
@@ -77,26 +53,26 @@ export function BolnaAgentPicker({ connectionId, value, onChange }: Props) {
             options={options}
             value={value}
             onChange={onChange}
-            placeholder={loading ? 'Loading agents…' : 'Select an agent'}
-            disabled={loading && agents.length === 0}
-            loading={loading}
+            placeholder={isFetching ? 'Loading agents…' : 'Select an agent'}
+            disabled={isFetching && agents.length === 0}
+            loading={isFetching}
           />
         </div>
         <Button
           variant="secondary"
           size="sm"
           icon={RefreshCw}
-          onClick={() => void fetchAgents(true)}
-          disabled={loading}
+          onClick={() => void refresh()}
+          disabled={isFetching}
           aria-label="Refresh agents"
         >
           Refresh
         </Button>
       </div>
-      {error && (
-        <p className="text-xs text-[var(--color-error)]">{error}</p>
+      {errorMessage && (
+        <p className="text-xs text-[var(--color-error)]">{errorMessage}</p>
       )}
-      {!loading && !error && agents.length === 0 && (
+      {!isFetching && !errorMessage && agents.length === 0 && (
         <p className="text-xs text-[var(--text-secondary)]">
           No agents found. Create one in Bolna and click Refresh.
         </p>
