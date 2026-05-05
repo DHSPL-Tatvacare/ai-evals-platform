@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { SplitBranchEditor } from '@/features/orchestration/components/editors/SplitBranchEditor';
+import { normalizeSplitConfigForMode } from '@/features/orchestration/components/editors/splitBranchUtils';
 
 describe('SplitBranchEditor', () => {
   it('adds branches with stable ids the operator never sees', () => {
@@ -69,34 +70,26 @@ describe('SplitBranchEditor', () => {
     expect(next.default_branch_id).toBeUndefined();
   });
 
-  it('drops mode-specific stale fields when switching split modes', async () => {
-    const onChange = vi.fn();
-    render(
-      <SplitBranchEditor
-        value={{
+  it('drops mode-specific stale fields when normalizing split config for a new mode', () => {
+    expect(
+      normalizeSplitConfigForMode(
+        {
           mode: 'by_field',
           field: 'tier',
           branches: [{ id: 'b1', label: 'High', match: 'high', weight: 7 }],
-        }}
-        onChange={onChange}
-      />,
-    );
-
-    fireEvent.pointerDown(screen.getByRole('combobox', { name: /By field value/i }));
-    fireEvent.click(await screen.findByRole('option', { name: /^By rules \(predicates\)$/i }));
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith({
-        mode: 'by_rules',
-        branches: [
-          {
-            id: 'b1',
-            label: 'High',
-            predicate: { field: '', op: 'eq', value: '' },
-          },
-        ],
-        default_branch_id: undefined,
-      });
+        },
+        'by_rules',
+      ),
+    ).toEqual({
+      mode: 'by_rules',
+      branches: [
+        {
+          id: 'b1',
+          label: 'High',
+          predicate: { field: '', op: 'eq', value: '' },
+        },
+      ],
+      default_branch_id: undefined,
     });
   });
 });

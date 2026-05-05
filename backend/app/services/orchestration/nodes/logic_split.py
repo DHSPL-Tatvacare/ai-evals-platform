@@ -91,10 +91,26 @@ class _Config(BaseModel):
         if self.default_branch_id is not None and self.default_branch_id not in ids:
             raise ValueError(
                 f"default_branch_id={self.default_branch_id!r} not present in branches {ids}"
-            )
+        )
         if self.mode == "by_field" and not self.field:
             raise ValueError("'field' required when mode='by_field'")
+        if self.mode == "by_field":
+            if any(not (b.match or "").strip() for b in self.branches):
+                raise ValueError("branches in by_field mode must declare non-empty 'match' values")
+            if any(b.weight is not None for b in self.branches):
+                raise ValueError("branches in by_field mode must not carry random 'weight' values")
+            return self
         if self.mode == "random":
+            if self.field is not None:
+                raise ValueError("'field' is not allowed when mode='random'")
+            if self.default_branch_id is not None:
+                raise ValueError("'default_branch_id' is not allowed when mode='random'")
+            if self.drop_unmatched:
+                raise ValueError("'drop_unmatched' is not allowed when mode='random'")
+            if any(b.match is not None for b in self.branches):
+                raise ValueError("branches in random mode must not carry by_field 'match' values")
+            if any((b.weight or 0) <= 0 for b in self.branches):
+                raise ValueError("branches in random mode must have positive weight on every branch")
             total = sum(b.weight or 0 for b in self.branches)
             if total <= 0:
                 raise ValueError("branches must have positive weight in random mode")

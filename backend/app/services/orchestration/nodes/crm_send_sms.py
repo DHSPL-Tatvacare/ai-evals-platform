@@ -31,6 +31,9 @@ from app.services.orchestration.integrations.template_resolver import (
     TemplateNotFound,
     resolve_template,
 )
+from app.services.orchestration.nodes._dispatch_contract import (
+    assert_contact_field_present,
+)
 from app.services.orchestration.node_protocol import (
     ActionDispatch,
     NodeResult,
@@ -169,13 +172,19 @@ class _Handler:
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
+        cohort: list[tuple[str, dict[str, Any], str]] = []
+
+        async for rid, payload in input_cohort:
+            phone = assert_contact_field_present(
+                node_type=self.node_type,
+                recipient_id=rid,
+                payload=payload,
+                field_name=config.phone_field,
+            )
+            cohort.append((rid, payload, phone))
 
         async with _make_client() as client:
-            async for rid, payload in input_cohort:
-                phone = payload.get(config.phone_field)
-                if not phone:
-                    exhausted.append(RecipientOutcome(recipient_id=rid))
-                    continue
+            for rid, payload, phone in cohort:
                 msg = _render(body_template, payload)
                 idem = ctx.idempotency_key(rid, "sms", config.template_slug)
                 results = await ctx.dispatch_actions([

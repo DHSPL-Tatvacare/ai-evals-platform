@@ -35,8 +35,9 @@ def test_contains():
     assert evaluate_predicate({"field": "notes", "op": "contains", "value": "diabetes"}, {"notes": "patient has diabetes type 2"}) is True
 
 
-def test_missing_field_returns_false():
-    assert evaluate_predicate({"field": "absent", "op": "eq", "value": "x"}, {"present": "y"}) is False
+def test_missing_field_raises():
+    with pytest.raises(PredicateError, match="is missing"):
+        evaluate_predicate({"field": "absent", "op": "eq", "value": "x"}, {"present": "y"})
 
 
 def test_exists_with_stale_value_raises():

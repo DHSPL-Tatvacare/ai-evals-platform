@@ -17,6 +17,7 @@ from app.models.orchestration import (
 )
 from app.services.orchestration.webhook_handlers.generic_event import (
     EventPayloadContractError,
+    EventTriggerConfigurationError,
     fire_event,
 )
 from app.services.orchestration.webhook_handlers.lsq import handle_lsq_event
@@ -94,7 +95,7 @@ async def test_inactive_trigger_skipped(db_session, seed_full_run):
 
 
 @pytest.mark.asyncio
-async def test_unpublished_workflow_skipped(db_session, seed_full_run):
+async def test_unpublished_workflow_raises(db_session, seed_full_run):
     run, version, workflow, _step, tenant_id, app_id = seed_full_run
     workflow.current_published_version_id = None  # unpublished
     event_name = f"e.{uuid.uuid4().hex[:6]}"
@@ -104,11 +105,11 @@ async def test_unpublished_workflow_skipped(db_session, seed_full_run):
         active=True, params={}, created_by=run.triggered_by_user_id,
     ))
     await db_session.flush()
-    created = await fire_event(
-        db_session, tenant_id=tenant_id, app_id=app_id,
-        event_name=event_name, event_payload={"recipient_id": "evt-unpublished"},
-    )
-    assert created == []
+    with pytest.raises(EventTriggerConfigurationError, match="without a published version"):
+        await fire_event(
+            db_session, tenant_id=tenant_id, app_id=app_id,
+            event_name=event_name, event_payload={"recipient_id": "evt-unpublished"},
+        )
 
 
 @pytest.mark.asyncio

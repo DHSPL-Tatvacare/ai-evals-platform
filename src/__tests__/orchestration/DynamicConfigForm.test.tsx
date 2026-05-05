@@ -98,7 +98,7 @@ describe('DynamicConfigForm', () => {
     };
 
     function Harness() {
-      const [value, setValue] = useState({
+      const [value, setValue] = useState<Record<string, unknown>>({
         template_name: 'legacy_template',
         variable_mappings: [
           {
@@ -115,7 +115,9 @@ describe('DynamicConfigForm', () => {
           value={value}
           onChange={setValue}
           connectionIdForVariables="conn-1"
-          templateNameForVariables={value.template_name}
+          templateNameForVariables={
+            typeof value.template_name === 'string' ? value.template_name : undefined
+          }
         />
       );
     }

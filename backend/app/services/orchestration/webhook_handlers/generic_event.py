@@ -25,6 +25,10 @@ class EventPayloadContractError(ValueError):
     """Raised when an inbound event does not reference any recipient(s)."""
 
 
+class EventTriggerConfigurationError(ValueError):
+    """Raised when a matching trigger points at an invalid workflow state."""
+
+
 _SINGLE_RECIPIENT_KEYS = ("recipient_id", "recipientId")
 
 
@@ -116,13 +120,24 @@ async def fire_event(
         stmt = stmt.where(WorkflowTrigger.app_id == app_id)
     triggers = (await db.execute(stmt)).scalars().all()
 
-    created: list[uuid.UUID] = []
+    workflows_by_trigger: dict[uuid.UUID, Workflow] = {}
+    unpublished: list[str] = []
     for trigger in triggers:
         wf = (
             await db.execute(select(Workflow).where(Workflow.id == trigger.workflow_id))
         ).scalar_one()
+        workflows_by_trigger[trigger.id] = wf
         if wf.current_published_version_id is None:
-            continue
+            unpublished.append(str(wf.id))
+    if unpublished:
+        raise EventTriggerConfigurationError(
+            "matching event trigger(s) reference workflow(s) without a published version: "
+            + ", ".join(unpublished)
+        )
+
+    created: list[uuid.UUID] = []
+    for trigger in triggers:
+        wf = workflows_by_trigger[trigger.id]
 
         run = WorkflowRun(
             id=uuid.uuid4(),

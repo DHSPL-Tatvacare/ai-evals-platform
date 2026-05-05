@@ -38,6 +38,9 @@ from app.services.orchestration.attempt_policy import (
 from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_dict,
 )
+from app.services.orchestration.nodes._dispatch_contract import (
+    assert_contact_field_present,
+)
 from app.services.orchestration.dispatch.resume_enqueue import (
     enqueue_bolna_correlation_poll,
 )
@@ -156,6 +159,12 @@ class _Handler:
         # rows we revisit with a streaming CSV writer.
         cohort: list[tuple[str, dict[str, Any]]] = []
         async for rid, payload in input_cohort:
+            assert_contact_field_present(
+                node_type=self.node_type,
+                recipient_id=rid,
+                payload=payload,
+                field_name=config.phone_field,
+            )
             cohort.append((rid, payload))
 
         if len(cohort) >= BATCH_THRESHOLD:
@@ -187,10 +196,12 @@ class _Handler:
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         for rid, payload in cohort:
-            phone = payload.get(config.phone_field)
-            if not phone:
-                exhausted.append(RecipientOutcome(recipient_id=rid))
-                continue
+            phone = assert_contact_field_present(
+                node_type=self.node_type,
+                recipient_id=rid,
+                payload=payload,
+                field_name=config.phone_field,
+            )
 
             user_data = apply_variable_mappings_dict(
                 config.variable_mappings,
@@ -302,19 +313,20 @@ class _Handler:
         dial-out internally; per-execution status is reconciled by the
         Phase E poller (``poll-bolna-executions``).
 
-        Recipients without a phone number short-circuit to ``exhausted``
-        before the batch is built — Bolna would reject the row anyway,
-        and we'd rather surface the failure as a per-recipient outcome.
+        Missing contact fields fail the node before any upstream dispatch so
+        operators do not silently skip or partially send a malformed cohort.
         """
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         dispatched: list[tuple[str, dict[str, Any], dict[str, Any], str]] = []
 
         for rid, payload in cohort:
-            phone = payload.get(config.phone_field)
-            if not phone:
-                exhausted.append(RecipientOutcome(recipient_id=rid))
-                continue
+            phone = assert_contact_field_present(
+                node_type=self.node_type,
+                recipient_id=rid,
+                payload=payload,
+                field_name=config.phone_field,
+            )
             user_data = apply_variable_mappings_dict(
                 config.variable_mappings,
                 payload,

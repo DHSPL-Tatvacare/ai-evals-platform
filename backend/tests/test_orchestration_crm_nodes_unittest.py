@@ -280,8 +280,8 @@ async def test_crm_send_wati_missing_phone_field(db_session, seed_full_run):
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="wati",
                     step_id=step_id, connections=resolver)
-    result = await _Handler().execute(CohortStream([("L-x", {})]), cfg, ctx)
-    assert [o.recipient_id for o in result.by_output_id["exhausted"]] == ["L-x"]
+    with pytest.raises(RuntimeError, match="missing required contact field 'whatsapp_number'"):
+        await _Handler().execute(CohortStream([("L-x", {})]), cfg, ctx)
 
 
 @pytest.mark.asyncio
@@ -521,6 +521,38 @@ async def test_crm_place_bolna_call_blank_agent_id_raises(
         await _Handler().execute(cohort, cfg, ctx)
 
 
+@pytest.mark.asyncio
+async def test_crm_place_bolna_call_missing_phone_field_raises(
+    db_session, seed_full_run,
+):
+    from app.services.orchestration.nodes.crm_place_bolna_call import _Config, _Handler
+
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    slug = f"nophone-{uuid.uuid4().hex[:8]}"
+    db_session.add(WorkflowActionTemplate(
+        id=uuid.uuid4(), tenant_id=None, app_id=None,
+        channel="bolna", slug=slug, name="No Phone",
+        payload_schema={},
+    ))
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="bn", node_type="crm.place_bolna_call")
+    await db_session.flush()
+
+    cfg = _Config(
+        connection_id=uuid.uuid4(),
+        template_slug=slug,
+        agent_id="agent-confirm-1",
+        phone_field="phone",
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="bn",
+                    step_id=step_id,
+                    connections=_FakeResolver(bolna=BolnaService(base_url="https://api.bolna.ai", api_key="k")))
+    with pytest.raises(RuntimeError, match="missing required contact field 'phone'"):
+        await _Handler().execute(CohortStream([("L-1", {})]), cfg, ctx)
+
+
 # ─── crm.send_sms ────────────────────────────────────────────────────────
 
 
@@ -627,6 +659,35 @@ async def test_crm_send_sms_unsupported_provider_raises(
                     tenant_id=tenant_id, app_id=app_id, node_id="sms",
                     step_id=step_id, connections=resolver)
     with pytest.raises(RuntimeError, match="not an SMS provider"):
+        await _Handler().execute(CohortStream([("L1", {})]), cfg, ctx)
+
+
+@pytest.mark.asyncio
+async def test_crm_send_sms_missing_phone_field_raises(
+    db_session, seed_full_run,
+):
+    from app.services.orchestration.nodes.crm_send_sms import _Config, _Handler
+
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    slug = f"sms-nophone-{uuid.uuid4().hex[:8]}"
+    db_session.add(WorkflowActionTemplate(
+        id=uuid.uuid4(), tenant_id=None, app_id=None,
+        channel="sms", slug=slug, name="SMS No Phone",
+        payload_schema={"body": "Hi"},
+    ))
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="sms", node_type="crm.send_sms")
+    await db_session.flush()
+    resolver = _FakeResolver(sms_config={
+        "__provider__": "msg91",
+        "auth_key": "K", "flow_id": "F1", "sender_id": "TATVAS",
+    })
+    cfg = _Config(connection_id=uuid.uuid4(), template_slug=slug, phone_field="phone")
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="sms",
+                    step_id=step_id, connections=resolver)
+    with pytest.raises(RuntimeError, match="missing required contact field 'phone'"):
         await _Handler().execute(CohortStream([("L1", {})]), cfg, ctx)
 
 

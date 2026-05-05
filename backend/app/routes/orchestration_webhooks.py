@@ -110,12 +110,17 @@ async def lsq_webhook(
     # per-connection — provider_specs marks supports_webhook=False.
     _check_secret(secret, settings.LSQ_WEBHOOK_SECRET)
     tenant_id, app_id = _resolve_tenant_for_provider()
-    from app.services.orchestration.webhook_handlers.generic_event import EventPayloadContractError
+    from app.services.orchestration.webhook_handlers.generic_event import (
+        EventPayloadContractError,
+        EventTriggerConfigurationError,
+    )
     from app.services.orchestration.webhook_handlers.lsq import handle_lsq_event
     try:
         created = await handle_lsq_event(db, tenant_id=tenant_id, app_id=app_id, payload=payload)
     except EventPayloadContractError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except EventTriggerConfigurationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     await db.commit()
     return {"status": "ok", "runs_created": len(created)}
 
@@ -131,6 +136,7 @@ async def generic_event_webhook(
     tenant_id, app_id = _resolve_tenant_for_provider()
     from app.services.orchestration.webhook_handlers.generic_event import (
         EventPayloadContractError,
+        EventTriggerConfigurationError,
         fire_event,
     )
     try:
@@ -140,6 +146,8 @@ async def generic_event_webhook(
         )
     except EventPayloadContractError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except EventTriggerConfigurationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     await db.commit()
     return {
         "status": "ok",

@@ -16,10 +16,12 @@ existing definitions parse with no migration:
 Supported leaf ops:
   eq, neq, gte, gt, lte, lt, in, not_in, contains, exists, missing
 
-Missing fields evaluate to False for every leaf op except ``missing`` (true)
-and ``exists`` (false). Malformed operator/value shapes still raise
-``PredicateError`` so publish-time validation and runtime execution fail
-explicitly when a predicate drifts out of contract.
+Missing fields are only legal with ``exists`` / ``missing``. Other leaf ops
+raise ``PredicateError`` so authors must branch on absence explicitly
+instead of silently treating missing payload as ``False``. Malformed
+operator/value shapes still raise ``PredicateError`` so publish-time
+validation and runtime execution fail explicitly when a predicate drifts
+out of contract.
 
 This module replaces ``nodes/_predicate.py``'s ad-hoc evaluator with:
   - a typed ``Predicate`` AST (Pydantic discriminated union),
@@ -168,7 +170,9 @@ def _evaluate_leaf(leaf: LeafPredicate, payload: dict[str, Any]) -> bool:
     if leaf.op == "missing":
         return actual is None
     if actual is None:
-        return False
+        raise PredicateError(
+            f"payload field {leaf.field!r} is missing; use 'exists'/'missing' to branch on absence"
+        )
 
     op = leaf.op
     value = leaf.value

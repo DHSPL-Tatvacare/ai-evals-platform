@@ -109,6 +109,79 @@ def test_invalid_filter_predicate_contract_fails():
     assert any("does not accept a value" in e for e in exc_info.value.errors)
 
 
+def test_invalid_cohort_filter_value_shape_fails():
+    bad_source = {
+        **_VALID_COHORT_QUERY_NODE,
+        "config": {
+            "source_ref": "crm.lead_record",
+            "filters": [{"column": "city", "op": "in", "value": []}],
+        },
+    }
+    defn = _wf(
+        [bad_source, _VALID_SINK_NODE],
+        [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}],
+    )
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(defn, workflow_type="crm")
+    assert any("non-empty list value" in e for e in exc_info.value.errors)
+
+
+def test_split_rejects_stale_random_fields_in_by_field_mode():
+    split_node = {
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {
+            "mode": "by_field",
+            "field": "tier",
+            "branches": [
+                {"id": "high", "label": "High", "match": "high", "weight": 10},
+                {"id": "low", "label": "Low", "match": "low", "weight": 90},
+            ],
+        },
+    }
+    defn = _wf(
+        [_VALID_COHORT_QUERY_NODE, split_node, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "split", "output_id": "default"},
+            {"id": "e_h", "source": "split", "target": "done", "output_id": "high"},
+        ],
+    )
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(defn, workflow_type="crm")
+    assert any("must not carry random 'weight'" in e for e in exc_info.value.errors)
+
+
+def test_split_rejects_stale_by_field_fields_in_random_mode():
+    split_node = {
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {
+            "mode": "random",
+            "field": "tier",
+            "default_branch_id": "high",
+            "drop_unmatched": True,
+            "branches": [
+                {"id": "high", "label": "High", "weight": 50, "match": "high"},
+                {"id": "low", "label": "Low", "weight": 50, "match": "low"},
+            ],
+        },
+    }
+    defn = _wf(
+        [_VALID_COHORT_QUERY_NODE, split_node, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "split", "output_id": "default"},
+            {"id": "e_h", "source": "split", "target": "done", "output_id": "high"},
+        ],
+    )
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(defn, workflow_type="crm")
+    assert any("'field' is not allowed when mode='random'" in e for e in exc_info.value.errors)
+
+
 def test_invalid_wait_event_match_predicate_fails():
     wait_node = {
         "id": "wait",

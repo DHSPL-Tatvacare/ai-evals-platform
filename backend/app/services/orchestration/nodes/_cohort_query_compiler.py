@@ -133,6 +133,22 @@ class CohortQueryFilter(BaseModel):
             raise CohortQueryCompileError(f"unsupported filter op: {v!r}")
         return v
 
+    @model_validator(mode="after")
+    def _validate_value_shape(self) -> "CohortQueryFilter":
+        if self.op in {"in", "not_in"}:
+            if not isinstance(self.value, list) or not self.value:
+                raise CohortQueryCompileError(
+                    f"filter op {self.op!r} requires a non-empty list value"
+                )
+            return self
+        if self.op == "contains":
+            if not isinstance(self.value, str):
+                raise CohortQueryCompileError("'contains' requires a string value")
+            return self
+        if self.value is None:
+            raise CohortQueryCompileError(f"filter op {self.op!r} requires a value")
+        return self
+
 
 class CohortQueryConfig(BaseModel):
     """Canonical Phase 11 cohort-query config.
