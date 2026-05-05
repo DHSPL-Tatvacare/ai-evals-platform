@@ -265,9 +265,18 @@ async def test_batch_upstream_error_exhausts_cohort(
 
 
 @pytest.mark.asyncio
-async def test_batch_skips_recipients_without_phone(
+async def test_batch_fails_fast_on_recipient_without_phone(
     db_session, seed_full_run, monkeypatch,
 ):
+    """A cohort with even one phone-less recipient must raise at the
+    contact-presence check — not silently drop the row.
+
+    Pre-2026-05-05 behavior was "skip silently and dispatch the rest";
+    that lost leads to silent data drops at scale. The shared
+    ``_dispatch_contract.assert_contact_field_present`` helper now
+    raises ``RuntimeError`` so missing contact fields surface in the
+    run's failure reason instead of disappearing into the void.
+    Operators fix the cohort source (CRM phone column) and re-run."""
     run, version, workflow, _step, tenant_id, app_id = seed_full_run
     slug = f"skip-{uuid.uuid4().hex[:8]}"
     _seed_template(db_session, slug)
@@ -298,8 +307,5 @@ async def test_batch_skips_recipients_without_phone(
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, step_id=step_id,
                     connections=resolver)
-    result = await _Handler().execute(cohort, cfg, ctx)
-    assert "L-3" in {o.recipient_id for o in result.by_output_id["exhausted"]}
-    success_ids = {o.recipient_id for o in result.by_output_id["success"]}
-    assert "L-3" not in success_ids
-    assert len(success_ids) == BATCH_THRESHOLD + 1
+    with pytest.raises(RuntimeError, match="missing required contact field 'phone'"):
+        await _Handler().execute(cohort, cfg, ctx)

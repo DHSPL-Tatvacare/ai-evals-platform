@@ -89,7 +89,14 @@ class LsqWriter:
             return {"accessKey": self._access_key, "secretKey": self._secret_key}
         return _auth_params()
 
-    async def update_stage(self, *, prospect_id: str, stage: str) -> None:
+    async def update_stage(
+        self, *, prospect_id: str, stage: str,
+    ) -> dict[str, Any]:
+        """Returns LSQ's parsed response body. ``Status`` and
+        ``Message`` are always present; the dispatch handler stamps
+        ``provider_correlation_id`` from the prospect_id (LSQ doesn't
+        emit a separate update id) and may surface ``Status`` for
+        observability."""
         url = f"{self._resolved_base_url()}/LeadManagement.svc/Lead.Update"
         params = {
             **self._resolved_auth_params(),
@@ -99,13 +106,17 @@ class LsqWriter:
         body = [{"Attribute": "ProspectStage", "Value": stage}]
         async with _make_client() as client:
             try:
-                await _lsq_client._rate_limited_request(
+                resp = await _lsq_client._rate_limited_request(
                     client, "POST", url, params=params, json=body,
                 )
             except _lsq_client.LsqRequestError as exc:
                 raise LsqWriteError(
                     f"LSQ Lead.Update failed (status={exc.status_code}): {exc}"
                 ) from exc
+        try:
+            return resp.json() if hasattr(resp, "json") else {}
+        except Exception:  # noqa: BLE001 — defensive; LSQ sometimes returns 204/empty
+            return {}
 
     async def log_activity(
         self,
@@ -114,7 +125,11 @@ class LsqWriter:
         activity_event: int,
         note: str,
         fields: Optional[list[dict[str, Any]]] = None,
-    ) -> None:
+    ) -> dict[str, Any]:
+        """Returns LSQ's parsed response body — typically
+        ``{ProspectActivityId, Status, Message}``. Dispatch handler
+        captures ``ProspectActivityId`` as ``provider_correlation_id``
+        so reporting / re-fetch can target the activity row directly."""
         url = f"{self._resolved_base_url()}/ProspectActivity.svc/Create"
         params = self._resolved_auth_params()
         body = {
@@ -125,10 +140,14 @@ class LsqWriter:
         }
         async with _make_client() as client:
             try:
-                await _lsq_client._rate_limited_request(
+                resp = await _lsq_client._rate_limited_request(
                     client, "POST", url, params=params, json=body,
                 )
             except _lsq_client.LsqRequestError as exc:
                 raise LsqWriteError(
                     f"LSQ ProspectActivity.Create failed (status={exc.status_code}): {exc}"
                 ) from exc
+        try:
+            return resp.json() if hasattr(resp, "json") else {}
+        except Exception:  # noqa: BLE001 — defensive; LSQ sometimes returns 204/empty
+            return {}

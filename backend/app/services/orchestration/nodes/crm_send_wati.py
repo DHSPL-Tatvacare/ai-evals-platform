@@ -29,6 +29,9 @@ from app.services.orchestration.attempt_policy import (
     attempt_policy_json_schema_extra,
     run_with_attempt_policy,
 )
+from app.services.orchestration.nodes._dispatch_contract import (
+    assert_contact_field_present,
+)
 from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_list,
 )
@@ -150,13 +153,18 @@ class _Handler:
         success: list[RecipientOutcome] = []
         exhausted: list[RecipientOutcome] = []
         on_exhausted = config.attempt_policy.on_exhausted_output_id
+        cohort: list[tuple[str, dict[str, Any], str]] = []
 
         async for rid, payload in input_cohort:
-            wa_number = payload.get(config.phone_field)
-            if not wa_number:
-                exhausted.append(RecipientOutcome(recipient_id=rid))
-                continue
+            wa_number = assert_contact_field_present(
+                node_type=self.node_type,
+                recipient_id=rid,
+                payload=payload,
+                field_name=config.phone_field,
+            )
+            cohort.append((rid, payload, wa_number))
 
+        for rid, payload, wa_number in cohort:
             params_built = apply_variable_mappings_list(
                 config.variable_mappings,
                 payload,
@@ -241,11 +249,39 @@ class _Handler:
 
 
 def _extract_wati_message_id(resp: dict[str, Any]) -> Optional[str]:
-    """Pull the WATI ``localMessageId`` (or fallbacks) out of a send response."""
+    """Pull the WATI ``localMessageId`` out of a send-template response.
+
+    WATI exposes two endpoint shapes that this codebase has hit in prod:
+
+      - **V2 ``sendTemplateMessage``** (single recipient): id at the top
+        level, e.g. ``{localMessageId, whatsappMessageId, ...}``.
+      - **V1 ``sendTemplateMessages``** (broadcast list): id wrapped
+        inside ``receivers[0].localMessageId`` along with ``waId``,
+        ``isValidWhatsAppNumber``, etc. This is the shape that landed
+        on 2026-05-04 and silently produced NULL ``provider_correlation_id``
+        until this fix.
+      - Some legacy paths nested under ``messageContact``.
+
+    The first non-empty value wins. Returns ``None`` only when the
+    response carries none of these — at which point the caller should
+    log a warning so we notice if WATI changes shapes again.
+    """
+    # V2 / top-level
     for key in ("localMessageId", "messageId", "id", "wati_local_message_id"):
         v = resp.get(key)
         if v:
             return str(v)
+    # V1 broadcast — receivers[0].localMessageId
+    receivers = resp.get("receivers")
+    if isinstance(receivers, list):
+        for entry in receivers:
+            if not isinstance(entry, dict):
+                continue
+            for key in ("localMessageId", "messageId", "id"):
+                v = entry.get(key)
+                if v:
+                    return str(v)
+    # Legacy nested
     nested = resp.get("messageContact")
     if isinstance(nested, dict):
         for key in ("localMessageId", "messageId"):

@@ -115,6 +115,55 @@ async def test_create_batch_posts_multipart_with_csv(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_batch_falls_back_to_default_from_phone(monkeypatch):
+    """When the dispatch node passes an empty ``from_phone_numbers``
+    list, the connection's saved ``default_from_phone`` shows up on the
+    wire. Mirrors the per-call fallback for BolnaService — same fix for
+    the same 2026-05-04 caller-id-null bug."""
+    captured: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"batch_id": "b-2", "status": "queued"})
+
+    _patch_make_client(monkeypatch, _handler)
+    svc = BolnaBatchService(
+        base_url="https://api.bolna.ai", api_key="k",
+        connection_id=uuid.uuid4(),
+        default_from_phone="+918031136499",
+    )
+    await svc.create_batch(
+        agent_id="agent-A",
+        from_phone_numbers=[],  # operator didn't override per-node
+        csv_bytes=b"contact_number,recipient_id\n+91,L-1\n",
+    )
+    body = captured[0].content
+    assert b"+918031136499" in body
+    assert b"from_phone_numbers" in body
+
+
+@pytest.mark.asyncio
+async def test_create_batch_omits_from_phone_when_neither_set(monkeypatch):
+    """No per-call list AND no connection default → field is absent so
+    Bolna falls back to the agent's per-agent default."""
+    captured: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"batch_id": "b-3", "status": "queued"})
+
+    _patch_make_client(monkeypatch, _handler)
+    svc = _service()
+    await svc.create_batch(
+        agent_id="agent-A",
+        from_phone_numbers=[],
+        csv_bytes=b"contact_number,recipient_id\n+91,L-1\n",
+    )
+    body = captured[0].content
+    assert b"from_phone_numbers" not in body
+
+
+@pytest.mark.asyncio
 async def test_create_batch_raises_on_4xx(monkeypatch):
     def _handler(_request):
         return httpx.Response(400, json={"error": "bad agent"})

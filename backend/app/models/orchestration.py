@@ -404,6 +404,14 @@ class WorkflowRunRecipientAction(Base):
             "recipient_id",
             "created_at",
         ),
+        # Partial index mirrors migration 0027. Restricts to non-null
+        # values so logic / sink / source nodes (which never set a
+        # provider correlation id) don't bloat the index.
+        Index(
+            "idx_orch_actions_provider_correlation_id",
+            "provider_correlation_id",
+            postgresql_where=text("provider_correlation_id IS NOT NULL"),
+        ),
         {"schema": "orchestration"},
     )
 

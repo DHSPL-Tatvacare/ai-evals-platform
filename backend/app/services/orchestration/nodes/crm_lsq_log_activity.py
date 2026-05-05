@@ -64,6 +64,10 @@ class _Handler:
                     action_type="lsq_activity_logged",
                     idempotency_key=idem,
                     payload={
+                        # Channel-agnostic recipient handle (migration 0027).
+                        # LSQ identifies the lead by prospect_id; that's the
+                        # natural ``contact`` for this channel.
+                        "contact": rid,
                         "prospect_id": rid,
                         "activity_event": config.activity_event_code,
                         "note": note,
@@ -78,14 +82,22 @@ class _Handler:
                 )
                 continue
             try:
-                await writer.log_activity(
+                lsq_resp = await writer.log_activity(
                     prospect_id=rid,
                     activity_event=config.activity_event_code,
                     note=note,
                     fields=config.fields,
                 )
+                # LSQ ProspectActivity.Create returns
+                # ``{ProspectActivityId, Status, Message}``. Capture the
+                # activity id as the channel-agnostic correlation handle.
+                activity_id = lsq_resp.get("ProspectActivityId") if isinstance(lsq_resp, dict) else None
                 await ctx.update_action_result(
-                    r.action_id, status="success", response={"note": note},
+                    r.action_id,
+                    status="success",
+                    response={"note": note, **(lsq_resp or {})},
+                    provider_correlation_id=str(activity_id) if activity_id else None,
+                    provider_status=str((lsq_resp or {}).get("Status") or "").lower() or None,
                 )
                 success.append(RecipientOutcome(recipient_id=rid))
             except LsqWriteError as exc:

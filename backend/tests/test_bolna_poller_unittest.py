@@ -461,6 +461,50 @@ async def test_orphan_correlation_detected_when_no_live_job(
 
 
 @pytest.mark.asyncio
+async def test_reconciled_child_action_inherits_correlation_id(
+    db_session, seed_full_run, monkeypatch, _bolna_connection_key,
+):
+    """When ``apply_terminal_event`` inserts the bolna_answered child
+    row, it must inherit ``provider_correlation_id`` (and the Phase
+    13/E.2 channel-specific columns) from the parent. Without
+    inheritance, outcome-filtered queries lose the upstream link."""
+    run, version, workflow, node_step, tenant_id, app_id = seed_full_run
+    cid = await _seed_bolna_connection(db_session, tenant_id=tenant_id, app_id=app_id)
+    parent = _seed_open_action(
+        db_session, run=run, version=version, workflow=workflow, node_step=node_step,
+        tenant_id=tenant_id, app_id=app_id,
+        recipient_id="L-inherit", execution_id="ex-inherit",
+    )
+    # Pre-stamp the canonical correlation id on the parent so we can
+    # verify the child inherits it (the dispatch node would normally
+    # do this; we simulate that step here).
+    parent.provider_correlation_id = "ex-inherit"
+    await db_session.flush()
+
+    fake = _FakeBolna({
+        "ex-inherit": {"execution_id": "ex-inherit", "status": "completed"},
+    })
+    _patch_bolna_services(monkeypatch, single=fake)
+
+    result = await bolna_poller.poll_correlation_once(
+        db_session,
+        tenant_id=tenant_id, user_id=SYSTEM_USER_ID, app_id=app_id,
+        connection_id=cid, correlation_id="ex-inherit", kind="execution", attempt=1,
+    )
+    assert result.status == "done"
+
+    child = (await db_session.execute(
+        select(WorkflowRunRecipientAction).where(
+            WorkflowRunRecipientAction.parent_action_id == parent.id,
+        )
+    )).scalar_one_or_none()
+    assert child is not None
+    assert child.action_type == "bolna_answered"
+    assert child.provider_correlation_id == "ex-inherit"
+    assert child.bolna_execution_id == "ex-inherit"
+
+
+@pytest.mark.asyncio
 async def test_orphan_correlation_skipped_when_live_poll_job_exists(
     db_session, seed_full_run,
 ):

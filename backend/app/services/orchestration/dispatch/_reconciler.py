@@ -102,6 +102,18 @@ async def apply_terminal_event(
         child_response_payload = (
             child_response if child_response is not None else response_patch
         )
+        # Inherit the parent's correlation handles so reporting that
+        # filters on outcome rows (e.g. ``action_type='bolna_answered'``)
+        # can still join to the upstream call. Without this propagation
+        # the child would have ``provider_correlation_id=NULL`` and any
+        # outcome-filtered query would lose the upstream link.
+        inherited_payload = dict(action.payload or {})
+        # Strip parent-only book-keeping; keep ``contact`` since the
+        # recipient is the same and downstream readers expect it.
+        inherited_payload = {
+            k: v for k, v in inherited_payload.items() if k == "contact"
+        }
+        inherited_payload["event"] = child_action_type
         await db.execute(
             pg_insert(WorkflowRunRecipientAction)
             .values(
@@ -117,9 +129,16 @@ async def apply_terminal_event(
                 action_type=child_action_type,
                 status="success",
                 idempotency_key=child_idempotency_key,
-                payload={"event": child_action_type},
+                payload=inherited_payload,
                 response=child_response_payload,
                 parent_action_id=action.id,
+                # Channel-specific correlation columns (Phase 13/E.2)
+                # AND channel-agnostic ``provider_correlation_id`` (0027)
+                # all inherit from the parent so the child row is fully
+                # joinable to the upstream provider event.
+                bolna_execution_id=action.bolna_execution_id,
+                bolna_batch_id=action.bolna_batch_id,
+                provider_correlation_id=action.provider_correlation_id,
                 provider_terminal=True,
                 completed_at=now,
             )

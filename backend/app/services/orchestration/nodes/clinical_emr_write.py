@@ -59,7 +59,9 @@ class _Handler:
                     channel="system",
                     action_type="clinical.emr_write",
                     idempotency_key=idem,
-                    payload=outbox_payload,
+                    # Channel-agnostic recipient handle (migration 0027).
+                    # ``rid`` is the patient identifier for clinical channels.
+                    payload={"contact": rid, **outbox_payload},
                 )
             ])
             r = results[0]
@@ -69,7 +71,7 @@ class _Handler:
                 )
                 continue
             try:
-                await ctx.services.clinical_outbox.enqueue(
+                outbox_row_id = await ctx.services.clinical_outbox.enqueue(
                     ctx.db,
                     tenant_id=ctx.tenant_id,
                     app_id=ctx.app_id,
@@ -79,7 +81,14 @@ class _Handler:
                     payload=outbox_payload,
                 )
                 await ctx.update_action_result(
-                    r.action_id, status="success", response={"queued": True}
+                    r.action_id, status="success",
+                    response={
+                        "queued": True,
+                        "outbox_row_id": str(outbox_row_id) if outbox_row_id else None,
+                    },
+                    # Outbox row id is the channel-agnostic correlation
+                    # handle for clinical actions.
+                    provider_correlation_id=str(outbox_row_id) if outbox_row_id else None,
                 )
                 success.append(RecipientOutcome(recipient_id=rid))
             except Exception as exc:  # pragma: no cover — defensive

@@ -52,7 +52,13 @@ class _Handler:
                     channel="lsq",
                     action_type="lsq_stage_updated",
                     idempotency_key=idem,
-                    payload={"prospect_id": rid, "target_stage": config.target_stage},
+                    payload={
+                        # Channel-agnostic recipient handle (migration 0027).
+                        # LSQ identifies the lead by prospect_id.
+                        "contact": rid,
+                        "prospect_id": rid,
+                        "target_stage": config.target_stage,
+                    },
                 )
             ])
             r = results[0]
@@ -62,10 +68,16 @@ class _Handler:
                 )
                 continue
             try:
-                await writer.update_stage(prospect_id=rid, stage=config.target_stage)
+                lsq_resp = await writer.update_stage(
+                    prospect_id=rid, stage=config.target_stage,
+                )
+                # LSQ Lead.Update doesn't emit a separate update id;
+                # the prospect_id is the only stable correlation handle.
                 await ctx.update_action_result(
                     r.action_id, status="success",
-                    response={"stage": config.target_stage},
+                    response={"stage": config.target_stage, **(lsq_resp or {})},
+                    provider_correlation_id=str(rid),
+                    provider_status=str((lsq_resp or {}).get("Status") or "").lower() or None,
                 )
                 success.append(RecipientOutcome(recipient_id=rid))
             except LsqWriteError as exc:

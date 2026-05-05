@@ -65,6 +65,72 @@ async def test_place_call_with_retry_config(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_from_phone_per_call_override_wins(monkeypatch):
+    """Explicit per-call ``from_phone`` is what reaches the wire even
+    when the service was constructed with a connection default."""
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content.decode()
+        return httpx.Response(200, json={"execution_id": "ex-1", "status": "queued"})
+
+    _patch_transport(monkeypatch, _handler)
+    svc = BolnaService(
+        base_url="https://api.bolna.ai", api_key="k",
+        default_from_phone="+918000000000",  # connection default
+    )
+    await svc.place_call(
+        agent_id="a", recipient_phone="+91",
+        user_data={}, from_phone="+918031136499",  # node override
+    )
+    assert "+918031136499" in captured["body"]
+    assert "+918000000000" not in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_from_phone_falls_back_to_connection_default(monkeypatch):
+    """When the per-call override is None/empty, the service uses the
+    connection's saved ``from_phone``. This is the bug the 2026-05-04
+    test surfaced — without this fallback the call dialed with no
+    caller-id (``agent_number=null`` in Bolna's executions response)."""
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content.decode()
+        return httpx.Response(200, json={"execution_id": "ex-2", "status": "queued"})
+
+    _patch_transport(monkeypatch, _handler)
+    svc = BolnaService(
+        base_url="https://api.bolna.ai", api_key="k",
+        default_from_phone="+918031136499",
+    )
+    await svc.place_call(
+        agent_id="a", recipient_phone="+91",
+        user_data={}, from_phone=None,  # operator didn't override
+    )
+    assert "+918031136499" in captured["body"]
+    assert "from_phone_number" in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_from_phone_omitted_when_neither_set(monkeypatch):
+    """No per-call override AND no connection default → ``from_phone_number``
+    is absent from the body so Bolna falls back to the agent default."""
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content.decode()
+        return httpx.Response(200, json={"execution_id": "ex-3", "status": "queued"})
+
+    _patch_transport(monkeypatch, _handler)
+    svc = BolnaService(base_url="https://api.bolna.ai", api_key="k")
+    await svc.place_call(
+        agent_id="a", recipient_phone="+91", user_data={},
+    )
+    assert "from_phone_number" not in captured["body"]
+
+
+@pytest.mark.asyncio
 async def test_4xx_raises_service_error(monkeypatch):
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"error": "no agent"})

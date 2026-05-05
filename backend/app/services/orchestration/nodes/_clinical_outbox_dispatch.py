@@ -62,7 +62,10 @@ async def dispatch_outbox_with_attempt_policy(
                 channel="system",
                 action_type=action_type,
                 idempotency_key=idem,
-                payload=outbox_payload,
+                # Channel-agnostic recipient handle (migration 0027). For
+                # clinical channels the recipient_id IS the patient
+                # identifier — that's the natural ``contact``.
+                payload={"contact": rid, **outbox_payload},
             )
         ])
         r = results[0]
@@ -80,7 +83,7 @@ async def dispatch_outbox_with_attempt_policy(
             _payload: dict[str, Any] = outbox_payload,
         ) -> dict[str, Any]:
             del _n
-            await ctx.services.clinical_outbox.enqueue(
+            outbox_row_id = await ctx.services.clinical_outbox.enqueue(
                 ctx.db,
                 tenant_id=ctx.tenant_id,
                 app_id=ctx.app_id,
@@ -89,7 +92,7 @@ async def dispatch_outbox_with_attempt_policy(
                 idempotency_key=_idem,
                 payload=_payload,
             )
-            return {"queued": True}
+            return {"queued": True, "outbox_row_id": str(outbox_row_id) if outbox_row_id else None}
 
         outcome = await run_with_attempt_policy(
             policy=attempt_policy,
@@ -97,9 +100,14 @@ async def dispatch_outbox_with_attempt_policy(
             classify_error=_classify_outbox_error,
         )
         if outcome.status == "success":
+            outcome_payload = outcome.payload or {}
+            outbox_row_id = outcome_payload.get("outbox_row_id")
             await ctx.update_action_result(
                 r.action_id, status="success",
-                response={"queued": True, "attempts": outcome.attempts},
+                response={"queued": True, "attempts": outcome.attempts, **outcome_payload},
+                # Outbox row id is the channel-agnostic correlation handle
+                # — downstream EMR consumers correlate against it.
+                provider_correlation_id=outbox_row_id,
             )
             success.append(RecipientOutcome(recipient_id=rid))
         else:
