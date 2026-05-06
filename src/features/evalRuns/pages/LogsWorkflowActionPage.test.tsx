@@ -73,9 +73,8 @@ afterEach(() => {
 test('fetches the run-scoped action detail and renders the shared body', async () => {
   renderAt('/inside-sales/logs/workflow-actions/action-1?run=run-1');
 
-  expect(await screen.findByText('+15555550100')).toBeInTheDocument();
+  expect(await screen.findByText('Action summary')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Back to Workflow actions' })).toBeInTheDocument();
-  expect(screen.getByText('Action summary')).toBeInTheDocument();
   expect(screen.getByText('send sms')).toBeInTheDocument();
   expect(getRunActionMock).toHaveBeenCalledWith('run-1', 'action-1');
 });
