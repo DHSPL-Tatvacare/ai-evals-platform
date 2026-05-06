@@ -353,5 +353,6 @@ async def test_run_action_detail_returns_single_action_row(client, db_session, s
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == str(action.id)
-    assert body["runId"] == str(run.id)
+    assert body["recipientId"] == action.recipient_id
+    assert body["channel"] == "bolna"
     assert body["providerCorrelationId"] == "exec-detail-1234"
