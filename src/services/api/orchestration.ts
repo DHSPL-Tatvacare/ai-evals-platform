@@ -6,6 +6,7 @@ import type {
   RecipientState,
   RunOverlaySnapshot,
   Workflow,
+  WorkflowActionListResponse,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowTrigger,
@@ -164,12 +165,14 @@ export interface RunListResponse {
 }
 
 export async function listRuns(params?: {
+  appId?: string;
   workflowId?: string;
   status?: string;
   limit?: number;
   offset?: number;
 }): Promise<RunListResponse> {
   const q = new URLSearchParams();
+  if (params?.appId) q.set('appId', params.appId);
   if (params?.workflowId) q.set('workflowId', params.workflowId);
   if (params?.status) q.set('status', params.status);
   if (params?.limit !== undefined) q.set('limit', String(params.limit));
@@ -211,6 +214,47 @@ export async function listRunActions(
   const qs = q.toString();
   return apiRequest<ActionRow[]>(
     `/api/orchestration/runs/${runId}/actions${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function getRunAction(runId: string, actionId: string): Promise<ActionRow> {
+  return apiRequest<ActionRow>(`/api/orchestration/runs/${runId}/actions/${actionId}`);
+}
+
+/** Phase 15.1b — tenant-wide outbound action log. Powers the Logs page's
+ *  "Workflow actions" tab. The backend resolves the workflow name and
+ *  app-gates via the caller's `app_access` set, so callers don't pass
+ *  app_id. Pass `workflowId` to drill into one workflow; omit it for the
+ *  cross-workflow view. */
+export async function listWorkflowActions(params?: {
+  appId?: string;
+  workflowId?: string;
+  channel?: string;
+  actionType?: string;
+  status?: string;
+  recipientId?: string;
+  providerCorrelationId?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<WorkflowActionListResponse> {
+  const q = new URLSearchParams();
+  if (params?.appId) q.set('appId', params.appId);
+  if (params?.workflowId) q.set('workflowId', params.workflowId);
+  if (params?.channel) q.set('channel', params.channel);
+  if (params?.actionType) q.set('actionType', params.actionType);
+  if (params?.status) q.set('status', params.status);
+  if (params?.recipientId) q.set('recipientId', params.recipientId);
+  if (params?.providerCorrelationId)
+    q.set('providerCorrelationId', params.providerCorrelationId);
+  if (params?.since) q.set('since', params.since);
+  if (params?.until) q.set('until', params.until);
+  if (params?.limit !== undefined) q.set('limit', String(params.limit));
+  if (params?.offset !== undefined) q.set('offset', String(params.offset));
+  const qs = q.toString();
+  return apiRequest<WorkflowActionListResponse>(
+    `/api/orchestration/actions${qs ? `?${qs}` : ''}`,
   );
 }
 

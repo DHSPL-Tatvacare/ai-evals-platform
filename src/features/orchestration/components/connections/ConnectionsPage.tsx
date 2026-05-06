@@ -186,6 +186,7 @@ export function ConnectionsPage() {
     {
       key: 'webhookUrl',
       header: 'Webhook URL',
+      textBehavior: 'truncate',
       render: (c) =>
         c.webhookUrl ? (
           <button

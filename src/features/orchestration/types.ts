@@ -259,6 +259,34 @@ export interface ActionRow {
   completedAt: string | null;
 }
 
+/** Phase 15.1b — denormalized row from `GET /api/orchestration/actions`
+ *  (tenant-wide). Carries workflow + run identity inline so the Logs
+ *  "Workflow actions" tab can render a linked workflow column without
+ *  extra round-trips, and so the row click can deep-link into the Logs
+ *  action-detail sub-route with its parent run context. */
+export interface WorkflowActionGlobalRow {
+  id: string;
+  workflowId: string;
+  workflowName: string | null;
+  runId: string;
+  recipientId: string;
+  channel: string;
+  actionType: string;
+  status: string;
+  providerCorrelationId: string | null;
+  providerStatus: string | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface WorkflowActionListResponse {
+  items: WorkflowActionGlobalRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 const PENDING_PROVIDER_OUTCOMES = new Set(['bolna_queued']);
 
 function stringField(value: unknown): string | null {

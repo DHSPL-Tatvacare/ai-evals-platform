@@ -8,7 +8,7 @@ import {
   Play,
   Save,
   Send,
-  Waypoints,
+  Timeline,
 } from 'lucide-react';
 import { useWorkflowRuns } from '@/features/orchestration/queries/runs';
 
@@ -263,7 +263,7 @@ export function WorkflowHeaderBar({
           title={runsTooltip}
           aria-label="Open run inspector"
         >
-          <Waypoints className="h-3.5 w-3.5" />
+          <Timeline className="h-3.5 w-3.5" />
         </Button>
         {viewMode === 'view' ? (
           <ViewModeActions

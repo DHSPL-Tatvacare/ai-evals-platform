@@ -17,6 +17,10 @@ import {
   EvalRunDetail,
   EvalThreadDetailV2,
   EvalAdversarialDetailV2,
+  LogsEvaluationRunPage,
+  LogsSherlockToolCallPage,
+  LogsWorkflowActionPage,
+  LogsWorkflowRunPage,
 } from "@/features/evalRuns";
 import { AppEvaluatorsPage, EvaluatorDetailPage } from "@/features/evals";
 import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from "@/features/auth";
@@ -110,6 +114,10 @@ export function Router() {
             <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
             <Route path={routes.voiceRx.runs} element={<EvalRunList />} />
             <Route path={routes.voiceRx.logs} element={<EvalLogs />} />
+            <Route path={`${routes.voiceRx.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
+            <Route path={`${routes.voiceRx.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
+            <Route path={`${routes.voiceRx.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
+            <Route path={`${routes.voiceRx.logs}/sherlock/:toolCallId`} element={<LogsSherlockToolCallPage />} />
             <Route path={routes.voiceRx.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
             <Route path="/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
@@ -153,6 +161,10 @@ export function Router() {
               element={<EvalThreadDetailV2 />}
             />
             <Route path={routes.kaira.logs} element={<EvalLogs />} />
+            <Route path={`${routes.kaira.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
+            <Route path={`${routes.kaira.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
+            <Route path={`${routes.kaira.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
+            <Route path={`${routes.kaira.logs}/sherlock/:toolCallId`} element={<LogsSherlockToolCallPage />} />
             <Route path={routes.kaira.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
             <Route path="/kaira/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/kaira/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
@@ -170,6 +182,10 @@ export function Router() {
             <Route path="/inside-sales/leads/:prospectId" element={<InsideSalesLeadDetail />} />
             <Route path={routes.insideSales.dashboard} element={<AnalyticsDashboardPage appId="inside-sales" />} />
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
+            <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
+            <Route path={`${routes.insideSales.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
+            <Route path={`${routes.insideSales.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
+            <Route path={`${routes.insideSales.logs}/sherlock/:toolCallId`} element={<LogsSherlockToolCallPage />} />
             <Route path={routes.insideSales.settings} element={<RequirePermission action="configuration:edit"><InsideSalesSettings /></RequirePermission>} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
             <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />

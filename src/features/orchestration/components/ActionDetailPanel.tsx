@@ -49,20 +49,31 @@ export function ActionDetailPanel({ action, open, onClose }: Props) {
 }
 
 function PanelBody({ action, onClose }: { action: ActionRow; onClose: () => void }) {
-  const channel = (action.channel || '').toLowerCase();
   return (
     <>
       <Header action={action} onClose={onClose} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {channel === 'bolna' ? (
-          <BolnaBody action={action} />
-        ) : channel === 'wati' ? (
-          <WatiBody action={action} />
-        ) : (
-          <GenericBody action={action} />
-        )}
-      </div>
+      <ActionDetailContent action={action} />
     </>
+  );
+}
+
+/** Channel-aware action body — same content rendered by the slide-over
+ *  (`ActionDetailPanel`) and the standalone sub-route page
+ *  (`LogsWorkflowActionPage`). Lives outside `PanelBody` so the sub-route
+ *  page can compose it inside a `PageSurface` chrome with its own back
+ *  button instead of the slide-over's close X. */
+export function ActionDetailContent({ action }: { action: ActionRow }) {
+  const channel = (action.channel || '').toLowerCase();
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      {channel === 'bolna' ? (
+        <BolnaBody action={action} />
+      ) : channel === 'wati' ? (
+        <WatiBody action={action} />
+      ) : (
+        <GenericBody action={action} />
+      )}
+    </div>
   );
 }
 

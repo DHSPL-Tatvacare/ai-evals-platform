@@ -105,6 +105,7 @@ export function CampaignRunsPage() {
         key: 'started',
         header: 'Started',
         width: 'min-w-[190px]',
+        textBehavior: 'nowrap',
         render: (r) => (
           <div>
             <div className="tabular-nums text-[var(--text-primary)]">

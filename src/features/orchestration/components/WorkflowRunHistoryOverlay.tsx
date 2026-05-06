@@ -170,6 +170,7 @@ export function WorkflowRunHistoryOverlay({ workflow, onClose }: Props) {
         key: 'started',
         header: 'Started',
         width: 'min-w-[190px]',
+        textBehavior: 'nowrap',
         render: (row) => (
           <div>
             <div className="tabular-nums">{formatAbsolute(row.createdAt)}</div>

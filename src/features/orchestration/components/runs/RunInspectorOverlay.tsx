@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { RefreshCw, Waypoints, X } from 'lucide-react';
+import { RefreshCw, Timeline, X } from 'lucide-react';
 
 import {
   EmptyState,
@@ -173,7 +173,7 @@ export function RunInspectorOverlay({
         <header className="shrink-0 border-b border-[var(--border-subtle)] px-5 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-2">
-              <Waypoints className="mt-0.5 h-4 w-4 text-[var(--text-muted)]" />
+              <Timeline className="mt-0.5 h-4 w-4 text-[var(--text-muted)]" />
               <div className="min-w-0">
                 <h2
                   id={titleId}
@@ -258,7 +258,7 @@ export function RunInspectorOverlay({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {showZeroRunsEmpty ? (
             <EmptyState
-              icon={Waypoints}
+              icon={Timeline}
               title="No runs yet"
               description="This workflow has not been run. Click Run Now from the header to create the first run."
               fill
@@ -267,7 +267,7 @@ export function RunInspectorOverlay({
             <LoadingState />
           ) : !runId ? (
             <EmptyState
-              icon={Waypoints}
+              icon={Timeline}
               title="Pick a run to inspect"
               description="Choose a run from the picker above to see its recipients and action log."
               fill

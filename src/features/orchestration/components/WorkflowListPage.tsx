@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Archive, ChartGantt, Copy, History, Pencil, Play } from 'lucide-react';
+import { Archive, Copy, History, Logs, Pencil, Play, Timeline } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 import { Badge } from '@/components/ui/Badge';
@@ -14,6 +14,7 @@ import { usePageMetadata } from '@/config/pageMetadata';
 import { useCurrentAppId } from '@/hooks';
 import type { RunStatus, Workflow } from '@/features/orchestration/types';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
+import { apiLogsForApp } from '@/config/routes';
 import { ApiError } from '@/services/api/client';
 import { formatDateTime } from '@/utils/formatters';
 import { timeAgo } from '@/utils/evalFormatters';
@@ -263,6 +264,7 @@ export function WorkflowListPage() {
       key: 'lastRun',
       header: 'Last run',
       width: 'min-w-[170px]',
+      textBehavior: 'nowrap',
       // Phase-14 follow-up — single-line "8h ago · running" with a
       // middle-dot separator. Display-only; drilling into the run is
       // exclusively via the row's [Timeline] icon in the actions column.
@@ -290,6 +292,7 @@ export function WorkflowListPage() {
       key: 'updatedAt',
       header: 'Updated',
       width: 'w-[180px]',
+      textBehavior: 'nowrap',
       render: (r) => (
         <span className="tabular-nums text-[var(--text-secondary)]">
           {fmtDateTime(r.updatedAt)}
@@ -335,7 +338,7 @@ export function WorkflowListPage() {
              *  the overlay lets the operator switch runs. No navigation
              *  to the builder. Disabled until at least one run exists. */}
             <IconButton
-              icon={ChartGantt}
+              icon={Timeline}
               variant="ghost"
               size="sm"
               label="Run timeline"
@@ -344,6 +347,18 @@ export function WorkflowListPage() {
                 e.stopPropagation();
                 if (!r.lastRunId) return;
                 setInspectorState({ workflowId: r.id, runId: r.lastRunId });
+              }}
+            />
+            {/* Workflow actions — deep-link to the platform Logs page,
+             *  pre-filtered to this workflow's outbound action history. */}
+            <IconButton
+              icon={Logs}
+              variant="ghost"
+              size="sm"
+              label="Workflow actions log"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`${apiLogsForApp(appId)}?type=workflow-actions&workflow_id=${r.id}`);
               }}
             />
             <IconButton

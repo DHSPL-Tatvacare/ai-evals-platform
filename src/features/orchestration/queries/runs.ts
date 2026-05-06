@@ -27,11 +27,14 @@
 import { useQuery } from '@tanstack/react-query';
 
 import {
+  getRunAction,
   getRun,
   getRunOverlaySnapshot,
   listRuns,
   listRunActions,
   listRunRecipients,
+  listWorkflowActions,
+  listWorkflows,
   type RunListResponse,
 } from '@/services/api/orchestration';
 import {
@@ -40,6 +43,8 @@ import {
   type RecipientState,
   type RunOverlaySnapshot,
   type RunStatus,
+  type Workflow,
+  type WorkflowActionListResponse,
   type WorkflowRun,
 } from '@/features/orchestration/types';
 
@@ -51,6 +56,7 @@ import {
 const PAGE_SIZE_DEFAULT = 100;
 const TERMINAL_STALE_TIME_MS = 30_000;
 const ACTIVE_REFETCH_INTERVAL_MS = 5_000;
+const WORKFLOW_ACTIONS_REFETCH_INTERVAL_MS = 30_000;
 
 const ACTIVE_STATUS_SET = new Set<RunStatus>(ACTIVE_RUN_STATUSES);
 
@@ -90,7 +96,64 @@ export const runQueryKeys = {
       'actions',
       { page, pageSize, ...filters },
     ] as const,
+  workflowActionsGlobal: (
+    page: number,
+    pageSize: number,
+    filters: WorkflowActionsFilters,
+  ) =>
+    [
+      'orchestration',
+      'actions-global',
+      { page, pageSize, ...filters },
+    ] as const,
+  runsGlobal: (page: number, pageSize: number, filters: RunsFilters) =>
+    ['orchestration', 'runs-global', { page, pageSize, ...filters }] as const,
 };
+
+/** Filter set accepted by `useRuns` (Logs page Workflow runs tab). Mirrors
+ *  `listRuns` minus pagination. `workflowId` null means "all workflows in
+ *  the caller's app set"; passing one drills into a single workflow. */
+export interface RunsFilters {
+  appId?: string | null;
+  workflowId?: string | null;
+  status?: RunStatus | null;
+}
+
+function normaliseRunsFilters(filters: RunsFilters | undefined): RunsFilters {
+  return {
+    appId: filters?.appId ?? null,
+    workflowId: filters?.workflowId ?? null,
+    status: filters?.status ?? null,
+  };
+}
+
+/** Filter set accepted by `useWorkflowActions` (Logs page Workflow actions
+ *  tab). Mirrors `listWorkflowActions` minus pagination. */
+export interface WorkflowActionsFilters {
+  appId?: string | null;
+  workflowId?: string | null;
+  channel?: string | null;
+  actionType?: string | null;
+  status?: string | null;
+  recipientId?: string | null;
+  providerCorrelationId?: string | null;
+  since?: string | null;
+  until?: string | null;
+}
+
+function normaliseFilters(filters: WorkflowActionsFilters | undefined): WorkflowActionsFilters {
+  return {
+    appId: filters?.appId ?? null,
+    workflowId: filters?.workflowId ?? null,
+    channel: filters?.channel ?? null,
+    actionType: filters?.actionType ?? null,
+    status: filters?.status ?? null,
+    recipientId: filters?.recipientId ?? null,
+    providerCorrelationId: filters?.providerCorrelationId ?? null,
+    since: filters?.since ?? null,
+    until: filters?.until ?? null,
+  };
+}
 
 // ─── Hooks ──────────────────────────────────────────────────────────────
 
@@ -119,6 +182,47 @@ export function useWorkflowRuns(
     // List polls every 5 s when ANY run in the most recent page is active.
     // The query data is the source we read here, so the interval reads
     // through `query.data` via TQ's function-form `refetchInterval`.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const hasActive = data.runs?.some((r) => isActiveStatus(r.status));
+      return hasActive ? ACTIVE_REFETCH_INTERVAL_MS : false;
+    },
+  });
+}
+
+/** Phase 15.1c — generalised cross-workflow runs hook for the Logs page's
+ *  Workflow runs tab. Server-side pagination (the backend caps `limit` at
+ *  200), filters mirror `listRuns`. Polls every 5 s while any run in the
+ *  current page is active.
+ *
+ *  Distinct from `useWorkflowRuns` (single-workflow, no offset). Keep the
+ *  two hooks separate so the builder/inspector cache (per-workflow) isn't
+ *  invalidated by a Logs-page filter change. */
+export function useRuns(options?: {
+  page?: number;
+  pageSize?: number;
+  filters?: RunsFilters;
+  enabled?: boolean;
+}) {
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? PAGE_SIZE_DEFAULT;
+  const enabled = options?.enabled ?? true;
+  const filters = normaliseRunsFilters(options?.filters);
+  const offset = (page - 1) * pageSize;
+
+  return useQuery<RunListResponse>({
+    queryKey: runQueryKeys.runsGlobal(page, pageSize, filters),
+    queryFn: () =>
+      listRuns({
+        appId: filters.appId ?? undefined,
+        workflowId: filters.workflowId ?? undefined,
+        status: filters.status ?? undefined,
+        limit: pageSize,
+        offset,
+      }),
+    enabled,
+    staleTime: TERMINAL_STALE_TIME_MS,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return false;
@@ -210,6 +314,21 @@ export function useRunActions(
   });
 }
 
+export function useRunAction(
+  runId: string | null | undefined,
+  actionId: string | null | undefined,
+) {
+  const enabled = Boolean(runId && actionId);
+  return useQuery<ActionRow>({
+    queryKey: enabled
+      ? (['orchestration', 'run', runId as string, 'action', actionId as string] as const)
+      : (['orchestration', 'run', '__disabled__', 'action'] as const),
+    queryFn: () => getRunAction(runId as string, actionId as string),
+    enabled,
+    staleTime: TERMINAL_STALE_TIME_MS,
+  });
+}
+
 /** Per-node overlay snapshot for a run — what the canvas paints. The
  *  inspector hydrates `runOverlayStore` from this so the builder canvas
  *  behind the overlay shows the correct per-node statuses for the
@@ -249,4 +368,77 @@ export function useRunActionFromCache(
 ): ActionRow | null {
   if (!actionId || !actionsForCurrentPage) return null;
   return actionsForCurrentPage.find((a) => a.id === actionId) ?? null;
+}
+
+/** Phase 15.1b — tenant-wide outbound action log. Powers the platform Logs
+ *  page's Workflow actions tab. Server-side pagination (the backend caps
+ *  ``limit`` at 200), filters mirror ``listWorkflowActions``. Polls every
+ *  30 s when at least one workflow run is in flight on the tenant — that
+ *  signal is supplied by the caller (so we don't fan out an extra
+ *  ``useRuns`` from inside the hook). */
+export function useWorkflowActions(
+  options?: {
+    page?: number;
+    pageSize?: number;
+    filters?: WorkflowActionsFilters;
+    /** When true (caller derives this from a runs query), refetch every
+     *  5 s. Defaults to false so closed / archival views are quiet. */
+    livePoll?: boolean;
+    enabled?: boolean;
+  },
+) {
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? PAGE_SIZE_DEFAULT;
+  const enabled = options?.enabled ?? true;
+  const filters = normaliseFilters(options?.filters);
+  const offset = (page - 1) * pageSize;
+
+  return useQuery<WorkflowActionListResponse>({
+    queryKey: runQueryKeys.workflowActionsGlobal(page, pageSize, filters),
+    queryFn: () =>
+      listWorkflowActions({
+        appId: filters.appId ?? undefined,
+        workflowId: filters.workflowId ?? undefined,
+        channel: filters.channel ?? undefined,
+        actionType: filters.actionType ?? undefined,
+        status: filters.status ?? undefined,
+        recipientId: filters.recipientId ?? undefined,
+        providerCorrelationId: filters.providerCorrelationId ?? undefined,
+        since: filters.since ?? undefined,
+        until: filters.until ?? undefined,
+        limit: pageSize,
+        offset,
+      }),
+    enabled,
+    staleTime: TERMINAL_STALE_TIME_MS,
+    refetchInterval: () => (options?.livePoll ? WORKFLOW_ACTIONS_REFETCH_INTERVAL_MS : false),
+  });
+}
+
+/** Cache lookup variant of `useRunActionFromCache` for the global rows.
+ *  Used by the Workflow actions tab → Action Detail overlay flow so the
+ *  detail surface lights up immediately on row click. */
+export function useWorkflowActionFromCache(
+  page: WorkflowActionListResponse | undefined,
+  actionId: string | null | undefined,
+) {
+  if (!actionId || !page) return null;
+  return page.items.find((a) => a.id === actionId) ?? null;
+}
+
+/** Phase 15.1b — workflow list for filter Comboboxes (Logs / cross-tab
+ *  affordances). App-scoped via the caller's app picker. Workflows change
+ *  rarely, so a long stale time keeps the dropdown snappy. */
+export function useWorkflows(
+  options?: { appId?: string; enabled?: boolean },
+) {
+  const enabled = (options?.enabled ?? true) && Boolean(options?.appId);
+  return useQuery<Workflow[]>({
+    queryKey: enabled
+      ? (['orchestration', 'workflows', { appId: options?.appId }] as const)
+      : (['orchestration', 'workflows', '__disabled__'] as const),
+    queryFn: () => listWorkflows({ appId: options?.appId }),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
 }
