@@ -65,6 +65,7 @@ async def list_cohort_sources(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     workflow_type: Optional[str] = None,
     app_id: Optional[str] = None,
     app_ids: Optional[list[str]] = None,
@@ -101,7 +102,7 @@ async def list_cohort_sources(
     dataset_entries = [
         _dataset_to_response(ds)
         for ds in await list_dataset_sources(
-            db, tenant_id=tenant_id, app_id=app_id, app_ids=app_ids,
+            db, tenant_id=tenant_id, user_id=user_id, app_id=app_id, app_ids=app_ids,
         )
     ]
     return static_entries + dataset_entries

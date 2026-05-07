@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import { apiQueryFn } from './queryFn';
+import type { AssetVisibility } from '@/types/settings.types';
 
 /** Provider known to the backend `provider_specs` registry. New providers
  *  are surfaced via the schema endpoint at runtime, but the literal union
@@ -62,6 +63,9 @@ export interface Connection {
   secretPreviews?: Record<string, string>;
   fields: ConnectionFieldDescriptor[];
   createdBy: string;
+  visibility: AssetVisibility;
+  sharedBy: string | null;
+  sharedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -123,11 +127,13 @@ export interface CreateConnectionBody {
   name: string;
   config: ConnectionConfig;
   active?: boolean;
+  visibility?: AssetVisibility;
 }
 
 export interface UpdateConnectionBody {
   name?: string;
   active?: boolean;
+  visibility?: AssetVisibility;
   /** Partial plaintext config. Omitted secret keys preserve stored values;
    *  blank-string overwrites of secret keys are rejected by the backend. */
   config?: ConnectionConfig;
@@ -140,6 +146,7 @@ export interface ListConnectionsParams {
   provider?: string;
   providers?: string[];
   includeInactive?: boolean;
+  visibility?: 'all' | 'private' | 'shared';
 }
 
 function buildListQuery(params?: ListConnectionsParams): string {
@@ -151,6 +158,7 @@ function buildListQuery(params?: ListConnectionsParams): string {
     for (const p of params.providers) q.append('provider', p);
   }
   if (params.includeInactive) q.set('includeInactive', 'true');
+  if (params.visibility) q.set('visibility', params.visibility);
   const s = q.toString();
   return s ? `?${s}` : '';
 }

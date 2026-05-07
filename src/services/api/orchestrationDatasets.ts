@@ -16,6 +16,7 @@
 import { ApiError, apiRequest } from './client';
 import { parseApiErrorResponse } from './errorHandling';
 import { useAuthStore } from '@/stores/authStore';
+import type { AssetVisibility } from '@/types/settings.types';
 
 const API_BASE = '';
 
@@ -54,6 +55,9 @@ export interface DatasetResponse {
   name: string;
   description: string | null;
   createdBy: string;
+  visibility: AssetVisibility;
+  sharedBy: string | null;
+  sharedAt: string | null;
   createdAt: string;
   updatedAt: string;
   latestVersion: DatasetVersionResponse | null;
@@ -67,6 +71,13 @@ export interface CreateDatasetBody {
   appId: string;
   name: string;
   description?: string | null;
+  visibility?: AssetVisibility;
+}
+
+export interface UpdateDatasetBody {
+  name?: string;
+  description?: string | null;
+  visibility?: AssetVisibility;
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -121,15 +132,20 @@ async function uploadDatasetVersionRequest(
 }
 
 export const orchestrationDatasetsApi = {
-  list: (appId: string) =>
+  list: (appId: string, visibility: 'all' | 'private' | 'shared' = 'all') =>
     apiRequest<DatasetResponse[]>(
-      `/api/orchestration/datasets?appId=${encodeURIComponent(appId)}`,
+      `/api/orchestration/datasets?appId=${encodeURIComponent(appId)}&visibility=${encodeURIComponent(visibility)}`,
     ),
   get: (id: string) =>
     apiRequest<DatasetDetailResponse>(`/api/orchestration/datasets/${id}`),
   create: (body: CreateDatasetBody) =>
     apiRequest<DatasetResponse>('/api/orchestration/datasets', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  update: (id: string, body: UpdateDatasetBody) =>
+    apiRequest<DatasetDetailResponse>(`/api/orchestration/datasets/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     }),
   remove: (id: string) =>

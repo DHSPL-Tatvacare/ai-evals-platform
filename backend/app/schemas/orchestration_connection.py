@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from pydantic import Field
 
+from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
 
 
@@ -23,11 +24,13 @@ class ConnectionCreateRequest(CamelModel):
     name: str
     config: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
+    visibility: Visibility = Visibility.PRIVATE
 
 
 class ConnectionUpdateRequest(CamelModel):
     name: Optional[str] = None
     active: Optional[bool] = None
+    visibility: Optional[Visibility] = None
     # Partial plaintext config. Omitted secret keys are preserved, blank
     # secret strings are rejected at the service layer (never overwrite a
     # stored credential with empty).
@@ -70,6 +73,9 @@ class ConnectionResponse(CamelORMModel):
     # forms without fetching the schema endpoint separately.
     fields: list[ConnectionFieldDescriptor]
     created_by: uuid.UUID
+    visibility: Visibility
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

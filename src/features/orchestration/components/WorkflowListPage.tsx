@@ -10,6 +10,7 @@ import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { FilterPills } from '@/components/ui/FilterPills';
 import { IconButton } from '@/components/ui/IconButton';
 import { PageSurface } from '@/components/ui/PageSurface';
+import { VisibilityToggle } from '@/components/ui/VisibilityToggle';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { useCurrentAppId } from '@/hooks';
 import type { RunStatus, Workflow } from '@/features/orchestration/types';
@@ -23,19 +24,32 @@ import {
   fireManualRun,
   listSystemWorkflows,
   listWorkflows,
+  updateWorkflow,
 } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
+import { useAuthStore } from '@/stores/authStore';
 import { CloneSystemWorkflowDialog } from './CloneSystemWorkflowDialog';
 import { CreateWorkflowDialog } from './CreateWorkflowDialog';
 import { WorkflowRunHistoryOverlay } from './WorkflowRunHistoryOverlay';
 import { RunInspectorOverlay } from './runs/RunInspectorOverlay';
+import {
+  canEditOrchestrationAsset,
+  canManageOrchestration,
+} from '@/features/orchestration/utils/access';
 
 type SourceFilter = 'all' | 'custom' | 'platform';
+type VisibilityFilter = 'all' | 'private' | 'shared';
 
 const SOURCE_FILTERS: Array<{ id: SourceFilter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'custom', label: 'Custom' },
   { id: 'platform', label: 'Platform' },
+];
+
+const VISIBILITY_FILTERS: Array<{ id: VisibilityFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'private', label: 'Private' },
+  { id: 'shared', label: 'Shared' },
 ];
 
 interface UnifiedRow extends Workflow {
@@ -87,6 +101,7 @@ export function WorkflowListPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [activeSource, setActiveSource] = useState<SourceFilter>('all');
+  const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [cloneSource, setCloneSource] = useState<Workflow | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Workflow | null>(null);
   // History modal — list of runs for one workflow.
@@ -100,15 +115,18 @@ export function WorkflowListPage() {
   >(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [updatingVisibilityId, setUpdatingVisibilityId] = useState<string | null>(null);
   const navigate = useNavigate();
   const appId = useCurrentAppId();
   const orchestrationRoutes = useOrchestrationRoutes();
+  const user = useAuthStore((s) => s.user);
+  const canManage = canManageOrchestration(user);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const [tenantWorkflows, systemWorkflows] = await Promise.all([
-        listWorkflows({ appId }),
+        listWorkflows({ appId, visibility }),
         listSystemWorkflows({ appId }),
       ]);
       setTenantRows(tenantWorkflows);
@@ -124,7 +142,7 @@ export function WorkflowListPage() {
     } finally {
       setLoading(false);
     }
-  }, [appId]);
+  }, [appId, visibility]);
 
   useEffect(() => {
     void refresh();
@@ -192,6 +210,30 @@ export function WorkflowListPage() {
     }
   }, [archiveTarget, refresh]);
 
+  const handleVisibilityChange = useCallback(async (workflow: Workflow, nextVisibility: 'private' | 'shared') => {
+    if (workflow.visibility === nextVisibility) return;
+    setUpdatingVisibilityId(workflow.id);
+    try {
+      await updateWorkflow(workflow.id, { visibility: nextVisibility });
+      notificationService.success(
+        nextVisibility === 'shared'
+          ? `"${workflow.name}" is now shared`
+          : `"${workflow.name}" is now private`,
+      );
+      await refresh();
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'Failed to update workflow visibility';
+      notificationService.error(msg);
+    } finally {
+      setUpdatingVisibilityId(null);
+    }
+  }, [refresh]);
+
   const columns: ColumnDef<UnifiedRow>[] = [
     {
       key: 'name',
@@ -217,12 +259,35 @@ export function WorkflowListPage() {
       ),
     },
     {
+      key: 'visibility',
+      header: 'Visibility',
+      width: 'min-w-[180px]',
+      render: (r) => {
+        if (r.source === 'platform') {
+          return <Badge variant="info" size="sm">Shared</Badge>;
+        }
+        const canEdit = canEditOrchestrationAsset(user, r.createdBy);
+        return (
+          <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+            <VisibilityToggle
+              value={r.visibility}
+              onChange={(value) => {
+                void handleVisibilityChange(r, value);
+              }}
+              disabled={!canEdit || updatingVisibilityId === r.id}
+              variant="toolbar"
+            />
+          </div>
+        );
+      },
+    },
+    {
       key: 'status',
       header: 'Status',
       width: 'w-[120px]',
       render: (r) =>
         r.source === 'platform' ? (
-          <span className="text-[var(--text-muted)]">—</span>
+          <Badge variant="neutral" size="sm">Platform</Badge>
         ) : r.currentPublishedVersionId ? (
           <Badge variant="success" size="sm">Published</Badge>
         ) : (
@@ -289,17 +354,6 @@ export function WorkflowListPage() {
       },
     },
     {
-      key: 'updatedAt',
-      header: 'Updated',
-      width: 'w-[180px]',
-      textBehavior: 'nowrap',
-      render: (r) => (
-        <span className="tabular-nums text-[var(--text-secondary)]">
-          {fmtDateTime(r.updatedAt)}
-        </span>
-      ),
-    },
-    {
       key: 'actions',
       header: 'Actions',
       width: '170px',
@@ -313,6 +367,7 @@ export function WorkflowListPage() {
               variant="secondary"
               size="sm"
               label="Clone"
+              disabled={!canManage}
               onClick={(e) => {
                 e.stopPropagation();
                 setCloneSource(r);
@@ -321,6 +376,10 @@ export function WorkflowListPage() {
           </div>
         ) : (
           <div className="flex items-center justify-end gap-1">
+            {(() => {
+              const canEdit = canEditOrchestrationAsset(user, r.createdBy);
+              return (
+                <>
             {/* History — list of runs for this workflow. Opens the
              *  existing modal on the same page; no navigation. */}
             <IconButton
@@ -366,6 +425,7 @@ export function WorkflowListPage() {
               variant="ghost"
               size="sm"
               label="Edit"
+              disabled={!canEdit}
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(orchestrationRoutes.campaignBuilder(r.id));
@@ -382,7 +442,7 @@ export function WorkflowListPage() {
                     ? 'Starting run…'
                     : 'Run now'
               }
-              disabled={!r.currentPublishedVersionId || runningId === r.id}
+              disabled={!canEdit || !r.currentPublishedVersionId || runningId === r.id}
               onClick={(e) => {
                 e.stopPropagation();
                 void handleRun(r);
@@ -393,11 +453,15 @@ export function WorkflowListPage() {
               variant="danger"
               size="sm"
               label="Archive"
+              disabled={!canEdit}
               onClick={(e) => {
                 e.stopPropagation();
                 setArchiveTarget(r);
               }}
             />
+                </>
+              );
+            })()}
           </div>
         ),
     },
@@ -409,13 +473,20 @@ export function WorkflowListPage() {
         icon={icon}
         title={title}
         filters={(
-          <FilterPills
-            options={SOURCE_FILTERS}
-            active={activeSource}
-            onChange={(id) => setActiveSource(id as SourceFilter)}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <FilterPills
+              options={SOURCE_FILTERS}
+              active={activeSource}
+              onChange={(id) => setActiveSource(id as SourceFilter)}
+            />
+            <FilterPills
+              options={VISIBILITY_FILTERS}
+              active={visibility}
+              onChange={(id) => setVisibility(id as VisibilityFilter)}
+            />
+          </div>
         )}
-        actions={<Button onClick={() => setShowCreate(true)}>New Workflow</Button>}
+        actions={canManage ? <Button onClick={() => setShowCreate(true)}>New Workflow</Button> : null}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           <DataTable<UnifiedRow>

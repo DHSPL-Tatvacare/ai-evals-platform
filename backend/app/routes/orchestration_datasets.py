@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -31,15 +31,20 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthContext, get_auth_context
 from app.auth.app_scope import ensure_registered_app_access
+from app.auth.permissions import require_permission
 from app.database import get_db
+from app.models.orchestration import CohortDataset
+from app.services.access_control import can_access
 from app.schemas.orchestration_dataset import (
     DatasetCreate,
     DatasetDetailResponse,
     DatasetResponse,
+    DatasetUpdate,
     DatasetVersionResponse,
 )
 from app.services.orchestration.api import datasets as dataset_service
@@ -56,15 +61,25 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB outer guard
 
 
 async def _load_and_gate_dataset(
-    db: AsyncSession, auth: AuthContext, dataset_id: uuid.UUID,
-) -> dict:
-    try:
-        row = await dataset_service.get_dataset(
-            db, tenant_id=auth.tenant_id, dataset_id=dataset_id,
+    db: AsyncSession,
+    auth: AuthContext,
+    dataset_id: uuid.UUID,
+    *,
+    action: Literal["read", "edit"] = "read",
+) -> CohortDataset:
+    row = await db.scalar(
+        select(CohortDataset).where(
+            CohortDataset.id == dataset_id,
+            CohortDataset.tenant_id == auth.tenant_id,
         )
-    except dataset_service.DatasetNotFound:
+    )
+    if row is None:
         raise HTTPException(status_code=404, detail="dataset not found")
-    await ensure_registered_app_access(db, auth, row["app_id"])
+    await ensure_registered_app_access(db, auth, row.app_id)
+    if not can_access(auth, row, action):
+        if action == "read":
+            raise HTTPException(status_code=404, detail="dataset not found")
+        raise HTTPException(status_code=403, detail="dataset is read-only")
     return row
 
 
@@ -79,7 +94,7 @@ def _format_in_use_detail(exc: dataset_service.DatasetInUse) -> str:
 @router.post("", response_model=DatasetResponse, status_code=201)
 async def create_dataset_route(
     body: DatasetCreate,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await ensure_registered_app_access(db, auth, body.app_id)
@@ -91,6 +106,7 @@ async def create_dataset_route(
             name=body.name,
             description=body.description,
             created_by=auth.user_id,
+            visibility=body.visibility,
         )
     except dataset_service.DatasetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -101,10 +117,15 @@ async def list_datasets_route(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
     app_id: str = Query(..., alias="appId"),
+    visibility: Literal["all", "private", "shared"] = Query("all"),
 ):
     await ensure_registered_app_access(db, auth, app_id)
     return await dataset_service.list_datasets(
-        db, tenant_id=auth.tenant_id, app_id=app_id,
+        db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        app_id=app_id,
+        visibility=visibility,
     )
 
 
@@ -114,16 +135,40 @@ async def get_dataset_route(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _load_and_gate_dataset(db, auth, dataset_id)
+    await _load_and_gate_dataset(db, auth, dataset_id)
+    return await dataset_service.get_dataset(
+        db, tenant_id=auth.tenant_id, dataset_id=dataset_id,
+    )
+
+
+@router.patch("/{dataset_id}", response_model=DatasetDetailResponse)
+async def update_dataset_route(
+    dataset_id: uuid.UUID,
+    body: DatasetUpdate,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+):
+    await _load_and_gate_dataset(db, auth, dataset_id, action="edit")
+    try:
+        return await dataset_service.update_dataset(
+            db,
+            tenant_id=auth.tenant_id,
+            dataset_id=dataset_id,
+            name=body.name,
+            description=body.description,
+            visibility=body.visibility,
+        )
+    except dataset_service.DatasetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.delete("/{dataset_id}", status_code=204)
 async def delete_dataset_route(
     dataset_id: uuid.UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_dataset(db, auth, dataset_id)
+    await _load_and_gate_dataset(db, auth, dataset_id, action="edit")
     try:
         await dataset_service.delete_dataset(
             db, tenant_id=auth.tenant_id, dataset_id=dataset_id,
@@ -149,9 +194,9 @@ async def import_version_route(
     id_strategy: str = Form(...),
     id_column: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
 ):
-    await _load_and_gate_dataset(db, auth, dataset_id)
+    await _load_and_gate_dataset(db, auth, dataset_id, action="edit")
 
     # Outer guard: reject upload bodies > 50 MB before parsing. The parser
     # then enforces the 20k row cap (CsvImportError -> 400 below).
@@ -218,10 +263,10 @@ async def get_version_route(
 async def delete_version_route(
     dataset_id: uuid.UUID,
     version_id: uuid.UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_dataset(db, auth, dataset_id)
+    await _load_and_gate_dataset(db, auth, dataset_id, action="edit")
     try:
         await dataset_service.delete_version(
             db,

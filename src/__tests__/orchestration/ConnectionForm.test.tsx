@@ -17,6 +17,7 @@ vi.mock('@/services/notifications', () => ({
 }));
 
 import {
+  type Connection,
   getProviderSchema,
   updateConnection,
 } from '@/services/api/orchestrationConnections';
@@ -79,7 +80,7 @@ const WATI_SCHEMA = {
   },
 };
 
-const EXISTING_CONNECTION = {
+const EXISTING_CONNECTION: Connection = {
   id: 'conn-1',
   tenantId: 'tenant-1',
   appId: 'inside-sales',
@@ -95,6 +96,9 @@ const EXISTING_CONNECTION = {
   },
   fields: WATI_SCHEMA.fields,
   createdBy: 'user-1',
+  visibility: 'private',
+  sharedBy: null,
+  sharedAt: null,
   createdAt: '2026-05-04T10:00:00Z',
   updatedAt: '2026-05-04T10:00:00Z',
 };

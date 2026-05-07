@@ -1,4 +1,5 @@
 export type WorkflowType = 'crm' | 'clinical';
+export type WorkflowVisibilityFilter = 'all' | 'private' | 'shared';
 
 // Phase 11 — neutral, functional palette categories.
 export type DisplayCategory =
@@ -158,6 +159,9 @@ export interface Workflow {
   description: string | null;
   currentPublishedVersionId: string | null;
   createdBy: string;
+  visibility: 'private' | 'shared';
+  sharedBy: string | null;
+  sharedAt: string | null;
   /** Resolved display name of the creator. `null` when the workflow was
    *  seeded by the system user, or when the creator's row was deleted.
    *  Surfaces in the campaigns listing's "Created by" column. */

@@ -26,12 +26,14 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from app.models.base import Base
+from app.models.mixins.shareable import ShareableMixin
 
 
-class ProviderConnection(Base):
+class ProviderConnection(ShareableMixin, Base):
+    asset_family = "connection"
     __tablename__ = "provider_connections"
     __table_args__ = (
         UniqueConstraint(
@@ -49,6 +51,16 @@ class ProviderConnection(Base):
         Index(
             "idx_provider_connections_tenant_app_provider_active_orm",
             "tenant_id", "app_id", "provider",
+            unique=False,
+        ),
+        Index(
+            "idx_provider_connections_tenant_app_visibility_active_orm",
+            "tenant_id", "app_id", "visibility", "active",
+            unique=False,
+        ),
+        Index(
+            "idx_provider_connections_tenant_app_created_by_active_orm",
+            "tenant_id", "app_id", "created_by", "active",
             unique=False,
         ),
         {"schema": "orchestration"},
@@ -78,6 +90,7 @@ class ProviderConnection(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    user_id = synonym("created_by")
 
 
 __all__ = ["ProviderConnection"]

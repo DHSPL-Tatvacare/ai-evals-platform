@@ -2,12 +2,13 @@
 
 import uuid
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantUserMixin, TimestampMixin
 from app.models.mixins.shareable import ShareableMixin, Visibility
+from sqlalchemy import Enum as SAEnum
 
 
 class ReportConfiguration(Base, TimestampMixin, TenantUserMixin, ShareableMixin):

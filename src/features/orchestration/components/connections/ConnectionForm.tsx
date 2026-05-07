@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { VisibilityToggle } from '@/components/ui/VisibilityToggle';
 import { ApiError } from '@/services/api/client';
 import {
   createConnection,
@@ -13,6 +14,7 @@ import {
   type ProviderSchema,
 } from '@/services/api/orchestrationConnections';
 import { notificationService } from '@/services/notifications';
+import type { AssetVisibility } from '@/types/settings.types';
 
 import {
   DynamicConfigForm,
@@ -64,6 +66,9 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
   const [schema, setSchema] = useState<ProviderSchema | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>(
     existing ? { ...existing.configRedacted } : {},
+  );
+  const [visibility, setVisibility] = useState<AssetVisibility>(
+    existing?.visibility ?? 'private',
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +147,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         saved = await updateConnection(existing.id, {
           name,
           config: payloadConfig,
+          visibility,
         });
       } else {
         saved = await createConnection({
@@ -149,6 +155,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
           provider,
           name,
           config: payloadConfig,
+          visibility,
         });
       }
       notificationService.success(
@@ -191,6 +198,12 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. TatvaCare Bolna — Production"
         />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-[var(--text-primary)]">
+          Visibility
+        </label>
+        <VisibilityToggle value={visibility} onChange={setVisibility} />
       </div>
       {jsonSchema ? (
         <>

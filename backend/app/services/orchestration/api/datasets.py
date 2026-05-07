@@ -25,12 +25,14 @@ from __future__ import annotations
 
 import io
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, insert
+from sqlalchemy import insert, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.mixins.shareable import Visibility
 from app.models.orchestration import (
     CohortDataset,
     CohortDatasetRow,
@@ -85,6 +87,9 @@ def _serialize_dataset(
         "name": row.name,
         "description": row.description,
         "created_by": row.created_by,
+        "visibility": row.visibility,
+        "shared_by": row.shared_by,
+        "shared_at": row.shared_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "latest_version": (
@@ -226,7 +231,9 @@ async def create_dataset(
     name: str,
     description: Optional[str],
     created_by: uuid.UUID,
+    visibility: Visibility = Visibility.PRIVATE,
 ) -> dict[str, Any]:
+    normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
     row = CohortDataset(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -234,6 +241,13 @@ async def create_dataset(
         name=name,
         description=description,
         created_by=created_by,
+        visibility=normalized_visibility,
+        shared_by=created_by if normalized_visibility == Visibility.SHARED else None,
+        shared_at=(
+            datetime.now(timezone.utc)
+            if normalized_visibility == Visibility.SHARED
+            else None
+        ),
     )
     db.add(row)
     try:
@@ -251,9 +265,23 @@ async def list_datasets(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
+    visibility: str = "all",
 ) -> list[dict[str, Any]]:
     stmt = select(CohortDataset).where(CohortDataset.tenant_id == tenant_id)
+    if user_id is not None:
+        if visibility == "private":
+            stmt = stmt.where(CohortDataset.created_by == user_id)
+        elif visibility == "shared":
+            stmt = stmt.where(CohortDataset.visibility == Visibility.SHARED)
+        else:
+            stmt = stmt.where(
+                or_(
+                    CohortDataset.created_by == user_id,
+                    CohortDataset.visibility == Visibility.SHARED,
+                )
+            )
     if app_id is not None:
         stmt = stmt.where(CohortDataset.app_id == app_id)
     stmt = stmt.order_by(CohortDataset.created_at.desc())
@@ -303,6 +331,40 @@ async def get_dataset(
     payload = _serialize_dataset(dataset, latest_version=latest)
     payload["versions"] = [_serialize_version(v) for v in versions]
     return payload
+
+
+async def update_dataset(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    dataset_id: uuid.UUID,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    visibility: Optional[Visibility] = None,
+) -> dict[str, Any]:
+    dataset = await _load_dataset(db, tenant_id=tenant_id, dataset_id=dataset_id)
+    if name is not None:
+        dataset.name = name
+    if description is not None:
+        dataset.description = description
+    if visibility is not None:
+        normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
+        dataset.visibility = normalized_visibility
+        if normalized_visibility == Visibility.SHARED:
+            dataset.shared_by = dataset.created_by
+            dataset.shared_at = dataset.shared_at or datetime.now(timezone.utc)
+        else:
+            dataset.shared_by = None
+            dataset.shared_at = None
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise DatasetConflict(
+            f"dataset name {name!r} already exists for app_id={dataset.app_id!r}"
+        ) from exc
+    await db.refresh(dataset)
+    return await get_dataset(db, tenant_id=tenant_id, dataset_id=dataset_id)
 
 
 async def delete_dataset(

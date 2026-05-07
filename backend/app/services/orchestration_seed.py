@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from app.models.mixins.shareable import Visibility
 from app.models.orchestration import (
     Workflow,
     WorkflowActionTemplate,
@@ -371,6 +372,9 @@ async def _upsert_seeded_workflow(db: AsyncSession, spec: dict[str, Any]) -> Non
             name=spec["name"],
             description=spec.get("description"),
             created_by=SYSTEM_USER_ID,
+            visibility=Visibility.SHARED,
+            shared_by=SYSTEM_USER_ID,
+            shared_at=datetime.now(timezone.utc),
         )
         db.add(wf)
         await db.flush()
@@ -395,6 +399,9 @@ async def _upsert_seeded_workflow(db: AsyncSession, spec: dict[str, Any]) -> Non
     # Update name/description in place; publish a new version on definition drift.
     existing.name = spec["name"]
     existing.description = spec.get("description")
+    existing.visibility = Visibility.SHARED
+    existing.shared_by = SYSTEM_USER_ID
+    existing.shared_at = existing.shared_at or datetime.now(timezone.utc)
     versions_stmt = (
         select(WorkflowVersion)
         .where(WorkflowVersion.workflow_id == existing.id)

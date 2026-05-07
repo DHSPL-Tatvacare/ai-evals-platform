@@ -5,10 +5,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job import BackgroundJob
+from app.models.mixins.shareable import Visibility
 from app.models.orchestration import (
     Workflow,
     WorkflowRun,
@@ -86,6 +87,7 @@ async def list_runs(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     workflow_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -103,6 +105,14 @@ async def list_runs(
     list endpoints in this codebase (e.g. ``LeadListResponse``).
     """
     base = select(WorkflowRun).where(WorkflowRun.tenant_id == tenant_id)
+    if user_id is not None:
+        base = base.join(Workflow, Workflow.id == WorkflowRun.workflow_id).where(
+            Workflow.tenant_id == tenant_id,
+            or_(
+                Workflow.created_by == user_id,
+                Workflow.visibility == Visibility.SHARED,
+            ),
+        )
     if workflow_id:
         base = base.where(WorkflowRun.workflow_id == workflow_id)
     if app_id is not None:
@@ -235,6 +245,7 @@ async def list_actions_global(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     app_ids: Optional[frozenset[str]] = None,
     app_id: Optional[str] = None,
     workflow_id: Optional[uuid.UUID] = None,
@@ -277,8 +288,18 @@ async def list_actions_global(
             WorkflowRunRecipientAction.completed_at,
         )
         .join(Workflow, Workflow.id == WorkflowRunRecipientAction.workflow_id)
-        .where(WorkflowRunRecipientAction.tenant_id == tenant_id)
+        .where(
+            WorkflowRunRecipientAction.tenant_id == tenant_id,
+            Workflow.tenant_id == tenant_id,
+        )
     )
+    if user_id is not None:
+        base = base.where(
+            or_(
+                Workflow.created_by == user_id,
+                Workflow.visibility == Visibility.SHARED,
+            )
+        )
 
     if app_ids is not None:
         if not app_ids:

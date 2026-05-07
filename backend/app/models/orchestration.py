@@ -29,20 +29,30 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from app.models.base import Base
+from app.models.mixins.shareable import ShareableMixin
 
 
 # ─── Catalog tier ────────────────────────────────────────────────────────────
 
 
-class Workflow(Base):
+class Workflow(ShareableMixin, Base):
+    asset_family = "workflow"
     __tablename__ = "workflows"
     __table_args__ = (
         UniqueConstraint("tenant_id", "app_id", "slug", name="uq_workflows_tenant_app_slug"),
         Index("idx_workflows_tenant_app", "tenant_id", "app_id"),
         Index("idx_workflows_tenant_app_type", "tenant_id", "app_id", "workflow_type"),
+        Index(
+            "idx_workflows_tenant_app_visibility_active",
+            "tenant_id", "app_id", "visibility", "active",
+        ),
+        Index(
+            "idx_workflows_tenant_app_created_by_active",
+            "tenant_id", "app_id", "created_by", "active",
+        ),
         {"schema": "orchestration"},
     )
 
@@ -69,6 +79,7 @@ class Workflow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    user_id = synonym("created_by")
 
 
 class WorkflowVersion(Base):
@@ -513,11 +524,20 @@ class WorkflowRunRecipientOverride(Base):
 # ─── Cohort dataset tier (Phase 12) ──────────────────────────────────────────
 
 
-class CohortDataset(Base):
+class CohortDataset(ShareableMixin, Base):
+    asset_family = "dataset"
     __tablename__ = "cohort_datasets"
     __table_args__ = (
         UniqueConstraint("tenant_id", "app_id", "name", name="uq_cohort_datasets_scope_name"),
         Index("idx_cohort_datasets_tenant_app", "tenant_id", "app_id"),
+        Index(
+            "idx_cohort_datasets_tenant_app_visibility",
+            "tenant_id", "app_id", "visibility",
+        ),
+        Index(
+            "idx_cohort_datasets_tenant_app_created_by",
+            "tenant_id", "app_id", "created_by",
+        ),
         {"schema": "orchestration"},
     )
 
@@ -544,6 +564,7 @@ class CohortDataset(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    user_id = synonym("created_by")
 
 
 class CohortDatasetVersion(Base):

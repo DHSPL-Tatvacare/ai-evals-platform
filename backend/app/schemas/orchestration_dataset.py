@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from pydantic import Field
 
+from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
 
 
@@ -23,6 +24,13 @@ class DatasetCreate(CamelModel):
     app_id: str
     name: str
     description: Optional[str] = None
+    visibility: Visibility = Visibility.PRIVATE
+
+
+class DatasetUpdate(CamelModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    visibility: Optional[Visibility] = None
 
 
 class DatasetVersionResponse(CamelORMModel):
@@ -50,6 +58,9 @@ class DatasetResponse(CamelORMModel):
     name: str
     description: Optional[str]
     created_by: uuid.UUID
+    visibility: Visibility
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     # Inlined latest version (or None when no version has been imported yet).

@@ -24,11 +24,12 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import SYSTEM_TENANT_ID
+from app.models.mixins.shareable import Visibility
 from app.models.orchestration import Workflow, WorkflowVersion
 from app.models.provider_connection import ProviderConnection
 
@@ -39,7 +40,7 @@ class CloneError(ValueError):
 
 
 async def _allowed_connection_ids(
-    db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str,
+    db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str, user_id: uuid.UUID,
 ) -> set[uuid.UUID]:
     """Connection ids the cloned workflow may legally reference.
 
@@ -52,6 +53,10 @@ async def _allowed_connection_ids(
         select(ProviderConnection.id).where(
             ProviderConnection.tenant_id == tenant_id,
             ProviderConnection.app_id == app_id,
+            or_(
+                ProviderConnection.created_by == user_id,
+                ProviderConnection.visibility == Visibility.SHARED,
+            ),
         )
     )
     return set(rows.all())
@@ -120,7 +125,7 @@ async def clone_system_workflow(
         raise CloneError("source workflow's current_published_version_id is dangling")
 
     allowed = await _allowed_connection_ids(
-        db, tenant_id=tenant_id, app_id=target_app_id,
+        db, tenant_id=tenant_id, app_id=target_app_id, user_id=created_by,
     )
     sanitized_definition, cleared = _strip_foreign_connection_ids(
         src_version.definition, allowed,
@@ -136,6 +141,7 @@ async def clone_system_workflow(
         name=new_name,
         description=f"Cloned from system workflow {src.slug}",
         created_by=created_by,
+        visibility=Visibility.PRIVATE,
     )
     db.add(cloned_wf)
     try:

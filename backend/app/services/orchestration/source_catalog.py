@@ -36,9 +36,10 @@ from datetime import datetime
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.mixins.shareable import Visibility
 from app.models.orchestration import CohortDataset, CohortDatasetVersion
 
 
@@ -289,6 +290,7 @@ async def list_dataset_sources(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
     app_ids: Optional[list[str]] = None,
 ) -> list[DatasetSource]:
@@ -313,6 +315,13 @@ async def list_dataset_sources(
         if not app_ids:
             return []
         stmt = stmt.where(CohortDataset.app_id.in_(app_ids))
+    if user_id is not None:
+        stmt = stmt.where(
+            or_(
+                CohortDataset.created_by == user_id,
+                CohortDataset.visibility == Visibility.SHARED,
+            )
+        )
 
     result = await db.execute(stmt)
     sources = [_row_to_dataset_source(version, dataset) for version, dataset in result.all()]

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
+import { FilterPills } from '@/components/ui/FilterPills';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { useCurrentAppId } from '@/hooks';
@@ -14,8 +16,21 @@ import {
   type DatasetResponse,
 } from '@/services/api/orchestrationDatasets';
 import { notificationService } from '@/services/notifications';
+import { useAuthStore } from '@/stores/authStore';
 
 import { CreateDatasetDialog } from './CreateDatasetDialog';
+import {
+  canEditOrchestrationAsset,
+  canManageOrchestration,
+} from '@/features/orchestration/utils/access';
+
+type VisibilityFilter = 'all' | 'private' | 'shared';
+
+const VISIBILITY_FILTERS: Array<{ id: VisibilityFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'private', label: 'Private' },
+  { id: 'shared', label: 'Shared' },
+];
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -29,17 +44,20 @@ export function DatasetsPage() {
   const { icon, title } = usePageMetadata('datasets');
   const orchestrationRoutes = useOrchestrationRoutes();
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const canManage = canManageOrchestration(user);
 
   const [rows, setRows] = useState<DatasetResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [deleteTarget, setDeleteTarget] = useState<DatasetResponse | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await orchestrationDatasetsApi.list(appId);
+      const result = await orchestrationDatasetsApi.list(appId, visibility);
       setRows(result);
     } catch (err) {
       const msg =
@@ -52,7 +70,7 @@ export function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [appId]);
+  }, [appId, visibility]);
 
   useEffect(() => {
     void refresh();
@@ -100,6 +118,9 @@ export function DatasetsPage() {
               {d.description}
             </span>
           ) : null}
+          <Badge variant={d.visibility === 'shared' ? 'info' : 'neutral'} size="sm">
+            {d.visibility}
+          </Badge>
         </div>
       ),
     },
@@ -140,7 +161,9 @@ export function DatasetsPage() {
       key: '_actions',
       header: '',
       width: '160px',
-      render: (d) => (
+      render: (d) => {
+        const canEdit = canEditOrchestrationAsset(user, d.createdBy);
+        return (
         <div className="flex items-center justify-end gap-1">
           <Button
             size="sm"
@@ -155,6 +178,7 @@ export function DatasetsPage() {
           <Button
             size="sm"
             variant="danger-outline"
+            disabled={!canEdit}
             onClick={(e) => {
               e.stopPropagation();
               setDeleteTarget(d);
@@ -163,7 +187,8 @@ export function DatasetsPage() {
             Delete
           </Button>
         </div>
-      ),
+      );
+      },
     },
   ];
 
@@ -173,7 +198,14 @@ export function DatasetsPage() {
         icon={icon}
         title={title}
         subtitle="Reusable cohort imports for orchestration workflows."
-        actions={<Button onClick={() => setCreating(true)}>New Dataset</Button>}
+        filters={(
+          <FilterPills
+            options={VISIBILITY_FILTERS}
+            active={visibility}
+            onChange={(id) => setVisibility(id as VisibilityFilter)}
+          />
+        )}
+        actions={canManage ? <Button onClick={() => setCreating(true)}>New Dataset</Button> : null}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           <DataTable<DatasetResponse>

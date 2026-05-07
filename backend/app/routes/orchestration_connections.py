@@ -11,14 +11,18 @@ commit 2 — see ``orchestration_webhooks.py``.
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthContext, get_auth_context
 from app.auth.app_scope import ensure_registered_app_access
+from app.auth.permissions import require_permission
 from app.database import get_db
+from app.models.provider_connection import ProviderConnection
+from app.services.access_control import can_access
 from app.schemas.orchestration_connection import (
     AgentVariablesResponse,
     ConnectionCreateRequest,
@@ -58,7 +62,7 @@ async def get_provider_schema(
 @router.post("", response_model=ConnectionResponse, status_code=201)
 async def create_connection(
     body: ConnectionCreateRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await ensure_registered_app_access(db, auth, body.app_id)
@@ -72,6 +76,7 @@ async def create_connection(
             config=body.config,
             active=body.active,
             created_by=auth.user_id,
+            visibility=body.visibility,
         )
     except conn_service.ConnectionInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -89,28 +94,41 @@ async def list_connections(
     app_id: Optional[str] = Query(None, alias="appId"),
     provider: Optional[list[str]] = Query(None),
     include_inactive: bool = Query(False, alias="includeInactive"),
+    visibility: Literal["all", "private", "shared"] = Query("all"),
 ):
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
     return await conn_service.list_connections(
         db,
         tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
         app_id=app_id,
         providers=provider or None,
         include_inactive=include_inactive,
+        visibility=visibility,
     )
 
 
 async def _load_and_gate_connection(
-    db: AsyncSession, auth: AuthContext, connection_id: uuid.UUID,
+    db: AsyncSession,
+    auth: AuthContext,
+    connection_id: uuid.UUID,
+    *,
+    action: Literal["read", "edit"] = "read",
 ):
-    try:
-        row = await conn_service.get_connection(
-            db, tenant_id=auth.tenant_id, connection_id=connection_id,
+    row = await db.scalar(
+        select(ProviderConnection).where(
+            ProviderConnection.id == connection_id,
+            ProviderConnection.tenant_id == auth.tenant_id,
         )
-    except conn_service.ConnectionNotFound:
+    )
+    if row is None:
         raise HTTPException(status_code=404, detail="connection not found")
-    await ensure_registered_app_access(db, auth, row["app_id"])
+    await ensure_registered_app_access(db, auth, row.app_id)
+    if not can_access(auth, row, action):
+        if action == "read":
+            raise HTTPException(status_code=404, detail="connection not found")
+        raise HTTPException(status_code=403, detail="connection is read-only")
     return row
 
 
@@ -120,17 +138,18 @@ async def get_connection(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _load_and_gate_connection(db, auth, connection_id)
+    row = await _load_and_gate_connection(db, auth, connection_id)
+    return conn_service.serialize_connection(row)
 
 
 @router.patch("/{connection_id}", response_model=ConnectionResponse)
 async def update_connection(
     connection_id: uuid.UUID,
     body: ConnectionUpdateRequest,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_connection(db, auth, connection_id)
+    await _load_and_gate_connection(db, auth, connection_id, action="edit")
     try:
         return await conn_service.update_connection(
             db,
@@ -139,6 +158,7 @@ async def update_connection(
             name=body.name,
             active=body.active,
             config=body.config,
+            visibility=body.visibility,
         )
     except conn_service.ConnectionInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -151,10 +171,10 @@ async def update_connection(
 @router.delete("/{connection_id}", status_code=204)
 async def archive_connection(
     connection_id: uuid.UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_connection(db, auth, connection_id)
+    await _load_and_gate_connection(db, auth, connection_id, action="edit")
     try:
         await conn_service.archive_connection(
             db, tenant_id=auth.tenant_id, connection_id=connection_id,
@@ -167,10 +187,10 @@ async def archive_connection(
 @router.post("/{connection_id}/test", response_model=ConnectionTestResponse)
 async def test_connection(
     connection_id: uuid.UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_connection(db, auth, connection_id)
+    await _load_and_gate_connection(db, auth, connection_id, action="edit")
     return await conn_service.test_connection(
         db, tenant_id=auth.tenant_id, connection_id=connection_id,
     )
@@ -181,10 +201,10 @@ async def test_connection(
 )
 async def rotate_webhook_token(
     connection_id: uuid.UUID,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    await _load_and_gate_connection(db, auth, connection_id)
+    await _load_and_gate_connection(db, auth, connection_id, action="edit")
     try:
         return await conn_service.rotate_webhook_token(
             db, tenant_id=auth.tenant_id, connection_id=connection_id,
@@ -225,15 +245,15 @@ async def list_connection_agents(
     ``error`` inline.
     """
     row = await _load_and_gate_connection(db, auth, connection_id)
-    if row["provider"] != "bolna":
+    if row.provider != "bolna":
         raise HTTPException(
             status_code=400,
-            detail=f"connection {connection_id} is provider={row['provider']}, expected bolna",
+            detail=f"connection {connection_id} is provider={row.provider}, expected bolna",
         )
     return await agents_service.list_connection_bolna_agents(
         db,
         tenant_id=auth.tenant_id,
-        app_id=row["app_id"],
+        app_id=row.app_id,
         connection_id=connection_id,
         refresh=refresh,
     )
@@ -251,15 +271,15 @@ async def list_connection_templates(
     Same soft-error envelope as the agents endpoint.
     """
     row = await _load_and_gate_connection(db, auth, connection_id)
-    if row["provider"] != "wati":
+    if row.provider != "wati":
         raise HTTPException(
             status_code=400,
-            detail=f"connection {connection_id} is provider={row['provider']}, expected wati",
+            detail=f"connection {connection_id} is provider={row.provider}, expected wati",
         )
     return await agents_service.list_connection_wati_templates(
         db,
         tenant_id=auth.tenant_id,
-        app_id=row["app_id"],
+        app_id=row.app_id,
         connection_id=connection_id,
         refresh=refresh,
     )

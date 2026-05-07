@@ -12,6 +12,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import Field, field_validator, model_validator
 
+from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
 
 
@@ -75,11 +76,13 @@ class WorkflowCreateRequest(CamelModel):
     slug: str
     name: str
     description: Optional[str] = None
+    visibility: Visibility = Visibility.PRIVATE
 
 
 class WorkflowUpdateRequest(CamelModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    visibility: Optional[Visibility] = None
 
 
 class CloneSystemWorkflowRequest(CamelModel):
@@ -105,6 +108,9 @@ class WorkflowResponse(CamelORMModel):
     description: Optional[str]
     current_published_version_id: Optional[uuid.UUID]
     created_by: uuid.UUID
+    visibility: Visibility
+    shared_by: Optional[uuid.UUID] = None
+    shared_at: Optional[datetime] = None
     # Human-readable creator fields, resolved at the route layer via a
     # left join on ``platform.users``. Both are ``None`` for system
     # workflows whose creator is the system user, or when the creator

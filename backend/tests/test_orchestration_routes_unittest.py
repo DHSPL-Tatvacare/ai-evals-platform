@@ -2,7 +2,8 @@
 
 Uses FastAPI ASGITransport with dependency overrides for ``get_db`` (test
 session, commit→flush so outer rollback wipes) and ``get_auth_context``
-(synthetic owner-auth bound to SYSTEM_TENANT_ID + SYSTEM_USER_ID).
+(synthetic owner-auth bound to a normal tenant plus ``SYSTEM_USER_ID`` so
+workflow rows remain editable; system rows stay read-only).
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from app.models.orchestration import (
     WorkflowTrigger,
 )
 from app.models.scheduled_job import ScheduledJobDefinition
+from app.models.tenant import Tenant
 
 import app.services.orchestration.nodes  # noqa: F401 — register handlers
 
@@ -34,10 +36,6 @@ def _override_db(db_session):
         yield db_session
     fastapi_app.dependency_overrides[get_db] = _g
     db_session.commit = db_session.flush  # type: ignore[assignment]
-
-
-def _override_auth():
-    return _override_auth_for_tenant(SYSTEM_TENANT_ID)
 
 
 def _override_auth_for_tenant(tenant_id, *, app_access=frozenset({"voice-rx", "kaira-bot", "inside-sales"})):
@@ -55,9 +53,22 @@ def _override_auth_for_tenant(tenant_id, *, app_access=frozenset({"voice-rx", "k
 
 
 @pytest_asyncio.fixture
-async def client(db_session):
+async def route_tenant_id(db_session) -> uuid.UUID:
+    tenant_id = uuid.uuid4()
+    db_session.add(Tenant(
+        id=tenant_id,
+        name=f"wf-route-{tenant_id.hex[:8]}",
+        slug=f"wf-route-{tenant_id.hex[:8]}",
+        is_active=True,
+    ))
+    await db_session.flush()
+    return tenant_id
+
+
+@pytest_asyncio.fixture
+async def client(db_session, route_tenant_id):
     _override_db(db_session)
-    _override_auth()
+    _override_auth_for_tenant(route_tenant_id)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=fastapi_app), base_url="http://test"
@@ -308,7 +319,9 @@ async def test_publish_rejects_unknown_node_type(client):
         f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
     assert r.status_code == 400
-    assert "fake.unknown_node" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert isinstance(detail, list)
+    assert any("fake.unknown_node" in item["message"] for item in detail)
 
 
 @pytest.mark.asyncio

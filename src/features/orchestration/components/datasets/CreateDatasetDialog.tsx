@@ -3,12 +3,14 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { VisibilityToggle } from '@/components/ui/VisibilityToggle';
 import { ApiError } from '@/services/api/client';
 import {
   orchestrationDatasetsApi,
   type DatasetResponse,
 } from '@/services/api/orchestrationDatasets';
 import { notificationService } from '@/services/notifications';
+import type { AssetVisibility } from '@/types/settings.types';
 
 interface Props {
   isOpen: boolean;
@@ -23,12 +25,14 @@ const DESCRIPTION_MAX = 500;
 export function CreateDatasetDialog({ isOpen, appId, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [visibility, setVisibility] = useState<AssetVisibility>('private');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   function reset() {
     setName('');
     setDescription('');
+    setVisibility('private');
     setError(null);
     setSaving(false);
   }
@@ -45,6 +49,7 @@ export function CreateDatasetDialog({ isOpen, appId, onClose, onCreated }: Props
         appId,
         name: name.trim(),
         description: description.trim() ? description.trim() : null,
+        visibility,
       });
       notificationService.success(`Dataset "${dataset.name}" created.`);
       onCreated(dataset);
@@ -102,6 +107,12 @@ export function CreateDatasetDialog({ isOpen, appId, onClose, onCreated }: Props
           <p className="text-[11px] text-[var(--text-muted)]">
             {description.length} / {DESCRIPTION_MAX}
           </p>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-[var(--text-primary)]">
+            Visibility
+          </label>
+          <VisibilityToggle value={visibility} onChange={setVisibility} />
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={handleClose} disabled={saving}>

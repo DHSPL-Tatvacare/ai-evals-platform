@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
+import { FilterPills } from '@/components/ui/FilterPills';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { usePageMetadata } from '@/config/pageMetadata';
@@ -19,9 +20,22 @@ import {
 } from '@/services/api/orchestrationConnections';
 import { notificationService } from '@/services/notifications';
 import { logger } from '@/services/logger';
+import { useAuthStore } from '@/stores/authStore';
 
 import { ConnectionForm } from './ConnectionForm';
 import { getConnectionProviderLabel } from './providerOptions';
+import {
+  canEditOrchestrationAsset,
+  canManageOrchestration,
+} from '@/features/orchestration/utils/access';
+
+type VisibilityFilter = 'all' | 'private' | 'shared';
+
+const VISIBILITY_FILTERS: Array<{ id: VisibilityFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'private', label: 'Private' },
+  { id: 'shared', label: 'Shared' },
+];
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -43,10 +57,13 @@ async function copyToClipboard(text: string): Promise<boolean> {
 export function ConnectionsPage() {
   const appId = useCurrentAppId();
   const { icon, title } = usePageMetadata('connections');
+  const user = useAuthStore((s) => s.user);
+  const canManage = canManageOrchestration(user);
   const createTitleId = useId();
   const editTitleId = useId();
   const [rows, setRows] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Connection | null>(null);
@@ -59,6 +76,7 @@ export function ConnectionsPage() {
       const result = await listConnections({
         appId: appId,
         includeInactive: true,
+        visibility,
       });
       setRows(result);
     } catch (err) {
@@ -72,7 +90,7 @@ export function ConnectionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [appId]);
+  }, [appId, visibility]);
 
   useEffect(() => {
     void refresh();
@@ -145,9 +163,14 @@ export function ConnectionsPage() {
       render: (c) => (
         <div className="flex flex-col gap-0.5">
           <span className="text-[var(--text-primary)]">{c.name}</span>
-          {!c.active ? (
-            <span className="text-[11px] text-[var(--text-secondary)]">Archived</span>
-          ) : null}
+          <div className="flex items-center gap-1">
+            <Badge variant={c.visibility === 'shared' ? 'info' : 'neutral'} size="sm">
+              {c.visibility}
+            </Badge>
+            {!c.active ? (
+              <span className="text-[11px] text-[var(--text-secondary)]">Archived</span>
+            ) : null}
+          </div>
         </div>
       ),
     },
@@ -210,7 +233,9 @@ export function ConnectionsPage() {
       key: '_actions',
       header: '',
       width: '180px',
-      render: (c) => (
+      render: (c) => {
+        const canEdit = canEditOrchestrationAsset(user, c.createdBy);
+        return (
         <div className="flex items-center justify-end gap-1">
           <Button
             size="sm"
@@ -222,7 +247,7 @@ export function ConnectionsPage() {
               e.stopPropagation();
               void handleTest(c);
             }}
-            disabled={testingId === c.id}
+            disabled={!canEdit || testingId === c.id}
             aria-label="Test connection"
             title={testingId === c.id ? 'Testing…' : 'Test connection'}
           />
@@ -235,6 +260,7 @@ export function ConnectionsPage() {
               e.stopPropagation();
               setEditing(c);
             }}
+            disabled={!canEdit}
             aria-label="Edit connection"
             title="Edit"
           />
@@ -249,7 +275,7 @@ export function ConnectionsPage() {
                 e.stopPropagation();
                 void handleRotate(c);
               }}
-              disabled={rotatingId === c.id}
+                disabled={!canEdit || rotatingId === c.id}
               aria-label="Rotate webhook URL"
               title={rotatingId === c.id ? 'Rotating…' : 'Rotate webhook URL'}
             />
@@ -264,12 +290,14 @@ export function ConnectionsPage() {
                 e.stopPropagation();
                 setArchiveTarget(c);
               }}
-              aria-label="Archive connection"
-              title="Archive"
-            />
-          ) : null}
+                disabled={!canEdit}
+                aria-label="Archive connection"
+                title="Archive"
+              />
+            ) : null}
         </div>
-      ),
+      );
+      },
     },
   ];
 
@@ -278,7 +306,14 @@ export function ConnectionsPage() {
       <PageSurface
         icon={icon}
         title={title}
-        actions={<Button onClick={() => setCreating(true)}>New Connection</Button>}
+        filters={(
+          <FilterPills
+            options={VISIBILITY_FILTERS}
+            active={visibility}
+            onChange={(id) => setVisibility(id as VisibilityFilter)}
+          />
+        )}
+        actions={canManage ? <Button onClick={() => setCreating(true)}>New Connection</Button> : null}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           <DataTable<Connection>

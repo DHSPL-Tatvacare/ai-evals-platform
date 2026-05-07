@@ -19,13 +19,15 @@ from __future__ import annotations
 import secrets
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.mixins.shareable import Visibility
 from app.models.provider_connection import ProviderConnection
 from app.services.orchestration.integrations.bolna import (
     BolnaService,
@@ -164,9 +166,16 @@ def _serialize(row: ProviderConnection) -> dict[str, Any]:
         "secret_previews": _secret_previews(row.provider, plaintext),
         "fields": _field_descriptors(row.provider),
         "created_by": row.created_by,
+        "visibility": row.visibility,
+        "shared_by": row.shared_by,
+        "shared_at": row.shared_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+
+
+def serialize_connection(row: ProviderConnection) -> dict[str, Any]:
+    return _serialize(row)
 
 
 def _unique_names(values: Iterable[str]) -> list[str]:
@@ -327,9 +336,11 @@ async def create_connection(
     created_by: uuid.UUID,
     active: bool = True,
     webhook_token: Optional[str] = None,
+    visibility: Visibility = Visibility.PRIVATE,
 ) -> dict[str, Any]:
     spec = provider_specs.get_spec(provider)  # raises ValueError → caller maps
     _validate_full_config(provider, config)
+    normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
 
     token: Optional[str] = None
     if spec.supports_webhook:
@@ -345,6 +356,13 @@ async def create_connection(
         webhook_token=token,
         active=active,
         created_by=created_by,
+        visibility=normalized_visibility,
+        shared_by=created_by if normalized_visibility == Visibility.SHARED else None,
+        shared_at=(
+            datetime.now(timezone.utc)
+            if normalized_visibility == Visibility.SHARED
+            else None
+        ),
     )
     db.add(row)
     try:
@@ -363,11 +381,25 @@ async def list_connections(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    user_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
     providers: Optional[Iterable[str]] = None,
     include_inactive: bool = False,
+    visibility: str = "all",
 ) -> list[dict[str, Any]]:
     stmt = select(ProviderConnection).where(ProviderConnection.tenant_id == tenant_id)
+    if user_id is not None:
+        if visibility == "private":
+            stmt = stmt.where(ProviderConnection.created_by == user_id)
+        elif visibility == "shared":
+            stmt = stmt.where(ProviderConnection.visibility == Visibility.SHARED)
+        else:
+            stmt = stmt.where(
+                or_(
+                    ProviderConnection.created_by == user_id,
+                    ProviderConnection.visibility == Visibility.SHARED,
+                )
+            )
     if app_id is not None:
         stmt = stmt.where(ProviderConnection.app_id == app_id)
     if providers:
@@ -394,12 +426,22 @@ async def update_connection(
     name: Optional[str] = None,
     active: Optional[bool] = None,
     config: Optional[dict[str, Any]] = None,
+    visibility: Optional[Visibility] = None,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
     if name is not None:
         row.name = name
     if active is not None:
         row.active = active
+    if visibility is not None:
+        normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
+        row.visibility = normalized_visibility
+        if normalized_visibility == Visibility.SHARED:
+            row.shared_by = row.created_by
+            row.shared_at = row.shared_at or datetime.now(timezone.utc)
+        else:
+            row.shared_by = None
+            row.shared_at = None
     if config is not None:
         stored = crypto.decrypt(row.config_encrypted)
         merged = _merge_config_for_patch(row.provider, stored=stored, submitted=config)

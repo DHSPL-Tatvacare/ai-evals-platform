@@ -13,6 +13,7 @@ import type {
   WorkflowType,
   WorkflowVersion,
 } from '@/features/orchestration/types';
+import type { AssetVisibility } from '@/types/settings.types';
 
 export interface ActionTemplate {
   id: string;
@@ -37,10 +38,12 @@ export async function listActionTemplates(params: {
 export async function listWorkflows(params?: {
   appId?: string;
   workflowType?: WorkflowType;
+  visibility?: 'all' | 'private' | 'shared';
 }): Promise<Workflow[]> {
   const q = new URLSearchParams();
   if (params?.appId) q.set('appId', params.appId);
   if (params?.workflowType) q.set('workflowType', params.workflowType);
+  if (params?.visibility) q.set('visibility', params.visibility);
   const qs = q.toString();
   return apiRequest<Workflow[]>(`/api/orchestration/workflows${qs ? `?${qs}` : ''}`);
 }
@@ -62,6 +65,7 @@ export async function createWorkflow(body: {
   slug: string;
   name: string;
   description?: string;
+  visibility?: AssetVisibility;
 }): Promise<Workflow> {
   return apiRequest<Workflow>('/api/orchestration/workflows', {
     method: 'POST',
@@ -75,7 +79,7 @@ export async function getWorkflow(id: string): Promise<Workflow> {
 
 export async function updateWorkflow(
   id: string,
-  body: { name?: string; description?: string },
+  body: { name?: string; description?: string; visibility?: AssetVisibility },
 ): Promise<Workflow> {
   return apiRequest<Workflow>(`/api/orchestration/workflows/${id}`, {
     method: 'PATCH',
