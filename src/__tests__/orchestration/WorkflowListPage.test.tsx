@@ -13,6 +13,7 @@ vi.mock('@/services/api/orchestration', () => ({
   cloneSystemWorkflow: vi.fn(),
   fireManualRun: vi.fn(),
   archiveWorkflow: vi.fn(),
+  updateWorkflow: vi.fn(),
 }));
 
 vi.mock('@/services/notifications', () => ({
@@ -45,6 +46,7 @@ import {
   listWorkflows,
 } from '@/services/api/orchestration';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { WorkflowListPage } from '@/features/orchestration/components/WorkflowListPage';
 
 const tenantWorkflow = {
@@ -57,8 +59,14 @@ const tenantWorkflow = {
   description: 'owned',
   currentPublishedVersionId: 'ver-1',
   createdBy: 'user-1',
+  visibility: 'private' as const,
+  sharedBy: null,
+  sharedAt: null,
+  createdByName: 'Test User',
+  createdByEmail: 'user-1@example.com',
   createdAt: '2026-04-30T00:00:00Z',
   updatedAt: '2026-04-30T00:00:00Z',
+  lastRunId: null,
   lastRunAt: null,
   lastRunStatus: null,
 };
@@ -73,8 +81,14 @@ const systemWorkflow = {
   description: 'seeded',
   currentPublishedVersionId: 'ver-seed',
   createdBy: 'system-user',
+  visibility: 'shared' as const,
+  sharedBy: 'system-user',
+  sharedAt: '2026-04-30T00:00:00Z',
+  createdByName: null,
+  createdByEmail: null,
   createdAt: '2026-04-30T00:00:00Z',
   updatedAt: '2026-04-30T00:00:00Z',
+  lastRunId: null,
   lastRunAt: null,
   lastRunStatus: null,
 };
@@ -85,6 +99,23 @@ describe('WorkflowListPage', () => {
     // ``useCurrentAppId``; tests need to anchor it explicitly so the
     // route resolver finds the right resolver branch.
     useAppStore.setState({ currentApp: 'inside-sales' });
+    useAuthStore.setState({
+      user: {
+        id: 'user-1',
+        email: 'user-1@example.com',
+        displayName: 'Test User',
+        tenantId: 'tenant-1',
+        tenantName: 'Tenant One',
+        roleId: 'role-1',
+        roleName: 'Admin',
+        isOwner: true,
+        permissions: ['orchestration:manage'],
+        appAccess: ['inside-sales'],
+      },
+      accessToken: 'token',
+      isAuthenticated: true,
+      isLoading: false,
+    });
     vi.clearAllMocks();
     (listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([tenantWorkflow]);
     (listSystemWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue([systemWorkflow]);
@@ -105,7 +136,7 @@ describe('WorkflowListPage', () => {
     render(<WorkflowListPage />);
 
     await waitFor(() =>
-      expect(listWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales' }),
+      expect(listWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales', visibility: 'all' }),
     );
     expect(listSystemWorkflows).toHaveBeenCalledWith({ appId: 'inside-sales' });
 

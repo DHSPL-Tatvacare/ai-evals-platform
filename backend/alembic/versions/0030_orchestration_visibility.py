@@ -25,8 +25,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _VISIBILITY_ENUM = sa.Enum(
-    "private",
-    "shared",
+    "PRIVATE",
+    "SHARED",
     name="asset_visibility",
     native_enum=False,
 )
@@ -40,7 +40,7 @@ def _add_shareable_columns(table_name: str) -> None:
             "visibility",
             _VISIBILITY_ENUM,
             nullable=False,
-            server_default=sa.text("'private'"),
+            server_default=sa.text("'PRIVATE'"),
         ),
         schema="orchestration",
     )
@@ -75,7 +75,7 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE orchestration.workflows
-        SET visibility = 'shared',
+        SET visibility = 'SHARED',
             shared_by = created_by,
             shared_at = COALESCE(updated_at, created_at, NOW())
         """
@@ -83,7 +83,7 @@ def upgrade() -> None:
     op.execute(
         f"""
         UPDATE orchestration.provider_connections
-        SET visibility = 'shared',
+        SET visibility = 'SHARED',
             shared_by = created_by,
             shared_at = COALESCE(updated_at, created_at, NOW())
         WHERE tenant_id <> '{_SYSTEM_TENANT_ID}'::uuid
@@ -92,7 +92,7 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE orchestration.cohort_datasets
-        SET visibility = 'shared',
+        SET visibility = 'SHARED',
             shared_by = created_by,
             shared_at = COALESCE(updated_at, created_at, NOW())
         """

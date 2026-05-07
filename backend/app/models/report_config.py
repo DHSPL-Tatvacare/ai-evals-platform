@@ -2,13 +2,12 @@
 
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantUserMixin, TimestampMixin
 from app.models.mixins.shareable import ShareableMixin, Visibility
-from sqlalchemy import Enum as SAEnum
 
 
 class ReportConfiguration(Base, TimestampMixin, TenantUserMixin, ShareableMixin):
@@ -35,7 +34,7 @@ class ReportConfiguration(Base, TimestampMixin, TenantUserMixin, ShareableMixin)
         SAEnum(Visibility, name="asset_visibility", native_enum=False),
         nullable=False,
         default=Visibility.PRIVATE,
-        server_default=Visibility.PRIVATE.value,
+        server_default=Visibility.PRIVATE.name,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
