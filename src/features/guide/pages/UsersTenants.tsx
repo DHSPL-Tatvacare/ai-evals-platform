@@ -29,7 +29,7 @@ const authFlowDiagram = `sequenceDiagram
 const inviteFlowDiagram = `flowchart TD
     Admin["Admin / Owner"] -->|"POST /api/admin/invite-links"| Create["Create Invite Link"]
     Create --> Token["Generate token + hash"]
-    Token --> Link["Shareable URL: /signup?token=xxx"]
+    Token --> Link["Shareable URL: /signup?invite=xxx"]
     Link --> NewUser["New user opens link"]
     NewUser -->|"GET /api/auth/validate-invite"| Validate["Validate token"]
     Validate --> Check{"Valid + not expired + uses remaining?"}
@@ -102,9 +102,11 @@ const adminEndpoints = [
   { method: "PATCH", path: "/api/admin/users/:id", description: "Update user (name, role, active)" },
   { method: "PUT", path: "/api/admin/users/:id/password", description: "Reset user password (revokes all sessions)" },
   { method: "DELETE", path: "/api/admin/users/:id", description: "Deactivate user (owner only)" },
-  { method: "POST", path: "/api/admin/invite-links", description: "Create invite link (label, role, max uses, expiry)" },
-  { method: "GET", path: "/api/admin/invite-links", description: "List all invite links" },
-  { method: "DELETE", path: "/api/admin/invite-links/:id", description: "Revoke invite link" },
+  { method: "POST", path: "/api/admin/invite-links", description: "Create invite link (label, role, max uses, expiry, signup method)" },
+  { method: "GET", path: "/api/admin/invite-links", description: "List invite links with lifecycle metadata and status filtering" },
+  { method: "POST", path: "/api/admin/invite-links/:id/revoke", description: "Soft-revoke an active invite link" },
+  { method: "DELETE", path: "/api/admin/invite-links/:id", description: "Hard-delete a terminal invite link" },
+  { method: "GET", path: "/api/admin/invite-links/:id/uses", description: "List invite redemptions for forensic drill-in" },
   { method: "GET", path: "/api/admin/tenant", description: "Get tenant details" },
   { method: "PATCH", path: "/api/admin/tenant", description: "Update tenant (name, slug)" },
   { method: "GET", path: "/api/admin/tenant-config", description: "Get tenant config (branding, domains)" },

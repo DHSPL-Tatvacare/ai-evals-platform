@@ -2,9 +2,9 @@
 import logging
 import uuid as _uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, delete, case, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,8 @@ from app.auth.context import AuthContext, get_auth_context, require_owner
 from app.auth.permissions import ensure_any_permission, ensure_permissions, require_permission
 from app.auth.utils import create_refresh_token, hash_password, hash_refresh_token
 from app.database import get_db
-from app.models.invite_link import IdentityInviteLink
+from app.models.invite_link import IdentityInviteLink, InviteSignupMethod, InviteStatus
+from app.services import invite_links as invite_link_service
 from app.models.evaluation_dataset import EvaluationDataset
 from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, EvaluationRunAdversarialResult, EvaluationRunApiCallLog
 from app.models.chat import ChatSession, ChatMessage
@@ -877,6 +878,37 @@ class CreateInviteLinkRequest(CamelModel):
     role_id: str
     max_uses: Optional[int] = None
     expires_in_hours: int = 168  # 7 days
+    # SSO seam — accepted at the schema level so the frontend can prepare,
+    # but the create route hard-rejects ``sso`` until the SSO redemption
+    # path lands. Persisted as the row's ``signup_method`` once allowed.
+    signup_method: Literal['password', 'sso'] = 'password'
+
+
+_INVITE_CREATOR_FALLBACK = "(deleted user)"
+
+
+def _resolve_creator_email(
+    invite: IdentityInviteLink, live_email: Optional[str]
+) -> str:
+    """Live email → snapshot → stable fallback. Phase 1 keeps the existing
+    ``createdByEmail`` field shape; the snapshot lets invite rows survive
+    creator deletion now that ``created_by`` is ``ON DELETE SET NULL``."""
+    if live_email:
+        return live_email
+    if invite.created_by_email_snapshot:
+        return invite.created_by_email_snapshot
+    return _INVITE_CREATOR_FALLBACK
+
+
+async def _load_live_creator_email(
+    db: AsyncSession,
+    invite: IdentityInviteLink,
+) -> Optional[str]:
+    if not invite.created_by:
+        return None
+    return await db.scalar(
+        select(User.email).where(User.id == invite.created_by)
+    )
 
 
 def _invite_response(invite: IdentityInviteLink, creator_email: str) -> dict:
@@ -887,8 +919,13 @@ def _invite_response(invite: IdentityInviteLink, creator_email: str) -> dict:
         "maxUses": invite.max_uses,
         "usesCount": invite.uses_count,
         "expiresAt": invite.expires_at.isoformat(),
-        "isActive": invite.is_active,
+        "status": invite.status.value,
+        "signupMethod": invite.signup_method.value,
+        "revokedAt": invite.revoked_at.isoformat() if invite.revoked_at else None,
+        "revokedBy": str(invite.revoked_by) if invite.revoked_by else None,
+        "revokedByEmail": invite.revoked_by_email_snapshot,
         "createdAt": invite.created_at.isoformat() if invite.created_at else None,
+        "createdBy": str(invite.created_by) if invite.created_by else None,
         "createdByEmail": creator_email,
     }
 
@@ -914,6 +951,10 @@ async def create_invite_link(
         raise HTTPException(400, detail="Expiry must be between 1 and 720 hours")
     if body.max_uses is not None and body.max_uses < 1:
         raise HTTPException(400, detail="Max uses must be at least 1")
+    if body.signup_method == 'sso':
+        # The column accepts ``sso``, but the redemption path isn't wired
+        # yet. Hard-reject so an admin can't issue an unredeemable invite.
+        raise HTTPException(501, detail="SSO invites are not yet supported")
 
     raw_token, token_hash = create_refresh_token()  # reuse same random+hash pattern
 
@@ -925,6 +966,9 @@ async def create_invite_link(
         role_id=_uuid.UUID(body.role_id),
         max_uses=body.max_uses,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours),
+        status=InviteStatus.active,
+        signup_method=InviteSignupMethod(body.signup_method),
+        created_by_email_snapshot=auth.email,
     )
     db.add(invite)
     await db.flush()
@@ -954,27 +998,127 @@ async def create_invite_link(
 
 @router.get("/invite-links")
 async def list_invite_links(
+    status: Literal['active', 'terminal', 'all'] = Query('active'),
     auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all invite links for the tenant (admin+)."""
-    result = await db.execute(
+    """List invite links for the tenant (admin+).
+
+    ``status`` filters server-side:
+    - ``active`` (default) → only invites currently usable.
+    - ``terminal`` → revoked / expired / exhausted.
+    - ``all`` → everything.
+
+    Lazy correction: rows still labelled ``active`` whose timer has run
+    out or whose ``max_uses`` is hit get persisted to their derived
+    terminal status before the response is sent. Bounded so a list query
+    never amplifies into a large fan-out.
+    """
+    stmt = (
         select(IdentityInviteLink, User.email)
-        .join(User, IdentityInviteLink.created_by == User.id)
+        .outerjoin(User, IdentityInviteLink.created_by == User.id)
         .where(IdentityInviteLink.tenant_id == auth.tenant_id)
         .order_by(IdentityInviteLink.created_at.desc())
     )
-    return [_invite_response(invite, email) for invite, email in result.all()]
+    rows = (await db.execute(stmt)).all()
+    invites = [invite for invite, _email in rows]
+    previous_statuses = [invite.status for invite in invites]
+    await invite_link_service.lazily_persist_status_corrections(invites)
+    if any(invite.status != previous for invite, previous in zip(invites, previous_statuses, strict=False)):
+        await db.commit()
+
+    if status == 'active':
+        rows = [(invite, email) for invite, email in rows if invite.status == InviteStatus.active]
+    elif status == 'terminal':
+        rows = [(invite, email) for invite, email in rows if invite.status != InviteStatus.active]
+
+    return [
+        _invite_response(invite, _resolve_creator_email(invite, email))
+        for invite, email in rows
+    ]
 
 
-@router.delete("/invite-links/{link_id}")
-async def revoke_invite_link(
+@router.post("/invite-links/{link_id}/revoke")
+async def revoke_invite_link_v2(
     link_id: str,
     request: Request,
     auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Revoke an invite link (admin+)."""
+    """Revoke an invite link (canonical endpoint).
+
+    Returns the updated row so the frontend can update its cache without
+    a follow-up GET. ``409`` if the row is already terminal — this is the
+    enforcement that the legacy ``DELETE`` route silently lacked.
+    """
+    try:
+        invite = await invite_link_service.revoke_invite_link(
+            db,
+            tenant_id=auth.tenant_id,
+            invite_id=_uuid.UUID(link_id),
+            actor_id=auth.user_id,
+            actor_email=auth.email,
+            request=request,
+        )
+    except LookupError:
+        raise HTTPException(404, detail="Invite link not found")
+    except invite_link_service.InviteLinkAlreadyTerminal as exc:
+        await db.commit()
+        raise HTTPException(
+            409, detail=f"invite link is already {exc.args[0]}"
+        )
+    await db.commit()
+    creator_email = await _load_live_creator_email(db, invite)
+    return _invite_response(invite, _resolve_creator_email(invite, creator_email))
+
+
+@router.delete("/invite-links/{link_id}")
+async def hard_delete_invite_link(
+    link_id: str,
+    request: Request,
+    auth: AuthContext = require_permission('invite_link:delete'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hard-delete a terminal invite. Cascades the redemption audit rows.
+
+    Soft-revoke moved to ``POST /revoke`` in Phase 2; this verb now
+    means "permanently remove the row". Returns 409 on active rows so
+    callers can't bypass the audit trail by deleting before revoking.
+    """
+    try:
+        await invite_link_service.hard_delete_invite_link(
+            db,
+            tenant_id=auth.tenant_id,
+            invite_id=_uuid.UUID(link_id),
+            actor_id=auth.user_id,
+            request=request,
+        )
+    except LookupError:
+        raise HTTPException(404, detail="Invite link not found")
+    except invite_link_service.InviteLinkNotTerminal as exc:
+        raise HTTPException(
+            409,
+            detail=(
+                f"invite link is currently {exc.args[0]}; revoke it first "
+                "before permanent deletion"
+            ),
+        )
+    await db.commit()
+    return {"deleted": True, "id": link_id}
+
+
+@router.get("/invite-links/{link_id}/uses")
+async def list_invite_link_uses(
+    link_id: str,
+    auth: AuthContext = require_permission('invite_link:manage'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Forensic drill-in: who redeemed this invite, when, from where.
+
+    ``ipHashPrefix`` = first 12 chars of the per-tenant SHA-256 hash —
+    enough for "did the same IP redeem multiple invites" without
+    exposing the full hash.
+    """
     invite = await db.scalar(
         select(IdentityInviteLink).where(
             IdentityInviteLink.id == _uuid.UUID(link_id),
@@ -984,22 +1128,21 @@ async def revoke_invite_link(
     if not invite:
         raise HTTPException(404, detail="Invite link not found")
 
-    invite.is_active = False
-
-    await write_audit_log(
-        db,
-        tenant_id=auth.tenant_id,
-        actor_id=auth.user_id,
-        action="invite_link:revoke",
-        entity_type="invite_link",
-        entity_id=invite.id,
-        before_state={"is_active": True},
-        after_state={"is_active": False},
-        request=request,
+    uses = await invite_link_service.list_invite_uses(
+        db, invite_link_id=invite.id
     )
-
-    await db.commit()
-    return {"revoked": True, "id": link_id}
+    return {
+        "items": [
+            {
+                "id": str(u.id),
+                "userId": str(u.user_id) if u.user_id else None,
+                "userEmail": u.user_email_snapshot,
+                "usedAt": u.used_at.isoformat(),
+                "ipHashPrefix": (u.ip_hash[:12] + "…") if u.ip_hash else None,
+            }
+            for u in uses
+        ]
+    }
 
 
 # ── Tenant Config ─────────────────────────────────────────────────────────────

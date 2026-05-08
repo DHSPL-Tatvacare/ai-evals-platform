@@ -6,7 +6,7 @@ export interface ApiRoute {
 }
 
 export const apiRoutes: ApiRoute[] = [
-  { router: 'admin', prefix: '/api/admin', keyEndpoints: 'GET /stats, POST /erase, GET /users, POST /users, PATCH /users/{user_id}, PUT /users/{user_id}/password, DELETE /users/{user_id}, GET /tenant, PATCH /tenant, POST /invite-links, GET /invite-links, DELETE /invite-links/{link_id}, GET /tenant-config, PATCH /tenant-config', description: 'Admin API routes — database stats, selective data erasure, user management, tenant management, invite links' },
+  { router: 'admin', prefix: '/api/admin', keyEndpoints: 'GET /stats, POST /erase, GET /users, POST /users, PATCH /users/{user_id}, PUT /users/{user_id}/password, DELETE /users/{user_id}, GET /tenant, PATCH /tenant, POST /invite-links, GET /invite-links, POST /invite-links/{link_id}/revoke, DELETE /invite-links/{link_id}, GET /invite-links/{link_id}/uses, GET /tenant-config, PATCH /tenant-config', description: 'Admin API routes — database stats, selective data erasure, user management, tenant management, invite links' },
   { router: 'adversarial_config', prefix: '/api/adversarial-config', keyEndpoints: 'GET /, PUT /, POST /reset, GET /export, POST /import', description: 'Adversarial config API routes' },
   { router: 'apps', prefix: '/api/apps', keyEndpoints: 'GET /', description: 'Apps route — list registered applications' },
   { router: 'auth', prefix: '/api/auth', keyEndpoints: 'POST /login, POST /refresh, POST /logout, GET /me, PUT /me/password, GET /validate-invite, POST /signup', description: 'Auth routes — login, refresh, logout, me, password change' },

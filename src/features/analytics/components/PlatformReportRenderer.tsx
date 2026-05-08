@@ -461,10 +461,15 @@ function SectionContent({
   section,
   presentationSection,
   report,
+  printMode = false,
 }: {
   section: PlatformReportSection;
   presentationSection?: PresentationSection;
   report?: PlatformRunReportPayload;
+  /** Forwarded to children that have a collapsed-by-default state — currently
+   *  ExemplarThreads transcripts. Static-artifact targets (PDF) need every
+   *  click-to-reveal panel pre-expanded. */
+  printMode?: boolean;
 }) {
   const componentId = getSectionComponentId(section, presentationSection);
 
@@ -722,6 +727,7 @@ function SectionContent({
         narrative={narrative}
         isAdversarial={isAdversarial}
         runId={report?.metadata.runId}
+        printMode={printMode}
       />
     );
   }
@@ -923,7 +929,24 @@ function SummarySectionContent({
   );
 }
 
-export function PlatformReportView({ report, actions }: { report: PlatformRunReportPayload; actions: ReactNode }) {
+interface PlatformReportViewProps {
+  report: PlatformRunReportPayload;
+  /** Live UI passes the export/refresh button cluster; print mode passes nothing. */
+  actions?: ReactNode;
+  /**
+   * When true, render only the detailed-analysis section list inline — no Tabs,
+   * no actions slot — and propagate `printMode` to children that have a
+   * collapsed-by-default state (e.g. exemplar transcripts) so the static
+   * artifact carries every piece of evidence the live UI exposes via clicks.
+   *
+   * This is the single source of truth for the headless PDF render: the print
+   * route mounts this same component with `printMode`, guaranteeing the PDF
+   * cannot drift from the Detailed tab of the live UI.
+   */
+  printMode?: boolean;
+}
+
+export function PlatformReportView({ report, actions, printMode = false }: PlatformReportViewProps) {
   const [activeTab, setActiveTab] = useState('summary');
   const reportTitle = report.metadata.runName || report.metadata.reportName || 'Evaluation Report';
   const modelLabel = report.metadata.llmProvider && report.metadata.llmModel
@@ -946,39 +969,92 @@ export function PlatformReportView({ report, actions }: { report: PlatformRunRep
         ? 'var(--color-error)'
         : 'var(--text-muted)';
 
+  const headerCard = (
+    <div className="flex flex-wrap items-center gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+      {primaryCard ? (
+        <>
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-full shrink-0"
+            style={{ backgroundColor: gradeColor }}
+          >
+            <span className="text-sm font-bold text-white">{primaryCard.subtitle ?? ''}</span>
+          </div>
+          <div className="flex h-10 items-center shrink-0">
+            <span className="text-xl font-bold leading-none text-[var(--text-primary)]">{primaryCard.value}</span>
+            <span className="ml-1.5 text-sm leading-none text-[var(--text-muted)]">/ 100</span>
+          </div>
+        </>
+      ) : null}
+
+      <div className="min-w-0 flex-1">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">{reportTitle}</h2>
+        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[var(--text-muted)]">
+          {secondaryCards.map((card) => (
+            <span key={card.key}>{card.value} {card.label.toLowerCase()}</span>
+          ))}
+          {report.metadata.evalType ? <><span>·</span><span>{report.metadata.evalType}</span></> : null}
+          {modelLabel ? <><span>·</span><span>{modelLabel}</span></> : null}
+          <span>·</span>
+          <span>{new Date(report.metadata.computedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+        </div>
+      </div>
+
+      {!printMode ? <div className="ml-auto shrink-0">{actions}</div> : null}
+    </div>
+  );
+
+  // The platform's `presentation.sections[*].printable` flag is the canonical
+  // way for a backend profile or Sherlock blueprint to opt a section out of
+  // the static artifact (e.g. an interactive control panel that has no value
+  // on paper). It defaults to `true`, so unflagged sections always print.
+  // We honour it ONLY when rendering for print — the live UI still shows the
+  // full Detailed tab regardless of the flag.
+  const detailedSectionsToRender = printMode
+    ? detailedSections.filter((section) => {
+        const pSection = presentationSectionMap.get(section.id);
+        return pSection ? pSection.printable !== false : true;
+      })
+    : detailedSections;
+
+  const detailedSectionList = (
+    <div className="space-y-8">
+      {detailedSectionsToRender.map((section) => {
+        const pSection = presentationSectionMap.get(section.id);
+        const cId = getSectionComponentId(section, pSection);
+        const isRich = RICH_COMPONENT_IDS.has(cId);
+        // `break-inside-avoid` keeps each rich card from splitting across PDF
+        // pages. It's a no-op on screen because the Detailed tab is one
+        // continuous scroll surface — no page breaks to honour.
+        return isRich ? (
+          <div key={section.id} className="break-inside-avoid">
+            <SectionContent section={section} presentationSection={pSection} report={report} printMode={printMode} />
+          </div>
+        ) : (
+          <section key={section.id} className="space-y-4 break-inside-avoid">
+            <SectionHeader title={section.title} description={section.description ?? undefined} />
+            <SectionContent section={section} presentationSection={pSection} report={report} printMode={printMode} />
+          </section>
+        );
+      })}
+    </div>
+  );
+
+  if (printMode) {
+    return (
+      <div className="space-y-6" style={buildReportPresentationStyle(report)}>
+        {headerCard}
+        {hasRenderableSections
+          ? detailedSectionList
+          : report.exportDocument
+            ? <ReportDocumentPreview document={report.exportDocument} report={report} />
+            : null}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6" style={buildReportPresentationStyle(report)}>
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-        {primaryCard ? (
-          <>
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-full shrink-0"
-              style={{ backgroundColor: gradeColor }}
-            >
-              <span className="text-sm font-bold text-white">{primaryCard.subtitle ?? ''}</span>
-            </div>
-            <div className="flex h-10 items-center shrink-0">
-              <span className="text-xl font-bold leading-none text-[var(--text-primary)]">{primaryCard.value}</span>
-              <span className="ml-1.5 text-sm leading-none text-[var(--text-muted)]">/ 100</span>
-            </div>
-          </>
-        ) : null}
-
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">{reportTitle}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[var(--text-muted)]">
-            {secondaryCards.map((card) => (
-              <span key={card.key}>{card.value} {card.label.toLowerCase()}</span>
-            ))}
-            {report.metadata.evalType ? <><span>·</span><span>{report.metadata.evalType}</span></> : null}
-            {modelLabel ? <><span>·</span><span>{modelLabel}</span></> : null}
-            <span>·</span>
-            <span>{new Date(report.metadata.computedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-          </div>
-        </div>
-
-        <div className="ml-auto shrink-0">{actions}</div>
-      </div>
+      {headerCard}
 
       {hasRenderableSections ? (
         <Tabs
@@ -1007,25 +1083,7 @@ export function PlatformReportView({ report, actions }: { report: PlatformRunRep
             {
               id: 'detailed',
               label: 'Detailed Analysis',
-              content: (
-                <div className="space-y-8 pt-2">
-                  {detailedSections.map((section) => {
-                    const pSection = presentationSectionMap.get(section.id);
-                    const cId = getSectionComponentId(section, pSection);
-                    const isRich = RICH_COMPONENT_IDS.has(cId);
-                    return isRich ? (
-                      <div key={section.id}>
-                        <SectionContent section={section} presentationSection={pSection} report={report} />
-                      </div>
-                    ) : (
-                      <section key={section.id} className="space-y-4">
-                        <SectionHeader title={section.title} description={section.description ?? undefined} />
-                        <SectionContent section={section} presentationSection={pSection} report={report} />
-                      </section>
-                    );
-                  })}
-                </div>
-              ),
+              content: <div className="pt-2">{detailedSectionList}</div>,
             },
           ]}
         />

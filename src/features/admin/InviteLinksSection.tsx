@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useId, useMemo } from 'react';
-import { Link2, Copy, Check, Trash2, Plus, SearchX, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Link2, Copy, Check, Ban, Plus, SearchX, X } from 'lucide-react';
 import {
   Button,
   Badge,
@@ -8,16 +9,24 @@ import {
   Select,
   TableToolbar,
   DataTable,
+  FilterPills,
   type ColumnDef,
 } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
 import { adminApi } from '@/services/api/adminApi';
-import type { InviteLink, CreateInviteLinkRequest, CreateInviteLinkResponse } from '@/services/api/adminApi';
+import type {
+  InviteLink,
+  InviteLinkStatus,
+  InviteListStatus,
+  CreateInviteLinkRequest,
+  CreateInviteLinkResponse,
+} from '@/services/api/adminApi';
 import { rolesApi } from '@/services/api/rolesApi';
 import type { RoleResponse } from '@/services/api/rolesApi';
 import { notificationService } from '@/services/notifications';
 import { useRightOverlay } from '@/hooks';
 import { PermissionGate } from '@/components/auth/PermissionGate';
+import { InviteUsesPanel } from './InviteUsesPanel';
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -28,22 +37,59 @@ const EXPIRY_OPTIONS = [
   { label: '30 days', value: 720 },
 ];
 
-type LinkStatus = { label: string; variant: 'success' | 'neutral' | 'warning' };
+const STATUS_FILTER_OPTIONS: { id: InviteListStatus; label: string }[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'all', label: 'All' },
+];
 
-function statusFor(link: InviteLink): LinkStatus {
-  const expired = new Date(link.expiresAt) < new Date();
-  const exhausted = link.maxUses !== null && link.usesCount >= link.maxUses;
-  if (!link.isActive) return { label: 'Revoked', variant: 'neutral' };
-  if (expired) return { label: 'Expired', variant: 'neutral' };
-  if (exhausted) return { label: 'Exhausted', variant: 'warning' };
-  return { label: 'Active', variant: 'success' };
+// Server is the authority on status — render its label/variant directly.
+const STATUS_BADGE: Record<InviteLinkStatus, { label: string; variant: 'success' | 'neutral' | 'warning' }> = {
+  active: { label: 'Active', variant: 'success' },
+  revoked: { label: 'Revoked', variant: 'neutral' },
+  expired: { label: 'Expired', variant: 'neutral' },
+  exhausted: { label: 'Exhausted', variant: 'warning' },
+};
+
+function isInviteListStatus(value: string | null): value is InviteListStatus {
+  return value === 'active' || value === 'terminal' || value === 'all';
+}
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export function InviteLinksSection() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawStatus = searchParams.get('status');
+  const statusFilter: InviteListStatus = isInviteListStatus(rawStatus) ? rawStatus : 'active';
+
+  const setStatusFilter = useCallback(
+    (next: InviteListStatus) => {
+      const params = new URLSearchParams(searchParams);
+      if (next === 'active') {
+        params.delete('status');
+      } else {
+        params.set('status', next);
+      }
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
   const [links, setLinks] = useState<InviteLink[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [revokingLink, setRevokingLink] = useState<InviteLink | null>(null);
+  const [viewingUsesFor, setViewingUsesFor] = useState<InviteLink | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -67,18 +113,19 @@ export function InviteLinksSection() {
   const [copied, setCopied] = useState(false);
 
   const loadLinks = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const data = await adminApi.listInviteLinks();
+      const data = await adminApi.listInviteLinks({ status: statusFilter });
       setLinks(data);
     } catch {
       notificationService.error('Failed to load invite links');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => { loadLinks(); }, [loadLinks]);
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
   useEffect(() => {
     rolesApi.listRoles().then((all) => {
       setAllRoles(all);
@@ -113,7 +160,7 @@ export function InviteLinksSection() {
         l.roleId.toLowerCase().includes(q) ||
         (roleNamesById.get(l.roleId) ?? '').toLowerCase().includes(q) ||
         l.createdByEmail.toLowerCase().includes(q) ||
-        statusFor(l).label.toLowerCase().includes(q),
+        STATUS_BADGE[l.status].label.toLowerCase().includes(q),
     );
   }, [links, search, roleNamesById]);
 
@@ -171,9 +218,29 @@ export function InviteLinksSection() {
     {
       key: 'label',
       header: 'Label',
-      width: 'min-w-[180px]',
-      render: (link) =>
-        link.label ? link.label : <span className="italic text-[var(--text-muted)]">No label</span>,
+      width: 'min-w-[220px]',
+      render: (link) => (
+        <div className="flex flex-col">
+          <span>
+            {link.label ? link.label : <span className="italic text-[var(--text-muted)]">No label</span>}
+          </span>
+          {link.status === 'revoked' && link.revokedAt && (
+            <span className="text-[11px] text-[var(--text-muted)]">
+              Revoked by {link.revokedByEmail ?? 'unknown'} · {formatRelative(link.revokedAt)}
+            </span>
+          )}
+          {link.status === 'expired' && (
+            <span className="text-[11px] text-[var(--text-muted)]">
+              Expired {formatRelative(link.expiresAt)}
+            </span>
+          )}
+          {link.status === 'exhausted' && (
+            <span className="text-[11px] text-[var(--text-muted)]">
+              Filled · {link.usesCount}{link.maxUses !== null ? ` / ${link.maxUses}` : ''} used
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'role',
@@ -193,12 +260,27 @@ export function InviteLinksSection() {
     {
       key: 'uses',
       header: 'Uses',
-      width: 'w-[90px]',
-      render: (link) => (
-        <span className="tabular-nums text-[var(--text-secondary)]">
-          {link.usesCount}{link.maxUses !== null ? ` / ${link.maxUses}` : ''}
-        </span>
-      ),
+      width: 'w-[110px]',
+      render: (link) => {
+        const text = `${link.usesCount}${link.maxUses !== null ? ` / ${link.maxUses}` : ''}`;
+        if (link.usesCount === 0) {
+          return <span className="tabular-nums text-[var(--text-muted)]">{text}</span>;
+        }
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewingUsesFor(link);
+            }}
+            className="inline-flex items-center gap-1 tabular-nums text-[var(--color-brand-accent)] hover:underline"
+            title="View redemptions"
+          >
+            {text}
+            <Link2 className="h-3 w-3" />
+          </button>
+        );
+      },
     },
     {
       key: 'expires',
@@ -221,8 +303,8 @@ export function InviteLinksSection() {
       header: 'Status',
       width: 'w-[110px]',
       render: (link) => {
-        const status = statusFor(link);
-        return <Badge variant={status.variant} dot={status.variant} size="sm">{status.label}</Badge>;
+        const badge = STATUS_BADGE[link.status];
+        return <Badge variant={badge.variant} dot={badge.variant} size="sm">{badge.label}</Badge>;
       },
     },
     {
@@ -232,12 +314,12 @@ export function InviteLinksSection() {
       cellClassName: 'text-right',
       headerClassName: 'text-right',
       render: (link) =>
-        link.isActive ? (
+        link.status === 'active' ? (
           <PermissionGate action="invite_link:manage">
             <Button
               variant="danger"
               size="sm"
-              icon={Trash2}
+              icon={Ban}
               iconOnly
               title="Revoke"
               onClick={(e) => {
@@ -250,7 +332,7 @@ export function InviteLinksSection() {
     },
   ], [roleNamesById]);
 
-  if (isLoading) {
+  if (isLoading && links.length === 0) {
     return <LoadingState />;
   }
 
@@ -271,6 +353,14 @@ export function InviteLinksSection() {
           </div>
         </div>
       )}
+
+      <FilterPills
+        options={STATUS_FILTER_OPTIONS}
+        active={statusFilter}
+        onChange={(id) => {
+          if (isInviteListStatus(id)) setStatusFilter(id);
+        }}
+      />
 
       <TableToolbar
         search={{
@@ -359,10 +449,12 @@ export function InviteLinksSection() {
         </div>
       )}
 
+      <InviteUsesPanel invite={viewingUsesFor} onClose={() => setViewingUsesFor(null)} />
+
       <ConfirmDialog
         isOpen={!!revokingLink}
         title="Revoke Invite Link"
-        description={`Are you sure you want to revoke this invite link${revokingLink?.label ? ` (${revokingLink.label})` : ''}? It will no longer be usable for signups.`}
+        description={`Revoke this invite link${revokingLink?.label ? ` (${revokingLink.label})` : ''}? It will become unusable immediately. This action cannot be undone.`}
         confirmLabel="Revoke"
         variant="danger"
         onConfirm={handleRevoke}

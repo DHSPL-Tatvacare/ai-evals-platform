@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,10 +62,12 @@ async def get_provider_schema(
 @router.post("", response_model=ConnectionResponse, status_code=201)
 async def create_connection(
     body: ConnectionCreateRequest,
+    request: Request,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await ensure_registered_app_access(db, auth, body.app_id)
+    base_url = conn_service.resolve_base_url(request.headers.get("origin"))
     try:
         return await conn_service.create_connection(
             db,
@@ -77,6 +79,7 @@ async def create_connection(
             active=body.active,
             created_by=auth.user_id,
             visibility=body.visibility,
+            base_url=base_url,
         )
     except conn_service.ConnectionInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -89,6 +92,7 @@ async def create_connection(
 
 @router.get("", response_model=list[ConnectionResponse])
 async def list_connections(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
     app_id: Optional[str] = Query(None, alias="appId"),
@@ -98,6 +102,7 @@ async def list_connections(
 ):
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
+    base_url = conn_service.resolve_base_url(request.headers.get("origin"))
     return await conn_service.list_connections(
         db,
         tenant_id=auth.tenant_id,
@@ -106,6 +111,7 @@ async def list_connections(
         providers=provider or None,
         include_inactive=include_inactive,
         visibility=visibility,
+        base_url=base_url,
     )
 
 
@@ -135,21 +141,25 @@ async def _load_and_gate_connection(
 @router.get("/{connection_id}", response_model=ConnectionResponse)
 async def get_connection(
     connection_id: uuid.UUID,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     row = await _load_and_gate_connection(db, auth, connection_id)
-    return conn_service.serialize_connection(row)
+    base_url = conn_service.resolve_base_url(request.headers.get("origin"))
+    return conn_service.serialize_connection(row, base_url)
 
 
 @router.patch("/{connection_id}", response_model=ConnectionResponse)
 async def update_connection(
     connection_id: uuid.UUID,
     body: ConnectionUpdateRequest,
+    request: Request,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_connection(db, auth, connection_id, action="edit")
+    base_url = conn_service.resolve_base_url(request.headers.get("origin"))
     try:
         return await conn_service.update_connection(
             db,
@@ -159,6 +169,7 @@ async def update_connection(
             active=body.active,
             config=body.config,
             visibility=body.visibility,
+            base_url=base_url,
         )
     except conn_service.ConnectionInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -201,13 +212,18 @@ async def test_connection(
 )
 async def rotate_webhook_token(
     connection_id: uuid.UUID,
+    request: Request,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_connection(db, auth, connection_id, action="edit")
+    base_url = conn_service.resolve_base_url(request.headers.get("origin"))
     try:
         return await conn_service.rotate_webhook_token(
-            db, tenant_id=auth.tenant_id, connection_id=connection_id,
+            db,
+            tenant_id=auth.tenant_id,
+            connection_id=connection_id,
+            base_url=base_url,
         )
     except conn_service.ConnectionInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc))

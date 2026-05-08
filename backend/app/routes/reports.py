@@ -1,17 +1,22 @@
 """Report generation endpoint."""
 
+import html
+import json
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.app_scope import ensure_registered_app_access
 from app.auth.context import AuthContext
 from app.auth.permissions import require_permission, require_app_access
+from app.auth.utils import create_access_token
+from app.config import settings
 from app.database import get_db
 from app.models.eval_run import EvaluationRun
 from app.models.report_config import ReportConfiguration
@@ -21,9 +26,7 @@ from app.schemas.reporting import ReportConfigResponse, ReportRunResponse
 from app.services.access_control import readable_scope_clause
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
 from app.services.reports.cache_validation import load_cached_payload_or_raise
-from app.services.reports.config_models import ExportConfig, PresentationConfig
-from app.services.reports.document_composer import compose_document
-from app.services.reports.html_renderer import render_report_document
+from app.services.reports.config_models import ExportConfig
 from app.services.reports.report_config_resolver import resolve_report_config
 from app.services.reports.report_run_store import fetch_single_run_artifact, fetch_report_run_artifact
 from app.services.report_builder.tool_handlers import handle_save_template
@@ -96,30 +99,187 @@ def _load_report_payload(artifact_data: dict, *, detail: str, log_message: str) 
     )
 
 
-def _compose_export_document(
-    *,
-    payload: PlatformRunReportPayload,
-    report_run: ReportGenerationRun,
-    report_config: ReportConfiguration,
-) -> str:
-    presentation_config = PresentationConfig.model_validate(report_config.presentation_config or {})
+def _ensure_pdf_export_enabled(report_config: ReportConfiguration) -> None:
+    """Raise 404 if the report config has PDF export disabled."""
     export_config = ExportConfig.model_validate(report_config.export_config or {})
     if not export_config.enabled:
         raise HTTPException(status_code=404, detail="PDF export is not enabled for this report")
-    export_document = compose_document(
-        title=payload.metadata.report_name or payload.metadata.run_name or report_config.name,
-        subtitle=f'{report_run.app_id} {report_run.scope.replace("_", "-")} report',
-        metadata={
-            'Run ID': payload.metadata.run_id,
-            'Report': payload.metadata.report_name or report_config.name,
-            'Computed': payload.metadata.computed_at,
-            'Model': payload.metadata.llm_model,
-        },
-        sections=payload.sections,
-        export_config=export_config,
-        theme_tokens=dict(presentation_config.theme_tokens or {}) | dict(payload.presentation.theme_tokens or {}),
+
+
+def _compose_print_bootstrap_script(print_token: str) -> str:
+    return f"window.__REPORT_PRINT_TOKEN__ = {json.dumps(print_token)};"
+
+
+def _resolve_pdf_render_base_url() -> str:
+    return (settings.PDF_RENDER_BASE_URL or settings.APP_BASE_URL).rstrip('/')
+
+
+def _pdf_export_failure_detail(exc: Exception) -> str:
+    if isinstance(exc, PlaywrightTimeoutError):
+        return "PDF generation timed out while waiting for the report print page to finish loading."
+    return "PDF generation failed while rendering the report print view."
+
+
+_PDF_HEADER_LABEL = "Evaluation Report"
+_PDF_HEADER_TITLE_MAX_LEN = 100
+_PDF_FOOTER_SUBTITLE_MAX_LEN = 120
+
+
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + '…'
+
+
+def build_pdf_running_meta(payload: PlatformRunReportPayload) -> dict[str, str]:
+    """Distill the running header/footer text from a report payload.
+
+    Header carries the run name (or report name fallback). Footer carries the
+    eval type and the computed-at date so a reader who skips to page 6 still
+    knows which run + when. Pure metadata read — no payload mutation.
+    """
+    metadata = payload.metadata
+    title = metadata.run_name or metadata.report_name or 'Evaluation Report'
+
+    subtitle_parts: list[str] = []
+    if metadata.eval_type:
+        subtitle_parts.append(metadata.eval_type)
+    computed_at = getattr(metadata, 'computed_at', None)
+    if computed_at:
+        try:
+            iso = computed_at if isinstance(computed_at, str) else computed_at.isoformat()
+            dt = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+            subtitle_parts.append(dt.strftime('%-d %b %Y'))
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+    return {
+        'title': _truncate(title, _PDF_HEADER_TITLE_MAX_LEN),
+        'subtitle': _truncate(' · '.join(subtitle_parts), _PDF_FOOTER_SUBTITLE_MAX_LEN),
+    }
+
+
+def _compose_pdf_header_template(meta: dict[str, str]) -> str:
+    """Running header HTML for Playwright's ``page.pdf(header_template=...)``.
+
+    Playwright renders header/footer outside the React tree, so app CSS
+    variables aren't available — color literals here are intentional and
+    confined to this function.
+    """
+    title_safe = html.escape(meta.get('title', ''))
+    label_safe = html.escape(_PDF_HEADER_LABEL)
+    return (
+        '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;'
+        'font-size:8.5px;color:#64748b;width:100%;padding:0 14mm;'
+        'display:flex;justify-content:space-between;align-items:center;">'
+        f'<span style="text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">{label_safe}</span>'
+        f'<span style="font-weight:500;color:#0f172a;">{title_safe}</span>'
+        '</div>'
     )
-    return render_report_document(export_document)
+
+
+def _compose_pdf_footer_template(meta: dict[str, str]) -> str:
+    subtitle_safe = html.escape(meta.get('subtitle', ''))
+    return (
+        '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;'
+        'font-size:8px;color:#94a3b8;width:100%;padding:0 14mm;'
+        'display:flex;justify-content:space-between;align-items:center;">'
+        f'<span>{subtitle_safe}</span>'
+        '<span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>'
+        '</div>'
+    )
+
+
+async def _render_pdf_via_print_route(
+    *,
+    print_path: str,
+    auth: AuthContext,
+    log_id: str,
+    pdf_meta: dict[str, str] | None = None,
+) -> bytes:
+    """Render the React print route to PDF via headless Chromium.
+
+    The print route (e.g. ``/print/report-runs/<id>``) is the SAME React
+    component tree the user sees in the UI, so the PDF can never drift from
+    the live report. Auth is bridged via a 60-second access token injected
+    into the page before the app bootstraps.
+
+    When ``pdf_meta`` is provided, a running header (run name) and footer
+    (eval type · date · page X of Y) are stamped on every page so an
+    out-of-context reader can still place the document.
+    """
+    base_url = _resolve_pdf_render_base_url()
+    print_token = create_access_token(
+        user_id=auth.user_id,
+        tenant_id=auth.tenant_id,
+        email=auth.email,
+        role_id=auth.role_id,
+        expires_minutes=1,
+    )
+    url = f"{base_url}{print_path}"
+
+    display_header_footer = pdf_meta is not None
+    header_template = _compose_pdf_header_template(pdf_meta) if pdf_meta else ''
+    footer_template = _compose_pdf_footer_template(pdf_meta) if pdf_meta else ''
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu"],
+            )
+            try:
+                context = await browser.new_context(
+                    viewport={"width": 1240, "height": 1754},
+                    device_scale_factor=2,
+                )
+                await context.add_init_script(_compose_print_bootstrap_script(print_token))
+                page = await context.new_page()
+                # Belt-and-suspenders: pin the headless browser to light color
+                # scheme BEFORE first paint so the inline theme bootstrap in
+                # index.html (which reads `prefers-color-scheme` when no
+                # localStorage entry exists) cannot accidentally select dark
+                # mode on a host where the OS reports dark. Frontend also
+                # forces `data-theme=light` on mount; this guards against the
+                # window between page load and React hydration.
+                await page.emulate_media(media="print", color_scheme="light")
+                await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                await page.wait_for_selector(
+                    'body[data-report-ready="true"]',
+                    timeout=45_000,
+                )
+                report_error = await page.get_attribute('body', 'data-report-error')
+                if report_error:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"PDF generation failed: {report_error}",
+                    )
+                pdf_bytes = await page.pdf(
+                    format="A4",
+                    print_background=True,
+                    display_header_footer=display_header_footer,
+                    header_template=header_template,
+                    footer_template=footer_template,
+                    margin={
+                        # Header (~7mm) + breathing room → 18mm top.
+                        # Footer (~6mm) + breathing room → 16mm bottom.
+                        "top": "18mm" if display_header_footer else "12mm",
+                        "right": "14mm",
+                        "bottom": "16mm" if display_header_footer else "12mm",
+                        "left": "14mm",
+                    },
+                )
+            finally:
+                await browser.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("PDF export failed for %s", log_id)
+        raise HTTPException(
+            status_code=500,
+            detail=_pdf_export_failure_detail(e),
+        )
+    return pdf_bytes
 
 
 @router.get("/report-configs", response_model=list[ReportConfigResponse])
@@ -405,43 +565,20 @@ async def export_report_run_pdf(
         scope=report_run.scope,
         report_id=report_run.report_id,
     )
+    _ensure_pdf_export_enabled(report_config)
+
     payload = _load_report_payload(
         artifact.artifact_data,
         detail='Cached report artifact is outdated. Regenerate the report before exporting.',
         log_message=f'Report artifact invalid for report run {report_run_id} during PDF export',
     )
-    html_content = _compose_export_document(
-        payload=payload,
-        report_run=report_run,
-        report_config=report_config,
+
+    pdf_bytes = await _render_pdf_via_print_route(
+        print_path=f"/print/report-runs/{report_run_id}",
+        auth=auth,
+        log_id=f"report run {report_run_id}",
+        pdf_meta=build_pdf_running_meta(payload),
     )
-
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu"],
-            )
-            page = await browser.new_page()
-            await page.set_content(html_content, wait_until="networkidle")
-
-            pdf_bytes = await page.pdf(
-                format="A4",
-                print_background=True,
-                margin={
-                    "top": "12mm",
-                    "right": "14mm",
-                    "bottom": "12mm",
-                    "left": "14mm",
-                },
-            )
-            await browser.close()
-    except Exception as e:
-        logger.exception("PDF export failed for report run %s", report_run_id)
-        raise HTTPException(
-            status_code=500,
-            detail=f"PDF generation failed: {str(e)}",
-        )
 
     short_id = str(report_run_id)[:8]
     return Response(
@@ -460,7 +597,7 @@ async def export_report_pdf(
     auth: AuthContext = require_permission('evaluation:export'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Export report as PDF via headless browser rendering of self-contained HTML."""
+    """Export the latest single-run report as PDF by rendering the React print route."""
     run = await _get_visible_eval_run(db, run_id=UUID(run_id), auth=auth)
 
     report_config = await resolve_report_config(
@@ -471,6 +608,8 @@ async def export_report_pdf(
         scope='single_run',
         report_id=report_id,
     )
+    _ensure_pdf_export_enabled(report_config)
+
     artifact_data = await fetch_single_run_artifact(
         db,
         tenant_id=auth.tenant_id,
@@ -511,38 +650,13 @@ async def export_report_pdf(
         )
     if report_run is None:
         raise HTTPException(status_code=404, detail="Report run not found")
-    html_content = _compose_export_document(
-        payload=payload,
-        report_run=report_run,
-        report_config=report_config,
+
+    pdf_bytes = await _render_pdf_via_print_route(
+        print_path=f"/print/report-runs/{report_run.id}",
+        auth=auth,
+        log_id=f"run {run_id}",
+        pdf_meta=build_pdf_running_meta(payload),
     )
-
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu"],
-            )
-            page = await browser.new_page()
-            await page.set_content(html_content, wait_until="networkidle")
-
-            pdf_bytes = await page.pdf(
-                format="A4",
-                print_background=True,
-                margin={
-                    "top": "12mm",
-                    "right": "14mm",
-                    "bottom": "12mm",
-                    "left": "14mm",
-                },
-            )
-            await browser.close()
-    except Exception as e:
-        logger.exception("PDF export failed for run %s", run_id)
-        raise HTTPException(
-            status_code=500,
-            detail=f"PDF generation failed: {str(e)}",
-        )
 
     short_id = run_id[:8]
     return Response(
@@ -599,5 +713,3 @@ async def get_report(
         detail='Cached report artifact is outdated. Regenerate the report.',
         log_message=f'Report artifact invalid for run {run_id} during fetch',
     )
-
-
