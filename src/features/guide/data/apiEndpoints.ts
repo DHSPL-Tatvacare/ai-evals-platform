@@ -59,7 +59,7 @@ function parseEndpoints(): ApiEndpoint[] {
         } else if (route.prefix === '/api/admin' && suffix === '/users') {
           bodyExample = JSON.stringify({ email: 'new@example.com', displayName: 'New User', password: '...', role: 'member' }, null, 2);
         } else if (route.prefix === '/api/admin' && suffix === '/invite-links') {
-          bodyExample = JSON.stringify({ label: 'Team invite', defaultRole: 'member', maxUses: 10, expiresInHours: 168 }, null, 2);
+          bodyExample = JSON.stringify({ label: 'Team invite', roleId: '00000000-0000-0000-0000-000000000123', maxUses: 10, expiresInHours: 168, signupMethod: 'password' }, null, 2);
         } else if (route.prefix === '/api/admin' && suffix === '/erase') {
           bodyExample = JSON.stringify({ target: 'eval_runs', appId: 'voice-rx' }, null, 2);
         }

@@ -19,11 +19,17 @@ from app.config import settings
 
 limiter = Limiter(key_func=get_remote_address)
 from app.database import get_db
-from app.models.invite_link import IdentityInviteLink
+from app.models.invite_link import IdentityInviteLink, InviteSignupMethod, InviteStatus
+from app.models.invite_link_use import IdentityInviteLinkUse
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfiguration
 from app.models.user import IdentityRefreshToken, User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, SignupRequest
+from app.services.invite_links import (
+    compute_invite_status,
+    hash_ip,
+    refresh_invite_status,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -256,7 +262,13 @@ async def _validate_invite(token: str, db: AsyncSession) -> tuple[IdentityInvite
     invite = await db.scalar(
         select(IdentityInviteLink).where(IdentityInviteLink.token_hash == token_hash)
     )
-    if not invite or not invite.is_usable:
+    if not invite:
+        return None, None
+    previous_status = invite.status
+    current_status = refresh_invite_status(invite)
+    if current_status != previous_status:
+        await db.commit()
+    if current_status != InviteStatus.active:
         return None, None
 
     tenant = await db.get(Tenant, invite.tenant_id)
@@ -267,11 +279,17 @@ async def _validate_invite(token: str, db: AsyncSession) -> tuple[IdentityInvite
 
 
 @router.get("/validate-invite")
+@limiter.limit(settings.AUTH_RATE_LIMIT)
 async def validate_invite(
+    request: Request,  # required by slowapi for IP keying
     token: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Check if an invite token is valid (public endpoint)."""
+    """Check if an invite token is valid (public endpoint).
+
+    Rate-limited per IP — same setting as ``/login`` and ``/signup``. Token
+    brute-force is infeasible at 256 bits; this prevents log-flood DoS.
+    """
     invite, tenant = await _validate_invite(token, db)
     if not invite or not tenant:
         return {"valid": False}
@@ -311,8 +329,23 @@ async def signup(
         .where(IdentityInviteLink.token_hash == token_hash)
         .with_for_update()
     )
-    if not invite or not invite.is_usable:
+    if not invite:
         raise HTTPException(400, detail="Invalid or expired invite link")
+    previous_status = invite.status
+    current_status = refresh_invite_status(invite)
+    if current_status != InviteStatus.active:
+        if current_status != previous_status:
+            await db.commit()
+        raise HTTPException(400, detail="Invalid or expired invite link")
+
+    # 1a. Reject SSO invites — the password signup path can't redeem them.
+    #     Today the create route hard-rejects ``sso``; this is the safety
+    #     net for when SSO ships and the column starts seeing real values.
+    if invite.signup_method != InviteSignupMethod.password:
+        raise HTTPException(
+            400,
+            detail="This invite is for SSO. Sign in with your provider.",
+        )
 
     tenant = await db.get(Tenant, invite.tenant_id)
     if not tenant or not tenant.is_active:
@@ -346,10 +379,29 @@ async def signup(
     )
     db.add(user)
 
-    # 5. Increment invite usage
+    # 5. Increment invite usage and persist the new lifecycle state.
     invite.uses_count += 1
 
     await db.flush()
+
+    # 5a. Recompute status inside the same FOR UPDATE window so an invite
+    #     that just hit ``max_uses`` flips ACTIVE → EXHAUSTED on the row.
+    invite.status = compute_invite_status(
+        is_revoked=invite.is_revoked,
+        expires_at=invite.expires_at,
+        max_uses=invite.max_uses,
+        uses_count=invite.uses_count,
+        now=datetime.now(timezone.utc),
+    )
+
+    # 5b. Forensic audit row: who redeemed this invite, from where.
+    client_ip = request.client.host if request.client else None
+    db.add(IdentityInviteLinkUse(
+        invite_link_id=invite.id,
+        user_id=user.id,
+        user_email_snapshot=user.email,
+        ip_hash=hash_ip(client_ip, invite.tenant_id),
+    ))
 
     # 6. Create tokens (same as login)
     access_token = create_access_token(user.id, user.tenant_id, user.email, user.role_id)

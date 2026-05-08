@@ -48,6 +48,10 @@ export interface UpdateTenantConfigRequest {
   allowedDomains?: string[];
 }
 
+export type InviteLinkStatus = 'active' | 'revoked' | 'expired' | 'exhausted';
+export type InviteSignupMethod = 'password' | 'sso';
+export type InviteListStatus = 'active' | 'terminal' | 'all';
+
 export interface InviteLink {
   id: string;
   label: string | null;
@@ -55,9 +59,22 @@ export interface InviteLink {
   maxUses: number | null;
   usesCount: number;
   expiresAt: string;
-  isActive: boolean;
+  status: InviteLinkStatus;
+  signupMethod: InviteSignupMethod;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokedByEmail: string | null;
   createdAt: string;
+  createdBy: string | null;
   createdByEmail: string;
+}
+
+export interface InviteLinkUse {
+  id: string;
+  userId: string | null;
+  userEmail: string;
+  usedAt: string;
+  ipHashPrefix: string | null;
 }
 
 export interface CreateInviteLinkRequest {
@@ -65,6 +82,7 @@ export interface CreateInviteLinkRequest {
   roleId?: string;
   maxUses?: number | null;
   expiresInHours?: number;
+  signupMethod?: InviteSignupMethod;
 }
 
 export interface CreateInviteLinkResponse extends InviteLink {
@@ -119,10 +137,32 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
 
-  listInviteLinks: (): Promise<InviteLink[]> =>
-    apiRequest('/api/admin/invite-links'),
+  listInviteLinks: (params?: { status?: InviteListStatus }): Promise<InviteLink[]> => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiRequest(`/api/admin/invite-links${suffix}`);
+  },
 
-  revokeInviteLink: (linkId: string): Promise<void> =>
+  // Phase 2: revoke moves to POST /revoke. The server returns the updated
+  // row so the caller can patch its cache without a follow-up GET.
+  revokeInviteLink: (linkId: string): Promise<InviteLink> =>
+    apiRequest(`/api/admin/invite-links/${linkId}/revoke`, {
+      method: 'POST',
+    }),
+
+  // Forensic drill-in. Server already truncates the IP hash to 12 chars.
+  listInviteUses: async (linkId: string): Promise<InviteLinkUse[]> => {
+    const resp = await apiRequest<{ items: InviteLinkUse[] }>(
+      `/api/admin/invite-links/${linkId}/uses`,
+    );
+    return resp.items;
+  },
+
+  // Hard delete is gated by `invite_link:delete` (default-off, owner only).
+  // Phase 4: now on the canonical DELETE verb. Surface deliberately not
+  // exposed in the standard admin UI yet.
+  hardDeleteInviteLink: (linkId: string): Promise<void> =>
     apiRequest(`/api/admin/invite-links/${linkId}`, {
       method: 'DELETE',
     }),

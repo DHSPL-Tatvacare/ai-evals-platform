@@ -27,6 +27,7 @@ from app.models.report_config import ReportConfiguration
 from app.models.report_run import ReportGenerationRun
 from app.models.report_artifact import ReportGeneratedArtifact
 from app.models.invite_link import IdentityInviteLink
+from app.models.invite_link_use import IdentityInviteLinkUse
 from app.models.tenant_config import TenantConfiguration
 from app.models.source_records import CrmCallRecord, CrmLeadRecord, LogCrmSourceSync
 from app.models.application_external_agent_connector import ApplicationExternalAgentConnector
@@ -74,7 +75,7 @@ from app.models.provider_connection import ProviderConnection
 
 __all__ = [
     "Base",
-    "Tenant", "TenantConfiguration", "User", "IdentityRefreshToken", "IdentityInviteLink",
+    "Tenant", "TenantConfiguration", "User", "IdentityRefreshToken", "IdentityInviteLink", "IdentityInviteLinkUse",
     "Application", "AccessRole", "AccessRoleApplicationGrant", "AccessRolePermission", "AuditEventLog",
     "EvaluationDataset", "ApplicationUploadedFile", "LibraryPromptDefinition", "LibraryOutputSchemaDefinition", "Evaluator",
     "ChatSession", "ChatMessage", "ApplicationEventHistory", "ApplicationSetting", "LibraryAdversarialTestCase", "ApplicationTag",

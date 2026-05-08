@@ -238,6 +238,18 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_label='User management',
             ),
             PermissionCatalogEntry(
+                id='invite_link:delete',
+                label='Hard-delete invite links',
+                description=(
+                    'Hard-deletes a terminal invite link row. Use with care — this also '
+                    'deletes its redemption audit rows. The audit log retains the action.'
+                ),
+                group_id='users',
+                group_label='User management',
+                grantable=False,
+                owner_only=True,
+            ),
+            PermissionCatalogEntry(
                 id='user:edit',
                 label='Edit users',
                 description='Edit mutable user profile and assignment details.',
