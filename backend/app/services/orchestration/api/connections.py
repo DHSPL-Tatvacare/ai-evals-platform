@@ -68,22 +68,49 @@ def _generate_webhook_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _compose_webhook_url(provider: str, token: Optional[str]) -> Optional[str]:
+def resolve_base_url(origin_header: Optional[str]) -> str:
+    """Pick the public origin for URLs returned to the caller.
+
+    Mirrors ``_invite_base_url`` in ``routes/admin.py``: prefer the
+    request's ``Origin`` header so URLs render against whichever domain
+    the user is actually on (``evals.tatvacare.in``, the raw Azure FQDN,
+    localhost dev, etc.) rather than whatever is baked into the
+    container env. Falls back to ``settings.APP_BASE_URL`` when no
+    Origin header rides the request — non-browser clients, no-request
+    contexts, browsers omitting the header on same-origin GETs.
+
+    ``Origin`` is browser-controlled and can't be set from page
+    JavaScript, so reflecting it is self-scoped per session: the
+    response only goes to the same caller. The URL embeds no tenant or
+    app identifier (the token alone resolves the connection row at
+    receive time), so a forged Origin from a non-browser client doesn't
+    leak cross-tenant state.
+    """
+    if origin_header:
+        return origin_header.rstrip("/")
+    return (settings.APP_BASE_URL or "").rstrip("/")
+
+
+def _compose_webhook_url(
+    provider: str, token: Optional[str], base_url: str,
+) -> Optional[str]:
     """Build the public webhook URL for one provider connection.
 
-    Piggybacks on ``APP_BASE_URL`` — the single public origin every
-    deployment already configures — plus the webhook path prefix and the
-    per-connection ``webhook_token``. The token alone resolves to one
-    ``provider_connections`` row at receive time (`_resolve_connection_by_token`),
-    which is where tenant + app scoping happens; the URL itself never
-    embeds tenant or app identifiers, so passing it to a provider
-    dashboard is safe.
+    The base URL is resolved by the route handler via ``resolve_base_url``
+    (Origin header > ``APP_BASE_URL``). The token alone resolves to one
+    ``provider_connections`` row at receive time
+    (``_resolve_connection_by_token``), which is where tenant + app
+    scoping happens; the URL itself never embeds tenant or app
+    identifiers, so passing it to a provider dashboard is safe.
+
+    Returns a relative path when ``base_url`` is empty — the frontend's
+    ``toAbsoluteWebhookUrl`` will then resolve against
+    ``window.location.origin``.
     """
     if not token:
         return None
-    base = (settings.APP_BASE_URL or "").rstrip("/")
     path = f"{WEBHOOK_PATH_PREFIX}/{provider}/{token}"
-    return f"{base}{path}" if base else path
+    return f"{base_url}{path}" if base_url else path
 
 
 def _redact(provider: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -146,7 +173,7 @@ def _field_descriptors(provider: str) -> list[dict[str, Any]]:
     ]
 
 
-def _serialize(row: ProviderConnection) -> dict[str, Any]:
+def _serialize(row: ProviderConnection, base_url: str) -> dict[str, Any]:
     plaintext = crypto.decrypt(row.config_encrypted)
     return {
         "id": row.id,
@@ -156,7 +183,7 @@ def _serialize(row: ProviderConnection) -> dict[str, Any]:
         "name": row.name,
         "active": row.active,
         "last_used_at": row.last_used_at,
-        "webhook_url": _compose_webhook_url(row.provider, row.webhook_token),
+        "webhook_url": _compose_webhook_url(row.provider, row.webhook_token, base_url),
         "config_redacted": _redact(row.provider, plaintext),
         # Phase 14 follow-up — partial-reveal previews so the connections
         # form can render `XYZA••••WXYZ` next to each secret field instead
@@ -173,8 +200,8 @@ def _serialize(row: ProviderConnection) -> dict[str, Any]:
     }
 
 
-def serialize_connection(row: ProviderConnection) -> dict[str, Any]:
-    return _serialize(row)
+def serialize_connection(row: ProviderConnection, base_url: str) -> dict[str, Any]:
+    return _serialize(row, base_url)
 
 
 def _unique_names(values: Iterable[str]) -> list[str]:
@@ -340,6 +367,7 @@ async def create_connection(
     name: str,
     config: dict[str, Any],
     created_by: uuid.UUID,
+    base_url: str,
     active: bool = True,
     webhook_token: Optional[str] = None,
     visibility: Visibility = Visibility.PRIVATE,
@@ -386,13 +414,14 @@ async def create_connection(
             f"app_id={app_id!r} provider={provider!r}"
         ) from exc
     await db.refresh(row)
-    return _serialize(row)
+    return _serialize(row, base_url)
 
 
 async def list_connections(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    base_url: str,
     user_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
     providers: Optional[Iterable[str]] = None,
@@ -420,14 +449,18 @@ async def list_connections(
         stmt = stmt.where(ProviderConnection.active.is_(True))
     stmt = stmt.order_by(ProviderConnection.created_at.desc())
     rows = (await db.execute(stmt)).scalars().all()
-    return [_serialize(r) for r in rows]
+    return [_serialize(r, base_url) for r in rows]
 
 
 async def get_connection(
-    db: AsyncSession, *, tenant_id: uuid.UUID, connection_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    base_url: str,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
-    return _serialize(row)
+    return _serialize(row, base_url)
 
 
 async def update_connection(
@@ -435,6 +468,7 @@ async def update_connection(
     *,
     tenant_id: uuid.UUID,
     connection_id: uuid.UUID,
+    base_url: str,
     name: Optional[str] = None,
     active: Optional[bool] = None,
     config: Optional[dict[str, Any]] = None,
@@ -467,7 +501,7 @@ async def update_connection(
             f"connection name {name!r} already exists for this tenant + app + provider"
         ) from exc
     await db.refresh(row)
-    return _serialize(row)
+    return _serialize(row, base_url)
 
 
 async def archive_connection(
@@ -482,7 +516,11 @@ async def archive_connection(
 
 
 async def rotate_webhook_token(
-    db: AsyncSession, *, tenant_id: uuid.UUID, connection_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    base_url: str,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
     spec = provider_specs.get_spec(row.provider)
@@ -492,7 +530,9 @@ async def rotate_webhook_token(
         )
     row.webhook_token = _generate_webhook_token()
     await db.commit()
-    return {"webhook_url": _compose_webhook_url(row.provider, row.webhook_token)}
+    return {
+        "webhook_url": _compose_webhook_url(row.provider, row.webhook_token, base_url),
+    }
 
 
 async def test_connection(
