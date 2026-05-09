@@ -93,8 +93,10 @@ def build_supervisor(app_id: str, client: openai.AsyncAzureOpenAI) -> Agent:
         name=f'sherlock-supervisor-{app_id}',
         instructions=_SUPERVISOR_PROMPT.format(app_id=app_id),
         model=OpenAIResponsesModel(supervisor_model(), client),
+        # gpt-5.4 reasoning models reject `temperature` and `top_p`. The
+        # spec's "temperature=0.3" was for non-reasoning models; for the
+        # reasoning family, control behavior via reasoning effort instead.
         model_settings=ModelSettings(
-            temperature=0.3,
             reasoning=Reasoning(effort='medium'),
         ),
         tools=[
