@@ -101,6 +101,7 @@ async def _answer_data_question_handler(
         validate_sql,
         validate_sql_columns_against_manifest,
     )
+    from app.services.sherlock_v3.exemplars import build_context_payload
 
     app_id = sherlock_ctx.app_id
     tenant_id = str(sherlock_ctx.tenant_id)
@@ -118,6 +119,7 @@ async def _answer_data_question_handler(
                 semantic_model=semantic_model,
                 app_id=app_id,
                 original_user_message=question,
+                context_payload=build_context_payload(app_id),
             )
             sql = gen.get('sql', '').strip()
             chart_title = gen.get('chart_title') or ''
