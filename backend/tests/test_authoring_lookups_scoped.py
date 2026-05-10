@@ -27,6 +27,7 @@ def _make_auth(app: str = 'inside-sales') -> SimpleNamespace:
         user_id=uuid.uuid4(),
         permissions=frozenset({'orchestration:manage'}),
         app_access=frozenset({app}),
+        is_owner=False,
     )
 
 

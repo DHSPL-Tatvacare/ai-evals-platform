@@ -341,8 +341,10 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
 
     # Layered permission re-check (R3). The route gate (R1) and conditional
     # tool inclusion (R2) cover the same ground; this ensures a future bug
-    # in either does not bypass the gate.
-    if auth is None or 'orchestration:manage' not in getattr(auth, 'permissions', frozenset()):
+    # in either does not bypass the gate. Use the canonical helper so the
+    # Owner role's permission bypass is honored here too.
+    from app.auth.permissions import missing_permissions
+    if auth is None or missing_permissions(auth, 'orchestration:manage'):
         return _error_result(
             reason_code='PERMISSION_DENIED',
             message='Missing orchestration:manage permission.',
@@ -694,7 +696,10 @@ async def _check_layered_auth(
             message='Authoring tools require an active builder context.',
             started=started,
         )
-    if auth is None or 'orchestration:manage' not in getattr(auth, 'permissions', frozenset()):
+    # Owner role bypass via canonical helper (matches `_lookup_handler`
+    # block above; see comment there).
+    from app.auth.permissions import missing_permissions as _missing_perms_apply
+    if auth is None or _missing_perms_apply(auth, 'orchestration:manage'):
         return _error_result(
             reason_code='PERMISSION_DENIED',
             message='Missing orchestration:manage permission.',

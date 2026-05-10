@@ -30,6 +30,7 @@ def _make_auth() -> SimpleNamespace:
         user_id=uuid.uuid4(),
         permissions=frozenset({'orchestration:manage'}),
         app_access=frozenset({'inside-sales'}),
+        is_owner=False,
     )
 
 

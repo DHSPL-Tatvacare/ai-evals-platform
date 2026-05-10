@@ -546,7 +546,11 @@ async def _resolve_builder_snapshot(
         from fastapi import HTTPException
         raise HTTPException(400, 'app_id mismatch between body and pageContext')
 
-    if 'orchestration:manage' not in auth.permissions:
+    # Owner role bypasses permission lists; use the canonical helper instead
+    # of a raw `in` check (Phase 2 hotfix — Owners were silently dropped
+    # because they hold no literal permissions).
+    from app.auth.permissions import missing_permissions
+    if missing_permissions(auth, 'orchestration:manage'):
         logger.warning(
             'sherlock_v3 builder context dropped: tenant=%s user=%s app=%s '
             'workflow=%s — missing orchestration:manage',

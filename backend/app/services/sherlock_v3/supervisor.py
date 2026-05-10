@@ -138,10 +138,13 @@ def build_supervisor(
         ),
     ]
 
+    # Owner role bypasses permission lists; route through the canonical
+    # helper so Owners see the authoring tool too.
+    from app.auth.permissions import missing_permissions
     if (
         builder_context is not None
         and auth is not None
-        and 'orchestration:manage' in auth.permissions
+        and not missing_permissions(auth, 'orchestration:manage')
     ):
         authoring_agent = build_authoring_specialist(
             client, app_id,

@@ -122,6 +122,35 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
         self.assertEqual(tools, ['data_specialist_tool', 'authoring_specialist_tool'])
         self.assertIn('authoring_built_with', captured)
 
+    def test_includes_authoring_when_owner_without_explicit_permission(self) -> None:
+        """Owner role's permission bypass must reach the supervisor's gate.
+
+        Regression test for the Phase 2 hotfix: the previous code did a raw
+        ``'orchestration:manage' in auth.permissions`` check which Owners
+        fail because Owners hold no literal permissions — they bypass via
+        ``missing_permissions``'s ``is_owner`` short-circuit. Owners must
+        see the authoring tool just like any user with the explicit perm.
+        """
+        owner_auth = AuthContext(
+            user_id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            email='owner@t',
+            role_id=uuid.uuid4(),
+            is_owner=True,
+            permissions=frozenset(),  # No literal permissions — Owner bypass.
+            app_access=frozenset({'inside-sales'}),
+        )
+        sup_mod, fake_client, captured, patchers = _patched_supervisor()
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
+            sup_mod.build_supervisor(
+                'inside-sales', fake_client,
+                builder_context=_make_snapshot(),
+                auth=owner_auth,
+            )
+        tools = captured.get('tools') or []
+        self.assertEqual(tools, ['data_specialist_tool', 'authoring_specialist_tool'])
+        self.assertIn('authoring_built_with', captured)
+
 
 if __name__ == '__main__':
     unittest.main()

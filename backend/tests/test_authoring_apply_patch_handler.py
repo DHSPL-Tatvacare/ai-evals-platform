@@ -30,6 +30,7 @@ def _make_auth(*, has_perm: bool = True, app: str = 'inside-sales') -> SimpleNam
         user_id=uuid.uuid4(),
         permissions=frozenset({'orchestration:manage'}) if has_perm else frozenset(),
         app_access=frozenset({app}),
+        is_owner=False,
     )
 
 
