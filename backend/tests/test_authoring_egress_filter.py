@@ -70,5 +70,38 @@ class LookupEgressFilterTests(unittest.TestCase):
         self.assertEqual(contains_credential_fields(payload), 'API_KEY')
 
 
+class PackBuildOutcomeFilterTests(unittest.TestCase):
+    """Decision §R5 binds the egress filter to `CapabilityPack.build_outcome`.
+
+    v3 routes through SpecialistResult JSON and never calls build_outcome,
+    but the filter MUST also be wired here so that a future harness path
+    that does go through build_outcome cannot regress R5.
+    """
+
+    def test_build_outcome_blocks_credential_field(self) -> None:
+        from app.services.orchestration_authoring.orchestration_authoring_pack import (
+            OrchestrationAuthoringPack,
+        )
+
+        pack = OrchestrationAuthoringPack()
+        outcome = pack.build_outcome(
+            'list_provider_connections',
+            {'items': [{'id': 'x', 'api_key': 'leak'}]},
+        )
+        self.assertEqual(outcome.get('reason_code'), 'CREDENTIAL_LEAK_BLOCKED')
+
+    def test_build_outcome_passes_clean_payload(self) -> None:
+        from app.services.orchestration_authoring.orchestration_authoring_pack import (
+            OrchestrationAuthoringPack,
+        )
+
+        pack = OrchestrationAuthoringPack()
+        outcome = pack.build_outcome(
+            'list_provider_connections',
+            {'items': [{'id': 'x', 'name': 'wati-prod'}]},
+        )
+        self.assertNotEqual(outcome.get('reason_code'), 'CREDENTIAL_LEAK_BLOCKED')
+
+
 if __name__ == '__main__':
     unittest.main()

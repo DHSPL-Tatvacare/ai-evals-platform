@@ -1122,12 +1122,37 @@ class OrchestrationAuthoringPack:
         }
 
     def build_outcome(self, tool_name: str, raw_result: Any) -> Outcome:
+        """v2 chat-engine egress hook with credential filter (Decision §R5).
+
+        v3 routes the SpecialistResult JSON through the supervisor's
+        custom_output_extractor and never calls this; the inline filters
+        in `_apply_patch_handler` / `_lookup_result_json` are the
+        load-bearing egress points today. We still wire the filter here
+        so that any future harness path that goes through
+        `CapabilityPack.build_outcome` cannot regress R5.
+        """
+        payload = dict(raw_result) if isinstance(raw_result, dict) else {}
+        leaked = contains_credential_fields(payload)
+        if leaked is not None:
+            authoring_logger.warning(
+                'build_outcome egress filter blocked tool=%s field=%s',
+                tool_name, leaked,
+            )
+            envelope = build_envelope(
+                status='error',
+                summary=f'{tool_name}: credential field {leaked} blocked',
+                kind='error',
+                capability=PACK_ID,
+                reason_code='CREDENTIAL_LEAK_BLOCKED',
+                payload={},
+            )
+            return envelope.outcome.model_dump()  # type: ignore[return-value]
         envelope = build_envelope(
             status='ok',
             summary=f'{tool_name} ok',
             kind='artifact',
             capability=PACK_ID,
-            payload=dict(raw_result) if isinstance(raw_result, dict) else {},
+            payload=payload,
         )
         return envelope.outcome.model_dump()  # type: ignore[return-value]
 

@@ -124,6 +124,29 @@ class ResolveBuilderSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_ctx.exception.status_code, 400)
 
+    async def test_cross_app_no_access_returns_403(self) -> None:
+        """User holds no access to the requested app — ensure_registered_app_access
+        raises 403, the route gate propagates it."""
+        from app.routes.report_builder import _resolve_builder_snapshot
+
+        async def _fake_ensure(db, auth, app_slug, **kwargs):
+            del db
+            if app_slug not in auth.app_access:
+                raise HTTPException(403, f'No access to app: {app_slug}')
+            return app_slug
+
+        with patch('app.routes.report_builder.ensure_registered_app_access',
+                   side_effect=_fake_ensure):
+            with self.assertRaises(HTTPException) as exc_ctx:
+                # body.app_id matches pageContext.app_id, but neither is in
+                # auth.app_access — the helper raises 403.
+                await _resolve_builder_snapshot(
+                    body=_body(app_id='voice-rx', page_app_id='voice-rx'),
+                    auth=_make_auth(apps={'inside-sales'}),
+                    db=MagicMock(),
+                )
+        self.assertEqual(exc_ctx.exception.status_code, 403)
+
     async def test_cross_tenant_workflow_returns_404(self) -> None:
         from app.routes import report_builder as route_mod
 

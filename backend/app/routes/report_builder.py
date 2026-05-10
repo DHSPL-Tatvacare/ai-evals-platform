@@ -528,6 +528,13 @@ async def _resolve_builder_snapshot(
       2. Workflow tenant ownership via `assert_workflow_owned` (404 not 403).
       3. Permission gate: missing `'orchestration:manage'` drops the
          context (warn-log) so the chat continues read-only.
+
+    Log-redaction contract: `body.page_context.definition` is the entire
+    canvas snapshot and can be tens of KB. The current request middleware
+    (`app.middleware.correlation`, `app.middleware.gzip_safe`) does NOT
+    log request bodies, so today's logging surface is clean. If a future
+    middleware starts logging request bodies, it MUST redact
+    `pageContext.definition` per Decision §R Risks.
     """
     page = body.page_context
     if page is None or not isinstance(page, OrchestrationBuilderPageContext):
