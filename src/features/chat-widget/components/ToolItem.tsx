@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AlertCircle, ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { Shimmer } from './Shimmer';
+import { SqlBlock } from './SqlBlock';
 import type { ToolCallPart } from '../types';
 
 interface ToolItemProps {
@@ -158,12 +159,7 @@ export function ToolItem({ part }: ToolItemProps) {
           ) : null}
 
           {part.routing?.attemptedSql || part.detail?.sqlUsed ? (
-            <div>
-              <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[var(--text-muted)]">sql</div>
-              <pre className="overflow-x-auto whitespace-pre rounded border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--text-primary)]">
-                {part.routing?.attemptedSql ?? part.detail?.sqlUsed}
-              </pre>
-            </div>
+            <SqlBlock sql={(part.routing?.attemptedSql ?? part.detail?.sqlUsed) as string} />
           ) : null}
         </div>
       ) : null}
