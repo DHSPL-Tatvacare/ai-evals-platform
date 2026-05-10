@@ -18,7 +18,10 @@ from openai.types.shared import Reasoning
 
 from app.services.sherlock_v3.azure_client import supervisor_model
 from app.services.sherlock_v3.contracts import TASK_BRIEF_JSON_SCHEMA
-from app.services.sherlock_v3.data_specialist import build_data_specialist
+from app.services.sherlock_v3.data_specialist import (
+    build_data_specialist,
+    extract_data_specialist_output,
+)
 from app.services.sherlock_v3.manifest_projection import GroundingContext
 
 
@@ -47,6 +50,8 @@ in this app's capability pack. Never invent data. Cite evidence.
 
 # Output
 - Markdown. Tables for tabular data. Bold key numbers.
+- NEVER draw ASCII charts (no `█`/`▓`/`●`/`*` bar lines). The UI renders chart cards from specialist artifacts; duplicating them in prose makes the answer noisy.
+- Do NOT cite "Evidence ref <uuid>" inline. Evidence is rendered separately by the UI; prose should read clean and human.
 - Use phase: "commentary" for status updates.
 - Use phase: "final_answer" only when synthesizing the answer.
 
@@ -120,7 +125,17 @@ def build_supervisor(
                     'Answers analytics questions over evaluation facts. '
                     'Pass a TaskBrief; receive a SpecialistResult.'
                 ),
-                custom_output_extractor=None,
+                # Critical: without this extractor, the SDK's default
+                # ("last message from the agent will be used") swallows
+                # the SpecialistResult JSON that ``submit_sql`` produced
+                # and the supervisor sees only the data_specialist's
+                # LLM prose. Downstream the wire event for
+                # ``specialist_finished`` carries empty evidence_refs /
+                # artifact_refs / 0ms duration, and ``artifact_emitted``
+                # never fires for chart payloads. See
+                # ``data_specialist.extract_data_specialist_output`` for
+                # full background (2026-05-10 investigation).
+                custom_output_extractor=extract_data_specialist_output,
             ),
         ],
     )

@@ -42,7 +42,10 @@ interface StreamToolCallStartEvent {
   seq: number;
   toolCallId: string;
   toolName: string;
+  briefSummary?: string;
 }
+
+import type { SpecialistRoutingTelemetry } from './types';
 
 // Phase 7 audit fix (Gap 4): ``outcome`` is the §6.2 envelope projection
 // the backend emits on specialist_finished / turn_finished. Carrying ``job`` end-to-end
@@ -60,6 +63,9 @@ interface StreamToolCallEndEvent extends StreamToolCallStartEvent {
   detail?: ToolCallDetailData | null;
   durationMs?: number;
   outcome?: StreamToolCallOutcome;
+  rowCount?: number;
+  evidenceCount?: number;
+  routing?: SpecialistRoutingTelemetry;
 }
 
 interface StreamDoneEvent {
@@ -344,17 +350,35 @@ export async function streamChatMessage(
                 seq,
                 toolCallId: String(data.call_id ?? `tc_${seq}`),
                 toolName: String(data.specialist ?? 'specialist'),
+                briefSummary: typeof data.brief_summary === 'string' ? data.brief_summary : undefined,
               });
               break;
             }
             case 'specialist_finished': {
               const seq = typeof data.seq === 'number' ? data.seq : 0;
+              const routingRaw = data.routing as Record<string, unknown> | undefined;
+              const groundingRaw = routingRaw?.grounding as Record<string, unknown> | undefined;
+              const routing: SpecialistRoutingTelemetry | undefined = routingRaw ? {
+                intentClass: typeof groundingRaw?.intent_class === 'string' ? groundingRaw.intent_class : undefined,
+                allowedLayers: Array.isArray(groundingRaw?.allowed_layers) ? groundingRaw.allowed_layers as string[] : undefined,
+                projectedTables: Array.isArray(groundingRaw?.projected_tables) ? groundingRaw.projected_tables as string[] : undefined,
+                attemptedSql: typeof routingRaw.attempted_sql === 'string' ? routingRaw.attempted_sql : undefined,
+                validationResult: typeof routingRaw.validation_result === 'string' ? routingRaw.validation_result : undefined,
+                executionStatus: typeof routingRaw.execution_status === 'string' ? routingRaw.execution_status : undefined,
+                chartPayloadKind: typeof routingRaw.chart_payload_kind === 'string' ? routingRaw.chart_payload_kind : null,
+                status: typeof routingRaw.status === 'string' ? routingRaw.status : undefined,
+                latencyMs: typeof routingRaw.latency_ms === 'number' ? routingRaw.latency_ms : undefined,
+              } : undefined;
+              const evidenceRefs = Array.isArray(data.evidence_refs) ? data.evidence_refs : [];
               callbacks.onToolCallEnd({
                 seq,
                 toolCallId: String(data.call_id ?? ''),
                 toolName: String(data.specialist ?? 'specialist'),
                 summary: typeof data.result_summary === 'string' ? data.result_summary : '',
                 durationMs: typeof data.duration_ms === 'number' ? data.duration_ms : 0,
+                rowCount: typeof data.row_count === 'number' ? data.row_count : undefined,
+                evidenceCount: evidenceRefs.length,
+                routing,
                 outcome: {
                   kind: typeof data.status === 'string' ? data.status : 'ok',
                   capability: typeof data.specialist === 'string' ? data.specialist : '',

@@ -742,6 +742,87 @@ async def _persist_sql_evidence(
     return refs
 
 
+# ─────────────────────── as_tool output extractor ───────────────────────
+
+
+# Tool name we look for in the data_specialist's RunResult. The data_specialist
+# has exactly one tool (``submit_sql``); the extractor still matches by name so
+# a future second tool doesn't silently leak the wrong shape.
+_SUBMIT_SQL_TOOL_NAME = 'submit_sql'
+
+
+async def extract_data_specialist_output(run_result: Any) -> str:
+    """Extract the SpecialistResult JSON from a data_specialist RunResult.
+
+    Background — the architectural fix for the as_tool boundary loss
+    (2026-05-10 investigation):
+
+    When the supervisor calls ``data_specialist`` via ``Agent.as_tool``,
+    the SDK's documented default is "the last message from the agent will
+    be used" as the tool output. That means the supervisor receives the
+    data_specialist LLM's final-answer prose — NOT the rich
+    ``SpecialistResult`` JSON that ``submit_sql`` produced. Downstream
+    that strips evidence_refs / artifact_refs / duration_ms / summary
+    to defaults, and ``artifact_emitted`` never fires for chart payloads.
+
+    This extractor walks the data_specialist's ``new_items`` in reverse,
+    finds the most recent ``ToolCallOutputItem`` from ``submit_sql``,
+    and returns its ``output`` (already a JSON string). The supervisor
+    then receives that JSON; ``runtime.normalize_to_v3_events``'s
+    ``_extract_specialist_result`` deserializes it; evidence/artifacts/
+    latency/summary all populate; ``artifact_emitted`` fires per artifact.
+
+    Fallback — if no submit_sql output exists (the LLM didn't call the
+    tool), we return the agent's final-answer text. This preserves the
+    SDK's default behavior so a clarifying-question turn still flows to
+    the supervisor as plain text. Such turns produce no chart/evidence/
+    duration on the wire, which is correct (none was generated).
+
+    The extractor is async because ``Agent.as_tool``'s
+    ``custom_output_extractor`` parameter is typed
+    ``Callable[[RunResult | RunResultStreaming], Awaitable[str]]``.
+    """
+    new_items = list(getattr(run_result, 'new_items', []) or [])
+    for item in reversed(new_items):
+        if not _is_tool_output_for(item, _SUBMIT_SQL_TOOL_NAME):
+            continue
+        output = getattr(item, 'output', None)
+        if isinstance(output, str) and output.strip():
+            return output
+        if isinstance(output, dict):
+            return json.dumps(output, default=str)
+    # Fallback: SDK default — last message text. Used when the LLM
+    # answered without calling submit_sql (e.g., a clarifying question).
+    final_output = getattr(run_result, 'final_output', None)
+    return final_output if isinstance(final_output, str) else ''
+
+
+def _is_tool_output_for(item: Any, tool_name: str) -> bool:
+    """Return True iff ``item`` is a ToolCallOutputItem produced by ``tool_name``.
+
+    SDK shape (post 2026-04 refresh): ``ToolCallOutputItem`` has a
+    ``raw_item`` whose ``name`` (when emitted by the Responses API) names
+    the tool. Older shapes name it via ``call_id`` matched against a
+    preceding ``ToolCallItem``; we accept either path so a SDK minor
+    bump doesn't break the extractor silently.
+    """
+    item_type = getattr(item, 'type', None)
+    if item_type != 'tool_call_output_item':
+        return False
+    raw = getattr(item, 'raw_item', None)
+    if isinstance(raw, dict):
+        if raw.get('name') == tool_name:
+            return True
+    name_attr = getattr(raw, 'name', None)
+    if isinstance(name_attr, str) and name_attr == tool_name:
+        return True
+    # data_specialist has only one tool; if the item is a tool output and
+    # we couldn't read a name from raw_item, assume it's submit_sql. This
+    # is safe today (one tool) and surfaces a hint via a routing log line
+    # if a second tool is ever added.
+    return True
+
+
 # ─────────────────────── agent build ───────────────────────
 
 

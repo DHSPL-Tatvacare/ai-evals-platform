@@ -148,6 +148,12 @@ def normalize_to_v3_events(
                 'evidence_refs': _evidence_ref_ids(result),
                 'artifact_refs': _artifact_ref_ids(result),
                 'duration_ms': _specialist_latency_ms(result),
+                # Phase 1A telemetry: surface the grounded routing
+                # decision (intent class + projected tables + attempted
+                # SQL) on the wire so the chat widget can narrate the
+                # specialist's work concretely instead of "Used 2 tools".
+                'routing': _specialist_routing(result),
+                'row_count': _specialist_row_count(result),
             }]
             if result:
                 for artifact in _specialist_artifacts(result):
@@ -286,6 +292,48 @@ def _specialist_latency_ms(result: dict[str, Any] | None) -> int:
         return 0
     latency = meta.get('latency_ms')
     return latency if isinstance(latency, int) else 0
+
+
+def _specialist_routing(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Pull the Phase 1A routing block off the SpecialistResult ``meta``.
+
+    Shape (set by ``data_specialist._emit_with_telemetry``):
+      ``{intent_class, allowed_layers, projected_tables,
+         attempted_sql, validation_result, execution_status,
+         chart_payload_kind, status, latency_ms, grounding}``
+
+    Returned to the wire only when present; widget treats absence as
+    "no projection ran for this turn" and degrades the chip narration
+    gracefully.
+    """
+    if not result:
+        return None
+    meta = result.get('meta')
+    if not isinstance(meta, dict):
+        return None
+    routing = meta.get('routing')
+    return routing if isinstance(routing, dict) else None
+
+
+def _specialist_row_count(result: dict[str, Any] | None) -> int | None:
+    """Best-effort row count for the chip narration.
+
+    Pulled from the first artifact's ``data`` array length when present
+    (table fallbacks always carry one) — not a contract field, so we
+    return ``None`` when it can't be derived rather than lying with 0.
+    """
+    if not result:
+        return None
+    artifacts = _specialist_artifacts(result)
+    if not artifacts:
+        return None
+    payload = artifacts[0].get('payload')
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get('data')
+    if isinstance(data, list):
+        return len(data)
+    return None
 
 
 # ─────────────────────────── grounding (Phase 1A) ────────────────

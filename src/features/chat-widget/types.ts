@@ -135,14 +135,36 @@ export interface TextPart {
   content: string;
 }
 
+// Phase 1A — routing telemetry surfaced on the wire so the chip can
+// narrate the supervisor → specialist hand-off concretely (e.g.
+// "agg_evaluation_run · 16 rows · 56ms" instead of "data_specialist · 0ms").
+// Mirror of ``data_specialist._emit_with_telemetry``'s ``routing_payload``.
+export interface SpecialistRoutingTelemetry {
+  intentClass?: string;
+  allowedLayers?: string[];
+  projectedTables?: string[];
+  attemptedSql?: string;
+  validationResult?: string;
+  executionStatus?: string;
+  chartPayloadKind?: string | null;
+  status?: string;
+  latencyMs?: number;
+}
+
 export interface ToolCallPart {
   type: 'tool-call';
   toolCallId: string;
   toolName: string;
+  briefSummary?: string;
   state: 'executing' | 'completed' | 'error';
   summary?: string;
   detail?: ToolCallDetailData | null;
   durationMs?: number;
+  // Phase 1A wire additions — the chip uses these to render the
+  // "Sherlock consulted the data specialist · …" narrative + metrics.
+  rowCount?: number;
+  evidenceCount?: number;
+  routing?: SpecialistRoutingTelemetry;
 }
 
 // Phase 4: ``ChartPart`` wraps a ``ChartPayload`` (discriminated union).
