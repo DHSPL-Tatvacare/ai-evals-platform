@@ -15,26 +15,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.orchestration_authoring.credential_field_filter import (
+    FORBIDDEN_FIELD_NAMES,
+)
 
-# Decision §R5. Field names rejected by the egress walker.
-# Add a name here BEFORE writing a new lookup that touches a table
-# with that column — the filter is otherwise the last line of defense.
-CREDENTIAL_FIELD_BLOCKLIST: frozenset[str] = frozenset({
-    'api_key',
-    'apikey',
-    'secret',
-    'access_token',
-    'config_encrypted',
-    'password',
-    'bearer',
-    'webhook_token',
-    'bolna_api_key',
-    'wati_api_key',
-    'private_key',
-    'client_secret',
-    'auth_token',
-    'session_token',
-})
+
+# Decision §R5. Canonical blocklist lives in `credential_field_filter`;
+# this name is kept as a re-export so existing call sites (the inline
+# `_lookup_result_json` filter and the static lookup_models regression
+# test) don't need to chase the rename.
+CREDENTIAL_FIELD_BLOCKLIST: frozenset[str] = FORBIDDEN_FIELD_NAMES
 
 
 class ProviderConnectionRef(BaseModel):
