@@ -43,13 +43,18 @@ const SESSION_STORAGE_KEY = 'sherlock-active-session';
 const WIDGET_OPEN_KEY = 'sherlock-widget-open';
 const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
 const STREAM_FLUSH_MS = 50;
-// Analytics turns finish in 10-30s; authoring turns under
-// `reasoning effort=medium` with 4-6 sequential tool calls
-// (list_node_types → list_provider_connections → list_action_templates → … → apply_patch)
-// regularly run 60-100s end-to-end. Bump the wall clock to 3 minutes so
-// the chat widget doesn't kill turns the supervisor was about to land.
-// The backend is the timeout authority, not us.
-const SEND_TIMEOUT_MS = 180_000;
+// No wall-clock send timeout. The SSE stream itself is the liveness
+// probe — `fetch` rejects on connection drop, and the backend signals
+// terminal state via `turn_finished` / `error_emitted`. The user's
+// Stop button is the intentional-abort path. A wall-clock setTimeout
+// from `send()` added nothing those three signals don't already give
+// us, and it actively killed authoring turns whose `as_tool` boundary
+// is silent for 60-90s while the specialist runs its tool chain (the
+// SDK swallows sub-agent events at that boundary).
+//
+// If a future change needs a defensive ceiling, prefer an *idle*-based
+// watchdog that resets on every SSE event — never a wall-clock from
+// send.
 
 interface PersistedPointer {
   sessionId: string;
@@ -631,7 +636,6 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      let abortController: AbortController | null = null;
       activeAbortController?.abort();
       activeAbortController = null;
 
@@ -640,7 +644,6 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           return;
         }
         settled = true;
-        clearTimeout(timeoutId);
         resolve();
       };
 
@@ -649,25 +652,10 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           return;
         }
         settled = true;
-        clearTimeout(timeoutId);
         reject(error);
       };
 
-      // Single applier shared between timeout and stream — no racing second applier.
       const applier = createRuntimeApplier(set, get, finishResolve, finishReject);
-
-      const timeoutId = window.setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        // Abort the stream so no more events arrive after timeout.
-        abortController?.abort();
-        // Use the SAME applier to finalize — no second applier.
-        applier.onError({
-          terminalStatus: 'error',
-          message: 'Sherlock timed out before the turn completed',
-        });
-      }, SEND_TIMEOUT_MS);
 
       // Phase 2 (sherlock-builder) — read the page context exactly once
       // when the message goes out. The non-hook getter consumes the
@@ -740,7 +728,9 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onError: applier.onError,
         },
       ).then((controller) => {
-        abortController = controller;
+        // Push the AbortController to module scope so `stopActiveTurn`
+        // and the next `send()` can abort an in-flight stream. This is
+        // the *only* abort path now that the wall-clock timeout is gone.
         activeAbortController = controller;
       }).catch((error) => finishReject(error instanceof Error ? error : new Error(String(error))));
     }).catch(() => {
