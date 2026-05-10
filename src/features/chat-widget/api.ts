@@ -1,6 +1,7 @@
 import { apiRequest } from '@/services/api/client';
 import { useAuthStore } from '@/stores/authStore';
 import { logger } from '@/services/logger/logger';
+import type { PageContext } from '@/features/orchestration/copilot/usePageContext';
 import type {
   Artifact,
   BlueprintPart,
@@ -21,6 +22,11 @@ interface ChatRequest {
   operation: RuntimeOperation;
   message?: string;
   model: string;
+  /** Phase 2 (sherlock-builder) — when the user is on the orchestration
+   *  builder, the widget attaches the canvas snapshot so the supervisor
+   *  can route to `authoring_specialist`. Backend Phase 1 enforces
+   *  permissions before the tool is wired. Absent when off the builder. */
+  pageContext?: PageContext;
 }
 
 interface CancelTurnResponse {
@@ -46,6 +52,8 @@ interface StreamToolCallStartEvent {
 }
 
 import type { SpecialistRoutingTelemetry } from './types';
+import type { CanvasPatch } from '@/features/orchestration/copilot/canvasPatchSchema';
+import { CANVAS_PATCH_CONTRACT_ID } from '@/features/orchestration/copilot/canvasPatchSchema';
 
 // Phase 7 audit fix (Gap 4): ``outcome`` is the §6.2 envelope projection
 // the backend emits on specialist_finished / turn_finished. Carrying ``job`` end-to-end
@@ -210,6 +218,11 @@ export async function streamChatMessage(
     onToolCallEnd: (event: StreamToolCallEndEvent) => void;
     onContentDelta: (event: { seq: number; delta: string }) => void;
     onChart: (event: { seq: number; payload: ChartPayload; saved?: boolean; chartId?: string }) => void;
+    /** Phase 2 (sherlock-builder) — invoked when an `artifact_emitted` SSE
+     *  event carries the orchestration canvas-patch contract. Wired by
+     *  `useChatWidget.send` to the `canvasPatchApplier`. The chart consumer
+     *  stays on the fallthrough branch — no behaviour change for analytics. */
+    onCanvasPatch?: (event: { seq: number; patch: CanvasPatch }) => void;
     onBlueprint: (event: BlueprintPart & { seq: number }) => void;
     onSaveResult: (event: SaveResultEvent) => void;
     onStatus: (event: StreamStatusEvent) => void;
@@ -400,9 +413,27 @@ export async function streamChatMessage(
               break;
             }
             case 'artifact_emitted': {
+              // Phase 2 (sherlock-builder) — branch on `data.kind` so the
+              // canvas-patch contract routes to `onCanvasPatch` while every
+              // other artifact (chart, blueprint, …) keeps its existing
+              // chart-shaped fallthrough. The wire envelope already carries
+              // `kind` at the top level (runtime.py:161, turn_orchestrator.py:247).
               const seq = typeof data.seq === 'number' ? data.seq : 0;
               const payload = (data.payload ?? {}) as Record<string, unknown>;
-              callbacks.onChart({ seq, payload: payload as unknown as ChartPayload });
+              const kind =
+                typeof data.kind === 'string'
+                  ? data.kind
+                  : typeof payload.kind === 'string'
+                    ? (payload.kind as string)
+                    : '';
+              if (kind === CANVAS_PATCH_CONTRACT_ID && callbacks.onCanvasPatch) {
+                callbacks.onCanvasPatch({
+                  seq,
+                  patch: payload as unknown as CanvasPatch,
+                });
+              } else {
+                callbacks.onChart({ seq, payload: payload as unknown as ChartPayload });
+              }
               break;
             }
             case 'turn_finished': {

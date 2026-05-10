@@ -222,6 +222,90 @@ test('streamChatMessage emits EOF fallback when no terminal event arrives', asyn
   expect(onError.mock.calls[0][0].message).toMatch(/terminal runtime event/i);
 });
 
+test('streamChatMessage routes orchestration.canvas_patch.v1 to onCanvasPatch (not onChart)', async () => {
+  const patchPayload = {
+    workflow_id: 'wf_demo',
+    version_id: null,
+    base_data_hash: 'h_abc',
+    rationale: 'demo',
+    ops: [
+      {
+        op: 'add_node',
+        node_id: 'n_a',
+        payload: { node_type: 'sink.complete', config: {} },
+      },
+    ],
+  };
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    createSseResponse([
+      'event: session\ndata: {"sessionId":"session-1","provider":"openai","model":"gpt-5.4-mini","lastEventSeq":0}\n\n',
+      `event: artifact_emitted\ndata: ${JSON.stringify({
+        seq: 7,
+        kind: 'orchestration.canvas_patch.v1',
+        payload: patchPayload,
+      })}\n\n`,
+      'event: turn_finished\ndata: {"seq":8,"status":"done","content":"","toolCalls":[],"artifacts":[]}\n\n',
+    ]),
+  );
+
+  const onChart = vi.fn();
+  const onCanvasPatch = vi.fn();
+
+  await streamChatMessage(body, {
+    onSessionId: vi.fn(),
+    onEntityRecognition: vi.fn(),
+    onToolCallStart: vi.fn(),
+    onToolCallEnd: vi.fn(),
+    onContentDelta: vi.fn(),
+    onChart,
+    onCanvasPatch,
+    onBlueprint: vi.fn(),
+    onSaveResult: vi.fn(),
+    onStatus: vi.fn(),
+    onDone: vi.fn(),
+    onError: vi.fn(),
+  });
+  await flushPromises();
+
+  expect(onCanvasPatch).toHaveBeenCalledTimes(1);
+  expect(onCanvasPatch).toHaveBeenCalledWith(expect.objectContaining({
+    seq: 7,
+    patch: expect.objectContaining({ workflow_id: 'wf_demo' }),
+  }));
+  expect(onChart).not.toHaveBeenCalled();
+});
+
+test('streamChatMessage falls through to onChart when onCanvasPatch is omitted', async () => {
+  // Same canvas-patch artifact but the consumer (e.g. the legacy chart-only
+  // widget surface) didn't provide an onCanvasPatch handler. The dispatcher
+  // must fall through to onChart so behaviour matches pre-Phase-2.
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    createSseResponse([
+      'event: session\ndata: {"sessionId":"session-1","provider":"openai","model":"gpt-5.4-mini","lastEventSeq":0}\n\n',
+      'event: artifact_emitted\ndata: {"seq":7,"kind":"orchestration.canvas_patch.v1","payload":{"workflow_id":"wf"}}\n\n',
+      'event: turn_finished\ndata: {"seq":8,"status":"done","content":"","toolCalls":[],"artifacts":[]}\n\n',
+    ]),
+  );
+
+  const onChart = vi.fn();
+  await streamChatMessage(body, {
+    onSessionId: vi.fn(),
+    onEntityRecognition: vi.fn(),
+    onToolCallStart: vi.fn(),
+    onToolCallEnd: vi.fn(),
+    onContentDelta: vi.fn(),
+    onChart,
+    onBlueprint: vi.fn(),
+    onSaveResult: vi.fn(),
+    onStatus: vi.fn(),
+    onDone: vi.fn(),
+    onError: vi.fn(),
+  });
+  await flushPromises();
+
+  expect(onChart).toHaveBeenCalledTimes(1);
+});
+
 test('streamChatMessage surfaces an error after too many malformed payloads', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(
     createSseResponse([
