@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -129,12 +129,33 @@ describe('BuilderContextChip — expand / collapse', () => {
     expect(screen.getByTestId('builder-context-chip-details')).toBeInTheDocument();
     expect(header.getAttribute('aria-expanded')).toBe('true');
     await userEvent.click(header);
-    // After the second click the chip is collapsed; aria-expanded flips back
-    // and the details panel is no longer in the DOM. AnimatePresence may
-    // briefly retain the node during exit, so the userEvent click delay is
-    // enough — query is enough, no waitForElementToBeRemoved needed.
     expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByTestId('builder-context-chip-details')).toBeNull();
+    // AnimatePresence runs an exit transition (~180ms) before unmount.
+    // Wait for the details node to leave the DOM.
+    await waitFor(() => {
+      expect(screen.queryByTestId('builder-context-chip-details')).toBeNull();
+    });
+  });
+
+  it('shows a "Switch to Edit" action in view mode that flips the store viewMode', async () => {
+    const { useWorkflowBuilderStore } = await import(
+      '@/features/orchestration/store/workflowBuilderStore'
+    );
+    useWorkflowBuilderStore.getState().reset();
+    useWorkflowBuilderStore.getState().setMetadata({
+      workflowId: 'wf_demo',
+      versionId: 'v_1',
+      name: 'MQL Concierge',
+      workflowType: 'crm',
+    });
+    useWorkflowBuilderStore.getState().setViewMode('view');
+
+    render(<BuilderContextChip pageContext={fixture('view')} onDismiss={() => {}} />);
+    await userEvent.click(screen.getByTestId('builder-context-chip-header'));
+    const switchBtn = screen.getByTestId('builder-context-chip-switch-to-edit');
+    await userEvent.click(switchBtn);
+
+    expect(useWorkflowBuilderStore.getState().viewMode).toBe('edit');
   });
 
   it('dismiss button does NOT toggle expand (stopPropagation)', async () => {

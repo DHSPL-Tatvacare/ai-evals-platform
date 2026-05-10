@@ -1,23 +1,27 @@
 /**
- * Phase 2 (sherlock-builder) — context chip rendered inside `ChatInput`,
- * sticky directly above the textarea.
+ * Phase 2 (sherlock-builder) — context chip rendered inside `ChatInput`.
  *
- * Two visual states:
- *   - Collapsed: single-line pill — pulse dot + verb + workflow name +
- *     chevron + dismiss. Sized to match input row density so it never
- *     visually competes with the textarea.
- *   - Expanded: clicking the chip body slides open a details panel
- *     (framer-motion) showing workflow, selection, and canvas stats —
- *     every field derived from `pageContext`, no hardcoded strings.
+ * Visual model: an "attachment-style" pill pinned at the top of the chat
+ * input container (think Cursor's file attachment chips). Two visual
+ * states:
+ *   - Collapsed: dashed-border pill — pulse dot + verb + workflow name +
+ *     CRM/Clinical badge + chevron + dismiss.
+ *   - Expanded: clicking the pill body slides open a details panel
+ *     (framer-motion) showing workflow / selection / canvas stats — every
+ *     field derived from `pageContext`, no hardcoded strings.
+ *
+ * View-mode chip is self-actuating: the in-pill "Switch to Edit" button
+ * flips `workflowBuilderStore.setViewMode('edit')` so the user can unlock
+ * authoring without hunting for the canvas pencil button.
  *
  * Visual tokens are pulled from `globals.css` only — no hex literals.
- * Class composition uses `cn()` per the global Tailwind rule.
  */
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, Circle, Eye, Pencil, X } from 'lucide-react';
 
 import { cn } from '@/utils/cn';
+import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type { PageContext } from '@/features/orchestration/copilot/usePageContext';
 
 interface BuilderContextChipProps {
@@ -43,6 +47,7 @@ function formatCount(count: number, singular: string, plural: string): string {
 
 export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChipProps) {
   const [expanded, setExpanded] = useState(false);
+  const setViewMode = useWorkflowBuilderStore((s) => s.setViewMode);
   const isEdit = pageContext.viewMode === 'edit';
   const Icon = isEdit ? Pencil : Eye;
 
@@ -68,10 +73,10 @@ export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChi
   return (
     <div
       className={cn(
-        'mx-3 mt-2 mb-1 overflow-hidden rounded-md border',
+        'overflow-hidden rounded-md border border-dashed',
         isEdit
           ? 'border-[var(--border-brand)] bg-[var(--surface-brand-subtle)]'
-          : 'border-[var(--border-default)] bg-[var(--bg-secondary)]',
+          : 'border-[var(--border-default)] bg-[var(--bg-primary)]',
       )}
       data-testid="builder-context-chip"
     >
@@ -85,11 +90,11 @@ export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChi
         aria-controls="builder-context-chip-details"
         aria-label={`${verb} ${workflowName}, ${expanded ? 'hide' : 'show'} details`}
         className={cn(
-          'flex items-center gap-2 px-2 py-1 text-[12px]',
+          'flex items-center gap-1.5 px-2 py-1 text-[12px]',
           'cursor-pointer select-none transition-colors',
           isEdit
             ? 'hover:bg-[var(--surface-brand-hover)]'
-            : 'hover:bg-[var(--bg-tertiary)]',
+            : 'hover:bg-[var(--bg-secondary)]',
           'focus-visible:outline-none focus-visible:ring-1',
           'focus-visible:ring-[var(--color-brand-accent)]',
         )}
@@ -182,7 +187,7 @@ export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChi
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-            className="overflow-hidden border-t border-[var(--border-subtle,var(--border-default))]"
+            className="overflow-hidden border-t border-dashed border-[var(--border-default)]"
             data-testid="builder-context-chip-details"
           >
             <dl
@@ -228,9 +233,24 @@ export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChi
 
               {!isEdit ? (
                 <DetailRow label="Mode">
-                  <span className="text-[var(--text-secondary)]">
-                    Read-only — switch to <span className="font-medium">Edit</span> on the canvas
-                    to let me make changes.
+                  <span className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
+                    <span>Read-only — Sherlock can't change the canvas.</span>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('edit')}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded',
+                        'border border-[var(--border-brand)] bg-[var(--surface-brand-subtle)]',
+                        'px-2 py-0.5 text-[11px] font-medium text-[var(--text-brand)]',
+                        'hover:bg-[var(--surface-brand-hover)]',
+                        'focus-visible:outline-none focus-visible:ring-1',
+                        'focus-visible:ring-[var(--color-brand-accent)]',
+                      )}
+                      data-testid="builder-context-chip-switch-to-edit"
+                    >
+                      <Pencil className="h-3 w-3" aria-hidden />
+                      Switch to Edit
+                    </button>
                   </span>
                 </DetailRow>
               ) : null}
