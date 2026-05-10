@@ -319,12 +319,15 @@ function renderAssistantParts(
   }
 
   if (message.status === 'error') {
+    const reason = message.errorReason?.trim();
     blocks.push(
       <div key={`${message.id}-retry`} className="flex items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--interactive-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] px-4 py-3 text-[13px] text-[var(--text-primary)]">
         <AlertCircle className="h-4 w-4 shrink-0 text-[var(--interactive-danger)]" />
         <div className="min-w-0 flex-1">
           <div className="font-medium capitalize">{message.terminalStatus ?? 'error'}</div>
-          <div className="text-xs text-[var(--text-muted)]">Retry the last prompt to continue.</div>
+          <div className="text-xs text-[var(--text-muted)] break-words">
+            {reason ? reason : 'Retry the last prompt to continue.'}
+          </div>
         </div>
         <Button variant="ghost" size="sm" icon={RotateCcw} onClick={onRetry}>
           Retry

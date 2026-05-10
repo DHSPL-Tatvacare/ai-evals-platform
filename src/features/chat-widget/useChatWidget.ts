@@ -43,7 +43,13 @@ const SESSION_STORAGE_KEY = 'sherlock-active-session';
 const WIDGET_OPEN_KEY = 'sherlock-widget-open';
 const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
 const STREAM_FLUSH_MS = 50;
-const SEND_TIMEOUT_MS = 60_000;
+// Analytics turns finish in 10-30s; authoring turns under
+// `reasoning effort=medium` with 4-6 sequential tool calls
+// (list_node_types → list_provider_connections → list_action_templates → … → apply_patch)
+// regularly run 60-100s end-to-end. Bump the wall clock to 3 minutes so
+// the chat widget doesn't kill turns the supervisor was about to land.
+// The backend is the timeout authority, not us.
+const SEND_TIMEOUT_MS = 180_000;
 
 interface PersistedPointer {
   sessionId: string;
@@ -249,6 +255,7 @@ function createRuntimeApplier(
     terminalStatus: TerminalStatus | undefined,
     status: WidgetMessage['status'],
     usage?: TurnUsage,
+    errorReason?: string,
   ) => {
     if (flushTimer !== null) {
       clearTimeout(flushTimer);
@@ -266,6 +273,7 @@ function createRuntimeApplier(
           status,
           terminalStatus,
           ...(usage ? { usage } : {}),
+          ...(errorReason ? { errorReason } : {}),
         },
       ],
       streamingParts: [],
@@ -432,10 +440,26 @@ function createRuntimeApplier(
     },
     onError: (event) => {
       applySequencedEvent(event.seq, () => {
-        let finalParts = [...pendingParts];
+        // Stop any in-flight tool-call shimmer dead. Without this the
+        // specialist chip keeps "consulting…" pulsing even though the
+        // turn has already terminated — the user sees the error footer
+        // AND a still-spinning specialist, which is incoherent.
+        let finalParts = pendingParts.map((part) =>
+          part.type === 'tool-call' && part.state === 'executing'
+            ? { ...part, state: 'error' as const }
+            : part,
+        );
         finalParts = mergeTerminalText(finalParts, event.content);
-        finalParts = appendTextPart(finalParts, finalParts.length > 0 ? `\n\n${event.message}` : event.message);
-        finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'error', 'error');
+        // Do NOT append the error message as a text part — the Error /
+        // Retry footer renders it via `errorReason` so the failure shows
+        // up exactly once instead of twice.
+        finalizeAssistantMessage(
+          finalParts,
+          event.terminalStatus ?? 'error',
+          'error',
+          undefined,
+          event.message,
+        );
         activeAbortController = null;
         set({ activeTurnId: null });
         rejectSend?.(Object.assign(new Error(event.message), { terminalStatus: event.terminalStatus, content: event.content }));

@@ -242,6 +242,12 @@ export interface WidgetMessage {
   status: 'pending' | 'streaming' | 'complete' | 'error';
   terminalStatus?: TerminalStatus;
   usage?: TurnUsage;
+  /** Human-readable failure reason carried into the chat-thread Error
+   *  footer. When set, replaces the generic "Retry the last prompt to
+   *  continue." subtitle so the user actually sees what broke. Set by
+   *  the runtime applier on `onError` and on hash-mismatch system
+   *  messages. Never persisted to the backend. */
+  errorReason?: string;
 }
 
 export interface ChatDefaults {
