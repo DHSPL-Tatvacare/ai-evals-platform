@@ -3,7 +3,7 @@ import type { StateCreator } from 'zustand';
 import { cancelChatTurn, getBuilderSession, getChatDefaults, streamChatMessage } from './api';
 import { CHAT_SESSION_SOURCE, chatSessionsRepository } from '@/services/api/chatApi';
 import { notificationService } from '@/services/notifications';
-import { applyCanvasPatch } from '@/features/orchestration/copilot/canvasPatchApplier';
+import { applyCanvasPatch, consumeRebaseRedo } from '@/features/orchestration/copilot/canvasPatchApplier';
 import { getPageContextSnapshot } from '@/features/orchestration/copilot/usePageContext';
 import type { AppId } from '@/types';
 import type {
@@ -663,13 +663,21 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       const pageContext = getPageContextSnapshot();
       const patchAbortController = new AbortController();
 
+      // Phase 3 (sherlock-builder) — when a rebase is pending and the
+      // user typed a redo trigger ("yes, redo" / "redo"), rewrite the
+      // wire payload to carry the previous patch's rationale verbatim.
+      // The user's original text remains in the chat thread above; only
+      // the message sent to the supervisor is substituted.
+      const rebaseSynthetic = consumeRebaseRedo(text);
+      const wireMessage = rebaseSynthetic ?? text;
+
       streamChatMessage(
         {
           appId,
           sessionId,
           turnId,
           operation: 'send',
-          message: text,
+          message: wireMessage,
           model,
           ...(pageContext.kind === 'orchestration_builder' ? { pageContext } : {}),
         },

@@ -57,6 +57,57 @@ const REBASE_PROMPT_TEXT =
   'The canvas changed while I was working — your changes are preserved. ' +
   'Want me to redo on the current state? Reply "yes, redo" to re-apply, or ignore to discard.';
 
+/**
+ * Phase 3 — module-level pending-rebase state. Set on hash-mismatch
+ * with the patch's rationale; consumed by the chat widget's `send()`
+ * when the user replies with a redo trigger. The rationale is carried
+ * verbatim into the synthetic prompt the LLM receives.
+ */
+let pendingRebase: { rationale: string } | null = null;
+
+const REDO_TRIGGERS = new Set(['yes, redo', 'yes redo', 'redo']);
+
+function buildRebaseSynthetic(rationale: string): string {
+  return (
+    'Canvas state changed since my last patch. Re-read current state ' +
+    `and re-apply the previous intent: ${rationale}`
+  );
+}
+
+/**
+ * Phase 3 — called by `useChatWidget.send` before dispatching a turn.
+ * Returns the synthetic rebase prompt (carrying the cached rationale)
+ * when:
+ *   - a hash-mismatch is currently pending, AND
+ *   - the user's text matches one of REDO_TRIGGERS (case-insensitive).
+ *
+ * Any other input clears the pending state — the implicit "discard"
+ * path. Either way, after this call returns, the pending flag is gone
+ * so the next mismatch starts fresh.
+ *
+ * Returns `null` when no rewrite should happen. Caller continues to
+ * send the user's original text on the wire.
+ */
+export function consumeRebaseRedo(userText: string): string | null {
+  if (pendingRebase === null) return null;
+  const trimmed = userText.trim().toLowerCase();
+  const rationale = pendingRebase.rationale;
+  pendingRebase = null;
+  if (REDO_TRIGGERS.has(trimmed)) {
+    return buildRebaseSynthetic(rationale);
+  }
+  return null;
+}
+
+/**
+ * Test-only helper — clears the pending-rebase state. Production code
+ * never needs this; module-level state is intentional so the redo flow
+ * can survive across re-renders.
+ */
+export function _resetRebaseStateForTests(): void {
+  pendingRebase = null;
+}
+
 /** Pure helper — group consecutive same-kind ops so we can hand `add_node`
  *  runs to `addNodes(...)` and `connect` runs to `addEdges(...)` for a
  *  single hash recompute per group. Update / remove ops do not benefit
@@ -150,9 +201,12 @@ export async function applyCanvasPatch(
       base: patch.base_data_hash,
       current: currentHash,
     });
+    pendingRebase = { rationale: patch.rationale };
     options.onChatMessage(REBASE_PROMPT_TEXT);
     return { kind: 'hash_mismatch' };
   }
+  // Apply path — any prior pending-rebase is now resolved.
+  pendingRebase = null;
 
   const stagger = options.staggerMs ?? 100;
   const signal = options.signal;
