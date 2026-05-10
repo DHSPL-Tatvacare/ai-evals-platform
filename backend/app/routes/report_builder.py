@@ -582,6 +582,7 @@ async def chat_stream_v2(
                     user_message=body.message or '',
                     turn=turn,
                     on_event=_on_event,
+                    auth=auth,
                 )
             finally:
                 await _close_turn_stream(turn.id)

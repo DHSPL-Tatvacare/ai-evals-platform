@@ -15,9 +15,22 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
+from app.auth.context import AuthContext
 from app.services.sherlock_v3 import data_specialist as ds_mod
 from app.services.sherlock_v3 import runtime as runtime_mod
 from app.services.sherlock_v3.runtime import SherlockTurnContext, run_turn
+
+
+def _make_auth() -> AuthContext:
+    return AuthContext(
+        user_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        email='test@example.com',
+        role_id=uuid.uuid4(),
+        is_owner=False,
+        permissions=frozenset(),
+        app_access=frozenset({'voice-rx'}),
+    )
 
 
 def _make_ctx() -> SherlockTurnContext:
@@ -27,6 +40,7 @@ def _make_ctx() -> SherlockTurnContext:
         app_id='voice-rx',
         chat_session_id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
+        auth=_make_auth(),
         previous_response_id=None,
     )
 

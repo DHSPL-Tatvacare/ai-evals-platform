@@ -23,6 +23,8 @@ from typing import Any
 
 from agents import Runner
 
+from app.auth.context import AuthContext
+from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
 from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 from app.services.sherlock_v3.intent_classifier import classify_intent
 from app.services.sherlock_v3.manifest_projection import (
@@ -48,6 +50,11 @@ class SherlockTurnContext:
     session id, a turn id for evidence rows + event seq, and a per-turn
     ``scratch`` dict that specialist tools use to hand intermediate state
     across each other inside one turn.
+
+    `auth` is required so per-tool re-checks (R3) can read permissions /
+    app_access without reaching back into the route. `builder_context` is
+    optional; the route handler stamps it only when a builder page is
+    open AND `'orchestration:manage'` is in `auth.permissions`.
     """
 
     tenant_id: uuid.UUID
@@ -55,9 +62,11 @@ class SherlockTurnContext:
     app_id: str
     chat_session_id: uuid.UUID
     turn_id: uuid.UUID
+    auth: AuthContext
     previous_response_id: str | None = None
     streamed_text_parts: list[str] = field(default_factory=list)
     scratch: dict[str, Any] = field(default_factory=dict)
+    builder_context: BuilderSnapshot | None = None
 
 
 # ─────────────────────────── stale-chain detection ───────────────

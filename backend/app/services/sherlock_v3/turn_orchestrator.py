@@ -27,7 +27,9 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from app.auth.context import AuthContext
 from app.database import async_session
+from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
 from app.services.report_builder.runtime_store import (
     SherlockAgentSessionState,
     create_assistant_message,
@@ -71,10 +73,18 @@ async def run_chat_turn(
     user_message: str,
     turn: SherlockConversationTurnState,
     on_event: Callable[[dict[str, Any]], Awaitable[None]],
+    auth: AuthContext,
+    builder_context: BuilderSnapshot | None = None,
 ) -> None:
     """Drive one Sherlock v3 turn through the SSE wire + DB persistence.
 
     Emits v3-native events; no v2 translation layer.
+
+    `auth` is required so the per-tool authoring re-check (R3) and the
+    supervisor's conditional inclusion (R2) have the same source of
+    truth as the route gate. `builder_context` is the per-turn canvas
+    snapshot — non-None ONLY when the chat widget is mounted on an
+    orchestration builder page AND the user holds `orchestration:manage`.
     """
     async with async_session() as db:
         assistant_message_id = await create_assistant_message(
@@ -93,6 +103,8 @@ async def run_chat_turn(
         app_id=runtime_session.app_id,
         chat_session_id=uuid.UUID(runtime_session.chat_session_id),
         turn_id=uuid.UUID(turn.id),
+        auth=auth,
+        builder_context=builder_context,
         previous_response_id=runtime_session.last_response_id,
     )
 
