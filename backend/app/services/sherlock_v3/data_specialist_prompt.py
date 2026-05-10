@@ -106,16 +106,22 @@ def build_data_specialist_prompt(
     column_role_hints: list[str],
     exemplars: list[dict[str, str]],
     max_rows: int,
+    grounding_header: str | None = None,
 ) -> str:
     """Compose the data_specialist's full system prompt for one app.
 
-    All inputs are computed at agent construction time (manifest is
-    static per process; exemplars are static per app). The resulting
-    prompt is reused for every turn — prompt-cache friendly.
+    Phase 1A: ``grounding_header`` is the optional "GROUNDING:" block
+    rendered between the app scope and the safety contract. Callers
+    that have run ``manifest_projection.project_for_intent`` pass a
+    short string naming the inferred intent and the projected layers
+    so the LLM understands *why* the schema below was filtered. When
+    ``None`` (legacy callers, tests), no header is rendered and the
+    rest of the prompt is unchanged.
     """
     schema_yaml = yaml.dump(schema_context, default_flow_style=False, width=120, sort_keys=False)
     role_hints_block = '\n'.join(f'- {h}' for h in column_role_hints) or '- none'
     allowed_tables_block = ', '.join(sorted(allowed_tables))
+    grounding_block = (grounding_header.strip() + '\n\n') if grounding_header else ''
 
     if exemplars:
         exemplar_lines: list[str] = ['VERIFIED QUERY EXAMPLES (hand-checked for this schema):']
@@ -129,6 +135,7 @@ def build_data_specialist_prompt(
     return (
         _PERSONALITY
         + '\n\nAPP SCOPE: ' + app_id + '\n\n'
+        + grounding_block
         + _SAFETY_CONTRACT
         + '\n\n' + _SQL_RULES.format(max_rows=max_rows)
         + '\nAllowed tables: ' + allowed_tables_block + '\n'

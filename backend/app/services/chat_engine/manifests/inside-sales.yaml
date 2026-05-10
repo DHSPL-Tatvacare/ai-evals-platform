@@ -8,6 +8,8 @@ description: |
 catalog_tables:
   agg_evaluation_run:
     pg_schema: analytics
+    layer: analytics_aggregate
+    grain: run
     orm: AggEvaluationRun
     alias: rf
     columns:
@@ -148,6 +150,8 @@ catalog_tables:
         description: "App-specific metadata"
   fact_evaluation:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: evaluation
     orm: FactEvaluation
     alias: ef
     columns:
@@ -300,6 +304,8 @@ catalog_tables:
         data_type: temporal
   fact_evaluation_criterion:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: criterion
     orm: FactEvaluationCriterion
     alias: cf
     columns:
@@ -373,6 +379,8 @@ catalog_tables:
   evaluation_runs:
     orm: EvaluationRun
     pg_schema: platform
+    layer: transactional
+    grain: run
     columns:
       id:
         role: identifier
@@ -491,6 +499,8 @@ catalog_tables:
   evaluators:
     orm: Evaluator
     pg_schema: platform
+    layer: identity
+    grain: evaluator
     alias: e
     columns:
       id:
@@ -530,6 +540,8 @@ catalog_tables:
   crm_call_record:
     orm: CrmCallRecord
     pg_schema: analytics
+    layer: analytics_fact
+    grain: call
     alias: c
     columns:
       activity_id:
@@ -602,6 +614,8 @@ catalog_tables:
   crm_lead_record:
     orm: CrmLeadRecord
     pg_schema: analytics
+    layer: analytics_fact
+    grain: lead_record
     alias: l
     columns:
       prospect_id:
@@ -638,6 +652,8 @@ catalog_tables:
         nullable: true
   dim_lead:
     pg_schema: analytics
+    layer: identity
+    grain: lead
     orm: DimLead
     alias: dl
     columns:
@@ -708,6 +724,8 @@ catalog_tables:
         data_type: temporal
   fact_lead_stage_transition:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: stage_transition
     orm: FactLeadStageTransition
     alias: lst
     columns:
@@ -769,6 +787,8 @@ catalog_tables:
         data_type: temporal
   fact_lead_activity:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: lead_activity
     orm: FactLeadActivity
     alias: la
     columns:
@@ -850,6 +870,8 @@ catalog_tables:
         data_type: temporal
   fact_lead_signal:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: lead_signal
     orm: FactLeadSignal
     alias: ls
     columns:

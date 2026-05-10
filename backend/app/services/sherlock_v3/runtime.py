@@ -24,6 +24,11 @@ from typing import Any
 from agents import Runner
 
 from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
+from app.services.sherlock_v3.intent_classifier import classify_intent
+from app.services.sherlock_v3.manifest_projection import (
+    GroundingContext,
+    project_for_intent,
+)
 from app.services.sherlock_v3.supervisor import build_supervisor
 
 logger = logging.getLogger(__name__)
@@ -283,6 +288,50 @@ def _specialist_latency_ms(result: dict[str, Any] | None) -> int:
     return latency if isinstance(latency, int) else 0
 
 
+# ─────────────────────────── grounding (Phase 1A) ────────────────
+
+
+def _compute_grounding(app_id: str, user_message: str) -> GroundingContext | None:
+    """Build the per-turn ``GroundingContext`` from ``user_message`` + manifest.
+
+    Returns ``None`` when projection cannot be computed for this app
+    (no manifest, semantic-model load failure) — the agent then falls
+    back to the unprojected schema and the routing telemetry records
+    no ``grounding`` block. Failure modes here MUST NOT crash a turn:
+    the worst case is "no projection, behave like pre-Phase-1A", which
+    is strictly an improvement over silently breaking the chat surface.
+    """
+    try:
+        from app.services.chat_engine.manifest import get_manifest
+        from app.services.chat_engine.sql_agent import (
+            _allowed_tables,
+            _build_schema_context,
+            _column_role_hints,
+            load_semantic_model,
+        )
+
+        manifest = get_manifest(app_id)
+        intent_class = classify_intent(user_message)
+        semantic_model = load_semantic_model(app_id)
+        schema_context = _build_schema_context(semantic_model, None)
+        return project_for_intent(
+            app_id=app_id,
+            user_message=user_message,
+            intent_class=intent_class,
+            manifest=manifest,
+            schema_context=schema_context,
+            full_allowed_tables=sorted(_allowed_tables(semantic_model)),
+            full_role_hints=_column_role_hints(schema_context, app_id=app_id),
+        )
+    except Exception as exc:  # noqa: BLE001 — non-fatal; degrade to unprojected
+        logger.warning(
+            'sherlock_v3 grounding computation failed for app=%s; '
+            'falling back to unprojected schema: %s',
+            app_id, exc,
+        )
+        return None
+
+
 # ─────────────────────────── run_turn ────────────────────────────
 
 
@@ -308,7 +357,13 @@ async def run_turn(
     client = await get_sherlock_azure_client(
         tenant_id=ctx.tenant_id, user_id=ctx.user_id,
     )
-    supervisor = build_supervisor(ctx.app_id, client)
+
+    # Phase 1A: compute grounding from the user_message + manifest
+    # BEFORE the agent is constructed. The result is passed explicitly
+    # through ``build_supervisor`` -> ``build_data_specialist`` instead
+    # of being stashed on ``ctx.scratch`` (Plan §1.2).
+    grounding = _compute_grounding(ctx.app_id, user_message)
+    supervisor = build_supervisor(ctx.app_id, client, grounding=grounding)
 
     try:
         async for normalized in _stream_once(

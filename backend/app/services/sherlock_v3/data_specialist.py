@@ -32,8 +32,16 @@ from openai.types.shared import Reasoning
 from app.services.sherlock_v3.azure_client import specialist_model
 from app.services.sherlock_v3.data_specialist_prompt import build_data_specialist_prompt
 from app.services.sherlock_v3.exemplars import exemplars_for
+from app.services.sherlock_v3.manifest_projection import GroundingContext
 
 logger = logging.getLogger(__name__)
+
+
+# Phase 1A: structured logger for routing telemetry. Every ``submit_sql``
+# attempt — successful, empty, validation-failure, execution-error —
+# emits one JSON-friendly INFO line on this logger so the audit set can
+# measure first-try table correctness without re-running the classifier.
+routing_logger = logging.getLogger('sherlock_v3.routing')
 
 
 # Cap evidence writes per query so a 200-row result set doesn't dump 200 rows
@@ -106,114 +114,183 @@ _SUBMIT_SQL_SCHEMA: dict[str, Any] = {
 # ─────────────────────── tool handler ───────────────────────
 
 
-async def _submit_sql_handler(ctx: ToolContext[Any], args: str) -> str:
-    """Validate + execute + chart the LLM's SQL. No second LLM call.
+def _make_submit_sql_handler(grounding: GroundingContext | None):
+    """Build the ``submit_sql`` tool handler with grounding closed in.
 
-    On validation failure or execution error, returns status='error'
-    with the reason; the data_specialist's prompt instructs it to retry
-    once, regenerating the SQL to avoid the same error.
+    Phase 1A: ``grounding`` is the per-turn ``GroundingContext`` that
+    ``runtime.run_turn`` computed before the agent was constructed. We
+    capture it here (closure on the agent build, NOT a per-turn side
+    channel) so the handler can:
+
+      1. Use ``grounding.user_message`` as the question label for chart
+         payloads — replacing the legacy reach-into-the-context read
+         that was never populated and silently fell back to chart_title.
+      2. Stamp routing telemetry (intent_class, projected_tables,
+         attempted SQL, validation+execution result, chart payload kind)
+         onto every attempt — success, empty, validation_failure,
+         execution_error — so the audit-set bar can be measured without
+         re-running the classifier.
     """
-    started = time.monotonic()
-    parsed = json.loads(args) if args.strip() else {}
-    sherlock_ctx = ctx.context
 
-    sql_raw = (parsed.get('sql') or '').strip()
-    chart_title = (parsed.get('chart_title') or '').strip()
-    output_columns = parsed.get('output_columns') or []
+    async def _submit_sql_handler(ctx: ToolContext[Any], args: str) -> str:
+        started = time.monotonic()
+        parsed = json.loads(args) if args.strip() else {}
+        sherlock_ctx = ctx.context
 
-    if not sql_raw:
-        return _result_json(
-            status='error',
-            summary='submit_sql called with empty sql.',
-            artifacts=[],
-            started=started,
-            app_id=sherlock_ctx.app_id,
+        sql_raw = (parsed.get('sql') or '').strip()
+        chart_title = (parsed.get('chart_title') or '').strip()
+        output_columns = parsed.get('output_columns') or []
+        app_id = sherlock_ctx.app_id
+
+        # Question label for chart payloads / supervisor summaries.
+        # Pulled from grounding (the user's actual question) when
+        # available; falls back to chart_title for legacy/unit-test
+        # callers that build the agent without grounding.
+        question = (grounding.user_message if grounding else '') or chart_title
+
+        if not sql_raw:
+            return _emit_with_telemetry(
+                grounding=grounding, app_id=app_id, started=started,
+                attempted_sql='', validation_result='empty_sql',
+                execution_status='error', chart_payload_kind=None,
+                status='error',
+                summary='submit_sql called with empty sql.',
+                artifacts=[], evidence=None,
+            )
+
+        from app.database import async_session
+        from app.services.chat_engine.sql_agent import (
+            SQLValidationError,
+            UUIDParamRegistry,
+            execute_query,
+            load_app_config,
+            load_semantic_model,
+            prepare_query,
+            validate_sql,
+            validate_sql_columns_against_manifest,
         )
 
-    from app.database import async_session
-    from app.services.chat_engine.sql_agent import (
-        SQLValidationError,
-        UUIDParamRegistry,
-        execute_query,
-        load_app_config,
-        load_semantic_model,
-        prepare_query,
-        validate_sql,
-        validate_sql_columns_against_manifest,
-    )
+        try:
+            async with async_session() as db:
+                app_config = await load_app_config(db, app_id)
+            semantic_model = load_semantic_model(app_id, app_config=app_config)
 
-    app_id = sherlock_ctx.app_id
+            sql = validate_sql(sql_raw, semantic_model)
+            validate_sql_columns_against_manifest(sql, app_id=app_id)
 
-    try:
-        async with async_session() as db:
-            app_config = await load_app_config(db, app_id)
-        semantic_model = load_semantic_model(app_id, app_config=app_config)
+            safe_sql, params = prepare_query(
+                sql,
+                sherlock_ctx,
+                app_id,
+                semantic_model,
+                uuid_registry=UUIDParamRegistry(),
+            )
+            async with async_session() as db:
+                rows = await execute_query(safe_sql, params, db)
 
-        sql = validate_sql(sql_raw, semantic_model)
-        validate_sql_columns_against_manifest(sql, app_id=app_id)
-
-        safe_sql, params = prepare_query(
-            sql,
-            sherlock_ctx,
-            app_id,
-            semantic_model,
-            uuid_registry=UUIDParamRegistry(),
-        )
-        async with async_session() as db:
-            rows = await execute_query(safe_sql, params, db)
-
-        question = sherlock_ctx.scratch.get('user_message', '') or chart_title
-
-        artifacts = _build_artifact_list(
-            rows=rows,
-            output_columns=list(output_columns),
-            question=question,
-            sql_used=safe_sql,
-            chart_title=chart_title,
-            app_id=app_id,
-        )
-
-        evidence = await _persist_sql_evidence(
-            rows=rows,
-            sql=safe_sql,
-            sherlock_ctx=sherlock_ctx,
-        )
-
-        if not rows:
-            return _result_json(
-                status='empty',
-                summary=f'No rows for: {question}',
-                artifacts=artifacts,
-                evidence=evidence,
-                started=started,
+            artifacts = _build_artifact_list(
+                rows=rows,
+                output_columns=list(output_columns),
+                question=question,
+                sql_used=safe_sql,
+                chart_title=chart_title,
                 app_id=app_id,
             )
 
-        return _result_json(
-            status='ok',
-            summary=_summarize_for_supervisor(question, len(rows), artifacts),
-            artifacts=artifacts,
-            evidence=evidence,
-            started=started,
-            app_id=app_id,
-        )
-    except SQLValidationError as exc:
-        return _result_json(
-            status='error',
-            summary=f'SQL validation failed: {exc}',
-            artifacts=[],
-            started=started,
-            app_id=app_id,
-        )
-    except Exception as exc:  # noqa: BLE001 — top-level tool boundary
-        logger.exception('sherlock_v3 submit_sql tool crashed')
-        return _result_json(
-            status='error',
-            summary=f'{type(exc).__name__}: {exc}',
-            artifacts=[],
-            started=started,
-            app_id=app_id,
-        )
+            evidence = await _persist_sql_evidence(
+                rows=rows,
+                sql=safe_sql,
+                sherlock_ctx=sherlock_ctx,
+            )
+
+            chart_kind = artifacts[0]['kind'] if artifacts else None
+
+            if not rows:
+                return _emit_with_telemetry(
+                    grounding=grounding, app_id=app_id, started=started,
+                    attempted_sql=safe_sql, validation_result='ok',
+                    execution_status='empty', chart_payload_kind=chart_kind,
+                    status='empty',
+                    summary=f'No rows for: {question}',
+                    artifacts=artifacts, evidence=evidence,
+                )
+
+            return _emit_with_telemetry(
+                grounding=grounding, app_id=app_id, started=started,
+                attempted_sql=safe_sql, validation_result='ok',
+                execution_status='ok', chart_payload_kind=chart_kind,
+                status='ok',
+                summary=_summarize_for_supervisor(question, len(rows), artifacts),
+                artifacts=artifacts, evidence=evidence,
+            )
+        except SQLValidationError as exc:
+            return _emit_with_telemetry(
+                grounding=grounding, app_id=app_id, started=started,
+                attempted_sql=sql_raw, validation_result=f'failed: {exc}',
+                execution_status='error', chart_payload_kind=None,
+                status='error',
+                summary=f'SQL validation failed: {exc}',
+                artifacts=[], evidence=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — top-level tool boundary
+            logger.exception('sherlock_v3 submit_sql tool crashed')
+            return _emit_with_telemetry(
+                grounding=grounding, app_id=app_id, started=started,
+                attempted_sql=sql_raw, validation_result='ok',
+                execution_status=f'error: {type(exc).__name__}',
+                chart_payload_kind=None,
+                status='error',
+                summary=f'{type(exc).__name__}: {exc}',
+                artifacts=[], evidence=None,
+            )
+
+    return _submit_sql_handler
+
+
+def _emit_with_telemetry(
+    *,
+    grounding: GroundingContext | None,
+    app_id: str,
+    started: float,
+    attempted_sql: str,
+    validation_result: str,
+    execution_status: str,
+    chart_payload_kind: str | None,
+    status: str,
+    summary: str,
+    artifacts: list[dict[str, Any]],
+    evidence: list[dict[str, Any]] | None,
+) -> str:
+    """Record one routing-telemetry log line and return the SpecialistResult JSON.
+
+    Plan §1.3 acceptance gate: telemetry MUST land for every submit_sql
+    attempt, including failed validation and empty result sets, so the
+    Q1–Q10 routing-correctness bar can be measured from logs alone
+    when ``platform.sherlock_evidence`` is empty.
+    """
+    routing_payload: dict[str, Any] = {
+        'event': 'submit_sql_attempt',
+        'app_id': app_id,
+        'attempted_sql': attempted_sql,
+        'validation_result': validation_result,
+        'execution_status': execution_status,
+        'chart_payload_kind': chart_payload_kind,
+        'status': status,
+        'latency_ms': int((time.monotonic() - started) * 1000),
+    }
+    if grounding is not None:
+        routing_payload['grounding'] = grounding.telemetry_dict()
+    routing_logger.info('sherlock_v3.submit_sql %s', routing_payload)
+
+    return _result_json(
+        status=status,
+        summary=summary,
+        artifacts=artifacts,
+        evidence=evidence,
+        started=started,
+        app_id=app_id,
+        routing=routing_payload,
+    )
 
 
 # ─────────────────────── chart pipeline ───────────────────────
@@ -577,7 +654,15 @@ def _result_json(
     started: float,
     app_id: str,
     evidence: list[dict[str, Any]] | None = None,
+    routing: dict[str, Any] | None = None,
 ) -> str:
+    meta: dict[str, Any] = {
+        'confidence': 0.8 if status == 'ok' else 0.0,
+        'latency_ms': int((time.monotonic() - started) * 1000),
+        'source_pack_id': app_id,
+    }
+    if routing is not None:
+        meta['routing'] = routing
     return json.dumps({
         'kind': 'data',
         'status': status,
@@ -585,11 +670,7 @@ def _result_json(
         'evidence': evidence or [],
         'artifacts': artifacts,
         'state_delta': {},
-        'meta': {
-            'confidence': 0.8 if status == 'ok' else 0.0,
-            'latency_ms': int((time.monotonic() - started) * 1000),
-            'source_pack_id': app_id,
-        },
+        'meta': meta,
     }, default=str)
 
 
@@ -664,18 +745,32 @@ async def _persist_sql_evidence(
 # ─────────────────────── agent build ───────────────────────
 
 
-def build_data_specialist(client: openai.AsyncAzureOpenAI, app_id: str) -> Agent:
+def build_data_specialist(
+    client: openai.AsyncAzureOpenAI,
+    app_id: str,
+    *,
+    grounding: GroundingContext | None = None,
+) -> Agent:
     """Construct the data_specialist Agent for one app.
 
     The system prompt bakes in:
-      - Schema (rendered from ``load_semantic_model`` + ``_build_schema_context``)
-      - Allowed tables list
-      - Column role hints (from the same comment_metadata sql_agent used)
+      - Schema (rendered from ``load_semantic_model`` + ``_build_schema_context``,
+        then projected through ``manifest_projection.project_for_intent``
+        when ``grounding`` is supplied)
+      - Allowed tables list (projected)
+      - Column role hints (projected)
       - Verified-query exemplars (from ``exemplars.py``)
       - Safety + output contract
+      - Optional grounding header naming the inferred intent class
 
     The agent has ONE tool: ``submit_sql``. It validates + executes +
     charts the SQL the LLM emitted. No second LLM call.
+
+    Phase 1A: ``grounding`` is the per-turn ``GroundingContext`` computed
+    by ``runtime.run_turn`` from the user_message + manifest. When
+    omitted (legacy callers, unit tests), the prompt receives the full
+    unprojected schema and the tool handler emits telemetry with no
+    ``grounding`` block.
     """
     from app.services.chat_engine.sql_agent import (
         MAX_RESULT_ROWS,
@@ -691,6 +786,23 @@ def build_data_specialist(client: openai.AsyncAzureOpenAI, app_id: str) -> Agent
     role_hints = _column_role_hints(schema_context, app_id=app_id)
     exemplars = exemplars_for(app_id)
 
+    grounding_header: str | None = None
+    if grounding is not None:
+        # Use the projected slices instead of the full schema. The
+        # projection has already been computed once in run_turn — we
+        # don't re-derive it here.
+        schema_context = grounding.projected_schema
+        allowed_tables = list(grounding.allowed_tables_hint)
+        role_hints = list(grounding.projected_role_hints)
+        grounding_header = (
+            'GROUNDING (Phase 1A — deterministic, no LLM):\n'
+            f'- intent_class: {grounding.intent_class}\n'
+            f'- allowed_layers: {", ".join(sorted(grounding.allowed_layers))}\n'
+            f'- projected_tables: {", ".join(grounding.projected_tables) or "(none — fallback)"}\n'
+            'The schema below has been filtered to the layers above. '
+            'Pick a table from the projected list; do not invent one.'
+        )
+
     system_prompt = build_data_specialist_prompt(
         app_id=app_id,
         schema_context=schema_context,
@@ -698,6 +810,7 @@ def build_data_specialist(client: openai.AsyncAzureOpenAI, app_id: str) -> Agent
         column_role_hints=role_hints,
         exemplars=exemplars,
         max_rows=MAX_RESULT_ROWS,
+        grounding_header=grounding_header,
     )
 
     return Agent(
@@ -718,7 +831,7 @@ def build_data_specialist(client: openai.AsyncAzureOpenAI, app_id: str) -> Agent
                     'on status=error you may regenerate and call once more.'
                 ),
                 params_json_schema=_SUBMIT_SQL_SCHEMA,
-                on_invoke_tool=_submit_sql_handler,
+                on_invoke_tool=_make_submit_sql_handler(grounding),
                 strict_json_schema=True,
             ),
         ],

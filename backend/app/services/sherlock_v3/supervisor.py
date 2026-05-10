@@ -19,6 +19,7 @@ from openai.types.shared import Reasoning
 from app.services.sherlock_v3.azure_client import supervisor_model
 from app.services.sherlock_v3.contracts import TASK_BRIEF_JSON_SCHEMA
 from app.services.sherlock_v3.data_specialist import build_data_specialist
+from app.services.sherlock_v3.manifest_projection import GroundingContext
 
 
 _SUPERVISOR_PROMPT = """\
@@ -77,7 +78,12 @@ in this app's capability pack. Never invent data. Cite evidence.
 """
 
 
-def build_supervisor(app_id: str, client: openai.AsyncAzureOpenAI) -> Agent:
+def build_supervisor(
+    app_id: str,
+    client: openai.AsyncAzureOpenAI,
+    *,
+    grounding: GroundingContext | None = None,
+) -> Agent:
     """Build the supervisor agent for one app.
 
     The supervisor is constructed per turn (not cached) so the prompt's
@@ -86,8 +92,15 @@ def build_supervisor(app_id: str, client: openai.AsyncAzureOpenAI) -> Agent:
 
     The client comes from the route handler (one per turn, tenant-scoped via
     ``get_sherlock_azure_client``).
+
+    Phase 1A: ``grounding`` is the per-turn ``GroundingContext`` computed
+    by ``runtime.run_turn`` from the user_message + manifest. It is
+    forwarded verbatim to ``build_data_specialist`` so the specialist's
+    schema, allowed-tables, role hints, and routing telemetry are all
+    sourced from the same projection. The supervisor's own prompt does
+    not need projection — it never writes SQL.
     """
-    data_spec = build_data_specialist(client, app_id)
+    data_spec = build_data_specialist(client, app_id, grounding=grounding)
 
     return Agent(
         name=f'sherlock-supervisor-{app_id}',
