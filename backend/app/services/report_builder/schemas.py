@@ -2,14 +2,49 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from app.schemas.base import CamelModel
 
 RuntimeOperation = Literal['send', 'resume']
 CancelTurnResult = Literal['cancelled', 'forced_interrupted', 'already_terminal']
+
+WorkflowType = Literal['crm', 'clinical']
+ViewMode = Literal['view', 'edit']
+
+
+class OrchestrationBuilderPageContext(CamelModel):
+    """Per-turn snapshot of the orchestration builder, sent by the FE.
+
+    Backend treats `definition` as untrusted shape-wise (re-coerced as a
+    dict) but trusted content-wise because the user is editing it on the
+    frontend right now. Tenant-ownership of `workflow_id` is verified at
+    the route gate via `tenant_guard.assert_workflow_owned`.
+
+    `definition` is large (entire canvas) — the route's logging
+    middleware redacts it before persisting request logs.
+    """
+    kind: Literal['orchestration_builder']
+    workflow_id: str
+    version_id: str | None = None
+    workflow_type: WorkflowType
+    app_id: str
+    selected_node_id: str | None = None
+    definition: dict[str, Any] = Field(default_factory=dict)
+    data_hash: str
+    view_mode: ViewMode = 'edit'
+
+
+class NoPageContext(CamelModel):
+    kind: Literal['none']
+
+
+PageContext = Annotated[
+    Union[OrchestrationBuilderPageContext, NoPageContext],
+    Field(discriminator='kind'),
+]
 
 
 class BuilderChatRequest(CamelModel):
@@ -21,6 +56,7 @@ class BuilderChatRequest(CamelModel):
     message: str | None = None
     provider: str | None = None
     model: str
+    page_context: PageContext | None = None
 
     @model_validator(mode='after')
     def validate_operation(self) -> 'BuilderChatRequest':
