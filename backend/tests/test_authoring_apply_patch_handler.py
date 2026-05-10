@@ -169,15 +169,15 @@ class ApplyPatchReasonCodeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ApplyPatchToolSpecTests(unittest.TestCase):
-    def test_tool_spec_has_strict_schema_compatible_shape(self) -> None:
+    def test_apply_patch_spec_has_strict_schema(self) -> None:
         from app.services.orchestration_authoring.orchestration_authoring_pack import (
             OrchestrationAuthoringPack,
         )
 
         pack = OrchestrationAuthoringPack()
-        specs = list(pack.tool_specs())
-        self.assertEqual([s['name'] for s in specs], ['apply_patch'])
-        schema = specs[0]['params_json_schema']
+        specs = {s['name']: s for s in pack.tool_specs()}
+        self.assertIn('apply_patch', specs)
+        schema = specs['apply_patch']['params_json_schema']
         self.assertFalse(schema['additionalProperties'])
         self.assertEqual(set(schema['required']), {'ops_json', 'rationale'})
 

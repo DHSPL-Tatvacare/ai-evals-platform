@@ -37,6 +37,16 @@ from app.services.orchestration_authoring.canvas_patch import (
     CanvasPatchOp,
 )
 from app.services.orchestration_authoring.lookup_models import (
+    ActionTemplateRef,
+    ActionTemplatesList,
+    CohortDatasetRef,
+    CohortDatasetsList,
+    NodeTypeRef,
+    NodeTypesList,
+    ProviderConnectionRef,
+    ProviderConnectionsList,
+    WatiTemplateRef,
+    WatiTemplatesList,
     contains_credential_fields,
 )
 
@@ -390,6 +400,450 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Lookup tools — tenant + app scoped (R4) and credential-stripped (R5)
+# ---------------------------------------------------------------------------
+
+
+_LIST_PROVIDER_CONNECTIONS_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['provider'],
+    'properties': {
+        'provider': {
+            'type': 'string',
+            'enum': ['wati', 'bolna', 'sms', 'lsq', 'msg91', 'aisensy'],
+            'description': 'Provider type to filter on.',
+        },
+    },
+}
+
+_LIST_ACTION_TEMPLATES_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['channel'],
+    'properties': {
+        'channel': {
+            'type': 'string',
+            'description': "Channel slug (e.g. 'whatsapp', 'voice', 'sms', 'lsq').",
+        },
+    },
+}
+
+_LIST_WATI_TEMPLATES_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['connection_id'],
+    'properties': {
+        'connection_id': {
+            'type': 'string',
+            'description': 'UUID of the WATI provider_connections row.',
+        },
+    },
+}
+
+_LIST_COHORT_DATASETS_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {},
+}
+
+_LIST_NODE_TYPES_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'properties': {
+        'category': {
+            'type': 'string',
+            'description': "Optional category filter (e.g. 'source', 'sink').",
+        },
+    },
+}
+
+
+def _record_authorized_uuids(scratch: dict[str, Any], uuids: list[str]) -> None:
+    """Add returned UUIDs to the per-turn allowlist (R6).
+
+    `apply_patch` will reject any patch whose connection_id /
+    dataset_version_id / action_template_id is not in this set. Step 9
+    enforces; lookups populate.
+    """
+    bucket = scratch.setdefault('authorized_uuids', set())
+    if not isinstance(bucket, set):
+        bucket = set(bucket)
+        scratch['authorized_uuids'] = bucket
+    for value in uuids:
+        if value:
+            bucket.add(str(value))
+
+
+def _lookup_result_json(
+    *,
+    started: float,
+    summary: str,
+    payload: dict[str, Any],
+    tool_name: str,
+) -> str:
+    """Wrap a lookup result in the SpecialistResult shape.
+
+    Lookups don't emit artifacts — the supervisor consumes the payload
+    directly. Putting them under SpecialistResult keeps the
+    custom_output_extractor's "match by tool name" contract intact and
+    makes the audit log uniform.
+    """
+    leaked = contains_credential_fields(payload)
+    if leaked is not None:
+        authoring_logger.warning(
+            'lookup egress filter blocked tool=%s field=%s', tool_name, leaked,
+        )
+        return _error_result(
+            reason_code='CREDENTIAL_LEAK_BLOCKED',
+            message=f'Lookup result contained forbidden field: {leaked}',
+            started=started,
+        )
+    meta: dict[str, Any] = {
+        'confidence': 1.0,
+        'latency_ms': int((time.monotonic() - started) * 1000),
+        'source_pack_id': PACK_ID,
+        'tool': tool_name,
+    }
+    return json.dumps({
+        'kind': 'data',
+        'status': 'ok',
+        'summary': summary,
+        'evidence': [],
+        'artifacts': [],
+        'state_delta': {},
+        'meta': meta,
+        'payload': payload,
+    }, default=str)
+
+
+async def _check_layered_auth(
+    sherlock_ctx: Any,
+    *,
+    started: float,
+) -> tuple[Any, Any] | str:
+    """Re-run R3 checks. Returns (auth, builder_context) or an error JSON."""
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth = getattr(sherlock_ctx, 'auth', None)
+    if builder_context is None:
+        return _error_result(
+            reason_code='NO_BUILDER_CONTEXT',
+            message='Authoring tools require an active builder context.',
+            started=started,
+        )
+    if auth is None or 'orchestration:manage' not in getattr(auth, 'permissions', frozenset()):
+        return _error_result(
+            reason_code='PERMISSION_DENIED',
+            message='Missing orchestration:manage permission.',
+            started=started,
+        )
+    if builder_context.app_id not in getattr(auth, 'app_access', frozenset()):
+        return _error_result(
+            reason_code='APP_FORBIDDEN',
+            message=f'No access to app {builder_context.app_id}.',
+            started=started,
+        )
+    return auth, builder_context
+
+
+async def _list_node_types_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    check = await _check_layered_auth(sherlock_ctx, started=started)
+    if isinstance(check, str):
+        return check
+    parsed = json.loads(args) if args.strip() else {}
+    category_filter = (parsed.get('category') or '').strip() or None
+
+    items: list[NodeTypeRef] = []
+    seen: dict[str, NodeTypeRef] = {}
+    for (workflow_type, node_type), handler in NODE_REGISTRY.items():
+        if node_type.startswith('test.'):
+            continue
+        if category_filter and getattr(handler, 'category', '') != category_filter:
+            continue
+        ref = seen.get(node_type)
+        if ref is None:
+            ref = NodeTypeRef(
+                node_type=node_type,
+                category=str(getattr(handler, 'category', '')),
+                workflow_types=[workflow_type],
+                output_edges=list(getattr(handler, 'output_edges', []) or []),
+            )
+            seen[node_type] = ref
+            items.append(ref)
+        else:
+            if workflow_type not in ref.workflow_types:
+                ref.workflow_types.append(workflow_type)
+
+    payload = NodeTypesList(items=items).model_dump(mode='json')
+    return _lookup_result_json(
+        started=started,
+        summary=f'{len(items)} node type(s) available.',
+        payload=payload,
+        tool_name='list_node_types',
+    )
+
+
+async def _list_provider_connections_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    check = await _check_layered_auth(sherlock_ctx, started=started)
+    if isinstance(check, str):
+        return check
+    auth, builder_context = check
+
+    parsed = json.loads(args) if args.strip() else {}
+    provider = parsed.get('provider')
+    if not isinstance(provider, str) or not provider:
+        return _error_result(
+            reason_code='NODE_CONFIG_INVALID',
+            message='provider is required',
+            started=started,
+        )
+
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.provider_connection import ProviderConnection
+
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(ProviderConnection).where(
+                    ProviderConnection.tenant_id == auth.tenant_id,
+                    ProviderConnection.app_id == builder_context.app_id,
+                    ProviderConnection.provider == provider,
+                    ProviderConnection.active.is_(True),
+                )
+            )
+        ).scalars().all()
+
+    items = [
+        ProviderConnectionRef(
+            id=str(row.id),
+            name=row.name,
+            provider=row.provider,
+        )
+        for row in rows
+    ]
+    _record_authorized_uuids(
+        sherlock_ctx.scratch if hasattr(sherlock_ctx, 'scratch') else {},
+        [item.id for item in items],
+    )
+
+    payload = ProviderConnectionsList(items=items).model_dump(mode='json')
+    authoring_logger.info(
+        'authoring_tool_call tool=list_provider_connections '
+        'tenant=%s app=%s provider=%s rows=%d',
+        auth.tenant_id, builder_context.app_id, provider, len(items),
+    )
+    return _lookup_result_json(
+        started=started,
+        summary=f'{len(items)} {provider} connection(s).',
+        payload=payload,
+        tool_name='list_provider_connections',
+    )
+
+
+async def _list_action_templates_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    check = await _check_layered_auth(sherlock_ctx, started=started)
+    if isinstance(check, str):
+        return check
+    auth, builder_context = check
+
+    parsed = json.loads(args) if args.strip() else {}
+    channel = parsed.get('channel')
+    if not isinstance(channel, str) or not channel:
+        return _error_result(
+            reason_code='NODE_CONFIG_INVALID',
+            message='channel is required',
+            started=started,
+        )
+
+    from sqlalchemy import or_, select
+
+    from app.database import async_session
+    from app.models.orchestration import WorkflowActionTemplate
+
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(WorkflowActionTemplate).where(
+                    or_(
+                        WorkflowActionTemplate.tenant_id == auth.tenant_id,
+                        WorkflowActionTemplate.tenant_id.is_(None),
+                    ),
+                    or_(
+                        WorkflowActionTemplate.app_id == builder_context.app_id,
+                        WorkflowActionTemplate.app_id.is_(None),
+                    ),
+                    WorkflowActionTemplate.channel == channel,
+                    WorkflowActionTemplate.active.is_(True),
+                )
+            )
+        ).scalars().all()
+
+    items = [
+        ActionTemplateRef(
+            id=str(row.id),
+            slug=row.slug,
+            name=row.name,
+            channel=row.channel,
+        )
+        for row in rows
+    ]
+    _record_authorized_uuids(
+        sherlock_ctx.scratch if hasattr(sherlock_ctx, 'scratch') else {},
+        [item.id for item in items],
+    )
+
+    payload = ActionTemplatesList(items=items).model_dump(mode='json')
+    authoring_logger.info(
+        'authoring_tool_call tool=list_action_templates '
+        'tenant=%s app=%s channel=%s rows=%d',
+        auth.tenant_id, builder_context.app_id, channel, len(items),
+    )
+    return _lookup_result_json(
+        started=started,
+        summary=f'{len(items)} action template(s) for channel {channel}.',
+        payload=payload,
+        tool_name='list_action_templates',
+    )
+
+
+async def _list_wati_templates_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    check = await _check_layered_auth(sherlock_ctx, started=started)
+    if isinstance(check, str):
+        return check
+    auth, builder_context = check
+
+    parsed = json.loads(args) if args.strip() else {}
+    connection_id_raw = parsed.get('connection_id')
+    if not isinstance(connection_id_raw, str) or not connection_id_raw:
+        return _error_result(
+            reason_code='NODE_CONFIG_INVALID',
+            message='connection_id is required',
+            started=started,
+        )
+    try:
+        import uuid as _uuid
+        connection_uuid = _uuid.UUID(connection_id_raw)
+    except (TypeError, ValueError):
+        return _error_result(
+            reason_code='NODE_CONFIG_INVALID',
+            message='connection_id is not a UUID',
+            started=started,
+        )
+
+    # Connection-ownership re-check at the same SQL boundary as the
+    # template fetch — use the existing helper so the tenant + app scope
+    # mirrors the connections route.
+    from app.database import async_session
+    from app.services.orchestration.api.agents import list_connection_wati_templates
+
+    async with async_session() as db:
+        result = await list_connection_wati_templates(
+            db,
+            tenant_id=auth.tenant_id,
+            app_id=builder_context.app_id,
+            connection_id=connection_uuid,
+        )
+
+    raw_items = result.get('items') or []
+    items: list[WatiTemplateRef] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        params = raw.get('parameters') or []
+        if not isinstance(params, list):
+            params = []
+        items.append(WatiTemplateRef(
+            name=str(raw.get('name') or ''),
+            language=str(raw.get('language') or ''),
+            status=str(raw.get('status') or ''),
+            parameters=[str(p) for p in params],
+        ))
+
+    payload = WatiTemplatesList(
+        items=items,
+        error=result.get('error'),
+    ).model_dump(mode='json')
+    authoring_logger.info(
+        'authoring_tool_call tool=list_wati_templates tenant=%s app=%s rows=%d',
+        auth.tenant_id, builder_context.app_id, len(items),
+    )
+    return _lookup_result_json(
+        started=started,
+        summary=f'{len(items)} WATI template(s).',
+        payload=payload,
+        tool_name='list_wati_templates',
+    )
+
+
+async def _list_cohort_datasets_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    check = await _check_layered_auth(sherlock_ctx, started=started)
+    if isinstance(check, str):
+        return check
+    auth, builder_context = check
+    del args  # no parameters
+
+    from sqlalchemy import desc, select
+
+    from app.database import async_session
+    from app.models.orchestration import CohortDataset, CohortDatasetVersion
+
+    items: list[CohortDatasetRef] = []
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(CohortDataset).where(
+                    CohortDataset.tenant_id == auth.tenant_id,
+                    CohortDataset.app_id == builder_context.app_id,
+                )
+            )
+        ).scalars().all()
+        for row in rows:
+            latest_version = await db.scalar(
+                select(CohortDatasetVersion)
+                .where(CohortDatasetVersion.dataset_id == row.id)
+                .order_by(desc(CohortDatasetVersion.version_number))
+                .limit(1)
+            )
+            items.append(CohortDatasetRef(
+                id=str(row.id),
+                name=row.name,
+                latest_version_id=(
+                    str(latest_version.id) if latest_version is not None else None
+                ),
+            ))
+
+    _record_authorized_uuids(
+        sherlock_ctx.scratch if hasattr(sherlock_ctx, 'scratch') else {},
+        [item.id for item in items if item.id]
+        + [item.latest_version_id for item in items if item.latest_version_id],
+    )
+
+    payload = CohortDatasetsList(items=items).model_dump(mode='json')
+    authoring_logger.info(
+        'authoring_tool_call tool=list_cohort_datasets tenant=%s app=%s rows=%d',
+        auth.tenant_id, builder_context.app_id, len(items),
+    )
+    return _lookup_result_json(
+        started=started,
+        summary=f'{len(items)} cohort dataset(s).',
+        payload=payload,
+        tool_name='list_cohort_datasets',
+    )
+
+
+# ---------------------------------------------------------------------------
 # Pack class
 # ---------------------------------------------------------------------------
 
@@ -416,11 +870,61 @@ class OrchestrationAuthoringPack:
                 ),
                 'params_json_schema': _APPLY_PATCH_SCHEMA,
             },
+            {
+                'name': 'list_node_types',
+                'description': (
+                    'Enumerate the node types available in this builder. '
+                    'Optional `category` filter; safe to call multiple times.'
+                ),
+                'params_json_schema': _LIST_NODE_TYPES_SCHEMA,
+            },
+            {
+                'name': 'list_provider_connections',
+                'description': (
+                    'List provider_connections in this app for a given '
+                    'provider. Returns (id, name, provider) only — no '
+                    'credentials. UUIDs returned here are added to the '
+                    'per-turn allowlist used by apply_patch.'
+                ),
+                'params_json_schema': _LIST_PROVIDER_CONNECTIONS_SCHEMA,
+            },
+            {
+                'name': 'list_action_templates',
+                'description': (
+                    'List action templates available for the named '
+                    'channel in this tenant + app. Returns (id, slug, '
+                    'name, channel).'
+                ),
+                'params_json_schema': _LIST_ACTION_TEMPLATES_SCHEMA,
+            },
+            {
+                'name': 'list_wati_templates',
+                'description': (
+                    'List WATI message templates registered against the '
+                    'given connection_id. Returns (name, language, status, '
+                    'parameters); never returns API tokens.'
+                ),
+                'params_json_schema': _LIST_WATI_TEMPLATES_SCHEMA,
+            },
+            {
+                'name': 'list_cohort_datasets',
+                'description': (
+                    'List cohort_datasets in this app. Returns (id, name, '
+                    'latest_version_id). Both IDs are added to the '
+                    'per-turn allowlist.'
+                ),
+                'params_json_schema': _LIST_COHORT_DATASETS_SCHEMA,
+            },
         )
 
     def tool_handlers(self) -> Mapping[str, Any]:
         return {
             'apply_patch': _apply_patch_handler,
+            'list_node_types': _list_node_types_handler,
+            'list_provider_connections': _list_provider_connections_handler,
+            'list_action_templates': _list_action_templates_handler,
+            'list_wati_templates': _list_wati_templates_handler,
+            'list_cohort_datasets': _list_cohort_datasets_handler,
         }
 
     def validate_arguments(self, tool_name: str, args: Mapping[str, Any]) -> None:
@@ -434,6 +938,23 @@ class OrchestrationAuthoringPack:
             'apply_patch': (
                 'Propose canvas edits as one CanvasPatch. The user reviews '
                 'and saves manually — never claim work is saved or live.'
+            ),
+            'list_node_types': (
+                'List node types available for this builder, optionally '
+                'filtered by category.'
+            ),
+            'list_provider_connections': (
+                'List provider connections (id, name, provider). UUIDs are '
+                'added to the per-turn allowlist for apply_patch.'
+            ),
+            'list_action_templates': (
+                'List action templates by channel.'
+            ),
+            'list_wati_templates': (
+                'List WATI message templates registered against a connection.'
+            ),
+            'list_cohort_datasets': (
+                'List cohort datasets in this app and their latest version IDs.'
             ),
         }
 
