@@ -1258,7 +1258,8 @@ class OrchestrationAuthoringPack:
         }
 
     def build_outcome(self, tool_name: str, raw_result: Any) -> Outcome:
-        """v2 chat-engine egress hook with credential filter (Decision §R5).
+        """v2 chat-engine egress hook — credential filter via the
+        canonical recursive walker (Decision §R5; Phase 3 Step 4).
 
         v3 routes the SpecialistResult JSON through the supervisor's
         custom_output_extractor and never calls this; the inline filters
@@ -1266,17 +1267,41 @@ class OrchestrationAuthoringPack:
         load-bearing egress points today. We still wire the filter here
         so that any future harness path that goes through
         `CapabilityPack.build_outcome` cannot regress R5.
+
+        On `CredentialLeakError`: log one R10 audit row with
+        `validation_result='credential_leak_blocked'` (the offending
+        field name and tool name land in the audit log only — never in
+        the user-facing payload) and return an empty error envelope.
         """
+        from app.services.orchestration_authoring.credential_field_filter import (
+            CredentialLeakError,
+            assert_no_credentials,
+        )
+
+        started = time.monotonic()
         payload = dict(raw_result) if isinstance(raw_result, dict) else {}
-        leaked = contains_credential_fields(payload)
-        if leaked is not None:
+        try:
+            assert_no_credentials(payload)
+        except CredentialLeakError as exc:
             authoring_logger.warning(
-                'build_outcome egress filter blocked tool=%s field=%s',
-                tool_name, leaked,
+                'build_outcome egress filter blocked tool=%s field=%s path=%s',
+                tool_name, exc.field_name,
+                '.'.join(str(p) for p in exc.path),
             )
+            emit_authoring_event({
+                'tool': tool_name,
+                'app_id': '',
+                'tenant_id': '',
+                'user_id': '',
+                'workflow_id': '',
+                'patch_op_count': 0,
+                'validation_result': 'credential_leak_blocked',
+                'permission_denied': False,
+                'duration_ms': int((time.monotonic() - started) * 1000),
+            })
             envelope = build_envelope(
                 status='error',
-                summary=f'{tool_name}: credential field {leaked} blocked',
+                summary=f'{tool_name}: credential field blocked',
                 kind='error',
                 capability=PACK_ID,
                 reason_code='CREDENTIAL_LEAK_BLOCKED',
