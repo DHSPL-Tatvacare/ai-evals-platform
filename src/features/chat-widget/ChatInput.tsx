@@ -56,10 +56,10 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
   const canSend = !!value.trim() && !disabled;
 
   return (
-    <div className="px-3 pb-3 pt-2 border-t border-[var(--border-default)]">
+    <div className="px-2 pb-2 pt-1 border-t border-[var(--border-default)]">
       <div
         className={cn(
-          'rounded-2xl border bg-[var(--bg-secondary)]',
+          'rounded-lg border bg-[var(--bg-secondary)]',
           'border-[var(--border-default)] transition-colors',
           'focus-within:border-[var(--color-brand-accent)]',
           'focus-within:ring-1 focus-within:ring-[var(--color-brand-accent)]',
@@ -67,7 +67,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
         )}
       >
         {showChip ? (
-          <div className="px-2 pt-2 pb-1">
+          <div className="px-1.5 pt-1.5 pb-0.5">
             <BuilderContextChip
               pageContext={pageContext}
               onDismiss={() => setDismissed(true)}
@@ -90,19 +90,19 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
           rows={1}
           className={cn(
             'block w-full resize-none bg-transparent border-0 outline-none',
-            'px-4 pt-3 pb-2 text-[13px] leading-relaxed',
+            'px-3 pt-2 pb-1 text-[13px] leading-snug',
             'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
-            'min-h-[44px] max-h-[140px]',
+            'min-h-[28px] max-h-[120px]',
           )}
         />
 
-        <div className="flex items-center justify-end gap-1 px-2 pb-2">
+        <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
           {showStop ? (
             <button
               type="button"
               onClick={onStop}
               className={cn(
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+                'flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
                 'border border-[var(--border-error)] bg-[var(--surface-error)]',
                 'text-[var(--color-error)] transition-colors',
                 'hover:bg-[color-mix(in_srgb,var(--surface-error)_70%,var(--bg-primary))]',
@@ -112,7 +112,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
               title="Stop"
               aria-label="Stop"
             >
-              <Square className="h-3 w-3 fill-current" />
+              <Square className="h-2.5 w-2.5 fill-current" />
             </button>
           ) : (
             <button
@@ -120,7 +120,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
               onClick={handleSend}
               disabled={!canSend}
               className={cn(
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+                'flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
                 'transition-colors',
                 canSend
                   ? 'bg-[var(--color-brand-primary)] text-[var(--text-inverse)] hover:bg-[var(--color-brand-primary-hover)]'
@@ -131,7 +131,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
               aria-label="Send"
               title="Send"
             >
-              <ArrowUp className="h-4 w-4" />
+              <ArrowUp className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
