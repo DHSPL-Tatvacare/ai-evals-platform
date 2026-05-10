@@ -218,6 +218,108 @@ def _validate_node_config(
     return True, ''
 
 
+# ---------------------------------------------------------------------------
+# Graph pre-flight + UUID allowlist
+# ---------------------------------------------------------------------------
+
+
+# Field names inside a node config that reference an external resource
+# UUID. Anything appearing under one of these names must have been
+# returned by a list_* lookup earlier in the same turn.
+_UUID_REFERENCE_KEYS: frozenset[str] = frozenset({
+    'connection_id',
+    'dataset_version_id',
+    'action_template_id',
+})
+
+
+def _walk_uuid_references(payload: Any) -> list[tuple[str, str]]:
+    """Yield every (field_name, value) where field_name is in
+    `_UUID_REFERENCE_KEYS`. Recursive over dicts and lists.
+    """
+    out: list[tuple[str, str]] = []
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, v in value.items():
+                if (
+                    isinstance(key, str)
+                    and key in _UUID_REFERENCE_KEYS
+                    and isinstance(v, str) and v
+                ):
+                    out.append((key, v))
+                _walk(v)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(payload)
+    return out
+
+
+def _apply_ops_to_definition(
+    *,
+    base_definition: dict[str, Any],
+    ops: list[CanvasPatchOp],
+) -> dict[str, Any]:
+    """Replay a CanvasPatch against a copy of the canvas definition.
+
+    Used by Step 9 graph preflight to feed `validate_definition` a
+    realistic post-patch shape. Mirrors the frontend applier semantics:
+
+      - add_node:           append `{id, type, position?, data, config}`
+      - update_node_config: shallow-merge `payload.config_patch` into
+                            the matching node's `config`
+      - connect:            append `{id, source, target, output_id}`
+      - remove_node:        drop the node and any edges that touch it
+    """
+    nodes = list(base_definition.get('nodes') or [])
+    edges = list(base_definition.get('edges') or [])
+
+    by_id: dict[str, dict[str, Any]] = {n.get('id'): dict(n) for n in nodes if n.get('id')}
+    new_nodes: list[dict[str, Any]] = list(by_id.values())
+    new_edges: list[dict[str, Any]] = [dict(e) for e in edges]
+
+    for op in ops:
+        if op.op == 'add_node':
+            node_type = op.payload.get('node_type')
+            new_node = {
+                'id': op.node_id,
+                'type': node_type,
+                'position': op.payload.get('position') or {},
+                'data': {},
+                'config': dict(op.payload.get('config') or {}),
+            }
+            by_id[op.node_id] = new_node
+            new_nodes.append(new_node)
+        elif op.op == 'update_node_config':
+            target = by_id.get(op.node_id)
+            if target is not None:
+                cfg = dict(target.get('config') or {})
+                cfg.update(op.payload.get('config_patch') or {})
+                target['config'] = cfg
+        elif op.op == 'connect':
+            new_edges.append({
+                'id': op.payload.get('edge_id'),
+                'source': op.payload.get('source_node_id'),
+                'target': op.payload.get('target_node_id'),
+                'output_id': op.payload.get('output_id'),
+            })
+        elif op.op == 'remove_node':
+            by_id.pop(op.node_id, None)
+            new_nodes = [n for n in new_nodes if n.get('id') != op.node_id]
+            new_edges = [
+                e for e in new_edges
+                if e.get('source') != op.node_id and e.get('target') != op.node_id
+            ]
+
+    return {
+        'nodes': new_nodes,
+        'edges': new_edges,
+        'canvas': base_definition.get('canvas') or {},
+    }
+
+
 async def _apply_patch_handler(ctx: Any, args: str) -> str:
     """Terminal authoring tool — validate ops + emit one CanvasPatch artifact.
 
@@ -343,6 +445,67 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                     )
         # remove_node: no payload fields to validate at this layer
         validated_ops.append(op)
+
+    # ── R6: per-turn UUID allowlist enforcement ──────────────────────
+    scratch = getattr(sherlock_ctx, 'scratch', {}) or {}
+    authorized = scratch.get('authorized_uuids')
+    if not isinstance(authorized, set):
+        authorized = set(authorized or [])
+    for op in validated_ops:
+        for field, value in _walk_uuid_references(op.payload):
+            if value not in authorized:
+                authoring_logger.warning(
+                    'apply_patch UUID_NOT_AUTHORIZED field=%s value=%s '
+                    'tenant=%s app=%s',
+                    field, value,
+                    getattr(auth, 'tenant_id', None),
+                    builder_context.app_id,
+                )
+                return _error_result(
+                    reason_code='UUID_NOT_AUTHORIZED',
+                    message=(
+                        f'Patch references {field}={value} but no list_* '
+                        'tool returned that UUID this turn.'
+                    ),
+                    started=started,
+                )
+
+    # ── Graph-level pre-flight ───────────────────────────────────────
+    # Validate the patched-copy definition against publish-time graph
+    # rules. We run the same validator that publish uses; draft mode
+    # tolerates publish-required fields being absent (the validator
+    # checks structure, not dispatch readiness).
+    try:
+        from app.services.orchestration.definition_validator import (
+            DefinitionValidationError,
+            validate_definition,
+        )
+        from app.services.orchestration.definition_normalizer import (
+            normalize_definition,
+        )
+
+        patched = _apply_ops_to_definition(
+            base_definition=builder_context.definition or {},
+            ops=validated_ops,
+        )
+        try:
+            normalized = normalize_definition(patched)
+        except Exception:  # noqa: BLE001 — bad shape; fall through to validator
+            normalized = patched
+        try:
+            validate_definition(normalized, workflow_type=workflow_type)
+        except DefinitionValidationError as exc:
+            return _error_result(
+                reason_code='GRAPH_INVALID',
+                message=f'Patched graph fails validation: {exc}',
+                started=started,
+                detail={'errors': exc.errors},
+            )
+    except ImportError:
+        # `definition_normalizer.normalize_definition` may be absent in
+        # older branches; fail open for graph rules then. Per-op validation
+        # already ran.
+        pass
 
     canvas_patch = CanvasPatch(
         workflow_id=str(builder_context.workflow_id),

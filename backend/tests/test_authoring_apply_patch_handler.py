@@ -33,13 +33,42 @@ def _make_auth(*, has_perm: bool = True, app: str = 'inside-sales') -> SimpleNam
     )
 
 
-def _make_snapshot(*, app: str = 'inside-sales') -> BuilderSnapshot:
+_VALID_MINIMAL_DEFINITION = {
+    'nodes': [
+        {
+            'id': 'src',
+            'type': 'source.event_trigger',
+            'position': {'x': 0, 'y': 0},
+            'data': {},
+            'config': {'event_name': 'demo'},
+        },
+        {
+            'id': 'sink',
+            'type': 'sink.complete',
+            'position': {'x': 200, 'y': 0},
+            'data': {},
+            'config': {},
+        },
+    ],
+    'edges': [
+        {
+            'id': 'e1',
+            'source': 'src',
+            'target': 'sink',
+            'output_id': 'default',
+        },
+    ],
+}
+
+
+def _make_snapshot(*, app: str = 'inside-sales',
+                    definition: dict | None = None) -> BuilderSnapshot:
     return BuilderSnapshot(
         workflow_id=uuid.uuid4(),
         version_id=None,
         workflow_type='crm',
         app_id=app,
-        definition={'nodes': [], 'edges': []},
+        definition=definition if definition is not None else dict(_VALID_MINIMAL_DEFINITION),
         data_hash='hash-1',
         selected_node_id=None,
         view_mode='edit',
@@ -140,13 +169,15 @@ class ApplyPatchReasonCodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decoded['meta']['reason_code'], 'NODE_CONFIG_INVALID')
 
     async def test_apply_patch_happy_path_emits_artifact(self) -> None:
+        # Update the existing sink node's config patch — graph preflight
+        # passes because the resulting graph is still a valid src→sink chain.
         ops = _ops({
-            'op': 'remove_node',
-            'node_id': 'n1',
-            'payload': {},
+            'op': 'update_node_config',
+            'node_id': 'sink',
+            'payload': {'config_patch': {'reason': 'demo done'}},
         })
         decoded = await self._call(args=_wrap(ops_json=ops, rationale='clean up'))
-        self.assertEqual(decoded['status'], 'ok')
+        self.assertEqual(decoded['status'], 'ok', msg=decoded)
         self.assertEqual(len(decoded['artifacts']), 1)
         artifact = decoded['artifacts'][0]
         self.assertEqual(artifact['kind'], CANVAS_PATCH_CONTRACT_ID)
