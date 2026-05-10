@@ -56,6 +56,7 @@ from app.models.sherlock_ontology import (
     SherlockOntologyEntityType,
     SherlockEntityResolver,
 )
+from app.models.sherlock_verified_query import SherlockVerifiedQuery
 from app.models.cost import (
     FactLlmGeneration,
     RefLlmModelPricing,

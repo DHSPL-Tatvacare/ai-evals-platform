@@ -18,7 +18,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from agents import Runner
@@ -339,7 +339,12 @@ def _specialist_row_count(result: dict[str, Any] | None) -> int | None:
 # ─────────────────────────── grounding (Phase 1A) ────────────────
 
 
-def _compute_grounding(app_id: str, user_message: str) -> GroundingContext | None:
+async def _compute_grounding(
+    app_id: str,
+    user_message: str,
+    *,
+    tenant_id: uuid.UUID,
+) -> GroundingContext | None:
     """Build the per-turn ``GroundingContext`` from ``user_message`` + manifest.
 
     Returns ``None`` when projection cannot be computed for this app
@@ -348,6 +353,11 @@ def _compute_grounding(app_id: str, user_message: str) -> GroundingContext | Non
     no ``grounding`` block. Failure modes here MUST NOT crash a turn:
     the worst case is "no projection, behave like pre-Phase-1A", which
     is strictly an improvement over silently breaking the chat surface.
+
+    Phase 2A: also retrieves verified question→SQL examples from
+    ``platform.sherlock_verified_queries`` (lexical Jaccard against
+    ``user_message``). Retrieval failure is non-fatal — the grounding
+    context still ships projection, with empty ``verified_examples``.
     """
     try:
         from app.services.chat_engine.manifest import get_manifest
@@ -362,7 +372,7 @@ def _compute_grounding(app_id: str, user_message: str) -> GroundingContext | Non
         intent_class = classify_intent(user_message)
         semantic_model = load_semantic_model(app_id)
         schema_context = _build_schema_context(semantic_model, None)
-        return project_for_intent(
+        grounding = project_for_intent(
             app_id=app_id,
             user_message=user_message,
             intent_class=intent_class,
@@ -378,6 +388,38 @@ def _compute_grounding(app_id: str, user_message: str) -> GroundingContext | Non
             app_id, exc,
         )
         return None
+
+    # Phase 2A — verified-query retrieval. Pure-additive on top of the
+    # projection contract; missing/empty result is the explicit
+    # "schema-only" fallback signal.
+    try:
+        from app.database import async_session
+        from app.services.sherlock_v3.manifest_projection import VerifiedExampleRef
+        from app.services.sherlock_v3.verified_queries import retrieve_top_k
+
+        async with async_session() as db:
+            hits = await retrieve_top_k(
+                user_message,
+                tenant_id=tenant_id,
+                app_id=app_id,
+                db=db,
+                k=5,
+            )
+        verified = tuple(
+            VerifiedExampleRef(
+                id=str(h.id), question=h.question, sql=h.sql,
+                score=h.score, source=h.source,
+            )
+            for h in hits
+        )
+        return replace(grounding, verified_examples=verified)
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        logger.warning(
+            'sherlock_v3 verified_queries.retrieve_top_k failed for app=%s; '
+            'continuing with no verified examples: %s',
+            app_id, exc,
+        )
+        return grounding
 
 
 # ─────────────────────────── run_turn ────────────────────────────
@@ -410,7 +452,9 @@ async def run_turn(
     # BEFORE the agent is constructed. The result is passed explicitly
     # through ``build_supervisor`` -> ``build_data_specialist`` instead
     # of being stashed on ``ctx.scratch`` (Plan §1.2).
-    grounding = _compute_grounding(ctx.app_id, user_message)
+    grounding = await _compute_grounding(
+        ctx.app_id, user_message, tenant_id=ctx.tenant_id,
+    )
     supervisor = build_supervisor(ctx.app_id, client, grounding=grounding)
 
     try:

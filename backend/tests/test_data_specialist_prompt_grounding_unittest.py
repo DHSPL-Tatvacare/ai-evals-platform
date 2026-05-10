@@ -25,7 +25,6 @@ from app.services.chat_engine.sql_agent import (
 from app.services.sherlock_v3.data_specialist_prompt import (
     build_data_specialist_prompt,
 )
-from app.services.sherlock_v3.exemplars import exemplars_for
 from app.services.sherlock_v3.intent_classifier import classify_intent
 from app.services.sherlock_v3.manifest_projection import project_for_intent
 
@@ -60,7 +59,7 @@ def _render_with_grounding(app_id: str, question: str) -> str:
         schema_context=g.projected_schema,
         allowed_tables=list(g.allowed_tables_hint),
         column_role_hints=list(g.projected_role_hints),
-        exemplars=exemplars_for(app_id),
+        exemplars=[],
         max_rows=200,
         grounding_header=grounding_header,
     )

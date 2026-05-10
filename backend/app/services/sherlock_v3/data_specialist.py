@@ -31,7 +31,6 @@ from openai.types.shared import Reasoning
 
 from app.services.sherlock_v3.azure_client import specialist_model
 from app.services.sherlock_v3.data_specialist_prompt import build_data_specialist_prompt
-from app.services.sherlock_v3.exemplars import exemplars_for
 from app.services.sherlock_v3.manifest_projection import GroundingContext
 
 logger = logging.getLogger(__name__)
@@ -865,7 +864,10 @@ def build_data_specialist(
     schema_context = _build_schema_context(semantic_model, None)
     allowed_tables = sorted(_allowed_tables(semantic_model))
     role_hints = _column_role_hints(schema_context, app_id=app_id)
-    exemplars = exemplars_for(app_id)
+    # Phase 2A — verified examples come from grounding.verified_examples
+    # (DB-backed, retrieved per-turn). Empty list when grounding is None
+    # (legacy callers / unit tests) or when retrieval returned nothing.
+    exemplars: list[dict[str, str]] = []
 
     grounding_header: str | None = None
     if grounding is not None:
@@ -875,13 +877,20 @@ def build_data_specialist(
         schema_context = grounding.projected_schema
         allowed_tables = list(grounding.allowed_tables_hint)
         role_hints = list(grounding.projected_role_hints)
+        exemplars = [
+            {'question': v.question, 'sql': v.sql}
+            for v in grounding.verified_examples
+        ]
         grounding_header = (
             'GROUNDING (Phase 1A — deterministic, no LLM):\n'
             f'- intent_class: {grounding.intent_class}\n'
             f'- allowed_layers: {", ".join(sorted(grounding.allowed_layers))}\n'
             f'- projected_tables: {", ".join(grounding.projected_tables) or "(none — fallback)"}\n'
+            f'- verified_examples: {len(exemplars)} retrieved from sherlock_verified_queries\n'
             'The schema below has been filtered to the layers above. '
-            'Pick a table from the projected list; do not invent one.'
+            'Pick a table from the projected list; do not invent one. '
+            'When a verified example matches, follow its SQL shape '
+            '(column names + join pattern) verbatim — do not improvise.'
         )
 
     system_prompt = build_data_specialist_prompt(

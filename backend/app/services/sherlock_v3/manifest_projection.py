@@ -56,6 +56,20 @@ _LAYERS_BY_INTENT: dict[IntentClass, frozenset[TableLayer]] = {
 
 
 @dataclass(frozen=True)
+class VerifiedExampleRef:
+    """One retrieved verified-query reference rendered into the prompt
+    + surfaced in routing telemetry. Mirrors the public surface of
+    ``verified_queries.RetrievedQuery`` so the projection layer stays
+    free of a circular import.
+    """
+    id: str  # uuid as string for telemetry-friendliness
+    question: str
+    sql: str
+    score: float
+    source: str
+
+
+@dataclass(frozen=True)
 class GroundingContext:
     """Per-turn grounding payload handed to the data_specialist.
 
@@ -90,6 +104,12 @@ class GroundingContext:
     original_table_count: int
     projected_table_count: int
 
+    # Phase 2A: verified question→SQL examples retrieved from
+    # ``platform.sherlock_verified_queries`` for this turn. Empty when
+    # the retriever returned nothing or DB lookup failed (the prompt
+    # builder degrades to "(none for this app yet)").
+    verified_examples: tuple[VerifiedExampleRef, ...] = ()
+
     def telemetry_dict(self) -> dict[str, Any]:
         """Serializable view of the grounding decision for log lines."""
         return {
@@ -98,6 +118,7 @@ class GroundingContext:
             "projected_tables": list(self.projected_tables),
             "original_table_count": self.original_table_count,
             "projected_table_count": self.projected_table_count,
+            "verified_example_ids": [v.id for v in self.verified_examples],
         }
 
 
