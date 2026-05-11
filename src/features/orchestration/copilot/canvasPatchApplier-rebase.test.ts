@@ -26,7 +26,11 @@ import {
   consumeRebaseRedo,
 } from './canvasPatchApplier';
 
-const VALID_CONFIG = { dataset_version_id: 'd_1' };
+// Empty config is the draft-default for partial authoring — every node
+// schema permits it under ``parseNodeConfig({mode: 'draft'})``. The applier
+// re-validates every add_node config; a fabricated key (the previous fixture
+// value) is now rejected as ``config_invalid``.
+const VALID_CONFIG = {};
 
 function fixturePatch(baseHash: string, rationale: string) {
   return {

@@ -10,6 +10,7 @@ import json
 import unittest
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from app.services.orchestration_authoring.lookup_models import (
     CREDENTIAL_FIELD_BLOCKLIST,
@@ -113,7 +114,12 @@ class LookupSqlScopingTests(unittest.IsolatedAsyncioTestCase):
         try:
             ctx = _make_ctx(builder=_make_snapshot(), auth=_make_auth())
             args = json.dumps({'provider': 'wati'})
-            await pack_mod._list_provider_connections_handler(ctx, args)
+            with patch.object(
+                pack_mod,
+                '_assert_builder_workflow_still_owned',
+                new=AsyncMock(return_value='inside-sales'),
+            ):
+                await pack_mod._list_provider_connections_handler(ctx, args)
         finally:
             db_mod.async_session = orig  # type: ignore[assignment]
         del original
@@ -150,7 +156,12 @@ class LookupSqlScopingTests(unittest.IsolatedAsyncioTestCase):
         try:
             ctx = _make_ctx(builder=_make_snapshot(), auth=_make_auth())
             args = json.dumps({'channel': 'whatsapp'})
-            await pack_mod._list_action_templates_handler(ctx, args)
+            with patch.object(
+                pack_mod,
+                '_assert_builder_workflow_still_owned',
+                new=AsyncMock(return_value='inside-sales'),
+            ):
+                await pack_mod._list_action_templates_handler(ctx, args)
         finally:
             db_mod.async_session = orig  # type: ignore[assignment]
         sql = captured['stmt'].lower()
@@ -162,7 +173,12 @@ class LookupSqlScopingTests(unittest.IsolatedAsyncioTestCase):
 class LookupResponseShapeTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_node_types_works_without_db(self) -> None:
         ctx = _make_ctx(builder=_make_snapshot(), auth=_make_auth())
-        result = await _list_node_types_handler(ctx, '{}')
+        with patch(
+            'app.services.orchestration_authoring.orchestration_authoring_pack.'
+            '_assert_builder_workflow_still_owned',
+            new=AsyncMock(return_value='inside-sales'),
+        ):
+            result = await _list_node_types_handler(ctx, '{}')
         decoded = json.loads(result)
         self.assertEqual(decoded['status'], 'ok')
         self.assertGreater(len(decoded['payload']['items']), 0)

@@ -115,10 +115,9 @@ def build_supervisor(
 
     Authoring sub-agent inclusion is **conditional** (Decision §R2):
     `authoring_specialist.as_tool(...)` is only added to `tools=[...]`
-    when `builder_context is not None` AND
-    `'orchestration:manage' in auth.permissions`. The LLM cannot call a
-    tool that doesn't exist, so the gate happens before any token
-    sampling.
+    when the route provided an editable builder context and the caller
+    has `orchestration:manage`. The LLM cannot call a tool that doesn't
+    exist, so the gate happens before any token sampling.
     """
     data_spec = build_data_specialist(client, app_id, grounding=grounding)
 
@@ -147,6 +146,7 @@ def build_supervisor(
     from app.auth.permissions import missing_permissions
     if (
         builder_context is not None
+        and builder_context.view_mode == 'edit'
         and auth is not None
         and not missing_permissions(auth, 'orchestration:manage')
     ):

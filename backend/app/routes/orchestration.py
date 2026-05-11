@@ -341,10 +341,20 @@ async def create_version(
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_workflow(db, auth, workflow_id, action="edit")
-    v = await ver_service.create_draft_version(
-        db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
-        definition=body.definition.model_dump(),
-    )
+    try:
+        v = await ver_service.create_draft_version(
+            db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
+            definition=body.definition.model_dump(),
+        )
+    except ver_service.DraftValidationError as exc:
+        # Mirrors the publish path: structured ``errors`` go as the detail
+        # array so the FE renders draft and publish failures through the
+        # same ``PublishErrorPanel``. Drafts may have missing required
+        # runtime fields; what's rejected here is fabricated keys, wrong
+        # types, bad edges, malformed predicates, and unknown node types.
+        if exc.errors:
+            raise HTTPException(status_code=400, detail=exc.errors)
+        raise HTTPException(status_code=400, detail=str(exc))
     if v is None:
         raise HTTPException(status_code=404, detail="workflow not found")
     return v

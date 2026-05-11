@@ -37,7 +37,8 @@ def _body(*, app_id: str = 'inside-sales',
           page_app_id: str | None = 'inside-sales',
           workflow_id: str | None = None,
           definition: dict | None = None,
-          data_hash: str = 'h1') -> BuilderChatRequest:
+          data_hash: str = 'h1',
+          view_mode: str = 'edit') -> BuilderChatRequest:
     payload: dict = {
         'app_id': app_id,
         'turn_id': str(uuid.uuid4()),
@@ -52,7 +53,7 @@ def _body(*, app_id: str = 'inside-sales',
             'app_id': page_app_id,
             'definition': definition or {'nodes': [], 'edges': []},
             'data_hash': data_hash,
-            'view_mode': 'edit',
+            'view_mode': view_mode,
         }
     return BuilderChatRequest.model_validate(payload)
 
@@ -103,8 +104,14 @@ class ResolveBuilderSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_drops_context_when_permission_missing(self) -> None:
         from app.routes.report_builder import _resolve_builder_snapshot
+        fake_workflow = SimpleNamespace(
+            id=uuid.uuid4(), app_id='inside-sales',
+            current_published_version_id=None,
+        )
         with patch('app.routes.report_builder.ensure_registered_app_access',
-                   new=AsyncMock(return_value='inside-sales')):
+                   new=AsyncMock(return_value='inside-sales')), \
+             patch('app.routes.report_builder.assert_workflow_owned',
+                   new=AsyncMock(return_value=fake_workflow)):
             snap = await _resolve_builder_snapshot(
                 body=_body(),
                 auth=_make_auth(with_perm=False),
@@ -181,8 +188,8 @@ class ResolveBuilderSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(route_mod, 'ensure_registered_app_access',
                           new=AsyncMock(return_value='inside-sales')), \
-             patch.object(route_mod, 'assert_workflow_owned',
-                          side_effect=_fake_assert):
+              patch.object(route_mod, 'assert_workflow_owned',
+                           side_effect=_fake_assert):
             snap = await route_mod._resolve_builder_snapshot(
                 body=_body(workflow_id=str(wf_id)),
                 auth=_make_auth(),
@@ -191,6 +198,24 @@ class ResolveBuilderSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(snap)
         self.assertEqual(str(snap.workflow_id), str(wf_id))
         self.assertEqual(snap.app_id, 'inside-sales')
+
+    async def test_view_mode_drops_context(self) -> None:
+        from app.routes import report_builder as route_mod
+
+        fake_workflow = SimpleNamespace(
+            id=uuid.uuid4(), app_id='inside-sales',
+            current_published_version_id=None,
+        )
+        with patch.object(route_mod, 'ensure_registered_app_access',
+                          new=AsyncMock(return_value='inside-sales')), \
+             patch.object(route_mod, 'assert_workflow_owned',
+                          new=AsyncMock(return_value=fake_workflow)):
+            snap = await route_mod._resolve_builder_snapshot(
+                body=_body(view_mode='view'),
+                auth=_make_auth(),
+                db=MagicMock(),
+            )
+        self.assertIsNone(snap)
 
 
 if __name__ == '__main__':

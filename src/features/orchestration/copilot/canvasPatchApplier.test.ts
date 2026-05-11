@@ -15,8 +15,10 @@ import * as snapshotHashModule from '@/features/orchestration/contracts/snapshot
 
 import { applyCanvasPatch } from './canvasPatchApplier';
 
-const VALID_CONFIG = { dataset_version_id: 'd_1' };
-
+// Empty config is the draft-default for partial authoring — every node
+// schema permits it under ``parseNodeConfig({mode: 'draft'})``. The applier
+// re-validates every add_node config, so the previous ``dataset_version_id``
+// fixture (an unrecognized key on ``source.cohort_query``) is now blocked.
 function fixturePatch(baseHash: string) {
   return {
     workflow_id: 'wf_demo',
@@ -39,7 +41,7 @@ function fixturePatch(baseHash: string) {
         node_id: 'n_c',
         payload: {
           node_type: 'source.cohort_query',
-          config: VALID_CONFIG,
+          config: {},
         },
       },
       {
@@ -169,7 +171,9 @@ describe('applyCanvasPatch', () => {
       type: 'crm.send_wati',
       position: { x: 0, y: 0 },
       data: {},
-      config: { template_slug: 'old', other: 'unchanged' },
+      // Existing fields all belong to the crm.send_wati schema so the
+      // Section 6 re-validation lets the merged config through.
+      config: { template_slug: 'old', broadcast_name: 'unchanged' },
     });
 
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
@@ -195,7 +199,7 @@ describe('applyCanvasPatch', () => {
       .nodes.find((n) => n.id === 'n_existing');
     expect(updated?.config).toMatchObject({
       template_slug: 'new',
-      other: 'unchanged',
+      broadcast_name: 'unchanged',
     });
   });
 
@@ -236,5 +240,125 @@ describe('applyCanvasPatch', () => {
     const state = useWorkflowBuilderStore.getState();
     expect(state.nodes.map((n) => n.id)).toEqual(['n_b']);
     expect(state.edges).toHaveLength(0);
+  });
+});
+
+describe('applyCanvasPatch — Section 6 guards', () => {
+  beforeEach(() => {
+    useWorkflowBuilderStore.getState().reset();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects a patch authored against a different workflow', async () => {
+    useWorkflowBuilderStore.getState().setMetadata({
+      workflowId: 'wf_A',
+      versionId: null,
+      name: 'A',
+      workflowType: 'crm',
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+    const onChatMessage = vi.fn();
+    const result = await applyCanvasPatch(
+      { workflow_id: 'wf_B', base_data_hash: baseHash, ops: [] },
+      { onChatMessage, staggerMs: 0 },
+    );
+    expect(result.kind).toBe('workflow_mismatch');
+    expect(onChatMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a patch authored against a stale version', async () => {
+    useWorkflowBuilderStore.getState().setMetadata({
+      workflowId: 'wf_A',
+      versionId: 'v_2',
+      name: 'A',
+      workflowType: 'crm',
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+    const onChatMessage = vi.fn();
+    const result = await applyCanvasPatch(
+      {
+        workflow_id: 'wf_A',
+        version_id: 'v_1',
+        base_data_hash: baseHash,
+        ops: [],
+      },
+      { onChatMessage, staggerMs: 0 },
+    );
+    expect(result.kind).toBe('version_mismatch');
+  });
+
+  it('rejects add_node when its config has a hard parse issue', async () => {
+    useWorkflowBuilderStore.getState().setMetadata({
+      workflowId: 'wf_demo',
+      versionId: null,
+      name: 'demo',
+      workflowType: 'crm',
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+    const onChatMessage = vi.fn();
+    const result = await applyCanvasPatch(
+      {
+        workflow_id: 'wf_demo',
+        base_data_hash: baseHash,
+        ops: [
+          {
+            op: 'add_node',
+            node_id: 'n_bad',
+            payload: {
+              node_type: 'sink.complete',
+              config: { fabricated_key: 1 },
+            },
+          },
+        ],
+      },
+      { onChatMessage, staggerMs: 0 },
+    );
+    expect(result.kind).toBe('config_invalid');
+    if (result.kind !== 'config_invalid') return;
+    expect(result.opKind).toBe('add_node');
+    expect(result.nodeId).toBe('n_bad');
+    // Nothing landed in the store.
+    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
+  });
+
+  it('rejects update_node_config when the merged config has a hard parse issue', async () => {
+    const store = useWorkflowBuilderStore.getState();
+    store.setMetadata({
+      workflowId: 'wf_demo',
+      versionId: null,
+      name: 'demo',
+      workflowType: 'crm',
+    });
+    store.addNode({
+      id: 'n_e',
+      type: 'sink.complete',
+      position: { x: 0, y: 0 },
+      data: {},
+      config: { reason: 'ok' },
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+    const onChatMessage = vi.fn();
+    const result = await applyCanvasPatch(
+      {
+        workflow_id: 'wf_demo',
+        base_data_hash: baseHash,
+        ops: [
+          {
+            op: 'update_node_config',
+            node_id: 'n_e',
+            payload: { config_patch: { fabricated_key: 'x' } },
+          },
+        ],
+      },
+      { onChatMessage, staggerMs: 0 },
+    );
+    expect(result.kind).toBe('config_invalid');
+    if (result.kind !== 'config_invalid') return;
+    expect(result.opKind).toBe('update_node_config');
+    // Original config preserved — no partial write landed.
+    const node = useWorkflowBuilderStore
+      .getState()
+      .nodes.find((n) => n.id === 'n_e');
+    expect(node?.config).toEqual({ reason: 'ok' });
   });
 });

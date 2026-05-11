@@ -19,7 +19,11 @@ import {
   type PublishOutcome,
   type SaveOutcome,
 } from "@/features/orchestration/contracts/lifecycleState";
-import { parseNodeConfig } from "@/features/orchestration/contracts/nodeConfig";
+import {
+  isHardParseIssue,
+  parseNodeConfig,
+  type NodeConfigParseIssue,
+} from "@/features/orchestration/contracts/nodeConfig";
 import type { FieldErrorItem } from "@/features/orchestration/contracts/errorDecoder";
 import { logger } from "@/services/logger";
 
@@ -613,4 +617,48 @@ export function useLifecycleState(): LifecycleState {
     })),
   );
   return useMemo(() => deriveLifecycleState(inputs), [inputs]);
+}
+
+/** Section 5 — hard parse-issue selector for the save gate.
+ *
+ *  Re-runs ``parseNodeConfig(node.type, node.config, { mode: 'draft' })``
+ *  over every live node — exactly as the plan specifies — rather than
+ *  trusting the store's cached ``_parseIssues`` annotation. Cached
+ *  annotations are kept in sync on every mutator, so in steady state both
+ *  paths agree; re-running adds defense-in-depth against any future path
+ *  that mutates ``nodes`` without going through ``annotateNodeWithParse``,
+ *  and matches the literal plan wording.
+ *
+ *  Soft issues (missing required fields under draft tolerance) are
+ *  filtered inside ``parseNodeConfig`` itself; anything that survives is
+ *  hard. The hook is the single decision point for the Save / Publish
+ *  buttons: any non-empty result blocks the click. */
+export interface HardParseIssueGroup {
+  nodeId: string;
+  nodeType: string;
+  hardIssues: NodeConfigParseIssue[];
+}
+
+export function selectHardParseIssues(
+  nodes: readonly WorkflowDefinitionNode[],
+): HardParseIssueGroup[] {
+  const out: HardParseIssueGroup[] = [];
+  for (const n of nodes) {
+    const result = parseNodeConfig(n.type, n.config, { mode: "draft" });
+    if (result.ok) continue;
+    // Every surviving issue is hard after the draft filter (see
+    // ``isHardParseIssue`` rationale in nodeConfig.ts); the named call
+    // is kept here so the relationship between the gate and the parse
+    // layer is greppable from this file.
+    const hardIssues = result.issues.filter(isHardParseIssue);
+    if (hardIssues.length > 0) {
+      out.push({ nodeId: n.id, nodeType: n.type, hardIssues });
+    }
+  }
+  return out;
+}
+
+export function useHardParseIssues(): HardParseIssueGroup[] {
+  const nodes = useWorkflowBuilderStore((s) => s.nodes);
+  return useMemo(() => selectHardParseIssues(nodes), [nodes]);
 }

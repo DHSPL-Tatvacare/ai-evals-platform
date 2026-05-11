@@ -26,10 +26,13 @@ from app.services.chat_engine.artifact import (
     build_envelope,
 )
 from app.services.chat_engine.capability_pack import register_pack
+from app.services.orchestration.definition_normalizer import normalize_definition
+from app.services.orchestration.definition_validator import (
+    DefinitionValidationError,
+    validate_definition,
+)
 from app.services.orchestration.node_registry import (
     NODE_REGISTRY,
-    NodeRegistryError,
-    resolve_handler,
 )
 from app.services.orchestration_authoring.audit import (
     emit_authoring_event,
@@ -231,26 +234,6 @@ def _validate_op_shape(op: Any) -> tuple[CanvasPatchOp | None, str | None]:
         return None, f'invalid op shape: {exc}'
 
 
-def _validate_node_config(
-    *,
-    workflow_type: str,
-    node_type: str,
-    config: Any,
-) -> tuple[bool, str]:
-    """Resolve handler and run config_schema(**config). Returns (ok, error)."""
-    try:
-        handler = resolve_handler(workflow_type=workflow_type, node_type=node_type)
-    except NodeRegistryError:
-        return False, f'unknown node_type {node_type!r} for workflow_type {workflow_type!r}'
-    if not isinstance(config, dict):
-        return False, "'config' must be an object"
-    try:
-        handler.config_schema(**config)
-    except Exception as exc:  # pydantic ValidationError surfaces here
-        return False, f'config invalid for {node_type}: {exc}'
-    return True, ''
-
-
 # ---------------------------------------------------------------------------
 # Graph pre-flight + UUID allowlist
 # ---------------------------------------------------------------------------
@@ -290,6 +273,21 @@ def _walk_uuid_references(payload: Any) -> list[tuple[str, str]]:
     return out
 
 
+class PatchTargetMissingError(ValueError):
+    """``update_node_config`` / ``remove_node`` targeted a node that does
+    not exist in the running candidate (base + prior ``add_node`` ops).
+
+    Surfaced as ``GRAPH_INVALID`` by ``apply_patch``. Raised here instead
+    of silently no-op'ing because a missing target is always a
+    Sherlock-side bug, never desirable behavior.
+    """
+
+    def __init__(self, op_kind: str, node_id: str) -> None:
+        self.op_kind = op_kind
+        self.node_id = node_id
+        super().__init__(f'{op_kind}: target node {node_id!r} does not exist')
+
+
 def _apply_ops_to_definition(
     *,
     base_definition: dict[str, Any],
@@ -297,14 +295,19 @@ def _apply_ops_to_definition(
 ) -> dict[str, Any]:
     """Replay a CanvasPatch against a copy of the canvas definition.
 
-    Used by Step 9 graph preflight to feed `validate_definition` a
-    realistic post-patch shape. Mirrors the frontend applier semantics:
+    Used by ``apply_patch`` to build the candidate definition handed to
+    ``validate_definition(mode='draft')``. Mirrors the frontend applier
+    semantics:
 
       - add_node:           append `{id, type, position?, data, config}`
       - update_node_config: shallow-merge `payload.config_patch` into
                             the matching node's `config`
       - connect:            append `{id, source, target, output_id}`
       - remove_node:        drop the node and any edges that touch it
+
+    Raises :class:`PatchTargetMissingError` when ``update_node_config`` or
+    ``remove_node`` references a node that does not exist in the running
+    candidate. The previous behavior (silently no-op) hid a bug class.
     """
     nodes = list(base_definition.get('nodes') or [])
     edges = list(base_definition.get('edges') or [])
@@ -327,10 +330,11 @@ def _apply_ops_to_definition(
             new_nodes.append(new_node)
         elif op.op == 'update_node_config':
             target = by_id.get(op.node_id)
-            if target is not None:
-                cfg = dict(target.get('config') or {})
-                cfg.update(op.payload.get('config_patch') or {})
-                target['config'] = cfg
+            if target is None:
+                raise PatchTargetMissingError('update_node_config', op.node_id)
+            cfg = dict(target.get('config') or {})
+            cfg.update(op.payload.get('config_patch') or {})
+            target['config'] = cfg
         elif op.op == 'connect':
             new_edges.append({
                 'id': op.payload.get('edge_id'),
@@ -339,6 +343,8 @@ def _apply_ops_to_definition(
                 'output_id': op.payload.get('output_id'),
             })
         elif op.op == 'remove_node':
+            if op.node_id not in by_id:
+                raise PatchTargetMissingError('remove_node', op.node_id)
             by_id.pop(op.node_id, None)
             new_nodes = [n for n in new_nodes if n.get('id') != op.node_id]
             new_edges = [
@@ -351,6 +357,36 @@ def _apply_ops_to_definition(
         'edges': new_edges,
         'canvas': base_definition.get('canvas') or {},
     }
+
+
+def _classify_reason_code(errors: list[dict[str, Any]]) -> str:
+    """Map structured ``definition_validator`` errors to a pack reason_code.
+
+    Scans every error and returns the highest-priority match:
+
+      1. ``UNKNOWN_NODE_TYPE`` — any error with ``field == 'type'``. The
+         validator emits this only for node-type-resolution failures
+         (unknown type, missing type) — both are "Sherlock named a type
+         that doesn't work."
+      2. ``NODE_CONFIG_INVALID`` — any error with ``field`` starting with
+         ``'config'`` (matches ``'config'`` and ``'config.foo'``).
+      3. ``GRAPH_INVALID`` — everything else (edges, graph structure).
+
+    Inspecting ``field`` only (never ``message``) keeps the classifier
+    decoupled from validator error-message text.
+    """
+    has_config = False
+    for err in errors:
+        if not isinstance(err, dict):
+            continue
+        field = err.get('field') or ''
+        if field == 'type':
+            return 'UNKNOWN_NODE_TYPE'
+        if field == 'config' or field.startswith('config.'):
+            has_config = True
+    if has_config:
+        return 'NODE_CONFIG_INVALID'
+    return 'GRAPH_INVALID'
 
 
 async def _apply_patch_handler(ctx: Any, args: str) -> str:
@@ -368,33 +404,12 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
     patch_op_count = 0
 
     try:
-        if builder_context is None:
-            reason_code = 'NO_BUILDER_CONTEXT'
-            return _error_result(
-                reason_code=reason_code,
-                message='Authoring tools require an active builder context.',
-                started=started,
-            )
-
-        # Layered permission re-check (R3). The route gate (R1) and conditional
-        # tool inclusion (R2) cover the same ground; this ensures a future bug
-        # in either does not bypass the gate. Use the canonical helper so the
-        # Owner role's permission bypass is honored here too.
-        from app.auth.permissions import missing_permissions
-        if auth is None or missing_permissions(auth, 'orchestration:manage'):
-            reason_code = 'PERMISSION_DENIED'
-            return _error_result(
-                reason_code=reason_code,
-                message='Missing orchestration:manage permission.',
-                started=started,
-            )
-        if builder_context.app_id not in getattr(auth, 'app_access', frozenset()):
-            reason_code = 'APP_FORBIDDEN'
-            return _error_result(
-                reason_code=reason_code,
-                message=f'No access to app {builder_context.app_id}.',
-                started=started,
-            )
+        audit: dict[str, Any] = {'reason_code': None}
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            reason_code = audit.get('reason_code')
+            return check
+        auth, builder_context = check
 
         try:
             parsed = json.loads(args) if args.strip() else {}
@@ -452,6 +467,10 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                     message=f'op[{index}]: {shape_err}',
                     started=started,
                 )
+            # Envelope-only checks: payload field shapes that the canonical
+            # validator can't observe (node_type missing entirely, connect
+            # payload missing edge identifiers). Schema and graph rules run
+            # once against the post-patch candidate definition below.
             if op.op == 'add_node':
                 node_type = op.payload.get('node_type')
                 if not isinstance(node_type, str) or not node_type:
@@ -462,21 +481,13 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                         message=f'op[{index}] add_node: payload.node_type required',
                         started=started,
                     )
-                ok, err = _validate_node_config(
-                    workflow_type=workflow_type,
-                    node_type=node_type,
-                    config=op.payload.get('config') or {},
-                )
-                if not ok:
-                    reason_code = (
-                        'UNKNOWN_NODE_TYPE'
-                        if 'unknown node_type' in err
-                        else 'NODE_CONFIG_INVALID'
-                    )
+                config = op.payload.get('config')
+                if config is not None and not isinstance(config, dict):
+                    reason_code = 'NODE_CONFIG_INVALID'
                     patch_op_count = len(raw_ops)
                     return _error_result(
                         reason_code=reason_code,
-                        message=f'op[{index}] {err}',
+                        message=f"op[{index}] add_node: 'config' must be an object",
                         started=started,
                     )
             elif op.op == 'update_node_config':
@@ -528,43 +539,46 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                         started=started,
                     )
 
-        # ── Graph-level pre-flight ───────────────────────────────────────
-        # Validate the patched-copy definition against publish-time graph
-        # rules. We run the same validator that publish uses; draft mode
-        # tolerates publish-required fields being absent (the validator
-        # checks structure, not dispatch readiness).
+        # ── Canonical draft validation ──────────────────────────────────
+        # Apply ops to the current canvas, normalize, and run the same
+        # validator the publish path uses but in draft mode. This is the
+        # ONE source of truth for "is this canvas legal" — no separate
+        # draft-only schema, no per-op duplicate validation. The applier
+        # raises ``PatchTargetMissingError`` when an update / remove op
+        # targets a node that does not exist; we map that to GRAPH_INVALID
+        # before reaching the validator.
         try:
-            from app.services.orchestration.definition_validator import (
-                DefinitionValidationError,
-                validate_definition,
-            )
-            from app.services.orchestration.definition_normalizer import (
-                normalize_definition,
-            )
-
             patched = _apply_ops_to_definition(
                 base_definition=builder_context.definition or {},
                 ops=validated_ops,
             )
-            try:
-                normalized = normalize_definition(patched)
-            except Exception:  # noqa: BLE001 — bad shape; fall through to validator
-                normalized = patched
-            try:
-                validate_definition(normalized, workflow_type=workflow_type)
-            except DefinitionValidationError as exc:
-                reason_code = 'GRAPH_INVALID'
-                return _error_result(
-                    reason_code=reason_code,
-                    message=f'Patched graph fails validation: {exc}',
-                    started=started,
-                    detail={'errors': exc.errors},
-                )
-        except ImportError:
-            # `definition_normalizer.normalize_definition` may be absent in
-            # older branches; fail open for graph rules then. Per-op validation
-            # already ran.
-            pass
+        except PatchTargetMissingError as exc:
+            reason_code = 'GRAPH_INVALID'
+            return _error_result(
+                reason_code=reason_code,
+                message=str(exc),
+                started=started,
+                detail={'errors': [{
+                    'node_id': exc.node_id,
+                    'field': 'node_id',
+                    'message': f'{exc.op_kind} target does not exist',
+                }]},
+            )
+        candidate = normalize_definition(patched)
+        try:
+            validate_definition(
+                candidate,
+                workflow_type=workflow_type,
+                mode='draft',
+            )
+        except DefinitionValidationError as exc:
+            reason_code = _classify_reason_code(exc.errors)
+            return _error_result(
+                reason_code=reason_code,
+                message='Patched canvas failed draft validation.',
+                started=started,
+                detail={'errors': exc.errors},
+            )
 
         canvas_patch = CanvasPatch(
             workflow_id=str(builder_context.workflow_id),
@@ -738,6 +752,24 @@ def _lookup_result_json(
     }, default=str)
 
 
+async def _assert_builder_workflow_still_owned(
+    *,
+    builder_context: Any,
+    auth: Any,
+) -> str:
+    """Re-read workflow ownership at tool time and return its app_id."""
+    from app.database import async_session
+    from app.services.orchestration_authoring.tenant_guard import assert_workflow_owned
+
+    async with async_session() as db:
+        workflow = await assert_workflow_owned(
+            db,
+            workflow_id=builder_context.workflow_id,
+            auth=auth,
+        )
+    return str(workflow.app_id)
+
+
 async def _check_layered_auth(
     sherlock_ctx: Any,
     *,
@@ -759,6 +791,13 @@ async def _check_layered_auth(
             message='Authoring tools require an active builder context.',
             started=started,
         )
+    if getattr(builder_context, 'view_mode', None) != 'edit':
+        audit['reason_code'] = 'PERMISSION_DENIED'
+        return _error_result(
+            reason_code='PERMISSION_DENIED',
+            message='Builder is read-only. Switch to edit mode before changing the canvas.',
+            started=started,
+        )
     # Owner role bypass via canonical helper (matches `_lookup_handler`
     # block above; see comment there).
     from app.auth.permissions import missing_permissions as _missing_perms_apply
@@ -774,6 +813,29 @@ async def _check_layered_auth(
         return _error_result(
             reason_code='APP_FORBIDDEN',
             message=f'No access to app {builder_context.app_id}.',
+            started=started,
+        )
+    from fastapi import HTTPException
+
+    try:
+        workflow_app_id = await _assert_builder_workflow_still_owned(
+            builder_context=builder_context,
+            auth=auth,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            audit['reason_code'] = 'WORKFLOW_NOT_FOUND'
+            return _error_result(
+                reason_code='WORKFLOW_NOT_FOUND',
+                message='Workflow not found.',
+                started=started,
+            )
+        raise
+    if workflow_app_id != builder_context.app_id:
+        audit['reason_code'] = 'APP_FORBIDDEN'
+        return _error_result(
+            reason_code='APP_FORBIDDEN',
+            message=f'Workflow does not belong to app {builder_context.app_id}.',
             started=started,
         )
     return auth, builder_context

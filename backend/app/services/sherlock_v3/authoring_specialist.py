@@ -37,6 +37,7 @@ from agents.models.openai_responses import OpenAIResponsesModel
 from openai.types.shared import Reasoning
 
 from app.auth.context import AuthContext
+from app.services.orchestration.node_registry import NODE_REGISTRY
 from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
 from app.services.orchestration_authoring.orchestration_authoring_pack import (
     OrchestrationAuthoringPack,
@@ -81,6 +82,98 @@ class CanvasTooLargeError(Exception):
         super().__init__(f'{reason_code}: {node_count} nodes (cap {CANVAS_NODE_LIMIT})')
 
 
+def _compact_annotation(info: Any) -> str:
+    """Render a Pydantic FieldInfo's annotation as a tight string.
+
+    Strips `typing.` / module-path prefixes that bloat the prompt
+    without adding signal. For nested BaseModel fields we still emit
+    the bare class name; the recursive walker emits its body separately.
+    """
+    try:
+        annotation = repr(info.annotation)
+    except Exception:
+        return '?'
+    annotation = annotation.replace('typing.', '').replace("<class '", '').replace("'>", '')
+    # Strip the module path on user-defined classes ("foo.bar.baz._Branch" → "_Branch").
+    import re as _re
+    annotation = _re.sub(r"[\w.]+\.([A-Z_][A-Za-z0-9_]*)", r"\1", annotation)
+    return annotation
+
+
+def _collect_nested_models(schema: type, seen: set[type]) -> list[type]:
+    """Walk a BaseModel's annotations, return every nested BaseModel class
+    (including those inside list[...] / Optional[...] / etc.). Stable order."""
+    from pydantic import BaseModel as _BM
+    from typing import get_args, get_origin
+    out: list[type] = []
+    for info in schema.model_fields.values():
+        anno = info.annotation
+        stack = [anno]
+        while stack:
+            t = stack.pop()
+            if t is None:
+                continue
+            origin = get_origin(t)
+            if origin is not None:
+                stack.extend(get_args(t))
+                continue
+            if isinstance(t, type) and issubclass(t, _BM) and t not in seen:
+                seen.add(t)
+                out.append(t)
+                # Recurse into the nested model.
+                out.extend(_collect_nested_models(t, seen))
+    return out
+
+
+def _render_model_block(label: str, model_cls: type, *, is_node: bool, header_extras: str = '') -> str:
+    """Render one BaseModel as a `## <label>` block with field list."""
+    lines = [f'## {label}{header_extras}'] if is_node else [f'### {label}']
+    for field_name, info in model_cls.model_fields.items():
+        annotation = _compact_annotation(info)
+        required = info.is_required()
+        default_str = ''
+        if not required:
+            try:
+                default_str = f' — default: {info.get_default(call_default_factory=True)!r}'
+            except Exception:
+                default_str = ''
+        req_marker = ', required' if required else ''
+        lines.append(f'  - {field_name} ({annotation}{req_marker}){default_str}')
+    return '\n'.join(lines)
+
+
+def _node_schemas_for_prompt(workflow_type: str) -> str:
+    """Render every node type's config schema (with nested models expanded)
+    as compact text. The LLM gets the full contract — no guessing."""
+    blocks: list[str] = []
+    seen_nodes: set[str] = set()
+    for (wf_type, node_type), handler in sorted(NODE_REGISTRY.items()):
+        # Wildcard handlers shown everywhere; per-workflow handlers only
+        # under their declared workflow_type.
+        if wf_type not in ('*', workflow_type):
+            continue
+        if node_type in seen_nodes:
+            continue
+        seen_nodes.add(node_type)
+        schema = getattr(handler, 'config_schema', None)
+        outputs = ','.join(getattr(handler, 'output_edges', []) or []) or '(none)'
+        category = getattr(handler, 'category', '?')
+        header_extras = f'  [category={category}, outputs={outputs}]'
+        if schema is None:
+            blocks.append(f'## {node_type}{header_extras}\n  (no config schema)')
+            continue
+
+        # Top-level node schema.
+        block = _render_model_block(node_type, schema, is_node=True, header_extras=header_extras)
+        # Nested models referenced by this node — render once each.
+        nested_seen: set[type] = set()
+        nested = _collect_nested_models(schema, nested_seen)
+        for nested_cls in nested:
+            block += '\n' + _render_model_block(nested_cls.__name__, nested_cls, is_node=False)
+        blocks.append(block)
+    return '\n\n'.join(blocks)
+
+
 def _build_system_prompt(
     *,
     app_id: str,
@@ -104,6 +197,7 @@ def _build_system_prompt(
         'definition': definition,
     }, default=str, indent=2)
     enum_list = ', '.join(node_type_enum())
+    node_schemas = _node_schemas_for_prompt(builder_context.workflow_type)
 
     return f"""\
 Role: Sherlock — orchestration authoring specialist.
@@ -122,6 +216,28 @@ saves manually.
 
 # Available node types (from NODE_REGISTRY at boot)
 {enum_list}
+
+# Node config schemas — THIS IS THE CONTRACT
+You MUST only use field names listed below. Unknown fields are rejected
+with NODE_CONFIG_INVALID; you get one corrective retry then the user sees
+an error. Required fields can be omitted at draft time (publish-validator
+catches missing required) but you MUST NOT invent new field names. If a
+concept you want is not on the schema, leave the node empty and let the
+user fill it in via the inspector.
+
+{node_schemas}
+
+# Choosing the right node
+- Sources (`source.*`) START a workflow. Use ONE source.
+- Logic (`logic.*`) shapes flow: `split` fans out by branch, `conditional`
+  is binary true/false, `wait` pauses, `merge` joins paths.
+- Filters (`filter.*`) drop recipients without dispatching anything.
+- Action nodes (`crm.*`, `clinical.*`) talk to external systems —
+  WhatsApp, Bolna, SMS, LSQ, EMR. They have side effects when run.
+- `sink.complete` ends a branch with no side effect. **Use `sink.complete`
+  as the placeholder when the user says "leave the action node empty"**;
+  NEVER use `core.webhook_out` as a placeholder — it dispatches HTTP and
+  has real side effects.
 
 # Tools
 - `list_node_types(category?)`           — palette enumeration
@@ -241,16 +357,24 @@ def build_authoring_specialist(
 
 
 async def extract_authoring_specialist_output(run_result: Any) -> str:
-    """Strict match on `apply_patch` — no defaulting to "the only tool".
+    """Return the most recent `apply_patch` tool output JSON, by call_id.
 
-    Walk `new_items` in reverse, take the most recent
-    `tool_call_output_item` whose tool name is `apply_patch`, return its
-    JSON output. Fall back to `final_output` text only when no tool was
-    called (clarifying-question turns).
+    Agents-SDK reality: `tool_call_output_item.raw_item` carries `call_id`,
+    NOT `name`. The tool name lives on the preceding `tool_call_item`.
+    Build a `call_id -> tool_name` index from the run's tool_call_items
+    first, then match outputs against `apply_patch` via that index.
+
+    Strict on `apply_patch` (no defaulting to "the only tool" — this
+    specialist has six). Falls back to the agent's final_output text only
+    when no apply_patch output exists, preserving the SDK default for
+    clarifying-question turns.
     """
     new_items = list(getattr(run_result, 'new_items', []) or [])
+    call_name_index = _build_call_name_index(new_items)
     for item in reversed(new_items):
-        if not _is_tool_output_for(item, _AUTHORING_TOOL_TERMINAL):
+        if not _is_tool_output_for(
+            item, _AUTHORING_TOOL_TERMINAL, call_name_index=call_name_index,
+        ):
             continue
         output = getattr(item, 'output', None)
         if isinstance(output, str) and output.strip():
@@ -261,16 +385,43 @@ async def extract_authoring_specialist_output(run_result: Any) -> str:
     return final_output if isinstance(final_output, str) else ''
 
 
-def _is_tool_output_for(item: Any, tool_name: str) -> bool:
-    """Strict tool-name match (no fallback) — see Decision §F."""
-    item_type = getattr(item, 'type', None)
-    if item_type != 'tool_call_output_item':
+def _build_call_name_index(new_items: list[Any]) -> dict[str, str]:
+    """call_id -> tool_name, harvested from every tool_call_item in the run."""
+    index: dict[str, str] = {}
+    for item in new_items:
+        if getattr(item, 'type', None) != 'tool_call_item':
+            continue
+        raw = getattr(item, 'raw_item', None)
+        call_id = (
+            raw.get('call_id') if isinstance(raw, dict)
+            else getattr(raw, 'call_id', None)
+        )
+        name = (
+            raw.get('name') if isinstance(raw, dict)
+            else getattr(raw, 'name', None)
+        )
+        if isinstance(call_id, str) and isinstance(name, str):
+            index[call_id] = name
+    return index
+
+
+def _is_tool_output_for(
+    item: Any,
+    tool_name: str,
+    *,
+    call_name_index: dict[str, str],
+) -> bool:
+    """True iff `item` is a tool_call_output_item whose call_id maps to `tool_name`."""
+    if getattr(item, 'type', None) != 'tool_call_output_item':
         return False
     raw = getattr(item, 'raw_item', None)
-    if isinstance(raw, dict):
-        return raw.get('name') == tool_name
-    name_attr = getattr(raw, 'name', None)
-    return isinstance(name_attr, str) and name_attr == tool_name
+    call_id = (
+        raw.get('call_id') if isinstance(raw, dict)
+        else getattr(raw, 'call_id', None)
+    )
+    if not isinstance(call_id, str):
+        return False
+    return call_name_index.get(call_id) == tool_name
 
 
 __all__ = [

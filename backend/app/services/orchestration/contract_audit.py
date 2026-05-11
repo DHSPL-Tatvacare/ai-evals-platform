@@ -1,29 +1,26 @@
-"""Phase 14 / Phase D — strict-config audit for orchestration workflows.
+"""Strict-config audit for orchestration workflows.
 
-Scans every published `workflow_versions.definition` against the strict
-Pydantic schemas (extra='forbid' enabled via `_config_strictness`) and
+Scans every `workflow_versions.definition` against the strict Pydantic
+schemas (`extra='forbid'` is unconditional via `_config_strictness`) and
 emits one CSV row per offending node.
 
-Run before flipping ``ORCHESTRATION_BUILDER_V2=true`` on an environment.
-Zero rows = safe to flip. Non-zero rows = the listed workflows need a
-field declaration on the corresponding ``_Config`` class **before** the
-flag flips, otherwise their next publish will 400.
+Use this when you suspect a stored workflow carries fabricated fields
+that the publish path will now reject. Output columns:
+`workflow_id, version_id, version_status, app_id, workflow_type, node_id,
+node_type, issue`.
 
 Usage::
 
-    PYTHONPATH=backend ORCHESTRATION_BUILDER_V2=true python -m \\
+    PYTHONPATH=backend python -m \\
         app.services.orchestration.contract_audit \\
         --output /tmp/audit.csv
 
-When ``--output`` is omitted the report is written to stdout. Database
-URL comes from the standard ``DATABASE_URL``/``ANALYTICS_DATABASE_URL``
-environment variables — no credentials hard-coded here.
-
-Output columns: ``workflow_id, version_id, version_status, app_id,
-workflow_type, node_id, node_type, issue``.
+When `--output` is omitted the report is written to stdout. Database URL
+comes from the standard `DATABASE_URL` / `ANALYTICS_DATABASE_URL` env
+vars — no credentials hard-coded here.
 
 The script is read-only. It does not normalise or write back. The
-publish path keeps applying ``definition_normalizer.normalize_definition``
+publish path keeps applying `definition_normalizer.normalize_definition`
 before strict validation, but the audit operates on the canonical row as
 stored — that's what the publish path will see when re-publishing.
 """
@@ -39,12 +36,6 @@ from typing import Any, Iterable, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-# Force strictness on for the audit run regardless of how the host env was
-# invoked. The script explicitly mutates the environment **before** the
-# node modules import so every ``_Config`` class picks up
-# ``extra='forbid'`` even on hosts that haven't flipped the flag yet.
-os.environ["ORCHESTRATION_BUILDER_V2"] = "true"
 
 from app.models.orchestration import Workflow, WorkflowVersion  # noqa: E402
 from app.services.orchestration.definition_normalizer import (  # noqa: E402

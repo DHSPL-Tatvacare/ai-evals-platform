@@ -1,0 +1,11 @@
+{
+  "node_type": "logic.split",
+  "config": {
+    "mode": "by_field",
+    "field": "plan",
+    "branches": [
+      { "id": "gold", "label": "Gold", "match": "gold" }
+    ],
+    "fabricated_key": "should-be-rejected"
+  }
+}

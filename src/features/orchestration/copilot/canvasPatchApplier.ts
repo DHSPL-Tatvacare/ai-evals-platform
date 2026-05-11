@@ -21,6 +21,10 @@ import { logger } from '@/services/logger';
 import {
   useWorkflowBuilderStore,
 } from '@/features/orchestration/store/workflowBuilderStore';
+import {
+  isHardParseIssue,
+  parseNodeConfig,
+} from '@/features/orchestration/contracts/nodeConfig';
 import type {
   WorkflowDefinitionEdge,
   WorkflowDefinitionNode,
@@ -51,6 +55,9 @@ export type ApplyCanvasPatchResult =
   | { kind: 'applied'; opsApplied: number }
   | { kind: 'parse_error'; reason: string }
   | { kind: 'hash_mismatch' }
+  | { kind: 'workflow_mismatch' }
+  | { kind: 'version_mismatch' }
+  | { kind: 'config_invalid'; nodeId: string; opKind: 'add_node' | 'update_node_config' }
   | { kind: 'aborted'; opsApplied: number };
 
 const REBASE_PROMPT_TEXT =
@@ -195,7 +202,44 @@ export async function applyCanvasPatch(
   }
 
   const patch: CanvasPatch = parsed.data;
-  const currentHash = useWorkflowBuilderStore.getState().currentDataHash;
+  const storeSnapshot = useWorkflowBuilderStore.getState();
+
+  // Section 6 guard 1: workflow_id must match the live builder. A patch
+  // emitted against workflow A applied while the operator is editing
+  // workflow B would silently corrupt B's canvas.
+  if (storeSnapshot.workflowId && patch.workflow_id !== storeSnapshot.workflowId) {
+    logger.warn('orchestration.canvasPatchApplier.workflow_mismatch', {
+      patch: patch.workflow_id,
+      store: storeSnapshot.workflowId,
+    });
+    options.onChatMessage(
+      "I drafted a patch for a different workflow — nothing was applied. " +
+        'Reopen the canvas you intend to edit and ask again.',
+    );
+    return { kind: 'workflow_mismatch' };
+  }
+
+  // Section 6 guard 2: version_id compatibility. Both sides may be null
+  // (a brand-new workflow with no draft yet). When both are present they
+  // must agree; otherwise the patch was authored against a stale version
+  // and applying it would race with whoever published in between.
+  if (
+    patch.version_id !== null &&
+    storeSnapshot.versionId !== null &&
+    patch.version_id !== storeSnapshot.versionId
+  ) {
+    logger.warn('orchestration.canvasPatchApplier.version_mismatch', {
+      patch: patch.version_id,
+      store: storeSnapshot.versionId,
+    });
+    options.onChatMessage(
+      "The canvas was published or rebased since I drafted this patch — " +
+        'nothing was applied. Re-ask and I will rebuild against the current version.',
+    );
+    return { kind: 'version_mismatch' };
+  }
+
+  const currentHash = storeSnapshot.currentDataHash;
   if (patch.base_data_hash !== currentHash) {
     logger.info('orchestration.canvasPatchApplier.hash_mismatch', {
       base: patch.base_data_hash,
@@ -207,6 +251,62 @@ export async function applyCanvasPatch(
   }
   // Apply path — any prior pending-rebase is now resolved.
   pendingRebase = null;
+
+  // Section 6 guard 3: re-validate every add_node / update_node_config
+  // op through the same draft parser the store uses. Backend canonical
+  // validation runs at apply_patch time, but the SSE event could be
+  // tampered, replayed, or hit a contract drift the backend already
+  // forgave. Frontend revalidation closes the loop so a bad config
+  // never lands in the store. Soft issues (missing required fields) are
+  // tolerated; hard issues (fabricated keys, wrong types) abort apply.
+  const baseNodesById = new Map<string, WorkflowDefinitionNode>(
+    storeSnapshot.nodes.map((n) => [n.id, n]),
+  );
+  for (const op of patch.ops) {
+    if (op.op === 'add_node') {
+      const result = parseNodeConfig(op.payload.node_type, op.payload.config, {
+        mode: 'draft',
+      });
+      const hard = !result.ok && result.issues.some(isHardParseIssue);
+      if (hard) {
+        logger.warn('orchestration.canvasPatchApplier.config_invalid_add_node', {
+          nodeId: op.node_id,
+          nodeType: op.payload.node_type,
+          issues: result.issues.slice(0, 3),
+        });
+        options.onChatMessage(
+          `I drafted a patch but op for ${op.node_id} (${op.payload.node_type}) ` +
+            'has a schema issue — nothing was applied.',
+        );
+        return { kind: 'config_invalid', nodeId: op.node_id, opKind: 'add_node' };
+      }
+    } else if (op.op === 'update_node_config') {
+      const target = baseNodesById.get(op.node_id);
+      if (!target) continue; // applier raises later — the backend already gates this
+      const merged = {
+        ...(target.config as Record<string, unknown>),
+        ...(op.payload.config_patch as Record<string, unknown>),
+      };
+      const result = parseNodeConfig(target.type, merged, { mode: 'draft' });
+      const hard = !result.ok && result.issues.some(isHardParseIssue);
+      if (hard) {
+        logger.warn('orchestration.canvasPatchApplier.config_invalid_update', {
+          nodeId: op.node_id,
+          nodeType: target.type,
+          issues: result.issues.slice(0, 3),
+        });
+        options.onChatMessage(
+          `I drafted a patch but op for ${op.node_id} (${target.type}) ` +
+            'has a schema issue — nothing was applied.',
+        );
+        return {
+          kind: 'config_invalid',
+          nodeId: op.node_id,
+          opKind: 'update_node_config',
+        };
+      }
+    }
+  }
 
   const stagger = options.staggerMs ?? 100;
   const signal = options.signal;

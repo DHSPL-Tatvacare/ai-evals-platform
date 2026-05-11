@@ -14,7 +14,7 @@ import unittest
 import uuid
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.orchestration_authoring.audit import authoring_logger
 from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
@@ -65,7 +65,7 @@ _VALID_DEFINITION = {
             'type': 'source.event_trigger',
             'position': {'x': 0, 'y': 0},
             'data': {},
-            'config': {'event_name': 'demo'},
+            'config': {},
         },
         {
             'id': 'sink',
@@ -106,6 +106,16 @@ def _make_ctx(*, builder: Any = None, auth: Any = None) -> SimpleNamespace:
 
 def _wrap(*, ops_json: str, rationale: str = 'test') -> str:
     return json.dumps({'ops_json': ops_json, 'rationale': rationale})
+
+
+async def _call_owned(ctx: SimpleNamespace, args: str) -> None:
+    app_id = ctx.context.builder_context.app_id
+    with patch(
+        'app.services.orchestration_authoring.orchestration_authoring_pack.'
+        '_assert_builder_workflow_still_owned',
+        new=AsyncMock(return_value=app_id),
+    ):
+        await _apply_patch_handler(ctx, args)
 
 
 def _payloads(handler: _Capturing) -> list[dict[str, Any]]:
@@ -162,13 +172,12 @@ class AuditEmissionShapeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload['permission_denied'])
 
     async def test_node_config_invalid_validation_result(self) -> None:
-        # Empty add_node config trips the per-node Pydantic validator.
         ops = json.dumps([{
             'op': 'add_node',
             'node_id': 'n1',
-            'payload': {'node_type': 'crm.send_wati', 'config': {'foo': 'bar'}},
+            'payload': {'node_type': 'crm.send_wati', 'config': 'not an object'},
         }])
-        await _apply_patch_handler(
+        await _call_owned(
             _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
             _wrap(ops_json=ops),
         )
@@ -181,7 +190,7 @@ class AuditEmissionShapeTests(unittest.IsolatedAsyncioTestCase):
             {'op': 'remove_node', 'node_id': f'n{i}', 'payload': {}}
             for i in range(MAX_PATCH_OPS + 1)
         ])
-        await _apply_patch_handler(
+        await _call_owned(
             _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
             _wrap(ops_json=big_ops),
         )
@@ -195,7 +204,7 @@ class AuditEmissionShapeTests(unittest.IsolatedAsyncioTestCase):
             'node_id': 'sink',
             'payload': {'config_patch': {'reason': 'demo done'}},
         }])
-        await _apply_patch_handler(
+        await _call_owned(
             _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
             _wrap(ops_json=ops, rationale='cleanup'),
         )
@@ -206,10 +215,15 @@ class AuditEmissionShapeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lookup_handler_emits_one_line(self) -> None:
         # list_node_types reads NODE_REGISTRY only — no DB session.
-        await _list_node_types_handler(
-            _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
-            json.dumps({}),
-        )
+        with patch(
+            'app.services.orchestration_authoring.orchestration_authoring_pack.'
+            '_assert_builder_workflow_still_owned',
+            new=AsyncMock(return_value='inside-sales'),
+        ):
+            await _list_node_types_handler(
+                _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
+                json.dumps({}),
+            )
         payload = self._assert_one_full_record(tool='list_node_types')
         self.assertEqual(payload['validation_result'], 'ok')
         self.assertEqual(payload['patch_op_count'], 0)
@@ -225,7 +239,7 @@ class AuditEmissionShapeTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch(target, side_effect=RuntimeError('boom')):
             with self.assertRaises(RuntimeError):
-                await _apply_patch_handler(
+                await _call_owned(
                     _make_ctx(builder=_make_snapshot(), auth=_make_auth()),
                     _wrap(ops_json=json.dumps([{
                         'op': 'remove_node', 'node_id': 'src', 'payload': {},

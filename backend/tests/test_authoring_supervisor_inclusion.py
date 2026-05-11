@@ -30,7 +30,7 @@ def _make_auth(*, with_perm: bool = True) -> AuthContext:
     )
 
 
-def _make_snapshot() -> BuilderSnapshot:
+def _make_snapshot(*, view_mode: str = 'edit') -> BuilderSnapshot:
     return BuilderSnapshot(
         workflow_id=uuid.uuid4(),
         version_id=None,
@@ -38,6 +38,7 @@ def _make_snapshot() -> BuilderSnapshot:
         app_id='inside-sales',
         definition={'nodes': [], 'edges': []},
         data_hash='hash-1',
+        view_mode=view_mode,
     )
 
 
@@ -121,6 +122,18 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
         tools = captured.get('tools') or []
         self.assertEqual(tools, ['data_specialist_tool', 'authoring_specialist_tool'])
         self.assertIn('authoring_built_with', captured)
+
+    def test_excludes_authoring_when_builder_is_view_mode(self) -> None:
+        sup_mod, fake_client, captured, patchers = _patched_supervisor()
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
+            sup_mod.build_supervisor(
+                'inside-sales', fake_client,
+                builder_context=_make_snapshot(view_mode='view'),
+                auth=_make_auth(with_perm=True),
+            )
+        tools = captured.get('tools') or []
+        self.assertEqual(tools, ['data_specialist_tool'])
+        self.assertNotIn('authoring_built_with', captured)
 
     def test_includes_authoring_when_owner_without_explicit_permission(self) -> None:
         """Owner role's permission bypass must reach the supervisor's gate.

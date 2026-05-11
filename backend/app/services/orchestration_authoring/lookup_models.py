@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.orchestration_authoring.credential_field_filter import (
     FORBIDDEN_FIELD_NAMES,
+    CredentialLeakError,
+    assert_no_credentials,
 )
 
 
@@ -131,19 +133,10 @@ def contains_credential_fields(payload: Any) -> str | None:
     Used by the pack's `build_outcome` egress filter. Blocklist match is
     case-insensitive and only on dict keys (list values are walked).
     """
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if isinstance(key, str) and key.lower() in CREDENTIAL_FIELD_BLOCKLIST:
-                return key
-            hit = contains_credential_fields(value)
-            if hit is not None:
-                return hit
-        return None
-    if isinstance(payload, list):
-        for item in payload:
-            hit = contains_credential_fields(item)
-            if hit is not None:
-                return hit
+    try:
+        assert_no_credentials(payload)
+    except CredentialLeakError as exc:
+        return exc.field_name
     return None
 
 

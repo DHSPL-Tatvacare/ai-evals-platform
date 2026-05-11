@@ -526,8 +526,8 @@ async def _resolve_builder_snapshot(
     Three-layer enforcement (Decision §R1):
       1. App-access on body.app_id AND pageContext.app_id; mismatch → 400.
       2. Workflow tenant ownership via `assert_workflow_owned` (404 not 403).
-      3. Permission gate: missing `'orchestration:manage'` drops the
-         context (warn-log) so the chat continues read-only.
+      3. Edit-mode + permission gate. Failing those drops the context
+         (warn-log) so the chat continues read-only.
 
     Log-redaction contract: `body.page_context.definition` is the entire
     canvas snapshot and can be tens of KB. The current request middleware
@@ -546,6 +546,21 @@ async def _resolve_builder_snapshot(
         from fastapi import HTTPException
         raise HTTPException(400, 'app_id mismatch between body and pageContext')
 
+    workflow = await assert_workflow_owned(
+        db, workflow_id=page.workflow_id, auth=auth,
+    )
+    if workflow.app_id != page.app_id:
+        from fastapi import HTTPException
+        raise HTTPException(400, 'pageContext app_id does not match workflow')
+
+    if page.view_mode != 'edit':
+        logger.info(
+            'sherlock_v3 builder context dropped: tenant=%s user=%s app=%s '
+            'workflow=%s — builder is in view mode',
+            auth.tenant_id, auth.user_id, page.app_id, page.workflow_id,
+        )
+        return None
+
     # Owner role bypasses permission lists; use the canonical helper instead
     # of a raw `in` check (Phase 2 hotfix — Owners were silently dropped
     # because they hold no literal permissions).
@@ -557,13 +572,6 @@ async def _resolve_builder_snapshot(
             auth.tenant_id, auth.user_id, page.app_id, page.workflow_id,
         )
         return None
-
-    workflow = await assert_workflow_owned(
-        db, workflow_id=page.workflow_id, auth=auth,
-    )
-    if workflow.app_id != page.app_id:
-        from fastapi import HTTPException
-        raise HTTPException(400, 'pageContext app_id does not match workflow')
 
     if page.version_id is None:
         snapshot_version_id = workflow.current_published_version_id

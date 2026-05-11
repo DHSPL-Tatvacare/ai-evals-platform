@@ -457,16 +457,16 @@ export type WaitMode =
   | 'event'
   | 'event_or_timeout';
 
-export type SplitMode = 'by_field' | 'by_rules' | 'random';
+export type SplitMode = 'by_field' | 'random';
 
 export interface SplitBranch {
   id: string;
   label: string;
-  /** Discriminator-specific extras (match value / predicate / weight)
-   *  carried as a free-form dict — the editor surfaces the right shape. */
-  match?: unknown;
-  predicate?: PredicateAst;
-  weight?: number;
+  /** by_field: routing key matched against ``payload[field]``.
+   *  random:   not present — branches carry weights instead. */
+  match?: string | null;
+  /** random mode only. */
+  weight?: number | null;
 }
 
 export type MergePolicy = 'dedupe' | 'last_wins' | 'merge_lists';

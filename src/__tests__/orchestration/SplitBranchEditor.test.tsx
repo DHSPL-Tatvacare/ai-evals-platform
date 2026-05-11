@@ -26,26 +26,23 @@ describe('SplitBranchEditor', () => {
     expect(screen.queryByText(next.branches[0].id)).not.toBeInTheDocument();
   });
 
-  it('renders predicate sub-editor for by_rules mode', () => {
+  it('renders weight input for random mode', () => {
     const onChange = vi.fn();
     render(
       <SplitBranchEditor
         value={{
-          mode: 'by_rules',
+          mode: 'random',
           branches: [
-            {
-              id: 'b1',
-              label: 'High',
-              predicate: { field: 'mql_score', op: 'gte', value: '4' },
-            },
+            { id: 'b1', label: 'High', weight: 3 },
+            { id: 'b2', label: 'Low', weight: 1 },
           ],
         }}
         onChange={onChange}
       />,
     );
-    // PredicateBuilder renders the kind switcher inside the branch row.
-    expect(screen.getAllByText('Leaf').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('AND').length).toBeGreaterThan(0);
+    const weightInputs = screen.getAllByPlaceholderText('weight');
+    expect(weightInputs).toHaveLength(2);
+    expect((weightInputs[0] as HTMLInputElement).value).toBe('3');
   });
 
   it('clears default_branch_id when its branch is removed', () => {
@@ -71,24 +68,19 @@ describe('SplitBranchEditor', () => {
   });
 
   it('drops mode-specific stale fields when normalizing split config for a new mode', () => {
+    // by_field → random strips `field` and `match`, populates `weight`.
     expect(
       normalizeSplitConfigForMode(
         {
           mode: 'by_field',
           field: 'tier',
-          branches: [{ id: 'b1', label: 'High', match: 'high', weight: 7 }],
+          branches: [{ id: 'b1', label: 'High', match: 'high' }],
         },
-        'by_rules',
+        'random',
       ),
     ).toEqual({
-      mode: 'by_rules',
-      branches: [
-        {
-          id: 'b1',
-          label: 'High',
-          predicate: { field: '', op: 'eq', value: '' },
-        },
-      ],
+      mode: 'random',
+      branches: [{ id: 'b1', label: 'High', weight: 1 }],
       default_branch_id: undefined,
     });
   });

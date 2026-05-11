@@ -25,8 +25,10 @@ import {
 import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import {
+  useHardParseIssues,
   useLifecycleState,
   useWorkflowBuilderStore,
+  type HardParseIssueGroup,
 } from '@/features/orchestration/store/workflowBuilderStore';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import {
@@ -40,6 +42,10 @@ import {
   pillLabel,
   type LifecycleState,
 } from '@/features/orchestration/contracts/lifecycleState';
+import {
+  buildSaveBlockedMessage,
+  shouldBlockSave,
+} from '@/features/orchestration/contracts/saveGate';
 import { PublishErrorPanel } from './PublishErrorPanel';
 
 interface WorkflowHeaderBarProps {
@@ -48,6 +54,23 @@ interface WorkflowHeaderBarProps {
    *  run; pass `null` to open the inspector with the picker only (the
    *  "browse runs" entry point). The page owns the URL state. */
   onOpenRuns?: (runId: string | null) => void;
+}
+
+/** Section 5 — fail-closed save gate. Returns ``true`` when the live
+ *  canvas carries hard parse issues (fabricated keys, wrong types, invalid
+ *  enums, malformed predicates). The Save / Publish handlers early-return
+ *  when this fires; we surface a notification pointing to the parse-issue
+ *  banner that already lists the offending nodes. Soft issues (missing
+ *  required fields tolerated by draft mode) never block — incomplete
+ *  drafts must remain saveable.
+ *
+ *  Decision + message live in ``saveGate.ts`` (pure, tested). The
+ *  notification side-effect stays here so the gate keeps a single
+ *  user-visible surface. */
+function blockSaveForHardIssues(groups: HardParseIssueGroup[]): boolean {
+  if (!shouldBlockSave(groups)) return false;
+  notificationService.error(buildSaveBlockedMessage(groups));
+  return true;
 }
 
 export function WorkflowHeaderBar({
@@ -65,6 +88,7 @@ export function WorkflowHeaderBar({
     (s) => s.currentPublishedVersionId,
   );
   const lifecycle = useLifecycleState();
+  const hardParseIssues = useHardParseIssues();
 
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   /** Last publish error in structured form. Cleared on the next publish
@@ -115,6 +139,7 @@ export function WorkflowHeaderBar({
 
   const handleSave = async () => {
     if (!workflowId || !workflowType) return;
+    if (blockSaveForHardIssues(hardParseIssues)) return;
     const store = useWorkflowBuilderStore.getState();
     store.beginInFlight('saving');
     try {
@@ -139,6 +164,7 @@ export function WorkflowHeaderBar({
 
   const handlePublish = async () => {
     if (!workflowId) return;
+    if (blockSaveForHardIssues(hardParseIssues)) return;
     const store = useWorkflowBuilderStore.getState();
     setPublishError(null);
     store.beginInFlight('publishing');

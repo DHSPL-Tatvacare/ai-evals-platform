@@ -37,7 +37,7 @@ import re
 import uuid
 from typing import Any, Callable, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.services.orchestration.source_catalog import (
     CohortSource,
@@ -216,7 +216,11 @@ class CohortQueryConfig(BaseModel):
         return cols
 
     @model_validator(mode="after")
-    def _require_one_selector(self) -> "CohortQueryConfig":
+    def _require_one_selector(self, info: ValidationInfo) -> "CohortQueryConfig":
+        # Cross-field completeness — an in-progress source node may have
+        # neither selector filled yet. Publish remains strict.
+        if info.context and info.context.get("mode") == "draft":
+            return self
         if self.source_ref is None and not (self.source_table and self.id_column):
             raise CohortQueryCompileError(
                 "cohort_query config must declare 'source_ref' "

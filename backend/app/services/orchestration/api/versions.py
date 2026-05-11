@@ -52,6 +52,25 @@ class VersionPublishError(ValueError):
         super().__init__(message)
 
 
+class DraftValidationError(ValueError):
+    """Raised when a draft save fails ``validate_definition(mode='draft')``.
+
+    Mirrors :class:`VersionPublishError` so the route layer renders both
+    publish and draft failures through the same ``PublishErrorPanel``
+    contract. The save is rejected before the row hits the database — a
+    half-broken draft cannot poison subsequent publish attempts.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        errors: "Optional[list[dict[str, str | None]]]" = None,
+    ) -> None:
+        self.errors = list(errors or [])
+        super().__init__(message)
+
+
 async def create_draft_version(
     db: AsyncSession,
     *,
@@ -64,6 +83,19 @@ async def create_draft_version(
     )).scalar_one_or_none()
     if wf is None:
         return None
+
+    # Normalize first so the stored row carries the canonical shape; then
+    # validate in draft mode. Draft tolerates missing required runtime
+    # fields but blocks fabricated keys, wrong types, malformed predicates,
+    # bad edges, and unknown node types.
+    canonical = normalize_definition(definition)
+    try:
+        validate_definition(
+            canonical, workflow_type=wf.workflow_type, mode="draft",
+        )
+    except DefinitionValidationError as exc:
+        raise DraftValidationError(str(exc), errors=exc.errors) from exc
+
     next_version = (await db.execute(
         select(func.coalesce(func.max(WorkflowVersion.version), 0))
         .where(WorkflowVersion.workflow_id == workflow_id)
@@ -74,7 +106,7 @@ async def create_draft_version(
         app_id=wf.app_id,
         workflow_id=workflow_id,
         version=next_version,
-        definition=definition,
+        definition=canonical,
         status="draft",
     )
     db.add(v)

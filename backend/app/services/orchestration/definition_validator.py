@@ -34,11 +34,26 @@ Contract:
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+from pydantic import ValidationError as PydanticValidationError
 
 from app.services.orchestration.node_descriptors import build_descriptor
 from app.services.orchestration.node_registry import NodeRegistryError, resolve_handler
 from app.services.orchestration.nodes.logic_wait import expected_output_ids_for_config
+
+# Draft vs publish validation:
+#   - publish: every rule fires (current behavior)
+#   - draft:   structural rules fire; cross-field completeness and
+#              "must have outgoing edges yet" rules are deferred. Used by
+#              the authoring agent's apply_patch and by create_draft_version
+#              so partial in-progress workflows can save without flipping
+#              every required field on. The per-node Pydantic schema is
+#              still invoked, but ``context={'mode': 'draft'}`` lets node
+#              ``model_validator`` short-circuit completeness checks while
+#              preserving structural checks (extra='forbid', wrong types,
+#              malformed predicates, conflicting mode fields).
+ValidationMode = Literal["draft", "publish"]
 
 
 class DefinitionValidationError(ValueError):
@@ -170,8 +185,23 @@ def _err(
     return {"node_id": node_id, "field": field, "message": message}
 
 
-def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> None:
-    """Validate a canonical (post-normalization) definition. Raises on failure."""
+def validate_definition(
+    definition: dict[str, Any],
+    *,
+    workflow_type: str,
+    mode: ValidationMode = "publish",
+) -> None:
+    """Validate a canonical (post-normalization) definition. Raises on failure.
+
+    ``mode='publish'`` (default) preserves the legacy behavior — every rule
+    fires. ``mode='draft'`` defers completeness rules (ingress / terminal /
+    source-must-wire / required-output-ids / requires-outgoing-edges) and
+    propagates ``{'mode': 'draft'}`` into the per-node Pydantic context so
+    node validators can short-circuit "required when mode=X" checks without
+    relaxing structural ones (extra='forbid', wrong types, malformed
+    predicates, conflicting fields).
+    """
+    is_draft = mode == "draft"
     errors: list[dict[str, Optional[str]]] = []
     nodes: list[dict[str, Any]] = list(definition.get("nodes") or [])
     edges: list[dict[str, Any]] = list(definition.get("edges") or [])
@@ -239,9 +269,29 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
                 )
             )
             continue
+        # Draft mode validates every PROVIDED field strictly but tolerates
+        # missing required fields. Pydantic's required-check short-circuits
+        # before model_validators run, so we drop `type='missing'` errors
+        # explicitly and re-raise only when other errors remain. Structural
+        # errors (extra_forbidden, type_error, value_error from gated
+        # model_validators, predicate AST shape) still fire.
         try:
-            handler.config_schema(**(n.get("config") or {}))
-        except Exception as exc:  # noqa: BLE001 — surfaces Pydantic / value errors verbatim
+            handler.config_schema.model_validate(
+                n.get("config") or {},
+                context={"mode": mode},
+            )
+        except PydanticValidationError as exc:
+            kept = [e for e in exc.errors() if not (is_draft and e.get("type") == "missing")]
+            if kept:
+                bullets = "; ".join(
+                    f"{'.'.join(str(p) for p in e.get('loc') or ()) or '(root)'}: "
+                    f"{e.get('msg') or e.get('type') or 'invalid'}"
+                    for e in kept
+                )
+                errors.append(
+                    _err(f"config invalid: {bullets}", node_id=nid, field="config")
+                )
+        except Exception as exc:  # noqa: BLE001 — surfaces non-Pydantic value errors verbatim
             errors.append(
                 _err(f"config invalid: {exc}", node_id=nid, field="config")
             )
@@ -272,20 +322,23 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
                 in_edge_count[t] += 1
 
     # ── 7: at least one ingress (source.*) node ─────────────────────────
-    if not any((n.get("type") or "").startswith("source.") for n in nodes):
-        errors.append(_err("workflow has no ingress (source.*) node"))
-
     # ── 8: terminal paths exist ─────────────────────────────────────────
-    has_terminal = any(
-        (n.get("type") or "").startswith("sink.") or not out_edges_by_node[n["id"]]
-        for n in nodes
-    )
-    if nodes and not has_terminal:
-        errors.append(
-            _err(
-                "workflow has no terminal node (sink.* or a node with no outgoing edges)"
-            )
+    # Both are completeness rules: a half-authored canvas may have neither
+    # a source yet nor a terminal sink. They fire only at publish.
+    if not is_draft:
+        if not any((n.get("type") or "").startswith("source.") for n in nodes):
+            errors.append(_err("workflow has no ingress (source.*) node"))
+
+        has_terminal = any(
+            (n.get("type") or "").startswith("sink.") or not out_edges_by_node[n["id"]]
+            for n in nodes
         )
+        if nodes and not has_terminal:
+            errors.append(
+                _err(
+                    "workflow has no terminal node (sink.* or a node with no outgoing edges)"
+                )
+            )
 
     # ── 9–14: per-node graph rules ──────────────────────────────────────
     for n in nodes:
@@ -302,9 +355,13 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
         outs = out_edges_by_node.get(nid, [])
 
         # Source nodes: exactly one outgoing 'default' edge.
+        # In draft mode the cardinality check is deferred (a fresh source
+        # has 0 outgoing edges); the structural "no non-default outputs"
+        # rule still fires because that is a wrong-direction bug, not
+        # an incomplete-authoring state.
         if node_type.startswith("source."):
             default_edges = [e for e in outs if e.get("output_id") == "default"]
-            if len(default_edges) != 1:
+            if not is_draft and len(default_edges) != 1:
                 errors.append(
                     _err(
                         f"source node ({node_type}) must have exactly one outgoing "
@@ -334,25 +391,27 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
             )
 
         # Required output ids must each have at least one outgoing edge.
-        for required in descriptor.graph_rules.required_output_ids:
-            if not out_edges_by_node_output.get((nid, required)):
+        # Deferred in draft — author may still be wiring outputs.
+        if not is_draft:
+            for required in descriptor.graph_rules.required_output_ids:
+                if not out_edges_by_node_output.get((nid, required)):
+                    errors.append(
+                        _err(
+                            f"node ({node_type}) missing required outgoing edge for output {required!r}",
+                            node_id=nid,
+                            field=f"edges.{required}",
+                        )
+                    )
+
+            # Generic outgoing-edges requirement.
+            if descriptor.graph_rules.requires_outgoing_edges and not outs:
                 errors.append(
                     _err(
-                        f"node ({node_type}) missing required outgoing edge for output {required!r}",
+                        f"node ({node_type}) requires at least one outgoing edge",
                         node_id=nid,
-                        field=f"edges.{required}",
+                        field="edges",
                     )
                 )
-
-        # Generic outgoing-edges requirement.
-        if descriptor.graph_rules.requires_outgoing_edges and not outs:
-            errors.append(
-                _err(
-                    f"node ({node_type}) requires at least one outgoing edge",
-                    node_id=nid,
-                    field="edges",
-                )
-            )
 
         # No duplicate (node_id, output_id) edges unless the output declares fan-out.
         descriptor_outputs_by_id = {oe.id: oe for oe in descriptor.output_edges}
@@ -385,7 +444,7 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
                 for b in (n.get("config") or {}).get("branches", [])
                 if isinstance(b, dict) and b.get("id")
             }
-            if not branch_ids:
+            if not branch_ids and not is_draft:
                 errors.append(
                     _err(
                         "split node has no branches",
@@ -430,7 +489,8 @@ def validate_definition(definition: dict[str, Any], *, workflow_type: str) -> No
                 )
             # If the descriptor's graph_rules.requires_outgoing_edges is true,
             # at least one of the expected outputs must be wired.
-            if descriptor.graph_rules.requires_outgoing_edges:
+            # Deferred in draft — author may still be wiring outputs.
+            if descriptor.graph_rules.requires_outgoing_edges and not is_draft:
                 if not (expected & seen_outputs):
                     errors.append(
                         _err(

@@ -6,12 +6,11 @@ blocklist; other modules import from here. Adding a name here is the
 only way the egress filter learns about a new credential field.
 
 Two egress points use this module today:
-  - `lookup_models.contains_credential_fields` (legacy nullable-return
-    shim, retained so existing per-handler call sites inside the pack
-    keep working without the refactor sprawl).
-  - `orchestration_authoring_pack.build_outcome` (Phase 3 Step 4 —
-    raises CredentialLeakError directly so the harness path can never
-    leak a payload).
+  - `lookup_models.contains_credential_fields`, a small adapter for call
+    sites that need a nullable field name instead of an exception.
+  - `orchestration_authoring_pack.build_outcome`, which raises
+    CredentialLeakError directly so the harness path can never leak a
+    payload.
 """
 from __future__ import annotations
 

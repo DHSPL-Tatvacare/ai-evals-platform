@@ -256,12 +256,25 @@ def _merge_finished_tool_call(
     }
 
 
+_ARTIFACT_KIND_TO_PACK: dict[str, tuple[str, str]] = {
+    # Canvas patches from the orchestration_authoring pack.
+    'orchestration.canvas_patch.v1': ('orchestration.authoring', 'orchestration.canvas_patch.v1'),
+}
+_DEFAULT_ARTIFACT_PACK: tuple[str, str] = ('analytics', 'analytics.chart.v1')
+
+
 def _artifact_to_metadata(event: dict[str, Any]) -> dict[str, Any]:
+    """Stamp pack_id + contract_id by event.kind; analytics is the default."""
+    kind = event.get('kind')
+    pack_id, contract_id = _ARTIFACT_KIND_TO_PACK.get(
+        kind if isinstance(kind, str) else '',
+        _DEFAULT_ARTIFACT_PACK,
+    )
     return {
-        'pack_id': 'analytics',
-        'contract_id': 'analytics.chart.v1',
+        'pack_id': pack_id,
+        'contract_id': contract_id,
         'payload': event.get('payload') or {},
-        'extras': {'kind': event.get('kind')},
+        'extras': {'kind': kind},
     }
 
 

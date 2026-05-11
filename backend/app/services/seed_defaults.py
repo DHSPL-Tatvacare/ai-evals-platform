@@ -1927,10 +1927,11 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 # APPS + ROLES SEEDING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Sherlock v3 routes through ``backend/app/services/sherlock_v3/`` and does
-# not consume capability packs from ``App.config.chat.capabilities``. Keep
-# the list empty so app seeds do not reference legacy pack ids.
+# Sherlock v3 authoring tools are opt-in through
+# ``App.config.chat.capabilities``. Analytics remains built into v3; only
+# extra tool packs are listed here.
 COMMON_SHERLOCK_CAPABILITIES: list[str] = []
+ORCHESTRATION_AUTHORING_CAPABILITIES: list[str] = ["orchestration.authoring"]
 
 # M2: the legacy meaning-layer constants (``COMMON_SHERLOCK_ENTITY_TYPES``,
 # ``COMMON_RUN_SURFACE``, ``COMMON_RUN_RESOLVERS``) were deleted. Platform
@@ -2360,9 +2361,9 @@ APP_SEEDS = [
             },
             "chat": {
                 "enabled": True,
-                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
-                # M2: meaning-layer seeds live in ``sherlock_ontology_*``
-                # tables; runtime reads from the bundle, not app config.
+                "capabilities": ORCHESTRATION_AUTHORING_CAPABILITIES,
+                # The orchestration builder lives under inside-sales; this
+                # opt-in is what lets Sherlock propose canvas patches there.
                 "promptTemplates": [
                     {"label": "Summarize recent calls", "prompt": "Summarize the most recent call evaluation results and highlight coaching opportunities"},
                     {"label": "Compare agent trends", "prompt": "Compare recent call quality trends across agents"},
