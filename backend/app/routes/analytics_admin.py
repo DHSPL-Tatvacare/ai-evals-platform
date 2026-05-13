@@ -47,6 +47,16 @@ from app.services.analytics.backfill_lead_signals_job import (
     estimate_cost,
     parse_request as parse_lead_signals_request,
 )
+from app.services.analytics.backfill_stage_transitions_job import (
+    DEFAULT_BATCH_SIZE as STAGE_DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_LEADS as STAGE_DEFAULT_MAX_LEADS,
+    MAX_BATCH_SIZE as STAGE_MAX_BATCH_SIZE,
+    MAX_MAX_LEADS as STAGE_MAX_MAX_LEADS,
+    MIN_BATCH_SIZE as STAGE_MIN_BATCH_SIZE,
+    MIN_MAX_LEADS as STAGE_MIN_MAX_LEADS,
+    count_candidate_leads as count_candidate_stage_leads,
+    parse_request as parse_stage_request,
+)
 from app.services.analytics.mirror_to_fact_mapper import MirrorToFactMapper
 
 
@@ -200,6 +210,67 @@ class BackfillLeadSignalsResponse(CamelModel):
     job_id: uuid.UUID
     estimated_cost_usd: float
     cost_budget_usd: float
+    lead_count: int
+    app_id: str
+
+
+class BackfillStageTransitionsRequest(CamelModel):
+    """Request body for ``POST /api/admin/analytics/backfill-stage-transitions``.
+
+    Phase 6 of the analytics-facts-canonical-manifest-thinning plan. Reads
+    each lead's current ``prospect_stage`` from ``analytics.crm_lead_record``
+    and writes one row per lead into ``analytics.fact_lead_stage_transition``
+    with ``from_stage=NULL`` and ``detected_at`` derived from the lead's
+    ``created_on``/``first_synced_at`` snapshot. CRM-agnostic — same path
+    serves any future CRM-backed app via the ``app_id`` param.
+
+    No LLM, no cost budget — this is a pure projection from the mirror.
+    """
+
+    app_id: str = Field(..., min_length=1, max_length=50)
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When true, returns lead count and skips the job submission. "
+            "No fact rows written."
+        ),
+    )
+    max_leads: int = Field(
+        default=STAGE_DEFAULT_MAX_LEADS,
+        ge=STAGE_MIN_MAX_LEADS,
+        le=STAGE_MAX_MAX_LEADS,
+    )
+    batch_size: int = Field(
+        default=STAGE_DEFAULT_BATCH_SIZE,
+        ge=STAGE_MIN_BATCH_SIZE,
+        le=STAGE_MAX_BATCH_SIZE,
+    )
+    started_after: datetime | None = None
+    ended_before: datetime | None = None
+
+    @field_validator("ended_before")
+    @classmethod
+    def _ended_after_started_stage(
+        cls, value: datetime | None, info: Any  # noqa: ANN401
+    ) -> datetime | None:
+        started = info.data.get("started_after") if info is not None else None
+        if value is not None and started is not None and value <= started:
+            raise ValueError("ended_before must be strictly after started_after")
+        return value
+
+
+class BackfillStageTransitionsDryRunResponse(CamelModel):
+    """Dry-run path response. No job is enqueued."""
+
+    dry_run: bool = True
+    app_id: str
+    lead_count: int
+
+
+class BackfillStageTransitionsResponse(CamelModel):
+    """Live-run path response — job enqueued at 202."""
+
+    job_id: uuid.UUID
     lead_count: int
     app_id: str
 
@@ -595,6 +666,84 @@ async def submit_backfill_lead_signals(
         job_id=job_id,
         estimated_cost_usd=estimated,
         cost_budget_usd=parsed.cost_budget_usd,
+        lead_count=lead_count,
+        app_id=parsed.app_id,
+    )
+
+
+@router.post(
+    "/backfill-stage-transitions",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        200: {"description": "Dry-run result (no job enqueued)"},
+        202: {"description": "Job enqueued"},
+    },
+)
+async def submit_backfill_stage_transitions(
+    body: BackfillStageTransitionsRequest,
+    response: Response,
+    auth: AuthContext = require_permission("analytics:admin"),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Submit a ``backfill-stage-transitions`` job for one ``(tenant, app_id)``.
+
+    Dry-run (``dry_run=true``) returns a 200 with
+    ``BackfillStageTransitionsDryRunResponse`` containing the count of
+    candidate leads; no job is enqueued. Live run (``dry_run=false``)
+    returns a 202 with ``BackfillStageTransitionsResponse`` and enqueues
+    the job.
+
+    Rollback: ``DELETE FROM analytics.fact_lead_stage_transition WHERE sync_run_id = '<id>'``.
+    """
+    params: dict[str, Any] = {
+        "app_id": body.app_id,
+        "dry_run": body.dry_run,
+        "max_leads": body.max_leads,
+        "batch_size": body.batch_size,
+        "started_after": (
+            body.started_after.isoformat() if body.started_after else None
+        ),
+        "ended_before": (
+            body.ended_before.isoformat() if body.ended_before else None
+        ),
+    }
+    try:
+        parsed = parse_stage_request(params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if parsed.dry_run:
+        response.status_code = status.HTTP_200_OK
+        lead_count = await count_candidate_stage_leads(
+            db, tenant_id=auth.tenant_id, request=parsed
+        )
+        return BackfillStageTransitionsDryRunResponse(
+            app_id=parsed.app_id,
+            lead_count=lead_count,
+        )
+
+    lead_count = await count_candidate_stage_leads(
+        db, tenant_id=auth.tenant_id, request=parsed
+    )
+
+    job_id = uuid.uuid4()
+    job = BackgroundJob(
+        id=job_id,
+        job_type="backfill-stage-transitions",
+        app_id=body.app_id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        priority=520,
+        queue_class="bulk",
+        max_attempts=3,
+        params={**params, "tenant_id": str(auth.tenant_id), "user_id": str(auth.user_id)},
+    )
+    db.add(job)
+    await db.flush()
+    await db.commit()
+
+    return BackfillStageTransitionsResponse(
+        job_id=job_id,
         lead_count=lead_count,
         app_id=parsed.app_id,
     )

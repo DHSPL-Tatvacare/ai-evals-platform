@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -757,7 +757,27 @@ async def _append_lead_stage_transitions(
         )
     if not payload:
         return 0
-    await db.execute(pg_insert(FactLeadStageTransition).values(payload))
+    # ON CONFLICT DO NOTHING against the partial unique index added in
+    # Alembic 0041 (Phase 6). The read-before-write loop above is the
+    # primary idempotency mechanism; this clause is defense in depth for
+    # the narrow race where two cycles for the same (tenant, app) start
+    # with sub-microsecond-identical ``cycle_start`` values, or where a
+    # worker retries after a partial-fail commit. Without it, the second
+    # writer would raise ``IntegrityError`` on the unique key; with it,
+    # the duplicate is silently skipped and the steady-state sync stays
+    # green. ``index_where`` matches the partial predicate so Postgres
+    # picks the right index.
+    stmt = pg_insert(FactLeadStageTransition).values(payload)
+    stmt = stmt.on_conflict_do_nothing(
+        index_elements=[
+            FactLeadStageTransition.tenant_id,
+            FactLeadStageTransition.app_id,
+            FactLeadStageTransition.lead_id,
+            FactLeadStageTransition.detected_at,
+        ],
+        index_where=text("sync_run_id IS NOT NULL"),
+    )
+    await db.execute(stmt)
     return len(payload)
 
 

@@ -1680,6 +1680,35 @@ async def handle_backfill_lead_signals(
 
 
 @register_job_handler(
+    "backfill-stage-transitions",
+    queue_class="bulk",
+    priority=520,
+    # Idempotent on (tenant_id, app_id, lead_id, to_stage, detected_at) via
+    # the partial unique index uq_fact_lead_stage_transition_backfill
+    # (migration 0041). detected_at is derived from the lead's created_on /
+    # first_synced_at snapshot, so replays over unchanged mirror state
+    # upsert into the same row.
+    retry_safe=True,
+)
+async def handle_backfill_stage_transitions(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Backfill ``analytics.fact_lead_stage_transition`` from the CRM lead mirror.
+
+    Phase 6 of docs/plans/2026-05-12-analytics-facts-canonical-manifest-thinning.md.
+    Generic naming — not anchored to inside-sales; reused for future
+    CRM-backed apps by passing the new app_id.
+    """
+    from app.services.analytics.backfill_stage_transitions_job import (
+        run_backfill_stage_transitions,
+    )
+
+    return await run_backfill_stage_transitions(
+        job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id,
+    )
+
+
+@register_job_handler(
     "run-workflow",
     queue_class="standard",
     priority=5,

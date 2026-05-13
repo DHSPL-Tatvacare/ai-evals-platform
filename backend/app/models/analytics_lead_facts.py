@@ -179,6 +179,27 @@ class FactLeadStageTransition(Base):
             "to_stage",
             "detected_at",
         ),
+        # Phase 6 (Alembic 0041) — partial unique index covers rows stamped
+        # by a backfill or steady-state sync. ``to_stage`` is intentionally
+        # NOT part of the key: a lead has one prospect_stage at any moment,
+        # so reruns of the backfill (same detected_at, possibly different
+        # current to_stage) UPDATE the seed row instead of forking. Existing
+        # pre-sync_run_id rows remain unconstrained.
+        Index(
+            "uq_fact_lead_stage_transition_backfill",
+            "tenant_id",
+            "app_id",
+            "lead_id",
+            "detected_at",
+            unique=True,
+            postgresql_where=text("sync_run_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_fact_lead_stage_transition_tenant_app_sync_run",
+            "tenant_id",
+            "app_id",
+            "sync_run_id",
+        ),
         {"schema": "analytics"},
     )
 
