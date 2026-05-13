@@ -1629,6 +1629,29 @@ async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.U
 
 
 @register_job_handler(
+    "backfill-facts-from-mirror",
+    queue_class="bulk",
+    priority=520,
+    # Idempotent on (tenant_id, app_id, source_activity_id, activity_type)
+    # via ON CONFLICT DO UPDATE in the handler, so transient DB errors are
+    # safe to re-queue. Replays re-project from the current mirror state
+    # per plan §5.2 "Backfill replay safety".
+    retry_safe=True,
+)
+async def handle_backfill_facts_from_mirror(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Project a mirror table into its target fact via the Phase 2 mapper."""
+    from app.services.analytics.backfill_facts_from_mirror_job import (
+        run_backfill_facts_from_mirror,
+    )
+
+    return await run_backfill_facts_from_mirror(
+        job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id,
+    )
+
+
+@register_job_handler(
     "run-workflow",
     queue_class="standard",
     priority=5,

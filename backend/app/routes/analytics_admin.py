@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import Field
+from pydantic import Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +24,15 @@ from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.analytics_log import LogFactPopulationRun
 from app.models.analytics_mapping_state import MappingState
+from app.models.job import BackgroundJob
 from app.schemas.base import CamelModel
 from app.services.analytics import mirror_to_fact_sync
+from app.services.analytics.backfill_facts_from_mirror_job import (
+    DEFAULT_BATCH_SIZE,
+    MAX_BATCH_SIZE,
+    MIN_BATCH_SIZE,
+    SUPPORTED_TARGET_FACT,
+)
 from app.services.analytics.mirror_to_fact_mapper import MirrorToFactMapper
 
 
@@ -61,6 +69,49 @@ class DisableMappingRequest(CamelModel):
             "self-describing."
         ),
     )
+
+
+class BackfillFactsRequest(CamelModel):
+    """Request body for ``POST /api/admin/analytics/backfill-facts``.
+
+    The mapping registry is the source of truth for allowed (app_id,
+    source_table, activity_type) tuples — operators cannot point this at an
+    arbitrary table. ``target_fact`` is gated to ``analytics.fact_lead_activity``
+    in Phase 4; signal-fact (Phase 5) and stage-transition-fact (Phase 6)
+    backfills will ship as their own job types, not as new targets for this
+    endpoint.
+    """
+
+    app_id: str = Field(..., min_length=1, max_length=50)
+    source_table: str = Field(..., min_length=1, max_length=120)
+    activity_type: str = Field(..., min_length=1, max_length=64)
+    started_after: datetime | None = None
+    ended_before: datetime | None = None
+    batch_size: int = Field(
+        default=DEFAULT_BATCH_SIZE,
+        ge=MIN_BATCH_SIZE,
+        le=MAX_BATCH_SIZE,
+        description=(
+            f"Mirror rows per batch. Clamped to "
+            f"[{MIN_BATCH_SIZE}, {MAX_BATCH_SIZE}] to bound per-batch DB cost."
+        ),
+    )
+
+    @field_validator("ended_before")
+    @classmethod
+    def _ended_after_started(
+        cls, value: datetime | None, info: Any  # noqa: ANN401
+    ) -> datetime | None:
+        started = info.data.get("started_after") if info is not None else None
+        if value is not None and started is not None and value <= started:
+            raise ValueError("ended_before must be strictly after started_after")
+        return value
+
+
+class BackfillFactsResponse(CamelModel):
+    job_id: uuid.UUID
+    mapping_id: uuid.UUID
+    target_fact: str
 
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -218,6 +269,134 @@ def _reset_counter_for_row(row: MappingState) -> None:
     except KeyError:
         return
     mirror_to_fact_sync.reset_failure_counter(mapping)
+
+
+@router.post(
+    "/backfill-facts",
+    response_model=BackfillFactsResponse,
+    status_code=202,
+)
+async def submit_backfill_facts(
+    body: BackfillFactsRequest,
+    auth: AuthContext = require_permission("analytics:admin"),
+    db: AsyncSession = Depends(get_db),
+) -> BackfillFactsResponse:
+    """Submit a ``backfill-facts-from-mirror`` job for one mapping.
+
+    Phase 4 only supports projection into ``analytics.fact_lead_activity``;
+    signal and stage-transition backfills will land as their own job types
+    in Phases 5/6. Validation refuses anything else with a stable 400 detail
+    so future callers can branch on it.
+
+    Idempotency: this endpoint does NOT use ``Idempotency-Key`` semantics
+    because backfills are explicitly safe to replay (ON CONFLICT DO UPDATE
+    re-projects from the current mirror state). Operators wanting to dedupe
+    in-flight runs should check the existing ``mapping_id``'s open log row
+    via the mappings list endpoint first.
+    """
+    # Mapper lookup is the allowlist. An unknown tuple = 400 with a stable
+    # detail string. We don't fall through to the job runner's later
+    # KeyError because that would only surface as a generic 500.
+    try:
+        mapping = MirrorToFactMapper.default().for_table(
+            body.app_id, body.source_table, body.activity_type
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"no mirror->fact mapping registered for "
+                f"app_id={body.app_id!r}, source_table={body.source_table!r}, "
+                f"activity_type={body.activity_type!r}"
+            ),
+        )
+
+    if mapping.target_fact != SUPPORTED_TARGET_FACT:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Phase 4 backfill only supports target_fact="
+                f"{SUPPORTED_TARGET_FACT!r}; mapping {mapping.key!r} targets "
+                f"{mapping.target_fact!r}"
+            ),
+        )
+
+    # The mapping_state row is the cross-reference operators see in the
+    # mappings list — we surface its id in the response so the UI can link
+    # the new job to the row that controls disable/enable.
+    state_row = await db.scalar(
+        select(MappingState).where(
+            MappingState.app_id == mapping.app_id,
+            MappingState.source_table == mapping.source_table,
+            MappingState.target_fact == mapping.target_fact,
+            MappingState.activity_type == mapping.activity_type,
+        )
+    )
+    if state_row is None:
+        # A registered mapping without a state row means the Phase 2 seed
+        # migration was skipped — refuse rather than crash inside the job.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"mapping_state row missing for {mapping.key!r}; "
+                "seed migration 0039 must run before backfill"
+            ),
+        )
+
+    # NOTE: we do NOT reject when ``enabled=False``. A disabled mapping
+    # means same-tx sync runs mirror-only; backfill is exactly the recovery
+    # path the operator needs to close the resulting gap. The plan
+    # (§5.2 "Backfill replay safety") makes this explicit.
+
+    params: dict[str, Any] = {
+        "app_id": body.app_id,
+        "source_table": body.source_table,
+        "activity_type": body.activity_type,
+        "started_after": (
+            body.started_after.isoformat() if body.started_after else None
+        ),
+        "ended_before": (
+            body.ended_before.isoformat() if body.ended_before else None
+        ),
+        "batch_size": body.batch_size,
+        # Carry submitter info into params for parity with the existing
+        # job-submission pattern (jobs.py:submit_job injects tenant/user
+        # automatically; admin endpoints write the row directly so we
+        # mirror the fields the worker reads).
+        "tenant_id": str(auth.tenant_id),
+        "user_id": str(auth.user_id),
+    }
+
+    # Pre-allocate the job id so the response carries it without depending
+    # on flush()-time default population. The ORM ``default=uuid.uuid4`` only
+    # fires inside the SQLAlchemy flush path; pre-allocating makes the id
+    # available immediately and also lets the worker reference itself in
+    # downstream log rows before flush.
+    job_id = uuid.uuid4()
+    job = BackgroundJob(
+        id=job_id,
+        job_type="backfill-facts-from-mirror",
+        app_id=body.app_id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        # ``bulk`` queue: this can scan tens of thousands of rows and
+        # shouldn't compete with interactive analytics requests.
+        priority=520,
+        queue_class="bulk",
+        # The handler is idempotent and the worker retries transient failures
+        # via ``retry_safe=True``; 3 attempts matches populate-analytics.
+        max_attempts=3,
+        params=params,
+    )
+    db.add(job)
+    await db.flush()
+    await db.commit()
+
+    return BackfillFactsResponse(
+        job_id=job_id,
+        mapping_id=state_row.id,
+        target_fact=mapping.target_fact,
+    )
 
 
 async def _load_or_404(db: AsyncSession, mapping_id: uuid.UUID) -> MappingState:
