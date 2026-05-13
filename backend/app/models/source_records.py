@@ -66,10 +66,10 @@ class CrmCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
         default=uuid.uuid4,
     )
     activity_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    prospect_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    agent_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    agent_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    agent_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lead_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    rep_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rep_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rep_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     event_code: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -84,7 +84,9 @@ class CrmCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     created_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "activity_id", name="uq_crm_call_record_tenant_app_activity"),
+        UniqueConstraint(
+            "tenant_id", "app_id", "activity_id", name="uq_crm_call_record_tenant_app_activity"
+        ),
         Index("idx_crm_call_record_tenant_app_call_started", "tenant_id", "app_id", "call_started_at"),
         Index("idx_crm_call_record_tenant_app_created", "tenant_id", "app_id", "created_on"),
         Index(
@@ -94,12 +96,16 @@ class CrmCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
             func.coalesce(call_started_at, created_on).desc(),
             activity_id.desc(),
         ),
+        # Index name retains the legacy ``_agent_lower`` suffix because the
+        # underlying Postgres index is renamed by Alembic 0038 against the
+        # renamed column; renaming the index identifier itself is a Phase 9
+        # cleanup. The expression now indexes ``rep_name``.
         Index(
             "idx_crm_call_record_tenant_app_agent_lower",
             "tenant_id",
             "app_id",
-            func.lower(agent_name),
-            postgresql_where=text("agent_name IS NOT NULL"),
+            func.lower(rep_name),
+            postgresql_where=text("rep_name IS NOT NULL"),
         ),
         Index("idx_crm_call_record_tenant_app_direction", "tenant_id", "app_id", "direction"),
         Index(
@@ -109,7 +115,8 @@ class CrmCallRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
             func.lower(status),
             postgresql_where=text("status IS NOT NULL"),
         ),
-        Index("idx_crm_call_record_tenant_app_prospect", "tenant_id", "app_id", "prospect_id"),
+        # Same legacy index name; column is now ``lead_id``.
+        Index("idx_crm_call_record_tenant_app_prospect", "tenant_id", "app_id", "lead_id"),
         Index("idx_crm_call_record_tenant_app_recording", "tenant_id", "app_id", "has_recording"),
         {"schema": "analytics"},
     )
@@ -123,7 +130,7 @@ class CrmLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
         primary_key=True,
         default=uuid.uuid4,
     )
-    prospect_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    lead_id: Mapped[str] = mapped_column(String(100), nullable=False)
     first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -138,7 +145,7 @@ class CrmLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     condition: Mapped[str | None] = mapped_column(Text, nullable=True)
     hba1c_band: Mapped[str | None] = mapped_column(Text, nullable=True)
     intent_to_pay: Mapped[str | None] = mapped_column(Text, nullable=True)
-    agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rep_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_campaign: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -155,14 +162,20 @@ class CrmLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
     mql_signals: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "app_id", "prospect_id", name="uq_crm_lead_record_tenant_app_prospect"),
+        # Constraint name retains the legacy ``_prospect`` suffix; the
+        # underlying Postgres constraint is renamed in place by 0038 and
+        # references the new ``lead_id`` column. Constraint-identifier
+        # rename is a Phase 9 cleanup item.
+        UniqueConstraint(
+            "tenant_id", "app_id", "lead_id", name="uq_crm_lead_record_tenant_app_prospect"
+        ),
         Index("idx_crm_lead_record_tenant_app_created", "tenant_id", "app_id", "created_on"),
         Index(
             "idx_crm_lead_record_tenant_app_created_prospect",
             "tenant_id",
             "app_id",
             created_on.desc(),
-            prospect_id.desc(),
+            lead_id.desc(),
         ),
         Index("idx_crm_lead_record_tenant_app_last_activity", "tenant_id", "app_id", "last_activity_on"),
         Index(
@@ -175,8 +188,8 @@ class CrmLeadRecord(Base, TimestampMixin, SourceRecordMetadataMixin):
             "idx_crm_lead_record_tenant_app_agent_lower",
             "tenant_id",
             "app_id",
-            func.lower(agent_name),
-            postgresql_where=text("agent_name IS NOT NULL"),
+            func.lower(rep_name),
+            postgresql_where=text("rep_name IS NOT NULL"),
         ),
         Index(
             "idx_crm_lead_record_tenant_app_city_lower",

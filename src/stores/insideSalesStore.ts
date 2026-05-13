@@ -19,7 +19,7 @@ type LeadsCacheEntry = Pick<LeadListResponse, 'leads' | 'total' | 'page' | 'page
 function buildCallsFilterHash(filters: CallFilters, pageSize: number): string {
   return [
     (filters.agents ?? []).join(','),
-    (filters.prospectId ?? []).join(','),
+    (filters.leadId ?? []).join(','),
     filters.direction ?? '',
     filters.status ?? '',
     filters.hasRecording ? 'recording' : '',
@@ -37,7 +37,7 @@ function buildLeadsFilterHash(filters: LeadFilters, pageSize: number): string {
     (filters.condition ?? []).join(','),
     filters.mqlMin ?? '',
     (filters.city ?? []).join(','),
-    (filters.prospectId ?? []).join(','),
+    (filters.leadId ?? []).join(','),
     (filters.phone ?? []).join(','),
     (filters.planName ?? []).join(','),
     (filters.q ?? '').trim(),
@@ -76,7 +76,7 @@ interface InsideSalesState {
 
 const DEFAULT_FILTERS: CallFilters = {
   agents: [],
-  prospectId: [],
+  leadId: [],
   direction: '',
   status: '',
   hasRecording: false,
@@ -227,7 +227,7 @@ const DEFAULT_LEAD_FILTERS: LeadFilters = {
   mqlMin: '',
   condition: [],
   city: [],
-  prospectId: [],
+  leadId: [],
   phone: [],
   planName: [],
   q: '',

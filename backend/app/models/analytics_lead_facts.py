@@ -75,9 +75,16 @@ class DimLead(Base):
     latest_stage_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Display name of the current assigned rep, lifted from the lead mirror.
+    # See ADR 2026-05-12-rep-and-lead-id-naming — no ``assigned_rep_id`` ships
+    # in Phase 1 because LSQ exposes only a name string on the lead record.
+    assigned_rep_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes_at_first_seen: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    # Mutable current-state bag distinct from ``attributes_at_first_seen``.
+    # Nullable in Phase 1; populator wiring lands in later phases.
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -207,6 +214,8 @@ class FactLeadActivity(Base):
     )
     actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Denormalized actor display name. Avoids a dim_actor join on every chart axis.
+    actor_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -220,11 +229,18 @@ class FactLeadActivity(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        # Wider unique key includes ``activity_type`` so multiple CRM apps /
+        # activity types can reuse the same fact table without colliding on
+        # ``source_activity_id`` namespaces. Created as ``CREATE UNIQUE INDEX
+        # CONCURRENTLY`` in Alembic 0038, not as a constraint, so we declare
+        # an ``Index(unique=True)`` to match what's in the DB.
+        Index(
+            "uq_fact_lead_activity_source",
             "tenant_id",
             "app_id",
             "source_activity_id",
-            name="uq_fact_lead_activity_tenant_app_source",
+            "activity_type",
+            unique=True,
         ),
         Index(
             "idx_fact_lead_activity_tenant_app_lead_occurred",

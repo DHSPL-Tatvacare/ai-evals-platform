@@ -18,7 +18,7 @@ import { CallFilterPanel } from './CallFilterPanel';
 export interface CallSelectionConfig {
   // Filter dimensions — must mirror CallFilters so the shared CallFilterPanel can drive it.
   agents: string[];
-  prospectId: string[];
+  leadId: string[];
   direction: string;
   status: string;
   durationMin: string;
@@ -50,7 +50,7 @@ const SCOPE_OPTIONS: { value: CallSelectionConfig['selectionMode']; label: strin
 function activeFilterCount(config: CallSelectionConfig): number {
   return [
     config.agents.length ? 'y' : '',
-    config.prospectId.length ? 'y' : '',
+    config.leadId.length ? 'y' : '',
     config.direction,
     config.status,
     config.durationMin,
@@ -77,7 +77,7 @@ export function SelectCallsStep({
 
   const callFilters = useMemo<CallFilters>(() => ({
     agents: config.agents,
-    prospectId: config.prospectId,
+    leadId: config.leadId,
     direction: config.direction,
     status: config.status,
     hasRecording: config.hasRecording,
@@ -86,7 +86,7 @@ export function SelectCallsStep({
     durationMax: config.durationMax,
   }), [
     config.agents,
-    config.prospectId,
+    config.leadId,
     config.direction,
     config.status,
     config.hasRecording,
@@ -98,7 +98,7 @@ export function SelectCallsStep({
   const handleFilterReset = useCallback(() => {
     onConfigChange({
       agents: [],
-      prospectId: [],
+      leadId: [],
       direction: '',
       status: '',
       durationMin: '',
@@ -146,7 +146,7 @@ export function SelectCallsStep({
     const q = callSearch.toLowerCase();
     return allCalls.filter(
       (c) =>
-        c.agentName.toLowerCase().includes(q) ||
+        c.repName.toLowerCase().includes(q) ||
         c.displayNumber.includes(q) ||
         c.activityId.toLowerCase().includes(q)
     );
@@ -171,10 +171,10 @@ export function SelectCallsStep({
   };
 
   const callLabel = (c: CallRecord) => {
-    const name = c.displayNumber || c.prospectId || c.activityId.slice(0, 8);
-    const agent = c.agentName || '—';
+    const name = c.displayNumber || c.leadId || c.activityId.slice(0, 8);
+    const rep = c.repName || '—';
     const dur = c.durationSeconds > 0 ? formatDuration(c.durationSeconds) : '—';
-    return { name, agent, dur, status: c.status || '—' };
+    return { name, agent: rep, dur, status: c.status || '—' };
   };
 
   const filterCount = activeFilterCount(config);
@@ -216,10 +216,10 @@ export function SelectCallsStep({
               <button onClick={() => onConfigChange({ agents: [] })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
             </span>
           )}
-          {config.prospectId.length > 0 && (
+          {config.leadId.length > 0 && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
-              Prospects: {config.prospectId.length === 1 ? config.prospectId[0] : `${config.prospectId.length} selected`}
-              <button onClick={() => onConfigChange({ prospectId: [] })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+              Leads: {config.leadId.length === 1 ? config.leadId[0] : `${config.leadId.length} selected`}
+              <button onClick={() => onConfigChange({ leadId: [] })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
             </span>
           )}
           {config.eventCodes && (

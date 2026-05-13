@@ -79,14 +79,14 @@ def _build_call_filter_clauses(
         CrmCallRecord.app_id == app_id,
     ]
 
-    agent_names = _normalize_text_values(filters.agents)
-    if agent_names:
-        clauses.append(func.lower(CrmCallRecord.agent_name).in_(agent_names))
+    rep_names = _normalize_text_values(filters.agents)
+    if rep_names:
+        clauses.append(func.lower(CrmCallRecord.rep_name).in_(rep_names))
 
-    call_prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
-    if call_prospect_ids:
+    call_lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
+    if call_lead_ids:
         clauses.append(
-            or_(*(CrmCallRecord.prospect_id.ilike(f"%{pid}%") for pid in call_prospect_ids))
+            or_(*(CrmCallRecord.lead_id.ilike(f"%{lid}%") for lid in call_lead_ids))
         )
 
     if filters.direction:
@@ -164,9 +164,9 @@ def _build_lead_filter_clauses(
         CrmLeadRecord.app_id == app_id,
     ]
 
-    agent_names = _normalize_text_values(filters.agents)
-    if agent_names:
-        clauses.append(func.lower(CrmLeadRecord.agent_name).in_(agent_names))
+    rep_names = _normalize_text_values(filters.agents)
+    if rep_names:
+        clauses.append(func.lower(CrmLeadRecord.rep_name).in_(rep_names))
 
     stages = _normalize_text_values(filters.stage)
     if stages:
@@ -184,10 +184,10 @@ def _build_lead_filter_clauses(
             or_(*(CrmLeadRecord.city.ilike(f"%{city}%") for city in cities))
         )
 
-    prospect_ids = tuple(pid.strip() for pid in filters.prospect_ids if pid.strip())
-    if prospect_ids:
+    lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
+    if lead_ids:
         clauses.append(
-            or_(*(CrmLeadRecord.prospect_id.ilike(f"%{pid}%") for pid in prospect_ids))
+            or_(*(CrmLeadRecord.lead_id.ilike(f"%{lid}%") for lid in lead_ids))
         )
 
     phones = tuple(p.strip() for p in filters.phones if p.strip())
@@ -254,7 +254,7 @@ def build_lead_listing_query(
     offset = max(page - 1, 0) * page_size
     return (
         build_lead_filtered_query(tenant_id=tenant_id, app_id=app_id, filters=filters)
-        .order_by(CrmLeadRecord.created_on.desc(), CrmLeadRecord.prospect_id.desc())
+        .order_by(CrmLeadRecord.created_on.desc(), CrmLeadRecord.lead_id.desc())
         .offset(offset)
         .limit(page_size)
     )
@@ -281,9 +281,9 @@ def map_call_listing_row(
 ) -> dict[str, Any]:
     return {
         "activityId": call.activity_id,
-        "prospectId": call.prospect_id,
-        "agentName": call.agent_name or "",
-        "agentEmail": call.agent_email or "",
+        "leadId": call.lead_id,
+        "repName": call.rep_name or "",
+        "repEmail": call.rep_email or "",
         "eventCode": call.event_code,
         "direction": call.direction,
         "status": call.status or "",
@@ -310,7 +310,7 @@ def map_lead_call_history_entry(call: CrmCallRecord) -> dict[str, Any]:
     return {
         "activityId": call.activity_id,
         "callTime": _format_response_datetime(call.call_started_at or call.created_on),
-        "agentName": call.agent_name or None,
+        "repName": call.rep_name or None,
         "durationSeconds": call.duration_seconds,
         "status": call.status or "",
         "recordingUrl": call.recording_url or None,
@@ -321,7 +321,7 @@ def map_lead_call_history_entry(call: CrmCallRecord) -> dict[str, Any]:
 
 def map_lead_listing_row(lead: CrmLeadRecord) -> dict[str, Any]:
     return {
-        "prospectId": lead.prospect_id,
+        "leadId": lead.lead_id,
         "firstName": lead.first_name,
         "lastName": lead.last_name,
         "phone": lead.phone,
@@ -331,7 +331,7 @@ def map_lead_listing_row(lead: CrmLeadRecord) -> dict[str, Any]:
         "condition": lead.condition,
         "hba1cBand": lead.hba1c_band,
         "intentToPay": lead.intent_to_pay,
-        "agentName": lead.agent_name,
+        "repName": lead.rep_name,
         "rnrCount": lead.rnr_count,
         "answeredCount": lead.answered_count,
         "totalDials": lead.total_dials,
@@ -446,37 +446,37 @@ async def get_lead_record(
     *,
     tenant_id: uuid.UUID,
     app_id: str,
-    prospect_id: str,
+    lead_id: str,
 ) -> CrmLeadRecord | None:
     """Fetch one lead row from the synced mirror, or ``None`` if absent."""
     stmt = select(CrmLeadRecord).where(
         CrmLeadRecord.tenant_id == tenant_id,
         CrmLeadRecord.app_id == app_id,
-        CrmLeadRecord.prospect_id == prospect_id,
+        CrmLeadRecord.lead_id == lead_id,
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def list_call_history_for_prospect(
+async def list_call_history_for_lead(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
     app_id: str,
-    prospect_id: str,
+    lead_id: str,
     limit: int,
 ) -> tuple[list[CrmCallRecord], bool]:
-    """Return up to ``limit`` most-recent calls for the prospect.
+    """Return up to ``limit`` most-recent calls for the lead.
 
-    The boolean is ``True`` when the prospect has more than ``limit``
-    matching rows. Implemented via ``LIMIT limit + 1`` so we avoid an
-    extra ``COUNT`` round trip purely to set the flag.
+    The boolean is ``True`` when the lead has more than ``limit`` matching
+    rows. Implemented via ``LIMIT limit + 1`` so we avoid an extra
+    ``COUNT`` round trip purely to set the flag.
     """
     stmt = (
         select(CrmCallRecord)
         .where(
             CrmCallRecord.tenant_id == tenant_id,
             CrmCallRecord.app_id == app_id,
-            CrmCallRecord.prospect_id == prospect_id,
+            CrmCallRecord.lead_id == lead_id,
         )
         .order_by(_call_sort_expression())
         .limit(limit + 1)
@@ -583,14 +583,20 @@ async def get_collection_freshness(
 
 
 _SUGGESTION_FIELDS: dict[tuple[str, str], Any] = {
-    ("leads", "prospect_id"): CrmLeadRecord.prospect_id,
+    ("leads", "lead_id"): CrmLeadRecord.lead_id,
     ("leads", "phone"): CrmLeadRecord.phone,
-    ("leads", "agent_name"): CrmLeadRecord.agent_name,
+    ("leads", "rep_name"): CrmLeadRecord.rep_name,
     ("leads", "city"): CrmLeadRecord.city,
     ("leads", "stage"): CrmLeadRecord.prospect_stage,
     ("leads", "plan_name"): CrmLeadRecord.plan_name,
-    ("calls", "prospect_id"): CrmCallRecord.prospect_id,
-    ("calls", "agent_name"): CrmCallRecord.agent_name,
+    ("calls", "lead_id"): CrmCallRecord.lead_id,
+    ("calls", "rep_name"): CrmCallRecord.rep_name,
+    # Deprecated aliases — accepted during the Phase 1→9 soak so existing
+    # clients still resolve. Removed in Phase 9.
+    ("leads", "prospect_id"): CrmLeadRecord.lead_id,
+    ("leads", "agent_name"): CrmLeadRecord.rep_name,
+    ("calls", "prospect_id"): CrmCallRecord.lead_id,
+    ("calls", "agent_name"): CrmCallRecord.rep_name,
 }
 
 

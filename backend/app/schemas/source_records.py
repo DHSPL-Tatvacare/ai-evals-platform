@@ -23,10 +23,10 @@ class SourceRecordRowBase(CamelORMModel):
 
 class SourceCallRecordRow(SourceRecordRowBase):
     activity_id: str
-    prospect_id: str
-    agent_id: str | None = None
-    agent_name: str | None = None
-    agent_email: str | None = None
+    lead_id: str
+    rep_id: str | None = None
+    rep_name: str | None = None
+    rep_email: str | None = None
     event_code: int
     direction: str
     status: str | None = None
@@ -42,7 +42,7 @@ class SourceCallRecordRow(SourceRecordRowBase):
 
 
 class SourceLeadRecordRow(SourceRecordRowBase):
-    prospect_id: str
+    lead_id: str
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
@@ -53,7 +53,7 @@ class SourceLeadRecordRow(SourceRecordRowBase):
     condition: str | None = None
     hba1c_band: str | None = None
     intent_to_pay: str | None = None
-    agent_name: str | None = None
+    rep_name: str | None = None
     source: str | None = None
     source_campaign: str | None = None
     created_on: datetime | None = None

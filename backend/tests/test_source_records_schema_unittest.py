@@ -59,10 +59,10 @@ def test_call_source_row_schema_exposes_camel_case_fields():
             created_at=now,
             updated_at=now,
             activity_id="activity-1",
-            prospect_id="prospect-1",
-            agent_id="agent-1",
-            agent_name="Agent Amy",
-            agent_email="amy@example.com",
+            lead_id="prospect-1",
+            rep_id="agent-1",
+            rep_name="Agent Amy",
+            rep_email="amy@example.com",
             event_code=21,
             direction="inbound",
             status="Answered",
@@ -81,7 +81,7 @@ def test_call_source_row_schema_exposes_camel_case_fields():
     dumped = row.model_dump(by_alias=True)
 
     assert dumped["activityId"] == "activity-1"
-    assert dumped["agentName"] == "Agent Amy"
+    assert dumped["repName"] == "Agent Amy"
     assert dumped["hasRecording"] is True
 
 
@@ -101,7 +101,7 @@ def test_lead_source_row_schema_keeps_derived_metrics_typed():
             raw_payload={"ProspectID": "prospect-1"},
             created_at=now,
             updated_at=now,
-            prospect_id="prospect-1",
+            lead_id="prospect-1",
             first_name="Lead",
             last_name="One",
             phone="9999999999",
@@ -112,7 +112,7 @@ def test_lead_source_row_schema_keeps_derived_metrics_typed():
             condition="Diabetes",
             hba1c_band="6.5",
             intent_to_pay="Yes",
-            agent_name="Agent Amy",
+            rep_name="Agent Amy",
             source="Campaign",
             source_campaign="Summer",
             created_on=now,
@@ -132,7 +132,7 @@ def test_lead_source_row_schema_keeps_derived_metrics_typed():
 
     dumped = row.model_dump(by_alias=True)
 
-    assert dumped["prospectId"] == "prospect-1"
+    assert dumped["leadId"] == "prospect-1"
     assert row.connect_rate == 60.0
     assert dumped["mqlSignals"]["city"] is True
 

@@ -51,9 +51,9 @@ function AsyncMultiSelectControl({
   const { options, loading, onSearchChange } = useCollectionSuggestions(
     family,
     // Invariant: `suggestionField` is required for `async-multi-select`
-    // entries. Fall through to `agent_name` as a last resort so the UI
+    // entries. Fall through to `rep_name` as a last resort so the UI
     // still loads rather than crashes on a stale app config.
-    field ?? 'agent_name',
+    field ?? 'rep_name',
     { debounceMs: 250, limit: 20 },
   );
 
@@ -101,7 +101,7 @@ function renderFilterControl(
           value={String(values[fields[0] as keyof typeof values] ?? '')}
           onChange={(event) => setPatch({ [fields[0]]: event.target.value })}
           placeholder={filter.placeholder}
-          className={cn(INPUT_CLASS, fields[0] === 'prospectId' && 'font-mono')}
+          className={cn(INPUT_CLASS, fields[0] === 'leadId' && 'font-mono')}
         />
       );
     case 'multi-select':

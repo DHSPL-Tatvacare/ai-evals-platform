@@ -56,12 +56,16 @@ def test_build_call_activity_fact_row_shape():
     assert row["activity_type"] == "call"
     assert row["activity_subtype"] == "outbound_call"
     assert row["source_event_code"] == 22
-    assert row["actor_type"] == "agent"
+    # Phase 1 renamed: actor_type='rep' (was 'agent'); 'agent_*' is now
+    # reserved for AI agents.
+    assert row["actor_type"] == "rep"
     assert row["actor_id"] == "AGENT-7"
+    assert row["actor_label"] == "Asha"
     assert row["sync_run_id"] == sync_run_id
-    # Attributes carry call-specific fields without the agent-id duplicate.
+    # Attributes carry call-specific fields without the rep-id duplicate.
     assert row["attributes"]["status"] == "completed"
     assert row["attributes"]["recording_url"] == "https://example/recording.mp3"
+    assert row["attributes"]["rep_email"] == "asha@tatva.com"
 
 
 def test_build_call_activity_skips_when_missing_ids():
@@ -101,7 +105,9 @@ def test_build_generic_activity_fact_row_shape():
     assert row["activity_type"] == "custom"
     assert row["activity_subtype"] == "Page Visit"
     assert row["source_event_code"] == 47
-    assert row["actor_type"] == "agent"
+    # Phase 1: human actor_type is 'rep'. AI-agent activities never come
+    # through this path.
+    assert row["actor_type"] == "rep"
     assert row["attributes"]["activity_event_name"] == "Page Visit"
 
 

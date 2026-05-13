@@ -160,7 +160,7 @@ export interface AppCollectionFilterConfig {
   description?: string;
   optionSource?: 'agents';
   /** For `async-multi-select`: which suggestion field on the backend. */
-  suggestionField?: 'prospect_id' | 'phone' | 'agent_name' | 'city' | 'stage' | 'plan_name';
+  suggestionField?: 'lead_id' | 'phone' | 'rep_name' | 'city' | 'stage' | 'plan_name';
   options?: Array<{
     value: string;
     label: string;
@@ -776,13 +776,13 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         leads: {
           filters: [
             {
-              key: 'prospectId',
-              label: 'Prospect ID',
-              pillLabel: 'Prospect',
+              key: 'leadId',
+              label: 'Lead ID',
+              pillLabel: 'Lead',
               control: 'async-multi-select',
-              fields: ['prospectId'],
-              suggestionField: 'prospect_id',
-              placeholder: 'Type to search prospect IDs...',
+              fields: ['leadId'],
+              suggestionField: 'lead_id',
+              placeholder: 'Type to search lead IDs...',
             },
             {
               key: 'phone',
@@ -836,12 +836,12 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
             },
             {
               key: 'agents',
-              label: 'Agent',
-              pillLabel: 'Agent',
+              label: 'Rep',
+              pillLabel: 'Rep',
               control: 'async-multi-select',
               fields: ['agents'],
-              suggestionField: 'agent_name',
-              placeholder: 'Type to search agents...',
+              suggestionField: 'rep_name',
+              placeholder: 'Type to search reps...',
             },
             {
               key: 'planName',
@@ -862,21 +862,21 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
           filters: [
             {
               key: 'agents',
-              label: 'Agent',
-              pillLabel: 'Agent',
+              label: 'Rep',
+              pillLabel: 'Rep',
               control: 'async-multi-select',
               fields: ['agents'],
-              suggestionField: 'agent_name',
-              placeholder: 'Type to search agents...',
+              suggestionField: 'rep_name',
+              placeholder: 'Type to search reps...',
             },
             {
-              key: 'prospectId',
-              label: 'Prospect ID',
-              pillLabel: 'Prospect',
+              key: 'leadId',
+              label: 'Lead ID',
+              pillLabel: 'Lead',
               control: 'async-multi-select',
-              fields: ['prospectId'],
-              suggestionField: 'prospect_id',
-              placeholder: 'Type to search prospect IDs...',
+              fields: ['leadId'],
+              suggestionField: 'lead_id',
+              placeholder: 'Type to search lead IDs...',
             },
             {
               key: 'direction',
@@ -931,7 +931,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
                 { key: 'city', label: 'City' },
                 { key: 'ageGroup', label: 'Age Group' },
                 { key: 'source', label: 'Source' },
-                { key: 'agentName', label: 'Agent' },
+                { key: 'repName', label: 'Rep' },
                 { key: 'createdOn', label: 'Lead Created' },
               ],
             },

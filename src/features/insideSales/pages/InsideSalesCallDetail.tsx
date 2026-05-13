@@ -73,9 +73,9 @@ export function InsideSalesCallDetail() {
   const canReview = usePermission('review:manage');
   const activeRunId = evalHistory[evalIdx]?.run_id ?? '';
 
-  const fetchLead = useCallback(async (prospectId: string) => {
+  const fetchLead = useCallback(async (leadId: string) => {
     try {
-      const data = await apiRequest<LeadDetail>(`/api/inside-sales/leads/${prospectId}`);
+      const data = await apiRequest<LeadDetail>(`/api/inside-sales/leads/${leadId}`);
       setLeadData(data);
     } catch {
       // silently fail — lead data is supplemental
@@ -83,10 +83,10 @@ export function InsideSalesCallDetail() {
   }, []);
 
   useEffect(() => {
-    if (call?.prospectId) {
-      fetchLead(call.prospectId);
+    if (call?.leadId) {
+      fetchLead(call.leadId);
     }
-  }, [call?.prospectId, fetchLead]);
+  }, [call?.leadId, fetchLead]);
 
   useEffect(() => {
     if (!call?.activityId) return;
@@ -129,8 +129,8 @@ export function InsideSalesCallDetail() {
     ? [leadData.firstName, leadData.lastName].filter(Boolean).join(' ')
     : null;
   const titleText = leadName
-    ? `${call.agentName || 'Unknown Agent'} → ${leadName}`
-    : call.agentName || 'Unknown Agent';
+    ? `${call.repName || 'Unknown Rep'} → ${leadName}`
+    : call.repName || 'Unknown Rep';
 
   const metaTooltip = (
     <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
@@ -140,11 +140,11 @@ export function InsideSalesCallDetail() {
       </div>
       <div className="flex items-center gap-2">
         <User className="h-3 w-3 text-[var(--text-muted)]" />
-        <span>{call.agentName || '—'}</span>
+        <span>{call.repName || '—'}</span>
       </div>
       <div className="flex items-center gap-2">
         <Users className="h-3 w-3 text-[var(--text-muted)]" />
-        <span className="font-mono">{call.prospectId || '—'}</span>
+        <span className="font-mono">{call.leadId || '—'}</span>
       </div>
       <div className="flex items-center gap-2">
         <Clock className="h-3 w-3 text-[var(--text-muted)]" />
@@ -298,7 +298,7 @@ export function InsideSalesCallDetail() {
             prefillContext={{
               kind: 'call',
               leadName: leadName ?? undefined,
-              agentName: call.agentName ?? undefined,
+              repName: call.repName ?? undefined,
             }}
           />
         )}

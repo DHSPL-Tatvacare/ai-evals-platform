@@ -34,7 +34,7 @@ class ResolvedCallSelection:
 @dataclass(frozen=True)
 class InsideSalesCallFilters:
     agents: tuple[str, ...] = ()
-    prospect_ids: tuple[str, ...] = ()
+    lead_ids: tuple[str, ...] = ()
     direction: str | None = None
     status: str | None = None
     duration_min: int | None = None
@@ -50,7 +50,7 @@ class InsideSalesLeadFilters:
     mql_min: int | None = None
     condition: tuple[str, ...] = ()
     city: tuple[str, ...] = ()
-    prospect_ids: tuple[str, ...] = ()
+    lead_ids: tuple[str, ...] = ()
     phones: tuple[str, ...] = ()
     plan_names: tuple[str, ...] = ()
     q: str | None = None

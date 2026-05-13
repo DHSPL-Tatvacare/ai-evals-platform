@@ -26,7 +26,7 @@ export interface LeadPlanPurchase {
 }
 
 export interface LeadListRecord {
-  prospectId: string;
+  leadId: string;
   firstName: string;
   lastName: string | null;
   phone: string;
@@ -36,7 +36,7 @@ export interface LeadListRecord {
   condition: string | null;
   hba1cBand: string | null;
   intentToPay: string | null;
-  agentName: string | null;
+  repName: string | null;
   rnrCount: number;
   answeredCount: number;
   totalDials: number;
@@ -64,9 +64,9 @@ export interface LeadListResponse {
 
 export interface CallRecord {
   activityId: string;
-  prospectId: string;
-  agentName: string;
-  agentEmail: string;
+  leadId: string;
+  repName: string;
+  repEmail: string;
   eventCode: number;
   direction: 'inbound' | 'outbound';
   status: string;
@@ -99,7 +99,7 @@ export interface CollectionFreshness {
 export interface CallFilters {
   agents: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
-  prospectId: string[];
+  leadId: string[];
   direction: string;
   status: string;
   hasRecording: boolean;
@@ -111,7 +111,7 @@ export interface CallFilters {
 export interface LeadCallRecord {
   activityId: string;
   callTime: string;
-  agentName: string | null;
+  repName: string | null;
   durationSeconds: number;
   status: string;
   recordingUrl: string | null;
@@ -128,7 +128,7 @@ export interface LeadEvalHistoryEntry {
 }
 
 export interface LeadDetailFullResponse {
-  prospectId: string;
+  leadId: string;
   firstName: string;
   lastName: string | null;
   phone: string;
@@ -145,7 +145,7 @@ export interface LeadDetailFullResponse {
   intentToPay: string | null;
   jobTitle: string | null;
   preferredCallTime: string | null;
-  agentName: string | null;
+  repName: string | null;
   source: string | null;
   sourceCampaign: string | null;
   createdOn: string;
@@ -176,7 +176,7 @@ export interface LeadFilters {
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   city: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
-  prospectId: string[];
+  leadId: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   phone: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
@@ -204,9 +204,9 @@ export async function fetchCollectionStatus(
 }
 
 export type SuggestionField =
-  | 'prospect_id'
+  | 'lead_id'
   | 'phone'
-  | 'agent_name'
+  | 'rep_name'
   | 'city'
   | 'stage'
   | 'plan_name';
@@ -241,7 +241,7 @@ function buildCallSearchParams(
     params.set('scope', scope);
   }
   if (filters.agents && filters.agents.length > 0) params.set('agents', filters.agents.join(','));
-  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
+  if (filters.leadId && filters.leadId.length > 0) params.set('lead_id', filters.leadId.join(','));
   if (filters.direction) params.set('direction', filters.direction);
   if (filters.status) params.set('status', filters.status);
   if (filters.hasRecording) params.set('has_recording', 'true');
@@ -285,7 +285,7 @@ export async function fetchLeads(
   if (filters.mqlMin) params.set('mql_min', filters.mqlMin);
   if (filters.condition && filters.condition.length > 0) params.set('condition', filters.condition.join(','));
   if (filters.city && filters.city.length > 0) params.set('city', filters.city.join(','));
-  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
+  if (filters.leadId && filters.leadId.length > 0) params.set('lead_id', filters.leadId.join(','));
   if (filters.phone && filters.phone.length > 0) params.set('phone', filters.phone.join(','));
   if (filters.planName && filters.planName.length > 0) params.set('plan_name', filters.planName.join(','));
   if (q) params.set('q', q);
@@ -294,7 +294,7 @@ export async function fetchLeads(
 }
 
 export async function fetchLeadDetail(
-  prospectId: string,
+  leadId: string,
 ): Promise<LeadDetailFullResponse> {
-  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
+  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${leadId}/detail`);
 }

@@ -222,7 +222,7 @@ function LeadsTableContent({
     return () => clearTimeout(id);
   }, [searchInput, leadFilters.q]);
 
-  const filterKey = `${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.prospectId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
+  const filterKey = `${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.leadId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
 
   const appConfig = useAppConfig('inside-sales');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
@@ -243,7 +243,7 @@ function LeadsTableContent({
   const totalPages = Math.max(1, Math.ceil(Math.max(leadsTotal, 1) / leadsPageSize));
 
   const handleRowClick = useCallback((lead: LeadListRecord) => {
-    navigate(routes.insideSales.leadDetail(lead.prospectId));
+    navigate(routes.insideSales.leadDetail(lead.leadId));
   }, [navigate]);
 
   const columns = useMemo((): ColumnDef<LeadListRecord>[] => [
@@ -294,7 +294,7 @@ function LeadsTableContent({
       header: 'Owner',
       headerTooltip: 'Assigned lead owner in the CRM. May differ from the agent shown in call timeline, who is the person who made each call.',
       width: 'min-w-[150px]',
-      render: (lead) => <span className="text-[var(--text-secondary)]">{lead.agentName || '—'}</span>,
+      render: (lead) => <span className="text-[var(--text-secondary)]">{lead.repName || '—'}</span>,
     },
     {
       key: 'dials',
@@ -390,7 +390,7 @@ function LeadsTableContent({
         <DataTable
           columns={columns}
           data={leads}
-          keyExtractor={(lead) => lead.prospectId}
+          keyExtractor={(lead) => lead.leadId}
           onRowClick={handleRowClick}
           loading={leadsLoading}
           emptyIcon={Phone}
@@ -502,7 +502,7 @@ export function InsideSalesListing() {
   // Stable key from filter values + page — only re-fetch when these actually change
   const filterKey = [
     (filters.agents ?? []).join(','),
-    (filters.prospectId ?? []).join(','),
+    (filters.leadId ?? []).join(','),
     filters.direction ?? '',
     filters.status ?? '',
     filters.hasRecording ? 'recording' : '',
@@ -537,7 +537,7 @@ export function InsideSalesListing() {
     if (q) {
       return calls.filter(
         (c) =>
-          c.agentName.toLowerCase().includes(q) ||
+          c.repName.toLowerCase().includes(q) ||
           c.displayNumber.includes(q) ||
           c.activityId.toLowerCase().includes(q)
       );
@@ -732,18 +732,18 @@ export function InsideSalesListing() {
       render: (call) => <span className="whitespace-nowrap text-[var(--text-primary)]">{formatCallTime(call.callStartTime)}</span>,
     },
     {
-      key: 'agentName',
-      header: 'Agent Name',
-      headerTooltip: 'Agent associated with the call activity.',
+      key: 'repName',
+      header: 'Rep Name',
+      headerTooltip: 'Sales rep who handled this call.',
       width: 'min-w-[150px]',
-      render: (call) => <span className="text-[var(--text-primary)]">{call.agentName || '—'}</span>,
+      render: (call) => <span className="text-[var(--text-primary)]">{call.repName || '—'}</span>,
     },
     {
-      key: 'prospectId',
-      header: 'Prospect ID',
-      headerTooltip: 'CRM prospect identifier linked to the call.',
+      key: 'leadId',
+      header: 'Lead ID',
+      headerTooltip: 'CRM lead identifier linked to the call.',
       width: 'min-w-[130px]',
-      render: (call) => <span className="font-mono text-[var(--text-secondary)]">{call.prospectId || '—'}</span>,
+      render: (call) => <span className="font-mono text-[var(--text-secondary)]">{call.leadId || '—'}</span>,
     },
     {
       key: 'durationSeconds',

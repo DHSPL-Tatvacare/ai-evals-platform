@@ -365,10 +365,13 @@ def build_call_source_row(
         "app_id": app_id,
         "source_system": source_system,
         "activity_id": record.get("activityId", ""),
-        "prospect_id": record.get("prospectId", ""),
-        "agent_id": record.get("agentId") or None,
-        "agent_name": record.get("agentName") or None,
-        "agent_email": record.get("agentEmail") or None,
+        # ``normalize_activity`` still emits LSQ-native key names (LSQ's
+        # payload uses ``Prospect_id`` / ``AgentId`` / etc); the column
+        # names here are post-Phase-1 canonical (``lead_id`` / ``rep_*``).
+        "lead_id": record.get("prospectId", ""),
+        "rep_id": record.get("agentId") or None,
+        "rep_name": record.get("agentName") or None,
+        "rep_email": record.get("agentEmail") or None,
         "event_code": int(record.get("eventCode") or 0),
         "direction": record.get("direction") or "",
         "status": record.get("status") or None,
@@ -419,7 +422,7 @@ def build_lead_source_row(
             extra={
                 "tenantId": str(tenant_id),
                 "appId": app_id,
-                "prospectId": record.get("prospectId"),
+                "leadId": record.get("prospectId"),
             },
         )
         return None
@@ -440,7 +443,7 @@ def build_lead_source_row(
         "tenant_id": tenant_id,
         "app_id": app_id,
         "source_system": source_system,
-        "prospect_id": record["prospectId"],
+        "lead_id": record["prospectId"],
         "first_name": record["firstName"] or None,
         "last_name": record["lastName"] or None,
         "phone": record["phone"] or None,
@@ -452,7 +455,7 @@ def build_lead_source_row(
         "condition": record["condition"] or None,
         "hba1c_band": record["hba1cBand"] or None,
         "intent_to_pay": record["intentToPay"] or None,
-        "agent_name": record["agentName"] or None,
+        "rep_name": record["agentName"] or None,
         "source": record["source"] or None,
         "source_campaign": record["sourceCampaign"] or None,
         "created_on": created_on_value,
@@ -482,10 +485,10 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
 
     stmt = pg_insert(CrmCallRecord).values(rows)
     update_columns = {
-        "prospect_id": stmt.excluded.prospect_id,
-        "agent_id": stmt.excluded.agent_id,
-        "agent_name": stmt.excluded.agent_name,
-        "agent_email": stmt.excluded.agent_email,
+        "lead_id": stmt.excluded.lead_id,
+        "rep_id": stmt.excluded.rep_id,
+        "rep_name": stmt.excluded.rep_name,
+        "rep_email": stmt.excluded.rep_email,
         "event_code": stmt.excluded.event_code,
         "direction": stmt.excluded.direction,
         "status": stmt.excluded.status,
@@ -538,7 +541,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
         "condition": stmt.excluded.condition,
         "hba1c_band": stmt.excluded.hba1c_band,
         "intent_to_pay": stmt.excluded.intent_to_pay,
-        "agent_name": stmt.excluded.agent_name,
+        "rep_name": stmt.excluded.rep_name,
         "source": stmt.excluded.source,
         "source_campaign": stmt.excluded.source_campaign,
         "created_on": stmt.excluded.created_on,
@@ -565,7 +568,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
             index_elements=[
                 CrmLeadRecord.tenant_id,
                 CrmLeadRecord.app_id,
-                CrmLeadRecord.prospect_id,
+                CrmLeadRecord.lead_id,
             ],
             set_=update_columns,
             where=CrmLeadRecord.source_record_hash.is_distinct_from(
@@ -619,21 +622,22 @@ async def _upsert_dim_lead_rows(
         return
     payload = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
-        if not prospect_id:
+        lead_id = row.get("lead_id") or ""
+        if not lead_id:
             continue
         payload.append(
             {
                 "id": uuid.uuid4(),
                 "tenant_id": row["tenant_id"],
                 "app_id": row["app_id"],
-                "lead_id": prospect_id,
+                "lead_id": lead_id,
                 "source": row.get("source_system") or LSQ_SOURCE_SYSTEM,
-                "source_ref": prospect_id,
+                "source_ref": lead_id,
                 "lsq_created_on": row.get("created_on"),
                 "first_seen_at": cycle_start,
                 "latest_stage_observed": (row.get("prospect_stage") or None),
                 "latest_stage_observed_at": cycle_start,
+                "assigned_rep_label": row.get("rep_name") or None,
                 "attributes_at_first_seen": {},
             }
         )
@@ -646,6 +650,7 @@ async def _upsert_dim_lead_rows(
             set_={
                 "latest_stage_observed": stmt.excluded.latest_stage_observed,
                 "latest_stage_observed_at": stmt.excluded.latest_stage_observed_at,
+                "assigned_rep_label": stmt.excluded.assigned_rep_label,
                 "updated_at": func.now(),
             },
         )
@@ -676,10 +681,10 @@ async def _append_lead_stage_transitions(
     # so the writeback insert can be a single bulk statement.
     keys: list[tuple[Any, str, str]] = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
-        if not prospect_id:
+        lead_id = row.get("lead_id") or ""
+        if not lead_id:
             continue
-        keys.append((row["tenant_id"], row["app_id"], prospect_id))
+        keys.append((row["tenant_id"], row["app_id"], lead_id))
     if not keys:
         return 0
 
@@ -716,11 +721,11 @@ async def _append_lead_stage_transitions(
 
     payload: list[dict[str, Any]] = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
+        lead_id = row.get("lead_id") or ""
         current_stage = (row.get("prospect_stage") or "").strip() or None
-        if not prospect_id:
+        if not lead_id:
             continue
-        key = (row["tenant_id"], row["app_id"], prospect_id)
+        key = (row["tenant_id"], row["app_id"], lead_id)
         prior = seen.get(key)
         if prior is None:
             # First observation only emits a row when the current stage
@@ -738,7 +743,7 @@ async def _append_lead_stage_transitions(
                 "id": uuid.uuid4(),
                 "tenant_id": row["tenant_id"],
                 "app_id": row["app_id"],
-                "lead_id": prospect_id,
+                "lead_id": lead_id,
                 "from_stage": from_stage,
                 "to_stage": current_stage,
                 "detected_at": cycle_start,
@@ -768,12 +773,16 @@ async def _upsert_lead_activity_rows(
     if not rows:
         return 0
     stmt = pg_insert(FactLeadActivity).values(rows)
+    # Phase 1 widened the conflict key to include ``activity_type`` so
+    # multiple CRM activity types can reuse the same fact table without
+    # colliding on ``source_activity_id`` namespaces.
     await db.execute(
         stmt.on_conflict_do_nothing(
             index_elements=[
                 FactLeadActivity.tenant_id,
                 FactLeadActivity.app_id,
                 FactLeadActivity.source_activity_id,
+                FactLeadActivity.activity_type,
             ]
         )
     )
@@ -795,8 +804,8 @@ def build_call_activity_fact_row(
     """
     record = normalize_activity(raw_activity)
     activity_id = record.get("activityId") or ""
-    prospect_id = record.get("prospectId") or ""
-    if not activity_id or not prospect_id:
+    lead_id = record.get("prospectId") or ""
+    if not activity_id or not lead_id:
         return None
     event_code_raw = record.get("eventCode")
     event_code = int(event_code_raw) if event_code_raw not in (None, "") else None
@@ -807,25 +816,32 @@ def build_call_activity_fact_row(
     if occurred_at is None:
         return None
     actor_id = record.get("agentId") or None
+    actor_label = record.get("agentName") or None
     return {
         "id": uuid.uuid4(),
         "tenant_id": tenant_id,
         "app_id": app_id,
-        "lead_id": prospect_id,
+        "lead_id": lead_id,
         "source_activity_id": activity_id,
         "activity_type": "call",
         "activity_subtype": _activity_subtype_for_event_code(event_code),
         "source_event_code": event_code,
         "occurred_at": occurred_at,
-        "actor_type": "agent" if actor_id else None,
+        # ``actor_type='rep'`` per plan §1.1.13 — ``rep`` for human reps,
+        # ``agent`` is reserved for AI agents elsewhere in the platform.
+        "actor_type": "rep" if (actor_id or actor_label) else None,
         "actor_id": actor_id,
+        "actor_label": actor_label,
         "attributes": {
             "direction": record.get("direction") or None,
             "status": record.get("status") or None,
             "duration_seconds": int(record.get("durationSeconds") or 0),
             "phone_number": record.get("phoneNumber") or None,
-            "agent_name": record.get("agentName") or None,
-            "agent_email": record.get("agentEmail") or None,
+            # Per the Phase 7 manifest contract: ``rep_email`` lives in
+            # attributes (not universal across activity types). The
+            # human-readable name is captured structurally on
+            # ``actor_label`` above and not duplicated here.
+            "rep_email": record.get("agentEmail") or None,
             "recording_url": record.get("recordingUrl") or None,
         },
         "sync_run_id": sync_run_id,
@@ -852,8 +868,8 @@ def build_generic_activity_fact_row(
         or raw_activity.get("Id")
         or ""
     )
-    prospect_id = raw_activity.get("RelatedProspectId") or ""
-    if not activity_id or not prospect_id:
+    lead_id = raw_activity.get("RelatedProspectId") or ""
+    if not activity_id or not lead_id:
         return None
     event_code_raw = raw_activity.get("ActivityEvent")
     event_code = int(event_code_raw) if event_code_raw not in (None, "") else None
@@ -870,14 +886,17 @@ def build_generic_activity_fact_row(
         "id": uuid.uuid4(),
         "tenant_id": tenant_id,
         "app_id": app_id,
-        "lead_id": prospect_id,
+        "lead_id": lead_id,
         "source_activity_id": activity_id,
         "activity_type": "custom",
         "activity_subtype": activity_event_name,
         "source_event_code": event_code,
         "occurred_at": occurred_at,
-        "actor_type": "agent" if actor_id else None,
+        # Generic non-call activities still flag the actor as a human rep;
+        # AI-agent activities never come through this path.
+        "actor_type": "rep" if actor_id else None,
         "actor_id": actor_id,
+        "actor_label": None,
         "attributes": {
             "activity_event_name": activity_event_name,
             "raw_status": raw_activity.get("Status") or None,

@@ -127,7 +127,7 @@ export function LeadCallTimeline({ callHistory, activeEvalActivityId }: LeadCall
                   {formatCallDateTime(call.callTime)}
                 </td>
                 <td className="px-3 py-2.5 text-[var(--text-secondary)]">
-                  {call.agentName || '—'}
+                  {call.repName || '—'}
                 </td>
                 <td
                   className={cn(

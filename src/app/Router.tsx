@@ -189,7 +189,7 @@ export function Router() {
             <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
-            <Route path="/inside-sales/leads/:prospectId" element={<InsideSalesLeadDetail />} />
+            <Route path="/inside-sales/leads/:leadId" element={<InsideSalesLeadDetail />} />
             <Route path={routes.insideSales.dashboard} element={<AnalyticsDashboardPage appId="inside-sales" />} />
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
             <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />

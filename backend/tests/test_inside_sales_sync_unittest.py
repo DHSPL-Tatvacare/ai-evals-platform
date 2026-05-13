@@ -595,7 +595,7 @@ class LeadsModifiedOnContractTests(unittest.IsolatedAsyncioTestCase):
         upsert_mock.assert_awaited_once()
         upserted_rows = upsert_mock.await_args.args[1]
         self.assertEqual(len(upserted_rows), 1)
-        self.assertEqual(upserted_rows[0]["prospect_id"], "prospect-old-modified")
+        self.assertEqual(upserted_rows[0]["lead_id"], "prospect-old-modified")
         self.assertEqual(result["records_upserted"], 1)
 
 
@@ -659,7 +659,7 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
             "app_id": "inside-sales",
             "source_system": "lsq",
             "activity_id": "activity-1",
-            "prospect_id": "prospect-1",
+            "lead_id": "prospect-1",
             "event_code": 21,
             "direction": "inbound",
             "duration_seconds": 0,
@@ -700,7 +700,7 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
             "tenant_id": uuid.uuid4(),
             "app_id": "inside-sales",
             "source_system": "lsq",
-            "prospect_id": "prospect-1",
+            "lead_id": "prospect-1",
             "prospect_stage": "New Lead",
             "rnr_count": 0,
             "answered_count": 0,
@@ -721,9 +721,10 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
         )
         # Conflict target must be the column list — not a named constraint —
         # so the upsert survives constraint renames (revision 0009 renamed
-        # uq_source_lead_records_tenant_app_prospect → uq_crm_lead_record_*).
+        # uq_source_lead_records_tenant_app_prospect → uq_crm_lead_record_*,
+        # and revision 0038 renamed the column ``prospect_id`` to ``lead_id``).
         self.assertIn(
-            "ON CONFLICT (tenant_id, app_id, prospect_id)", compiled
+            "ON CONFLICT (tenant_id, app_id, lead_id)", compiled
         )
         self.assertNotIn("ON CONFLICT ON CONSTRAINT", compiled)
         self.assertIn("source_record_hash IS DISTINCT FROM", compiled)

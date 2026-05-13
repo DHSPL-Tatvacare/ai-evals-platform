@@ -176,21 +176,24 @@ class InsideSalesReportService(BaseReportService):
 
     async def _load_agent_names(self, threads: list[dict]) -> dict[str, str]:
         # Build two buckets: UUIDs (look up in DB) and non-UUID keys
-        # (display name = call_metadata.agent or the key itself). The
-        # aggregator may emit either kind for the same run when LSQ does
-        # not return an agentId for some reps.
+        # (display name = call_metadata.rep / .agent or the key itself).
+        # The aggregator may emit either kind for the same run when LSQ
+        # does not return an agentId for some reps. Reads canonical
+        # ``rep_id`` / ``rep`` first with a deprecated ``agent_id`` /
+        # ``agent`` fallback for pre-Phase-1 rows (removed in Phase 9).
         uuid_keys: set[str] = set()
         fallback_names: dict[str, str] = {}
         for t in threads:
             meta = t.get("result", {}).get("call_metadata", {})
-            aid = meta.get("agent_id")
+            aid = meta.get("rep_id") or meta.get("agent_id")
             if not aid:
                 continue
+            display_name = meta.get("rep") or meta.get("agent") or aid
             try:
                 UUID(aid)
                 uuid_keys.add(aid)
             except (ValueError, AttributeError, TypeError):
-                fallback_names.setdefault(aid, meta.get("agent") or aid)
+                fallback_names.setdefault(aid, display_name)
 
         if not uuid_keys:
             return fallback_names
@@ -208,13 +211,13 @@ class InsideSalesReportService(BaseReportService):
             logger.warning("Failed to load agent names from DB: %s", e)
             db_names = {}
 
-        # DB names win over fallbacks; threads with un-mapped UUIDs fall back to call_metadata.agent.
+        # DB names win over fallbacks; threads with un-mapped UUIDs fall back to the rep display name.
         merged = {**fallback_names, **db_names}
         for t in threads:
             meta = t.get("result", {}).get("call_metadata", {})
-            aid = meta.get("agent_id")
+            aid = meta.get("rep_id") or meta.get("agent_id")
             if aid and aid not in merged:
-                merged[aid] = meta.get("agent") or aid
+                merged[aid] = meta.get("rep") or meta.get("agent") or aid
         return merged
 
     async def _load_analytics_config(self, app_id: str) -> AppAnalyticsConfig:

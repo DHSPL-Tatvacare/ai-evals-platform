@@ -34,7 +34,7 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
         app_id="inside-sales",
         filters=InsideSalesCallFilters(
             agents=("Agent Amy", "Agent Bob"),
-            prospect_ids=("pros-1",),
+            lead_ids=("pros-1",),
             direction="inbound",
             status="Answered",
             duration_min=30,
@@ -52,8 +52,8 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
     assert "analytics.crm_call_record.app_id =" in sql
     # No date_from / date_to clauses anymore — listing serves the full mirror.
     assert "call_started_at >=" not in sql
-    assert "lower(analytics.crm_call_record.agent_name) IN ('agent amy', 'agent bob')" in sql
-    assert "analytics.crm_call_record.prospect_id ILIKE '%%pros-1%%'" in sql
+    assert "lower(analytics.crm_call_record.rep_name) IN ('agent amy', 'agent bob')" in sql
+    assert "analytics.crm_call_record.lead_id ILIKE '%%pros-1%%'" in sql
     assert "analytics.crm_call_record.direction = 'inbound'" in sql
     assert "lower(analytics.crm_call_record.status) = 'answered'" in sql
     assert "analytics.crm_call_record.duration_seconds >= 30" in sql
@@ -103,20 +103,20 @@ def test_build_lead_listing_query_applies_filters_against_raw_columns():
             mql_min=3,
             condition=("diabetes", "pcos"),
             city=("mumbai", "pune"),
-            prospect_ids=("prospect-9",),
+            lead_ids=("prospect-9",),
         ),
         page=1,
         page_size=50,
     )
     sql = _compile(statement)
 
-    assert "lower(analytics.crm_lead_record.agent_name) IN ('agent amy')" in sql
+    assert "lower(analytics.crm_lead_record.rep_name) IN ('agent amy')" in sql
     assert "lower(analytics.crm_lead_record.prospect_stage) IN ('new lead', 'call back')" in sql
     assert "analytics.crm_lead_record.condition ILIKE '%%diabetes%%'" in sql
     assert "analytics.crm_lead_record.city ILIKE '%%mumbai%%'" in sql
-    assert "analytics.crm_lead_record.prospect_id ILIKE '%%prospect-9%%'" in sql
+    assert "analytics.crm_lead_record.lead_id ILIKE '%%prospect-9%%'" in sql
     assert "analytics.crm_lead_record.mql_score >= 3" in sql
-    assert "ORDER BY analytics.crm_lead_record.created_on DESC, analytics.crm_lead_record.prospect_id DESC" in sql
+    assert "ORDER BY analytics.crm_lead_record.created_on DESC, analytics.crm_lead_record.lead_id DESC" in sql
 
 
 def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
@@ -150,19 +150,19 @@ def test_build_lead_query_skips_q_when_whitespace_only():
     assert "concat(" not in sql
 
 
-def test_build_lead_query_prospect_id_substring_match():
-    """Leads filter should substring-match prospect_id, aligning with Calls behavior."""
+def test_build_lead_query_lead_id_substring_match():
+    """Leads filter should substring-match lead_id, aligning with Calls behavior."""
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
-        filters=InsideSalesLeadFilters(prospect_ids=("abc123",)),
+        filters=InsideSalesLeadFilters(lead_ids=("abc123",)),
         page=1,
         page_size=25,
     )
     sql = _compile(statement)
 
-    assert "analytics.crm_lead_record.prospect_id ILIKE '%%abc123%%'" in sql
-    assert "analytics.crm_lead_record.prospect_id = 'abc123'" not in sql
+    assert "analytics.crm_lead_record.lead_id ILIKE '%%abc123%%'" in sql
+    assert "analytics.crm_lead_record.lead_id = 'abc123'" not in sql
 
 
 def test_build_lead_count_query_wraps_filtered_lead_scope():
@@ -183,14 +183,14 @@ def test_map_call_listing_row_preserves_existing_api_shape_with_eval_overlay():
         app_id="inside-sales",
         source_system="lsq",
         activity_id="activity-1",
-        prospect_id="prospect-1",
+        lead_id="prospect-1",
         event_code=21,
         direction="inbound",
         duration_seconds=180,
         has_recording=True,
     )
-    call.agent_name = "Agent Amy"
-    call.agent_email = "amy@example.com"
+    call.rep_name = "Agent Amy"
+    call.rep_email = "amy@example.com"
     call.status = "Answered"
     call.recording_url = "https://example.com/recording.mp3"
     call.phone_number = "9999999999"
@@ -217,7 +217,7 @@ def test_map_lead_listing_row_preserves_existing_api_shape():
         tenant_id=uuid.uuid4(),
         app_id="inside-sales",
         source_system="lsq",
-        prospect_id="prospect-1",
+        lead_id="prospect-1",
         prospect_stage="New Lead",
         total_dials=5,
         mql_score=4,
@@ -226,7 +226,7 @@ def test_map_lead_listing_row_preserves_existing_api_shape():
     lead.first_name = "Lead"
     lead.last_name = "One"
     lead.phone = "9999999999"
-    lead.agent_name = "Agent Amy"
+    lead.rep_name = "Agent Amy"
     lead.connect_rate = 60.0
     lead.frt_seconds = 240
     lead.days_since_last_contact = 1
@@ -236,7 +236,7 @@ def test_map_lead_listing_row_preserves_existing_api_shape():
 
     payload = map_lead_listing_row(lead)
 
-    assert payload["prospectId"] == "prospect-1"
+    assert payload["leadId"] == "prospect-1"
     assert payload["createdOn"] == "2026-04-01 09:00:00"
     assert payload["lastActivityOn"] == "2026-04-07 09:00:00"
     assert payload["connectRate"] == 60.0

@@ -136,8 +136,8 @@ function formatLeadFieldValue(lead: LeadDetailFullResponse, field: AppDrilldownF
       return lead.ageGroup ?? '—';
     case 'source':
       return [lead.source, lead.sourceCampaign].filter(Boolean).join(' · ') || '—';
-    case 'agentName':
-      return lead.agentName ?? '—';
+    case 'repName':
+      return lead.repName ?? '—';
     case 'createdOn':
       return fmtDateTime(lead.createdOn);
     case 'condition':
@@ -484,9 +484,9 @@ function SummaryRail({
       <SectionBlock title="Contact" icon={User} tone="brand">
         <div className="flex flex-col gap-3">
           <Field label="Phone" value={lead.phone || '—'} mono />
-          <Field label="Owner" value={lead.agentName ?? '—'} />
+          <Field label="Owner" value={lead.repName ?? '—'} />
           <Field label="Source" value={sourceLine} />
-          <Field label="Prospect ID" value={lead.prospectId} mono />
+          <Field label="Lead ID" value={lead.leadId} mono />
           <Field label="Lead Created" value={fmtDateTime(lead.createdOn)} />
         </div>
       </SectionBlock>
@@ -585,7 +585,7 @@ function EvaluationsPanel({
 export function InsideSalesLeadDetail() {
   const appConfig = useAppConfig('inside-sales');
   const drilldownSections = appConfig.collections.drilldowns.lead?.sections ?? [];
-  const { prospectId } = useParams<{ prospectId: string }>();
+  const { leadId } = useParams<{ leadId: string }>();
   const navigate = useNavigate();
   // Navigation list: the ordered leads loaded on the listing page. Opening
   // a lead detail directly (no prior listing visit) results in an empty
@@ -593,16 +593,16 @@ export function InsideSalesLeadDetail() {
   const leadsList = useLeadsStore((s) => s.leads);
 
   const listNav = useMemo(() => {
-    if (!prospectId) return null;
-    const idx = leadsList.findIndex((l) => l.prospectId === prospectId);
+    if (!leadId) return null;
+    const idx = leadsList.findIndex((l) => l.leadId === leadId);
     if (idx < 0) return null;
     return {
       index: idx,
       total: leadsList.length,
-      prev: idx > 0 ? leadsList[idx - 1].prospectId : null,
-      next: idx < leadsList.length - 1 ? leadsList[idx + 1].prospectId : null,
+      prev: idx > 0 ? leadsList[idx - 1].leadId : null,
+      next: idx < leadsList.length - 1 ? leadsList[idx + 1].leadId : null,
     };
-  }, [leadsList, prospectId]);
+  }, [leadsList, leadId]);
 
   const goPrev = listNav?.prev
     ? () => navigate(routes.insideSales.leadDetail(listNav.prev as string))
@@ -618,21 +618,21 @@ export function InsideSalesLeadDetail() {
   const [evalOpen, setEvalOpen] = useState(false);
 
   const load = useCallback(async () => {
-    if (!prospectId) return;
+    if (!leadId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchLeadDetail(prospectId);
+      const data = await fetchLeadDetail(leadId);
       setLead(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load lead');
     } finally {
       setLoading(false);
     }
-  }, [prospectId]);
+  }, [leadId]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setEvalIdx(0); }, [prospectId]);
+  useEffect(() => { setEvalIdx(0); }, [leadId]);
 
   if (loading) {
     return (

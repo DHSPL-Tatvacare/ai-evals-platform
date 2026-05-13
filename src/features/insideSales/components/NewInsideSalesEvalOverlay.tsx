@@ -22,7 +22,7 @@ import type { EvaluatorDefinition } from '@/types';
 function buildAutoRunName(prefill: PrefillContext | undefined, idCount: number): string {
   if (!prefill) return '';
   const today = new Date().toISOString().slice(0, 10);
-  const labelFromName = prefill.leadName?.trim() || prefill.agentName?.trim();
+  const labelFromName = prefill.leadName?.trim() || prefill.repName?.trim();
   if (prefill.kind === 'lead' || prefill.kind === 'call') {
     return labelFromName ? `Eval — ${labelFromName} — ${today}` : `Eval — ${today}`;
   }
@@ -33,7 +33,7 @@ function buildAutoRunName(prefill: PrefillContext | undefined, idCount: number):
 export interface PrefillContext {
   kind: 'lead' | 'call' | 'listing';
   leadName?: string;
-  agentName?: string;
+  repName?: string;
 }
 
 const STEPS: WizardStep[] = [
@@ -78,7 +78,7 @@ export function NewInsideSalesEvalOverlay({
     const f = preSelectedFilters ?? {};
     return {
       agents: f.agents ?? [],
-      prospectId: f.prospectId ?? [],
+      leadId: f.leadId ?? [],
       direction: f.direction ?? '',
       status: f.status ?? '',
       durationMin: f.durationMin ?? '',
@@ -186,7 +186,7 @@ export function NewInsideSalesEvalOverlay({
         { key: 'Mode', value: callConfig.selectionMode },
         { key: 'Calls', value: String(callCount) },
         ...(callConfig.agents.length ? [{ key: 'Agents', value: callConfig.agents.join(', ') }] : []),
-        ...(callConfig.prospectId.length ? [{ key: 'Prospects', value: callConfig.prospectId.length === 1 ? callConfig.prospectId[0] : `${callConfig.prospectId.length} selected` }] : []),
+        ...(callConfig.leadId.length ? [{ key: 'Leads', value: callConfig.leadId.length === 1 ? callConfig.leadId[0] : `${callConfig.leadId.length} selected` }] : []),
         ...(callConfig.direction ? [{ key: 'Direction', value: callConfig.direction }] : []),
         ...(callConfig.status ? [{ key: 'Status', value: callConfig.status === 'not answered' ? 'Missed' : 'Answered' }] : []),
         ...((callConfig.durationMin || callConfig.durationMax) ? [{ key: 'Duration', value: `${callConfig.durationMin || '0'}s – ${callConfig.durationMax ? callConfig.durationMax + 's' : '∞'}` }] : []),
@@ -227,7 +227,7 @@ export function NewInsideSalesEvalOverlay({
       run_description: runDescription,
       call_selection: {
         agents: callConfig.agents,
-        prospect_ids: callConfig.prospectId,
+        lead_ids: callConfig.leadId,
         direction: callConfig.direction,
         status: callConfig.status,
         duration_min: callConfig.durationMin,

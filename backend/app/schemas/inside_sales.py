@@ -8,9 +8,9 @@ from app.schemas.base import CamelModel
 
 class CallRecord(CamelModel):
     activity_id: str
-    prospect_id: str
-    agent_name: str
-    agent_email: str
+    lead_id: str
+    rep_name: str
+    rep_email: str
     event_code: int
     direction: str
     status: str
@@ -41,7 +41,7 @@ class CallListResponse(CamelModel):
 
 
 class LeadDetailResponse(CamelModel):
-    prospect_id: str
+    lead_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -78,7 +78,7 @@ class LeadPlanPurchase(CamelModel):
 
 
 class LeadListRecord(CamelModel):
-    prospect_id: str
+    lead_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -88,7 +88,7 @@ class LeadListRecord(CamelModel):
     condition: Optional[str] = None
     hba1c_band: Optional[str] = None
     intent_to_pay: Optional[str] = None
-    agent_name: Optional[str] = None
+    rep_name: Optional[str] = None
     rnr_count: int = 0
     answered_count: int = 0
     total_dials: int = 0
@@ -182,7 +182,7 @@ class LeadEvalHistoryEntry(CamelModel):
 class LeadCallRecord(CamelModel):
     activity_id: str
     call_time: str
-    agent_name: Optional[str] = None
+    rep_name: Optional[str] = None
     duration_seconds: int = 0
     status: str
     recording_url: Optional[str] = None
@@ -192,7 +192,7 @@ class LeadCallRecord(CamelModel):
 
 class LeadDetailFullResponse(CamelModel):
     # Profile
-    prospect_id: str
+    lead_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -209,7 +209,7 @@ class LeadDetailFullResponse(CamelModel):
     intent_to_pay: Optional[str] = None
     job_title: Optional[str] = None
     preferred_call_time: Optional[str] = None
-    agent_name: Optional[str] = None
+    rep_name: Optional[str] = None
     source: Optional[str] = None
     source_campaign: Optional[str] = None
     created_on: str

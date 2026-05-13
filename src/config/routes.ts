@@ -68,7 +68,7 @@ export const routes = {
     runDetail: (runId: string) => `/inside-sales/runs/${runId}`,
     callDetail: (runId: string, callId: string) => `/inside-sales/runs/${runId}/calls/${callId}`,
     callView: (activityId: string) => `/inside-sales/calls/${activityId}`,
-    leadDetail: (prospectId: string) => `/inside-sales/leads/${prospectId}`,
+    leadDetail: (leadId: string) => `/inside-sales/leads/${leadId}`,
     dashboard: '/inside-sales/dashboard',
     logs: '/inside-sales/logs',
     settings: '/inside-sales/settings',
