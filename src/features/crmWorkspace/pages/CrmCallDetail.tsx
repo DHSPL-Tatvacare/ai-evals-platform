@@ -16,6 +16,7 @@ import {
 import { Button, LoadingState, PageSurface, Tabs, Tooltip, EmptyState } from '@/components/ui';
 import { PAGE_METADATA } from '@/config/pageMetadata';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
+import { useCurrentAppId } from '@/hooks';
 import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
 import { CallResultPanel } from '../components/CallResultPanel';
 import { fetchThreadHistory } from '@/services/api/evalRunsApi';
@@ -53,8 +54,9 @@ function formatDateTime(dateStr: string): string {
   }
 }
 
-export function InsideSalesCallDetail() {
+export function CrmCallDetail() {
   const navigate = useNavigate();
+  const appId = useCurrentAppId();
   const { activityId } = useParams<{ activityId: string }>();
   const activeCall = useInsideSalesStore((s) => s.activeCall);
   const calls = useInsideSalesStore((s) => s.calls);
@@ -229,7 +231,7 @@ export function InsideSalesCallDetail() {
   );
 
   return (
-    <InlineReviewProvider runId={activeRunId} appId="inside-sales" enabled={canReview && !!activeRunId}>
+    <InlineReviewProvider runId={activeRunId} appId={appId} enabled={canReview && !!activeRunId}>
       <PageSurface
         icon={PAGE_METADATA.callDetail.icon}
         title={titleText}
@@ -245,7 +247,7 @@ export function InsideSalesCallDetail() {
             <CallResultPanel
               thread={evalHistory[evalIdx]}
               recordingUrl={call.recordingUrl || undefined}
-              appId="inside-sales"
+              appId={appId}
             />
           </div>
         ) : (
@@ -258,7 +260,7 @@ export function InsideSalesCallDetail() {
                   content: (
                     <div className="flex min-h-0 flex-1 flex-col gap-4 py-4">
                       {call.recordingUrl && (
-                        <AudioPlayer audioUrl={call.recordingUrl} appId="inside-sales" />
+                        <AudioPlayer audioUrl={call.recordingUrl} appId={appId} />
                       )}
                       <EmptyState
                         icon={PhoneIcon}

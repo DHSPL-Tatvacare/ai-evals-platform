@@ -26,9 +26,9 @@ import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from 
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
 import { AdminUsersPage, AdminSherlockPage, AdminSherlockToolCallPage, AdminSherlockConfigPage } from "@/features/admin";
 import {
-  InsideSalesListing,
-  InsideSalesCallDetail,
-  InsideSalesLeadDetail,
+  CrmListing,
+  CrmCallDetail,
+  CrmLeadDetail,
 } from "@/features/crmWorkspace";
 // Phase 10 separated the inside-sales eval wizard into a sibling feature
 // folder; the CRM workspace pages stay app-agnostic, the eval wizard
@@ -188,14 +188,14 @@ export function Router() {
 
           {/* Inside Sales routes */}
           <Route element={<InsideSalesGuard />}>
-            <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
+            <Route path={routes.insideSales.listing} element={<CrmListing />} />
             <Route path={routes.insideSales.evaluators} element={<AppEvaluatorsPage />} />
             <Route path="/inside-sales/evaluators/:id" element={<EvaluatorDetailPage />} />
             <Route path={routes.insideSales.runs} element={<EvalRunList />} />
             <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
             <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
-            <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
-            <Route path="/inside-sales/leads/:leadId" element={<InsideSalesLeadDetail />} />
+            <Route path="/inside-sales/calls/:activityId" element={<CrmCallDetail />} />
+            <Route path="/inside-sales/leads/:leadId" element={<CrmLeadDetail />} />
             <Route path={routes.insideSales.dashboard} element={<AnalyticsDashboardPage appId="inside-sales" />} />
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
             <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />

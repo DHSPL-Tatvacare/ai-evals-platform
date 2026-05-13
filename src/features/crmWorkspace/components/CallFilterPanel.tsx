@@ -9,7 +9,7 @@
 import { useId } from 'react';
 import { X } from 'lucide-react';
 import { Button, Combobox, RightSlideOverShell } from '@/components/ui';
-import { useAppConfig } from '@/hooks';
+import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallFilters, InsideSalesCollectionFamily, LeadFilters } from '@/services/api/insideSales';
@@ -185,7 +185,8 @@ export function CallFilterPanel({
   onReset,
 }: CallFilterPanelProps) {
   const titleId = useId();
-  const appConfig = useAppConfig('inside-sales');
+  const appId = useCurrentAppId();
+  const appConfig = useAppConfig(appId);
   const datasetKey = activeTab === 'leads' ? 'leads' : 'calls';
   const datasetConfig = appConfig.collections.datasets[datasetKey];
 

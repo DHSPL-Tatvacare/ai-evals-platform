@@ -20,7 +20,7 @@ import {
   Tabs,
 } from '@/components/ui';
 import { PermissionGate } from '@/components/auth/PermissionGate';
-import { useAppConfig } from '@/hooks';
+import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
@@ -224,7 +224,8 @@ function LeadsTableContent({
 
   const filterKey = `${(leadFilters.agents ?? []).join(',')}|${(leadFilters.stage ?? []).join(',')}|${(leadFilters.condition ?? []).join(',')}|${leadFilters.mqlMin ?? ''}|${(leadFilters.city ?? []).join(',')}|${(leadFilters.leadId ?? []).join(',')}|${(leadFilters.phone ?? []).join(',')}|${(leadFilters.planName ?? []).join(',')}|${(leadFilters.q ?? '').trim()}|${leadsPageSize}|${leadsPage}`;
 
-  const appConfig = useAppConfig('inside-sales');
+  const appId = useCurrentAppId();
+  const appConfig = useAppConfig(appId);
   const leadDatasetConfig = appConfig.collections.datasets.leads;
   const activeFilterCount = useMemo(
     () => countActiveCollectionFilters(leadDatasetConfig, leadFilters),
@@ -462,8 +463,9 @@ function StatusBadge({ status }: { status: string }) {
 
 /* ── Main Component ──────────────────────────────────────── */
 
-export function InsideSalesListing() {
-  const appConfig = useAppConfig('inside-sales');
+export function CrmListing() {
+  const appId = useCurrentAppId();
+  const appConfig = useAppConfig(appId);
   const { icon, title } = usePageMetadata('listing');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
   const callDatasetConfig = appConfig.collections.datasets.calls;

@@ -31,7 +31,7 @@ import {
   type RecordWorkspaceTab,
 } from '@/components/ui';
 import { PAGE_METADATA } from '@/config/pageMetadata';
-import { useAppConfig } from '@/hooks';
+import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { CallResultPanel } from '../components/CallResultPanel';
 import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
@@ -526,6 +526,7 @@ function EvaluationsPanel({
   setEvalIdx: (updater: (prev: number) => number) => void;
   callHistory: LeadCallRecord[];
 }) {
+  const appId = useCurrentAppId();
   const currentEval = evalHistory[evalIdx] ?? null;
   const currentCall = useMemo(
     () => (currentEval ? callHistory.find((c) => c.activityId === currentEval.threadId) : null),
@@ -571,19 +572,19 @@ function EvaluationsPanel({
 
       {currentCall?.recordingUrl && (
         <SectionBlock title="Call Recording" icon={Mic} tone="brand">
-          <AudioPlayer audioUrl={currentCall.recordingUrl} appId="inside-sales" />
+          <AudioPlayer audioUrl={currentCall.recordingUrl} appId={appId} />
         </SectionBlock>
       )}
 
-      <CallResultPanel thread={currentEval as unknown as ThreadEvalRow} appId="inside-sales" />
+      <CallResultPanel thread={currentEval as unknown as ThreadEvalRow} appId={appId} />
     </div>
   );
 }
 
 /* ── Page component ────────────────────────────────────────────── */
 
-export function InsideSalesLeadDetail() {
-  const appConfig = useAppConfig('inside-sales');
+export function CrmLeadDetail() {
+  const appConfig = useAppConfig(useCurrentAppId());
   const drilldownSections = appConfig.collections.drilldowns.lead?.sections ?? [];
   const { leadId } = useParams<{ leadId: string }>();
   const navigate = useNavigate();
