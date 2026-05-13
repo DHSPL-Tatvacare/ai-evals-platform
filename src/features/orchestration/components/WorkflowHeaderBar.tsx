@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  Download,
   FlaskConical,
   MoreHorizontal,
   Pencil,
@@ -9,6 +10,7 @@ import {
   Save,
   Send,
   Timeline,
+  Upload,
 } from 'lucide-react';
 import { useWorkflowRuns } from '@/features/orchestration/queries/runs';
 
@@ -47,6 +49,7 @@ import {
   shouldBlockSave,
 } from '@/features/orchestration/contracts/saveGate';
 import { PublishErrorPanel } from './PublishErrorPanel';
+import { WorkflowJsonIO, type WorkflowJsonIOHandle } from './WorkflowJsonIO';
 
 interface WorkflowHeaderBarProps {
   onRunStarted?: (run: WorkflowRun) => void;
@@ -89,6 +92,18 @@ export function WorkflowHeaderBar({
   );
   const lifecycle = useLifecycleState();
   const hardParseIssues = useHardParseIssues();
+  const nodeCount = useWorkflowBuilderStore((s) => s.nodes.length);
+  // Import is offered only on a brand-new workflow canvas. Three guards:
+  //   - lifecycle is clean-draft (no in-flight write, nothing dirty)
+  //   - no draft version has ever been saved (`versionId === null`)
+  //   - zero nodes on the canvas
+  // The `versionId === null` check is the load-bearing one — a saved-then-
+  // emptied workflow also has zero nodes, but importing into it would
+  // create a new draft over real history. Better to require the operator
+  // create a fresh workflow first.
+  const canImport =
+    lifecycle.kind === 'clean-draft' && versionId === null && nodeCount === 0;
+  const jsonIORef = useRef<WorkflowJsonIOHandle>(null);
 
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   /** Last publish error in structured form. Cleared on the next publish
@@ -309,9 +324,12 @@ export function WorkflowHeaderBar({
             isPublished={isPublished}
             testRunDisabled={testRunDisabled}
             testRunTooltip={testRunTooltip}
+            canImport={canImport}
             onSave={handleSave}
             onPublish={handlePublish}
             onRun={handleRun}
+            onExportJson={() => jsonIORef.current?.openExport()}
+            onImportJson={() => jsonIORef.current?.openImport()}
           />
         )}
       </div>
@@ -324,6 +342,7 @@ export function WorkflowHeaderBar({
         />
       </div>
     ) : null}
+    <WorkflowJsonIO ref={jsonIORef} workflowId={workflowId} />
     <ConfirmDialog
       isOpen={showLeaveConfirm}
       onClose={() => setShowLeaveConfirm(false)}
@@ -411,9 +430,15 @@ interface EditModeActionsProps {
   isPublished: boolean;
   testRunDisabled: boolean;
   testRunTooltip: string;
+  /** True only on an empty new-workflow canvas. Controls whether the
+   *  "Import JSON" menu item is shown — once a node exists, importing
+   *  would silently nuke the operator's work. */
+  canImport: boolean;
   onSave(): void;
   onPublish(): void;
   onRun(): void;
+  onExportJson(): void;
+  onImportJson(): void;
 }
 
 type PrimaryActionKind = 'save' | 'publish';
@@ -458,9 +483,12 @@ function EditModeActions({
   isPublished,
   testRunDisabled,
   testRunTooltip,
+  canImport,
   onSave,
   onPublish,
   onRun,
+  onExportJson,
+  onImportJson,
 }: EditModeActionsProps) {
   const primaryKind = pickPrimary(lifecycle);
   const primaryClick = primaryKind === 'save' ? onSave : onPublish;
@@ -515,6 +543,23 @@ function EditModeActions({
       label: 'Test Run',
       disabled: testRunDisabled,
       title: testRunTooltip,
+    },
+    {
+      key: 'export-json',
+      icon: <Download className="h-3.5 w-3.5" />,
+      label: 'Export JSON',
+      onClick: onExportJson,
+      disabled: false,
+    },
+    {
+      key: 'import-json',
+      icon: <Upload className="h-3.5 w-3.5" />,
+      label: 'Import JSON',
+      onClick: canImport ? onImportJson : undefined,
+      disabled: !canImport,
+      title: canImport
+        ? 'Import a workflow definition from a JSON file'
+        : 'Import is only available on an empty canvas',
     },
   ];
 

@@ -296,3 +296,27 @@ export async function fetchCohortSources(params?: {
     `/api/orchestration/source_catalog${qs ? `?${qs}` : ''}`,
   );
 }
+
+export interface WorkflowValidateIssue {
+  nodeId: string | null;
+  field: string | null;
+  message: string;
+}
+
+export interface WorkflowValidateResponse {
+  ok: boolean;
+  errors: WorkflowValidateIssue[];
+  warnings: WorkflowValidateIssue[];
+  normalizedDefinition: WorkflowDefinition;
+}
+
+export async function validateWorkflowPayload(body: {
+  appId: string;
+  workflowType: WorkflowType;
+  definition: WorkflowDefinition;
+}): Promise<WorkflowValidateResponse> {
+  return apiRequest<WorkflowValidateResponse>('/api/orchestration/workflows/validate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

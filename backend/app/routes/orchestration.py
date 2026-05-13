@@ -49,6 +49,8 @@ from app.schemas.orchestration import (
     WorkflowCreateRequest,
     WorkflowResponse,
     WorkflowUpdateRequest,
+    WorkflowValidateRequest,
+    WorkflowValidateResponse,
     WorkflowVersionCreateRequest,
     WorkflowVersionResponse,
 )
@@ -72,6 +74,31 @@ router = APIRouter(prefix="/api/orchestration", tags=["orchestration"])
 
 
 # ─── Workflows ───────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/workflows/validate",
+    response_model=WorkflowValidateResponse,
+)
+async def validate_workflow_payload(
+    body: WorkflowValidateRequest,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pure validate — no DB writes. Powers JSON import preview and Claude-
+    authored payload checks. Unknown ``connection_id`` refs return as
+    warnings (not errors) so a cross-tenant import lands as a draft the
+    user rebinds in the builder; runtime contract still enforces the
+    binding at publish."""
+    await ensure_registered_app_access(db, auth, body.app_id)
+    result = await ver_service.validate_workflow_payload(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=body.app_id,
+        workflow_type=body.workflow_type,
+        definition=body.definition.model_dump(),
+    )
+    return WorkflowValidateResponse.model_validate(result)
 
 
 @router.post("/workflows", response_model=WorkflowResponse, status_code=201)

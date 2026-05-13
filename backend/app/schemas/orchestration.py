@@ -143,6 +143,45 @@ class WorkflowVersionCreateRequest(CamelModel):
         return v
 
 
+class WorkflowValidateRequest(CamelModel):
+    """Body for ``POST /api/orchestration/workflows/validate``.
+
+    Used by the import-JSON preview and by Claude-generated workflow JSON.
+    Pure: no DB writes, no workflow row created. ``workflow_type`` and
+    ``app_id`` are required because the validator's node-registry lookup is
+    namespaced by workflow type and the connection-id warning check is
+    scoped by tenant + app.
+    """
+    app_id: str
+    workflow_type: WorkflowType
+    definition: WorkflowDefinition
+
+    @field_validator("definition", mode="before")
+    @classmethod
+    def coerce_definition(cls, v: Any) -> Any:
+        if isinstance(v, dict) and ("nodes" not in v or "edges" not in v):
+            raise ValueError("definition must contain 'nodes' and 'edges' arrays")
+        return v
+
+
+class WorkflowValidateIssue(CamelModel):
+    """One error or warning row in the validate response.
+
+    Shape matches what ``PublishErrorPanel`` already renders so the import
+    preview can reuse the same component.
+    """
+    node_id: Optional[str] = None
+    field: Optional[str] = None
+    message: str
+
+
+class WorkflowValidateResponse(CamelModel):
+    ok: bool
+    errors: list[WorkflowValidateIssue] = Field(default_factory=list)
+    warnings: list[WorkflowValidateIssue] = Field(default_factory=list)
+    normalized_definition: dict[str, Any]
+
+
 class WorkflowVersionResponse(CamelORMModel):
     id: uuid.UUID
     workflow_id: uuid.UUID
@@ -463,6 +502,7 @@ __all__ = [
     "WorkflowCreateRequest", "WorkflowUpdateRequest", "WorkflowResponse",
     "CloneSystemWorkflowRequest",
     "WorkflowVersionCreateRequest", "WorkflowVersionResponse",
+    "WorkflowValidateRequest", "WorkflowValidateResponse", "WorkflowValidateIssue",
     "TriggerCreateRequest", "TriggerUpdateRequest", "TriggerResponse",
     "ActionTemplateUpsertRequest", "ActionTemplateResponse",
     "ConsentSetRequest", "ConsentResponse",

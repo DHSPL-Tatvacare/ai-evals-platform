@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.orchestration import Workflow, WorkflowVersion
+from app.models.provider_connection import ProviderConnection
 from app.services.orchestration.definition_normalizer import normalize_definition
 from app.services.orchestration.definition_validator import (
     DefinitionValidationError,
@@ -179,3 +180,113 @@ async def publish_version(
     await db.commit()
     await db.refresh(v)
     return v
+
+
+# ─── Pure validate (no DB writes) ────────────────────────────────────────────
+
+
+async def validate_workflow_payload(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    workflow_type: str,
+    definition: dict[str, Any],
+) -> dict[str, Any]:
+    """Run normalize + publish-mode validate + dispatch-field gate without writing.
+
+    Used by ``POST /api/orchestration/workflows/validate`` and the JSON
+    import preview. Mirrors :func:`publish_version`'s pipeline so a payload
+    that validates here is guaranteed to publish (modulo unknown
+    ``connection_id`` references, which are softened to warnings — the
+    caller may still need to rebind credentials post-import).
+
+    Returns ``{ok, errors, warnings, normalized_definition}``.
+    """
+    errors: list[dict[str, str | None]] = []
+    warnings: list[dict[str, str | None]] = []
+
+    canonical = normalize_definition(definition)
+
+    for d in validate_dispatch_required_fields(canonical):
+        errors.append({"node_id": d.get("node_id"), "field": d.get("field"), "message": d.get("message")})
+
+    try:
+        validate_definition(canonical, workflow_type=workflow_type)
+    except DefinitionValidationError as exc:
+        errors.extend(exc.errors)
+
+    # Soften unknown connection_ids to warnings so imports across tenants
+    # can land as drafts the user rebinds in the builder. Matches the
+    # clone_system_workflow behavior at the runtime contract level.
+    referenced = _collect_connection_ids(canonical)
+    if referenced:
+        known = await _resolve_known_connection_ids(
+            db, tenant_id=tenant_id, app_id=app_id, ids=referenced.keys(),
+        )
+        for conn_id, locations in referenced.items():
+            if conn_id in known:
+                continue
+            for node_id in locations:
+                warnings.append({
+                    "node_id": node_id,
+                    "field": "config.connection_id",
+                    "message": (
+                        f"connection_id {conn_id} is not bound to a "
+                        f"connection in this tenant/app; rebind in the builder "
+                        f"before publishing."
+                    ),
+                })
+
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "normalized_definition": canonical,
+    }
+
+
+def _collect_connection_ids(definition: dict[str, Any]) -> dict[str, list[str]]:
+    """Return ``{connection_id: [node_id, ...]}`` for every node config that
+    carries a ``connection_id`` string. Returns ``{}`` when none are present."""
+    out: dict[str, list[str]] = {}
+    for node in definition.get("nodes") or []:
+        cfg = node.get("config") or {}
+        conn_id = cfg.get("connection_id")
+        if not isinstance(conn_id, str) or not conn_id.strip():
+            continue
+        out.setdefault(conn_id, []).append(str(node.get("id") or "<unknown>"))
+    return out
+
+
+async def _resolve_known_connection_ids(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    ids,
+) -> set[str]:
+    """Return the subset of referenced connection ids that exist for this
+    tenant/app and are still active. Stringified for symmetric comparison
+    with the JSON-side ``connection_id`` strings."""
+    try:
+        ids_as_uuid = [uuid.UUID(i) for i in ids]
+    except (TypeError, ValueError):
+        # Any malformed id falls through as "unknown" → warning.
+        ids_as_uuid = []
+        for i in ids:
+            try:
+                ids_as_uuid.append(uuid.UUID(i))
+            except (TypeError, ValueError):
+                continue
+    if not ids_as_uuid:
+        return set()
+    rows = (await db.execute(
+        select(ProviderConnection.id).where(
+            ProviderConnection.id.in_(ids_as_uuid),
+            ProviderConnection.tenant_id == tenant_id,
+            ProviderConnection.app_id == app_id,
+            ProviderConnection.active.is_(True),
+        )
+    )).scalars().all()
+    return {str(r) for r in rows}
