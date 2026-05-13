@@ -267,13 +267,25 @@ class FactLeadActivity(Base):
 
 
 class FactLeadSignal(Base):
-    """Signal fact: one row per LLM-extracted signal from an evaluated call.
+    """Signal fact: one row per LLM-extracted signal about a lead.
 
-    Delete-then-insert per ``eval_run_id`` (the only inside-sales fact
-    using delete-then-insert; the other three are append-only, per §13).
-    Populated by the ``SignalExtractor`` inside ``populate-analytics``
-    from ``platform.evaluation_run_thread_results.result.signals`` —
-    never by request handlers.
+    Two population paths share this table (Phase 5 amendment, 2026-05-14):
+
+    1. **Eval-run-coupled** rows come from ``populate-analytics``'s
+       ``SignalExtractor`` reading
+       ``platform.evaluation_run_thread_results.result.signals`` — these
+       set ``eval_run_id`` + ``thread_evaluation_id`` and are dedup'd by
+       ``uq_fact_lead_signal_run_thread_signal``.
+    2. **Backfill / scheduled-extraction** rows come from
+       ``backfill_lead_signals_job`` walking the CRM lead mirror — these
+       leave ``eval_run_id`` / ``thread_evaluation_id`` NULL, set
+       ``sync_run_id`` to the owning ``analytics.log_crm_source_sync`` id,
+       and are dedup'd by the partial unique index
+       ``uq_fact_lead_signal_backfill (tenant_id, app_id, lead_id,
+       signal_type, detected_at) WHERE sync_run_id IS NOT NULL``.
+
+    Rollback for path 2: ``DELETE WHERE sync_run_id = '<run_id>'``.
+    Never written by request handlers.
     """
 
     __tablename__ = "fact_lead_signal"
@@ -287,17 +299,24 @@ class FactLeadSignal(Base):
         nullable=False,
     )
     app_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    eval_run_id: Mapped[uuid.UUID] = mapped_column(
+    # Nullable since 0040 — backfill rows have no eval-run lineage.
+    eval_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("platform.evaluation_runs.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
-    thread_evaluation_id: Mapped[int] = mapped_column(
+    thread_evaluation_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey(
             "platform.evaluation_run_thread_results.id", ondelete="CASCADE"
         ),
-        nullable=False,
+        nullable=True,
+    )
+    # Owns rollback-by-run for backfill / scheduled-extraction writes.
+    sync_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analytics.log_crm_source_sync.id", ondelete="SET NULL"),
+        nullable=True,
     )
     lead_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_activity_id: Mapped[str | None] = mapped_column(
@@ -309,6 +328,11 @@ class FactLeadSignal(Base):
         Numeric, nullable=True
     )
     signal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Observation timestamp for backfill rows. Distinct from signal_at,
+    # which is the source-side moment of the signal as reported.
+    detected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     confidence: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -333,11 +357,30 @@ class FactLeadSignal(Base):
             "ordinal",
             name="uq_fact_lead_signal_run_thread_signal",
         ),
+        # Partial unique index for backfill rows; created in migration 0040.
+        # Declared here with postgresql_where so SQLAlchemy reflection /
+        # autogenerate stay in sync; the migration is the source of truth.
+        Index(
+            "uq_fact_lead_signal_backfill",
+            "tenant_id",
+            "app_id",
+            "lead_id",
+            "signal_type",
+            "detected_at",
+            unique=True,
+            postgresql_where=text("sync_run_id IS NOT NULL"),
+        ),
         Index(
             "idx_fact_lead_signal_tenant_app_run",
             "tenant_id",
             "app_id",
             "eval_run_id",
+        ),
+        Index(
+            "ix_fact_lead_signal_tenant_app_sync_run",
+            "tenant_id",
+            "app_id",
+            "sync_run_id",
         ),
         Index(
             "idx_fact_lead_signal_tenant_app_lead_type_at",

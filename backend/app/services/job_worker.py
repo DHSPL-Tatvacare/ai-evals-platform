@@ -1652,6 +1652,34 @@ async def handle_backfill_facts_from_mirror(
 
 
 @register_job_handler(
+    "backfill-lead-signals",
+    queue_class="bulk",
+    priority=520,
+    # Idempotent on (tenant_id, app_id, lead_id, signal_type, detected_at)
+    # via the partial unique index uq_fact_lead_signal_backfill (migration
+    # 0040). Replays produce the same rows; transient DB errors are safe to
+    # re-queue. LLM cost on replay is the caller's tradeoff to make.
+    retry_safe=True,
+)
+async def handle_backfill_lead_signals(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """LLM-extract signals from the CRM lead mirror into fact_lead_signal.
+
+    Phase 5 of docs/plans/2026-05-12-analytics-facts-canonical-manifest-thinning.md.
+    Generic naming — not anchored to inside-sales; reused for future CRM-backed
+    apps by passing the new app_id.
+    """
+    from app.services.analytics.backfill_lead_signals_job import (
+        run_backfill_lead_signals,
+    )
+
+    return await run_backfill_lead_signals(
+        job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id,
+    )
+
+
+@register_job_handler(
     "run-workflow",
     queue_class="standard",
     priority=5,

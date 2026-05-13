@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,20 @@ from app.services.analytics.backfill_facts_from_mirror_job import (
     MAX_BATCH_SIZE,
     MIN_BATCH_SIZE,
     SUPPORTED_TARGET_FACT,
+)
+from app.services.analytics.backfill_lead_signals_job import (
+    DEFAULT_BATCH_SIZE as LEAD_SIGNALS_DEFAULT_BATCH_SIZE,
+    DEFAULT_COST_BUDGET_USD as LEAD_SIGNALS_DEFAULT_COST_BUDGET_USD,
+    DEFAULT_MAX_LEADS as LEAD_SIGNALS_DEFAULT_MAX_LEADS,
+    DEFAULT_PER_LEAD_COST_USD as LEAD_SIGNALS_DEFAULT_PER_LEAD_COST_USD,
+    DEFAULT_PROMPT_TOKEN_ESTIMATE as LEAD_SIGNALS_DEFAULT_PROMPT_TOKEN_ESTIMATE,
+    MAX_BATCH_SIZE as LEAD_SIGNALS_MAX_BATCH_SIZE,
+    MAX_MAX_LEADS as LEAD_SIGNALS_MAX_MAX_LEADS,
+    MIN_BATCH_SIZE as LEAD_SIGNALS_MIN_BATCH_SIZE,
+    MIN_MAX_LEADS as LEAD_SIGNALS_MIN_MAX_LEADS,
+    count_candidate_leads,
+    estimate_cost,
+    parse_request as parse_lead_signals_request,
 )
 from app.services.analytics.mirror_to_fact_mapper import MirrorToFactMapper
 
@@ -112,6 +126,82 @@ class BackfillFactsResponse(CamelModel):
     job_id: uuid.UUID
     mapping_id: uuid.UUID
     target_fact: str
+
+
+class BackfillLeadSignalsRequest(CamelModel):
+    """Request body for ``POST /api/admin/analytics/backfill-lead-signals``.
+
+    Phase 5 of the analytics-facts-canonical-manifest-thinning plan.
+    CRM-agnostic — the same endpoint serves inside-sales today and any
+    future CRM-backed app by passing the new app_id.
+
+    ``dry_run=true`` returns the lead count and estimated cost without
+    enqueuing a job. ``cost_budget_usd`` is the hard ceiling — the live
+    run refuses to start if the projected cost exceeds it; raise the budget
+    or tighten the window to proceed.
+    """
+
+    app_id: str = Field(..., min_length=1, max_length=50)
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When true, returns lead count + estimated cost and skips the "
+            "job submission. No LLM calls, no fact rows written."
+        ),
+    )
+    max_leads: int = Field(
+        default=LEAD_SIGNALS_DEFAULT_MAX_LEADS,
+        ge=LEAD_SIGNALS_MIN_MAX_LEADS,
+        le=LEAD_SIGNALS_MAX_MAX_LEADS,
+    )
+    batch_size: int = Field(
+        default=LEAD_SIGNALS_DEFAULT_BATCH_SIZE,
+        ge=LEAD_SIGNALS_MIN_BATCH_SIZE,
+        le=LEAD_SIGNALS_MAX_BATCH_SIZE,
+    )
+    cost_budget_usd: float = Field(
+        default=LEAD_SIGNALS_DEFAULT_COST_BUDGET_USD,
+        gt=0,
+        description=(
+            "Hard USD ceiling for projected cost. Live run refuses to start "
+            "if estimate exceeds this value."
+        ),
+    )
+    started_after: datetime | None = None
+    ended_before: datetime | None = None
+
+    @field_validator("ended_before")
+    @classmethod
+    def _ended_after_started_lead_signals(
+        cls, value: datetime | None, info: Any  # noqa: ANN401
+    ) -> datetime | None:
+        started = info.data.get("started_after") if info is not None else None
+        if value is not None and started is not None and value <= started:
+            raise ValueError("ended_before must be strictly after started_after")
+        return value
+
+
+class BackfillLeadSignalsDryRunResponse(CamelModel):
+    """Dry-run path response. No job is enqueued."""
+
+    dry_run: bool = True
+    app_id: str
+    lead_count: int
+    estimated_cost_usd: float
+    per_lead_cost_usd: float
+    cost_budget_usd: float
+    prompt_token_estimate: int
+    over_budget: bool
+
+
+class BackfillLeadSignalsResponse(CamelModel):
+    """Live-run path response — job enqueued at 202."""
+
+    job_id: uuid.UUID
+    estimated_cost_usd: float
+    cost_budget_usd: float
+    lead_count: int
+    app_id: str
 
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -396,6 +486,117 @@ async def submit_backfill_facts(
         job_id=job_id,
         mapping_id=state_row.id,
         target_fact=mapping.target_fact,
+    )
+
+
+@router.post(
+    "/backfill-lead-signals",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        200: {"description": "Dry-run result (no job enqueued)"},
+        202: {"description": "Job enqueued"},
+    },
+)
+async def submit_backfill_lead_signals(
+    body: BackfillLeadSignalsRequest,
+    response: Response,
+    auth: AuthContext = require_permission("analytics:admin"),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Submit a ``backfill-lead-signals`` job for one ``(tenant, app_id)``.
+
+    Dry-run (``dry_run=true``) returns a 200 with ``BackfillLeadSignalsDryRunResponse``
+    containing the count of candidate leads and the estimated USD cost; no
+    job is enqueued. Live run (``dry_run=false``) returns a 202 with
+    ``BackfillLeadSignalsResponse`` and enqueues the job. The live run
+    refuses to start (HTTP 400) if the projected cost exceeds
+    ``cost_budget_usd``.
+
+    Rollback: ``DELETE FROM analytics.fact_lead_signal WHERE sync_run_id = '<id>'``.
+    The job writes a ``LogCrmSourceSync`` row whose id is the ``sync_run_id``;
+    the response surfaces the job id, and the resulting BackgroundJob row
+    persists the sync_run_id once the worker starts running.
+    """
+    # Validate via the same parser the worker uses so the admin endpoint and
+    # the job loader can never drift on bounds / required fields.
+    params: dict[str, Any] = {
+        "app_id": body.app_id,
+        "dry_run": body.dry_run,
+        "max_leads": body.max_leads,
+        "batch_size": body.batch_size,
+        "cost_budget_usd": body.cost_budget_usd,
+        "started_after": (
+            body.started_after.isoformat() if body.started_after else None
+        ),
+        "ended_before": (
+            body.ended_before.isoformat() if body.ended_before else None
+        ),
+    }
+    try:
+        parsed = parse_lead_signals_request(params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Dry-run is in-line — no job, no LLM, no rows. The worker also supports
+    # a dry-run path so scheduled callers can probe without a roundtrip; the
+    # endpoint version short-circuits to avoid the BackgroundJob row entirely
+    # for the most common operator workflow.
+    if parsed.dry_run:
+        # Dry-run is informational, not a job submission. Override the
+        # route-level 202 default so the status code matches semantics
+        # (200 = here is the answer; 202 = work accepted for async).
+        response.status_code = status.HTTP_200_OK
+        lead_count = await count_candidate_leads(
+            db, tenant_id=auth.tenant_id, request=parsed
+        )
+        estimated = estimate_cost(lead_count)
+        return BackfillLeadSignalsDryRunResponse(
+            app_id=parsed.app_id,
+            lead_count=lead_count,
+            estimated_cost_usd=estimated,
+            per_lead_cost_usd=LEAD_SIGNALS_DEFAULT_PER_LEAD_COST_USD,
+            cost_budget_usd=parsed.cost_budget_usd,
+            prompt_token_estimate=LEAD_SIGNALS_DEFAULT_PROMPT_TOKEN_ESTIMATE,
+            over_budget=estimated > parsed.cost_budget_usd,
+        )
+
+    # Pre-flight budget gate so a rejected run leaves no audit clutter.
+    lead_count = await count_candidate_leads(
+        db, tenant_id=auth.tenant_id, request=parsed
+    )
+    estimated = estimate_cost(lead_count)
+    if estimated > parsed.cost_budget_usd:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"estimated cost ${estimated:.2f} exceeds cost_budget_usd "
+                f"${parsed.cost_budget_usd:.2f}; raise the budget or tighten "
+                f"the window"
+            ),
+        )
+
+    job_id = uuid.uuid4()
+    job = BackgroundJob(
+        id=job_id,
+        job_type="backfill-lead-signals",
+        app_id=body.app_id,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        priority=520,
+        queue_class="bulk",
+        max_attempts=3,
+        params={**params, "tenant_id": str(auth.tenant_id), "user_id": str(auth.user_id)},
+    )
+    db.add(job)
+    await db.flush()
+    await db.commit()
+
+    return BackfillLeadSignalsResponse(
+        job_id=job_id,
+        estimated_cost_usd=estimated,
+        cost_budget_usd=parsed.cost_budget_usd,
+        lead_count=lead_count,
+        app_id=parsed.app_id,
     )
 
 
