@@ -559,24 +559,24 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: category
-      prospect_id:
+      lead_id:
         role: identifier
         type: text
         data_type: nominal
         semantic_type: fk
-        description: "FK to analytics.crm_lead_record(prospect_id)"
+        description: "FK to analytics.crm_lead_record(lead_id)"
       source_system:
         role: dimension
         type: text
         data_type: nominal
         semantic_type: category
-      agent_id:
+      rep_id:
         role: identifier
         type: text
         data_type: nominal
         semantic_type: id_hash
         nullable: true
-      agent_name:
+      rep_name:
         role: dimension
         type: text
         data_type: nominal
@@ -618,7 +618,7 @@ catalog_tables:
     grain: lead_record
     alias: l
     columns:
-      prospect_id:
+      lead_id:
         role: identifier
         type: text
         data_type: nominal
@@ -638,7 +638,7 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: category
-      agent_name:
+      rep_name:
         role: dimension
         type: text
         data_type: nominal
@@ -847,13 +847,22 @@ catalog_tables:
         type: text
         data_type: nominal
         nullable: true
-        allowed_values: ["agent", "lead", "system"]
+        # Phase 1 (Alembic 0038) canonicalized human-actor type to ``rep``;
+        # ``agent`` retained for legacy rows during the soak.
+        allowed_values: ["rep", "agent", "lead", "system"]
       actor_id:
         role: identifier
         type: text
         data_type: nominal
         semantic_type: id_hash
         nullable: true
+        synonyms: ["agent", "agent id", "salesperson", "rep", "caller"]
+      actor_label:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["agent", "agent name", "rep name", "salesperson"]
       attributes:
         role: dimension
         type: jsonb

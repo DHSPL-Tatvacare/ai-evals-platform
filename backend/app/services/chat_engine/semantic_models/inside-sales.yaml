@@ -359,15 +359,15 @@ tables:
         data_type: nominal
         physical_type: text
         is_enum: true
-        sample_values: [agent, lead, system]
-      # JSONB-derived: attributes
-      - name: agent_email
-        expr: "attributes->>'agent_email'"
+        sample_values: [rep, lead, system]
+      - name: actor_label
+        expr: actor_label
         data_type: nominal
         physical_type: text
         source_table: fact_lead_activity
-      - name: agent_name
-        expr: "attributes->>'agent_name'"
+      # JSONB-derived: attributes
+      - name: rep_email
+        expr: "attributes->>'rep_email'"
         data_type: nominal
         physical_type: text
         source_table: fact_lead_activity
