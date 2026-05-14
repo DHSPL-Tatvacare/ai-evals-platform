@@ -43,6 +43,7 @@ from app.models.analytics_lead_facts import (
 )
 from app.models.analytics_log import LogFactPopulationRun, LogSherlockToolCall, CacheSqlQuery
 from app.models.analytics_mapping_state import MappingState
+from app.models.analytics_signal_definition import SignalDefinition
 from app.models.analytics_chart import AnalyticsChart
 from app.models.analytics_dashboard import AnalyticsDashboard
 from app.models.sherlock_runtime import (
@@ -99,6 +100,7 @@ __all__ = [
     "DimLead", "FactLeadStageTransition", "FactLeadActivity", "FactLeadSignal",
     "LogFactPopulationRun", "LogSherlockToolCall", "CacheSqlQuery",
     "MappingState",
+    "SignalDefinition",
     "AnalyticsChart", "AnalyticsDashboard",
     "SherlockAgentSession", "SherlockTurnEvent", "SherlockConversationTurn",
     "SherlockState", "SherlockEvidence",

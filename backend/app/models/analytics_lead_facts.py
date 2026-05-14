@@ -79,6 +79,15 @@ class DimLead(Base):
     # See ADR 2026-05-12-rep-and-lead-id-naming — no ``assigned_rep_id`` ships
     # in Phase 1 because LSQ exposes only a name string on the lead record.
     assigned_rep_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 11A — lead-identity columns, all ``pii: true`` in the manifest.
+    # The CRM workspace UI reads these from dim_lead (the normalized serving
+    # surface); values are masked by applications.config.crmWorkspace.
+    # piiVisibility. The mirror keeps its own copies for source fidelity.
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes_at_first_seen: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -339,6 +348,15 @@ class FactLeadSignal(Base):
         ForeignKey("analytics.log_crm_source_sync.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Phase 11A — lineage for signal-derivation-framework rows. Every row
+    # written by the scheduled ``derive-signals`` Transform carries the
+    # owning ``signal_definition`` id; it is the dedup key for framework
+    # rows (uq_fact_lead_signal_framework) and the rollback handle.
+    signal_definition_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analytics.signal_definition.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     lead_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_activity_id: Mapped[str | None] = mapped_column(
         String(128), nullable=True
@@ -402,6 +420,28 @@ class FactLeadSignal(Base):
             "tenant_id",
             "app_id",
             "sync_run_id",
+        ),
+        # Phase 11A — dedup key for signal-derivation-framework rows. The
+        # scheduled Transform upserts ON CONFLICT against this index so a
+        # re-run over unchanged lead state collapses to one row per
+        # (lead, signal_type, detected_at). Created in migration 0044;
+        # declared here with postgresql_where so reflection stays in sync.
+        Index(
+            "uq_fact_lead_signal_framework",
+            "tenant_id",
+            "app_id",
+            "lead_id",
+            "signal_type",
+            "detected_at",
+            unique=True,
+            postgresql_where=text("signal_definition_id IS NOT NULL"),
+        ),
+        # Powers the rollback DELETE / per-definition scan.
+        Index(
+            "ix_fact_lead_signal_tenant_app_definition",
+            "tenant_id",
+            "app_id",
+            "signal_definition_id",
         ),
         Index(
             "idx_fact_lead_signal_tenant_app_lead_type_at",

@@ -315,9 +315,30 @@ def get_manifest(app_id: str) -> AppManifest:
     return cache[app_id]
 
 
-def _clear_manifest_cache_for_tests() -> None:
-    """Drop the process-wide manifest cache. Test-only; call before reload in tests."""
+def invalidate_manifest_cache() -> None:
+    """Drop the process-wide manifest cache so the next load re-reads YAML.
+
+    Public — called by tests and by the signal-definition projection
+    (``signal_schema_projection``) when an admin edit changes the
+    DB-sourced ``fact_lead_signal.attribute_schemas`` (invariant 21, §7.4).
+    """
     _MANIFEST_CACHE.clear()
+
+
+def replace_cached_manifest(app_id: str, manifest: AppManifest) -> None:
+    """Overwrite one cached manifest in place.
+
+    Used by the signal-definition projection to overlay DB-sourced
+    ``attribute_schemas`` onto the YAML-loaded manifest. The structural
+    columns stay YAML-owned; only the projected table is swapped.
+    """
+    load_all_manifests()  # ensure the cache is populated before we mutate it
+    _MANIFEST_CACHE[app_id] = manifest
+
+
+def _clear_manifest_cache_for_tests() -> None:
+    """Deprecated alias for :func:`invalidate_manifest_cache` (test callers)."""
+    invalidate_manifest_cache()
 
 
 # Phase 4 §675 acceptance gate: ``sql_agent.py`` must not call

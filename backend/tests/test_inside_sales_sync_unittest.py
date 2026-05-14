@@ -284,7 +284,12 @@ class InsideSalesSourceRowBuilderTests(unittest.TestCase):
         self.assertNotIn("prospect_stage_normalized", row)
         self.assertNotIn("city_normalized", row)
         self.assertNotIn("agent_name_normalized", row)
-        self.assertEqual(raw_payload["mql_score"], 5)
+        # Phase 11A — mql_score / mql_signals are NOT written to the
+        # mirror any more. MQL is a derived signal; the signal derivation
+        # framework computes it from dim_lead via the `mql` rule
+        # definition (invariant 2 — nothing derived lives on the mirror).
+        self.assertNotIn("mql_score", raw_payload)
+        self.assertNotIn("mql_signals", raw_payload)
         self.assertEqual(raw_payload["total_dials"], 5)
         # In-process plumbing — read by dim_lead writer / stage appender,
         # stripped from the DB INSERT by upsert_lead_source_rows.

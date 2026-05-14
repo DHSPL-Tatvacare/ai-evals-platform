@@ -150,6 +150,15 @@ async def lifespan(app: FastAPI):
         await seed_all_defaults(session)
     await seed_bootstrap_admin()
 
+    # Overlay DB-sourced fact_lead_signal.attribute_schemas onto the YAML
+    # manifests (signal derivation framework, invariant 21 / §7.4). Runs
+    # after seeding so the system-tenant signal definitions exist.
+    from app.services.chat_engine.signal_schema_projection import (
+        project_signal_definitions,
+    )
+    async with async_session() as _projection_db:
+        await project_signal_definitions(_projection_db)
+
     # Phase 3 acceptance gate: raise on unknown pack id in any app config.
     # Runs after seed so stale ``App.config.chat.capabilities`` arrays have
     # already been rewritten by ``seed_apps`` to the current canonical set

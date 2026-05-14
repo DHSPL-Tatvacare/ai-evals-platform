@@ -1629,6 +1629,47 @@ async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.U
 
 
 @register_job_handler(
+    "derive-signals",
+    queue_class="bulk",
+    priority=505,
+    # Idempotent: every strategy upserts on a dedup key, so a partial pass
+    # is safe to retry. Platform-managed — the seeded system-tenant
+    # schedule runs unscoped across every tenant (the "T" of ELT).
+    retry_safe=True,
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Signal derivation",
+    schedule_description=(
+        "Runs every enabled analytics.signal_definition across all tenants, "
+        "deriving analytics.fact_lead_signal rows from the normalized "
+        "dim/fact surfaces."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
+async def handle_derive_signals(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Run the signal-derivation Transform pass.
+
+    The seeded system-tenant schedule runs unscoped (all tenants / apps).
+    Params may narrow scope for ad-hoc runs:
+        tenant_id_scope: optional UUID string
+        app_id_scope:    optional app id string
+    """
+    from app.services.analytics.signal_derivation.orchestrator import (
+        run_signal_derivation,
+    )
+
+    raw_tenant = params.get("tenant_id_scope")
+    scope_tenant = uuid.UUID(raw_tenant) if raw_tenant else None
+    scope_app = params.get("app_id_scope") or None
+
+    async with async_session() as db:
+        return await run_signal_derivation(
+            db, scope_tenant_id=scope_tenant, scope_app_id=scope_app
+        )
+
+
+@register_job_handler(
     "backfill-facts-from-mirror",
     queue_class="bulk",
     priority=520,

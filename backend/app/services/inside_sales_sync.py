@@ -28,7 +28,6 @@ from app.models.source_records import (
 )
 from app.services.lsq_client import (
     compute_lead_metrics,
-    compute_mql_score,
     fetch_call_activities,
     fetch_lead_by_id,
     fetch_leads,
@@ -429,7 +428,6 @@ def build_lead_source_row(
         )
         return None
 
-    mql_score, mql_signals = compute_mql_score(raw_lead)
     metrics = compute_lead_metrics(
         created_on=record["createdOn"],
         last_activity_on=record["lastActivityOn"],
@@ -479,8 +477,10 @@ def build_lead_source_row(
         "frt_seconds": frt_seconds,
         "lead_age_days": metrics["lead_age_days"],
         "days_since_last_contact": metrics["days_since_last_contact"],
-        "mql_score": mql_score,
-        "mql_signals": mql_signals,
+        # mql_score / mql_signals are no longer written to the mirror —
+        # MQL is a derived signal (Phase 11A). The signal derivation
+        # framework computes it from dim_lead via the `mql` rule
+        # definition; nothing derived lives on the mirror (invariant 2).
     })
 
     return {
@@ -660,11 +660,19 @@ async def _upsert_dim_lead_rows(
         source_campaign = (
             row.get("_lift_source_campaign") or rp.get("source_campaign")
         )
+        # Phase 11A — attributes_at_first_seen is the normalized,
+        # CRM-agnostic lead-profile snapshot the `rule` signal definitions
+        # score on (invariant 21). The MQL-input keys land here under
+        # canonical names so the `mql` rule reads dim_lead, never the mirror.
         attrs_first_seen: dict[str, Any] = {}
         if source:
             attrs_first_seen["source"] = source
         if source_campaign:
             attrs_first_seen["source_campaign"] = source_campaign
+        for key in ("age_group", "condition", "hba1c_band", "intent_to_pay"):
+            value = rp.get(key)
+            if value:
+                attrs_first_seen[key] = value
 
         payload.append(
             {
@@ -679,6 +687,15 @@ async def _upsert_dim_lead_rows(
                 "latest_stage_observed": prospect_stage or None,
                 "latest_stage_observed_at": cycle_start,
                 "assigned_rep_label": rep_name or None,
+                # Phase 11A — lead-identity columns. dim_lead is the
+                # normalized serving surface the CRM workspace UI reads;
+                # these are pii: true in the manifest and masked by role.
+                # The mirror keeps its own copies for source fidelity.
+                "first_name": row.get("first_name"),
+                "last_name": row.get("last_name"),
+                "phone": row.get("phone"),
+                "email": row.get("email"),
+                "city": row.get("city"),
                 "attributes_at_first_seen": attrs_first_seen,
             }
         )
@@ -692,6 +709,13 @@ async def _upsert_dim_lead_rows(
                 "latest_stage_observed": stmt.excluded.latest_stage_observed,
                 "latest_stage_observed_at": stmt.excluded.latest_stage_observed_at,
                 "assigned_rep_label": stmt.excluded.assigned_rep_label,
+                # Lead-identity columns are mutable current state — refresh
+                # them on every resync, same as the stage / rep label.
+                "first_name": stmt.excluded.first_name,
+                "last_name": stmt.excluded.last_name,
+                "phone": stmt.excluded.phone,
+                "email": stmt.excluded.email,
+                "city": stmt.excluded.city,
                 # attributes_at_first_seen is insert-only by design;
                 # don't overwrite the first-observation snapshot on resync.
                 "updated_at": func.now(),

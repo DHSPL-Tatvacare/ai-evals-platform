@@ -3231,6 +3231,12 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     from app.services.cost_tracking.bootstrap_seed import seed_model_pricing
     from app.services.cost_tracking.schedule_seed import seed_cost_rollup_schedule
     from app.services.sherlock_v3.verified_queries import seed_verified_queries
+    from app.services.analytics.signal_derivation.definition_seed import (
+        seed_default_signal_definitions,
+    )
+    from app.services.analytics.signal_derivation.schedule_seed import (
+        seed_signal_derivation_schedule,
+    )
 
     logger.info("Checking seed defaults...")
     await seed_apps(session)
@@ -3244,6 +3250,10 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await seed_orchestration_defaults(session)
     await seed_model_pricing(session)
     await seed_cost_rollup_schedule(session)
+    inserted_sigdef = await seed_default_signal_definitions(session)
+    if inserted_sigdef:
+        logger.info("Seeded default signal definitions (rows=%d)", inserted_sigdef)
+    await seed_signal_derivation_schedule(session)
     inserted_vq = await seed_verified_queries(session)
     if inserted_vq:
         logger.info("Seeded sherlock verified queries (rows=%d)", inserted_vq)
