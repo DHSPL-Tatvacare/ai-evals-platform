@@ -304,6 +304,7 @@ catalog_tables:
         data_type: temporal
   fact_evaluation_criterion:
     pg_schema: analytics
+    expected_empty_when: "no evaluation runs have been scored for this app yet (fresh DB / freshly-onboarded app)"
     layer: analytics_fact
     grain: criterion
     orm: FactEvaluationCriterion
@@ -547,6 +548,7 @@ catalog_tables:
   # answer so the user can correct future prompts.
   dim_lead:
     pg_schema: analytics
+    expected_empty_when: "no leads have been synced for this app yet (fresh DB / freshly-onboarded app)"
     layer: identity
     grain: lead
     orm: DimLead
@@ -619,6 +621,7 @@ catalog_tables:
         data_type: temporal
   fact_lead_stage_transition:
     pg_schema: analytics
+    expected_empty_when: "no leads have been synced for this app yet (fresh DB / freshly-onboarded app)"
     layer: analytics_fact
     grain: stage_transition
     orm: FactLeadStageTransition
@@ -687,6 +690,7 @@ catalog_tables:
       _default: {}
   fact_lead_activity:
     pg_schema: analytics
+    expected_empty_when: "no calls/activities have been synced for this app yet (fresh DB / freshly-onboarded app)"
     layer: analytics_fact
     grain: lead_activity
     orm: FactLeadActivity
@@ -823,6 +827,7 @@ catalog_tables:
           pii: true
   fact_lead_signal:
     pg_schema: analytics
+    expected_empty_when: "no signals derived for this app yet — empty until the first scheduled derive-signals Transform pass or an eval-run populate (fresh DB / freshly-onboarded app)"
     layer: analytics_fact
     grain: lead_signal
     orm: FactLeadSignal
