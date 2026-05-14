@@ -837,11 +837,11 @@ export function CrmListing() {
           onRowClick={handleRowClick}
           loading={isLoading}
           emptyIcon={Phone}
-          emptyTitle={callSearch ? 'No matching calls' : (callDatasetConfig.emptyState?.title ?? 'No calls found')}
+          emptyTitle={callSearch ? 'No matching calls' : (callDatasetConfig?.emptyState?.title ?? 'No calls found')}
           emptyDescription={
             callSearch
               ? 'Try adjusting your search terms.'
-              : (callDatasetConfig.emptyState?.description ?? 'No call activities for the selected date range.')
+              : (callDatasetConfig?.emptyState?.description ?? 'No call activities for the selected date range.')
           }
           pagination={{
             page,
@@ -878,7 +878,7 @@ export function CrmListing() {
             content: (
               <LeadsTableContent
                 onOpenFilters={() => setFilterPanelOpen(true)}
-                emptyState={leadDatasetConfig.emptyState}
+                emptyState={leadDatasetConfig?.emptyState}
               />
             ),
           },
