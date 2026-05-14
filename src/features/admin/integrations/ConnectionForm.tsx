@@ -14,7 +14,9 @@ import {
   type ProviderSchema,
 } from '@/services/api/orchestrationConnections';
 import { notificationService } from '@/services/notifications';
+import { APPS, APP_IDS, type AppId } from '@/types/app.types';
 import type { AssetVisibility } from '@/types/settings.types';
+import { useAuthStore } from '@/stores/authStore';
 
 import {
   DynamicConfigForm,
@@ -25,7 +27,11 @@ import {
 } from './providerOptions';
 
 interface Props {
-  appId: string;
+  /** App the new connection binds to. Optional on the admin Integrations
+   *  surface — when omitted in create mode the form renders an app picker
+   *  scoped to the user's app access. Ignored in edit mode (the app is
+   *  fixed to `existing.appId`). */
+  appId?: string;
   /** When set, the form is in edit mode for that connection — provider is
    *  locked, secret fields render with "leave blank to keep" semantics. */
   existing?: Connection | null;
@@ -59,6 +65,22 @@ function asStringArray(value: unknown): string[] {
 
 export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
   const isEdit = Boolean(existing);
+  const user = useAuthStore((s) => s.user);
+  // Apps the admin may bind a new connection to: their app access,
+  // narrowed to known app ids. Edit mode locks to the existing app.
+  const appOptions = useMemo(
+    () =>
+      (user?.appAccess ?? [])
+        .filter((id): id is AppId => (APP_IDS as string[]).includes(id))
+        .map((id) => ({ value: id, label: APPS[id].name })),
+    [user?.appAccess],
+  );
+  // `appId` prop wins (deep-linked `?app=`); otherwise let the admin pick.
+  const [selectedAppId, setSelectedAppId] = useState<string>(
+    existing?.appId ?? appId ?? appOptions[0]?.value ?? '',
+  );
+  const effectiveAppId = existing?.appId ?? appId ?? selectedAppId;
+  const showAppPicker = !isEdit && !appId;
   const [provider, setProvider] = useState<string>(
     existing?.provider ?? 'bolna',
   );
@@ -138,6 +160,10 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
 
   async function handleSave() {
     if (!schema) return;
+    if (!existing && !effectiveAppId) {
+      setError('Select an app for this connection.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -151,7 +177,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         });
       } else {
         saved = await createConnection({
-          appId,
+          appId: effectiveAppId,
           provider,
           name,
           config: payloadConfig,
@@ -177,6 +203,19 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
+      {showAppPicker ? (
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-[var(--text-primary)]">
+            App
+          </label>
+          <Select
+            value={selectedAppId}
+            onChange={(next) => setSelectedAppId(next)}
+            options={appOptions}
+            placeholder="Select an app"
+          />
+        </div>
+      ) : null}
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium text-[var(--text-primary)]">
           Provider
@@ -211,7 +250,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
             schema={jsonSchema}
             value={config}
             onChange={setConfig}
-            appId={appId}
+            appId={effectiveAppId}
             secretsOptional={isEdit}
             secretPreviews={isEdit ? existing?.secretPreviews : undefined}
             hiddenFields={provider === 'wati' ? new Set(['channel_numbers']) : undefined}
@@ -290,7 +329,13 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         </Button>
         <Button
           onClick={handleSave}
-          disabled={saving || !name || !schema || invalidChannelNumbers.length > 0}
+          disabled={
+            saving ||
+            !name ||
+            !schema ||
+            invalidChannelNumbers.length > 0 ||
+            (!existing && !effectiveAppId)
+          }
         >
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create'}
         </Button>

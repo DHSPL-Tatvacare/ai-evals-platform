@@ -336,9 +336,7 @@ export function ConnectionsPage() {
         )}
         actions={
           canManage ? (
-            <Button onClick={() => setCreating(true)} disabled={!appId}>
-              New Connection
-            </Button>
+            <Button onClick={() => setCreating(true)}>New Connection</Button>
           ) : null
         }
       >
@@ -375,7 +373,7 @@ export function ConnectionsPage() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {creating && appId ? (
+          {creating ? (
             <ConnectionForm
               appId={appId}
               onClose={() => setCreating(false)}
