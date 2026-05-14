@@ -216,6 +216,7 @@ export function CallFilterPanel({
   const appConfig = useAppConfig(appId);
   const datasetKey = activeTab === 'leads' ? 'leads' : 'calls';
   const datasetConfig = appConfig.collections.datasets[datasetKey];
+  const datasetFilters = datasetConfig?.filters ?? [];
   const { data: crmSchema } = useCrmSchema(appId, FAMILY_SCHEMA_TABLE[datasetKey]);
 
   const callFiltersFromStore = useInsideSalesStore((state) => state.filters);
@@ -268,7 +269,7 @@ export function CallFilterPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {datasetConfig.filters.map((filter) => (
+          {datasetFilters.map((filter) => (
             <div key={filter.key} className="space-y-2">
               <label
                 className="text-xs font-medium text-[var(--text-secondary)]"

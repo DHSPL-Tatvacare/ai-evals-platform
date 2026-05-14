@@ -35,16 +35,23 @@ export function MainLayout({ children }: MainLayoutProps) {
   const activeModal = useUIStore((s) => s.activeModal);
   const closeModal = useUIStore((s) => s.closeModal);
 
-  // Sync app store from route — route is the single source of truth
+  // Sync app store from route — route is the single source of truth.
+  // Done *during render* (not in an effect) so children mounted under
+  // <Outlet/> read the correct app on their very first render. A
+  // useEffect here lands one render late, so the first paint of an app
+  // page (fresh load / cross-app navigation) would otherwise pull the
+  // previous app's config and crash on app-specific config keys.
+  const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
+  const routeApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
+  if (routeApp && routeApp !== currentApp) {
+    setCurrentApp(routeApp);
+  }
+
+  // Side effect of an app change (mini-player teardown) stays in an
+  // effect — it must not run during render.
   useEffect(() => {
-    const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
-    const newApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
-    if (!newApp || newApp === currentApp) {
-      return;
-    }
-    setCurrentApp(newApp);
-    useMiniPlayerStore.getState().closeIfAppChanged(newApp);
-  }, [currentApp, location.pathname, setCurrentApp, user]);
+    useMiniPlayerStore.getState().closeIfAppChanged(currentApp);
+  }, [currentApp]);
 
   useEffect(() => {
     if (!user) {
