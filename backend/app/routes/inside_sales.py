@@ -60,6 +60,11 @@ from app.services.inside_sales_sync import (
     build_incremental_refresh_job_params,
 )
 from app.models.source_records import LogCrmSourceSync
+from app.services.crm_workspace_pii import (
+    CALL_PII_FIELDS,
+    LEAD_PII_FIELDS,
+    mask_crm_pii,
+)
 from app.services.job_worker import get_job_submission_metadata
 from app.services.lsq_client import (
     MAX_LEAD_CALL_HISTORY,
@@ -135,8 +140,15 @@ async def list_calls(
         source_family="calls",
     )
 
+    masked_calls = await mask_crm_pii(
+        call_page.records,
+        pii_fields=CALL_PII_FIELDS,
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return CallListResponse(
-        calls=[CallRecord(**call) for call in call_page.records],
+        calls=[CallRecord(**call) for call in masked_calls],
         total=call_page.total,
         page=call_page.page,
         page_size=call_page.page_size,
@@ -165,12 +177,25 @@ async def get_lead(
     if record is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    [masked] = await mask_crm_pii(
+        [{
+            "leadId": record.lead_id,
+            "firstName": record.first_name,
+            "lastName": record.last_name,
+            "phone": record.phone,
+            "email": record.email,
+        }],
+        pii_fields=LEAD_PII_FIELDS,
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return LeadDetailResponse(
-        lead_id=record.lead_id,
-        first_name=record.first_name,
-        last_name=record.last_name,
-        phone=record.phone,
-        email=record.email,
+        lead_id=masked["leadId"],
+        first_name=masked["firstName"],
+        last_name=masked["lastName"],
+        phone=masked["phone"],
+        email=masked["email"],
     )
 
 
@@ -218,8 +243,15 @@ async def list_leads(
         source_family="leads",
     )
 
+    masked_leads = await mask_crm_pii(
+        lead_page.records,
+        pii_fields=LEAD_PII_FIELDS,
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return LeadListResponse(
-        leads=[LeadListRecord(**lead) for lead in lead_page.records],
+        leads=[LeadListRecord(**lead) for lead in masked_leads],
         total=lead_page.total,
         page=lead_page.page,
         page_size=lead_page.page_size,
