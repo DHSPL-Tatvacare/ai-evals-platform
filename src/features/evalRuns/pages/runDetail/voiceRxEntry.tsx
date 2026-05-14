@@ -5,10 +5,10 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { usePoll } from '@/hooks';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Clock, Calendar, Cpu, ChevronRight, Info, ListChecks } from 'lucide-react';
-import { ConfirmDialog, DataTable, Tooltip, type ColumnDef } from '@/components/ui';
+import { AlertTriangle, Clock, Calendar, Code2, Cpu, ChevronRight, Info, ListChecks, X } from 'lucide-react';
+import { ConfirmDialog, DataTable, RightSlideOverShell, Tooltip, type ColumnDef } from '@/components/ui';
 import { EvalRunVisibilityPanel, VerdictBadge, OutputFieldRenderer, RunProgressBar } from '@/features/evalRuns/components';
-import { RunHeaderActions } from '@/features/evalRuns/components/RunHeaderActions';
+import { RunHeaderActions, ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
 import { useElapsedTime } from '@/features/evalRuns/hooks';
 import { AppReportTab } from '@/features/analytics/AppReportTab';
 import {
@@ -38,6 +38,7 @@ function useVoiceRxRunDetail(runId: string): RunDetailView {
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
 
   // Initial fetch
   useEffect(() => {
@@ -195,6 +196,44 @@ function useVoiceRxRunDetail(runId: string): RunDetailView {
     </div>
   ) : null;
 
+  const rawPayloadButton = (
+    <ActionIconButton
+      icon={Code2}
+      label="View raw payload"
+      tooltip="View raw payload"
+      onClick={() => setRawOpen(true)}
+    />
+  );
+
+  const rawOverlay = (
+    <RightSlideOverShell
+      isOpen={rawOpen}
+      onClose={() => setRawOpen(false)}
+      labelledBy="raw-payload-heading"
+    >
+      <div className="flex h-full flex-col">
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
+          <h2 id="raw-payload-heading" className="text-sm font-semibold text-[var(--text-primary)]">
+            Raw Payload
+          </h2>
+          <button
+            type="button"
+            onClick={() => setRawOpen(false)}
+            aria-label="Close"
+            className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--text-secondary)]">
+            {JSON.stringify(run.result ?? {}, null, 2)}
+          </pre>
+        </div>
+      </div>
+    </RightSlideOverShell>
+  );
+
   const tabs = [
     {
       id: 'results',
@@ -227,7 +266,12 @@ function useVoiceRxRunDetail(runId: string): RunDetailView {
       icon: ListChecks,
       title: evalName,
       subtitle,
-      actions,
+      actions: (
+        <>
+          {rawPayloadButton}
+          {actions}
+        </>
+      ),
     },
     body: (
       <>
@@ -237,16 +281,19 @@ function useVoiceRxRunDetail(runId: string): RunDetailView {
       </>
     ),
     dialogs: (
-      <ConfirmDialog
-        isOpen={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
-        onConfirm={handleDelete}
-        title="Delete Run"
-        description="Delete this evaluator run? This cannot be undone."
-        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
-        variant="danger"
-        isLoading={isDeleting}
-      />
+      <>
+        <ConfirmDialog
+          isOpen={deleteOpen}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={handleDelete}
+          title="Delete Run"
+          description="Delete this evaluator run? This cannot be undone."
+          confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+          variant="danger"
+          isLoading={isDeleting}
+        />
+        {rawOverlay}
+      </>
     ),
   };
 }
@@ -408,21 +455,6 @@ function FullEvaluationDetail({ run }: { run: EvalRun }) {
         ) : (
           <p className="text-sm text-[var(--text-muted)] italic">No detail data.</p>
         )}
-      </div>
-
-      {/* Raw data (collapsible card) */}
-      <div className="shrink-0 bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-md">
-        <details className="group">
-          <summary className="flex items-center gap-1.5 px-4 py-3 text-xs font-semibold text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-secondary)] select-none">
-            <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-            Raw Prompts &amp; Responses
-          </summary>
-          <div className="px-4 pb-3 border-t border-[var(--border-subtle)]">
-            <pre className="mt-3 text-xs bg-[var(--bg-tertiary)] p-3 rounded overflow-auto max-h-64 text-[var(--text-secondary)]">
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </div>
-        </details>
       </div>
     </div>
   );
