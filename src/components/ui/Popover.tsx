@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode, type HTMLAttributes } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode, type HTMLAttributes } from 'react';
 import React from 'react';
 import { createPortal } from 'react-dom';
 
@@ -92,86 +92,92 @@ export function PopoverContent({
   const contentRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
   
-  // Calculate position
-  useEffect(() => {
-    if (open && triggerRef.current && contentRef.current) {
-      const triggerRect = triggerRef.current.getBoundingClientRect();
-      const contentRect = contentRef.current.getBoundingClientRect();
-      
-      let x = 0;
-      let y = 0;
-      
-      // Calculate base position based on side
-      switch (side) {
-        case 'top':
-          y = triggerRect.top - contentRect.height - 8;
-          x = triggerRect.left;
-          break;
-        case 'bottom':
-          y = triggerRect.bottom + 8;
-          x = triggerRect.left;
-          break;
-        case 'left':
-          x = triggerRect.left - contentRect.width - 8;
-          y = triggerRect.top;
-          break;
-        case 'right':
-          x = triggerRect.right + 8;
-          y = triggerRect.top;
-          break;
-      }
-      
-      // Adjust for alignment
-      if (side === 'top' || side === 'bottom') {
-        switch (align) {
-          case 'start':
-            // x already set to triggerRect.left
-            break;
-          case 'center':
-            x = triggerRect.left + (triggerRect.width - contentRect.width) / 2;
-            break;
-          case 'end':
-            x = triggerRect.right - contentRect.width;
-            break;
-        }
-      } else {
-        switch (align) {
-          case 'start':
-            // y already set to triggerRect.top
-            break;
-          case 'center':
-            y = triggerRect.top + (triggerRect.height - contentRect.height) / 2;
-            break;
-          case 'end':
-            y = triggerRect.bottom - contentRect.height;
-            break;
-        }
-      }
-      
-      // Keep within viewport
-      x = Math.max(8, Math.min(x, window.innerWidth - contentRect.width - 8));
-      y = Math.max(8, Math.min(y, window.innerHeight - contentRect.height - 8));
-      
-      setCoords({ x, y });
+  // Position the portaled content against the trigger.
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current || !contentRef.current) return;
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const contentRect = contentRef.current.getBoundingClientRect();
+
+    let x = 0;
+    let y = 0;
+
+    // Base position based on side.
+    switch (side) {
+      case 'top':
+        y = triggerRect.top - contentRect.height - 8;
+        x = triggerRect.left;
+        break;
+      case 'bottom':
+        y = triggerRect.bottom + 8;
+        x = triggerRect.left;
+        break;
+      case 'left':
+        x = triggerRect.left - contentRect.width - 8;
+        y = triggerRect.top;
+        break;
+      case 'right':
+        x = triggerRect.right + 8;
+        y = triggerRect.top;
+        break;
     }
-  }, [open, align, side, triggerRef]);
-  
-  // Close on outside click
+
+    // Adjust for alignment ('start' keeps the base position).
+    if (side === 'top' || side === 'bottom') {
+      if (align === 'center') {
+        x = triggerRect.left + (triggerRect.width - contentRect.width) / 2;
+      } else if (align === 'end') {
+        x = triggerRect.right - contentRect.width;
+      }
+    } else {
+      if (align === 'center') {
+        y = triggerRect.top + (triggerRect.height - contentRect.height) / 2;
+      } else if (align === 'end') {
+        y = triggerRect.bottom - contentRect.height;
+      }
+    }
+
+    // Keep within the viewport.
+    x = Math.max(8, Math.min(x, window.innerWidth - contentRect.width - 8));
+    y = Math.max(8, Math.min(y, window.innerHeight - contentRect.height - 8));
+
+    setCoords({ x, y });
+  }, [align, side, triggerRef]);
+
+  // Run in a layout effect so coords are committed before paint (no flash
+  // from the initial 0,0), and re-run on scroll / resize so the popover
+  // tracks its trigger instead of stranding when the layout shifts.
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+    // Capture-phase scroll so an ancestor scroll container — not just the
+    // window — still triggers a reposition.
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [open, updatePosition]);
+
+  // Close on outside click. Capture phase so the listener fires even when a
+  // descendant (e.g. the React Flow canvas) calls stopPropagation on
+  // mousedown during the bubble phase — a bubble-phase document listener
+  // would never see those clicks and the popover would stay stuck open.
   useEffect(() => {
     if (!open) return;
-    
+
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      // Don't close if clicking inside the popover or its trigger
+      // Don't close if clicking inside the popover or its trigger.
       if (contentRef.current?.contains(target)) return;
       if (triggerRef.current?.contains(target)) return;
       // Don't close if clicking inside a Radix portal (Select, Combobox, etc.)
       if ((target as Element).closest?.('[data-radix-popper-content-wrapper], [role="listbox"], [data-radix-select-viewport]')) return;
       setOpen(false);
     };
-    
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [open, setOpen, triggerRef]);
   
   // Close on Escape
