@@ -69,13 +69,15 @@ interface WorkflowBuilderState {
   /** Persisted React Flow viewport — null until first load/move-end. */
   viewport: ViewportState | null;
 
-  /** Hash of the most recently committed data snapshot (set on hydrate /
-   *  successful save). `null` only between `reset()` and the first hydrate. */
-  committedDataHash: string | null;
+  /** Hash of the most recently committed data snapshot (set on `reset()`,
+   *  hydrate, and successful save). Seeded with the empty-snapshot hash so a
+   *  fresh, never-hydrated store reads as `clean-draft`, not phantom-dirty. */
+  committedDataHash: string;
   /** Hash of the live data snapshot (recomputed by every content mutator). */
   currentDataHash: string;
-  /** Hash of the most recently committed layout (positions only). */
-  committedLayoutHash: string | null;
+  /** Hash of the most recently committed layout (positions only). Seeded with
+   *  the empty-layout hash on `reset()`, same as `committedDataHash`. */
+  committedLayoutHash: string;
   /** Hash of the live layout snapshot (recomputed by `updateNodePosition`,
    *  `addNode`, `removeNode`). Viewport is excluded entirely — pan/zoom is
    *  presentation-only state and must never affect either hash. */
@@ -224,9 +226,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     selectedNodeId: null,
     viewport: null,
 
-    committedDataHash: null,
+    committedDataHash: EMPTY_DATA_HASH,
     currentDataHash: EMPTY_DATA_HASH,
-    committedLayoutHash: null,
+    committedLayoutHash: EMPTY_LAYOUT_HASH,
     currentLayoutHash: EMPTY_LAYOUT_HASH,
 
     inFlight: "idle",
@@ -250,9 +252,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         edges: [],
         selectedNodeId: null,
         viewport: null,
-        committedDataHash: null,
+        committedDataHash: EMPTY_DATA_HASH,
         currentDataHash: EMPTY_DATA_HASH,
-        committedLayoutHash: null,
+        committedLayoutHash: EMPTY_LAYOUT_HASH,
         currentLayoutHash: EMPTY_LAYOUT_HASH,
         inFlight: "idle",
         lastSaveOutcome: null,

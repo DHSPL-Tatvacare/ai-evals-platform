@@ -27,14 +27,14 @@ export type InFlight = 'idle' | 'saving' | 'publishing';
 export interface LifecycleInputs {
   /** True when there is no published version on this workflow yet. */
   hasPublishedVersion: boolean;
-  /** Hash of the most recently committed (saved or hydrated) data snapshot.
-   *  `null` only before first hydrate. */
-  committedDataHash: string | null;
+  /** Hash of the most recently committed (reset / saved / hydrated) data
+   *  snapshot. Always set — the store seeds it with the empty-snapshot hash. */
+  committedDataHash: string;
   /** Hash of the live, in-store data snapshot. */
   currentDataHash: string;
   /** Hash of the most recently committed layout (positions). Layout changes
    *  do NOT drive `dirty-published-edits` — see snapshotHash.ts rationale. */
-  committedLayoutHash: string | null;
+  committedLayoutHash: string;
   /** Hash of the live, in-store layout snapshot. */
   currentLayoutHash: string;
   inFlight: InFlight;
