@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
 
-from app.models.source_records import CrmCallRecord, CrmLeadRecord  # noqa: E402
+from app.models.analytics_lead_facts import DimLead, FactLeadActivity  # noqa: E402
 from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters, InsideSalesLeadFilters  # noqa: E402
 from app.services.inside_sales_queries import (  # noqa: E402
     INSIDE_SALES_STALE_AFTER,
@@ -29,6 +29,9 @@ def _compile(statement) -> str:
 
 
 def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
+    # Phase 11E: calls listing reads analytics.fact_lead_activity
+    # (activity_type='call'). Structural filters hit typed columns; the
+    # call-specific payload filters route through the attributes JSONB.
     statement = build_call_listing_query(
         tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
         app_id="inside-sales",
@@ -48,19 +51,22 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
     )
     sql = _compile(statement)
 
-    assert "analytics.crm_call_record.tenant_id =" in sql
-    assert "analytics.crm_call_record.app_id =" in sql
-    # No date_from / date_to clauses anymore — listing serves the full mirror.
-    assert "call_started_at >=" not in sql
-    assert "lower(analytics.crm_call_record.rep_name) IN ('agent amy', 'agent bob')" in sql
-    assert "analytics.crm_call_record.lead_id ILIKE '%%pros-1%%'" in sql
-    assert "analytics.crm_call_record.direction = 'inbound'" in sql
-    assert "lower(analytics.crm_call_record.status) = 'answered'" in sql
-    assert "analytics.crm_call_record.duration_seconds >= 30" in sql
-    assert "analytics.crm_call_record.duration_seconds <= 600" in sql
-    assert "analytics.crm_call_record.has_recording IS true" in sql
-    assert "analytics.crm_call_record.event_code IN (21, 22)" in sql
-    assert "ORDER BY coalesce(analytics.crm_call_record.call_started_at, analytics.crm_call_record.created_on) DESC" in sql
+    assert "FROM analytics.fact_lead_activity" in sql
+    assert "analytics.fact_lead_activity.tenant_id =" in sql
+    assert "analytics.fact_lead_activity.app_id =" in sql
+    assert "analytics.fact_lead_activity.activity_type = 'call'" in sql
+    assert "lower(analytics.fact_lead_activity.actor_label) IN ('agent amy', 'agent bob')" in sql
+    assert "analytics.fact_lead_activity.lead_id ILIKE '%%pros-1%%'" in sql
+    assert "(analytics.fact_lead_activity.attributes ->> 'direction') = 'inbound'" in sql
+    assert "lower(analytics.fact_lead_activity.attributes ->> 'status') = 'answered'" in sql
+    assert "CAST(nullif(analytics.fact_lead_activity.attributes ->> 'duration_seconds', '') AS INTEGER) >= 30" in sql
+    assert "CAST(nullif(analytics.fact_lead_activity.attributes ->> 'duration_seconds', '') AS INTEGER) <= 600" in sql
+    assert "(analytics.fact_lead_activity.attributes ->> 'has_recording') = 'true'" in sql
+    assert "analytics.fact_lead_activity.source_event_code IN (21, 22)" in sql
+    assert (
+        "ORDER BY analytics.fact_lead_activity.occurred_at DESC NULLS LAST, "
+        "analytics.fact_lead_activity.source_activity_id DESC" in sql
+    )
     assert " LIMIT 25 OFFSET 25" in sql
 
 
@@ -73,13 +79,15 @@ def test_build_call_count_query_wraps_filtered_call_scope_without_pagination():
     sql = _compile(statement)
 
     assert "SELECT count(*) AS count_1" in sql
-    assert "lower(analytics.crm_call_record.status) = 'answered'" in sql
+    assert "FROM analytics.fact_lead_activity" in sql
+    assert "lower(analytics.fact_lead_activity.attributes ->> 'status') = 'answered'" in sql
     assert " LIMIT " not in sql
     assert " OFFSET " not in sql
 
 
 def test_lead_listing_query_orders_by_created_on_desc():
-    """Lead listing always orders newest-first by ``created_on``."""
+    """Lead listing reads analytics.dim_lead, ordered newest-first by
+    ``lsq_created_on`` with ``lead_id`` as a stable tiebreak."""
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
@@ -88,12 +96,18 @@ def test_lead_listing_query_orders_by_created_on_desc():
         page_size=50,
     )
     sql = _compile(statement)
-    assert "ORDER BY analytics.crm_lead_record.created_on DESC" in sql
-    # No date_from / date_to clauses anymore.
-    assert "analytics.crm_lead_record.created_on >=" not in sql
+    assert "FROM analytics.dim_lead" in sql
+    assert (
+        "ORDER BY analytics.dim_lead.lsq_created_on DESC NULLS LAST, "
+        "analytics.dim_lead.lead_id DESC" in sql
+    )
 
 
-def test_build_lead_listing_query_applies_filters_against_raw_columns():
+def test_build_lead_listing_query_applies_filters_against_dim_columns():
+    # Phase 11E: leads listing reads analytics.dim_lead. Identity + current
+    # state come off typed columns; lead-profile fields route through the
+    # attributes_at_first_seen JSONB; the mql_min threshold filters via a
+    # fact_lead_signal subquery.
     statement = build_lead_listing_query(
         tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         app_id="inside-sales",
@@ -110,17 +124,19 @@ def test_build_lead_listing_query_applies_filters_against_raw_columns():
     )
     sql = _compile(statement)
 
-    # Post-Phase-9: domain-field filters route through JSONB key access
-    # on raw_payload (typed cols dropped). PII fields (city, lead_id) and
-    # the numeric mql_min comparator are still SQL-shaped — just cast
-    # through the JSONB path.
-    assert "lower(analytics.crm_lead_record.raw_payload ->> 'rep_name') IN ('agent amy')" in sql
-    assert "lower(analytics.crm_lead_record.raw_payload ->> 'prospect_stage') IN ('new lead', 'call back')" in sql
-    assert "(analytics.crm_lead_record.raw_payload ->> 'condition') ILIKE '%%diabetes%%'" in sql
-    assert "analytics.crm_lead_record.city ILIKE '%%mumbai%%'" in sql
-    assert "analytics.crm_lead_record.lead_id ILIKE '%%prospect-9%%'" in sql
-    assert "coalesce(CAST(nullif(analytics.crm_lead_record.raw_payload ->> 'mql_score', '') AS INTEGER), 0) >= 3" in sql
-    assert "ORDER BY analytics.crm_lead_record.created_on DESC, analytics.crm_lead_record.lead_id DESC" in sql
+    assert "lower(analytics.dim_lead.assigned_rep_label) IN ('agent amy')" in sql
+    assert "lower(analytics.dim_lead.latest_stage_observed) IN ('new lead', 'call back')" in sql
+    assert "(analytics.dim_lead.attributes_at_first_seen ->> 'condition') ILIKE '%%diabetes%%'" in sql
+    assert "(analytics.dim_lead.attributes_at_first_seen ->> 'condition') ILIKE '%%pcos%%'" in sql
+    assert "analytics.dim_lead.city ILIKE '%%mumbai%%'" in sql
+    assert "analytics.dim_lead.lead_id ILIKE '%%prospect-9%%'" in sql
+    assert "analytics.dim_lead.lead_id IN (SELECT analytics.fact_lead_signal.lead_id" in sql
+    assert "analytics.fact_lead_signal.signal_type = 'mql_score'" in sql
+    assert "analytics.fact_lead_signal.signal_value_numeric >= 3" in sql
+    assert (
+        "ORDER BY analytics.dim_lead.lsq_created_on DESC NULLS LAST, "
+        "analytics.dim_lead.lead_id DESC" in sql
+    )
 
 
 def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
@@ -135,9 +151,9 @@ def test_build_lead_query_applies_q_concat_ilike_across_name_and_phone():
     sql = _compile(statement)
 
     assert "concat(" in sql
-    assert "analytics.crm_lead_record.first_name" in sql
-    assert "analytics.crm_lead_record.last_name" in sql
-    assert "analytics.crm_lead_record.phone" in sql
+    assert "analytics.dim_lead.first_name" in sql
+    assert "analytics.dim_lead.last_name" in sql
+    assert "analytics.dim_lead.phone" in sql
     assert "ILIKE '%%rohit%%'" in sql
 
 
@@ -165,8 +181,8 @@ def test_build_lead_query_lead_id_substring_match():
     )
     sql = _compile(statement)
 
-    assert "analytics.crm_lead_record.lead_id ILIKE '%%abc123%%'" in sql
-    assert "analytics.crm_lead_record.lead_id = 'abc123'" not in sql
+    assert "analytics.dim_lead.lead_id ILIKE '%%abc123%%'" in sql
+    assert "analytics.dim_lead.lead_id = 'abc123'" not in sql
 
 
 def test_build_lead_count_query_wraps_filtered_lead_scope():
@@ -178,31 +194,38 @@ def test_build_lead_count_query_wraps_filtered_lead_scope():
     sql = _compile(statement)
 
     assert "SELECT count(*) AS count_1" in sql
-    assert "coalesce(CAST(nullif(analytics.crm_lead_record.raw_payload ->> 'mql_score', '') AS INTEGER), 0) >= 5" in sql
+    assert "FROM analytics.dim_lead" in sql
+    assert "analytics.dim_lead.lead_id IN (SELECT analytics.fact_lead_signal.lead_id" in sql
+    assert "analytics.fact_lead_signal.signal_value_numeric >= 5" in sql
 
 
 def test_map_call_listing_row_preserves_existing_api_shape_with_eval_overlay():
-    call = CrmCallRecord(
+    # Phase 11E: map_call_listing_row projects a fact_lead_activity row.
+    # Structural fields come off typed columns; call-specific payload comes
+    # off the attributes JSONB.
+    call = FactLeadActivity(
         tenant_id=uuid.uuid4(),
         app_id="inside-sales",
-        source_system="lsq",
-        activity_id="activity-1",
         lead_id="prospect-1",
-        event_code=21,
-        direction="inbound",
-        duration_seconds=180,
-        has_recording=True,
+        source_activity_id="activity-1",
+        activity_type="call",
+        source_event_code=21,
+        occurred_at=datetime(2026, 4, 8, 9, 0, tzinfo=timezone.utc),
+        actor_label="Agent Amy",
+        attributes={
+            "rep_email": "amy@example.com",
+            "status": "Answered",
+            "direction": "inbound",
+            "duration_seconds": 180,
+            "has_recording": "true",
+            "recording_url": "https://example.com/recording.mp3",
+            "phone_number": "9999999999",
+            "display_number": "Lead Amy",
+            "call_notes": "Interested",
+            "call_session_id": "session-1",
+        },
+        created_at=datetime(2026, 4, 8, 9, 5, tzinfo=timezone.utc),
     )
-    call.rep_name = "Agent Amy"
-    call.rep_email = "amy@example.com"
-    call.status = "Answered"
-    call.recording_url = "https://example.com/recording.mp3"
-    call.phone_number = "9999999999"
-    call.display_number = "Lead Amy"
-    call.call_notes = "Interested"
-    call.call_session_id = "session-1"
-    call.call_started_at = datetime(2026, 4, 8, 9, 0, tzinfo=timezone.utc)
-    call.created_on = datetime(2026, 4, 8, 9, 5, tzinfo=timezone.utc)
 
     payload = map_call_listing_row(
         call,
@@ -211,48 +234,59 @@ def test_map_call_listing_row_preserves_existing_api_shape_with_eval_overlay():
     )
 
     assert payload["activityId"] == "activity-1"
+    assert payload["leadId"] == "prospect-1"
+    assert payload["repName"] == "Agent Amy"
     assert payload["callStartTime"] == "2026-04-08 09:00:00"
+    assert payload["durationSeconds"] == 180
     assert payload["lastEvalScore"] == 84
     assert payload["evalCount"] == 2
 
 
 def test_map_lead_listing_row_preserves_existing_api_shape():
-    # Post-Phase-9: domain fields live in raw_payload; map_lead_listing_row
-    # reads them via the ``bag`` accessor. PII (first_name/last_name/phone)
-    # + city stay as typed cols.
-    lead = CrmLeadRecord(
+    # Phase 11E: map_lead_listing_row projects a dim_lead row. Identity +
+    # current-state come off typed columns; lead-profile fields come off
+    # attributes_at_first_seen; MQL is assembled from fact_lead_signal and
+    # passed in via the ``mql`` arg.
+    lead = DimLead(
         tenant_id=uuid.uuid4(),
         app_id="inside-sales",
-        source_system="lsq",
         lead_id="prospect-1",
+        source="lsq",
         first_name="Lead",
         last_name="One",
         phone="9999999999",
-        created_on=datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc),
-        raw_payload={
-            "prospect_stage": "New Lead",
-            "rep_name": "Agent Amy",
-            "total_dials": 5,
-            "mql_score": 4,
-            "lead_age_days": 7,
-            "connect_rate": 60.0,
-            "frt_seconds": 240,
-            "days_since_last_contact": 1,
-            "mql_signals": {"age": True},
-            "last_activity_on": "2026-04-07T09:00:00+00:00",
+        city="Mumbai",
+        latest_stage_observed="New Lead",
+        assigned_rep_label="Agent Amy",
+        lsq_created_on=datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc),
+        first_seen_at=datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc),
+        attributes_at_first_seen={
+            "condition": "diabetes",
+            "age_group": "45-54",
+            "source": "Facebook",
         },
+        attributes={"plan_name": "Gold"},
     )
 
-    payload = map_lead_listing_row(lead)
+    payload = map_lead_listing_row(
+        lead,
+        mql={"score": 4, "signals": {"age": True}},
+    )
 
     assert payload["leadId"] == "prospect-1"
-    assert payload["createdOn"] == "2026-04-01 09:00:00"
-    # lastActivityOn comes from raw_payload as an ISO string post-Phase-9;
-    # the response builder formats it for display.
-    assert payload["lastActivityOn"] is not None
-    assert payload["connectRate"] == 60.0
-    assert payload["mqlScore"] == 4
+    assert payload["firstName"] == "Lead"
+    assert payload["phone"] == "9999999999"
+    assert payload["city"] == "Mumbai"
+    assert payload["prospectStage"] == "New Lead"
     assert payload["repName"] == "Agent Amy"
+    assert payload["condition"] == "diabetes"
+    assert payload["createdOn"] == "2026-04-01 09:00:00"
+    assert payload["mqlScore"] == 4
+    assert payload["mqlSignals"] == {"age": True}
+    assert payload["planName"] == "Gold"
+    # Activity-derived numerics are not yet computed from fact_lead_activity.
+    assert payload["connectRate"] is None
+    assert payload["totalDials"] is None
 
 
 class _FakeFreshnessSession:

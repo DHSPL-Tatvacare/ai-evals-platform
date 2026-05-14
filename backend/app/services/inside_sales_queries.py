@@ -1,4 +1,19 @@
-"""Postgres-backed query services for Inside Sales collection serving."""
+"""Postgres-backed query services for Inside Sales collection serving.
+
+Phase 11E: the calls + leads listing surfaces read the **fact tables**
+(``analytics.fact_lead_activity`` / ``analytics.dim_lead`` /
+``analytics.fact_lead_signal``) — the canonical, CRM-agnostic analytical
+surface — not the CRM mirrors. The public function signatures and the DTO
+dict shapes are unchanged, so the routes, response schemas, and frontend
+pages are untouched; only the data source moved.
+
+What still reads the mirror, by design:
+  * ``get_lead_record`` + ``list_call_history_for_lead`` — the single-lead
+    drilldown stays on the mirror per plan §1.3 (untouched surface).
+  * ``prune_rows_older_than`` — prunes the mirrors, which are still synced.
+  * ``get_collection_sync_status`` / ``get_collection_freshness`` — read
+    ``log_crm_source_sync``, unrelated to the data tables.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +25,11 @@ from typing import Any
 from sqlalchemy import Integer as _SAInteger, Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.analytics_lead_facts import (
+    DimLead,
+    FactLeadActivity,
+    FactLeadSignal,
+)
 from app.models.source_records import CrmCallRecord, CrmLeadRecord, LogCrmSourceSync
 from app.services.inside_sales_dataset_resolver import (
     CallDatasetScope,
@@ -21,9 +41,14 @@ from app.services.inside_sales_eval_linkage import (
     extract_inside_sales_eval_score,
     fetch_latest_eval_overlays,
 )
-from app.services.lsq_client import extract_lead_plan_fields
 
 INSIDE_SALES_STALE_AFTER = timedelta(minutes=30)
+
+# The MQL signal_set's per-signal types (seeded `mql` rule definition).
+# The leads listing assembles the mqlScore / mqlSignals DTO fields from
+# these fact_lead_signal rows.
+_MQL_SCORE_SIGNAL = "mql_score"
+_MQL_SIGNAL_PREFIX = "mql_"
 
 
 def _utc_now() -> datetime:
@@ -48,16 +73,27 @@ def _to_float(value: Decimal | float | int | None) -> float | None:
     return float(value)
 
 
+def _attr(column, key: str):
+    """JSONB ``->>`` text accessor on a fact/dim ``attributes`` column."""
+    return column.op("->>")(key)
+
+
+def _attr_int(column, key: str):
+    """JSONB key cast to int, NULL-safe (blank string → NULL → 0 at compare)."""
+    return func.nullif(column.op("->>")(key), "").cast(_SAInteger)
+
+
+# ── calls — backed by analytics.fact_lead_activity (activity_type='call') ──
+
+
 def _call_sort_expression():
+    """Mirror-side sort — used by the single-lead drilldown history, which
+    stays on the mirror per §1.3."""
     return func.coalesce(CrmCallRecord.call_started_at, CrmCallRecord.created_on)
 
 
 def _normalize_text_values(values: tuple[str, ...]) -> tuple[str, ...]:
-    """Strip + lowercase + collapse whitespace for case-insensitive equality.
-
-    Mirrors what `func.lower(col)` produces on the Postgres side, so callers
-    can do `func.lower(col).in_(_normalize_text_values(values))`.
-    """
+    """Strip + lowercase + collapse whitespace for case-insensitive equality."""
     out: list[str] = []
     for value in values:
         if not value:
@@ -74,38 +110,42 @@ def _build_call_filter_clauses(
     app_id: str,
     filters: InsideSalesCallFilters,
 ) -> list[Any]:
+    attrs = FactLeadActivity.attributes
     clauses: list[Any] = [
-        CrmCallRecord.tenant_id == tenant_id,
-        CrmCallRecord.app_id == app_id,
+        FactLeadActivity.tenant_id == tenant_id,
+        FactLeadActivity.app_id == app_id,
+        FactLeadActivity.activity_type == "call",
     ]
 
     rep_names = _normalize_text_values(filters.agents)
     if rep_names:
-        clauses.append(func.lower(CrmCallRecord.rep_name).in_(rep_names))
+        clauses.append(func.lower(FactLeadActivity.actor_label).in_(rep_names))
 
     call_lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
     if call_lead_ids:
         clauses.append(
-            or_(*(CrmCallRecord.lead_id.ilike(f"%{lid}%") for lid in call_lead_ids))
+            or_(*(FactLeadActivity.lead_id.ilike(f"%{lid}%") for lid in call_lead_ids))
         )
 
     if filters.direction:
-        clauses.append(CrmCallRecord.direction == filters.direction)
+        clauses.append(_attr(attrs, "direction") == filters.direction)
 
     if filters.status:
-        clauses.append(func.lower(CrmCallRecord.status) == filters.status.strip().lower())
+        clauses.append(
+            func.lower(_attr(attrs, "status")) == filters.status.strip().lower()
+        )
 
     if filters.duration_min is not None:
-        clauses.append(CrmCallRecord.duration_seconds >= filters.duration_min)
+        clauses.append(_attr_int(attrs, "duration_seconds") >= filters.duration_min)
 
     if filters.duration_max is not None:
-        clauses.append(CrmCallRecord.duration_seconds <= filters.duration_max)
+        clauses.append(_attr_int(attrs, "duration_seconds") <= filters.duration_max)
 
     if filters.has_recording is True:
-        clauses.append(CrmCallRecord.has_recording.is_(True))
+        clauses.append(_attr(attrs, "has_recording") == "true")
 
     if filters.event_codes:
-        clauses.append(CrmCallRecord.event_code.in_(filters.event_codes))
+        clauses.append(FactLeadActivity.source_event_code.in_(filters.event_codes))
 
     return clauses
 
@@ -116,7 +156,7 @@ def build_call_filtered_query(
     app_id: str,
     filters: InsideSalesCallFilters,
 ) -> Select:
-    return select(CrmCallRecord).where(
+    return select(FactLeadActivity).where(
         *_build_call_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters)
     )
 
@@ -130,9 +170,11 @@ def build_call_listing_query(
     page_size: int,
     scope: CallDatasetScope,
 ) -> Select:
-    stmt = build_call_filtered_query(tenant_id=tenant_id, app_id=app_id, filters=filters).order_by(
-        _call_sort_expression().desc(),
-        CrmCallRecord.activity_id.desc(),
+    stmt = build_call_filtered_query(
+        tenant_id=tenant_id, app_id=app_id, filters=filters
+    ).order_by(
+        FactLeadActivity.occurred_at.desc().nullslast(),
+        FactLeadActivity.source_activity_id.desc(),
     )
     if scope == "all":
         return stmt
@@ -148,245 +190,49 @@ def build_call_count_query(
 ) -> Select:
     return (
         select(func.count())
-        .select_from(CrmCallRecord)
+        .select_from(FactLeadActivity)
         .where(*_build_call_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters))
     )
 
 
-def _build_lead_filter_clauses(
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    filters: InsideSalesLeadFilters,
-) -> list[Any]:
-    clauses: list[Any] = [
-        CrmLeadRecord.tenant_id == tenant_id,
-        CrmLeadRecord.app_id == app_id,
-    ]
-
-    # Post-Phase-9: domain fields filtered via JSONB key access on
-    # raw_payload (typed cols dropped by Alembic 0043). The op("->>")
-    # accessor produces a TEXT expression compatible with lower()/ilike.
-    rp_text = lambda key: CrmLeadRecord.raw_payload.op("->>")(key)
-
-    rep_names = _normalize_text_values(filters.agents)
-    if rep_names:
-        clauses.append(func.lower(rp_text("rep_name")).in_(rep_names))
-
-    stages = _normalize_text_values(filters.stage)
-    if stages:
-        clauses.append(func.lower(rp_text("prospect_stage")).in_(stages))
-
-    conditions = tuple(c.strip() for c in filters.condition if c.strip())
-    if conditions:
-        clauses.append(
-            or_(*(rp_text("condition").ilike(f"%{condition}%") for condition in conditions))
-        )
-
-    cities = tuple(c.strip() for c in filters.city if c.strip())
-    if cities:
-        clauses.append(
-            or_(*(CrmLeadRecord.city.ilike(f"%{city}%") for city in cities))
-        )
-
-    lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
-    if lead_ids:
-        clauses.append(
-            or_(*(CrmLeadRecord.lead_id.ilike(f"%{lid}%") for lid in lead_ids))
-        )
-
-    phones = tuple(p.strip() for p in filters.phones if p.strip())
-    if phones:
-        # Digits-only compare so UI input like "+91 98-xxx" matches a stored
-        # "+919800000000". Keep raw ilike as fallback for non-digit chars.
-        phone_clauses = []
-        phone_col = func.regexp_replace(
-            func.coalesce(CrmLeadRecord.phone, ""), r"\D", "", "g"
-        )
-        for value in phones:
-            digits = "".join(ch for ch in value if ch.isdigit())
-            if digits:
-                phone_clauses.append(phone_col.ilike(f"%{digits}%"))
-            else:
-                phone_clauses.append(CrmLeadRecord.phone.ilike(f"%{value}%"))
-        if phone_clauses:
-            clauses.append(or_(*phone_clauses))
-
-    plan_names = tuple(name.strip() for name in filters.plan_names if name.strip())
-    if plan_names:
-        clauses.append(
-            or_(*(rp_text("plan_name").ilike(f"%{name}%") for name in plan_names))
-        )
-
-    if filters.mql_min is not None:
-        # mql_score lives inside raw_payload (JSONB) post-Phase-9. Cast
-        # to integer for numeric comparison; NULLs short-circuit to 0.
-        mql_score_expr = func.coalesce(
-            func.nullif(rp_text("mql_score"), "").cast(_SAInteger),
-            0,
-        )
-        clauses.append(mql_score_expr >= filters.mql_min)
-
-    if filters.q:
-        needle = filters.q.strip()
-        if needle:
-            clauses.append(
-                func.concat(
-                    func.coalesce(CrmLeadRecord.first_name, ""),
-                    " ",
-                    func.coalesce(CrmLeadRecord.last_name, ""),
-                    " ",
-                    func.coalesce(CrmLeadRecord.phone, ""),
-                ).ilike(f"%{needle}%")
-            )
-
-    return clauses
-
-
-def build_lead_filtered_query(
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    filters: InsideSalesLeadFilters,
-) -> Select:
-    return select(CrmLeadRecord).where(
-        *_build_lead_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters)
-    )
-
-
-def build_lead_listing_query(
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    filters: InsideSalesLeadFilters,
-    page: int,
-    page_size: int,
-) -> Select:
-    offset = max(page - 1, 0) * page_size
-    return (
-        build_lead_filtered_query(tenant_id=tenant_id, app_id=app_id, filters=filters)
-        .order_by(CrmLeadRecord.created_on.desc(), CrmLeadRecord.lead_id.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
-
-
-def build_lead_count_query(
-    *,
-    tenant_id: uuid.UUID,
-    app_id: str,
-    filters: InsideSalesLeadFilters,
-) -> Select:
-    return (
-        select(func.count())
-        .select_from(CrmLeadRecord)
-        .where(*_build_lead_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters))
-    )
-
-
 def map_call_listing_row(
-    call: CrmCallRecord,
+    call: FactLeadActivity,
     *,
     eval_count: int = 0,
     eval_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Project a ``fact_lead_activity`` (call) row into the calls DTO.
+
+    Structural columns come off the row; the call-specific payload comes
+    from the ``attributes`` JSONB (the per-activity_type schema declared in
+    the manifest)."""
+    attrs: dict[str, Any] = call.attributes or {}
+
+    def _i(key: str) -> int:
+        raw = attrs.get(key)
+        try:
+            return int(raw) if raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            return 0
+
     return {
-        "activityId": call.activity_id,
+        "activityId": call.source_activity_id,
         "leadId": call.lead_id,
-        "repName": call.rep_name or "",
-        "repEmail": call.rep_email or "",
-        "eventCode": call.event_code,
-        "direction": call.direction,
-        "status": call.status or "",
-        "callStartTime": _format_response_datetime(call.call_started_at or call.created_on),
-        "durationSeconds": call.duration_seconds,
-        "recordingUrl": call.recording_url or "",
-        "phoneNumber": call.phone_number or "",
-        "displayNumber": call.display_number or "",
-        "callNotes": call.call_notes or "",
-        "callSessionId": call.call_session_id or "",
-        "createdOn": _format_response_datetime(call.created_on),
+        "repName": call.actor_label or "",
+        "repEmail": attrs.get("rep_email") or "",
+        "eventCode": call.source_event_code or 0,
+        "direction": attrs.get("direction") or "",
+        "status": attrs.get("status") or "",
+        "callStartTime": _format_response_datetime(call.occurred_at),
+        "durationSeconds": _i("duration_seconds"),
+        "recordingUrl": attrs.get("recording_url") or "",
+        "phoneNumber": attrs.get("phone_number") or "",
+        "displayNumber": attrs.get("display_number") or "",
+        "callNotes": attrs.get("call_notes") or "",
+        "callSessionId": attrs.get("call_session_id") or "",
+        "createdOn": _format_response_datetime(call.created_at),
         "lastEvalScore": extract_inside_sales_eval_score(eval_result),
         "evalCount": int(eval_count or 0),
-    }
-
-
-def map_lead_call_history_entry(call: CrmCallRecord) -> dict[str, Any]:
-    """Project a stored call row into the dict shape consumed by the lead
-    drilldown response and ``compute_drilldown_metrics``.
-
-    Returned shape mirrors what ``normalize_activity`` used to emit, so
-    downstream consumers do not need to branch on data source.
-    """
-    return {
-        "activityId": call.activity_id,
-        "callTime": _format_response_datetime(call.call_started_at or call.created_on),
-        "repName": call.rep_name or None,
-        "durationSeconds": call.duration_seconds,
-        "status": call.status or "",
-        "recordingUrl": call.recording_url or None,
-        "evalScore": None,
-        "isCounseling": call.duration_seconds >= 600,
-    }
-
-
-def map_lead_listing_row(lead: CrmLeadRecord) -> dict[str, Any]:
-    """Post-Phase-9: typed domain cols are gone from crm_lead_record; every
-    domain field is now sourced from raw_payload (lead.bag) or computed
-    at query time from fact_lead_activity downstream. PII cols (first_name,
-    last_name, phone, email, city) stay as typed columns and are read
-    directly. Activity-derived numerics (rnr_count etc.) are placeholder
-    None until the Phase 9 follow-up wires fact-side aggregations.
-    """
-    bag = lead.bag
-    # last_activity_on lives in raw_payload as an ISO string after Phase 9.
-    raw_last_activity = bag.get("last_activity_on")
-    last_activity_on: datetime | None
-    if isinstance(raw_last_activity, datetime):
-        last_activity_on = raw_last_activity
-    elif isinstance(raw_last_activity, str) and raw_last_activity:
-        try:
-            last_activity_on = datetime.fromisoformat(
-                raw_last_activity.replace("Z", "+00:00")
-            )
-        except ValueError:
-            last_activity_on = None
-    else:
-        last_activity_on = None
-    return {
-        "leadId": lead.lead_id,
-        "firstName": lead.first_name,
-        "lastName": lead.last_name,
-        "phone": lead.phone,
-        "prospectStage": bag.get("prospect_stage"),
-        "city": lead.city,
-        "ageGroup": bag.get("age_group"),
-        "condition": bag.get("condition"),
-        "hba1cBand": bag.get("hba1c_band"),
-        "intentToPay": bag.get("intent_to_pay"),
-        "repName": bag.get("rep_name"),
-        "rnrCount": bag.get("rnr_count"),
-        "answeredCount": bag.get("answered_count"),
-        "totalDials": bag.get("total_dials"),
-        "connectRate": _to_float(bag.get("connect_rate")),
-        "frtSeconds": bag.get("frt_seconds"),
-        "leadAgeDays": bag.get("lead_age_days"),
-        "daysSinceLastContact": bag.get("days_since_last_contact"),
-        "mqlScore": bag.get("mql_score"),
-        "mqlSignals": bag.get("mql_signals") or {},
-        "createdOn": _format_response_datetime(lead.created_on),
-        "lastActivityOn": (
-            _format_optional_response_datetime(last_activity_on)
-            if last_activity_on is not None
-            else None
-        ),
-        "source": bag.get("source"),
-        "sourceCampaign": bag.get("source_campaign"),
-        "planName": bag.get("plan_name"),
-        # Full plan-purchase surface. Read from ``raw_payload`` rather than
-        # per-field columns — every plan attribute other than ``plan_name``
-        # is derived at response time.
-        "plan": extract_lead_plan_fields(lead.raw_payload),
     }
 
 
@@ -418,7 +264,7 @@ async def list_calls_from_source(
     )
     calls = list(result.scalars().all())
 
-    activity_ids = [call.activity_id for call in calls if call.activity_id]
+    activity_ids = [c.source_activity_id for c in calls if c.source_activity_id]
     eval_map = await fetch_latest_eval_overlays(
         db,
         tenant_id=tenant_id,
@@ -429,7 +275,7 @@ async def list_calls_from_source(
 
     records = []
     for call in calls:
-        overlay = eval_map.get(call.activity_id)
+        overlay = eval_map.get(call.source_activity_id)
         records.append(
             map_call_listing_row(
                 call,
@@ -444,6 +290,229 @@ async def list_calls_from_source(
         page=1 if scope == "all" else page,
         page_size=resolved_page_size,
     )
+
+
+# ── leads — backed by analytics.dim_lead (+ fact_lead_signal for MQL) ──────
+
+
+def _build_lead_filter_clauses(
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    filters: InsideSalesLeadFilters,
+) -> list[Any]:
+    afs = DimLead.attributes_at_first_seen
+    attrs = DimLead.attributes
+    clauses: list[Any] = [
+        DimLead.tenant_id == tenant_id,
+        DimLead.app_id == app_id,
+    ]
+
+    rep_names = _normalize_text_values(filters.agents)
+    if rep_names:
+        clauses.append(func.lower(DimLead.assigned_rep_label).in_(rep_names))
+
+    stages = _normalize_text_values(filters.stage)
+    if stages:
+        clauses.append(func.lower(DimLead.latest_stage_observed).in_(stages))
+
+    conditions = tuple(c.strip() for c in filters.condition if c.strip())
+    if conditions:
+        clauses.append(
+            or_(*(_attr(afs, "condition").ilike(f"%{c}%") for c in conditions))
+        )
+
+    cities = tuple(c.strip() for c in filters.city if c.strip())
+    if cities:
+        clauses.append(or_(*(DimLead.city.ilike(f"%{city}%") for city in cities)))
+
+    lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
+    if lead_ids:
+        clauses.append(or_(*(DimLead.lead_id.ilike(f"%{lid}%") for lid in lead_ids)))
+
+    phones = tuple(p.strip() for p in filters.phones if p.strip())
+    if phones:
+        phone_clauses = []
+        phone_col = func.regexp_replace(
+            func.coalesce(DimLead.phone, ""), r"\D", "", "g"
+        )
+        for value in phones:
+            digits = "".join(ch for ch in value if ch.isdigit())
+            if digits:
+                phone_clauses.append(phone_col.ilike(f"%{digits}%"))
+            else:
+                phone_clauses.append(DimLead.phone.ilike(f"%{value}%"))
+        if phone_clauses:
+            clauses.append(or_(*phone_clauses))
+
+    plan_names = tuple(name.strip() for name in filters.plan_names if name.strip())
+    if plan_names:
+        clauses.append(
+            or_(*(_attr(attrs, "plan_name").ilike(f"%{name}%") for name in plan_names))
+        )
+
+    if filters.mql_min is not None:
+        # MQL score now lives in fact_lead_signal (signal_type='mql_score').
+        # Filter leads whose latest mql_score signal is >= the threshold.
+        mql_subq = (
+            select(FactLeadSignal.lead_id)
+            .where(
+                FactLeadSignal.tenant_id == tenant_id,
+                FactLeadSignal.app_id == app_id,
+                FactLeadSignal.signal_type == _MQL_SCORE_SIGNAL,
+                FactLeadSignal.signal_value_numeric >= filters.mql_min,
+            )
+        )
+        clauses.append(DimLead.lead_id.in_(mql_subq))
+
+    if filters.q:
+        needle = filters.q.strip()
+        if needle:
+            clauses.append(
+                func.concat(
+                    func.coalesce(DimLead.first_name, ""),
+                    " ",
+                    func.coalesce(DimLead.last_name, ""),
+                    " ",
+                    func.coalesce(DimLead.phone, ""),
+                ).ilike(f"%{needle}%")
+            )
+
+    return clauses
+
+
+def build_lead_filtered_query(
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    filters: InsideSalesLeadFilters,
+) -> Select:
+    return select(DimLead).where(
+        *_build_lead_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters)
+    )
+
+
+def build_lead_listing_query(
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    filters: InsideSalesLeadFilters,
+    page: int,
+    page_size: int,
+) -> Select:
+    offset = max(page - 1, 0) * page_size
+    return (
+        build_lead_filtered_query(tenant_id=tenant_id, app_id=app_id, filters=filters)
+        .order_by(
+            DimLead.lsq_created_on.desc().nullslast(),
+            DimLead.lead_id.desc(),
+        )
+        .offset(offset)
+        .limit(page_size)
+    )
+
+
+def build_lead_count_query(
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    filters: InsideSalesLeadFilters,
+) -> Select:
+    return (
+        select(func.count())
+        .select_from(DimLead)
+        .where(*_build_lead_filter_clauses(tenant_id=tenant_id, app_id=app_id, filters=filters))
+    )
+
+
+async def _load_mql_for_leads(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    lead_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Assemble ``{lead_id: {"score": int|None, "signals": {name: bool}}}``
+    from ``fact_lead_signal`` for a page of leads. Empty when the
+    ``derive-signals`` Transform hasn't run yet."""
+    if not lead_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                FactLeadSignal.lead_id,
+                FactLeadSignal.signal_type,
+                FactLeadSignal.signal_value,
+                FactLeadSignal.signal_value_numeric,
+            ).where(
+                FactLeadSignal.tenant_id == tenant_id,
+                FactLeadSignal.app_id == app_id,
+                FactLeadSignal.lead_id.in_(lead_ids),
+                FactLeadSignal.signal_type.like(f"{_MQL_SIGNAL_PREFIX}%"),
+            )
+        )
+    ).all()
+    out: dict[str, dict[str, Any]] = {}
+    for lead_id, signal_type, signal_value, signal_value_numeric in rows:
+        entry = out.setdefault(lead_id, {"score": None, "signals": {}})
+        if signal_type == _MQL_SCORE_SIGNAL:
+            entry["score"] = (
+                int(signal_value_numeric) if signal_value_numeric is not None else None
+            )
+        else:
+            # mql_age / mql_city / ... → {"age": True, "city": False, ...}
+            name = signal_type[len(_MQL_SIGNAL_PREFIX):]
+            entry["signals"][name] = signal_value == "true"
+    return out
+
+
+def map_lead_listing_row(
+    lead: DimLead,
+    *,
+    mql: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project a ``dim_lead`` row into the leads-listing DTO.
+
+    Identity + current-state come off typed columns; the lead-profile
+    fields come from ``attributes_at_first_seen`` / ``attributes``; MQL is
+    assembled from ``fact_lead_signal`` (``mql`` arg). Activity-derived
+    numerics (rnr_count etc.) remain ``None`` — they were already ``None``
+    on the mirror path post-Phase-9 and are computed at query time from
+    fact_lead_activity by a separate follow-up."""
+    afs: dict[str, Any] = lead.attributes_at_first_seen or {}
+    attrs: dict[str, Any] = lead.attributes or {}
+    mql = mql or {}
+    return {
+        "leadId": lead.lead_id,
+        "firstName": lead.first_name,
+        "lastName": lead.last_name,
+        "phone": lead.phone,
+        "prospectStage": lead.latest_stage_observed,
+        "city": lead.city,
+        "ageGroup": afs.get("age_group"),
+        "condition": afs.get("condition"),
+        "hba1cBand": afs.get("hba1c_band"),
+        "intentToPay": afs.get("intent_to_pay"),
+        "repName": lead.assigned_rep_label,
+        "rnrCount": None,
+        "answeredCount": None,
+        "totalDials": None,
+        "connectRate": None,
+        "frtSeconds": None,
+        "leadAgeDays": None,
+        "daysSinceLastContact": None,
+        "mqlScore": mql.get("score"),
+        "mqlSignals": mql.get("signals") or {},
+        "createdOn": _format_response_datetime(lead.lsq_created_on),
+        "lastActivityOn": None,
+        "source": afs.get("source") or lead.source,
+        "sourceCampaign": afs.get("source_campaign"),
+        "planName": attrs.get("plan_name"),
+        # The full plan-purchase surface lived on the mirror's raw_payload;
+        # on dim_lead only plan_name is normalized in. The rest degrade to
+        # an empty object until the plan surface is normalized onto the dim.
+        "plan": {},
+    }
 
 
 async def list_leads_from_source(
@@ -470,12 +539,38 @@ async def list_leads_from_source(
         )
     )
     leads = list(result.scalars().all())
+    mql_map = await _load_mql_for_leads(
+        db,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        lead_ids=[lead.lead_id for lead in leads],
+    )
     return ResolvedDatasetPage(
-        records=[map_lead_listing_row(lead) for lead in leads],
+        records=[
+            map_lead_listing_row(lead, mql=mql_map.get(lead.lead_id))
+            for lead in leads
+        ],
         total=total,
         page=page,
         page_size=page_size,
     )
+
+
+# ── single-lead drilldown — stays on the mirror per plan §1.3 ──────────────
+
+
+def map_lead_call_history_entry(call: CrmCallRecord) -> dict[str, Any]:
+    """Project a stored mirror call row into the drilldown history shape."""
+    return {
+        "activityId": call.activity_id,
+        "callTime": _format_response_datetime(call.call_started_at or call.created_on),
+        "repName": call.rep_name or None,
+        "durationSeconds": call.duration_seconds,
+        "status": call.status or "",
+        "recordingUrl": call.recording_url or None,
+        "evalScore": None,
+        "isCounseling": call.duration_seconds >= 600,
+    }
 
 
 async def get_lead_record(
@@ -485,7 +580,10 @@ async def get_lead_record(
     app_id: str,
     lead_id: str,
 ) -> CrmLeadRecord | None:
-    """Fetch one lead row from the synced mirror, or ``None`` if absent."""
+    """Fetch one lead row from the synced mirror, or ``None`` if absent.
+
+    The single-lead drilldown stays on the mirror (plan §1.3) — it carries
+    the full source-faithful payload the drilldown card renders."""
     stmt = select(CrmLeadRecord).where(
         CrmLeadRecord.tenant_id == tenant_id,
         CrmLeadRecord.app_id == app_id,
@@ -502,12 +600,11 @@ async def list_call_history_for_lead(
     lead_id: str,
     limit: int,
 ) -> tuple[list[CrmCallRecord], bool]:
-    """Return up to ``limit`` most-recent calls for the lead.
+    """Return up to ``limit`` most-recent calls for the lead, from the
+    mirror (the drilldown stays mirror-backed per §1.3).
 
     The boolean is ``True`` when the lead has more than ``limit`` matching
-    rows. Implemented via ``LIMIT limit + 1`` so we avoid an extra
-    ``COUNT`` round trip purely to set the flag.
-    """
+    rows (implemented via ``LIMIT limit + 1``)."""
     stmt = (
         select(CrmCallRecord)
         .where(
@@ -524,6 +621,9 @@ async def list_call_history_for_lead(
     return rows, False
 
 
+# ── sync freshness — reads log_crm_source_sync, unchanged ─────────────────
+
+
 async def get_collection_sync_status(
     db: AsyncSession,
     *,
@@ -531,13 +631,7 @@ async def get_collection_sync_status(
     app_id: str,
     source_family: str,
 ) -> dict[str, Any]:
-    """Durable freshness signal read straight from ``analytics.log_crm_source_sync``.
-
-    Returns the most recent success, the most recent attempt, and whether a
-    sync is in progress right now — three independent signals the UI needs
-    to decide between "up-to-date", "refreshing", "last sync failed", and
-    "never synced".
-    """
+    """Durable freshness signal read straight from ``analytics.log_crm_source_sync``."""
     latest_successful = await db.scalar(
         select(LogCrmSourceSync)
         .where(
@@ -619,31 +713,32 @@ async def get_collection_freshness(
     }
 
 
+# ── filter type-ahead suggestions — fact/dim-backed ───────────────────────
+
+# (source_family, field) → the fact/dim column the listing filters on, so
+# the dropdown values match exactly what filtering matches.
 _SUGGESTION_FIELDS: dict[tuple[str, str], Any] = {
-    ("leads", "lead_id"): CrmLeadRecord.lead_id,
-    ("leads", "phone"): CrmLeadRecord.phone,
-    # Post-Phase-9: rep_name / prospect_stage / plan_name moved into
-    # raw_payload (typed cols dropped). Suggestion lookups read them via
-    # JSONB key access — same SQL surface, source switched.
-    ("leads", "rep_name"): CrmLeadRecord.raw_payload.op("->>")("rep_name"),
-    ("leads", "city"): CrmLeadRecord.city,
-    ("leads", "stage"): CrmLeadRecord.raw_payload.op("->>")("prospect_stage"),
-    ("leads", "plan_name"): CrmLeadRecord.raw_payload.op("->>")("plan_name"),
-    ("calls", "lead_id"): CrmCallRecord.lead_id,
-    ("calls", "rep_name"): CrmCallRecord.rep_name,
-    # Legacy aliases retained as JSONB pointers for inbound API clients.
-    ("leads", "prospect_id"): CrmLeadRecord.lead_id,
-    ("leads", "agent_name"): CrmLeadRecord.raw_payload.op("->>")("rep_name"),
-    ("calls", "prospect_id"): CrmCallRecord.lead_id,
-    ("calls", "agent_name"): CrmCallRecord.rep_name,
+    ("leads", "lead_id"): DimLead.lead_id,
+    ("leads", "phone"): DimLead.phone,
+    ("leads", "rep_name"): DimLead.assigned_rep_label,
+    ("leads", "city"): DimLead.city,
+    ("leads", "stage"): DimLead.latest_stage_observed,
+    ("leads", "plan_name"): DimLead.attributes.op("->>")("plan_name"),
+    ("calls", "lead_id"): FactLeadActivity.lead_id,
+    ("calls", "rep_name"): FactLeadActivity.actor_label,
+    # Legacy aliases retained for inbound API clients.
+    ("leads", "prospect_id"): DimLead.lead_id,
+    ("leads", "agent_name"): DimLead.assigned_rep_label,
+    ("calls", "prospect_id"): FactLeadActivity.lead_id,
+    ("calls", "agent_name"): FactLeadActivity.actor_label,
 }
 
 
 def _suggestion_model_for(source_family: str) -> Any:
     if source_family == "leads":
-        return CrmLeadRecord
+        return DimLead
     if source_family == "calls":
-        return CrmCallRecord
+        return FactLeadActivity
     raise ValueError(f"unsupported source_family for suggestions: {source_family!r}")
 
 
@@ -658,13 +753,10 @@ async def list_collection_suggestions(
     limit: int,
 ) -> list[str]:
     """Distinct values of ``field`` for the collection, prefix-filtered by
-    ``query``, tenant/app-scoped. Used to feed type-ahead filter dropdowns.
+    ``query``, tenant/app-scoped. Feeds type-ahead filter dropdowns.
 
     ``field`` is validated against a fixed whitelist so this can never be
-    steered into reading arbitrary columns. The same raw column the listing
-    query matches against is read here, so what the user sees in the
-    dropdown is exactly what filtering matches.
-    """
+    steered into reading arbitrary columns."""
     column = _SUGGESTION_FIELDS.get((source_family, field))
     if column is None:
         raise ValueError(
@@ -672,14 +764,18 @@ async def list_collection_suggestions(
         )
     model = _suggestion_model_for(source_family)
 
+    where = [
+        model.tenant_id == tenant_id,
+        model.app_id == app_id,
+        column.is_not(None),
+        column != "",
+    ]
+    if model is FactLeadActivity:
+        where.append(FactLeadActivity.activity_type == "call")
+
     stmt = (
         select(column)
-        .where(
-            model.tenant_id == tenant_id,
-            model.app_id == app_id,
-            column.is_not(None),
-            column != "",
-        )
+        .where(*where)
         .distinct()
         .order_by(column)
         .limit(limit)
@@ -702,6 +798,9 @@ async def list_collection_suggestions(
     return [value for value in result.scalars().all() if value]
 
 
+# ── mirror pruning — still prunes the synced mirrors ──────────────────────
+
+
 async def prune_rows_older_than(
     db: AsyncSession,
     *,
@@ -710,15 +809,14 @@ async def prune_rows_older_than(
     source_family: str,
     cutoff: datetime,
 ) -> int:
-    """Delete synced source rows with `created_on < cutoff`.
+    """Delete synced source-mirror rows with ``created_on < cutoff``.
 
-    STRICTLY scoped to (tenant_id, app_id, source_family) — this is a
-    tenant-isolation guarantee, not an optimization. Called only by
-    scheduled `sync-external-source` runs (§PR4); on-demand syncs never
-    prune.
+    STRICTLY scoped to (tenant_id, app_id, source_family). Called only by
+    scheduled ``sync-external-source`` runs. Still targets the mirrors —
+    they remain the source-faithful landing tables that get synced and
+    pruned; the serving layer just no longer reads them for listings.
 
-    Returns the number of rows deleted.
-    """
+    Returns the number of rows deleted."""
     if source_family == "calls":
         model = CrmCallRecord
     elif source_family == "leads":

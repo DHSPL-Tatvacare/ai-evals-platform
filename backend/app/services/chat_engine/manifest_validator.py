@@ -511,13 +511,16 @@ async def validate_relationship_cardinalities(
             )
             continue
         if rel.relationship_type == "many_to_one":
-            if row.distinct_lefts <= row.distinct_rights:
+            # many_to_one => multiple left rows share a left key. For any
+            # clean FK join distinct_lefts == distinct_rights, so the tell
+            # is total_rows > distinct_lefts (at least one key repeats).
+            if row.total_rows <= row.distinct_lefts:
                 drift.append(
                     f"[{manifest.app_id}] {rel.left_table}.{rel.left_column} → "
                     f"{rel.right_table}.{rel.right_column}: declared "
                     f"many_to_one but cardinality looks 1:1 "
-                    f"(distinct_lefts={row.distinct_lefts}, "
-                    f"distinct_rights={row.distinct_rights})."
+                    f"(total_rows={row.total_rows}, "
+                    f"distinct_lefts={row.distinct_lefts})."
                 )
         elif rel.relationship_type == "one_to_one":
             if row.total_rows != row.distinct_lefts or row.distinct_lefts != row.distinct_rights:
