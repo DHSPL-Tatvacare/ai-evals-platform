@@ -134,6 +134,13 @@ const ADMIN_INTEGRATIONS_NAV: SidebarNavItem = {
   end: true,
 };
 
+const ADMIN_AI_SETTINGS_NAV: SidebarNavItem = {
+  to: routes.adminAiSettings,
+  icon: Sparkles,
+  label: 'AI Settings',
+  end: true,
+};
+
 const NAV_BY_APP: Record<AppId, SidebarNavItem[]> = {
   'voice-rx': VOICE_RX_NAV,
   'kaira-bot': KAIRA_NAV,
@@ -164,6 +171,7 @@ interface AdminNavOptions {
   canViewCost: boolean;
   canManageSchedules?: boolean;
   canManageOrchestration?: boolean;
+  canEditConfiguration?: boolean;
 }
 
 /**
@@ -191,6 +199,7 @@ export function getAdminNavGroups(options: AdminNavOptions): SidebarNavGroup[] {
       items: gate([
         [options.canManageSchedules, ADMIN_SCHEDULED_JOBS_NAV],
         [options.canManageOrchestration, ADMIN_INTEGRATIONS_NAV],
+        [options.canEditConfiguration, ADMIN_AI_SETTINGS_NAV],
       ]),
     },
     {

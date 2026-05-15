@@ -20,6 +20,7 @@ export const routes = {
   adminAnalyticsMappings: '/admin/analytics/mappings',
   adminAnalyticsSignals: '/admin/analytics/signals',
   adminIntegrations: '/admin/integrations',
+  adminAiSettings: '/admin/ai-settings',
   adminSherlock: '/admin/sherlock',
   adminSherlockToolCall: (toolCallId: string) => `/admin/sherlock/${toolCallId}`,
   adminSherlockConfig: '/admin/sherlock-config',

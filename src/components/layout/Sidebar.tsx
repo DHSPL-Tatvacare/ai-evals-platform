@@ -66,7 +66,13 @@ export function Sidebar() {
   // User-mgmt nav entry stays tied to user-specific permissions, even though
   // the admin chrome is now reachable via `schedule:manage` alone.
   const canManageUsers = userHasAnyPermission(user, USER_MANAGEMENT_PERMISSIONS);
-  const adminPermissions = { canManageUsers, canViewCost, canManageSchedules, canManageOrchestration };
+  const adminPermissions = {
+    canManageUsers,
+    canViewCost,
+    canManageSchedules,
+    canManageOrchestration,
+    canEditConfiguration,
+  };
   const adminNavGroups = getAdminNavGroups(adminPermissions);
   // Flat list for the collapsed sidebar rail — mirrors the grouped layout used
   // by the expanded chrome but discards group titles since collapsed nav has
