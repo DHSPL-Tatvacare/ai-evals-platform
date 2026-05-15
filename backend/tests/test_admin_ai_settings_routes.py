@@ -245,6 +245,131 @@ async def test_list_requires_configuration_edit(non_admin_client):
 
 
 @pytest.mark.asyncio
+async def test_discover_models_filters_by_search(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "list_models_for_provider",
+        AsyncMock(return_value=["gpt-5.4", "gpt-5.4-mini", "o3"]),
+    )
+
+    # A provider must exist with creds for discover to resolve credentials.
+    await admin_client.put(
+        "/api/admin/ai-settings/providers/openai",
+        json={
+            "isEnabled": True,
+            "apiKey": "sk-x",
+            "baseUrl": None,
+            "extraConfig": {},
+            "curatedModels": [],
+        },
+    )
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/openai/discover-models",
+        json={"search": "mini"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["models"] == ["gpt-5.4-mini"]
+
+
+@pytest.mark.asyncio
+async def test_discover_models_unconfigured_returns_409(admin_client):
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/anthropic/discover-models",
+        json={"search": ""},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_validate_marks_status_ok(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "list_models_for_provider",
+        AsyncMock(return_value=["gpt-5.4", "gpt-5.4-mini"]),
+    )
+    await admin_client.put(
+        "/api/admin/ai-settings/providers/openai",
+        json={
+            "isEnabled": True,
+            "apiKey": "sk-x",
+            "baseUrl": None,
+            "extraConfig": {},
+            "curatedModels": [],
+        },
+    )
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/openai/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validationStatus"] == "ok"
+    assert body["detail"] is None
+
+
+@pytest.mark.asyncio
+async def test_validate_marks_status_invalid_on_value_error(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "list_models_for_provider",
+        AsyncMock(side_effect=ValueError("OpenAI authentication failed: bad key")),
+    )
+    await admin_client.put(
+        "/api/admin/ai-settings/providers/openai",
+        json={
+            "isEnabled": True,
+            "apiKey": "sk-bad",
+            "baseUrl": None,
+            "extraConfig": {},
+            "curatedModels": [],
+        },
+    )
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/openai/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validationStatus"] == "invalid"
+    assert "authentication" in (body["detail"] or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_requires_provider_row(admin_client):
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/anthropic/validate"
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_validate_requires_configuration_edit(non_admin_client):
+    resp = await non_admin_client.post(
+        "/api/admin/ai-settings/providers/openai/validate"
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_discover_models_requires_configuration_edit(non_admin_client):
+    resp = await non_admin_client.post(
+        "/api/admin/ai-settings/providers/openai/discover-models",
+        json={"search": ""},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_new_key_resets_validation_status(admin_client, db_session, route_tenant_id):
     # First write — succeeds, lands as untested.
     await admin_client.put(

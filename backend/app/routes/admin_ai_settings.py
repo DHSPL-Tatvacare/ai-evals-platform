@@ -21,11 +21,19 @@ from app.database import get_db
 from app.models.tenant_llm_provider import TenantLlmProvider
 from app.schemas.ai_settings import (
     SUPPORTED_PROVIDERS,
+    ModelSearchRequest,
+    ModelSearchResponse,
     ProviderConfigResponse,
     ProviderConfigUpsert,
+    ValidateResponse,
 )
-from app.services.llm_credentials import invalidate_cache
+from app.services.llm_credentials import (
+    ProviderNotConfiguredError,
+    invalidate_cache,
+    resolve_llm_credentials,
+)
 from app.services.llm_credentials.crypto import encrypt_secret
+from app.services.llm_model_discovery import list_models_for_provider
 
 
 router = APIRouter(prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
@@ -108,3 +116,70 @@ async def upsert_provider(
     await db.refresh(row)
     invalidate_cache(auth.tenant_id, provider)
     return _to_response(provider, row)
+
+
+@router.post(
+    "/providers/{provider}/discover-models",
+    response_model=ModelSearchResponse,
+)
+async def discover_models(
+    body: ModelSearchRequest,
+    provider: str = Path(...),
+    auth: AuthContext = require_permission("configuration:edit"),
+    db: AsyncSession = Depends(get_db),
+):
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+    try:
+        creds = await resolve_llm_credentials(db, auth.tenant_id, provider)
+    except ProviderNotConfiguredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        models = await list_models_for_provider(provider, creds)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    search = (body.search or "").strip().lower()
+    if search:
+        models = [m for m in models if search in m.lower()]
+    return ModelSearchResponse(models=models)
+
+
+@router.post(
+    "/providers/{provider}/validate",
+    response_model=ValidateResponse,
+)
+async def validate_provider(
+    provider: str = Path(...),
+    auth: AuthContext = require_permission("configuration:edit"),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timezone
+
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+
+    row = (
+        await db.execute(
+            select(TenantLlmProvider).where(
+                TenantLlmProvider.tenant_id == auth.tenant_id,
+                TenantLlmProvider.provider == provider,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail=f"Provider {provider} not configured"
+        )
+
+    detail: str | None = None
+    try:
+        creds = await resolve_llm_credentials(db, auth.tenant_id, provider)
+        await list_models_for_provider(provider, creds)
+        row.validation_status = "ok"
+    except (ProviderNotConfiguredError, ValueError) as exc:
+        row.validation_status = "invalid"
+        detail = str(exc)[:300]
+    row.last_validated_at = datetime.now(timezone.utc)
+    await db.commit()
+    invalidate_cache(auth.tenant_id, provider)
+    return ValidateResponse(validation_status=row.validation_status, detail=detail)
