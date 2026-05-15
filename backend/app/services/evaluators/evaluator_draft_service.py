@@ -30,10 +30,12 @@ async def generate_evaluator_draft(
     app_id: str,
     tenant_id: str,
     user_id: str,
+    provider: str,
+    model: str,
     rule_catalog: list[dict] | None = None,
     job_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """Generate evaluator draft from a prompt using the user's LLM settings.
+    """Generate evaluator draft from a prompt using the supplied LLM provider/model.
 
     Returns:
         {
@@ -42,40 +44,44 @@ async def generate_evaluator_draft(
             "warnings": list of warning strings,
         }
     """
-    from app.services.evaluators.settings_helper import get_llm_settings_from_db
+    from app.database import async_session
     from app.services.evaluators.llm_base import create_llm_provider
+    from app.services.llm_credentials import (
+        ProviderNotConfiguredError,
+        resolve_llm_credentials,
+    )
 
     output_fields: list[dict] = []
     matched_rule_ids: list[str] = []
     warnings: list[str] = []
 
-    try:
-        # Resolve LLM credentials from the user's saved settings
-        db_settings = await get_llm_settings_from_db(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            auth_intent="managed_job",
+    if not provider or not model:
+        warnings.append(
+            "Missing provider/model for evaluator draft. Configure an LLM in AI Settings and select a model."
         )
+        return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
 
-        provider_name = db_settings.get("provider", "gemini")
-        model_name = db_settings.get("selected_model", "")
-        api_key = db_settings.get("api_key", "")
+    try:
+        async with async_session() as db:
+            try:
+                creds = await resolve_llm_credentials(db, tenant_id, provider)
+            except ProviderNotConfiguredError as exc:
+                warnings.append(str(exc))
+                return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
 
-        if not model_name:
-            warnings.append("No LLM model configured. Please select a model in Settings.")
-            return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
-
-        if not api_key and not db_settings.get("service_account_path"):
-            warnings.append("No LLM credentials configured. Please add API keys in Settings.")
-            return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
+        provider_kwargs: dict[str, Any] = {}
+        if creds.provider == "azure_openai":
+            provider_kwargs["azure_endpoint"] = creds.base_url or ""
+            provider_kwargs["api_version"] = creds.extra_config.get(
+                "api_version", "2025-03-01-preview"
+            )
 
         inner = create_llm_provider(
-            provider=provider_name,
-            model_name=model_name,
-            api_key=api_key,
-            service_account_path=db_settings.get("service_account_path", ""),
-            azure_endpoint=db_settings.get("azure_endpoint", ""),
-            api_version=db_settings.get("api_version", ""),
+            provider=creds.provider,
+            model_name=model,
+            api_key=creds.api_key,
+            service_account_path=creds.service_account_path or "",
+            **provider_kwargs,
         )
 
         # Wrap with LoggingLLMWrapper so the draft call records an analytics.fact_llm_generation
@@ -103,15 +109,15 @@ async def generate_evaluator_draft(
                 )
                 wrapped = LoggingLLMWrapper(inner, usage_callback=usage_cb)
                 wrapped.set_call_purpose('draft')
-                provider: Any = wrapped
+                llm_client: Any = wrapped
             else:
-                provider = inner
+                llm_client = inner
         else:
-            provider = inner
+            llm_client = inner
 
         user_message = f"Generate output fields for this evaluation prompt:\n\n{prompt}"
 
-        response = await provider.generate_json(
+        response = await llm_client.generate_json(
             prompt=user_message,
             system_prompt=DRAFT_SYSTEM_PROMPT,
         )

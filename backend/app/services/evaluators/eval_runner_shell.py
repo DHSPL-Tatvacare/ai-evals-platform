@@ -295,20 +295,23 @@ async def run_eval(
         )
 
     # ── LLM wrapper ─────────────────────────────────────────────
-    from app.services.evaluators.settings_helper import get_llm_settings_from_db
+    from app.services.llm_credentials import resolve_llm_credentials
 
-    llm_settings = await get_llm_settings_from_db(
-        tenant_id, user_id,
-        app_id=None,
-        auth_intent="managed_job",
-        provider_override=params.llm_config.provider,
-    )
+    async with _async_session() as db:
+        creds = await resolve_llm_credentials(db, tenant_id, params.llm_config.provider)
+    provider_kwargs: dict[str, Any] = {}
+    if creds.provider == "azure_openai":
+        provider_kwargs["azure_endpoint"] = creds.base_url or ""
+        provider_kwargs["api_version"] = creds.extra_config.get(
+            "api_version", "2025-03-01-preview"
+        )
     provider = create_llm_provider(
-        provider=llm_settings.get("provider", params.llm_config.provider),
-        api_key=llm_settings.get("api_key", ""),
-        model_name=params.llm_config.model or llm_settings.get("selected_model", ""),
+        provider=creds.provider,
+        api_key=creds.api_key,
+        model_name=params.llm_config.model or "",
         temperature=params.llm_config.temperature,
-        service_account_path=llm_settings.get("service_account_path", ""),
+        service_account_path=creds.service_account_path or "",
+        **provider_kwargs,
     )
     usage_cb = make_usage_callback(
         tenant_id=tenant_id,

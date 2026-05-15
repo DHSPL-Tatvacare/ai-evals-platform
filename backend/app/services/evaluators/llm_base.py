@@ -1021,7 +1021,7 @@ def create_llm_provider(
     temperature: float = 0.1, service_account_path: str = "",
     **kwargs,
 ) -> BaseLLMProvider:
-    """Factory — dumb constructor, no auth policy. Use settings_helper for credential resolution."""
+    """Factory — dumb constructor, no auth policy. Use resolve_llm_credentials for credential resolution."""
     if not model_name:
         raise ValueError("No model selected. Go to Settings and select a model.")
     if provider == "gemini":

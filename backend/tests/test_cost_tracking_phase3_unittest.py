@@ -27,13 +27,16 @@ class EvaluatorDraftWrapTests(unittest.IsolatedAsyncioTestCase):
         def _fake_create_llm_provider(**_):
             return fake_inner
 
-        async def _fake_settings(**_):
-            return {
-                'provider': 'openai',
-                'selected_model': 'gpt-4o-mini',
-                'api_key': 'sk-test',
-                'service_account_path': '',
-            }
+        from app.services.llm_credentials import ResolvedCredentials
+
+        async def _fake_resolve(*args, **kwargs):
+            return ResolvedCredentials(
+                provider='openai',
+                api_key='sk-test',
+                base_url=None,
+                extra_config={},
+                service_account_path=None,
+            )
 
         with patch.object(
             evaluator_draft_service,
@@ -47,14 +50,19 @@ class EvaluatorDraftWrapTests(unittest.IsolatedAsyncioTestCase):
                 'app.services.evaluators.llm_base.create_llm_provider',
                 _fake_create_llm_provider,
             ), patch(
-                'app.services.evaluators.settings_helper.get_llm_settings_from_db',
-                _fake_settings,
+                'app.services.llm_credentials.resolve_llm_credentials',
+                _fake_resolve,
+            ), patch(
+                'app.services.llm_credentials.resolver.resolve_llm_credentials',
+                _fake_resolve,
             ):
                 result = await evaluator_draft_service.generate_evaluator_draft(
                     prompt='Write a rubric.',
                     app_id='kaira-bot',
                     tenant_id=str(uuid.uuid4()),
                     user_id=str(uuid.uuid4()),
+                    provider='openai',
+                    model='gpt-4o-mini',
                     job_id=uuid.uuid4(),
                 )
 
@@ -79,26 +87,34 @@ class EvaluatorDraftWrapTests(unittest.IsolatedAsyncioTestCase):
         def _fake_create_llm_provider(**_):
             return _FakeInner()
 
-        async def _fake_settings(**_):
-            return {
-                'provider': 'openai',
-                'selected_model': 'gpt-4o-mini',
-                'api_key': 'sk-test',
-                'service_account_path': '',
-            }
+        from app.services.llm_credentials import ResolvedCredentials
+
+        async def _fake_resolve(*args, **kwargs):
+            return ResolvedCredentials(
+                provider='openai',
+                api_key='sk-test',
+                base_url=None,
+                extra_config={},
+                service_account_path=None,
+            )
 
         with patch(
             'app.services.evaluators.llm_base.create_llm_provider',
             _fake_create_llm_provider,
         ), patch(
-            'app.services.evaluators.settings_helper.get_llm_settings_from_db',
-            _fake_settings,
+            'app.services.llm_credentials.resolve_llm_credentials',
+            _fake_resolve,
+        ), patch(
+            'app.services.llm_credentials.resolver.resolve_llm_credentials',
+            _fake_resolve,
         ):
             result = await evaluator_draft_service.generate_evaluator_draft(
                 prompt='Write a rubric.',
                 app_id='kaira-bot',
                 tenant_id=str(uuid.uuid4()),
                 user_id=str(uuid.uuid4()),
+                provider='openai',
+                model='gpt-4o-mini',
             )
         self.assertEqual(result['outputFields'], [{'key': 'score'}])
 

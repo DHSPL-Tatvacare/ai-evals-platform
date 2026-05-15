@@ -208,24 +208,26 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
     audio_bytes = await file_storage.read(file_record.storage_path)
     mime_type = file_record.mime_type or audio_file_meta.get("mimeType", "audio/mpeg")
 
-    # ── Resolve LLM settings ────────────────────────────────────
-    from app.services.evaluators.settings_helper import get_llm_settings_from_db
-    db_settings = await get_llm_settings_from_db(
-        tenant_id=tenant_id, user_id=user_id,
-        app_id=None, key="llm-settings", auth_intent="managed_job",
-        provider_override=params.get("provider") or None,
-    )
-    api_key = db_settings["api_key"]
-    provider = db_settings["provider"]
-    service_account_path = db_settings.get("service_account_path", "")
+    # ── Resolve LLM credentials ─────────────────────────────────
+    from app.services.llm_credentials import resolve_llm_credentials
+    provider = params.get("provider") or ""
+    if not provider:
+        raise RuntimeError("voice_rx_runner requires params['provider']")
+    async with async_session() as db:
+        creds = await resolve_llm_credentials(db, tenant_id, provider)
+    api_key = creds.api_key
+    service_account_path = creds.service_account_path or ""
 
     # Default model for all steps; per-step overrides via step_models
-    selected_model = params.get("model") or db_settings["selected_model"]
+    selected_model = params.get("model") or ""
     step_models = params.get("step_models") or {}
 
     # ── Create LLM providers ────────────────────────────────────
-    vr_azure_endpoint = db_settings.get("azure_endpoint", "")
-    vr_api_version = db_settings.get("api_version", "")
+    vr_azure_endpoint = ""
+    vr_api_version = ""
+    if creds.provider == "azure_openai":
+        vr_azure_endpoint = creds.base_url or ""
+        vr_api_version = creds.extra_config.get("api_version", "2025-03-01-preview")
 
     usage_cb = make_usage_callback(
         tenant_id=tenant_id,
@@ -306,7 +308,7 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
         "prerequisites": prerequisites,
         "normalize_original": flow.normalize_original,
         "flow_type": flow.flow_type,
-        "auth_method": db_settings["auth_method"],
+        "auth_method": "service_account" if service_account_path else "api_key",
         "thinking": thinking,
     }
 

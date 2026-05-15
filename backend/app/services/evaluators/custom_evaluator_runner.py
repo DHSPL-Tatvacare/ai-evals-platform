@@ -12,7 +12,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select, update
 
@@ -255,25 +255,25 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
     # ── Generate JSON schema from output definition ──────────────
     json_schema = generate_json_schema(output_schema_data)
 
-    # ── Resolve LLM settings ────────────────────────────────────
-    from app.services.evaluators.settings_helper import get_llm_settings_from_db
-    db_settings = await get_llm_settings_from_db(
-        tenant_id=tenant_id, user_id=user_id,
-        app_id=None, key="llm-settings", auth_intent="managed_job",
-        provider_override=params.get("provider") or None,
-    )
+    # ── Resolve LLM credentials ─────────────────────────────────
+    from app.services.llm_credentials import resolve_llm_credentials
+    provider_name = params.get("provider") or ""
+    if not provider_name:
+        raise RuntimeError("custom_evaluator_runner requires params['provider']")
+    async with async_session() as db:
+        creds = await resolve_llm_credentials(db, tenant_id, provider_name)
 
-    model = params.get("model") or evaluator.model_id or db_settings["selected_model"]
-    factory_kwargs = {}
-    if db_settings["provider"] == "azure_openai":
-        factory_kwargs["azure_endpoint"] = db_settings.get("azure_endpoint", "")
-        factory_kwargs["api_version"] = db_settings.get("api_version", "")
+    model = params.get("model") or evaluator.model_id or ""
+    factory_kwargs: dict[str, Any] = {}
+    if creds.provider == "azure_openai":
+        factory_kwargs["azure_endpoint"] = creds.base_url or ""
+        factory_kwargs["api_version"] = creds.extra_config.get("api_version", "2025-03-01-preview")
     inner = create_llm_provider(
-        provider=db_settings["provider"],
-        api_key=db_settings["api_key"],
+        provider=creds.provider,
+        api_key=creds.api_key,
         model_name=model,
         temperature=0.2,
-        service_account_path=db_settings.get("service_account_path", ""),
+        service_account_path=creds.service_account_path or "",
         **factory_kwargs,
     )
     usage_cb = make_usage_callback(
@@ -299,9 +299,9 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
         "template_id": str(evaluator.template_id) if evaluator.template_id else None,
         "template_branch_key": evaluator.template_branch_key,
         "model_id": model,
-        "provider": db_settings["provider"],
+        "provider": creds.provider,
         "evaluator_name": evaluator.name,
-        "auth_method": db_settings["auth_method"],
+        "auth_method": "service_account" if creds.service_account_path else "api_key",
         "thinking": thinking,
     }
 
@@ -310,7 +310,7 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
         await db.execute(
             update(EvaluationRun).where(EvaluationRun.id == eval_run_id, EvaluationRun.tenant_id == tenant_id).values(
                 config=config_snapshot,
-                llm_provider=db_settings["provider"],
+                llm_provider=creds.provider,
                 llm_model=model,
             )
         )

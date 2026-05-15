@@ -182,23 +182,26 @@ async def run_batch_evaluation(
         run_id=str(run_id),
     )
 
-    # Resolve API key from settings if not provided
+    # Resolve API key from per-tenant credentials when caller didn't supply one.
     auth_method = "api_key"  # default when caller provides api_key directly
     if not api_key:
-        from app.services.evaluators.settings_helper import get_llm_settings_from_db
+        from app.services.llm_credentials import resolve_llm_credentials
 
-        db_settings = await get_llm_settings_from_db(
-            tenant_id=tenant_id, user_id=user_id,
-            auth_intent="managed_job", provider_override=llm_provider or None,
-        )
-        api_key = db_settings["api_key"]
-        auth_method = db_settings.get("auth_method", "api_key")
-        if not service_account_path:
-            service_account_path = db_settings.get("service_account_path", "")
         if not llm_provider:
-            llm_provider = db_settings["provider"]
-        if not llm_model:
-            llm_model = db_settings["selected_model"]
+            raise RuntimeError(
+                "batch_runner requires llm_provider when api_key is not provided"
+            )
+        async with async_session() as db:
+            creds = await resolve_llm_credentials(db, tenant_id, llm_provider)
+        api_key = creds.api_key
+        if not service_account_path:
+            service_account_path = creds.service_account_path or ""
+        auth_method = "service_account" if creds.service_account_path else "api_key"
+        if creds.provider == "azure_openai":
+            if not azure_endpoint:
+                azure_endpoint = creds.base_url or ""
+            if not api_version:
+                api_version = creds.extra_config.get("api_version", "2025-03-01-preview")
 
     # Load data
     loader = DataLoader(

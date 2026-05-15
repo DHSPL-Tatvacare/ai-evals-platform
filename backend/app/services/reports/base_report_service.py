@@ -14,7 +14,7 @@ from app.schemas.base import CamelModel
 from app.services.access_control import readable_scope_clause
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log, make_usage_callback
-from app.services.evaluators.settings_helper import get_llm_settings_from_db
+from app.services.llm_credentials import resolve_llm_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -113,30 +113,30 @@ class BaseReportService(ABC):
         model_override: str | None = None,
     ) -> tuple[LoggingLLMWrapper, str] | tuple[None, None]:
         try:
-            settings = await get_llm_settings_from_db(
-                tenant_id=self.tenant_id,
-                user_id=self.user_id,
-                auth_intent="managed_job",
-                provider_override=provider_override or None,
-            )
+            effective_provider = provider_override or run.llm_provider
+            effective_model = model_override or run.llm_model
 
-            effective_provider = provider_override or settings["provider"]
-            effective_model = model_override or settings["selected_model"]
-
+            if not effective_provider:
+                logger.warning("LLM setup skipped: no provider specified")
+                return None, None
             if not effective_model:
                 logger.warning("LLM setup skipped: no model specified")
                 return None, None
 
-            factory_kwargs = {}
-            if effective_provider == "azure_openai":
-                factory_kwargs["azure_endpoint"] = settings.get("azure_endpoint", "")
-                factory_kwargs["api_version"] = settings.get("api_version", "")
+            creds = await resolve_llm_credentials(self.db, self.tenant_id, effective_provider)
+
+            factory_kwargs: dict[str, Any] = {}
+            if creds.provider == "azure_openai":
+                factory_kwargs["azure_endpoint"] = creds.base_url or ""
+                factory_kwargs["api_version"] = creds.extra_config.get(
+                    "api_version", "2025-03-01-preview"
+                )
 
             provider = create_llm_provider(
-                provider=effective_provider,
-                api_key=settings["api_key"],
+                provider=creds.provider,
+                api_key=creds.api_key,
                 model_name=effective_model,
-                service_account_path=settings.get("service_account_path", ""),
+                service_account_path=creds.service_account_path or "",
                 **factory_kwargs,
             )
 

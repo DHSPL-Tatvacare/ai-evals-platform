@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.application import Application
@@ -34,7 +35,7 @@ from app.services.access_control import readable_scope_clause
 from app.services.reports.contracts.run_report import PlatformReportPresentation
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log, make_usage_callback
-from app.services.evaluators.settings_helper import get_llm_settings_from_db
+from app.services.llm_credentials import resolve_llm_credentials
 
 
 def _serialize_section_payloads(sections) -> dict[str, Any]:
@@ -165,31 +166,36 @@ async def _load_run_and_profile(db, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
 
 async def _create_logging_llm(
     *,
+    db: AsyncSession,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     app_id: str,
     report_id: str,
     provider_override: str | None,
     model_override: str | None,
+    run_provider: str | None = None,
+    run_model: str | None = None,
 ):
-    settings = await get_llm_settings_from_db(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        auth_intent='managed_job',
-        provider_override=provider_override or None,
-    )
-    effective_provider = provider_override or settings['provider']
-    effective_model = model_override or settings['selected_model']
-    if not effective_model:
+    effective_provider = provider_override or run_provider
+    effective_model = model_override or run_model
+    if not effective_provider or not effective_model:
         return None, None, None
 
+    creds = await resolve_llm_credentials(db, tenant_id, effective_provider)
+
+    factory_kwargs: dict[str, Any] = {}
+    if creds.provider == "azure_openai":
+        factory_kwargs["azure_endpoint"] = creds.base_url or ""
+        factory_kwargs["api_version"] = creds.extra_config.get(
+            "api_version", "2025-03-01-preview"
+        )
+
     provider = create_llm_provider(
-        provider=effective_provider,
-        api_key=settings['api_key'],
+        provider=creds.provider,
+        api_key=creds.api_key,
         model_name=effective_model,
-        service_account_path=settings.get('service_account_path', ''),
-        azure_endpoint=settings.get('azure_endpoint', ''),
-        api_version=settings.get('api_version', ''),
+        service_account_path=creds.service_account_path or "",
+        **factory_kwargs,
     )
     try:
         report_uuid: uuid.UUID | None = uuid.UUID(str(report_id))
@@ -255,12 +261,15 @@ async def _compose_single_run_payload(
             asset_keys=narrative_config.asset_keys,
         )
         llm, effective_provider, effective_model = await _create_logging_llm(
+            db=db,
             tenant_id=tenant_id,
             user_id=user_id,
             app_id=run.app_id,
             report_id=report_config.report_id,
             provider_override=llm_provider,
             model_override=llm_model,
+            run_provider=run.llm_provider,
+            run_model=run.llm_model,
         )
         if llm is not None:
             narrative_payloads = await execute_narrative_generation(
@@ -572,6 +581,7 @@ async def generate_cross_run_report_artifact(
                     asset_keys=narrative_config.asset_keys,
                 )
                 llm, effective_provider, effective_model = await _create_logging_llm(
+                    db=db,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     app_id=app_id,

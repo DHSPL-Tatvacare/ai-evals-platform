@@ -1521,11 +1521,20 @@ async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uu
     except (ValueError, TypeError):
         draft_job_id = None
 
+    provider = params.get("provider") or ""
+    model = params.get("model") or ""
+    if not provider or not model:
+        raise ValueError(
+            "generate-evaluator-draft requires 'provider' and 'model' in job params"
+        )
+
     result = await generate_evaluator_draft(
         prompt=prompt,
         app_id=app_id,
         tenant_id=str(tenant_id),
         user_id=str(user_id),
+        provider=provider,
+        model=model,
         rule_catalog=rule_catalog,
         job_id=draft_job_id,
     )
