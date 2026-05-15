@@ -16,21 +16,10 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONNECTION_STRING: str = ""
     AZURE_STORAGE_CONTAINER: str = "evals-files"
 
-    # LLM providers (for Phase 3 batch evaluation jobs)
-    GEMINI_API_KEY: str = ""
-    GEMINI_AUTH_METHOD: str = "api_key"  # "api_key" or "service_account"
+    # Gemini service account — system-tenant-only fallback for Sherlock/Gemini.
+    # Decoded from GEMINI_SERVICE_ACCOUNT_JSON to a file by entrypoint.sh in prod.
+    # Planned-deprecation: full removal + per-tenant SA upload tracked separately.
     GEMINI_SERVICE_ACCOUNT_PATH: str = ""
-    GEMINI_MODEL: str = ""
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = ""
-    AZURE_OPENAI_API_KEY: str = ""
-    AZURE_OPENAI_ENDPOINT: str = ""
-    AZURE_OPENAI_API_VERSION: str = "2025-03-01-preview"
-    AZURE_OPENAI_MODEL: str = ""
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = ""
-    DEFAULT_LLM_PROVIDER: str = "gemini"
-    EVAL_TEMPERATURE: float = 0.1
 
     # Kaira API (for live adversarial testing)
     KAIRA_API_URL: str = ""

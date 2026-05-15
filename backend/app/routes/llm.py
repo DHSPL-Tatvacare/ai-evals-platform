@@ -31,19 +31,46 @@ class DiscoverModelsRequest(CamelModel):
 
 
 @router.get("/auth-status")
-async def auth_status(_auth: AuthContext = Depends(get_auth_context)):
-    """Check whether service account auth is configured on the server."""
+async def auth_status(auth: AuthContext = Depends(get_auth_context)):
+    """Report which providers the tenant has configured.
+
+    Phase 1 keeps this endpoint cheap — Phase 2 of llm-byok rewrites it
+    to consume the new admin AI Settings query surface. For now, query
+    ``tenant_llm_providers`` directly and report any row marked
+    ``is_enabled`` as available. ``serviceAccountConfigured`` continues
+    to reflect the system-tenant Gemini SA fallback path.
+    """
+    from app.database import async_session
+    from app.models.tenant_llm_provider import TenantLlmProvider
+    from sqlalchemy import select
+
     sa_path = settings.GEMINI_SERVICE_ACCOUNT_PATH
     sa_configured = bool(sa_path and os.path.isfile(sa_path))
 
+    providers: dict[str, bool] = {
+        "gemini": False,
+        "openai": False,
+        "azure_openai": False,
+        "anthropic": False,
+    }
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(TenantLlmProvider.provider).where(
+                    TenantLlmProvider.tenant_id == auth.tenant_id,
+                    TenantLlmProvider.is_enabled.is_(True),
+                )
+            )
+        ).scalars().all()
+    for name in rows:
+        if name in providers:
+            providers[name] = True
+    if sa_configured:
+        providers["gemini"] = True
+
     return {
         "serviceAccountConfigured": sa_configured,
-        "providers": {
-            "gemini": bool(settings.GEMINI_API_KEY or sa_configured),
-            "openai": bool(settings.OPENAI_API_KEY),
-            "azure_openai": bool(settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT),
-            "anthropic": bool(settings.ANTHROPIC_API_KEY),
-        },
+        "providers": providers,
     }
 
 
@@ -150,12 +177,10 @@ async def _discover_anthropic_models(
         {"name": "claude-haiku-4-5", "displayName": "Claude Haiku 4.5", "inputTokenLimit": 200000, "outputTokenLimit": 8192},
     ]
 
-    # Resolve API key: override → DB → env
+    # Resolve API key: override → tenant DB. No env fallback (BYOK only).
     api_key = api_key_override
     if not api_key:
         api_key = await _get_provider_key_from_db("anthropic", auth=auth)
-    if not api_key:
-        api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return FALLBACK
 
@@ -189,12 +214,10 @@ async def _discover_openai_models(
         {"name": "gpt-4o-audio-preview", "displayName": "GPT-4o Audio Preview", "inputTokenLimit": 128000, "outputTokenLimit": 16384},
     ]
 
-    # Resolve API key: override → DB → env
+    # Resolve API key: override → tenant DB. No env fallback (BYOK only).
     api_key = api_key_override
     if not api_key:
         api_key = await _get_provider_key_from_db("openai", auth=auth)
-    if not api_key:
-        api_key = settings.OPENAI_API_KEY
     if not api_key:
         return FALLBACK
 
