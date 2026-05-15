@@ -342,6 +342,7 @@ from app.routes.orchestration_sse import router as orchestration_sse_router
 from app.routes.sherlock_tool_calls import router as sherlock_tool_calls_router
 from app.routes.sherlock_verified_queries import router as sherlock_verified_queries_router
 from app.routes.admin_ai_settings import router as admin_ai_settings_router
+from app.routes.llm_assist import router as llm_assist_router
 app.include_router(auth_router)
 app.include_router(listings_router)
 app.include_router(files_router)
@@ -381,3 +382,4 @@ app.include_router(orchestration_sse_router)
 app.include_router(sherlock_tool_calls_router)
 app.include_router(sherlock_verified_queries_router)
 app.include_router(admin_ai_settings_router)
+app.include_router(llm_assist_router)
