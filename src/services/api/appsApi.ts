@@ -231,6 +231,7 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     pageIcons: normalizeStringMap(config.pageIcons ?? config.page_icons),
     pageTitles: normalizeStringMap(config.pageTitles ?? config.page_titles),
     pageActions: normalizePageActions(config.pageActions ?? config.page_actions),
+    quickActions: normalizeQuickActions(config.quickActions ?? config.quick_actions),
     evaluatorDetail: normalizeEvaluatorDetail(config.evaluatorDetail ?? config.evaluator_detail),
   };
 }
@@ -291,6 +292,14 @@ function normalizePageActions(value: unknown): AppConfig['pageActions'] | undefi
     }
   }
   return out as AppConfig['pageActions'];
+}
+
+function normalizeQuickActions(value: unknown): PageActionSpec[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value
+    .map((spec) => normalizePageActionSpec(spec))
+    .filter((spec): spec is PageActionSpec => spec !== null);
+  return out;
 }
 
 function normalizePageActionSpec(value: unknown): PageActionSpec | null {

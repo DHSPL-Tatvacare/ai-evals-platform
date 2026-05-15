@@ -30,6 +30,14 @@ interface UIState {
   pushRightOverlay: () => void;
   popRightOverlay: () => void;
 
+  // Imperative triggers registered by long-lived layout chrome (MainLayout) so
+  // declarative quick-action descriptors can invoke layout-owned side effects
+  // (e.g. opening a hidden <input type="file"> that must survive navigation).
+  // Generic by key so adding a new trigger never touches this store.
+  imperativeTriggers: Record<string, () => void>;
+  registerTrigger: (key: string, fn: () => void) => () => void;
+  invokeTrigger: (key: string) => void;
+
   reset: () => void;
 }
 
@@ -68,6 +76,24 @@ export const useUIStore = create<UIState>()(
       rightOverlayCount: 0,
       pushRightOverlay: () => set((state) => ({ rightOverlayCount: state.rightOverlayCount + 1 })),
       popRightOverlay: () => set((state) => ({ rightOverlayCount: Math.max(0, state.rightOverlayCount - 1) })),
+
+      // Imperative triggers (see UIState comment).
+      imperativeTriggers: {},
+      registerTrigger: (key, fn) => {
+        set((state) => ({ imperativeTriggers: { ...state.imperativeTriggers, [key]: fn } }));
+        return () => {
+          set((state) => {
+            if (state.imperativeTriggers[key] !== fn) return state;
+            const rest = { ...state.imperativeTriggers };
+            delete rest[key];
+            return { imperativeTriggers: rest };
+          });
+        };
+      },
+      invokeTrigger: (key) => {
+        const fn = useUIStore.getState().imperativeTriggers[key];
+        if (fn) fn();
+      },
 
       reset: () => set({
         globalLoading: false,

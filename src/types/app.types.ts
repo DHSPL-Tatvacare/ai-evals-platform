@@ -367,6 +367,9 @@ export interface AppConfig {
   pageTitles?: Partial<Record<PageType, string>>;
   /** Per-app extra header actions keyed by page type. Resolved via `PAGE_ACTION_COMPONENTS` registry. */
   pageActions?: Partial<Record<PageType, PageActionSpec[]>>;
+  /** Per-app sidebar primary-action menu items. Resolved via `QUICK_ACTION_REGISTRY`.
+   *  Empty / missing = no Run button is rendered. Order is preserved. */
+  quickActions?: PageActionSpec[];
   /** Per-app copy/labels for the shared evaluator-detail page. Missing = neutral default. */
   evaluatorDetail?: EvaluatorDetailConfig;
 }
@@ -581,6 +584,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    quickActions: [
+      { id: 'voice-rx-upload', kind: 'voiceRxUpload' },
+    ],
     evaluatorDetail: { interpretationBands: [] },
   },
   'kaira-bot': {
@@ -708,6 +714,11 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    quickActions: [
+      { id: 'kaira-new-chat', kind: 'kairaNewChat' },
+      { id: 'kaira-batch-eval', kind: 'kairaBatchEval' },
+      { id: 'kaira-adversarial', kind: 'adversarialTest' },
+    ],
     evaluatorDetail: { interpretationBands: [] },
   },
   'inside-sales': {
@@ -1011,6 +1022,9 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { id: 'csv-import', kind: 'csvImport', requires: 'asset:create' },
       ],
     },
+    quickActions: [
+      { id: 'inside-sales-batch-eval', kind: 'insideSalesBatchEval' },
+    ],
     evaluatorDetail: {
       interpretationBands: [
         { color: 'emerald', label: 'Strong', range: '80-100', description: 'Ready for independent calling' },
@@ -1185,6 +1199,7 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
       ...(fallback.pageActions ?? {}),
       ...(config.pageActions ?? {}),
     },
+    quickActions: config.quickActions ?? fallback.quickActions ?? [],
     evaluatorDetail: {
       interpretationBands:
         config.evaluatorDetail?.interpretationBands

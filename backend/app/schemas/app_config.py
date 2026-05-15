@@ -219,4 +219,5 @@ class AppConfig(CamelModel):
     page_icons: dict[PageType, str] = Field(default_factory=dict)
     page_titles: dict[PageType, str] = Field(default_factory=dict)
     page_actions: dict[PageType, list[PageActionSpec]] = Field(default_factory=dict)
+    quick_actions: list[PageActionSpec] = Field(default_factory=list)
     evaluator_detail: EvaluatorDetailConfig = Field(default_factory=EvaluatorDetailConfig)

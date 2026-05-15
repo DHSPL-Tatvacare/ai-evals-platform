@@ -68,11 +68,14 @@ export function MainLayout({ children }: MainLayoutProps) {
   // Load listings on mount
   useListingsLoader();
 
-  // Voice Rx upload — triggered from the sidebar +New popover. The hidden
-  // <input type="file"> lives in this layout so the selector survives page
-  // navigation and upload progress can render as a floating card.
+  // Voice Rx upload — triggered from the sidebar quick-action menu. The
+  // hidden <input type="file"> lives in this layout so the selector survives
+  // page navigation and upload progress can render as a floating card. The
+  // sidebar dispatches imperatively via uiStore.invokeTrigger('voiceRxUpload')
+  // so this layout no longer prop-drills the trigger callback.
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const { uploadFiles, isUploading, progress, error: uploadError } = useFileUpload();
+  const registerTrigger = useUIStore((s) => s.registerTrigger);
 
   const triggerVoiceRxUpload = useCallback(() => {
     const el = audioInputRef.current;
@@ -81,6 +84,8 @@ export function MainLayout({ children }: MainLayoutProps) {
     el.value = '';
     el.click();
   }, []);
+
+  useEffect(() => registerTrigger('voiceRxUpload', triggerVoiceRxUpload), [registerTrigger, triggerVoiceRxUpload]);
 
   const handleAudioInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,7 +112,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-secondary)]">
-      <Sidebar onVoiceRxUpload={triggerVoiceRxUpload} />
+      <Sidebar />
       <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
         <ReviewBorderGlow />
         <main

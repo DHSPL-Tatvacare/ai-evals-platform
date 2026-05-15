@@ -2079,6 +2079,9 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "quickActions": [
+                {"id": "voice-rx-upload", "kind": "voiceRxUpload"},
+            ],
             "evaluatorDetail": {"interpretationBands": []},
         },
     },
@@ -2228,6 +2231,11 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "quickActions": [
+                {"id": "kaira-new-chat", "kind": "kairaNewChat"},
+                {"id": "kaira-batch-eval", "kind": "kairaBatchEval"},
+                {"id": "kaira-adversarial", "kind": "adversarialTest"},
+            ],
             "evaluatorDetail": {"interpretationBands": []},
         },
     },
@@ -2377,6 +2385,9 @@ APP_SEEDS = [
                     {"id": "csv-import", "kind": "csvImport", "requires": "asset:create"},
                 ],
             },
+            "quickActions": [
+                {"id": "inside-sales-batch-eval", "kind": "insideSalesBatchEval"},
+            ],
             "evaluatorDetail": {
                 "interpretationBands": [
                     {"color": "emerald", "label": "Strong", "range": "80-100", "description": "Ready for independent calling"},
