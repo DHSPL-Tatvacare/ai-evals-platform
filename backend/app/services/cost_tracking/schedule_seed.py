@@ -87,7 +87,7 @@ async def seed_cost_rollup_schedule(
         app_id=COST_ROLLUP_APP_ID,
         job_type=COST_ROLLUP_JOB_TYPE,
         schedule_key=COST_ROLLUP_SCHEDULE_KEY,
-        name="Platform · LLM cost daily rollup",
+        name="LLM cost daily rollup",
         description=(
             "Rebuilds analytics.agg_llm_usage_daily for D-1 across all tenants. "
             "Runs at 01:05 UTC to allow a short buffer for late analytics.fact_llm_generation "

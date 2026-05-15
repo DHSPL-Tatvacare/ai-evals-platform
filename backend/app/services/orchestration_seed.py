@@ -507,7 +507,7 @@ async def _ensure_anomaly_sweep_scheduled(
         app_id=ANOMALY_SWEEP_APP_ID,
         job_type=ANOMALY_SWEEP_JOB_TYPE,
         schedule_key=ANOMALY_SWEEP_SCHEDULE_KEY,
-        name="Platform · Orchestration anomaly sweep",
+        name="Orchestration anomaly sweep",
         description=(
             "Off-by-default safety net for the per-correlation Bolna "
             "polling chain. Re-enqueues a polling job for any open "

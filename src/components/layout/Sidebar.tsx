@@ -28,8 +28,7 @@ import { userHasAnyPermission, usePermission, USER_MANAGEMENT_PERMISSIONS } from
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
 import type { AppId } from '@/types';
-import { getNavItems } from "@/config/sidebarNav";
-import { getAdminNavItems } from "@/config/sidebarNav";
+import { getAdminNavGroups, getNavItems, type SidebarNavGroup, type SidebarNavItem } from "@/config/sidebarNav";
 import { AppSwitcher } from "./AppSwitcher";
 import { AppIcon, type AppIconKind } from "./AppIcon";
 import { KairaSidebarContent } from "./KairaSidebarContent";
@@ -67,8 +66,21 @@ export function Sidebar() {
   // User-mgmt nav entry stays tied to user-specific permissions, even though
   // the admin chrome is now reachable via `schedule:manage` alone.
   const canManageUsers = userHasAnyPermission(user, USER_MANAGEMENT_PERMISSIONS);
-  const adminNavItems = getAdminNavItems({ canManageUsers, canViewCost, canManageSchedules, canManageOrchestration });
+  const adminPermissions = { canManageUsers, canViewCost, canManageSchedules, canManageOrchestration };
+  const adminNavGroups = getAdminNavGroups(adminPermissions);
+  // Flat list for the collapsed sidebar rail — mirrors the grouped layout used
+  // by the expanded chrome but discards group titles since collapsed nav has
+  // no room for them.
+  const adminNavItems = adminNavGroups.flatMap((group) => group.items);
   const navItems = isAdminView ? adminNavItems : getNavItems(appId as AppId);
+
+  // Entries that drive the collapsed icon strip. Admin view tags each item
+  // with its group so the tooltip can carry the section name; other views
+  // pass the item through unannotated.
+  type CollapsedEntry = { item: SidebarNavItem; group: SidebarNavGroup | null };
+  const collapsedEntries: CollapsedEntry[] = isAdminView
+    ? adminNavGroups.flatMap((group) => group.items.map((item) => ({ item, group })))
+    : navItems.map((item) => ({ item, group: null }));
 
   // Controlled state for the +New popover
   const [newMenuOpen, setNewMenuOpen] = useState(false);
@@ -230,12 +242,12 @@ export function Sidebar() {
               {!isAdminView && quickActionItems.length > 0 ? (
                 <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
               ) : null}
-              {navItems.map((item) => (
+              {collapsedEntries.map(({ item, group }) => (
                 <CollapsedNavLink
                   key={item.to}
                   to={item.to}
                   icon={item.icon}
-                  title={item.label}
+                  title={group ? `${group.title} · ${item.label}` : item.label}
                   end={item.end}
                   activeWhen={item.activeWhen}
                 />
@@ -270,7 +282,12 @@ export function Sidebar() {
             )}
           </>
         ) : (
-          <>
+          // Locked-width inner shell (matches the aside's expanded width).
+          // The aside animates 56→230; this wrapper renders at the final
+          // width so children compute layout once and the resize becomes a
+          // pure clipping reveal under the aside's `overflow-hidden` —
+          // no per-frame flex/truncate reflow ("dancing").
+          <div className="flex h-full min-h-0 w-[230px] flex-col">
             <div className="flex h-14 items-center gap-2 px-3 shrink-0">
               <div className="min-w-0 flex-1">
                 <AppSwitcher />
@@ -305,7 +322,7 @@ export function Sidebar() {
                 className="flex flex-1 flex-col min-h-0"
               >
                 {isAdminView ? (
-                  <AdminSidebarContent items={adminNavItems} />
+                  <AdminSidebarContent groups={adminNavGroups} />
                 ) : isInsideSales ? (
                   <InsideSalesSidebarContent />
                 ) : isKairaBot ? (
@@ -358,7 +375,7 @@ export function Sidebar() {
                 </Popover>
               </div>
             )}
-          </>
+          </div>
         )}
       </motion.aside>
       <ChangePasswordDialog

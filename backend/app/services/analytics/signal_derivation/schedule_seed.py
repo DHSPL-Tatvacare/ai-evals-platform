@@ -81,7 +81,7 @@ async def seed_signal_derivation_schedule(
         app_id=SIGNAL_DERIVATION_APP_ID,
         job_type=SIGNAL_DERIVATION_JOB_TYPE,
         schedule_key=SIGNAL_DERIVATION_SCHEDULE_KEY,
-        name="Platform · Signal derivation",
+        name="Signal derivation",
         description=(
             "Runs every enabled analytics.signal_definition across all "
             "tenants, deriving analytics.fact_lead_signal rows from the "

@@ -36,6 +36,19 @@ export interface SidebarNavItem {
   activeWhen?: (pathname: string) => boolean;
 }
 
+/**
+ * A labelled section of sidebar items. Used by surfaces (today: admin) that
+ * benefit from grouped scanning. The renderer prints `title` above the
+ * section's items; groups whose `items` array is empty after permission
+ * gating are dropped before render so the data shape stays the source of
+ * truth (no `if (group === 'analytics')` branches in the view).
+ */
+export interface SidebarNavGroup {
+  id: string;
+  title: string;
+  items: SidebarNavItem[];
+}
+
 const VOICE_RX_NAV: SidebarNavItem[] = [
   { to: routes.voiceRx.dashboard, icon: LayoutDashboard, label: 'Dashboard', hidden: true },
   { to: routes.voiceRx.evaluators, icon: FileText, label: 'Evaluators' },
@@ -146,35 +159,59 @@ export function landingRouteForApp(appId: AppId): string {
   return first?.to ?? NAV_BY_APP[appId]?.[0]?.to ?? VOICE_RX_NAV[0].to;
 }
 
-export function getAdminNavItems(options: {
+interface AdminNavOptions {
   canManageUsers: boolean;
   canViewCost: boolean;
   canManageSchedules?: boolean;
   canManageOrchestration?: boolean;
-}): SidebarNavItem[] {
-  const items: SidebarNavItem[] = [];
+}
 
-  if (options.canManageUsers) {
-    items.push(ADMIN_USERS_NAV);
-  }
-  if (options.canViewCost) {
-    items.push(ADMIN_COST_NAV);
-  }
-  if (options.canManageSchedules) {
-    items.push(ADMIN_SCHEDULED_JOBS_NAV);
-  }
-  if (options.canManageOrchestration) {
-    items.push(ADMIN_INTEGRATIONS_NAV);
-  }
-  // Sherlock observability — admin-only surface. The list/detail pages
-  // are gated by `AdminGuard` (any admin access permission), so we
-  // mirror the same "shows up in the admin nav whenever admin chrome
-  // is visible" behaviour by tying visibility to user-mgmt access.
-  // If a more granular permission is ever needed we can split it then.
-  if (options.canManageUsers) {
-    items.push(ADMIN_SHERLOCK_NAV);
-    items.push(ADMIN_SHERLOCK_CONFIG_NAV);
-  }
+/**
+ * Admin sidebar grouped by capability. The renderer prints the `title` of
+ * each group as a section heading. Per-item permission gates run inside the
+ * group; groups whose `items` array is empty after gating are dropped so the
+ * renderer never sees an empty section.
+ *
+ * Adding a new admin surface = append to the right group's items, set its
+ * permission gate, and the renderer picks it up. New groups = add a new
+ * `SidebarNavGroup` entry; no renderer change needed.
+ */
+export function getAdminNavGroups(options: AdminNavOptions): SidebarNavGroup[] {
+  const groups: SidebarNavGroup[] = [
+    {
+      id: 'workspace',
+      title: 'Workspace',
+      items: gate([
+        [options.canManageUsers, ADMIN_USERS_NAV],
+      ]),
+    },
+    {
+      id: 'operations',
+      title: 'Operations',
+      items: gate([
+        [options.canManageSchedules, ADMIN_SCHEDULED_JOBS_NAV],
+        [options.canManageOrchestration, ADMIN_INTEGRATIONS_NAV],
+      ]),
+    },
+    {
+      id: 'analytics',
+      title: 'Analytics',
+      items: gate([
+        [options.canViewCost, ADMIN_COST_NAV],
+        // Sherlock list/detail pages are gated by `AdminGuard` (any admin
+        // access permission), mirrored here against user-mgmt access.
+        [options.canManageUsers, ADMIN_SHERLOCK_NAV],
+        [options.canManageUsers, ADMIN_SHERLOCK_CONFIG_NAV],
+      ]),
+    },
+  ];
+  return groups
+    .map((group) => ({ ...group, items: getVisibleNavItems(group.items) }))
+    .filter((group) => group.items.length > 0);
+}
 
-  return getVisibleNavItems(items);
+function gate(
+  rows: Array<[boolean | undefined, SidebarNavItem]>,
+): SidebarNavItem[] {
+  return rows.filter(([allowed]) => Boolean(allowed)).map(([, item]) => item);
 }

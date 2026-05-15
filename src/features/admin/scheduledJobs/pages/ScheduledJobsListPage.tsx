@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import cronstrue from 'cronstrue';
 import { CalendarClock, History, Play, Pencil, Trash2, Plus, Lock } from 'lucide-react';
-import { Button, EmptyState, ConfirmDialog, DataTable, type ColumnDef, LoadingState, PageSurface, Tooltip } from '@/components/ui';
+import { Button, EmptyState, ConfirmDialog, DataTable, type ColumnDef, LoadingState, PageSurface, RowActionsMenu, Tooltip } from '@/components/ui';
 import { PAGE_METADATA } from '@/config/pageMetadata';
 import { useScheduledJobsStore } from '@/stores/scheduledJobsStore';
 import { notificationService } from '@/services/notifications';
@@ -86,6 +86,7 @@ export function ScheduledJobsListPage() {
   const [editing, setEditing] = useState<Schedule | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [historyScheduleId, setHistoryScheduleId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     void load();
@@ -154,65 +155,71 @@ export function ScheduledJobsListPage() {
     {
       key: 'name',
       header: 'Name',
-      width: 'min-w-[240px]',
+      width: 'min-w-[200px]',
+      textBehavior: 'wrap',
       render: (schedule) => (
-        <div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium">{schedule.name}</span>
-            {schedule.isPlatformManaged ? (
-              <Tooltip
-                position="top"
-                content="Platform-managed: seeded by the platform and read-only from tenant accounts."
-              >
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
-                  <Lock className="h-2.5 w-2.5" />
-                  Platform
-                </span>
-              </Tooltip>
-            ) : null}
-          </div>
-          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">{schedule.scheduleKey}</div>
-        </div>
+        <span className="font-medium text-[var(--text-primary)]">{schedule.name}</span>
       ),
     },
     {
-      key: 'app-workload',
-      header: 'App / Workload',
-      width: 'min-w-[220px]',
+      key: 'source',
+      header: 'Source',
+      width: 'w-[110px]',
+      render: (schedule) =>
+        schedule.isPlatformManaged ? (
+          <Tooltip
+            position="top"
+            content="Platform-managed: seeded by the platform and read-only from tenant accounts."
+          >
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-muted)]">
+              <Lock className="h-2.5 w-2.5" />
+              Platform
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="text-[var(--text-muted)]">Tenant</span>
+        ),
+    },
+    {
+      key: 'app',
+      header: 'App',
+      width: 'w-[140px]',
+      textBehavior: 'truncate',
       render: (schedule) => (
-        <div>
-          <div>{schedule.appId}</div>
-          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">
-            {workloadLabels.get(`${schedule.appId}:${schedule.jobType}`) ?? schedule.jobType}
-          </div>
-        </div>
+        <span className="text-[var(--text-secondary)]">{schedule.appId}</span>
       ),
     },
     {
-      key: 'cron',
-      header: 'Cron',
-      width: 'min-w-[220px]',
+      key: 'workload',
+      header: 'Workload',
+      width: 'min-w-[180px]',
+      textBehavior: 'wrap',
       render: (schedule) => (
-        <div>
-          <div className="font-mono">{schedule.cron}</div>
-          <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]" title={cronHumanPreview(schedule.cron)}>
-            {cronHumanPreview(schedule.cron)}
-          </div>
-        </div>
+        <span className="text-[var(--text-primary)]">
+          {workloadLabels.get(`${schedule.appId}:${schedule.jobType}`) ?? schedule.jobType}
+        </span>
+      ),
+    },
+    {
+      key: 'schedule',
+      header: 'Schedule',
+      width: 'min-w-[170px]',
+      textBehavior: 'wrap',
+      render: (schedule) => (
+        <Tooltip position="top" content={<span className="font-mono text-[11px]">{schedule.cron}</span>}>
+          <span className="cursor-default text-[var(--text-primary)]">{cronHumanPreview(schedule.cron)}</span>
+        </Tooltip>
       ),
     },
     {
       key: 'next-check',
       header: 'Next check',
-      width: 'w-[120px]',
+      width: 'w-[110px]',
       render: (schedule) => {
         const label = nextCheckLabel(schedule);
         const absolute = schedule.nextCheckAt ? new Date(schedule.nextCheckAt).toLocaleString() : undefined;
         return (
-          <span
-            className="tabular-nums text-[var(--text-secondary)]"
-            title={absolute}
-          >
+          <span className="tabular-nums text-[var(--text-secondary)]" title={absolute}>
             {label}
           </span>
         );
@@ -221,25 +228,28 @@ export function ScheduledJobsListPage() {
     {
       key: 'last-fire',
       header: 'Last fire',
-      width: 'min-w-[170px]',
-      render: (schedule) => (
-        <div className="space-y-1">
-          <div className="tabular-nums text-[var(--text-secondary)]">{relative(schedule.lastFireAt)}</div>
-          <LastFireChip status={schedule.lastFireStatus} />
-          {schedule.lastFireJobId ? (
-            <div className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">{schedule.lastFireJobId.slice(0, 8)}</div>
-          ) : null}
-        </div>
-      ),
+      width: 'w-[170px]',
+      render: (schedule) => {
+        if (!schedule.lastFireAt) {
+          return <span className="text-[var(--text-muted)]">—</span>;
+        }
+        const absolute = new Date(schedule.lastFireAt).toLocaleString();
+        return (
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={absolute}>
+            <span className="tabular-nums text-[var(--text-secondary)]">{relative(schedule.lastFireAt)}</span>
+            <LastFireChip status={schedule.lastFireStatus} />
+          </span>
+        );
+      },
     },
     {
       key: 'status',
       header: 'Status',
-      width: 'min-w-[180px]',
-      render: (schedule) => (
-        <div>
+      width: 'w-[110px]',
+      render: (schedule) => {
+        const chip = (
           <button
-            onClick={() => void handleToggle(schedule)}
+            onClick={() => { if (!schedule.isPlatformManaged) void handleToggle(schedule); }}
             disabled={schedule.isPlatformManaged}
             className={cn(
               'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
@@ -256,86 +266,82 @@ export function ScheduledJobsListPage() {
           >
             {schedule.enabled ? 'Enabled' : 'Disabled'}
           </button>
-          {schedule.lastSkipReason ? (
-            <Tooltip
-              position="top"
-              maxWidth={320}
-              content={
-                <div className="space-y-1 text-xs leading-snug">
-                  <div>
-                    <span className="font-medium">Last skip: </span>
-                    {schedule.lastSkipReason}
-                  </div>
-                  <div className="text-[var(--text-muted)]">
-                    Next check {relative(schedule.nextCheckAt)}
-                  </div>
+        );
+        if (!schedule.lastSkipReason) return chip;
+        return (
+          <Tooltip
+            position="top"
+            maxWidth={320}
+            content={
+              <div className="space-y-1 text-xs leading-snug">
+                <div>
+                  <span className="font-medium">Last skip: </span>
+                  {schedule.lastSkipReason}
                 </div>
-              }
-            >
-              <div className="mt-1 inline-flex max-w-[180px] cursor-default truncate text-[length:var(--text-table-header)] text-[var(--color-warning)]">
-                Skipped: {schedule.lastSkipReason}
+                <div className="text-[var(--text-muted)]">
+                  Next check {relative(schedule.nextCheckAt)}
+                </div>
               </div>
-            </Tooltip>
-          ) : null}
-        </div>
-      ),
+            }
+          >
+            <span className="inline-flex items-center gap-1">
+              {chip}
+              <span className="text-[var(--color-warning)]" aria-label="Skipped">!</span>
+            </span>
+          </Tooltip>
+        );
+      },
     },
     {
       key: 'actions',
-      header: 'Actions',
-      width: 'w-[170px]',
+      header: '',
+      width: 'w-[44px]',
       cellClassName: 'text-right',
       render: (schedule) => {
         const locked = schedule.isPlatformManaged;
         const lockedTitle = 'Platform-managed schedule — managed by platform operators';
-        const lockedCls = 'cursor-not-allowed opacity-40';
         return (
-          <div className="inline-flex items-center gap-1">
-            <button
-              onClick={() => setHistoryScheduleId(schedule.id)}
-              className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]"
-              title="Run history"
-            >
-              <History className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { if (!locked) { setEditing(schedule); setOverlayOpen(true); } }}
-              disabled={locked}
-              className={cn(
-                'rounded-md p-1.5 text-[var(--text-muted)]',
-                locked ? lockedCls : 'hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
-              )}
-              title={locked ? lockedTitle : 'Edit'}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { if (!locked) void handleFireNow(schedule); }}
-              disabled={locked}
-              className={cn(
-                'rounded-md p-1.5 text-[var(--text-muted)]',
-                locked ? lockedCls : 'hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]',
-              )}
-              title={locked ? lockedTitle : 'Fire now'}
-            >
-              <Play className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { if (!locked) setDeletingId(schedule.id); }}
-              disabled={locked}
-              className={cn(
-                'rounded-md p-1.5 text-[var(--text-muted)]',
-                locked ? lockedCls : 'hover:bg-[var(--interactive-secondary)] hover:text-[var(--color-danger)]',
-              )}
-              title={locked ? lockedTitle : 'Delete'}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          <RowActionsMenu
+            open={openMenuId === schedule.id}
+            onOpenChange={(next) => setOpenMenuId(next ? schedule.id : null)}
+            actions={[
+              {
+                id: 'history',
+                icon: History,
+                label: 'Run history',
+                onClick: () => setHistoryScheduleId(schedule.id),
+              },
+              {
+                id: 'edit',
+                icon: Pencil,
+                label: 'Edit',
+                onClick: () => { setEditing(schedule); setOverlayOpen(true); },
+                disabled: locked,
+                title: locked ? lockedTitle : undefined,
+              },
+              {
+                id: 'fire',
+                icon: Play,
+                label: 'Fire now',
+                onClick: () => { void handleFireNow(schedule); },
+                disabled: locked,
+                title: locked ? lockedTitle : undefined,
+              },
+              {
+                id: 'delete',
+                icon: Trash2,
+                label: 'Delete',
+                onClick: () => setDeletingId(schedule.id),
+                danger: true,
+                disabled: locked,
+                title: locked ? lockedTitle : undefined,
+              },
+            ]}
+          />
         );
       },
     },
-  ], [handleFireNow, handleToggle, workloadLabels]);
+  ], [handleFireNow, handleToggle, openMenuId, workloadLabels]);
 
   const { icon, title } = PAGE_METADATA.scheduledJobs;
 
@@ -372,7 +378,7 @@ export function ScheduledJobsListPage() {
           emptyIcon={CalendarClock}
           emptyTitle="No schedules yet"
           emptyDescription="Create your first scheduled job to enqueue workloads on a cron cadence."
-          minWidth="940px"
+          minWidth="1280px"
         />
       )}
 
