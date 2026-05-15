@@ -33,7 +33,10 @@ from app.services.llm_credentials import (
     resolve_llm_credentials,
 )
 from app.services.llm_credentials.crypto import encrypt_secret
-from app.services.llm_model_discovery import list_models_for_provider
+from app.services.llm_model_discovery import (
+    list_models_for_provider,
+    validate_azure_credentials,
+)
 
 
 router = APIRouter(prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
@@ -174,7 +177,12 @@ async def validate_provider(
     detail: str | None = None
     try:
         creds = await resolve_llm_credentials(db, auth.tenant_id, provider)
-        await list_models_for_provider(provider, creds)
+        if provider == "azure_openai":
+            # Azure has no public key-based listing — call the resource
+            # directly so an empty deployment list can't pass validation.
+            await validate_azure_credentials(creds)
+        else:
+            await list_models_for_provider(provider, creds)
         row.validation_status = "ok"
     except (ProviderNotConfiguredError, ValueError) as exc:
         row.validation_status = "invalid"

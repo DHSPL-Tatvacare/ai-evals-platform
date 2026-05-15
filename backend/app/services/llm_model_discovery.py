@@ -75,6 +75,12 @@ async def _list_openai(creds: ResolvedCredentials) -> list[str]:
 
 
 def _list_azure(creds: ResolvedCredentials) -> list[str]:
+    """Azure has no public key-based deployment listing; admins curate by hand.
+
+    We return the admin-curated list from ``extra_config["deployments"]``.
+    Credential validity is verified separately by ``validate_azure_credentials``
+    so the validate route doesn't pass with an empty deployment list.
+    """
     raw = creds.extra_config.get("deployments") or []
     if isinstance(raw, str):
         # Tolerate legacy CSV/newline strings; new admin writes a list.
@@ -84,6 +90,39 @@ def _list_azure(creds: ResolvedCredentials) -> list[str]:
     else:
         names = []
     return _dedupe_preserving_order(names)
+
+
+async def validate_azure_credentials(creds: ResolvedCredentials) -> None:
+    """Hit the Azure resource with the saved key + endpoint + api_version.
+
+    Uses ``client.models.list()``, which the Azure data-plane exposes at
+    ``GET /openai/models?api-version=...`` for key-authenticated callers.
+    A 401/403 surfaces as ``ValueError`` so the validate route can mark the
+    row ``invalid``; other failures propagate so unexpected bugs aren't
+    swallowed.
+    """
+    if not creds.api_key:
+        raise ValueError("Azure OpenAI API key not configured")
+    if not creds.base_url:
+        raise ValueError("Azure OpenAI endpoint not configured")
+    try:
+        import openai
+    except ImportError as exc:
+        raise ValueError(f"openai SDK unavailable: {exc}") from exc
+    client = openai.AzureOpenAI(
+        api_key=creds.api_key,
+        azure_endpoint=creds.base_url,
+        api_version=creds.extra_config.get("api_version") or "2025-04-01-preview",
+    )
+    try:
+        await asyncio.to_thread(lambda: list(client.models.list()))
+    except openai.AuthenticationError as exc:
+        raise ValueError(f"Azure OpenAI authentication failed: {exc}") from exc
+    except openai.PermissionDeniedError as exc:
+        raise ValueError(f"Azure OpenAI permission denied: {exc}") from exc
+    except openai.NotFoundError as exc:
+        # Wrong endpoint or wrong api_version comes back as 404.
+        raise ValueError(f"Azure OpenAI endpoint/api-version invalid: {exc}") from exc
 
 
 async def _list_anthropic(creds: ResolvedCredentials) -> list[str]:

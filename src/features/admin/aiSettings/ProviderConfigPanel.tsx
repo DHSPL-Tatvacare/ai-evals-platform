@@ -99,6 +99,10 @@ function PanelInner({
       };
       if (isAzure) {
         extraConfig.api_version = form.apiVersion || DEFAULT_AZURE_API_VERSION;
+        // Mirror curated deployment names into extra_config.deployments so
+        // legacy runner code that reads either side keeps working until the
+        // Phase-3 cleanup picks one source of truth.
+        extraConfig.deployments = [...form.curatedModels];
       }
       await upsert.mutateAsync({
         provider,

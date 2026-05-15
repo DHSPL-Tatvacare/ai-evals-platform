@@ -21,11 +21,27 @@ export function ModelCuration({
   onChange,
   disabled,
 }: ModelCurationProps) {
+  const isAzure = provider === 'azure_openai';
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<string[]>([]);
   const discover = useDiscoverModels();
 
+  const handleAddDeployment = () => {
+    const name = search.trim();
+    if (!name) return;
+    if (curatedModels.includes(name)) {
+      notificationService.info(`Deployment "${name}" is already added.`);
+      return;
+    }
+    onChange([...curatedModels, name]);
+    setSearch('');
+  };
+
   const handleSearch = async () => {
+    if (isAzure) {
+      handleAddDeployment();
+      return;
+    }
     try {
       const data = await discover.mutateAsync({ provider, search: search.trim() });
       setResults(data.models);
@@ -47,21 +63,34 @@ export function ModelCuration({
     onChange(curatedModels.filter((m) => m !== model));
   };
 
+  const inputPlaceholder = isAzure
+    ? 'Add deployment name (e.g. ai-evals-gpt-5.4-mini)'
+    : 'Search models (e.g. gpt, claude, gemini)…';
+  const ctaLabel = isAzure ? 'Add deployment' : 'Search';
+
   return (
     <section className="flex flex-col gap-3">
       <header className="flex items-center justify-between">
         <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
-          Models
+          {isAzure ? 'Deployments' : 'Models'}
         </h3>
         <span className="text-[11px] text-[var(--text-secondary)]">
           {curatedModels.length} selected
         </span>
       </header>
 
+      {isAzure && (
+        <p className="text-[11px] text-[var(--text-secondary)]">
+          Azure has no public model list — type each deployment name you
+          created in the Azure portal (the same string you pass to the
+          OpenAI SDK&rsquo;s <code>model</code> field).
+        </p>
+      )}
+
       <div className="flex items-stretch gap-2">
         <div className="flex-1">
           <Input
-            placeholder="Search models (e.g. gpt, claude, gemini)…"
+            placeholder={inputPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -78,14 +107,15 @@ export function ModelCuration({
           type="button"
           variant="secondary"
           onClick={handleSearch}
-          disabled={disabled || discover.isPending}
-          isLoading={discover.isPending}
+          disabled={disabled || (!isAzure && discover.isPending) || (isAzure && !search.trim())}
+          isLoading={!isAzure && discover.isPending}
+          icon={isAzure ? Plus : undefined}
         >
-          Search
+          {ctaLabel}
         </Button>
       </div>
 
-      {results.length > 0 && (
+      {!isAzure && results.length > 0 && (
         <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
           <header className="border-b border-dashed border-[var(--border-subtle)] px-3 py-2 text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
             Search results ({results.length})

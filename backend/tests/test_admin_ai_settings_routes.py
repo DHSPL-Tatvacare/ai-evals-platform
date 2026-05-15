@@ -345,6 +345,69 @@ async def test_validate_marks_status_invalid_on_value_error(admin_client, monkey
 
 
 @pytest.mark.asyncio
+async def test_validate_azure_uses_validate_azure_credentials(admin_client, monkeypatch):
+    """Azure has no key-based deployment listing, so validation must hit the
+    resource directly via validate_azure_credentials — not the (would-pass-on-
+    empty-list) list_models_for_provider path."""
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    azure_validate = AsyncMock(return_value=None)
+    list_models = AsyncMock(return_value=["should-not-be-used"])
+    monkeypatch.setattr(route_mod, "validate_azure_credentials", azure_validate)
+    monkeypatch.setattr(route_mod, "list_models_for_provider", list_models)
+
+    await admin_client.put(
+        "/api/admin/ai-settings/providers/azure_openai",
+        json={
+            "isEnabled": True,
+            "apiKey": "az-key",
+            "baseUrl": "https://x.openai.azure.com",
+            "extraConfig": {"api_version": "2025-04-01-preview", "deployments": []},
+            "curatedModels": [],
+        },
+    )
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/azure_openai/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["validationStatus"] == "ok"
+    assert azure_validate.await_count == 1
+    assert list_models.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_azure_marks_invalid_when_auth_fails(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "validate_azure_credentials",
+        AsyncMock(side_effect=ValueError("Azure OpenAI authentication failed: bad key")),
+    )
+    await admin_client.put(
+        "/api/admin/ai-settings/providers/azure_openai",
+        json={
+            "isEnabled": True,
+            "apiKey": "az-bad",
+            "baseUrl": "https://x.openai.azure.com",
+            "extraConfig": {"api_version": "2025-04-01-preview", "deployments": []},
+            "curatedModels": [],
+        },
+    )
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/azure_openai/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validationStatus"] == "invalid"
+    assert "authentication" in (body["detail"] or "").lower()
+
+
+@pytest.mark.asyncio
 async def test_validate_requires_provider_row(admin_client):
     resp = await admin_client.post(
         "/api/admin/ai-settings/providers/anthropic/validate"
