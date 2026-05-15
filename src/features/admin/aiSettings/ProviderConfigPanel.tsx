@@ -9,9 +9,9 @@ import {
   useValidateProvider,
 } from '@/services/api/aiSettingsQueries';
 import { notificationService } from '@/services/notifications/notificationService';
-import { cn } from '@/utils';
 
 import { ModelCuration } from './ModelCuration';
+import { ProviderLogo } from './ProviderLogo';
 
 interface ProviderConfigPanelProps {
   provider: LLMProvider;
@@ -131,15 +131,18 @@ function PanelInner({
   })();
 
   return (
-    <div className="flex flex-col gap-5 p-1">
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex flex-col">
-          <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
-            {PROVIDER_LABELS[provider]}
-          </h2>
-          <p className="text-[12px] text-[var(--text-secondary)]">
-            API credentials and curated model list for this tenant.
-          </p>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-dashed border-[var(--border-subtle)] pb-3">
+        <div className="flex items-center gap-3">
+          <ProviderLogo provider={provider} size={28} />
+          <div className="flex flex-col">
+            <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+              {PROVIDER_LABELS[provider]}
+            </h2>
+            <p className="text-[12px] text-[var(--text-secondary)]">
+              API credentials and curated model list for this tenant.
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {statusBadge}
@@ -155,7 +158,8 @@ function PanelInner({
         </div>
       </header>
 
-      <section className="flex flex-col gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto py-4 pr-1">
+        <section className="flex flex-col gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-semibold text-[var(--text-secondary)]">
             API Key
@@ -220,20 +224,17 @@ function PanelInner({
         )}
       </section>
 
-      <ModelCuration
-        provider={provider}
-        curatedModels={form.curatedModels}
-        onChange={(models) =>
-          setForm((prev) => ({ ...prev, curatedModels: models }))
-        }
-        disabled={!hasStoredKey && !form.apiKey}
-      />
+        <ModelCuration
+          provider={provider}
+          curatedModels={form.curatedModels}
+          onChange={(models) =>
+            setForm((prev) => ({ ...prev, curatedModels: models }))
+          }
+          disabled={!hasStoredKey && !form.apiKey}
+        />
+      </div>
 
-      <footer
-        className={cn(
-          'mt-2 flex items-center justify-end gap-2 border-t border-dashed border-[var(--border-subtle)] pt-3',
-        )}
-      >
+      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] pt-3">
         <Button
           type="button"
           variant="secondary"

@@ -1,9 +1,11 @@
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 import { StatusDot } from '@/components/ui';
 import type { LLMProvider, ProviderConfig } from '@/services/api/aiSettingsApi';
 import { useProviderConfigs } from '@/services/api/aiSettingsQueries';
 import { cn } from '@/utils';
+
+import { ProviderLogo } from './ProviderLogo';
 
 interface ProviderRailProps {
   selected: LLMProvider;
@@ -87,7 +89,7 @@ export function ProviderRail({ selected, onSelect }: ProviderRailProps) {
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
-              <Sparkles className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" aria-hidden />
+              <ProviderLogo provider={provider} size={18} />
               <div className="flex min-w-0 flex-col">
                 <span className="text-[13px] font-semibold text-[var(--text-primary)]">
                   {label}
