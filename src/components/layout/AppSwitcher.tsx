@@ -105,14 +105,14 @@ export function AppSwitcher() {
         onClick={() => setIsOpen(!isOpen)}
         title={currentOption.name}
         className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
+          'inline-flex max-w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
           'hover:bg-[var(--interactive-secondary)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1',
           isOpen && 'bg-[var(--interactive-secondary)]'
         )}
       >
         {renderOptionIcon(currentOption, 'h-6 w-6 shrink-0')}
-        <span className="min-w-0 flex-1 truncate text-left text-base font-semibold text-[var(--text-primary)]">
+        <span className="min-w-0 truncate text-left text-base font-semibold text-[var(--text-primary)]">
           {currentOption.name}
         </span>
         <ChevronDown

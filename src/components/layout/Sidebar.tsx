@@ -190,7 +190,7 @@ export function Sidebar() {
       {(quickActionItems: QuickActionItem[]) => (
     <>
       <motion.aside
-        animate={{ width: sidebarCollapsed ? 56 : 280 }}
+        animate={{ width: sidebarCollapsed ? 56 : 230 }}
         transition={{ type: 'spring', stiffness: 400, damping: 40 }}
         initial={false}
         className="flex h-screen flex-col bg-[var(--bg-secondary)] overflow-hidden"
