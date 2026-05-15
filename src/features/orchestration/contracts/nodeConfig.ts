@@ -147,6 +147,21 @@ const PredicateAstSchema: z.ZodType<PredicateAstOutput, PredicateAstInput> =
 // `NodeConfigSchema` is `z.discriminatedUnion('nodeType', [...])`.
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// Filter operators mirror backend `_cohort_query_compiler._SUPPORTED_OPS`.
+// Backend validation rejects any other op as a fabricated value.
+const COHORT_FILTER_OPS = [
+  "eq",
+  "neq",
+  "gte",
+  "gt",
+  "lte",
+  "lt",
+  "in",
+  "not_in",
+  "contains",
+] as const;
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const SourceCohortQueryConfigSchema = z
   .object({
     nodeType: z.literal("source.cohort_query"),
@@ -161,7 +176,7 @@ export const SourceCohortQueryConfigSchema = z
         z
           .object({
             column: z.string(),
-            op: z.string(),
+            op: z.enum(COHORT_FILTER_OPS),
             value: z.unknown(),
           })
           .strict(),
@@ -210,12 +225,14 @@ export const LogicConditionalConfigSchema = z
   .strict();
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// Mirrors backend `logic_split._Branch` exactly. `predicate` and the
+// `by_rules` mode were FE-only inventions — they had no backend handler
+// and silently broke at publish. Removed to match the canonical contract.
 const SplitBranchSchema = z
   .object({
     id: z.string().min(1),
     label: z.string(),
-    match: z.unknown().optional(),
-    predicate: PredicateAstSchema.optional(),
+    match: z.string().nullable().optional(),
     weight: z.number().nullable().optional(),
   })
   .strict();
@@ -224,7 +241,7 @@ type SplitBranchOutput = z.output<typeof SplitBranchSchema>;
 
 interface LogicSplitConfigOutput {
   nodeType: "logic.split";
-  mode: "by_field" | "by_rules" | "random";
+  mode: "by_field" | "random";
   field?: string;
   branches: SplitBranchOutput[];
   default_branch_id?: string;
@@ -232,7 +249,7 @@ interface LogicSplitConfigOutput {
 }
 
 function normaliseSplitBranches(
-  mode: "by_field" | "by_rules" | "random",
+  mode: "by_field" | "random",
   branches: SplitBranchOutput[],
 ): SplitBranchOutput[] {
   return branches.map((branch) => {
@@ -243,17 +260,9 @@ function normaliseSplitBranches(
         match:
           typeof branch.match === "string"
             ? branch.match
-            : branch.match === undefined
+            : branch.match === undefined || branch.match === null
               ? ""
               : String(branch.match),
-      };
-    }
-    if (mode === "by_rules") {
-      return {
-        ...base,
-        predicate:
-          branch.predicate ??
-          ({ field: "", op: "eq", value: "" } as PredicateAstOutput),
       };
     }
     return {
@@ -267,10 +276,7 @@ function normaliseSplitBranches(
 export const LogicSplitConfigSchema = z
   .object({
     nodeType: z.literal("logic.split"),
-    // FE supports `by_rules` even though backend currently only ships
-    // `by_field` / `random`; runtime publish would reject `by_rules`. Kept
-    // here so drafts authored with predicates do not lose their config.
-    mode: z.enum(["by_field", "by_rules", "random"]).default("by_field"),
+    mode: z.enum(["by_field", "random"]).default("by_field"),
     field: z.string().optional(),
     branches: z.array(SplitBranchSchema).default([]),
     default_branch_id: z.string().optional(),
@@ -301,10 +307,12 @@ export const LogicSplitConfigSchema = z
   });
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// Mirrors backend `logic_wait._EventCorrelation`. The legacy FE shape
+// (`field` / `payload_field`) had no backend equivalent and silently broke
+// at publish — narrowed to the canonical `recipient_id_field`.
 const EventCorrelationSchema = z
   .object({
-    field: z.string(),
-    payload_field: z.string().optional(),
+    recipient_id_field: z.string(),
   })
   .strict();
 
@@ -706,3 +714,20 @@ export function parseNodeConfig(
  *  collapsed onto the parse boundary instead. Kept exported for unit tests
  *  that exercise the operator-value contract directly. */
 export type { PredicateOperatorValueKind };
+
+/** Hard parse-issue classification — used by the FE save gate (Section 5)
+ *  and the canvas patch applier (Section 6).
+ *
+ *  After ``parseNodeConfig({mode: 'draft'})``, every surviving issue is
+ *  structurally hard. The draft filter (``isDraftOmittedRequiredIssue``)
+ *  has already removed missing-required-field cases; what's left includes
+ *  unrecognized keys, wrong-typed provided values, invalid enums,
+ *  malformed predicates, and unknown node types — all hard per the plan.
+ *
+ *  This helper exists so call sites read schematically rather than as
+ *  ``!result.ok``. It also gives a single hook if Phase 16 codegen ever
+ *  needs to attach finer-grained severity.
+ */
+export function isHardParseIssue(_issue: NodeConfigParseIssue): boolean {
+  return true;
+}

@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 
 from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult
@@ -80,20 +80,29 @@ class _Config(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _coerce_legacy(cls, raw: Any) -> Any:
+    def _coerce_legacy(cls, raw: Any, info: ValidationInfo) -> Any:
         if not isinstance(raw, dict) or "mode" in raw:
             return raw
         if raw.get("duration_hours") is not None:
             return {**raw, "mode": "duration"}
         if raw.get("until_datetime") is not None:
             return {**raw, "mode": "until_datetime"}
+        # Draft mode tolerates an in-progress wait node with no mode picked
+        # yet. Publish still requires the mode discriminator.
+        if info.context and info.context.get("mode") == "draft":
+            return raw
         raise ValueError(
             "logic.wait config requires 'mode' (or legacy "
             "'duration_hours' / 'until_datetime' for back-compat)"
         )
 
     @model_validator(mode="after")
-    def _check_mode_fields(self) -> "_Config":
+    def _check_mode_fields(self, info: ValidationInfo) -> "_Config":
+        # Every check here is "required when mode=X" — pure cross-field
+        # completeness. Defer the whole block in draft so the author can
+        # save a half-filled wait node.
+        if info.context and info.context.get("mode") == "draft":
+            return self
         if self.mode == "duration":
             if self.duration_hours is None:
                 raise ValueError("'duration_hours' required when mode='duration'")

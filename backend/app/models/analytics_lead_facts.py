@@ -75,9 +75,25 @@ class DimLead(Base):
     latest_stage_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Display name of the current assigned rep, lifted from the lead mirror.
+    # See ADR 2026-05-12-rep-and-lead-id-naming — no ``assigned_rep_id`` ships
+    # in Phase 1 because LSQ exposes only a name string on the lead record.
+    assigned_rep_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 11A — lead-identity columns, all ``pii: true`` in the manifest.
+    # The CRM workspace UI reads these from dim_lead (the normalized serving
+    # surface); values are masked by applications.config.crmWorkspace.
+    # piiVisibility. The mirror keeps its own copies for source fidelity.
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes_at_first_seen: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    # Mutable current-state bag distinct from ``attributes_at_first_seen``.
+    # Nullable in Phase 1; populator wiring lands in later phases.
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -172,6 +188,27 @@ class FactLeadStageTransition(Base):
             "to_stage",
             "detected_at",
         ),
+        # Phase 6 (Alembic 0041) — partial unique index covers rows stamped
+        # by a backfill or steady-state sync. ``to_stage`` is intentionally
+        # NOT part of the key: a lead has one prospect_stage at any moment,
+        # so reruns of the backfill (same detected_at, possibly different
+        # current to_stage) UPDATE the seed row instead of forking. Existing
+        # pre-sync_run_id rows remain unconstrained.
+        Index(
+            "uq_fact_lead_stage_transition_backfill",
+            "tenant_id",
+            "app_id",
+            "lead_id",
+            "detected_at",
+            unique=True,
+            postgresql_where=text("sync_run_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_fact_lead_stage_transition_tenant_app_sync_run",
+            "tenant_id",
+            "app_id",
+            "sync_run_id",
+        ),
         {"schema": "analytics"},
     )
 
@@ -207,6 +244,8 @@ class FactLeadActivity(Base):
     )
     actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Denormalized actor display name. Avoids a dim_actor join on every chart axis.
+    actor_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -220,11 +259,18 @@ class FactLeadActivity(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        # Wider unique key includes ``activity_type`` so multiple CRM apps /
+        # activity types can reuse the same fact table without colliding on
+        # ``source_activity_id`` namespaces. Created as ``CREATE UNIQUE INDEX
+        # CONCURRENTLY`` in Alembic 0038, not as a constraint, so we declare
+        # an ``Index(unique=True)`` to match what's in the DB.
+        Index(
+            "uq_fact_lead_activity_source",
             "tenant_id",
             "app_id",
             "source_activity_id",
-            name="uq_fact_lead_activity_tenant_app_source",
+            "activity_type",
+            unique=True,
         ),
         Index(
             "idx_fact_lead_activity_tenant_app_lead_occurred",
@@ -251,13 +297,25 @@ class FactLeadActivity(Base):
 
 
 class FactLeadSignal(Base):
-    """Signal fact: one row per LLM-extracted signal from an evaluated call.
+    """Signal fact: one row per LLM-extracted signal about a lead.
 
-    Delete-then-insert per ``eval_run_id`` (the only inside-sales fact
-    using delete-then-insert; the other three are append-only, per §13).
-    Populated by the ``SignalExtractor`` inside ``populate-analytics``
-    from ``platform.evaluation_run_thread_results.result.signals`` —
-    never by request handlers.
+    Two population paths share this table (Phase 5 amendment, 2026-05-14):
+
+    1. **Eval-run-coupled** rows come from ``populate-analytics``'s
+       ``SignalExtractor`` reading
+       ``platform.evaluation_run_thread_results.result.signals`` — these
+       set ``eval_run_id`` + ``thread_evaluation_id`` and are dedup'd by
+       ``uq_fact_lead_signal_run_thread_signal``.
+    2. **Backfill / scheduled-extraction** rows come from
+       ``backfill_lead_signals_job`` walking the CRM lead mirror — these
+       leave ``eval_run_id`` / ``thread_evaluation_id`` NULL, set
+       ``sync_run_id`` to the owning ``analytics.log_crm_source_sync`` id,
+       and are dedup'd by the partial unique index
+       ``uq_fact_lead_signal_backfill (tenant_id, app_id, lead_id,
+       signal_type, detected_at) WHERE sync_run_id IS NOT NULL``.
+
+    Rollback for path 2: ``DELETE WHERE sync_run_id = '<run_id>'``.
+    Never written by request handlers.
     """
 
     __tablename__ = "fact_lead_signal"
@@ -271,17 +329,33 @@ class FactLeadSignal(Base):
         nullable=False,
     )
     app_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    eval_run_id: Mapped[uuid.UUID] = mapped_column(
+    # Nullable since 0040 — backfill rows have no eval-run lineage.
+    eval_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("platform.evaluation_runs.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
-    thread_evaluation_id: Mapped[int] = mapped_column(
+    thread_evaluation_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey(
             "platform.evaluation_run_thread_results.id", ondelete="CASCADE"
         ),
-        nullable=False,
+        nullable=True,
+    )
+    # Owns rollback-by-run for backfill / scheduled-extraction writes.
+    sync_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analytics.log_crm_source_sync.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Phase 11A — lineage for signal-derivation-framework rows. Every row
+    # written by the scheduled ``derive-signals`` Transform carries the
+    # owning ``signal_definition`` id; it is the dedup key for framework
+    # rows (uq_fact_lead_signal_framework) and the rollback handle.
+    signal_definition_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analytics.signal_definition.id", ondelete="SET NULL"),
+        nullable=True,
     )
     lead_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_activity_id: Mapped[str | None] = mapped_column(
@@ -293,6 +367,11 @@ class FactLeadSignal(Base):
         Numeric, nullable=True
     )
     signal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Observation timestamp for backfill rows. Distinct from signal_at,
+    # which is the source-side moment of the signal as reported.
+    detected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     confidence: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -308,20 +387,43 @@ class FactLeadSignal(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        # Phase 11B — the framework dedup key. Rows written through the
+        # signal derivation framework carry ``signal_definition_id``.
+        # ``ordinal`` is in the key because one eval legitimately emits
+        # multiple signals of the same ``signal_type``; ``rule`` rows use
+        # ``ordinal=0``. The eval-run-coupled
+        # ``uq_fact_lead_signal_run_thread_signal`` constraint was dropped
+        # in migration 0045. ``eval_run_id`` / ``sync_run_id`` stay as
+        # lineage columns.
+        Index(
+            "uq_fact_lead_signal_framework",
             "tenant_id",
             "app_id",
-            "eval_run_id",
-            "thread_evaluation_id",
+            "lead_id",
             "signal_type",
+            "detected_at",
             "ordinal",
-            name="uq_fact_lead_signal_run_thread_signal",
+            unique=True,
+            postgresql_where=text("signal_definition_id IS NOT NULL"),
         ),
         Index(
             "idx_fact_lead_signal_tenant_app_run",
             "tenant_id",
             "app_id",
             "eval_run_id",
+        ),
+        Index(
+            "ix_fact_lead_signal_tenant_app_sync_run",
+            "tenant_id",
+            "app_id",
+            "sync_run_id",
+        ),
+        # Powers the rollback DELETE / per-definition scan.
+        Index(
+            "ix_fact_lead_signal_tenant_app_definition",
+            "tenant_id",
+            "app_id",
+            "signal_definition_id",
         ),
         Index(
             "idx_fact_lead_signal_tenant_app_lead_type_at",

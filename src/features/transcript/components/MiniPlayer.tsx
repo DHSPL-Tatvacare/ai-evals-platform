@@ -37,7 +37,9 @@ export const MiniPlayer = memo(function MiniPlayer({
     onSetPlaybackRate(PLAYBACK_SPEEDS[nextIndex]);
   }, [playbackRate, onSetPlaybackRate]);
 
-  const sidebarWidth = sidebarCollapsed ? '3.5rem' : '280px';
+  const sidebarWidth = sidebarCollapsed
+    ? 'var(--sidebar-collapsed-width)'
+    : 'var(--sidebar-width)';
 
   return (
     <div

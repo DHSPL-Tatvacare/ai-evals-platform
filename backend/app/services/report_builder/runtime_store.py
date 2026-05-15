@@ -12,7 +12,6 @@ from app.constants import SHERLOCK_CHAT_SOURCE
 from app.database import async_session
 from app.models.chat import ChatMessage, ChatSession
 from app.models.sherlock_runtime import SherlockAgentSession, SherlockTurnEvent
-from app.services.report_builder.scratchpad_state import default_scratchpad
 
 
 class SherlockSessionNotFoundError(Exception):
@@ -49,7 +48,7 @@ def _to_runtime_state(row: SherlockAgentSession) -> SherlockAgentSessionState:
         provider=row.provider,
         model=row.model,
         message_state=list(row.message_state or []),
-        scratchpad=dict(row.scratchpad or default_scratchpad()),
+        scratchpad=dict(row.scratchpad or {}),
         next_event_seq=row.next_event_seq,
         status=row.status,
         last_error=row.last_error,
@@ -111,7 +110,17 @@ async def resolve_sherlock_runtime_session(
     db: AsyncSession | None = None,
     strict_session_id: bool = False,
 ) -> SherlockAgentSessionState:
-    """Load or create a Sherlock agent session without touching Kaira chat semantics."""
+    """Load or create a Sherlock agent session without touching Kaira chat semantics.
+
+    Pre-existing security gap (closed by this call): the route was passing
+    `body.app_id` straight into session creation without verifying it
+    landed in `auth.app_access`. A user could smuggle in an app slug they
+    were not entitled to and create a session against it. We now run
+    `ensure_registered_app_access` on every call so the check happens
+    once at the choke point regardless of who calls into the resolver.
+    """
+    from app.auth.app_scope import ensure_registered_app_access
+
     if db is None:
         async with async_session() as session_db:
             runtime_session = await resolve_sherlock_runtime_session(
@@ -126,6 +135,8 @@ async def resolve_sherlock_runtime_session(
             )
             await session_db.commit()
             return runtime_session
+
+    await ensure_registered_app_access(db, auth, app_id)
 
     session_row: ChatSession | None = None
     runtime_row: SherlockAgentSession | None = None
@@ -168,7 +179,7 @@ async def resolve_sherlock_runtime_session(
             provider=provider,
             model=model,
             message_state=[],
-            scratchpad=default_scratchpad(),
+            scratchpad={},
             next_event_seq=1,
             status='active',
             last_response_id=None,

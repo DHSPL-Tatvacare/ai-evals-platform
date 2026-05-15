@@ -36,12 +36,16 @@ def extract_inside_sales_eval_score(result: dict[str, Any] | None) -> float | No
 
 
 def build_inside_sales_source_snapshot(call: Mapping[str, Any]) -> dict[str, Any]:
+    # Read canonical keys first; fall back to the deprecated camelCase
+    # aliases so historical run-config snapshots that still carry the
+    # old key names continue to round-trip. The deprecated reads are
+    # removed in Phase 9 alongside the legacy SQL views.
     return {
         "activityId": str(call.get("activityId") or ""),
-        "prospectId": str(call.get("prospectId") or ""),
-        "agentId": str(call.get("agentId") or ""),
-        "agentName": str(call.get("agentName") or ""),
-        "agentEmail": str(call.get("agentEmail") or ""),
+        "leadId": str(call.get("leadId") or call.get("prospectId") or ""),
+        "repId": str(call.get("repId") or call.get("agentId") or ""),
+        "repName": str(call.get("repName") or call.get("agentName") or ""),
+        "repEmail": str(call.get("repEmail") or call.get("agentEmail") or ""),
         "eventCode": call.get("eventCode"),
         "direction": str(call.get("direction") or ""),
         "status": str(call.get("status") or ""),

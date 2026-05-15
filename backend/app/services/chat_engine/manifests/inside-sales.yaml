@@ -8,6 +8,8 @@ description: |
 catalog_tables:
   agg_evaluation_run:
     pg_schema: analytics
+    layer: analytics_aggregate
+    grain: run
     orm: AggEvaluationRun
     alias: rf
     columns:
@@ -148,6 +150,8 @@ catalog_tables:
         description: "App-specific metadata"
   fact_evaluation:
     pg_schema: analytics
+    layer: analytics_fact
+    grain: evaluation
     orm: FactEvaluation
     alias: ef
     columns:
@@ -198,6 +202,19 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: category
+      evaluator_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: fk
+        nullable: true
+        description: "FK to platform.evaluators(id); NULL for system-built-in evaluators."
+      result_verdict:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        nullable: true
       result_status:
         role: dimension
         type: text
@@ -287,6 +304,9 @@ catalog_tables:
         data_type: temporal
   fact_evaluation_criterion:
     pg_schema: analytics
+    expected_empty_when: "no evaluation runs have been scored for this app yet (fresh DB / freshly-onboarded app)"
+    layer: analytics_fact
+    grain: criterion
     orm: FactEvaluationCriterion
     alias: cf
     columns:
@@ -360,6 +380,8 @@ catalog_tables:
   evaluation_runs:
     orm: EvaluationRun
     pg_schema: platform
+    layer: transactional
+    grain: run
     columns:
       id:
         role: identifier
@@ -395,13 +417,140 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
+      started_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+        nullable: true
+      completed_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+        nullable: true
+      duration_ms:
+        role: measure
+        type: float
+        data_type: quantitative
+        semantic_type: duration
+        unit: ms
+        nullable: true
+        measure_kind: duration_ms
+      evaluator_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: fk
+        nullable: true
+        description: "FK to platform.evaluators(id)"
+      job_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: fk
+        nullable: true
+      listing_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: fk
+        nullable: true
+      session_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: fk
+        nullable: true
+      llm_provider:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        nullable: true
+      llm_model:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        nullable: true
+      summary:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+      error_message:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+      config:
+        role: dimension
+        type: jsonb
+        data_type: nominal
+        nullable: true
+      result:
+        role: dimension
+        type: jsonb
+        data_type: nominal
+        nullable: true
       visibility:
         role: dimension
         type: text
         data_type: nominal
         semantic_type: category
+  evaluators:
+    orm: Evaluator
+    pg_schema: platform
+    layer: identity
+    grain: evaluator
+    alias: e
+    columns:
+      id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: pk
+      tenant_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+      user_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+      app_id:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+      name:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+      created_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+      visibility:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+  # CRM mirror tables (`crm_call_record`, `crm_lead_record`) are hidden
+  # from this Sherlock-visible catalog by design. The mirrors still exist
+  # physically and back the sync pipeline + CRM workspace pages, but
+  # Sherlock generates SQL only against the fact + dim surface below.
+  # The supervisor prompt's hidden-mirror recovery rule translates user
+  # mentions of `crm_call_record` → `fact_lead_activity` and
+  # `crm_lead_record` → `dim_lead`, and acknowledges the swap in its
+  # answer so the user can correct future prompts.
   dim_lead:
     pg_schema: analytics
+    expected_empty_when: "no leads have been synced for this app yet (fresh DB / freshly-onboarded app)"
+    layer: identity
+    grain: lead
     orm: DimLead
     alias: dl
     columns:
@@ -426,7 +575,7 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: id_hash
-        synonyms: ["prospect id", "prospect"]
+        synonyms: ["prospect", "prospect id", "lead", "contact"]
       source:
         role: dimension
         type: text
@@ -453,15 +602,64 @@ catalog_tables:
         data_type: nominal
         nullable: true
         synonyms: ["current stage", "latest stage"]
+        description: "Current CRM stage for the lead."
       latest_stage_observed_at:
         role: temporal
         type: timestamptz
         data_type: temporal
         nullable: true
+      assigned_rep_label:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["owner", "lead owner", "assigned rep", "agent"]
+        description: "Assigned lead owner in the CRM. May differ from the agent on any individual call."
+      first_name:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        pii: true
+        description: "Lead's first name. PII — masked unless the caller's role is allow-listed in crmWorkspace.piiVisibility."
+      last_name:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        pii: true
+        description: "Lead's last name. PII — masked unless the caller's role is allow-listed in crmWorkspace.piiVisibility."
+      phone:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        pii: true
+        description: "Lead's phone number. PII — masked unless the caller's role is allow-listed in crmWorkspace.piiVisibility."
+      email:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        pii: true
+        description: "Lead's email address. PII — masked unless the caller's role is allow-listed in crmWorkspace.piiVisibility."
+      city:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        pii: true
+        description: "Lead's city. PII — masked unless the caller's role is allow-listed in crmWorkspace.piiVisibility."
       attributes_at_first_seen:
         role: dimension
         type: jsonb
         data_type: nominal
+        description: "Frozen snapshot of the normalized lead-profile fields captured at first sync (age_group, condition, hba1c_band, intent_to_pay, source, source_campaign). The inputs the seeded `mql` rule scores on."
+      attributes:
+        role: dimension
+        type: jsonb
+        data_type: nominal
+        description: "Mutable current-state bag for the lead (e.g. plan_name once converted). Schema in attribute_schemas._default."
       created_at:
         role: temporal
         type: timestamptz
@@ -470,8 +668,22 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
+    # dim_lead has no discriminator column — its `attributes` JSONB carries
+    # the mutable current-state bag under the single `_default` bucket.
+    # (`attributes_at_first_seen` is the frozen snapshot and is modelled as
+    # a plain column; its keys are a stable normalized vocabulary, not a
+    # per-row-typed bag, so they are not declared here.)
+    attribute_schemas:
+      _default:
+        plan_name:
+          data_type: nominal
+          semantic_type: category
+          description: "Care plan purchased by the lead. Populated for converted / payment-received leads."
   fact_lead_stage_transition:
     pg_schema: analytics
+    expected_empty_when: "no leads have been synced for this app yet (fresh DB / freshly-onboarded app)"
+    layer: analytics_fact
+    grain: stage_transition
     orm: FactLeadStageTransition
     alias: lst
     columns:
@@ -495,7 +707,7 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: id_hash
-        synonyms: ["prospect id"]
+        synonyms: ["prospect", "prospect id", "lead", "contact"]
       from_stage:
         role: dimension
         type: text
@@ -531,8 +743,16 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
+    # Stage transitions carry no per-to_stage payload today; `_default`
+    # reserves the attribute_schemas surface for future per-to_stage
+    # transition payloads (e.g. churn_reason on the Lost stage).
+    attribute_schemas:
+      _default: {}
   fact_lead_activity:
     pg_schema: analytics
+    expected_empty_when: "no calls/activities have been synced for this app yet (fresh DB / freshly-onboarded app)"
+    layer: analytics_fact
+    grain: lead_activity
     orm: FactLeadActivity
     alias: la
     columns:
@@ -556,13 +776,15 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: id_hash
-        synonyms: ["prospect id"]
+        synonyms: ["prospect", "prospect id", "lead", "contact"]
+        description: "CRM lead identifier linked to the call."
       source_activity_id:
         role: identifier
         type: text
         data_type: nominal
         semantic_type: id_hash
         synonyms: ["LSQ activity id", "activity id"]
+        description: "CRM activity identifier for the call."
       activity_type:
         role: dimension
         type: text
@@ -586,18 +808,29 @@ catalog_tables:
         type: timestamptz
         data_type: temporal
         synonyms: ["activity time", "happened at"]
+        description: "Start time of the synced call activity."
       actor_type:
         role: dimension
         type: text
         data_type: nominal
         nullable: true
-        allowed_values: ["agent", "lead", "system"]
+        # Phase 1 (Alembic 0038) canonicalized human-actor type to ``rep``;
+        # ``agent`` retained for legacy rows during the soak.
+        allowed_values: ["rep", "agent", "lead", "system"]
       actor_id:
         role: identifier
         type: text
         data_type: nominal
         semantic_type: id_hash
         nullable: true
+        synonyms: ["agent", "agent id", "salesperson", "rep", "caller"]
+      actor_label:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["agent", "agent id", "agent name", "rep", "rep name", "salesperson", "caller"]
+        description: "Sales rep who handled this call."
       attributes:
         role: dimension
         type: jsonb
@@ -612,8 +845,57 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
+    attribute_schemas:
+      call:
+        duration_seconds:
+          data_type: quantitative
+          semantic_type: duration
+          unit: seconds
+          description: "Call duration in seconds; mirrors the typed mirror column."
+        direction:
+          data_type: nominal
+          semantic_type: category
+          allowed_values: ["inbound", "outbound"]
+          description: "Inbound or outbound call direction."
+        status:
+          data_type: nominal
+          semantic_type: category
+          allowed_values: ["answered", "no_answer", "busy", "rejected", "voicemail"]
+          description: "Answered calls connected successfully; other statuses did not connect."
+        phone_number:
+          data_type: nominal
+          semantic_type: id_hash
+          pii: true
+        recording_url:
+          data_type: nominal
+          semantic_type: none
+        rep_email:
+          data_type: nominal
+          semantic_type: id_hash
+          synonyms: ["rep email", "sales rep email"]
+        has_recording:
+          data_type: boolean
+          semantic_type: category
+        call_notes:
+          data_type: nominal
+          semantic_type: none
+          pii: true
+        event_code:
+          data_type: nominal
+          semantic_type: category
+          description: "Raw LSQ ActivityEvent code; also surfaced structurally as source_event_code."
+        call_session_id:
+          data_type: nominal
+          semantic_type: id_hash
+        display_number:
+          data_type: nominal
+          semantic_type: id_hash
+          pii: true
   fact_lead_signal:
     pg_schema: analytics
+    expected_empty_when: "no signals derived for this app yet — empty until the first scheduled derive-signals Transform pass or an eval-run populate (fresh DB / freshly-onboarded app)"
+    layer: analytics_fact
+    grain: lead_signal
     orm: FactLeadSignal
     alias: ls
     columns:
@@ -649,7 +931,7 @@ catalog_tables:
         data_type: nominal
         semantic_type: id_hash
         nullable: true
-        synonyms: ["prospect id"]
+        synonyms: ["prospect", "prospect id", "lead", "contact"]
       source_activity_id:
         role: identifier
         type: text
@@ -707,6 +989,12 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
+    # No declared JSONB keys today: the LLM-extracted signal payload is
+    # carried structurally on signal_value / signal_value_numeric /
+    # confidence / supporting_quote columns. `_default` reserves the
+    # attribute_schemas surface for future signal_type-specific keys.
+    attribute_schemas:
+      _default: {}
 
 data_surfaces:
   - key: runs
@@ -772,3 +1060,23 @@ data_surfaces:
       signal_type: signal_type
     fields: [eval_run_id, thread_evaluation_id, lead_id, signal_type, signal_value, signal_at, confidence, supporting_quote]
     default_limit: 25
+
+# Every lead-grain fact joins back to dim_lead via lead_id. The boot
+# validator's cardinality audit confirms each relation is truly many-to-one
+# (every fact row has exactly one matching dim_lead row; orphans fail boot).
+relationships:
+  - left_table: fact_lead_activity
+    left_column: lead_id
+    right_table: dim_lead
+    right_column: lead_id
+    relationship_type: many_to_one
+  - left_table: fact_lead_signal
+    left_column: lead_id
+    right_table: dim_lead
+    right_column: lead_id
+    relationship_type: many_to_one
+  - left_table: fact_lead_stage_transition
+    left_column: lead_id
+    right_table: dim_lead
+    right_column: lead_id
+    relationship_type: many_to_one

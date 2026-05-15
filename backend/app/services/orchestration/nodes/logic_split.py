@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, model_validator
 
 from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
@@ -88,7 +88,12 @@ class _Config(BaseModel):
         return raw
 
     @model_validator(mode="after")
-    def _check_branch_ids_unique(self) -> "_Config":
+    def _check_branch_ids_unique(self, info: ValidationInfo) -> "_Config":
+        # Structural checks fire in both draft and publish — they catch
+        # bad ids, missing references, and mode/field conflicts. Only
+        # cross-field completeness ("field required when mode=by_field",
+        # "weights must be set in random mode") is deferred to publish.
+        is_draft = bool(info.context and info.context.get("mode") == "draft")
         ids = [b.id for b in self.branches]
         if len(set(ids)) != len(ids):
             raise ValueError(f"split branch ids must be unique: {ids}")
@@ -96,10 +101,10 @@ class _Config(BaseModel):
             raise ValueError(
                 f"default_branch_id={self.default_branch_id!r} not present in branches {ids}"
         )
-        if self.mode == "by_field" and not self.field:
-            raise ValueError("'field' required when mode='by_field'")
         if self.mode == "by_field":
-            if any(not (b.match or "").strip() for b in self.branches):
+            if not is_draft and not self.field:
+                raise ValueError("'field' required when mode='by_field'")
+            if not is_draft and any(not (b.match or "").strip() for b in self.branches):
                 raise ValueError("branches in by_field mode must declare non-empty 'match' values")
             if any(b.weight is not None for b in self.branches):
                 raise ValueError("branches in by_field mode must not carry random 'weight' values")
@@ -113,11 +118,12 @@ class _Config(BaseModel):
                 raise ValueError("'drop_unmatched' is not allowed when mode='random'")
             if any(b.match is not None for b in self.branches):
                 raise ValueError("branches in random mode must not carry by_field 'match' values")
-            if any((b.weight or 0) <= 0 for b in self.branches):
+            if not is_draft and any((b.weight or 0) <= 0 for b in self.branches):
                 raise ValueError("branches in random mode must have positive weight on every branch")
-            total = sum(b.weight or 0 for b in self.branches)
-            if total <= 0:
-                raise ValueError("branches must have positive weight in random mode")
+            if not is_draft:
+                total = sum(b.weight or 0 for b in self.branches)
+                if total <= 0:
+                    raise ValueError("branches must have positive weight in random mode")
         return self
 
 

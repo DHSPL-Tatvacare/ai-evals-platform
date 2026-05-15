@@ -1,5 +1,8 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { useWorkflowBuilderStore } from "@/features/orchestration/store/workflowBuilderStore";
+import {
+  selectHardParseIssues,
+  useWorkflowBuilderStore,
+} from "@/features/orchestration/store/workflowBuilderStore";
 
 describe("workflowBuilderStore", () => {
   beforeEach(() => {
@@ -285,5 +288,54 @@ describe("workflowBuilderStore", () => {
     const def = useWorkflowBuilderStore.getState().toDefinition();
     expect(def.nodes).toHaveLength(1);
     expect(def.edges).toHaveLength(0);
+  });
+});
+
+describe("selectHardParseIssues — save-gate input", () => {
+  beforeEach(() => {
+    useWorkflowBuilderStore.getState().reset();
+  });
+
+  it("returns an empty list when every node parses cleanly", () => {
+    const store = useWorkflowBuilderStore.getState();
+    store.addNode({
+      id: "n1",
+      type: "sink.complete",
+      position: { x: 0, y: 0 },
+      data: {},
+      config: {},
+    });
+    const issues = selectHardParseIssues(useWorkflowBuilderStore.getState().nodes);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags a node with a fabricated key as hard", () => {
+    const store = useWorkflowBuilderStore.getState();
+    store.addNode({
+      id: "n1",
+      type: "sink.complete",
+      position: { x: 0, y: 0 },
+      data: {},
+      config: { fabricated_key: 1 },
+    });
+    const issues = selectHardParseIssues(useWorkflowBuilderStore.getState().nodes);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].nodeId).toBe("n1");
+    expect(issues[0].hardIssues.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT flag partial drafts with only missing required fields", () => {
+    // crm.send_wati requires connection_id + template_slug — both unset
+    // here. Section 5 must keep this case saveable.
+    const store = useWorkflowBuilderStore.getState();
+    store.addNode({
+      id: "wati",
+      type: "crm.send_wati",
+      position: { x: 0, y: 0 },
+      data: {},
+      config: {},
+    });
+    const issues = selectHardParseIssues(useWorkflowBuilderStore.getState().nodes);
+    expect(issues).toEqual([]);
   });
 });

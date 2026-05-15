@@ -63,8 +63,8 @@ class InsideSalesEvalLinkageTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(snapshot["activityId"], "activity-1")
-        self.assertEqual(snapshot["prospectId"], "prospect-1")
-        self.assertEqual(snapshot["agentName"], "Agent Amy")
+        self.assertEqual(snapshot["leadId"], "prospect-1")
+        self.assertEqual(snapshot["repName"], "Agent Amy")
         self.assertEqual(snapshot["durationSeconds"], 180)
 
     def test_build_inside_sales_run_config_snapshot_embeds_selected_call_snapshots(self):
@@ -87,7 +87,7 @@ class InsideSalesEvalLinkageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(config["selected_call_count"], 1)
         self.assertEqual(config["selected_call_ids"], ["activity-1"])
-        self.assertEqual(config["selected_call_snapshots"][0]["prospectId"], "prospect-1")
+        self.assertEqual(config["selected_call_snapshots"][0]["leadId"], "prospect-1")
         self.assertEqual(config["resolved_evaluators"][0]["name"], "QA")
 
     async def test_fetch_latest_eval_overlays_maps_scores_and_counts(self):

@@ -56,12 +56,16 @@ def test_build_call_activity_fact_row_shape():
     assert row["activity_type"] == "call"
     assert row["activity_subtype"] == "outbound_call"
     assert row["source_event_code"] == 22
-    assert row["actor_type"] == "agent"
+    # Phase 1 renamed: actor_type='rep' (was 'agent'); 'agent_*' is now
+    # reserved for AI agents.
+    assert row["actor_type"] == "rep"
     assert row["actor_id"] == "AGENT-7"
+    assert row["actor_label"] == "Asha"
     assert row["sync_run_id"] == sync_run_id
-    # Attributes carry call-specific fields without the agent-id duplicate.
+    # Attributes carry call-specific fields without the rep-id duplicate.
     assert row["attributes"]["status"] == "completed"
     assert row["attributes"]["recording_url"] == "https://example/recording.mp3"
+    assert row["attributes"]["rep_email"] == "asha@tatva.com"
 
 
 def test_build_call_activity_skips_when_missing_ids():
@@ -101,7 +105,9 @@ def test_build_generic_activity_fact_row_shape():
     assert row["activity_type"] == "custom"
     assert row["activity_subtype"] == "Page Visit"
     assert row["source_event_code"] == 47
-    assert row["actor_type"] == "agent"
+    # Phase 1: human actor_type is 'rep'. AI-agent activities never come
+    # through this path.
+    assert row["actor_type"] == "rep"
     assert row["attributes"]["activity_event_name"] == "Page Visit"
 
 
@@ -166,7 +172,7 @@ def test_targeted_call_sync_filters_fact_side_effect_in_lockstep():
     activities_page = [raw_unrelated_a, raw_target, raw_unrelated_b]
 
     seen_call_rows: list[list[dict]] = []
-    seen_fact_rows: list[list[dict]] = []
+    seen_mirror_rows: list[list[dict]] = []
 
     class _StubDb:
         async def execute(self, _stmt):
@@ -176,9 +182,11 @@ def test_targeted_call_sync_filters_fact_side_effect_in_lockstep():
         seen_call_rows.append(list(rows))
         return len(rows)
 
-    async def _fake_upsert_lead_activity_rows(_db, *, rows):
-        seen_fact_rows.append(list(rows))
-        return len(rows)
+    async def _fake_project_and_upsert_facts(_db, *, mapping, mirror_rows, sync_run_id):
+        # Phase 7: legacy ``_upsert_lead_activity_rows`` path is gone.
+        # The mapper is the only fact-write path now; capture the rows
+        # it receives and assert the targeted-id contract on them.
+        seen_mirror_rows.append(list(mirror_rows))
 
     async def _fake_fetch_call_activities(**_kwargs):
         return {"activities": activities_page, "total": len(activities_page)}
@@ -203,13 +211,39 @@ def test_targeted_call_sync_filters_fact_side_effect_in_lockstep():
         id=uuid.uuid4(), details={}, records_scanned=0, records_upserted=0, records_failed=0
     )
 
-    from unittest.mock import patch
+    from unittest.mock import AsyncMock, patch
+    from app.services.analytics import mirror_to_fact_sync
+
+    # Pretend the mapping is enabled and lookups succeed; the test cares
+    # about which rows reach the mapper, not the mapping-state plumbing.
+    fake_mapping = SimpleNamespace(
+        enabled=AsyncMock(return_value=True),
+        key=("inside-sales", "analytics.crm_call_record", "fact_lead_activity", "call"),
+    )
+    fake_mapper = SimpleNamespace(
+        for_table=lambda *_a, **_k: fake_mapping
+    )
 
     with (
         patch.object(sync_service, "fetch_call_activities", _fake_fetch_call_activities),
         patch.object(sync_service, "upsert_call_source_rows", _fake_upsert_call_source_rows),
         patch.object(
-            sync_service, "_upsert_lead_activity_rows", _fake_upsert_lead_activity_rows
+            sync_service.MirrorToFactMapper, "default", classmethod(lambda cls: fake_mapper)
+        ),
+        patch.object(
+            mirror_to_fact_sync,
+            "project_and_upsert_facts",
+            _fake_project_and_upsert_facts,
+        ),
+        patch.object(
+            mirror_to_fact_sync,
+            "record_mapping_success",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            mirror_to_fact_sync,
+            "record_mirror_only_mode",
+            AsyncMock(return_value=None),
         ),
         patch(
             "app.services.job_worker.is_job_cancelled", _not_cancelled
@@ -235,9 +269,11 @@ def test_targeted_call_sync_filters_fact_side_effect_in_lockstep():
     assert seen_call_rows
     flat_calls = [r for batch in seen_call_rows for r in batch]
     assert [r["activity_id"] for r in flat_calls] == [targeted_id]
-    # Side-effect: only the targeted call's fact row is persisted.
-    flat_facts = [r for batch in seen_fact_rows for r in batch]
-    assert [r["source_activity_id"] for r in flat_facts] == [targeted_id]
+    # Side-effect: only the targeted call's mirror row is projected into
+    # the fact table via the mapper.
+    assert seen_mirror_rows, "mapper.project_and_upsert_facts was never invoked"
+    flat_facts = [r for batch in seen_mirror_rows for r in batch]
+    assert [r["activity_id"] for r in flat_facts] == [targeted_id]
 
 
 def test_targeted_activities_sync_persists_only_matching_activity():

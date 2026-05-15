@@ -364,6 +364,15 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
       } catch {
         return;
       }
+      // Section 7 — drag/drop allowlist. The drop handler trusts arbitrary
+      // `dataTransfer` JSON; without this check a crafted drop could inject
+      // a node type that the registry has never heard of. Validate against
+      // the live palette catalog; anything outside is silently dropped
+      // (this is a defense-in-depth check, not a UX surface).
+      const allowed = s.paletteCatalog.some(
+        (p) => p.nodeType === desc.nodeType,
+      );
+      if (!allowed) return;
       // Convert browser-coords (event.clientX/Y) to React Flow's transformed
       // pane-coords. Bare bounds-math drops nodes in the wrong place under
       // any pan/zoom; screenToFlowPosition is the React Flow primitive that

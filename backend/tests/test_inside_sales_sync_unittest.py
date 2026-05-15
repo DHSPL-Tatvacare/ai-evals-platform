@@ -274,14 +274,29 @@ class InsideSalesSourceRowBuilderTests(unittest.TestCase):
 
         self.assertIsNotNone(row)
         assert row is not None
-        self.assertEqual(row["prospect_stage"], "New Lead")
+        # Post-Phase-9: domain fields land in raw_payload (the canonical
+        # JSONB bag) plus ``_lift_*`` in-process plumbing for downstream
+        # dim_lead / stage-transition writers. The typed cols themselves
+        # are no longer on crm_lead_record.
+        raw_payload = row["raw_payload"]
+        self.assertEqual(raw_payload["prospect_stage"], "New Lead")
         # No shadow normalized columns.
         self.assertNotIn("prospect_stage_normalized", row)
         self.assertNotIn("city_normalized", row)
         self.assertNotIn("agent_name_normalized", row)
-        self.assertEqual(row["mql_score"], 5)
-        self.assertEqual(row["total_dials"], 5)
-        self.assertEqual(row["connect_rate"], 60.0)
+        # Phase 11A — mql_score / mql_signals are NOT written to the
+        # mirror any more. MQL is a derived signal; the signal derivation
+        # framework computes it from dim_lead via the `mql` rule
+        # definition (invariant 2 — nothing derived lives on the mirror).
+        self.assertNotIn("mql_score", raw_payload)
+        self.assertNotIn("mql_signals", raw_payload)
+        self.assertEqual(raw_payload["total_dials"], 5)
+        # In-process plumbing — read by dim_lead writer / stage appender,
+        # stripped from the DB INSERT by upsert_lead_source_rows.
+        self.assertEqual(row["_lift_prospect_stage"], "New Lead")
+        self.assertEqual(row["_lift_rep_name"], "Agent Amy")
+        # Derived metrics now live in raw_payload (typed cols dropped).
+        self.assertEqual(raw_payload["connect_rate"], 60.0)
 
     def test_build_call_source_row_created_on_fallback_prefers_call_start_timestamp(self):
         """When CreatedOn is missing, created_on should fall back to mx_Custom_2."""
@@ -595,7 +610,7 @@ class LeadsModifiedOnContractTests(unittest.IsolatedAsyncioTestCase):
         upsert_mock.assert_awaited_once()
         upserted_rows = upsert_mock.await_args.args[1]
         self.assertEqual(len(upserted_rows), 1)
-        self.assertEqual(upserted_rows[0]["prospect_id"], "prospect-old-modified")
+        self.assertEqual(upserted_rows[0]["lead_id"], "prospect-old-modified")
         self.assertEqual(result["records_upserted"], 1)
 
 
@@ -659,7 +674,7 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
             "app_id": "inside-sales",
             "source_system": "lsq",
             "activity_id": "activity-1",
-            "prospect_id": "prospect-1",
+            "lead_id": "prospect-1",
             "event_code": 21,
             "direction": "inbound",
             "duration_seconds": 0,
@@ -696,34 +711,52 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
                 captured.append(stmt)
                 return None
 
+        # Post-Phase-9: prospect_stage / rnr_count / answered_count /
+        # total_dials are no longer columns on crm_lead_record. They live
+        # inside raw_payload. The upsert row only carries the PII fields
+        # + raw_payload + sync metadata. The ``_lift_*`` keys are stripped
+        # by ``upsert_lead_source_rows`` before the INSERT.
         row = {
             "tenant_id": uuid.uuid4(),
             "app_id": "inside-sales",
             "source_system": "lsq",
-            "prospect_id": "prospect-1",
-            "prospect_stage": "New Lead",
-            "rnr_count": 0,
-            "answered_count": 0,
-            "total_dials": 0,
+            "lead_id": "prospect-1",
+            "first_name": "Lead",
+            "last_name": "One",
+            "phone": "9999999999",
+            "email": None,
+            "city": None,
             "created_on": datetime.now(timezone.utc),
             "source_record_hash": "abc",
             "first_synced_at": datetime.now(timezone.utc),
             "last_synced_at": datetime.now(timezone.utc),
             "last_seen_in_source_at": datetime.now(timezone.utc),
+            "last_synced_by_user_id": None,
+            "raw_payload": {
+                "prospect_stage": "New Lead",
+                "rnr_count": 0,
+                "answered_count": 0,
+                "total_dials": 0,
+            },
+            "_lift_prospect_stage": "New Lead",
+            "_lift_rep_name": None,
+            "_lift_source": None,
+            "_lift_source_campaign": None,
         }
         await sync_service.upsert_lead_source_rows(_Sess(), [row])  # type: ignore[arg-type]
         self.assertEqual(len(captured), 1)
+        # Don't literal_binds — JSONB raw_payload value can't be rendered
+        # as a SQL literal. The compiled text (with parameter placeholders)
+        # is enough to assert the conflict shape.
         compiled = str(
-            captured[0].compile(
-                dialect=_pg.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
+            captured[0].compile(dialect=_pg.dialect())
         )
         # Conflict target must be the column list — not a named constraint —
         # so the upsert survives constraint renames (revision 0009 renamed
-        # uq_source_lead_records_tenant_app_prospect → uq_crm_lead_record_*).
+        # uq_source_lead_records_tenant_app_prospect → uq_crm_lead_record_*,
+        # and revision 0038 renamed the column ``prospect_id`` to ``lead_id``).
         self.assertIn(
-            "ON CONFLICT (tenant_id, app_id, prospect_id)", compiled
+            "ON CONFLICT (tenant_id, app_id, lead_id)", compiled
         )
         self.assertNotIn("ON CONFLICT ON CONSTRAINT", compiled)
         self.assertIn("source_record_hash IS DISTINCT FROM", compiled)

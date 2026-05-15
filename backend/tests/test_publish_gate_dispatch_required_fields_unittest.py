@@ -244,7 +244,7 @@ async def test_publish_succeeds_when_required_fields_present(
                 {
                     "id": "src",
                     "type": "source.event_trigger",
-                    "config": {"event_name": "lead.created"},
+                    "config": {},
                 },
                 bolna_node,
                 {"id": "snk", "type": "sink.complete", "config": {}},

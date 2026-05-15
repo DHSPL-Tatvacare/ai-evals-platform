@@ -1,0 +1,13 @@
+{
+  "node_type": "logic.split",
+  "config": {
+    "mode": "by_field",
+    "field": "plan",
+    "branches": [
+      { "id": "gold", "label": "Gold", "match": "gold" },
+      { "id": "silver", "label": "Silver", "match": "silver" }
+    ],
+    "default_branch_id": "silver",
+    "drop_unmatched": false
+  }
+}

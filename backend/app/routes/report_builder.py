@@ -6,6 +6,7 @@ import contextlib
 import json as json_mod
 import logging
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -13,10 +14,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.auth import AuthContext, get_auth_context
+from app.auth.app_scope import ensure_registered_app_access
 from app.database import async_session, get_db
-from app.services.report_builder.chat_handler import (
-    run_chat_turn_streaming_background,
-)
+from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
+from app.services.orchestration_authoring.tenant_guard import assert_workflow_owned
+from app.services.sherlock_v3.turn_orchestrator import run_chat_turn as run_sherlock_v3_chat_turn
 from app.services.report_builder.schemas import (
     BuilderChatRequest,
     BuilderMessageOut,
@@ -24,6 +26,7 @@ from app.services.report_builder.schemas import (
     BuilderRuntimeEventsResponse,
     BuilderSessionSnapshotResponse,
     BuilderTurnCancelResponse,
+    OrchestrationBuilderPageContext,
 )
 from app.services.report_builder.runtime_store import (
     SherlockAgentSessionState,
@@ -46,20 +49,6 @@ _SHERLOCK_BACKGROUND_TASKS: set[asyncio.Task] = set()
 _SHERLOCK_BACKGROUND_TASKS_BY_TURN: dict[str, asyncio.Task] = {}
 _SHERLOCK_BACKGROUND_SUBSCRIBERS: dict[str, set[asyncio.Queue[dict[str, Any] | None]]] = {}
 _RESUME_POLL_TIMEOUT_SECONDS = 155.0
-
-
-def _to_chat_handler_session(runtime_session: SherlockAgentSessionState) -> dict:
-    return {
-        'chat_session_id': runtime_session.chat_session_id,
-        'app_id': runtime_session.app_id,
-        'tenant_id': runtime_session.tenant_id,
-        'user_id': runtime_session.user_id,
-        'provider': runtime_session.provider,
-        'model': runtime_session.model,
-        'messages': list(runtime_session.message_state),
-        'scratchpad': dict(runtime_session.scratchpad),
-        'last_response_id': runtime_session.last_response_id,
-    }
 
 
 def _session_not_found_response() -> JSONResponse:
@@ -196,9 +185,9 @@ async def _force_interrupt_turn(
         )
     seq = await append_runtime_event(
         runtime_session=runtime_session,
-        event_type='error',
+        event_type='error_emitted',
         payload={
-            'terminalStatus': 'interrupted',
+            'status': 'interrupted',
             'message': reason,
             'recoverable': False,
         },
@@ -249,19 +238,17 @@ def _build_terminal_stream_event(
 
     if terminal_status in {'error', 'interrupted'}:
         return {
-            'event': 'error',
+            'event': 'error_emitted',
             'data': {
-                'terminalStatus': terminal_status,
+                'seq': turn.last_event_seq,
+                'status': terminal_status,
+                'source': 'orchestrator',
                 'message': str(turn.last_error or metadata.get('lastError') or 'Sherlock turn failed'),
                 'content': content or None,
                 'recoverable': False,
             },
         }
 
-    # Phase 1: resume snapshots carry the same ``artifacts[]`` contract
-    # the live ``done`` event produces. Callers dispatch on ``pack_id`` +
-    # ``contract_id`` to render analytics charts, report-builder
-    # blueprints, and any future pack outputs uniformly.
     artifacts = metadata.get('artifacts')
     if not isinstance(artifacts, list):
         artifacts = []
@@ -275,13 +262,17 @@ def _build_terminal_stream_event(
         tool_calls = []
 
     return {
-        'event': 'done',
+        'event': 'turn_finished',
         'data': {
-            'terminalStatus': terminal_status,
+            'seq': turn.last_event_seq,
+            'turn_id': turn.id,
+            'status': terminal_status,
+            'final_message_id': turn.assistant_message_id,
             'content': content,
             'toolCalls': tool_calls,
             'artifacts': artifacts,
             'warnings': warnings,
+            'usage': metadata.get('usage') if isinstance(metadata.get('usage'), dict) else None,
         },
     }
 
@@ -342,8 +333,9 @@ async def _poll_turn_until_terminal(
                 db=session_db,
             )
             if fresh_runtime_session is None:
-                yield _format_sse('error', {
-                    'terminalStatus': 'error',
+                yield _format_sse('error_emitted', {
+                    'status': 'error',
+                    'source': 'orchestrator',
                     'message': 'session_not_found',
                     'recoverable': False,
                 })
@@ -355,8 +347,9 @@ async def _poll_turn_until_terminal(
                 db=session_db,
             )
             if polled_turn is None:
-                yield _format_sse('error', {
-                    'terminalStatus': 'error',
+                yield _format_sse('error_emitted', {
+                    'status': 'error',
+                    'source': 'orchestrator',
                     'message': 'turn_not_found',
                     'recoverable': False,
                 })
@@ -375,8 +368,9 @@ async def _poll_turn_until_terminal(
 
         await asyncio.sleep(0.5)
 
-    yield _format_sse('error', {
-        'terminalStatus': 'error',
+    yield _format_sse('error_emitted', {
+        'status': 'error',
+        'source': 'orchestrator',
         'message': 'Timed out waiting for Sherlock to finish the turn',
         'recoverable': False,
     })
@@ -521,6 +515,85 @@ async def cancel_builder_turn_v2(
     )
 
 
+async def _resolve_builder_snapshot(
+    *,
+    body: BuilderChatRequest,
+    auth: AuthContext,
+    db,
+) -> BuilderSnapshot | None:
+    """Validate `pageContext` and return a `BuilderSnapshot` or None.
+
+    Three-layer enforcement (Decision §R1):
+      1. App-access on body.app_id AND pageContext.app_id; mismatch → 400.
+      2. Workflow tenant ownership via `assert_workflow_owned` (404 not 403).
+      3. Edit-mode + permission gate. Failing those drops the context
+         (warn-log) so the chat continues read-only.
+
+    Log-redaction contract: `body.page_context.definition` is the entire
+    canvas snapshot and can be tens of KB. The current request middleware
+    (`app.middleware.correlation`, `app.middleware.gzip_safe`) does NOT
+    log request bodies, so today's logging surface is clean. If a future
+    middleware starts logging request bodies, it MUST redact
+    `pageContext.definition` per Decision §R Risks.
+    """
+    page = body.page_context
+    if page is None or not isinstance(page, OrchestrationBuilderPageContext):
+        return None
+
+    await ensure_registered_app_access(db, auth, body.app_id)
+    await ensure_registered_app_access(db, auth, page.app_id)
+    if body.app_id != page.app_id:
+        from fastapi import HTTPException
+        raise HTTPException(400, 'app_id mismatch between body and pageContext')
+
+    workflow = await assert_workflow_owned(
+        db, workflow_id=page.workflow_id, auth=auth,
+    )
+    if workflow.app_id != page.app_id:
+        from fastapi import HTTPException
+        raise HTTPException(400, 'pageContext app_id does not match workflow')
+
+    if page.view_mode != 'edit':
+        logger.info(
+            'sherlock_v3 builder context dropped: tenant=%s user=%s app=%s '
+            'workflow=%s — builder is in view mode',
+            auth.tenant_id, auth.user_id, page.app_id, page.workflow_id,
+        )
+        return None
+
+    # Owner role bypasses permission lists; use the canonical helper instead
+    # of a raw `in` check (Phase 2 hotfix — Owners were silently dropped
+    # because they hold no literal permissions).
+    from app.auth.permissions import missing_permissions
+    if missing_permissions(auth, 'orchestration:manage'):
+        logger.warning(
+            'sherlock_v3 builder context dropped: tenant=%s user=%s app=%s '
+            'workflow=%s — missing orchestration:manage',
+            auth.tenant_id, auth.user_id, page.app_id, page.workflow_id,
+        )
+        return None
+
+    if page.version_id is None:
+        snapshot_version_id = workflow.current_published_version_id
+    else:
+        try:
+            snapshot_version_id = uuid.UUID(page.version_id)
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(400, 'pageContext.version_id must be a UUID')
+
+    return BuilderSnapshot(
+        workflow_id=workflow.id,
+        version_id=snapshot_version_id,
+        workflow_type=page.workflow_type,
+        app_id=page.app_id,
+        definition=page.definition,
+        data_hash=page.data_hash,
+        selected_node_id=page.selected_node_id,
+        view_mode=page.view_mode,
+    )
+
+
 @v2_router.post('/chat/stream')
 async def chat_stream_v2(
     body: BuilderChatRequest,
@@ -535,12 +608,16 @@ async def chat_stream_v2(
             auth=auth,
             provider=body.provider or 'openai',
             model=body.model,
-            initial_user_message=body.message,
+            initial_user_message=body.message or '',
             db=db,
             strict_session_id=body.session_id is not None,
         )
     except SherlockSessionNotFoundError:
         return _session_not_found_response()
+
+    builder_snapshot = await _resolve_builder_snapshot(
+        body=body, auth=auth, db=db,
+    )
 
     turn = await get_or_create_turn(
         runtime_session=runtime_session,
@@ -551,7 +628,6 @@ async def chat_stream_v2(
         db=db,
     )
     await db.commit()
-    session = _to_chat_handler_session(runtime_session)
 
     async def _start_turn_event_generator():
         if _is_terminal_turn_status(turn.status):
@@ -584,19 +660,32 @@ async def chat_stream_v2(
 
         event_queue = _register_turn_subscriber(turn.id)
 
-        async def _on_event(event: dict[str, Any]) -> None:
-            await _publish_turn_event(turn.id, event)
+        async def _on_event(event: dict[str, Any]) -> int:
+            payload = dict(event.get('data') or {})
+            payload.pop('seq', None)
+            async with async_session() as event_db:
+                seq = await append_runtime_event(
+                    runtime_session=runtime_session,
+                    event_type=str(event['event']),
+                    payload=payload,
+                    db=event_db,
+                )
+                await event_db.commit()
+            await _publish_turn_event(turn.id, {
+                'event': event['event'],
+                'data': {**payload, 'seq': seq},
+            })
+            return seq
 
         async def _turn_task() -> None:
             try:
-                await run_chat_turn_streaming_background(
-                    session,
-                    body.message or '',
-                    provider=runtime_session.provider,
-                    model=runtime_session.model,
-                    auth=auth,
+                await run_sherlock_v3_chat_turn(
+                    runtime_session=runtime_session,
+                    user_message=body.message or '',
                     turn=turn,
                     on_event=_on_event,
+                    auth=auth,
+                    builder_context=builder_snapshot,
                 )
             finally:
                 await _close_turn_stream(turn.id)

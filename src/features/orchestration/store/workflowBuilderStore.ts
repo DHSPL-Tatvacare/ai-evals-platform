@@ -19,7 +19,11 @@ import {
   type PublishOutcome,
   type SaveOutcome,
 } from "@/features/orchestration/contracts/lifecycleState";
-import { parseNodeConfig } from "@/features/orchestration/contracts/nodeConfig";
+import {
+  isHardParseIssue,
+  parseNodeConfig,
+  type NodeConfigParseIssue,
+} from "@/features/orchestration/contracts/nodeConfig";
 import type { FieldErrorItem } from "@/features/orchestration/contracts/errorDecoder";
 import { logger } from "@/services/logger";
 
@@ -65,13 +69,15 @@ interface WorkflowBuilderState {
   /** Persisted React Flow viewport — null until first load/move-end. */
   viewport: ViewportState | null;
 
-  /** Hash of the most recently committed data snapshot (set on hydrate /
-   *  successful save). `null` only between `reset()` and the first hydrate. */
-  committedDataHash: string | null;
+  /** Hash of the most recently committed data snapshot (set on `reset()`,
+   *  hydrate, and successful save). Seeded with the empty-snapshot hash so a
+   *  fresh, never-hydrated store reads as `clean-draft`, not phantom-dirty. */
+  committedDataHash: string;
   /** Hash of the live data snapshot (recomputed by every content mutator). */
   currentDataHash: string;
-  /** Hash of the most recently committed layout (positions only). */
-  committedLayoutHash: string | null;
+  /** Hash of the most recently committed layout (positions only). Seeded with
+   *  the empty-layout hash on `reset()`, same as `committedDataHash`. */
+  committedLayoutHash: string;
   /** Hash of the live layout snapshot (recomputed by `updateNodePosition`,
    *  `addNode`, `removeNode`). Viewport is excluded entirely — pan/zoom is
    *  presentation-only state and must never affect either hash. */
@@ -139,6 +145,14 @@ interface WorkflowBuilderState {
 
   addEdge(edge: WorkflowDefinitionEdge): void;
   removeEdge(edgeId: string): void;
+
+  /** Phase 2 (sherlock-builder) — batch mutations used by the canvas-patch
+   *  applier. Hash recomputation runs ONCE at the end of the batch (one
+   *  React commit, one `currentDataHash` change) instead of N. Each node
+   *  still passes through `annotateNodeWithParse` so per-node `_parseIssues`
+   *  surface in the banner exactly as if the user had added them one by one. */
+  addNodes(nodes: readonly WorkflowDefinitionNode[]): void;
+  addEdges(edges: readonly WorkflowDefinitionEdge[]): void;
 
   setSelectedNode(nodeId: string | null): void;
   /** Clear the current selection. Equivalent to setSelectedNode(null) but
@@ -212,9 +226,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     selectedNodeId: null,
     viewport: null,
 
-    committedDataHash: null,
+    committedDataHash: EMPTY_DATA_HASH,
     currentDataHash: EMPTY_DATA_HASH,
-    committedLayoutHash: null,
+    committedLayoutHash: EMPTY_LAYOUT_HASH,
     currentLayoutHash: EMPTY_LAYOUT_HASH,
 
     inFlight: "idle",
@@ -238,9 +252,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         edges: [],
         selectedNodeId: null,
         viewport: null,
-        committedDataHash: null,
+        committedDataHash: EMPTY_DATA_HASH,
         currentDataHash: EMPTY_DATA_HASH,
-        committedLayoutHash: null,
+        committedLayoutHash: EMPTY_LAYOUT_HASH,
         currentLayoutHash: EMPTY_LAYOUT_HASH,
         inFlight: "idle",
         lastSaveOutcome: null,
@@ -401,6 +415,28 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     addEdge: (edge) =>
       set((s) => {
         const edges = [...s.edges, edge];
+        return {
+          edges,
+          currentDataHash: dataSnapshotHash(s.nodes, edges),
+        };
+      }),
+
+    addNodes: (newNodes) =>
+      set((s) => {
+        if (newNodes.length === 0) return {};
+        const annotated = newNodes.map(annotateNodeWithParse);
+        const nodes = [...s.nodes, ...annotated];
+        return {
+          nodes,
+          currentDataHash: dataSnapshotHash(nodes, s.edges),
+          currentLayoutHash: layoutSnapshotHash(nodes),
+        };
+      }),
+
+    addEdges: (newEdges) =>
+      set((s) => {
+        if (newEdges.length === 0) return {};
+        const edges = [...s.edges, ...newEdges];
         return {
           edges,
           currentDataHash: dataSnapshotHash(s.nodes, edges),
@@ -583,4 +619,48 @@ export function useLifecycleState(): LifecycleState {
     })),
   );
   return useMemo(() => deriveLifecycleState(inputs), [inputs]);
+}
+
+/** Section 5 — hard parse-issue selector for the save gate.
+ *
+ *  Re-runs ``parseNodeConfig(node.type, node.config, { mode: 'draft' })``
+ *  over every live node — exactly as the plan specifies — rather than
+ *  trusting the store's cached ``_parseIssues`` annotation. Cached
+ *  annotations are kept in sync on every mutator, so in steady state both
+ *  paths agree; re-running adds defense-in-depth against any future path
+ *  that mutates ``nodes`` without going through ``annotateNodeWithParse``,
+ *  and matches the literal plan wording.
+ *
+ *  Soft issues (missing required fields under draft tolerance) are
+ *  filtered inside ``parseNodeConfig`` itself; anything that survives is
+ *  hard. The hook is the single decision point for the Save / Publish
+ *  buttons: any non-empty result blocks the click. */
+export interface HardParseIssueGroup {
+  nodeId: string;
+  nodeType: string;
+  hardIssues: NodeConfigParseIssue[];
+}
+
+export function selectHardParseIssues(
+  nodes: readonly WorkflowDefinitionNode[],
+): HardParseIssueGroup[] {
+  const out: HardParseIssueGroup[] = [];
+  for (const n of nodes) {
+    const result = parseNodeConfig(n.type, n.config, { mode: "draft" });
+    if (result.ok) continue;
+    // Every surviving issue is hard after the draft filter (see
+    // ``isHardParseIssue`` rationale in nodeConfig.ts); the named call
+    // is kept here so the relationship between the gate and the parse
+    // layer is greppable from this file.
+    const hardIssues = result.issues.filter(isHardParseIssue);
+    if (hardIssues.length > 0) {
+      out.push({ nodeId: n.id, nodeType: n.type, hardIssues });
+    }
+  }
+  return out;
+}
+
+export function useHardParseIssues(): HardParseIssueGroup[] {
+  const nodes = useWorkflowBuilderStore((s) => s.nodes);
+  return useMemo(() => selectHardParseIssues(nodes), [nodes]);
 }

@@ -1,25 +1,18 @@
-"""Phase 14 / Phase D — strict node config behavior under the env flag.
+"""Strict node config behaviour — unconditional `extra='forbid'`.
 
-Confirms three things the rollout plan depends on:
-  1. The ``strict_node_config_dict()`` helper returns the right
-     ``ConfigDict`` for each value of ``ORCHESTRATION_BUILDER_V2``.
-  2. Tiny ad-hoc models built from that helper reject unknown keys when
-     the flag is on. (We can't re-import the real node modules per test
-     because reloading them re-registers them with the global node
-     registry — see ``test_strict_off`` regression note.)
-  3. The legacy ``model_validator(mode='before')`` coercions on the real
-     node configs still fire before strict-mode kicks in (regression
-     guard against accidentally moving strictness ahead of legacy lift).
-  4. ``contract_audit.audit_definition`` produces one finding per
-     offending node and handles unknown node types without crashing.
+The flag-gated rollout was removed. `strict_node_config_dict()` always
+returns `ConfigDict(extra='forbid')`. These tests pin that contract:
 
-The audit script is the gate before flipping ``ORCHESTRATION_BUILDER_V2``
-on a real environment, so its smoke coverage matters.
+  1. The helper returns the strict shape, no env reads, no toggles.
+  2. Models built from the helper reject unknown keys at validation time.
+  3. Legacy `model_validator(mode='before')` coercions on the real node
+     configs still fire before strict-mode kicks in (regression guard
+     against accidentally moving strictness ahead of legacy lift).
+  4. `contract_audit.audit_definition` produces one finding per offending
+     node and handles unknown node types without crashing.
 """
 from __future__ import annotations
 
-import importlib
-import os
 from typing import Optional
 
 import pytest
@@ -29,67 +22,32 @@ from app.services.orchestration import _config_strictness
 from app.services.orchestration import contract_audit
 
 
-def _reload_helper(flag_value: str | None) -> None:
-    if flag_value is None:
-        os.environ.pop("ORCHESTRATION_BUILDER_V2", None)
-    else:
-        os.environ["ORCHESTRATION_BUILDER_V2"] = flag_value
-    importlib.reload(_config_strictness)
-
-
-def test_helper_off_returns_empty_configdict():
-    _reload_helper(None)
-    assert _config_strictness.strict_node_config_dict() == {}
-
-
-def test_helper_on_returns_extra_forbid():
-    _reload_helper("true")
+def test_helper_always_returns_extra_forbid():
     assert _config_strictness.strict_node_config_dict() == {"extra": "forbid"}
-    _reload_helper(None)  # restore default
 
 
-def test_helper_off_for_unrelated_values():
-    _reload_helper("0")
-    assert _config_strictness.strict_node_config_dict() == {}
-    _reload_helper("false")
-    assert _config_strictness.strict_node_config_dict() == {}
-
-
-def test_strict_dict_off_built_model_ignores_extra_keys():
-    """Sanity check the helper's contract: a model that consumes
-    ``strict_node_config_dict()`` ignores unknown keys when the flag
-    is off (Pydantic's default behavior)."""
-    _reload_helper(None)
+def test_strict_dict_built_model_rejects_extra_keys():
+    """The helper's contract: any model that consumes
+    `strict_node_config_dict()` rejects unknown keys, period."""
     cfg_dict = _config_strictness.strict_node_config_dict()
 
     class _Sink(BaseModel):
         model_config = cfg_dict
         reason: Optional[str] = None
 
-    instance = _Sink(reason="ok", surprise="ignored")
+    instance = _Sink(reason="ok")
     assert instance.reason == "ok"
-
-
-def test_strict_dict_on_built_model_rejects_extra_keys():
-    """Same shape, flag on → extras raise."""
-    _reload_helper("true")
-    cfg_dict = _config_strictness.strict_node_config_dict()
-
-    class _Sink(BaseModel):
-        model_config = cfg_dict
-        reason: Optional[str] = None
 
     with pytest.raises(ValidationError) as exc:
         _Sink(reason="ok", surprise="oops")
     err = str(exc.value).lower()
     assert "extra" in err or "surprise" in err
-    _reload_helper(None)
 
 
 def test_legacy_consent_gate_dialect_still_loads():
     """Regression guard: legacy ``require_explicit_optin`` shape must keep
-    loading on the real config, even with the strict-extras posture in
-    place — its ``model_validator(mode='before')`` runs first."""
+    loading on the real config — its ``model_validator(mode='before')``
+    runs first, before strict-extras kicks in."""
     from app.services.orchestration.nodes import filter_consent_gate
 
     cfg = filter_consent_gate._Config(

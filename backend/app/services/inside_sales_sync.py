@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,13 +28,14 @@ from app.models.source_records import (
 )
 from app.services.lsq_client import (
     compute_lead_metrics,
-    compute_mql_score,
     fetch_call_activities,
     fetch_lead_by_id,
     fetch_leads,
     normalize_activity,
     normalize_lead,
 )
+from app.services.analytics.mirror_to_fact_mapper import MirrorToFactMapper
+from app.services.analytics import mirror_to_fact_sync
 
 SyncMode = Literal["full", "incremental", "date_range", "targeted"]
 SourceFamily = Literal["calls", "leads", "activities"]
@@ -365,10 +366,13 @@ def build_call_source_row(
         "app_id": app_id,
         "source_system": source_system,
         "activity_id": record.get("activityId", ""),
-        "prospect_id": record.get("prospectId", ""),
-        "agent_id": record.get("agentId") or None,
-        "agent_name": record.get("agentName") or None,
-        "agent_email": record.get("agentEmail") or None,
+        # ``normalize_activity`` still emits LSQ-native key names (LSQ's
+        # payload uses ``Prospect_id`` / ``AgentId`` / etc); the column
+        # names here are post-Phase-1 canonical (``lead_id`` / ``rep_*``).
+        "lead_id": record.get("prospectId", ""),
+        "rep_id": record.get("agentId") or None,
+        "rep_name": record.get("agentName") or None,
+        "rep_email": record.get("agentEmail") or None,
         "event_code": int(record.get("eventCode") or 0),
         "direction": record.get("direction") or "",
         "status": record.get("status") or None,
@@ -419,12 +423,11 @@ def build_lead_source_row(
             extra={
                 "tenantId": str(tenant_id),
                 "appId": app_id,
-                "prospectId": record.get("prospectId"),
+                "leadId": record.get("prospectId"),
             },
         )
         return None
 
-    mql_score, mql_signals = compute_mql_score(raw_lead)
     metrics = compute_lead_metrics(
         created_on=record["createdOn"],
         last_activity_on=record["lastActivityOn"],
@@ -436,28 +439,37 @@ def build_lead_source_row(
     if frt_seconds is not None and frt_seconds < 60:
         frt_seconds = None
 
-    return {
-        "tenant_id": tenant_id,
-        "app_id": app_id,
-        "source_system": source_system,
-        "prospect_id": record["prospectId"],
-        "first_name": record["firstName"] or None,
-        "last_name": record["lastName"] or None,
-        "phone": record["phone"] or None,
-        "email": record["email"] or None,
-        "prospect_stage": record["prospectStage"],
-        "plan_name": (record.get("planName") or "").strip() or None,
-        "city": record["city"] or None,
-        "age_group": record["ageGroup"] or None,
-        "condition": record["condition"] or None,
-        "hba1c_band": record["hba1cBand"] or None,
-        "intent_to_pay": record["intentToPay"] or None,
-        "agent_name": record["agentName"] or None,
-        "source": record["source"] or None,
-        "source_campaign": record["sourceCampaign"] or None,
-        "created_on": created_on_value,
-        "first_activity_on": _parse_lsq_datetime(record["firstActivityOn"]),
-        "last_activity_on": _parse_lsq_datetime(record["lastActivityOn"]),
+    first_activity_on = _parse_lsq_datetime(record["firstActivityOn"])
+    last_activity_on = _parse_lsq_datetime(record["lastActivityOn"])
+    prospect_stage = record["prospectStage"]
+    plan_name = (record.get("planName") or "").strip() or None
+    age_group = record["ageGroup"] or None
+    condition = record["condition"] or None
+    hba1c_band = record["hba1cBand"] or None
+    intent_to_pay = record["intentToPay"] or None
+    rep_name = record["agentName"] or None
+    source = record["source"] or None
+    source_campaign = record["sourceCampaign"] or None
+
+    # Post-Phase-9: typed domain cols are gone from crm_lead_record. The
+    # mirror's raw_payload carries the canonical lowercase keys, merged
+    # from LSQ's original blob plus locally-computed values (mql_*,
+    # metrics). The in-process row dict still carries the lifted values
+    # under their canonical names so ``_upsert_dim_lead_rows`` (also
+    # called per row) can read them without re-parsing raw_payload.
+    raw_payload = dict(raw_lead)
+    raw_payload.update({
+        "prospect_stage": prospect_stage,
+        "plan_name": plan_name,
+        "age_group": age_group,
+        "condition": condition,
+        "hba1c_band": hba1c_band,
+        "intent_to_pay": intent_to_pay,
+        "rep_name": rep_name,
+        "source": source,
+        "source_campaign": source_campaign,
+        "first_activity_on": first_activity_on.isoformat() if first_activity_on else None,
+        "last_activity_on": last_activity_on.isoformat() if last_activity_on else None,
         "rnr_count": record["rnrCount"],
         "answered_count": record["answeredCount"],
         "total_dials": metrics["total_dials"],
@@ -465,14 +477,37 @@ def build_lead_source_row(
         "frt_seconds": frt_seconds,
         "lead_age_days": metrics["lead_age_days"],
         "days_since_last_contact": metrics["days_since_last_contact"],
-        "mql_score": mql_score,
-        "mql_signals": mql_signals,
+        # mql_score / mql_signals are no longer written to the mirror —
+        # MQL is a derived signal (Phase 11A). The signal derivation
+        # framework computes it from dim_lead via the `mql` rule
+        # definition; nothing derived lives on the mirror (invariant 2).
+    })
+
+    return {
+        "tenant_id": tenant_id,
+        "app_id": app_id,
+        "source_system": source_system,
+        "lead_id": record["prospectId"],
+        "first_name": record["firstName"] or None,
+        "last_name": record["lastName"] or None,
+        "phone": record["phone"] or None,
+        "email": record["email"] or None,
+        "city": record["city"] or None,
+        "created_on": created_on_value,
         "source_record_hash": _stable_payload_hash(raw_lead),
         "first_synced_at": synced_at,
         "last_synced_at": synced_at,
         "last_seen_in_source_at": synced_at,
         "last_synced_by_user_id": user_id,
-        "raw_payload": raw_lead,
+        "raw_payload": raw_payload,
+        # In-process plumbing kept under canonical lowercase names so the
+        # dim_lead writer / stage-transition appender can read them. NOT
+        # part of the DB INSERT after Alembic 0043 (filtered out at the
+        # upsert layer).
+        "_lift_prospect_stage": prospect_stage,
+        "_lift_rep_name": rep_name,
+        "_lift_source": source,
+        "_lift_source_campaign": source_campaign,
     }
 
 
@@ -482,10 +517,10 @@ async def upsert_call_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
 
     stmt = pg_insert(CrmCallRecord).values(rows)
     update_columns = {
-        "prospect_id": stmt.excluded.prospect_id,
-        "agent_id": stmt.excluded.agent_id,
-        "agent_name": stmt.excluded.agent_name,
-        "agent_email": stmt.excluded.agent_email,
+        "lead_id": stmt.excluded.lead_id,
+        "rep_id": stmt.excluded.rep_id,
+        "rep_name": stmt.excluded.rep_name,
+        "rep_email": stmt.excluded.rep_email,
         "event_code": stmt.excluded.event_code,
         "direction": stmt.excluded.direction,
         "status": stmt.excluded.status,
@@ -525,34 +560,24 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
     if not rows:
         return 0
 
-    stmt = pg_insert(CrmLeadRecord).values(rows)
+    # Strip in-process plumbing fields (``_lift_*``) before they hit the
+    # INSERT — they exist purely to thread lifted values into the dim_lead
+    # writer + stage-transition appender. Post-Phase-9 the CrmLeadRecord
+    # table no longer carries the typed domain columns; only the PII +
+    # raw_payload + sync metadata are valid INSERT keys.
+    cleaned_rows = [
+        {k: v for k, v in row.items() if not k.startswith("_lift_")}
+        for row in rows
+    ]
+
+    stmt = pg_insert(CrmLeadRecord).values(cleaned_rows)
     update_columns = {
         "first_name": stmt.excluded.first_name,
         "last_name": stmt.excluded.last_name,
         "phone": stmt.excluded.phone,
         "email": stmt.excluded.email,
-        "prospect_stage": stmt.excluded.prospect_stage,
-        "plan_name": stmt.excluded.plan_name,
         "city": stmt.excluded.city,
-        "age_group": stmt.excluded.age_group,
-        "condition": stmt.excluded.condition,
-        "hba1c_band": stmt.excluded.hba1c_band,
-        "intent_to_pay": stmt.excluded.intent_to_pay,
-        "agent_name": stmt.excluded.agent_name,
-        "source": stmt.excluded.source,
-        "source_campaign": stmt.excluded.source_campaign,
         "created_on": stmt.excluded.created_on,
-        "first_activity_on": stmt.excluded.first_activity_on,
-        "last_activity_on": stmt.excluded.last_activity_on,
-        "rnr_count": stmt.excluded.rnr_count,
-        "answered_count": stmt.excluded.answered_count,
-        "total_dials": stmt.excluded.total_dials,
-        "connect_rate": stmt.excluded.connect_rate,
-        "frt_seconds": stmt.excluded.frt_seconds,
-        "lead_age_days": stmt.excluded.lead_age_days,
-        "days_since_last_contact": stmt.excluded.days_since_last_contact,
-        "mql_score": stmt.excluded.mql_score,
-        "mql_signals": stmt.excluded.mql_signals,
         "source_record_hash": stmt.excluded.source_record_hash,
         "last_synced_at": stmt.excluded.last_synced_at,
         "last_seen_in_source_at": stmt.excluded.last_seen_in_source_at,
@@ -565,7 +590,7 @@ async def upsert_lead_source_rows(db: AsyncSession, rows: list[dict[str, Any]]) 
             index_elements=[
                 CrmLeadRecord.tenant_id,
                 CrmLeadRecord.app_id,
-                CrmLeadRecord.prospect_id,
+                CrmLeadRecord.lead_id,
             ],
             set_=update_columns,
             where=CrmLeadRecord.source_record_hash.is_distinct_from(
@@ -619,22 +644,59 @@ async def _upsert_dim_lead_rows(
         return
     payload = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
-        if not prospect_id:
+        lead_id = row.get("lead_id") or ""
+        if not lead_id:
             continue
+        # Post-Phase-9 plumbing fields. Fall back to ``raw_payload`` so
+        # the writer still works for callers that don't pass the
+        # ``_lift_*`` keys (legacy code paths / tests).
+        rp = row.get("raw_payload") or {}
+        prospect_stage = (
+            row.get("_lift_prospect_stage")
+            or rp.get("prospect_stage")
+        )
+        rep_name = row.get("_lift_rep_name") or rp.get("rep_name")
+        source = row.get("_lift_source") or rp.get("source")
+        source_campaign = (
+            row.get("_lift_source_campaign") or rp.get("source_campaign")
+        )
+        # Phase 11A — attributes_at_first_seen is the normalized,
+        # CRM-agnostic lead-profile snapshot the `rule` signal definitions
+        # score on (invariant 21). The MQL-input keys land here under
+        # canonical names so the `mql` rule reads dim_lead, never the mirror.
+        attrs_first_seen: dict[str, Any] = {}
+        if source:
+            attrs_first_seen["source"] = source
+        if source_campaign:
+            attrs_first_seen["source_campaign"] = source_campaign
+        for key in ("age_group", "condition", "hba1c_band", "intent_to_pay"):
+            value = rp.get(key)
+            if value:
+                attrs_first_seen[key] = value
+
         payload.append(
             {
                 "id": uuid.uuid4(),
                 "tenant_id": row["tenant_id"],
                 "app_id": row["app_id"],
-                "lead_id": prospect_id,
+                "lead_id": lead_id,
                 "source": row.get("source_system") or LSQ_SOURCE_SYSTEM,
-                "source_ref": prospect_id,
+                "source_ref": lead_id,
                 "lsq_created_on": row.get("created_on"),
                 "first_seen_at": cycle_start,
-                "latest_stage_observed": (row.get("prospect_stage") or None),
+                "latest_stage_observed": prospect_stage or None,
                 "latest_stage_observed_at": cycle_start,
-                "attributes_at_first_seen": {},
+                "assigned_rep_label": rep_name or None,
+                # Phase 11A — lead-identity columns. dim_lead is the
+                # normalized serving surface the CRM workspace UI reads;
+                # these are pii: true in the manifest and masked by role.
+                # The mirror keeps its own copies for source fidelity.
+                "first_name": row.get("first_name"),
+                "last_name": row.get("last_name"),
+                "phone": row.get("phone"),
+                "email": row.get("email"),
+                "city": row.get("city"),
+                "attributes_at_first_seen": attrs_first_seen,
             }
         )
     if not payload:
@@ -646,6 +708,16 @@ async def _upsert_dim_lead_rows(
             set_={
                 "latest_stage_observed": stmt.excluded.latest_stage_observed,
                 "latest_stage_observed_at": stmt.excluded.latest_stage_observed_at,
+                "assigned_rep_label": stmt.excluded.assigned_rep_label,
+                # Lead-identity columns are mutable current state — refresh
+                # them on every resync, same as the stage / rep label.
+                "first_name": stmt.excluded.first_name,
+                "last_name": stmt.excluded.last_name,
+                "phone": stmt.excluded.phone,
+                "email": stmt.excluded.email,
+                "city": stmt.excluded.city,
+                # attributes_at_first_seen is insert-only by design;
+                # don't overwrite the first-observation snapshot on resync.
                 "updated_at": func.now(),
             },
         )
@@ -676,10 +748,10 @@ async def _append_lead_stage_transitions(
     # so the writeback insert can be a single bulk statement.
     keys: list[tuple[Any, str, str]] = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
-        if not prospect_id:
+        lead_id = row.get("lead_id") or ""
+        if not lead_id:
             continue
-        keys.append((row["tenant_id"], row["app_id"], prospect_id))
+        keys.append((row["tenant_id"], row["app_id"], lead_id))
     if not keys:
         return 0
 
@@ -716,11 +788,20 @@ async def _append_lead_stage_transitions(
 
     payload: list[dict[str, Any]] = []
     for row in rows:
-        prospect_id = row.get("prospect_id") or ""
-        current_stage = (row.get("prospect_stage") or "").strip() or None
-        if not prospect_id:
+        lead_id = row.get("lead_id") or ""
+        # Post-Phase-9: prospect_stage no longer a top-level row key
+        # because it's gone from the DB schema. Read from the in-process
+        # ``_lift_*`` plumbing field with raw_payload fallback so legacy
+        # callers (tests / replay tooling) still work.
+        raw_stage = (
+            row.get("_lift_prospect_stage")
+            or (row.get("raw_payload") or {}).get("prospect_stage")
+            or row.get("prospect_stage")  # legacy in-process row dict
+        )
+        current_stage = (raw_stage or "").strip() or None
+        if not lead_id:
             continue
-        key = (row["tenant_id"], row["app_id"], prospect_id)
+        key = (row["tenant_id"], row["app_id"], lead_id)
         prior = seen.get(key)
         if prior is None:
             # First observation only emits a row when the current stage
@@ -738,7 +819,7 @@ async def _append_lead_stage_transitions(
                 "id": uuid.uuid4(),
                 "tenant_id": row["tenant_id"],
                 "app_id": row["app_id"],
-                "lead_id": prospect_id,
+                "lead_id": lead_id,
                 "from_stage": from_stage,
                 "to_stage": current_stage,
                 "detected_at": cycle_start,
@@ -749,7 +830,27 @@ async def _append_lead_stage_transitions(
         )
     if not payload:
         return 0
-    await db.execute(pg_insert(FactLeadStageTransition).values(payload))
+    # ON CONFLICT DO NOTHING against the partial unique index added in
+    # Alembic 0041 (Phase 6). The read-before-write loop above is the
+    # primary idempotency mechanism; this clause is defense in depth for
+    # the narrow race where two cycles for the same (tenant, app) start
+    # with sub-microsecond-identical ``cycle_start`` values, or where a
+    # worker retries after a partial-fail commit. Without it, the second
+    # writer would raise ``IntegrityError`` on the unique key; with it,
+    # the duplicate is silently skipped and the steady-state sync stays
+    # green. ``index_where`` matches the partial predicate so Postgres
+    # picks the right index.
+    stmt = pg_insert(FactLeadStageTransition).values(payload)
+    stmt = stmt.on_conflict_do_nothing(
+        index_elements=[
+            FactLeadStageTransition.tenant_id,
+            FactLeadStageTransition.app_id,
+            FactLeadStageTransition.lead_id,
+            FactLeadStageTransition.detected_at,
+        ],
+        index_where=text("sync_run_id IS NOT NULL"),
+    )
+    await db.execute(stmt)
     return len(payload)
 
 
@@ -768,12 +869,16 @@ async def _upsert_lead_activity_rows(
     if not rows:
         return 0
     stmt = pg_insert(FactLeadActivity).values(rows)
+    # Phase 1 widened the conflict key to include ``activity_type`` so
+    # multiple CRM activity types can reuse the same fact table without
+    # colliding on ``source_activity_id`` namespaces.
     await db.execute(
         stmt.on_conflict_do_nothing(
             index_elements=[
                 FactLeadActivity.tenant_id,
                 FactLeadActivity.app_id,
                 FactLeadActivity.source_activity_id,
+                FactLeadActivity.activity_type,
             ]
         )
     )
@@ -795,8 +900,8 @@ def build_call_activity_fact_row(
     """
     record = normalize_activity(raw_activity)
     activity_id = record.get("activityId") or ""
-    prospect_id = record.get("prospectId") or ""
-    if not activity_id or not prospect_id:
+    lead_id = record.get("prospectId") or ""
+    if not activity_id or not lead_id:
         return None
     event_code_raw = record.get("eventCode")
     event_code = int(event_code_raw) if event_code_raw not in (None, "") else None
@@ -807,25 +912,32 @@ def build_call_activity_fact_row(
     if occurred_at is None:
         return None
     actor_id = record.get("agentId") or None
+    actor_label = record.get("agentName") or None
     return {
         "id": uuid.uuid4(),
         "tenant_id": tenant_id,
         "app_id": app_id,
-        "lead_id": prospect_id,
+        "lead_id": lead_id,
         "source_activity_id": activity_id,
         "activity_type": "call",
         "activity_subtype": _activity_subtype_for_event_code(event_code),
         "source_event_code": event_code,
         "occurred_at": occurred_at,
-        "actor_type": "agent" if actor_id else None,
+        # ``actor_type='rep'`` per plan §1.1.13 — ``rep`` for human reps,
+        # ``agent`` is reserved for AI agents elsewhere in the platform.
+        "actor_type": "rep" if (actor_id or actor_label) else None,
         "actor_id": actor_id,
+        "actor_label": actor_label,
         "attributes": {
             "direction": record.get("direction") or None,
             "status": record.get("status") or None,
             "duration_seconds": int(record.get("durationSeconds") or 0),
             "phone_number": record.get("phoneNumber") or None,
-            "agent_name": record.get("agentName") or None,
-            "agent_email": record.get("agentEmail") or None,
+            # Per the Phase 7 manifest contract: ``rep_email`` lives in
+            # attributes (not universal across activity types). The
+            # human-readable name is captured structurally on
+            # ``actor_label`` above and not duplicated here.
+            "rep_email": record.get("agentEmail") or None,
             "recording_url": record.get("recordingUrl") or None,
         },
         "sync_run_id": sync_run_id,
@@ -852,8 +964,8 @@ def build_generic_activity_fact_row(
         or raw_activity.get("Id")
         or ""
     )
-    prospect_id = raw_activity.get("RelatedProspectId") or ""
-    if not activity_id or not prospect_id:
+    lead_id = raw_activity.get("RelatedProspectId") or ""
+    if not activity_id or not lead_id:
         return None
     event_code_raw = raw_activity.get("ActivityEvent")
     event_code = int(event_code_raw) if event_code_raw not in (None, "") else None
@@ -870,14 +982,17 @@ def build_generic_activity_fact_row(
         "id": uuid.uuid4(),
         "tenant_id": tenant_id,
         "app_id": app_id,
-        "lead_id": prospect_id,
+        "lead_id": lead_id,
         "source_activity_id": activity_id,
         "activity_type": "custom",
         "activity_subtype": activity_event_name,
         "source_event_code": event_code,
         "occurred_at": occurred_at,
-        "actor_type": "agent" if actor_id else None,
+        # Generic non-call activities still flag the actor as a human rep;
+        # AI-agent activities never come through this path.
+        "actor_type": "rep" if actor_id else None,
         "actor_id": actor_id,
+        "actor_label": None,
         "attributes": {
             "activity_event_name": activity_event_name,
             "raw_status": raw_activity.get("Status") or None,
@@ -1051,23 +1166,62 @@ async def _sync_calls_family(
             rows.append(row)
             accepted_activities.append(raw_activity)
 
+        # Plan §1.1.5/§5.1: lock-order discipline. Sort by (app_id, activity_id)
+        # before mirror/fact upserts so concurrent retries acquire row locks in
+        # the same order and don't deadlock.
+        rows.sort(key=lambda r: (r["app_id"], r["activity_id"]))
+        accepted_activities.sort(
+            key=lambda a: (
+                request.app_id,
+                (normalize_activity(a).get("activityId") or ""),
+            )
+        )
+
         counters.upserted += await upsert_call_source_rows(db, rows)
 
-        # Side-effect (Roadmap 01 §8.2): mirror the SAME accepted call
-        # activities into ``analytics.fact_lead_activity`` with
-        # ``activity_type='call'``. Same transaction; partial failure
-        # rolls both writes back.
-        activity_rows: list[dict[str, Any]] = []
-        for raw_activity in accepted_activities:
-            built = build_call_activity_fact_row(
-                raw_activity,
-                tenant_id=tenant_id,
-                app_id=request.app_id,
-                sync_run_id=sync_run.id,
+        # Project the SAME accepted call activities into
+        # ``analytics.fact_lead_activity`` (``activity_type='call'``)
+        # inside the same DB transaction via the declarative
+        # ``MirrorToFactMapper`` (`crm_call_record__call.yaml`). If the
+        # operator has disabled the mapping in ``analytics.mapping_state``
+        # we proceed mirror-only and log a structured breadcrumb. On
+        # projection/upsert failure the whole sync transaction rolls back
+        # and the failure counter advances (threshold-3 writes
+        # ``log_fact_population_run.status='blocking_sync'``).
+        mapping = MirrorToFactMapper.default().for_table(
+            INSIDE_SALES_APP_ID,
+            "analytics.crm_call_record",
+            "call",
+        )
+        if not await mapping.enabled(db):
+            await mirror_to_fact_sync.record_mirror_only_mode(
+                mapping, tenant_id=tenant_id
             )
-            if built is not None:
-                activity_rows.append(built)
-        await _upsert_lead_activity_rows(db, rows=activity_rows)
+        else:
+            try:
+                await mirror_to_fact_sync.project_and_upsert_facts(
+                    db,
+                    mapping=mapping,
+                    mirror_rows=rows,
+                    sync_run_id=sync_run.id,
+                )
+            except Exception as exc:
+                # The log write happens in a separate session and could
+                # itself fail (DB connection blip). Surface the original
+                # projection error regardless — `raise exc` (not bare
+                # `raise`) re-throws the root cause even if the inner
+                # except triggered.
+                try:
+                    await mirror_to_fact_sync.record_mapping_failure(
+                        mapping, error=exc, tenant_id=tenant_id
+                    )
+                except Exception:
+                    _log.exception(
+                        "failed to write mapping failure log; "
+                        "surfacing original projection error instead"
+                    )
+                raise exc
+            await mirror_to_fact_sync.record_mapping_success(mapping)
 
         sync_run.details = dict(sync_run.details or {}, pagesProcessed=pages_processed)
         await _save_sync_run_progress(sync_run=sync_run, counters=counters, page_count=pages_processed)

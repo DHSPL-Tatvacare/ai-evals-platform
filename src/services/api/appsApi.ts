@@ -18,6 +18,7 @@ import {
   type EvaluatorDetailBandColor,
   type EvaluatorDetailConfig,
   type PageActionSpec,
+  type QuickActionSpec,
 } from '@/types';
 
 interface ApiAppSummary {
@@ -231,6 +232,7 @@ function normalizeAppConfig(appId: AppId, config: Record<string, unknown>): Part
     pageIcons: normalizeStringMap(config.pageIcons ?? config.page_icons),
     pageTitles: normalizeStringMap(config.pageTitles ?? config.page_titles),
     pageActions: normalizePageActions(config.pageActions ?? config.page_actions),
+    quickActions: normalizeQuickActions(config.quickActions ?? config.quick_actions),
     evaluatorDetail: normalizeEvaluatorDetail(config.evaluatorDetail ?? config.evaluator_detail),
   };
 }
@@ -291,6 +293,39 @@ function normalizePageActions(value: unknown): AppConfig['pageActions'] | undefi
     }
   }
   return out as AppConfig['pageActions'];
+}
+
+const QUICK_ACTION_KINDS = ['openModal', 'triggerImperative', 'navigateTo'] as const;
+type QuickActionKind = (typeof QUICK_ACTION_KINDS)[number];
+
+function normalizeQuickActions(value: unknown): QuickActionSpec[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: QuickActionSpec[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
+    const kind = raw.kind;
+    if (typeof kind !== 'string' || !QUICK_ACTION_KINDS.includes(kind as QuickActionKind)) continue;
+    const config =
+      typeof raw.config === 'object' && raw.config !== null
+        ? (raw.config as Record<string, unknown>)
+        : undefined;
+    const requirements = Array.isArray(raw.requirements)
+      ? (raw.requirements as QuickActionSpec['requirements'])
+      : undefined;
+    out.push({
+      id: raw.id,
+      kind: kind as QuickActionKind,
+      label: raw.label,
+      ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
+      ...(typeof raw.icon === 'string' ? { icon: raw.icon } : {}),
+      ...(config !== undefined ? { config } : {}),
+      ...(typeof raw.requires === 'string' ? { requires: raw.requires } : {}),
+      ...(requirements !== undefined ? { requirements } : {}),
+    });
+  }
+  return out;
 }
 
 function normalizePageActionSpec(value: unknown): PageActionSpec | null {

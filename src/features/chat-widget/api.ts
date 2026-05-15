@@ -1,6 +1,7 @@
 import { apiRequest } from '@/services/api/client';
 import { useAuthStore } from '@/stores/authStore';
 import { logger } from '@/services/logger/logger';
+import type { PageContext } from '@/features/orchestration/copilot/usePageContext';
 import type {
   Artifact,
   BlueprintPart,
@@ -13,6 +14,7 @@ import type {
   ToolCallDetailData,
   TurnUsage,
 } from './types';
+import { normalizeSpecialistRoutingTelemetry } from './routingTelemetry';
 
 interface ChatRequest {
   appId: string;
@@ -21,6 +23,11 @@ interface ChatRequest {
   operation: RuntimeOperation;
   message?: string;
   model: string;
+  /** Phase 2 (sherlock-builder) — when the user is on the orchestration
+   *  builder, the widget attaches the canvas snapshot so the supervisor
+   *  can route to `authoring_specialist`. Backend Phase 1 enforces
+   *  permissions before the tool is wired. Absent when off the builder. */
+  pageContext?: PageContext;
 }
 
 interface CancelTurnResponse {
@@ -42,10 +49,15 @@ interface StreamToolCallStartEvent {
   seq: number;
   toolCallId: string;
   toolName: string;
+  briefSummary?: string;
 }
 
+import type { SpecialistRoutingTelemetry } from './types';
+import type { CanvasPatch } from '@/features/orchestration/copilot/canvasPatchSchema';
+import { CANVAS_PATCH_CONTRACT_ID } from '@/features/orchestration/copilot/canvasPatchSchema';
+
 // Phase 7 audit fix (Gap 4): ``outcome`` is the §6.2 envelope projection
-// the backend emits on tool_call_end / done. Carrying ``job`` end-to-end
+// the backend emits on specialist_finished / turn_finished. Carrying ``job`` end-to-end
 // lets the widget render a live pending-job badge (Gap 5).
 interface StreamToolCallOutcome {
   kind?: string;
@@ -60,6 +72,9 @@ interface StreamToolCallEndEvent extends StreamToolCallStartEvent {
   detail?: ToolCallDetailData | null;
   durationMs?: number;
   outcome?: StreamToolCallOutcome;
+  rowCount?: number;
+  evidenceCount?: number;
+  routing?: SpecialistRoutingTelemetry;
 }
 
 interface StreamDoneEvent {
@@ -72,6 +87,7 @@ interface StreamDoneEvent {
     name: string;
     summary?: string;
     detail?: ToolCallDetailData | null;
+    routing?: SpecialistRoutingTelemetry;
     outcome?: StreamToolCallOutcome;
   }>;
   // Phase 1 — pack-produced results arrive as opaque ``Artifact`` triples
@@ -138,6 +154,44 @@ async function parseErrorBody(response: Response): Promise<string> {
   }
 }
 
+function normalizeTurnUsage(raw: unknown): TurnUsage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const usage = raw as Record<string, unknown>;
+  const numberValue = (camel: string, snake: string): number => {
+    const value = usage[camel] ?? usage[snake];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+  const inputTokens = numberValue('inputTokens', 'input_tokens');
+  const outputTokens = numberValue('outputTokens', 'output_tokens');
+  const cachedReadTokens = numberValue('cachedReadTokens', 'cached_read_tokens');
+  const cachedWriteTokens = numberValue('cachedWriteTokens', 'cached_write_tokens');
+  const reasoningTokens = numberValue('reasoningTokens', 'reasoning_tokens');
+  const toolUsePromptTokens = numberValue('toolUsePromptTokens', 'tool_use_prompt_tokens');
+  const totalTokens = numberValue('totalTokens', 'total_tokens')
+    || inputTokens + outputTokens + cachedReadTokens + cachedWriteTokens + reasoningTokens + toolUsePromptTokens;
+  return {
+    inputTokens,
+    outputTokens,
+    cachedReadTokens,
+    cachedWriteTokens,
+    reasoningTokens,
+    toolUsePromptTokens,
+    totalTokens,
+    costUsd: numberValue('costUsd', 'cost_usd'),
+    callCount: numberValue('callCount', 'call_count'),
+  };
+}
+
+function normalizeTerminalStatus(raw: unknown): TerminalStatus {
+  const value = typeof raw === 'string' ? raw : 'done';
+  if (value === 'partial' || value === 'degraded') return 'degraded';
+  if (value === 'failed' || value === 'error') return 'error';
+  if (value === 'interrupted') return 'interrupted';
+  return 'done';
+}
+
 export async function getBuilderSession(appId: string, sessionId: string): Promise<BuilderSessionData> {
   return apiRequest<BuilderSessionData>(`/api/report-builder/v2/sessions/${sessionId}?app_id=${encodeURIComponent(appId)}`);
 }
@@ -165,7 +219,12 @@ export async function streamChatMessage(
     onToolCallStart: (event: StreamToolCallStartEvent) => void;
     onToolCallEnd: (event: StreamToolCallEndEvent) => void;
     onContentDelta: (event: { seq: number; delta: string }) => void;
-    onChart: (event: ChartPayload & { seq: number }) => void;
+    onChart: (event: { seq: number; payload: ChartPayload; saved?: boolean; chartId?: string }) => void;
+    /** Phase 2 (sherlock-builder) — invoked when an `artifact_emitted` SSE
+     *  event carries the orchestration canvas-patch contract. Wired by
+     *  `useChatWidget.send` to the `canvasPatchApplier`. The chart consumer
+     *  stays on the fallthrough branch — no behaviour change for analytics. */
+    onCanvasPatch?: (event: { seq: number; patch: CanvasPatch }) => void;
     onBlueprint: (event: BlueprintPart & { seq: number }) => void;
     onSaveResult: (event: SaveResultEvent) => void;
     onStatus: (event: StreamStatusEvent) => void;
@@ -293,46 +352,115 @@ export async function streamChatMessage(
             continue;
             }
 
+          // Sherlock v3 wire vocabulary. Names align 1:1 with the
+          // backend event names emitted by sherlock_v3.runtime +
+          // sherlock_v3.turn_orchestrator. No translation layer.
           switch (eventType) {
             case 'session':
               callbacks.onSessionId(data as unknown as StreamSessionEvent);
               break;
-            case 'entity_recognition':
-              callbacks.onEntityRecognition(data as unknown as EntityRecognitionEvent);
-              break;
-            case 'tool_call_start':
-              callbacks.onToolCallStart(data as unknown as StreamToolCallStartEvent);
-              break;
-            case 'tool_call_end':
-              callbacks.onToolCallEnd(data as unknown as StreamToolCallEndEvent);
-              break;
-            case 'content_delta':
-              if (typeof data.delta === 'string') {
-                accumulatedContent += data.delta;
-              }
-              callbacks.onContentDelta(data as { seq: number; delta: string });
-              break;
-            case 'chart':
-              callbacks.onChart(data as unknown as ChartPayload & { seq: number });
-              break;
-            case 'status':
-              if (typeof data.text === 'string') {
-                callbacks.onStatus(data as unknown as StreamStatusEvent);
-              }
-              break;
-            case 'done':
-              terminalReceived = true;
-              callbacks.onDone(data as unknown as StreamDoneEvent);
-              break;
-            case 'error':
-              terminalReceived = true;
-              callbacks.onError({
-                message: String(data.message ?? 'Unknown error'),
-                terminalStatus: (data.terminalStatus as StreamErrorEvent['terminalStatus']) ?? 'error',
-                seq: typeof data.seq === 'number' ? data.seq : undefined,
-                content: accumulatedContent || undefined,
+            case 'specialist_started': {
+              const seq = typeof data.seq === 'number' ? data.seq : 0;
+              callbacks.onToolCallStart({
+                seq,
+                toolCallId: String(data.call_id ?? `tc_${seq}`),
+                toolName: String(data.specialist ?? 'specialist'),
+                briefSummary: typeof data.brief_summary === 'string' ? data.brief_summary : undefined,
               });
               break;
+            }
+            case 'specialist_finished': {
+              const seq = typeof data.seq === 'number' ? data.seq : 0;
+              const routing = normalizeSpecialistRoutingTelemetry(data.routing);
+              const evidenceRefs = Array.isArray(data.evidence_refs) ? data.evidence_refs : [];
+              callbacks.onToolCallEnd({
+                seq,
+                toolCallId: String(data.call_id ?? ''),
+                toolName: String(data.specialist ?? 'specialist'),
+                summary: typeof data.result_summary === 'string' ? data.result_summary : '',
+                durationMs: typeof data.duration_ms === 'number' ? data.duration_ms : 0,
+                rowCount: typeof data.row_count === 'number' ? data.row_count : undefined,
+                evidenceCount: evidenceRefs.length,
+                routing,
+                outcome: {
+                  kind: typeof data.status === 'string' ? data.status : 'ok',
+                  capability: typeof data.specialist === 'string' ? data.specialist : '',
+                },
+              });
+              break;
+            }
+            case 'content_delta': {
+              const text = typeof data.text === 'string' ? data.text : '';
+              const phase = typeof data.phase === 'string' ? data.phase : 'final_answer';
+              if (!text) break;
+              const seq = typeof data.seq === 'number' ? data.seq : 0;
+              if (phase === 'commentary') {
+                callbacks.onStatus({ seq, text });
+              } else {
+                accumulatedContent += text;
+                callbacks.onContentDelta({ seq, delta: text });
+              }
+              break;
+            }
+            case 'artifact_emitted': {
+              // Phase 2 (sherlock-builder) — branch on `data.kind` so the
+              // canvas-patch contract routes to `onCanvasPatch` while every
+              // other artifact (chart, blueprint, …) keeps its existing
+              // chart-shaped fallthrough. The wire envelope already carries
+              // `kind` at the top level (runtime.py:161, turn_orchestrator.py:247).
+              const seq = typeof data.seq === 'number' ? data.seq : 0;
+              const payload = (data.payload ?? {}) as Record<string, unknown>;
+              const kind =
+                typeof data.kind === 'string'
+                  ? data.kind
+                  : typeof payload.kind === 'string'
+                    ? (payload.kind as string)
+                    : '';
+              if (kind === CANVAS_PATCH_CONTRACT_ID && callbacks.onCanvasPatch) {
+                callbacks.onCanvasPatch({
+                  seq,
+                  patch: payload as unknown as CanvasPatch,
+                });
+              } else {
+                callbacks.onChart({ seq, payload: payload as unknown as ChartPayload });
+              }
+              break;
+            }
+            case 'turn_finished': {
+              terminalReceived = true;
+              const seq = typeof data.seq === 'number' ? data.seq : 0;
+              const terminalStatus = normalizeTerminalStatus(data.status);
+              const usage = normalizeTurnUsage(data.usage);
+              const artifacts = Array.isArray(data.artifacts) ? data.artifacts as Artifact[] : null;
+              const toolCalls = Array.isArray(data.toolCalls)
+                ? (data.toolCalls as StreamDoneEvent['toolCalls']).map((toolCall) => ({
+                    ...toolCall,
+                    routing: normalizeSpecialistRoutingTelemetry(toolCall.routing),
+                  }))
+                : [];
+              const content = typeof data.content === 'string' ? data.content : accumulatedContent;
+              callbacks.onDone({
+                seq,
+                terminalStatus,
+                content,
+                warnings: [],
+                toolCalls,
+                artifacts,
+                ...(usage ? { usage } : {}),
+              });
+              break;
+            }
+            case 'error_emitted': {
+              terminalReceived = true;
+              const errorStatus = normalizeTerminalStatus(data.status);
+              callbacks.onError({
+                message: String(data.message ?? 'Unknown error'),
+                terminalStatus: errorStatus === 'interrupted' ? 'interrupted' : 'error',
+                seq: typeof data.seq === 'number' ? data.seq : undefined,
+                content: (typeof data.content === 'string' ? data.content : accumulatedContent) || undefined,
+              });
+              break;
+            }
             default:
               logger.debug('Ignoring unknown Sherlock SSE event', { eventType });
               break;

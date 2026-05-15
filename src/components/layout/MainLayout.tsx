@@ -12,11 +12,12 @@ import { cn } from '@/utils';
 import { firstAccessibleAppId, inferAppIdFromPath } from '@/config/routes';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
-import { NewInsideSalesEvalOverlay } from '@/features/insideSales/components/NewInsideSalesEvalOverlay';
+import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
 import { useFileUpload } from '@/features/upload';
 import { ACCEPTED_AUDIO_EXTENSIONS, validateAudioFiles } from '@/features/upload/utils/fileValidation';
 import { APP_IDS } from '@/types';
 import { ChatWidget } from '@/features/chat-widget/ChatWidget';
+import { KairaImperatives } from '@/features/kaira/KairaImperatives';
 import { ReviewBorderGlow } from '@/features/reviews/ReviewBorderGlow';
 import { ReviewPersistentBar } from '@/features/reviews/ReviewPersistentBar';
 import { ReviewNavigationBlocker } from '@/features/reviews/ReviewNavigationBlocker';
@@ -35,16 +36,23 @@ export function MainLayout({ children }: MainLayoutProps) {
   const activeModal = useUIStore((s) => s.activeModal);
   const closeModal = useUIStore((s) => s.closeModal);
 
-  // Sync app store from route — route is the single source of truth
+  // Sync app store from route — route is the single source of truth.
+  // Done *during render* (not in an effect) so children mounted under
+  // <Outlet/> read the correct app on their very first render. A
+  // useEffect here lands one render late, so the first paint of an app
+  // page (fresh load / cross-app navigation) would otherwise pull the
+  // previous app's config and crash on app-specific config keys.
+  const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
+  const routeApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
+  if (routeApp && routeApp !== currentApp) {
+    setCurrentApp(routeApp);
+  }
+
+  // Side effect of an app change (mini-player teardown) stays in an
+  // effect — it must not run during render.
   useEffect(() => {
-    const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
-    const newApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
-    if (!newApp || newApp === currentApp) {
-      return;
-    }
-    setCurrentApp(newApp);
-    useMiniPlayerStore.getState().closeIfAppChanged(newApp);
-  }, [currentApp, location.pathname, setCurrentApp, user]);
+    useMiniPlayerStore.getState().closeIfAppChanged(currentApp);
+  }, [currentApp]);
 
   useEffect(() => {
     if (!user) {
@@ -61,11 +69,14 @@ export function MainLayout({ children }: MainLayoutProps) {
   // Load listings on mount
   useListingsLoader();
 
-  // Voice Rx upload — triggered from the sidebar +New popover. The hidden
-  // <input type="file"> lives in this layout so the selector survives page
-  // navigation and upload progress can render as a floating card.
+  // Voice Rx upload — triggered from the sidebar quick-action menu. The
+  // hidden <input type="file"> lives in this layout so the selector survives
+  // page navigation and upload progress can render as a floating card. The
+  // sidebar dispatches imperatively via uiStore.invokeTrigger('voiceRxUpload')
+  // so this layout no longer prop-drills the trigger callback.
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const { uploadFiles, isUploading, progress, error: uploadError } = useFileUpload();
+  const registerTrigger = useUIStore((s) => s.registerTrigger);
 
   const triggerVoiceRxUpload = useCallback(() => {
     const el = audioInputRef.current;
@@ -74,6 +85,8 @@ export function MainLayout({ children }: MainLayoutProps) {
     el.value = '';
     el.click();
   }, []);
+
+  useEffect(() => registerTrigger('voiceRxUpload', triggerVoiceRxUpload), [registerTrigger, triggerVoiceRxUpload]);
 
   const handleAudioInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -100,7 +113,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-secondary)]">
-      <Sidebar onVoiceRxUpload={triggerVoiceRxUpload} />
+      <Sidebar />
       <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
         <ReviewBorderGlow />
         <main
@@ -116,12 +129,13 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
       <MiniPlayerConnector />
       <JobCompletionWatcher />
+      <KairaImperatives />
       <AnimatePresence>
         {activeModal === 'batchEval' && <NewBatchEvalOverlay key="batchEval" onClose={closeModal} />}
         {activeModal === 'adversarialTest' && <NewAdversarialOverlay key="adversarialTest" onClose={closeModal} />}
         {/* Vanilla inside-sales eval entry (Sidebar "Batch Evaluation" action). Prefilled flows
-            mount the overlay locally on the page that owns the context — see InsideSalesListing,
-            InsideSalesLeadDetail, InsideSalesCallDetail. */}
+            mount the overlay locally on the page that owns the context — see CrmListing,
+            CrmLeadDetail, CrmCallDetail. */}
         {activeModal === 'insideSalesEval' && <NewInsideSalesEvalOverlay key="insideSalesEval" onClose={closeModal} />}
       </AnimatePresence>
       <input

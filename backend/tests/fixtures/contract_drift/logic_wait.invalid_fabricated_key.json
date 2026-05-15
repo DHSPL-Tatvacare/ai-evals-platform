@@ -1,0 +1,9 @@
+{
+  "node_type": "logic.wait",
+  "config": {
+    "mode": "event",
+    "event_name": "wati.message_replied",
+    "correlation": { "recipient_id_field": "recipient_id" },
+    "fabricated_key": "should-be-rejected"
+  }
+}

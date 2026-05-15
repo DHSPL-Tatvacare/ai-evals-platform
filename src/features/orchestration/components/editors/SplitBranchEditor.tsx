@@ -6,12 +6,9 @@ import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import type {
-  PredicateAst,
   SplitBranch,
   SplitMode,
 } from '@/features/orchestration/types';
-
-import { PredicateBuilder } from './PredicateBuilder';
 
 interface SplitConfig {
   mode?: SplitMode;
@@ -30,9 +27,8 @@ interface Props {
 }
 
 const MODE_OPTIONS: { value: SplitMode; label: string; help: string }[] = [
-  { value: 'by_field', label: 'By field value',     help: 'Match a payload field against per-branch values' },
-  { value: 'by_rules', label: 'By rules (predicates)', help: 'First matching predicate wins' },
-  { value: 'random',   label: 'Random allocation',  help: 'Weighted random pick across branches' },
+  { value: 'by_field', label: 'By field value',    help: 'Match a payload field against per-branch values' },
+  { value: 'random',   label: 'Random allocation', help: 'Weighted random pick across branches' },
 ];
 
 let _branchIdCounter = 0;
@@ -84,7 +80,6 @@ export function SplitBranchEditor({ value, onChange, fieldOptions }: Props) {
     const label = `Branch ${branches.length + 1}`;
     const newBranch: SplitBranch = { id: makeBranchId(label), label };
     if (mode === 'by_field') newBranch.match = '';
-    if (mode === 'by_rules') newBranch.predicate = { field: '', op: 'eq', value: '' };
     if (mode === 'random') newBranch.weight = 1;
     onChange({ ...value, branches: [...branches, newBranch] });
   };
@@ -156,21 +151,12 @@ export function SplitBranchEditor({ value, onChange, fieldOptions }: Props) {
                   value={
                     typeof b.match === 'string'
                       ? b.match
-                      : b.match === undefined
+                      : b.match === undefined || b.match === null
                         ? ''
                         : String(b.match)
                   }
                   onChange={(e) => updateBranch(idx, { match: e.target.value })}
                   placeholder="match value"
-                />
-              ) : null}
-              {mode === 'by_rules' ? (
-                <PredicateBuilder
-                  value={b.predicate}
-                  onChange={(next: PredicateAst) =>
-                    updateBranch(idx, { predicate: next })
-                  }
-                  fieldOptions={fieldOptions}
                 />
               ) : null}
               {mode === 'random' ? (

@@ -25,33 +25,32 @@ export interface LeadPlanPurchase {
   leadConversionDate: string | null;
 }
 
+/**
+ * One `dim_lead` row in the manifest `{structural columns + attributes
+ * JSONB}` shape (Phase 11E). Identity + current-state are typed structural
+ * columns; `attributesAtFirstSeen` is the frozen lead-profile snapshot
+ * (age_group, condition, hba1c_band, intent_to_pay, source_campaign, ...)
+ * and `attributes` is the mutable current-state bag (plan_name, ...). Both
+ * bags are rendered generically against `useCrmSchema` — no field is
+ * flattened into a bespoke named property. PII columns
+ * (`firstName/lastName/phone/email/city`) arrive pre-masked from the
+ * role-aware serializer.
+ */
 export interface LeadListRecord {
-  prospectId: string;
-  firstName: string;
+  leadId: string;
+  firstName: string | null;
   lastName: string | null;
-  phone: string;
-  prospectStage: string;
+  phone: string | null;
+  email: string | null;
   city: string | null;
-  ageGroup: string | null;
-  condition: string | null;
-  hba1cBand: string | null;
-  intentToPay: string | null;
-  agentName: string | null;
-  rnrCount: number;
-  answeredCount: number;
-  totalDials: number;
-  connectRate: number | null;
-  frtSeconds: number | null;
-  leadAgeDays: number;
-  daysSinceLastContact: number | null;
-  mqlScore: number;
-  mqlSignals: Record<string, boolean>;
-  createdOn: string;
-  lastActivityOn: string | null;
+  prospectStage: string | null;
+  repName: string | null;
   source: string | null;
-  sourceCampaign: string | null;
-  planName: string | null;
-  plan: LeadPlanPurchase;
+  createdOn: string;
+  mqlScore: number | null;
+  mqlSignals: Record<string, boolean>;
+  attributesAtFirstSeen: Record<string, unknown>;
+  attributes: Record<string, unknown>;
 }
 
 export interface LeadListResponse {
@@ -62,22 +61,25 @@ export interface LeadListResponse {
   freshness: CollectionFreshness;
 }
 
+/**
+ * One `fact_lead_activity` (call) row in the manifest `{structural columns
+ * + attributes JSONB}` shape (Phase 11E). Typed structural columns at the
+ * top level; the call-specific payload (direction, status,
+ * duration_seconds, recording_url, phone_number, display_number,
+ * call_notes, call_session_id, rep_email, has_recording, event_code) lives
+ * in `attributes` and is rendered generically against `useCrmSchema`. PII
+ * keys inside `attributes` arrive pre-masked from the role-aware
+ * serializer.
+ */
 export interface CallRecord {
   activityId: string;
-  prospectId: string;
-  agentName: string;
-  agentEmail: string;
-  eventCode: number;
-  direction: 'inbound' | 'outbound';
-  status: string;
+  leadId: string;
+  repName: string | null;
+  eventCode: number | null;
+  activityType: string;
   callStartTime: string;
-  durationSeconds: number;
-  recordingUrl: string;
-  phoneNumber: string;
-  displayNumber: string;
-  callNotes: string;
-  callSessionId: string;
   createdOn: string;
+  attributes: Record<string, unknown>;
   lastEvalScore?: number;
   evalCount?: number;
 }
@@ -99,7 +101,7 @@ export interface CollectionFreshness {
 export interface CallFilters {
   agents: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
-  prospectId: string[];
+  leadId: string[];
   direction: string;
   status: string;
   hasRecording: boolean;
@@ -111,7 +113,7 @@ export interface CallFilters {
 export interface LeadCallRecord {
   activityId: string;
   callTime: string;
-  agentName: string | null;
+  repName: string | null;
   durationSeconds: number;
   status: string;
   recordingUrl: string | null;
@@ -128,7 +130,7 @@ export interface LeadEvalHistoryEntry {
 }
 
 export interface LeadDetailFullResponse {
-  prospectId: string;
+  leadId: string;
   firstName: string;
   lastName: string | null;
   phone: string;
@@ -145,7 +147,7 @@ export interface LeadDetailFullResponse {
   intentToPay: string | null;
   jobTitle: string | null;
   preferredCallTime: string | null;
-  agentName: string | null;
+  repName: string | null;
   source: string | null;
   sourceCampaign: string | null;
   createdOn: string;
@@ -176,7 +178,7 @@ export interface LeadFilters {
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   city: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
-  prospectId: string[];
+  leadId: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   phone: string[];
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
@@ -204,9 +206,9 @@ export async function fetchCollectionStatus(
 }
 
 export type SuggestionField =
-  | 'prospect_id'
+  | 'lead_id'
   | 'phone'
-  | 'agent_name'
+  | 'rep_name'
   | 'city'
   | 'stage'
   | 'plan_name';
@@ -241,7 +243,7 @@ function buildCallSearchParams(
     params.set('scope', scope);
   }
   if (filters.agents && filters.agents.length > 0) params.set('agents', filters.agents.join(','));
-  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
+  if (filters.leadId && filters.leadId.length > 0) params.set('lead_id', filters.leadId.join(','));
   if (filters.direction) params.set('direction', filters.direction);
   if (filters.status) params.set('status', filters.status);
   if (filters.hasRecording) params.set('has_recording', 'true');
@@ -285,7 +287,7 @@ export async function fetchLeads(
   if (filters.mqlMin) params.set('mql_min', filters.mqlMin);
   if (filters.condition && filters.condition.length > 0) params.set('condition', filters.condition.join(','));
   if (filters.city && filters.city.length > 0) params.set('city', filters.city.join(','));
-  if (filters.prospectId && filters.prospectId.length > 0) params.set('prospect_id', filters.prospectId.join(','));
+  if (filters.leadId && filters.leadId.length > 0) params.set('lead_id', filters.leadId.join(','));
   if (filters.phone && filters.phone.length > 0) params.set('phone', filters.phone.join(','));
   if (filters.planName && filters.planName.length > 0) params.set('plan_name', filters.planName.join(','));
   if (q) params.set('q', q);
@@ -294,7 +296,7 @@ export async function fetchLeads(
 }
 
 export async function fetchLeadDetail(
-  prospectId: string,
+  leadId: string,
 ): Promise<LeadDetailFullResponse> {
-  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${prospectId}/detail`);
+  return apiRequest<LeadDetailFullResponse>(`/api/inside-sales/leads/${leadId}/detail`);
 }

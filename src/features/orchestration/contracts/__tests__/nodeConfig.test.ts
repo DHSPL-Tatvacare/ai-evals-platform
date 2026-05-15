@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_NODE_TYPES,
   NodeConfigSchema,
+  isHardParseIssue,
   parseNodeConfig,
 } from "../nodeConfig";
 
@@ -100,8 +101,37 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
   });
 
   it("split branches normalise to active mode at parse time", () => {
-    // Pre-parse: branches carry both `match` and `predicate`. Parser should
-    // strip whichever doesn't apply to the active mode.
+    // by_field mode keeps `match`, populates default empty string when
+    // missing. `predicate` is no longer a legal branch field — see the
+    // adjacent test for the rejection case.
+    const result = parseNodeConfig("logic.split", {
+      mode: "by_field",
+      field: "plan",
+      branches: [
+        { id: "gold", label: "Gold", match: "gold" },
+        { id: "silver", label: "Silver" },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const branches = result.data.branches as Array<Record<string, unknown>>;
+      expect(branches).toHaveLength(2);
+      for (const b of branches) {
+        expect(b).not.toHaveProperty("predicate");
+        expect(b.match).toBeDefined();
+      }
+    }
+  });
+
+  it("logic.split rejects by_rules mode (backend doesn't ship it)", () => {
+    const result = parseNodeConfig("logic.split", {
+      mode: "by_rules",
+      branches: [{ id: "a", label: "A" }, { id: "b", label: "B" }],
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("logic.split rejects branch.predicate (fabricated FE-only field)", () => {
     const result = parseNodeConfig("logic.split", {
       mode: "by_field",
       field: "plan",
@@ -111,19 +141,71 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
           label: "Gold",
           predicate: { field: "plan", op: "eq", value: "gold" },
         },
-        { id: "silver", label: "Silver", match: "silver" },
       ],
     });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const branches = result.data.branches as Array<Record<string, unknown>>;
-      expect(branches).toHaveLength(2);
-      // by_field mode keeps `match`, drops `predicate`.
-      for (const b of branches) {
-        expect(b).not.toHaveProperty("predicate");
-        expect(b.match).toBeDefined();
-      }
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // unrecognized_keys surfaces 'predicate' as the offending field.
+      const flagged = result.issues.some((i) =>
+        i.field.includes("predicate") || i.message.toLowerCase().includes("predicate"),
+      );
+      expect(flagged).toBe(true);
     }
+  });
+
+  it("logic.wait correlation accepts recipient_id_field only", () => {
+    const ok = parseNodeConfig("logic.wait", {
+      mode: "event",
+      event_name: "wati.message_replied",
+      correlation: { recipient_id_field: "recipient_id" },
+    });
+    expect(ok.ok).toBe(true);
+    const drift = parseNodeConfig("logic.wait", {
+      mode: "event",
+      event_name: "wati.message_replied",
+      correlation: { field: "recipient_id" },
+    });
+    expect(drift.ok).toBe(false);
+  });
+
+  it("source.cohort_query rejects unsupported filter op", () => {
+    const result = parseNodeConfig("source.cohort_query", {
+      source_ref: "crm.lead_record",
+      filters: [{ column: "status", op: "matches_regex", value: ".*" }],
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("every issue surviving draft mode is hard", () => {
+    // Draft mode pre-filters missing-required-field cases inside
+    // parseNodeConfig. Anything that comes out is structurally bad and
+    // the save gate must block on it — including wrong-typed provided
+    // values, which Zod also encodes as code='invalid_type'.
+    const fabricated = parseNodeConfig("sink.complete", { fabricated_key: 1 });
+    expect(fabricated.ok).toBe(false);
+    if (!fabricated.ok) {
+      expect(fabricated.issues.every(isHardParseIssue)).toBe(true);
+    }
+
+    // Wrong-typed provided value (number on a string-typed field) MUST
+    // be classified as hard — the previous implementation had this
+    // backwards and let real bugs through.
+    const wrongType = parseNodeConfig("logic.wait", {
+      mode: "duration",
+      duration_hours: "not-a-number",
+    });
+    expect(wrongType.ok).toBe(false);
+    if (!wrongType.ok) {
+      expect(wrongType.issues.every(isHardParseIssue)).toBe(true);
+    }
+  });
+
+  it("missing required fields on a partial draft do NOT produce any parse issues", () => {
+    // The save gate's only signal is `!result.ok`. A blank crm.send_wati
+    // is the canonical partial-draft state (Sherlock authoring path);
+    // it must parse cleanly so the gate does not false-positive.
+    const result = parseNodeConfig("crm.send_wati", {}, { mode: "draft" });
+    expect(result.ok).toBe(true);
   });
 
   it("predicate leaf transform normalises value for the operator", () => {

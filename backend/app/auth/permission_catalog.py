@@ -175,6 +175,18 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_id='configuration',
                 group_label='Configuration',
             ),
+            PermissionCatalogEntry(
+                id='sherlock:manage_verified_queries',
+                label='Manage Sherlock verified queries',
+                description=(
+                    'Create, edit, enable/disable tenant-scoped verified '
+                    'question→SQL pairs that the Sherlock data_specialist '
+                    'retrieves at turn time. System-tenant rows (seeded from '
+                    'JSON) remain read-only via this surface.'
+                ),
+                group_id='configuration',
+                group_label='Configuration',
+            ),
         ),
     ),
     PermissionGroup(
@@ -195,6 +207,17 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 description=(
                     'Create/edit pricing rows, refresh pricing from models.dev, '
                     'and run the cost rollup backfill.'
+                ),
+                group_id='cost',
+                group_label='Cost & usage',
+            ),
+            PermissionCatalogEntry(
+                id='analytics:admin',
+                label='Administer analytics population',
+                description=(
+                    'Disable or re-enable mirror->fact mappings, trigger '
+                    'historical fact backfill jobs, and inspect '
+                    'log_fact_population_run rows.'
                 ),
                 group_id='cost',
                 group_label='Cost & usage',

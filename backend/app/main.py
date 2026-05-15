@@ -130,11 +130,34 @@ async def lifespan(app: FastAPI):
     async with async_session() as _validator_db:
         await run_manifest_validator(_validator_db)
 
+    # Fail boot if any mirror->fact mapping YAML is malformed, registers a
+    # duplicate ``(app_id, source_table, target_fact, activity_type)``, or
+    # collides on the ``for_table`` lookup key. Phase 2 of
+    # ``docs/plans/2026-05-12-analytics-facts-canonical-manifest-thinning.md``;
+    # the manifest cross-check (declared-vs-written keys) waits for Phase 7
+    # because production manifests don't carry ``attribute_schemas`` yet.
+    from app.services.analytics.mirror_to_fact_mapper import MirrorToFactMapper
+    _mapper = MirrorToFactMapper.default()
+    logger.info(
+        "mirror_to_fact_mappings_loaded count=%d keys=%s",
+        len(_mapper.all_mappings),
+        [m.key for m in _mapper.all_mappings],
+    )
+
     # Seed system tenant/user + default prompts/schemas, then bootstrap admin
     from app.services.seed_defaults import seed_all_defaults, seed_bootstrap_admin
     async with async_session() as session:
         await seed_all_defaults(session)
     await seed_bootstrap_admin()
+
+    # Overlay DB-sourced fact_lead_signal.attribute_schemas onto the YAML
+    # manifests (signal derivation framework, invariant 21 / §7.4). Runs
+    # after seeding so the system-tenant signal definitions exist.
+    from app.services.chat_engine.signal_schema_projection import (
+        project_signal_definitions,
+    )
+    async with async_session() as _projection_db:
+        await project_signal_definitions(_projection_db)
 
     # Phase 3 acceptance gate: raise on unknown pack id in any app config.
     # Runs after seed so stale ``App.config.chat.capabilities`` arrays have
@@ -293,7 +316,9 @@ from app.routes.rules import router as rules_router
 from app.routes.eval_templates import router as eval_templates_router
 from app.routes.reviews import router as reviews_router
 from app.routes.analytics_library import router as analytics_library_router
+from app.routes.analytics_crm_schema import router as analytics_crm_schema_router
 from app.routes.cost import router as cost_router, admin_router as cost_admin_router
+from app.routes.analytics_admin import router as analytics_admin_router
 from app.routes.scheduled_jobs import router as scheduled_jobs_router
 from app.routes.orchestration_webhooks import router as orchestration_webhooks_router
 from app.routes.orchestration import router as orchestration_router
@@ -301,6 +326,7 @@ from app.routes.orchestration_connections import router as orchestration_connect
 from app.routes.orchestration_datasets import router as orchestration_datasets_router
 from app.routes.orchestration_sse import router as orchestration_sse_router
 from app.routes.sherlock_tool_calls import router as sherlock_tool_calls_router
+from app.routes.sherlock_verified_queries import router as sherlock_verified_queries_router
 app.include_router(auth_router)
 app.include_router(listings_router)
 app.include_router(files_router)
@@ -327,8 +353,10 @@ app.include_router(rules_router)
 app.include_router(eval_templates_router)
 app.include_router(reviews_router)
 app.include_router(analytics_library_router)
+app.include_router(analytics_crm_schema_router)
 app.include_router(cost_router)
 app.include_router(cost_admin_router)
+app.include_router(analytics_admin_router)
 app.include_router(scheduled_jobs_router)
 app.include_router(orchestration_webhooks_router)
 app.include_router(orchestration_router)
@@ -336,3 +364,4 @@ app.include_router(orchestration_connections_router)
 app.include_router(orchestration_datasets_router)
 app.include_router(orchestration_sse_router)
 app.include_router(sherlock_tool_calls_router)
+app.include_router(sherlock_verified_queries_router)

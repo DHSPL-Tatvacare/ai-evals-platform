@@ -5,7 +5,6 @@ import { MainLayout } from "@/components/layout";
 import { LoadingState } from "@/components/ui";
 import {
   VoiceRxSettingsPage,
-  VoiceRxRunDetail,
 } from "@/features/voiceRx";
 import {
   KairaBotSettingsPage,
@@ -14,7 +13,7 @@ import {
 import {
   EvalLogs,
   EvalRunList,
-  EvalRunDetail,
+  RunDetailPage,
   EvalThreadDetailV2,
   EvalAdversarialDetailV2,
   LogsEvaluationRunPage,
@@ -24,14 +23,18 @@ import {
 import { AppEvaluatorsPage, EvaluatorDetailPage } from "@/features/evals";
 import { LoginPage, SignupPage, AuthGuard, AdminGuard, RequirePermission } from "@/features/auth";
 import { AppAccessGuard } from "@/components/auth/PermissionGate";
-import { AdminUsersPage, AdminSherlockPage, AdminSherlockToolCallPage } from "@/features/admin";
+import { AdminUsersPage, AdminSherlockPage, AdminSherlockToolCallPage, AdminSherlockConfigPage } from "@/features/admin";
 import {
-  InsideSalesListing,
-  InsideSalesRunDetail,
-  InsideSalesCallDetail,
+  CrmListing,
+  CrmCallDetail,
+  CrmLeadDetail,
+} from "@/features/crmWorkspace";
+// Phase 10 separated the inside-sales eval wizard into a sibling feature
+// folder; the CRM workspace pages stay app-agnostic, the eval wizard
+// stays LSQ-shaped.
+import {
   InsideSalesSettings,
-  InsideSalesLeadDetail,
-} from "@/features/insideSales";
+} from "@/features/insideSalesEval";
 import { AnalyticsDashboardPage } from "@/features/analytics/AnalyticsDashboardPage";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -46,11 +49,13 @@ const AnalyticsChartDetail = lazyWithRetry(() => import('@/features/analytics/pa
 const AnalyticsDashboardDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
 const CostPage = lazyWithRetry(() => import('@/features/cost/pages/CostPage').then(m => ({ default: m.CostPage })));
 const ScheduledJobsListPage = lazyWithRetry(() => import('@/features/admin/scheduledJobs/pages/ScheduledJobsListPage').then(m => ({ default: m.ScheduledJobsListPage })));
+const AnalyticsMappingsPage = lazyWithRetry(() => import('@/features/admin/analyticsMappings/AnalyticsMappingsPage').then(m => ({ default: m.AnalyticsMappingsPage })));
+const SignalDefinitionsPage = lazyWithRetry(() => import('@/features/admin/signalDefinitions/SignalDefinitionsPage').then(m => ({ default: m.SignalDefinitionsPage })));
 const WorkflowListPage = lazyWithRetry(() => import('@/features/orchestration/components/WorkflowListPage').then(m => ({ default: m.WorkflowListPage })));
 const WorkflowBuilderPage = lazyWithRetry(() => import('@/features/orchestration/components/WorkflowBuilderPage').then(m => ({ default: m.WorkflowBuilderPage })));
 const CampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/components/CampaignRunsPage').then(m => ({ default: m.CampaignRunsPage })));
 const LegacyRunDetailRedirect = lazyWithRetry(() => import('@/features/orchestration/components/runs/LegacyRunDetailRedirect').then(m => ({ default: m.LegacyRunDetailRedirect })));
-const ConnectionsPage = lazyWithRetry(() => import('@/features/orchestration/components/connections/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
+const ConnectionsPage = lazyWithRetry(() => import('@/features/admin/integrations/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
 const DatasetsPage = lazyWithRetry(() => import('@/features/orchestration/components/datasets/DatasetsPage').then(m => ({ default: m.DatasetsPage })));
 const DatasetDetail = lazyWithRetry(() => import('@/features/orchestration/components/datasets/DatasetDetail').then(m => ({ default: m.DatasetDetail })));
 
@@ -123,7 +128,7 @@ export function Router() {
               path={routes.voiceRx.evaluators}
               element={<AppEvaluatorsPage />}
             />
-            <Route path="/runs/:runId" element={<VoiceRxRunDetail />} />
+            <Route path="/runs/:runId" element={<RunDetailPage />} />
             <Route path={routes.voiceRx.runs} element={<EvalRunList />} />
             <Route path={routes.voiceRx.logs} element={<EvalLogs />} />
             <Route path={`${routes.voiceRx.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
@@ -162,7 +167,7 @@ export function Router() {
               element={<AppEvaluatorsPage />}
             />
             <Route path={routes.kaira.runs} element={<EvalRunList />} />
-            <Route path="/kaira/runs/:runId" element={<EvalRunDetail />} />
+            <Route path="/kaira/runs/:runId" element={<RunDetailPage />} />
             <Route
               path="/kaira/runs/:runId/adversarial/:evalId"
               element={<EvalAdversarialDetailV2 />}
@@ -182,14 +187,14 @@ export function Router() {
 
           {/* Inside Sales routes */}
           <Route element={<InsideSalesGuard />}>
-            <Route path={routes.insideSales.listing} element={<InsideSalesListing />} />
+            <Route path={routes.insideSales.listing} element={<CrmListing />} />
             <Route path={routes.insideSales.evaluators} element={<AppEvaluatorsPage />} />
             <Route path="/inside-sales/evaluators/:id" element={<EvaluatorDetailPage />} />
             <Route path={routes.insideSales.runs} element={<EvalRunList />} />
-            <Route path="/inside-sales/runs/:runId" element={<InsideSalesRunDetail />} />
-            <Route path="/inside-sales/runs/:runId/calls/:callId" element={<InsideSalesRunDetail />} />
-            <Route path="/inside-sales/calls/:activityId" element={<InsideSalesCallDetail />} />
-            <Route path="/inside-sales/leads/:prospectId" element={<InsideSalesLeadDetail />} />
+            <Route path="/inside-sales/runs/:runId" element={<RunDetailPage />} />
+            <Route path="/inside-sales/runs/:runId/calls/:callId" element={<RunDetailPage />} />
+            <Route path="/inside-sales/calls/:activityId" element={<CrmCallDetail />} />
+            <Route path="/inside-sales/leads/:leadId" element={<CrmLeadDetail />} />
             <Route path={routes.insideSales.dashboard} element={<AnalyticsDashboardPage appId="inside-sales" />} />
             <Route path={routes.insideSales.logs} element={<EvalLogs />} />
             <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
@@ -203,7 +208,6 @@ export function Router() {
             <Route path="/inside-sales/orchestration/workflows/:workflowId" element={<Suspense fallback={ROUTE_FALLBACK}><WorkflowBuilderPage /></Suspense>} />
             <Route path={routes.insideSales.campaignRuns} element={<Suspense fallback={ROUTE_FALLBACK}><CampaignRunsPage /></Suspense>} />
             <Route path="/inside-sales/orchestration/runs/:runId" element={<Suspense fallback={ROUTE_FALLBACK}><LegacyRunDetailRedirect /></Suspense>} />
-            <Route path={routes.insideSales.connections} element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><ConnectionsPage /></Suspense></RequirePermission>} />
             <Route path={routes.insideSales.datasets} element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><DatasetsPage /></Suspense></RequirePermission>} />
             <Route path="/inside-sales/orchestration/datasets/:datasetId" element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><DatasetDetail /></Suspense></RequirePermission>} />
           </Route>
@@ -238,6 +242,26 @@ export function Router() {
             }
           />
           <Route
+            path={routes.adminAnalyticsMappings}
+            element={
+              <RequirePermission action="analytics:admin">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <AnalyticsMappingsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path={routes.adminAnalyticsSignals}
+            element={
+              <RequirePermission action="analytics:admin">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <SignalDefinitionsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
             path={routes.adminSherlock}
             element={
               <AdminGuard>
@@ -251,6 +275,24 @@ export function Router() {
               <AdminGuard>
                 <AdminSherlockToolCallPage />
               </AdminGuard>
+            }
+          />
+          <Route
+            path={routes.adminSherlockConfig}
+            element={
+              <AdminGuard>
+                <AdminSherlockConfigPage />
+              </AdminGuard>
+            }
+          />
+          <Route
+            path={routes.adminIntegrations}
+            element={
+              <RequirePermission action="orchestration:manage">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <ConnectionsPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
 

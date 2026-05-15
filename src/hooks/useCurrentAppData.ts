@@ -61,7 +61,11 @@ export function useCurrentAppMetadata() {
 }
 
 /**
- * Get current appId
+ * Get current appId.
+ *
+ * `MainLayout` syncs `appStore.currentApp` from the route *during render*
+ * (before children render), so this store read is route-accurate on the
+ * first render of any app page.
  */
 export function useCurrentAppId(): AppId {
   return useAppStore((state) => state.currentApp);

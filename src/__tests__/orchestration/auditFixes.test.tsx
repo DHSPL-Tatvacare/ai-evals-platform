@@ -55,8 +55,8 @@ describe('audit #12 — viewport round-trip + non-dirty pan/zoom', () => {
   });
 
   it('setViewport does NOT mark draft dirty (data hash unchanged)', () => {
-    // Start from a hydrated baseline so committedDataHash is set; otherwise
-    // the post-reset state is `committedDataHash: null` by design.
+    // Exercise the post-hydrate path explicitly; the store also seeds
+    // committedDataHash on reset, so this is belt-and-braces.
     useWorkflowBuilderStore.getState().hydrate({ nodes: [], edges: [] });
     const initial = useWorkflowBuilderStore.getState();
     const initialHash = initial.currentDataHash;

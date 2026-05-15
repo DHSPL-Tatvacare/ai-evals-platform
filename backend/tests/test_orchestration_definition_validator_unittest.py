@@ -439,3 +439,152 @@ def test_scenario_a_passes_after_normalization_of_legacy_input():
     # Wait promoted to mode='duration'.
     wait = next(n for n in canonical["nodes"] if n["id"] == "wait")
     assert wait["config"].get("mode") == "duration"
+
+
+# ─── Section 1 / 1b: draft mode validation ─────────────────────────────────
+
+
+def test_draft_allows_missing_required_runtime_fields():
+    """A partial source.cohort_query (no selector yet) parses in draft."""
+    nodes = [{
+        "id": "src",
+        "type": "source.cohort_query",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {},  # no source_ref, no source_table — incomplete authoring
+    }]
+    validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_draft_allows_single_node_canvas_without_terminal_or_ingress():
+    """Ingress + terminal-path rules defer to publish in draft."""
+    nodes = [{
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"mode": "by_field"},  # branches not filled in yet
+    }]
+    validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_draft_rejects_fabricated_key():
+    """extra='forbid' still fires in draft — unknown keys are hard errors."""
+    nodes = [{
+        "id": "src",
+        "type": "source.event_trigger",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"fabricated_key": 1},
+    }]
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+    assert any("Extra inputs are not permitted" in e["message"]
+               for e in exc_info.value.errors)
+
+
+def test_draft_rejects_wrong_type_on_provided_field():
+    """Wrong-typed provided fields still surface in draft."""
+    nodes = [{
+        "id": "wait",
+        "type": "logic.wait",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"mode": "duration", "duration_hours": "not-a-number"},
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_draft_rejects_malformed_predicate():
+    """Predicate AST validation fires regardless of mode — structural."""
+    nodes = [{
+        "id": "f",
+        "type": "filter.eligibility",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"predicate": {"field": "x", "op": "in", "value": "not-a-list"}},
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_draft_rejects_split_with_conflicting_mode_fields():
+    """Mode/field conflicts (structural) still fire in draft mode."""
+    nodes = [{
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {
+            "mode": "random",
+            "field": "plan",  # not allowed when mode='random'
+            "branches": [
+                {"id": "a", "label": "A", "weight": 1},
+                {"id": "b", "label": "B", "weight": 1},
+            ],
+        },
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_publish_still_requires_ingress_and_terminal():
+    """Sanity check — section 1 didn't relax publish."""
+    nodes = [{
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"mode": "random", "branches": [
+            {"id": "a", "label": "A", "weight": 1},
+            {"id": "b", "label": "B", "weight": 1},
+        ]},
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="publish")
+
+
+def test_publish_default_mode_is_unchanged():
+    """The default (no mode arg) must still be 'publish'."""
+    nodes = [{
+        "id": "src",
+        "type": "source.event_trigger",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"fabricated_key": 1},
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm")
+
+
+def test_draft_allows_partial_crm_send_wati():
+    """The actual Sherlock-authoring scenario: a WATI dispatch node placed
+    on the canvas with no connection_id / template_slug / template_name
+    must parse in draft so the operator can fill the picker fields, but
+    publish still rejects via the schema's required-field check."""
+    nodes = [{
+        "id": "wati1",
+        "type": "crm.send_wati",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {},  # every required field unset — pure draft state
+    }]
+    # Draft: must not raise — Pydantic 'missing' errors are filtered.
+    validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+    # Publish: still rejects (connection_id required by the schema).
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="publish")
+
+
+def test_draft_rejects_partial_crm_send_wati_with_fabricated_key():
+    """Partial draft tolerance does NOT extend to fabricated keys."""
+    nodes = [{
+        "id": "wati1",
+        "type": "crm.send_wati",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"fabricated_field": "smuggle"},
+    }]
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")

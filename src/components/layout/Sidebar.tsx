@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Plus,
@@ -6,14 +6,10 @@ import {
   PanelLeft,
   Settings,
   BookOpen,
-  MessageSquare,
-  FileSpreadsheet,
-  FileAudio,
-  ShieldAlert,
   LogOut,
   KeyRound,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   Button,
   Popover,
@@ -24,18 +20,14 @@ import {
 import {
   useUIStore,
   useAppStore,
-  useAppSettingsStore,
-  useChatStore,
-  useKairaBotSettings,
 } from "@/stores";
 import { useAuthStore } from "@/stores/authStore";
-import { useCurrentAppConfig, useCurrentAppMetadata } from "@/hooks";
+import { useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { userHasAnyPermission, usePermission, USER_MANAGEMENT_PERMISSIONS } from "@/utils/permissions";
 import { routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
 import type { AppId } from '@/types';
-import { evaluateActionAvailability } from "@/utils/actionAvailability";
 import { getNavItems } from "@/config/sidebarNav";
 import { getAdminNavItems } from "@/config/sidebarNav";
 import { AppSwitcher } from "./AppSwitcher";
@@ -45,24 +37,15 @@ import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
 import { InsideSalesSidebarContent } from "./InsideSalesSidebarContent";
 import { AdminSidebarContent } from "./AdminSidebarContent";
 import { ChangePasswordDialog } from "@/features/auth/ChangePasswordDialog";
+import { QuickActionsProvider } from "@/features/quickActions/QuickActionsProvider";
+import type { QuickActionItem } from "@/features/quickActions/types";
+import type { ActionAvailabilityBlocker } from "@/utils/actionAvailability";
 
-interface SidebarProps {
-  onVoiceRxUpload?: () => void;
-}
-
-export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
+export function Sidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
   const appId = useAppStore((state) => state.currentApp);
-  const appConfig = useCurrentAppConfig();
   const appMetadata = useCurrentAppMetadata();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
-  const appSettings = useAppSettingsStore((state) => state.settings[appId]);
-
-  // Kaira chat specific
-  const { createSession, isCreatingSession, isStreaming } = useChatStore();
-  const { settings: kairaBotSettings } = useKairaBotSettings();
-  const kairaChatUserId = kairaBotSettings.kairaChatUserId;
 
   const isGuideActive = location.pathname === routes.guide;
 
@@ -79,19 +62,13 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
     APP_IDS.some((candidateAppId) => location.pathname === settingsRouteForApp(candidateAppId));
   const canViewCost = usePermission('cost:view');
   const canManageSchedules = usePermission('schedule:manage');
+  const canManageOrchestration = usePermission('orchestration:manage');
   const canEditConfiguration = usePermission('configuration:edit');
   // User-mgmt nav entry stays tied to user-specific permissions, even though
   // the admin chrome is now reachable via `schedule:manage` alone.
   const canManageUsers = userHasAnyPermission(user, USER_MANAGEMENT_PERMISSIONS);
-  const adminNavItems = getAdminNavItems({ canManageUsers, canViewCost, canManageSchedules });
+  const adminNavItems = getAdminNavItems({ canManageUsers, canViewCost, canManageSchedules, canManageOrchestration });
   const navItems = isAdminView ? adminNavItems : getNavItems(appId as AppId);
-
-  // Modal management (for batch/adversarial wizards)
-  const openModal = useUIStore((s) => s.openModal);
-
-  // Check app type
-  const isKairaBot = appId === "kaira-bot";
-  const isInsideSales = appId === "inside-sales";
 
   // Controlled state for the +New popover
   const [newMenuOpen, setNewMenuOpen] = useState(false);
@@ -102,129 +79,32 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
   // User menu popover
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
-  // Disable new button when creating session or streaming
-  const newActionAvailability = evaluateActionAvailability({
-    appId,
-    action: appConfig.actions.primaryNew,
-    sources: {
-      appSettings,
-    },
-    runtimeBlockers: [
-      {
-        key: 'action-in-progress',
-        isActive: isKairaBot && (isCreatingSession || isStreaming),
-        title: `${appMetadata.newItemLabel} is temporarily unavailable`,
-        description: 'Wait for the current action to finish, then try again.',
-      },
-    ],
-  });
-  const isNewButtonDisabled = newActionAvailability.disabled;
+  // Aggregate availability across all configured quick actions. The Run
+  // button itself is disabled only when EVERY action is disabled — partial
+  // disablement is communicated per-row inside the menu. This keeps the
+  // primary CTA usable as long as at least one item can fire.
+  const aggregateDisabled = (items: QuickActionItem[]) =>
+    items.length > 0 && items.every((item) => item.disabled);
+  const aggregateLoading = (items: QuickActionItem[]) =>
+    items.some((item) => item.isLoading);
+  const aggregateBlockers = (items: QuickActionItem[]): ActionAvailabilityBlocker[] =>
+    items.flatMap((item) => item.blockers);
 
-  // Kaira "new chat" action — creates a session and navigates to it
-  const handleNewKairaChat = useCallback(async () => {
-    if (!kairaChatUserId) return;
-    if (isCreatingSession || isStreaming) return;
-    try {
-      const session = await createSession(appId, kairaChatUserId);
-      navigate(routes.kaira.chatSession(session.id));
-    } catch (err) {
-      console.warn("Session creation skipped:", err);
-    }
-  }, [
-    kairaChatUserId,
-    isCreatingSession,
-    isStreaming,
-    appId,
-    createSession,
-    navigate,
-  ]);
+  const renderNewAction = (
+    variant: 'collapsed' | 'expanded',
+    items: QuickActionItem[],
+  ) => {
+    if (isAdminView || items.length === 0) return null;
 
-  // Generic popover items — one source of truth per app, no hardcoded
-  // rendering branches. Each entry drives the same NewMenu component.
-  const newMenuItems = useMemo<NewMenuItem[]>(() => {
-    if (isKairaBot) {
-      return [
-        {
-          icon: MessageSquare,
-          label: "New Chat",
-          description: "Start a new Kaira conversation",
-          action: handleNewKairaChat,
-        },
-        {
-          icon: FileSpreadsheet,
-          label: "Batch Evaluation",
-          description: "Evaluate threads from CSV data",
-          action: () => openModal("batchEval"),
-        },
-        {
-          icon: ShieldAlert,
-          label: "Adversarial Test",
-          description: "Run adversarial inputs against Kaira",
-          action: () => openModal("adversarialTest"),
-        },
-      ];
-    }
-    if (isInsideSales) {
-      return [
-        {
-          icon: FileSpreadsheet,
-          label: "Batch Evaluation",
-          description: "Evaluate a selected set of calls",
-          action: () => openModal("insideSalesEval"),
-        },
-      ];
-    }
-    if (onVoiceRxUpload) {
-      return [
-        {
-          icon: FileAudio,
-          label: "Evaluation",
-          description: "Single audio file evaluation",
-          action: onVoiceRxUpload,
-        },
-      ];
-    }
-    return [];
-  }, [isKairaBot, isInsideSales, handleNewKairaChat, openModal, onVoiceRxUpload]);
-
-  const newActionTooltip = isNewButtonDisabled && newActionAvailability.blockers.length > 0 ? (
-    <div className="space-y-2">
-      <div className="font-medium text-[var(--text-primary)]">
-        {appMetadata.newItemLabel} is unavailable
-      </div>
-      <div className="space-y-1.5">
-        {newActionAvailability.blockers.map((blocker) => (
-          <div key={blocker.key} className="space-y-0.5">
-            <div className="font-medium text-[var(--text-primary)]">{blocker.title}</div>
-            <div className="text-[var(--text-secondary)]">{blocker.description}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  ) : null;
-
-  const renderNewActionButton = (button: React.ReactNode, position: 'bottom' | 'right') => {
-    if (!newActionTooltip) {
-      return button;
-    }
-
-    return (
-      <Tooltip content={newActionTooltip} position={position} maxWidth={320}>
-        <span className="inline-flex">{button}</span>
-      </Tooltip>
-    );
-  };
-
-  // Generic +New rendering — same popover pattern for every app, items
-  // come from `newMenuItems` which is the single branching point.
-  const renderNewAction = (variant: 'collapsed' | 'expanded') => {
-    if (isAdminView || newMenuItems.length === 0) return null;
-
+    const disabled = aggregateDisabled(items);
+    const isLoading = aggregateLoading(items);
+    const blockers = disabled ? aggregateBlockers(items) : [];
     const position: 'bottom' | 'right' = variant === 'collapsed' ? 'right' : 'bottom';
+
     const triggerButton = variant === 'collapsed' ? (
       <Button
         size="sm"
-        disabled={isNewButtonDisabled}
+        disabled={disabled}
         className="h-9 w-9 p-0"
         title={appMetadata.newItemLabel}
       >
@@ -232,18 +112,39 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
       </Button>
     ) : (
       <Button
-        size="sm"
-        disabled={isNewButtonDisabled}
-        isLoading={isCreatingSession}
-        className="gap-1.5"
+        size="md"
+        disabled={disabled}
+        isLoading={isLoading}
+        className="w-full gap-1.5"
       >
         <Plus className="h-4 w-4" />
         Run
       </Button>
     );
 
-    if (isNewButtonDisabled) {
-      return renderNewActionButton(triggerButton, position);
+    const tooltip = disabled && blockers.length > 0 ? (
+      <div className="space-y-2">
+        <div className="font-medium text-[var(--text-primary)]">
+          {appMetadata.newItemLabel} is unavailable
+        </div>
+        <div className="space-y-1.5">
+          {blockers.map((blocker) => (
+            <div key={blocker.key} className="space-y-0.5">
+              <div className="font-medium text-[var(--text-primary)]">{blocker.title}</div>
+              <div className="text-[var(--text-secondary)]">{blocker.description}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
+    if (disabled) {
+      const wrapped = tooltip ? (
+        <Tooltip content={tooltip} position={position} maxWidth={320}>
+          <span className="inline-flex">{triggerButton}</span>
+        </Tooltip>
+      ) : triggerButton;
+      return wrapped;
     }
 
     return (
@@ -251,14 +152,21 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
         <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
         <PopoverContent
           side={position}
-          align={variant === 'collapsed' ? 'start' : 'end'}
-          className={cn('p-1', variant === 'collapsed' ? 'w-[240px]' : 'w-[280px]')}
+          align="start"
+          className={cn('p-1', variant === 'collapsed' ? 'w-[240px]' : 'w-[256px]')}
         >
-          <NewMenu items={newMenuItems} onClose={() => setNewMenuOpen(false)} />
+          <QuickActionMenu items={items} onClose={() => setNewMenuOpen(false)} />
         </PopoverContent>
       </Popover>
     );
   };
+
+  // App-content selection still keys off app id today. Sidebar *content*
+  // (chat list / call list / generic nav) is the next slot to declarativize
+  // — see docs/plans/ for the planned `sidebarContent` registry. Until then,
+  // these locals stay strictly local to the rendering branch below.
+  const isKairaBot = appId === 'kaira-bot';
+  const isInsideSales = appId === 'inside-sales';
 
   // Resolves to the icon shown in the collapsed-sidebar header. Single source
   // for both apps (image URL from metadata) and admin (the shield glyph),
@@ -278,9 +186,11 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
         : 'voice-rx';
 
   return (
+    <QuickActionsProvider>
+      {(quickActionItems: QuickActionItem[]) => (
     <>
       <motion.aside
-        animate={{ width: sidebarCollapsed ? 56 : 280 }}
+        animate={{ width: sidebarCollapsed ? 56 : 230 }}
         transition={{ type: 'spring', stiffness: 400, damping: 40 }}
         initial={false}
         className="flex h-screen flex-col bg-[var(--bg-secondary)] overflow-hidden"
@@ -312,12 +222,12 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
               </button>
             </div>
             <div className="flex-1 flex flex-col items-center py-3 gap-2">
-              {renderNewAction('collapsed')}
+              {renderNewAction('collapsed', quickActionItems)}
 
               {/* Divider separates the "New …" action from nav items. Hide
                   it in admin view (and any view without a New action), since
                   there is nothing above it to separate from. */}
-              {!isAdminView && newMenuItems.length > 0 ? (
+              {!isAdminView && quickActionItems.length > 0 ? (
                 <div className="border-t border-[var(--border-subtle)] w-8 my-1" />
               ) : null}
               {navItems.map((item) => (
@@ -361,19 +271,28 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
           </>
         ) : (
           <>
-            <div className="flex h-14 items-center justify-between px-4 shrink-0">
-              <AppSwitcher />
-              <div className="flex items-center gap-1">
-                {renderNewAction('expanded')}
-                <button
-                  onClick={toggleSidebar}
-                  className="ml-1 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
-                  title="Collapse sidebar"
-                >
-                  <PanelLeftClose className="h-4 w-4" />
-                </button>
+            <div className="flex h-14 items-center gap-2 px-3 shrink-0">
+              <div className="min-w-0 flex-1">
+                <AppSwitcher />
               </div>
+              <button
+                onClick={toggleSidebar}
+                className="shrink-0 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+                title="Collapse sidebar"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
             </div>
+
+            {/* Primary action lives on its own row so long app names never
+                collide with it, and Run reads as a top-level CTA rather
+                than a header chip. Hidden when the surface has no action
+                (admin) or no menu items registered. */}
+            {!isAdminView && quickActionItems.length > 0 && (
+              <div className="px-3 pb-2 shrink-0">
+                {renderNewAction('expanded', quickActionItems)}
+              </div>
+            )}
 
             {/* Conditional content based on app — crossfades on app switch */}
             <AnimatePresence mode="wait" initial={false}>
@@ -447,33 +366,30 @@ export function Sidebar({ onVoiceRxUpload }: SidebarProps) {
         onClose={() => setIsChangePasswordOpen(false)}
       />
     </>
+      )}
+    </QuickActionsProvider>
   );
 }
 
-export interface NewMenuItem {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  description: string;
-  action: () => void;
-}
-
-function NewMenu({
+function QuickActionMenu({
   items,
   onClose,
 }: {
-  items: NewMenuItem[];
+  items: QuickActionItem[];
   onClose: () => void;
 }) {
   return (
     <div className="py-1">
       {items.map((item) => (
         <button
-          key={item.label}
+          key={item.id}
           onClick={() => {
             onClose();
-            item.action();
+            item.onSelect();
           }}
-          className="w-full flex items-start gap-3 px-3 py-2 text-left rounded-md hover:bg-[var(--interactive-secondary)] transition-colors"
+          disabled={item.disabled}
+          title={item.disabled && item.blockers.length > 0 ? item.blockers[0].title : undefined}
+          className="w-full flex items-start gap-3 px-3 py-2 text-left rounded-md hover:bg-[var(--interactive-secondary)] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           <item.icon className="h-4 w-4 mt-0.5 text-[var(--text-secondary)] shrink-0" />
           <div className="min-w-0">

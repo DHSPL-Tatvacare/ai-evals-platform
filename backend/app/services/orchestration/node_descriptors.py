@@ -188,7 +188,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "source.cohort_query": {
         "display_label": "Cohort Query",
         "display_category": "ingress",
-        "description": "Materialize the entry cohort once from a registered source in one SQL round-trip.",
+        "description": "Load contacts from a connected data source as the workflow's entry audience.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "SourceSelector"},
         "required_payload_fields": [],
@@ -206,7 +206,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "source.event_trigger": {
         "display_label": "Event Trigger",
         "display_category": "ingress",
-        "description": "Seed entry recipients from already-normalized event payload.",
+        "description": "Trigger a workflow run when an external event fires (e.g. a new CRM lead).",
         "authoring_status": "active",
         "editor_hints": {"empty_state_message": "Event payload is supplied by the trigger / webhook."},
         "required_payload_fields": [],
@@ -226,7 +226,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "filter.eligibility": {
         "display_label": "Eligibility Filter",
         "display_category": "qualification",
-        "description": "Pass or block recipients by predicate.",
+        "description": "Continue only with contacts that match your eligibility rule.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "PredicateBuilder"},
         "required_payload_fields": [],  # config-derived from predicate field references
@@ -247,7 +247,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "filter.consent_gate": {
         "display_label": "Consent Gate",
         "display_category": "qualification",
-        "description": "Allow or block recipients using persisted consent state.",
+        "description": "Continue only with contacts that have valid consent on record.",
         "authoring_status": "hidden",
         "editor_hints": {
             "empty_state_message": (
@@ -275,7 +275,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "logic.conditional": {
         "display_label": "Conditional Branch",
         "display_category": "routing",
-        "description": "Route recipients into true/false branches by predicate.",
+        "description": "Route each contact to a true or false branch based on a rule.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "PredicateBuilder"},
         "required_payload_fields": [],
@@ -296,7 +296,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "logic.split": {
         "display_label": "Segment Split",
         "display_category": "routing",
-        "description": "Direct recipients into disjoint or weighted branches.",
+        "description": "Route contacts into multiple branches by rule or weighted percentage.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "SplitBranchEditor"},
         "required_payload_fields": [],
@@ -317,7 +317,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "logic.wait": {
         "display_label": "Wait Condition",
         "display_category": "suspension",
-        "description": "Suspend recipients until time or event conditions release them.",
+        "description": "Pause execution until a delay elapses or an awaited event arrives.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "WaitConditionEditor"},
         "required_payload_fields": [],
@@ -343,7 +343,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "logic.merge": {
         "display_label": "Path Merge",
         "display_category": "synchronization",
-        "description": "Reconcile multiple upstream paths into one continuation path.",
+        "description": "Reconverge multiple inbound branches into a single downstream path.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "MergePolicyEditor"},
         "required_payload_fields": [],
@@ -365,7 +365,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "core.webhook_out": {
         "display_label": "Webhook Dispatch",
         "display_category": "dispatch",
-        "description": "Optional structured outbound HTTP call. Body is a JSON-shaped object whose leaves may reference recipient payload fields.",
+        "description": "Call an external API with a JSON body assembled from contact attributes.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "StructuredRequestBodyEditor"},
         "required_payload_fields": [],  # derived from body field references
@@ -377,7 +377,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "crm.send_wati": {
         "display_label": "WhatsApp Dispatch",
         "display_category": "dispatch",
-        "description": "Send a WATI WhatsApp template via the configured provider connection.",
+        "description": "Send a WhatsApp template message through the connected provider.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": ["whatsapp_number"],
@@ -389,7 +389,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "crm.place_bolna_call": {
         "display_label": "AI Call Dispatch",
         "display_category": "dispatch",
-        "description": "Initiate an outbound Bolna AI voice call via the configured provider connection.",
+        "description": "Place an outbound AI voice call through the connected provider.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": ["phone"],
@@ -401,7 +401,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "crm.send_sms": {
         "display_label": "Message Dispatch",
         "display_category": "dispatch",
-        "description": "Send a provider-backed SMS via the configured provider connection.",
+        "description": "Send an SMS through the connected provider.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": ["phone"],
@@ -413,7 +413,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "clinical.schedule_lab": {
         "display_label": "Schedule Lab Order",
         "display_category": "dispatch",
-        "description": "Enqueue a lab scheduling action in the clinical outbox.",
+        "description": "Schedule a lab order for the patient.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": [],
@@ -425,7 +425,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "clinical.assign_care_team_task": {
         "display_label": "Assign Care Team Task",
         "display_category": "dispatch",
-        "description": "Assign a downstream task to the care team via the clinical outbox.",
+        "description": "Create a task for the care team to action.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": [],
@@ -437,7 +437,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "clinical.send_pro_assessment": {
         "display_label": "Send Assessment",
         "display_category": "dispatch",
-        "description": "Dispatch a PRO or questionnaire instrument to the recipient via the clinical outbox.",
+        "description": "Send a patient-reported outcome questionnaire to the patient.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": [],
@@ -449,7 +449,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "clinical.escalation_uptier": {
         "display_label": "Escalation",
         "display_category": "dispatch",
-        "description": "Dispatch an escalation action to a human or upstream workflow via the clinical outbox.",
+        "description": "Escalate the case to a human reviewer.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": [],
@@ -463,7 +463,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "crm.lsq_update_stage": {
         "display_label": "Lead Stage Update",
         "display_category": "mutation",
-        "description": "Write a lead stage to LeadSquared via the configured provider connection.",
+        "description": "Update the lead's stage in the connected CRM.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "FieldMappingEditor"},
         "required_payload_fields": [],
@@ -475,7 +475,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "crm.lsq_log_activity": {
         "display_label": "Activity Log Update",
         "display_category": "mutation",
-        "description": "Write an activity row to LeadSquared via the configured provider connection.",
+        "description": "Log an activity against the lead in the connected CRM.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "FieldMappingEditor"},
         "required_payload_fields": [],
@@ -487,7 +487,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "clinical.emr_write": {
         "display_label": "EMR Record Update",
         "display_category": "mutation",
-        "description": "Write structured output to the EMR-facing outbox.",
+        "description": "Write a structured record to the EMR.",
         "authoring_status": "active",
         "editor_hints": {"preferred_editor": "FieldMappingEditor"},
         "required_payload_fields": [],
@@ -501,7 +501,7 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "sink.complete": {
         "display_label": "Workflow Complete",
         "display_category": "termination",
-        "description": "Conclude workflow execution for the recipient.",
+        "description": "End the workflow run for the contact.",
         "authoring_status": "active",
         "editor_hints": {},
         "required_payload_fields": [],

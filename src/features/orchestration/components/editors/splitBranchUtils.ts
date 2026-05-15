@@ -1,5 +1,4 @@
 import type {
-  PredicateAst,
   SplitBranch,
   SplitMode,
 } from '@/features/orchestration/types';
@@ -23,15 +22,9 @@ function normalizeBranchForMode(branch: SplitBranch, mode: SplitMode): SplitBran
       match:
         typeof branch.match === 'string'
           ? branch.match
-          : branch.match === undefined
+          : branch.match === undefined || branch.match === null
             ? ''
             : String(branch.match),
-    };
-  }
-  if (mode === 'by_rules') {
-    return {
-      ...base,
-      predicate: branch.predicate ?? ({ field: '', op: 'eq', value: '' } as PredicateAst),
     };
   }
   return {

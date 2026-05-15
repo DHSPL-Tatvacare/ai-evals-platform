@@ -47,7 +47,7 @@ from app.services.inside_sales_queries import (
     get_collection_freshness,
     get_collection_sync_status,
     get_lead_record,
-    list_call_history_for_prospect,
+    list_call_history_for_lead,
     list_calls_from_source,
     list_collection_suggestions,
     list_leads_from_source,
@@ -60,6 +60,7 @@ from app.services.inside_sales_sync import (
     build_incremental_refresh_job_params,
 )
 from app.models.source_records import LogCrmSourceSync
+from app.services.crm_workspace_pii import mask_crm_pii
 from app.services.job_worker import get_job_submission_metadata
 from app.services.lsq_client import (
     MAX_LEAD_CALL_HISTORY,
@@ -89,14 +90,17 @@ async def list_calls(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     scope: str = Query("page", pattern="^(page|all)$"),
-    agents: str | None = Query(None, description="Comma-separated agent names"),
-    prospect_id: str | None = Query(None, description="Comma-separated prospect IDs; each is substring-matched"),
+    agents: str | None = Query(None, description="Comma-separated rep names"),
+    lead_id: str | None = Query(None, description="Comma-separated lead IDs; each is substring-matched"),
     direction: str | None = Query(None),
     status: str | None = Query(None),
     duration_min: int | None = Query(None, description="Min call duration in seconds (inclusive)"),
     duration_max: int | None = Query(None, description="Max call duration in seconds (inclusive)"),
     has_recording: bool | None = Query(None, description="If true, only calls with a recording URL"),
     event_codes: str | None = Query(None, description="Comma-separated event codes"),
+    # Deprecated alias — accepted for the duration of the Phase 1→9 soak so
+    # legacy clients keep working. Removed in Phase 9.
+    prospect_id: str | None = Query(None, include_in_schema=False),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -113,7 +117,7 @@ async def list_calls(
         app_id="inside-sales",
         filters=InsideSalesCallFilters(
             agents=_parse_csv_query(agents),
-            prospect_ids=_parse_csv_query(prospect_id),
+            lead_ids=_parse_csv_query(lead_id or prospect_id),
             direction=direction,
             status=status,
             duration_min=duration_min,
@@ -132,8 +136,15 @@ async def list_calls(
         source_family="calls",
     )
 
+    masked_calls = await mask_crm_pii(
+        call_page.records,
+        table_name="fact_lead_activity",
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return CallListResponse(
-        calls=[CallRecord(**call) for call in call_page.records],
+        calls=[CallRecord(**call) for call in masked_calls],
         total=call_page.total,
         page=call_page.page,
         page_size=call_page.page_size,
@@ -141,9 +152,9 @@ async def list_calls(
     )
 
 
-@router.get("/leads/{prospect_id}", response_model=LeadDetailResponse)
+@router.get("/leads/{lead_id}", response_model=LeadDetailResponse)
 async def get_lead(
-    prospect_id: str,
+    lead_id: str,
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -157,17 +168,30 @@ async def get_lead(
         db,
         tenant_id=auth.tenant_id,
         app_id=INSIDE_SALES_APP_ID,
-        prospect_id=prospect_id,
+        lead_id=lead_id,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    [masked] = await mask_crm_pii(
+        [{
+            "leadId": record.lead_id,
+            "firstName": record.first_name,
+            "lastName": record.last_name,
+            "phone": record.phone,
+            "email": record.email,
+        }],
+        table_name="dim_lead",
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return LeadDetailResponse(
-        prospect_id=record.prospect_id,
-        first_name=record.first_name,
-        last_name=record.last_name,
-        phone=record.phone,
-        email=record.email,
+        lead_id=masked["leadId"],
+        first_name=masked["firstName"],
+        last_name=masked["lastName"],
+        phone=masked["phone"],
+        email=masked["email"],
     )
 
 
@@ -175,15 +199,17 @@ async def get_lead(
 async def list_leads(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    agents: str | None = Query(None, description="Comma-separated agent names"),
+    agents: str | None = Query(None, description="Comma-separated rep names"),
     stage: str | None = Query(None, description="Comma-separated stage values"),
     mql_min: int | None = Query(None, ge=0, le=5, description="Minimum MQL score"),
     condition: str | None = Query(None, description="Comma-separated condition values"),
     city: str | None = Query(None, description="Comma-separated cities; each is substring-matched"),
-    prospect_id: str | None = Query(None, description="Comma-separated prospect IDs; each is substring-matched"),
+    lead_id: str | None = Query(None, description="Comma-separated lead IDs; each is substring-matched"),
     phone: str | None = Query(None, description="Comma-separated mobiles; digits-only compare per value"),
     plan_name: str | None = Query(None, description="Comma-separated plan names; each is substring-matched"),
     q: str | None = Query(None, description="Substring search across first name, last name, phone"),
+    # Deprecated alias kept for the soak window — removed in Phase 9.
+    prospect_id: str | None = Query(None, include_in_schema=False),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -198,7 +224,7 @@ async def list_leads(
             mql_min=mql_min,
             condition=_parse_csv_query(condition),
             city=_parse_csv_query(city),
-            prospect_ids=_parse_csv_query(prospect_id),
+            lead_ids=_parse_csv_query(lead_id or prospect_id),
             phones=_parse_csv_query(phone),
             plan_names=_parse_csv_query(plan_name),
             q=q,
@@ -213,8 +239,15 @@ async def list_leads(
         source_family="leads",
     )
 
+    masked_leads = await mask_crm_pii(
+        lead_page.records,
+        table_name="dim_lead",
+        auth=auth,
+        db=db,
+        app_id="inside-sales",
+    )
     return LeadListResponse(
-        leads=[LeadListRecord(**lead) for lead in lead_page.records],
+        leads=[LeadListRecord(**lead) for lead in masked_leads],
         total=lead_page.total,
         page=lead_page.page,
         page_size=lead_page.page_size,
@@ -422,9 +455,9 @@ async def list_collection_runs(
     )
 
 
-@router.get("/leads/{prospect_id}/detail", response_model=LeadDetailFullResponse)
+@router.get("/leads/{lead_id}/detail", response_model=LeadDetailFullResponse)
 async def get_lead_detail(
-    prospect_id: str,
+    lead_id: str,
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -441,7 +474,7 @@ async def get_lead_detail(
         db,
         tenant_id=auth.tenant_id,
         app_id=INSIDE_SALES_APP_ID,
-        prospect_id=prospect_id,
+        lead_id=lead_id,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -457,11 +490,11 @@ async def get_lead_detail(
     raw = record.raw_payload
     lead = normalize_lead(raw)
 
-    call_rows, history_truncated = await list_call_history_for_prospect(
+    call_rows, history_truncated = await list_call_history_for_lead(
         db,
         tenant_id=auth.tenant_id,
         app_id=INSIDE_SALES_APP_ID,
-        prospect_id=prospect_id,
+        lead_id=lead_id,
         limit=MAX_LEAD_CALL_HISTORY,
     )
     call_history_raw = [map_lead_call_history_entry(call) for call in call_rows]
@@ -501,7 +534,7 @@ async def get_lead_detail(
         LeadCallRecord(
             activity_id=c["activityId"],
             call_time=c["callTime"],
-            agent_name=c["agentName"],
+            rep_name=c["repName"],
             duration_seconds=c["durationSeconds"],
             status=c["status"],
             recording_url=c["recordingUrl"],
@@ -512,31 +545,36 @@ async def get_lead_detail(
     ]
 
     return LeadDetailFullResponse(
-        prospect_id=record.prospect_id,
+        lead_id=record.lead_id,
         first_name=record.first_name,
         last_name=record.last_name,
         phone=record.phone,
         email=record.email,
-        prospect_stage=record.prospect_stage,
+        # Post-Phase-9: typed domain cols are gone from crm_lead_record.
+        # Every domain field is now sourced from ``record.bag`` (raw_payload)
+        # or computed at response time. PII (first_name, last_name, phone,
+        # email, city) and source identity (lead_id, source_system) stay
+        # as typed columns.
+        prospect_stage=record.bag.get("prospect_stage") or "",
         city=record.city,
-        age_group=record.age_group,
-        condition=record.condition,
-        hba1c_band=record.hba1c_band,
+        age_group=record.bag.get("age_group"),
+        condition=record.bag.get("condition"),
+        hba1c_band=record.bag.get("hba1c_band"),
         # Fields below are not promoted to dedicated columns — read them
         # from the cached LSQ payload via ``normalize_lead``.
         blood_sugar_band=lead["bloodSugarBand"],
         diabetes_duration=lead["diabetesDuration"],
         current_management=lead["currentManagement"],
         goal=lead["goal"],
-        intent_to_pay=record.intent_to_pay,
+        intent_to_pay=record.bag.get("intent_to_pay"),
         job_title=lead["jobTitle"],
         preferred_call_time=lead["preferredCallTime"],
-        agent_name=record.agent_name,
-        source=record.source,
-        source_campaign=record.source_campaign,
+        rep_name=record.bag.get("rep_name"),
+        source=record.bag.get("source"),
+        source_campaign=record.bag.get("source_campaign"),
         created_on=lead["createdOn"],
-        mql_score=record.mql_score,
-        mql_signals=record.mql_signals,
+        mql_score=int(record.bag.get("mql_score") or 0),
+        mql_signals=record.bag.get("mql_signals") or {},
         frt_seconds=drilldown_metrics["frt_seconds"],
         total_dials=drilldown_metrics["total_dials"],
         connect_rate=drilldown_metrics["connect_rate"],

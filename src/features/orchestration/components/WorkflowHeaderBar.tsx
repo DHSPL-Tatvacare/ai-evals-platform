@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  Download,
   FlaskConical,
   MoreHorizontal,
   Pencil,
@@ -9,6 +10,7 @@ import {
   Save,
   Send,
   Timeline,
+  Upload,
 } from 'lucide-react';
 import { useWorkflowRuns } from '@/features/orchestration/queries/runs';
 
@@ -25,8 +27,10 @@ import {
 import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import {
+  useHardParseIssues,
   useLifecycleState,
   useWorkflowBuilderStore,
+  type HardParseIssueGroup,
 } from '@/features/orchestration/store/workflowBuilderStore';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import {
@@ -40,7 +44,12 @@ import {
   pillLabel,
   type LifecycleState,
 } from '@/features/orchestration/contracts/lifecycleState';
+import {
+  buildSaveBlockedMessage,
+  shouldBlockSave,
+} from '@/features/orchestration/contracts/saveGate';
 import { PublishErrorPanel } from './PublishErrorPanel';
+import { WorkflowJsonIO, type WorkflowJsonIOHandle } from './WorkflowJsonIO';
 
 interface WorkflowHeaderBarProps {
   onRunStarted?: (run: WorkflowRun) => void;
@@ -48,6 +57,23 @@ interface WorkflowHeaderBarProps {
    *  run; pass `null` to open the inspector with the picker only (the
    *  "browse runs" entry point). The page owns the URL state. */
   onOpenRuns?: (runId: string | null) => void;
+}
+
+/** Section 5 — fail-closed save gate. Returns ``true`` when the live
+ *  canvas carries hard parse issues (fabricated keys, wrong types, invalid
+ *  enums, malformed predicates). The Save / Publish handlers early-return
+ *  when this fires; we surface a notification pointing to the parse-issue
+ *  banner that already lists the offending nodes. Soft issues (missing
+ *  required fields tolerated by draft mode) never block — incomplete
+ *  drafts must remain saveable.
+ *
+ *  Decision + message live in ``saveGate.ts`` (pure, tested). The
+ *  notification side-effect stays here so the gate keeps a single
+ *  user-visible surface. */
+function blockSaveForHardIssues(groups: HardParseIssueGroup[]): boolean {
+  if (!shouldBlockSave(groups)) return false;
+  notificationService.error(buildSaveBlockedMessage(groups));
+  return true;
 }
 
 export function WorkflowHeaderBar({
@@ -65,6 +91,20 @@ export function WorkflowHeaderBar({
     (s) => s.currentPublishedVersionId,
   );
   const lifecycle = useLifecycleState();
+  const hardParseIssues = useHardParseIssues();
+  const nodeCount = useWorkflowBuilderStore((s) => s.nodes.length);
+  // Import is offered whenever the canvas is empty and no published version
+  // would be shadowed. Import only hydrates the canvas in memory — nothing
+  // persists until Save Draft, which creates a fresh draft version. So
+  // importing into a saved-but-emptied workflow is non-destructive; the old
+  // `versionId === null` guard blocked it for no safety benefit. Still gated
+  // off while a save/publish write is in flight.
+  const canImport =
+    nodeCount === 0 &&
+    !currentPublishedVersionId &&
+    lifecycle.kind !== 'saving' &&
+    lifecycle.kind !== 'publishing';
+  const jsonIORef = useRef<WorkflowJsonIOHandle>(null);
 
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   /** Last publish error in structured form. Cleared on the next publish
@@ -115,6 +155,7 @@ export function WorkflowHeaderBar({
 
   const handleSave = async () => {
     if (!workflowId || !workflowType) return;
+    if (blockSaveForHardIssues(hardParseIssues)) return;
     const store = useWorkflowBuilderStore.getState();
     store.beginInFlight('saving');
     try {
@@ -139,6 +180,7 @@ export function WorkflowHeaderBar({
 
   const handlePublish = async () => {
     if (!workflowId) return;
+    if (blockSaveForHardIssues(hardParseIssues)) return;
     const store = useWorkflowBuilderStore.getState();
     setPublishError(null);
     store.beginInFlight('publishing');
@@ -283,9 +325,12 @@ export function WorkflowHeaderBar({
             isPublished={isPublished}
             testRunDisabled={testRunDisabled}
             testRunTooltip={testRunTooltip}
+            canImport={canImport}
             onSave={handleSave}
             onPublish={handlePublish}
             onRun={handleRun}
+            onExportJson={() => jsonIORef.current?.openExport()}
+            onImportJson={() => jsonIORef.current?.openImport()}
           />
         )}
       </div>
@@ -298,6 +343,7 @@ export function WorkflowHeaderBar({
         />
       </div>
     ) : null}
+    <WorkflowJsonIO ref={jsonIORef} workflowId={workflowId} />
     <ConfirmDialog
       isOpen={showLeaveConfirm}
       onClose={() => setShowLeaveConfirm(false)}
@@ -385,9 +431,15 @@ interface EditModeActionsProps {
   isPublished: boolean;
   testRunDisabled: boolean;
   testRunTooltip: string;
+  /** True only on an empty new-workflow canvas. Controls whether the
+   *  "Import JSON" menu item is shown — once a node exists, importing
+   *  would silently nuke the operator's work. */
+  canImport: boolean;
   onSave(): void;
   onPublish(): void;
   onRun(): void;
+  onExportJson(): void;
+  onImportJson(): void;
 }
 
 type PrimaryActionKind = 'save' | 'publish';
@@ -432,9 +484,12 @@ function EditModeActions({
   isPublished,
   testRunDisabled,
   testRunTooltip,
+  canImport,
   onSave,
   onPublish,
   onRun,
+  onExportJson,
+  onImportJson,
 }: EditModeActionsProps) {
   const primaryKind = pickPrimary(lifecycle);
   const primaryClick = primaryKind === 'save' ? onSave : onPublish;
@@ -489,6 +544,25 @@ function EditModeActions({
       label: 'Test Run',
       disabled: testRunDisabled,
       title: testRunTooltip,
+    },
+    {
+      key: 'export-json',
+      icon: <Download className="h-3.5 w-3.5" />,
+      label: 'Export JSON',
+      onClick: onExportJson,
+      disabled: false,
+    },
+    {
+      key: 'import-json',
+      icon: <Upload className="h-3.5 w-3.5" />,
+      label: 'Import JSON',
+      onClick: canImport ? onImportJson : undefined,
+      disabled: !canImport,
+      title: canImport
+        ? 'Import a workflow definition from a JSON file'
+        : isPublished
+          ? 'Import is disabled once a version is published'
+          : 'Import is only available on an empty canvas',
     },
   ];
 

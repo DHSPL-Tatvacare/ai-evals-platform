@@ -15,7 +15,8 @@ the canonical array before persisting.
 Pure function over already-loaded thread results — no LLM I/O. Re-running
 ``populate-analytics`` is therefore deterministic.
 
-Lead linkage comes from ``result.call_metadata.prospect_id``;
+Lead linkage comes from ``result.call_metadata.lead_id`` (canonical) with
+a deprecated ``prospect_id`` fallback for rows written before Phase 1;
 ``source_activity_id`` comes from the thread's ``thread_id`` (which is
 the LSQ ``ProspectActivityId`` for inside-sales call evaluations).
 """
@@ -71,6 +72,15 @@ def build_signal_rows(
 
     Returns row dicts ready for ``FactLeadSignal(**row)``.
     """
+    # Phase 11B — every framework signal row carries ``detected_at`` (the
+    # framework dedup key). For eval-run signals it is the run's
+    # completion moment: stable per run, so re-running ``populate-analytics``
+    # produces the same key. ``signal_at`` (per-signal source moment)
+    # stays distinct.
+    detected_at = _coerce_signal_at(
+        getattr(run, "completed_at", None) or getattr(run, "created_at", None)
+    ) or datetime.now(timezone.utc)
+
     rows: list[dict[str, Any]] = []
     for thread in threads or []:
         result: dict[str, Any] = thread.result or {}
@@ -78,7 +88,13 @@ def build_signal_rows(
         if not isinstance(signals, list) or not signals:
             continue
         call_metadata = result.get("call_metadata") or {}
-        lead_id = (call_metadata.get("prospect_id") or "").strip() or None
+        # Canonical key is ``lead_id``; the deprecated ``prospect_id`` alias
+        # is read for the soak window so historical evaluation rows still
+        # resolve. The alias is removed in Phase 9.
+        lead_id_raw = (
+            call_metadata.get("lead_id") or call_metadata.get("prospect_id") or ""
+        )
+        lead_id = lead_id_raw.strip() or None
         # The thread_id IS the LSQ ProspectActivityId for inside-sales
         # call evaluations (set by the runner from ``call.activityId``).
         source_activity_id = (str(thread.thread_id) or "").strip() or None
@@ -103,6 +119,7 @@ def build_signal_rows(
                     "thread_evaluation_id": thread.id,
                     "lead_id": lead_id,
                     "source_activity_id": source_activity_id,
+                    "detected_at": detected_at,
                     "signal_type": signal_type,
                     "signal_value": (raw.get("signal_value") or None),
                     "signal_value_numeric": _coerce_decimal(

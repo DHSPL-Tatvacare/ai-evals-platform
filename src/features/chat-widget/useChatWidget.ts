@@ -3,6 +3,12 @@ import type { StateCreator } from 'zustand';
 import { cancelChatTurn, getBuilderSession, getChatDefaults, streamChatMessage } from './api';
 import { CHAT_SESSION_SOURCE, chatSessionsRepository } from '@/services/api/chatApi';
 import { notificationService } from '@/services/notifications';
+import { applyCanvasPatch, consumeRebaseRedo } from '@/features/orchestration/copilot/canvasPatchApplier';
+import { getPageContextSnapshot } from '@/features/orchestration/copilot/usePageContext';
+import {
+  VIEW_MODE_SUGGESTION_TEXT,
+  isAuthoringShapedPrompt,
+} from './components/viewModeSuggestion';
 import type { AppId } from '@/types';
 import type {
   Artifact,
@@ -15,6 +21,7 @@ import type {
   SaveToastPart,
   TerminalStatus,
   ToolCallDetailData,
+  ToolCallPart,
   TurnUsage,
   WidgetMessage,
   WidgetSessionSummary,
@@ -40,7 +47,18 @@ const SESSION_STORAGE_KEY = 'sherlock-active-session';
 const WIDGET_OPEN_KEY = 'sherlock-widget-open';
 const WIDGET_LAYOUT_KEY = 'sherlock-widget-layout';
 const STREAM_FLUSH_MS = 50;
-const SEND_TIMEOUT_MS = 60_000;
+// No wall-clock send timeout. The SSE stream itself is the liveness
+// probe — `fetch` rejects on connection drop, and the backend signals
+// terminal state via `turn_finished` / `error_emitted`. The user's
+// Stop button is the intentional-abort path. A wall-clock setTimeout
+// from `send()` added nothing those three signals don't already give
+// us, and it actively killed authoring turns whose `as_tool` boundary
+// is silent for 60-90s while the specialist runs its tool chain (the
+// SDK swallows sub-agent events at that boundary).
+//
+// If a future change needs a defensive ceiling, prefer an *idle*-based
+// watchdog that resets on every SSE event — never a wall-clock from
+// send.
 
 interface PersistedPointer {
   sessionId: string;
@@ -151,7 +169,7 @@ interface ChatWidgetStore {
 let activeAbortController: AbortController | null = null;
 
 type RuntimeApplier = {
-  onToolCallStart: (event: { seq: number; toolCallId: string; toolName: string }) => void;
+  onToolCallStart: (event: { seq: number; toolCallId: string; toolName: string; briefSummary?: string }) => void;
   onToolCallEnd: (event: {
     seq: number;
     toolCallId: string;
@@ -159,8 +177,11 @@ type RuntimeApplier = {
     summary?: string;
     detail?: ToolCallDetailData | null;
     durationMs?: number;
+    rowCount?: number;
+    evidenceCount?: number;
+    routing?: import('./types').SpecialistRoutingTelemetry;
     // Phase 7 audit fix (Gap 4): the §6.2 envelope projection the backend
-    // emits on tool_call_end. Carries ``job`` end-to-end so the widget
+    // emits on specialist_finished. Carries ``job`` end-to-end so the widget
     // can render a live pending-job badge (Gap 5).
     outcome?: {
       kind?: string;
@@ -184,6 +205,7 @@ type RuntimeApplier = {
       name: string;
       summary?: string;
       detail?: ToolCallDetailData | null;
+      routing?: import('./types').SpecialistRoutingTelemetry;
       // Phase 7 audit fix (Gap 4): envelope projection persisted alongside
       // each tool call so ``partsFromStoredMessage`` can rehydrate a
       // ``JobBadgePart`` after reload/replay (Gap 5).
@@ -243,6 +265,7 @@ function createRuntimeApplier(
     terminalStatus: TerminalStatus | undefined,
     status: WidgetMessage['status'],
     usage?: TurnUsage,
+    errorReason?: string,
   ) => {
     if (flushTimer !== null) {
       clearTimeout(flushTimer);
@@ -260,6 +283,7 @@ function createRuntimeApplier(
           status,
           terminalStatus,
           ...(usage ? { usage } : {}),
+          ...(errorReason ? { errorReason } : {}),
         },
       ],
       streamingParts: [],
@@ -276,6 +300,7 @@ function createRuntimeApplier(
           type: 'tool-call',
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          briefSummary: event.briefSummary,
           state: 'executing',
         }));
       });
@@ -290,6 +315,9 @@ function createRuntimeApplier(
           summary: typeof event.summary === 'string' ? event.summary : undefined,
           detail: event.detail ?? null,
           durationMs: event.durationMs ?? (typeof event.detail?.executionMs === 'number' ? event.detail.executionMs : undefined),
+          rowCount: event.rowCount,
+          evidenceCount: event.evidenceCount,
+          routing: event.routing,
         });
         // Phase 7 audit fix (Gap 5): if the tool submitted a platform
         // job, emit a ``JobBadgePart`` so the widget renders a live badge
@@ -378,15 +406,24 @@ function createRuntimeApplier(
           if (!toolCall.toolCallId) {
             continue;
           }
-          finalParts = upsertToolPart(finalParts, {
+          // 2026-05-10 fix: build the patch WITHOUT including
+          // `durationMs: undefined` when no value is available. The
+          // upsertToolPart spread merges `{...existing, ...next}` so an
+          // explicit-undefined key would clobber the duration set live
+          // by `onToolCallEnd` from the `specialist_finished` event.
+          const reconciledDuration =
+            typeof toolCall.detail?.executionMs === 'number' ? toolCall.detail.executionMs : undefined;
+          const reconciledPart: ToolCallPart = {
             type: 'tool-call',
             toolCallId: toolCall.toolCallId,
             toolName: toolCall.name,
             state: toolCall.detail?.error ? 'error' : 'completed',
             summary: toolCall.summary,
             detail: toolCall.detail ?? null,
-            durationMs: typeof toolCall.detail?.executionMs === 'number' ? toolCall.detail.executionMs : undefined,
-          });
+            ...(reconciledDuration !== undefined ? { durationMs: reconciledDuration } : {}),
+            ...(toolCall.routing !== undefined ? { routing: toolCall.routing } : {}),
+          };
+          finalParts = upsertToolPart(finalParts, reconciledPart);
           // Phase 7 audit fix (Gap 5): rehydrate a ``JobBadgePart`` from
           // the persisted envelope ``outcome.job`` so the final message
           // carries the same badge that was shown during streaming.
@@ -414,10 +451,26 @@ function createRuntimeApplier(
     },
     onError: (event) => {
       applySequencedEvent(event.seq, () => {
-        let finalParts = [...pendingParts];
+        // Stop any in-flight tool-call shimmer dead. Without this the
+        // specialist chip keeps "consulting…" pulsing even though the
+        // turn has already terminated — the user sees the error footer
+        // AND a still-spinning specialist, which is incoherent.
+        let finalParts = pendingParts.map((part) =>
+          part.type === 'tool-call' && part.state === 'executing'
+            ? { ...part, state: 'error' as const }
+            : part,
+        );
         finalParts = mergeTerminalText(finalParts, event.content);
-        finalParts = appendTextPart(finalParts, finalParts.length > 0 ? `\n\n${event.message}` : event.message);
-        finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'error', 'error');
+        // Do NOT append the error message as a text part — the Error /
+        // Retry footer renders it via `errorReason` so the failure shows
+        // up exactly once instead of twice.
+        finalizeAssistantMessage(
+          finalParts,
+          event.terminalStatus ?? 'error',
+          'error',
+          undefined,
+          event.message,
+        );
         activeAbortController = null;
         set({ activeTurnId: null });
         rejectSend?.(Object.assign(new Error(event.message), { terminalStatus: event.terminalStatus, content: event.content }));
@@ -576,20 +629,47 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       status: 'complete',
     };
 
+    // Phase 3 (sherlock-builder) — view-mode authoring affordance.
+    // Snapshot the page context exactly once here; the same value is
+    // threaded into the wire payload below so we don't consume the
+    // dismiss-flag twice. When the user is viewing (read-only) the
+    // orchestration builder AND just typed an authoring-shaped prompt,
+    // drop a one-time inline suggestion ABOVE their message. The
+    // suggestion does NOT block sending — the LLM refuses via the
+    // supervisor prompt anyway. Per-message, not per-session: it
+    // re-fires next time the user types this shape while viewing.
+    const pageContext = getPageContextSnapshot();
+    const builderViewing =
+      pageContext.kind === 'orchestration_builder' &&
+      pageContext.viewMode === 'view' &&
+      isAuthoringShapedPrompt(text);
+
+    const messagesUpdate: WidgetMessage[] = builderViewing
+      ? [
+          {
+            id: nextId(),
+            role: 'assistant',
+            parts: [{ type: 'text', content: VIEW_MODE_SUGGESTION_TEXT }],
+            status: 'complete',
+          },
+          userMessage,
+        ]
+      : [userMessage];
+
     set((state) => ({
       open: true,
       view: 'chat',
-      messages: [...state.messages, userMessage],
+      messages: [...state.messages, ...messagesUpdate],
       status: 'sending',
       locked: true,
       activeTurnId: turnId,
+      lastAppliedSeq: 0,
       streamingParts: [],
       streamingStatus: null,
     }));
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      let abortController: AbortController | null = null;
       activeAbortController?.abort();
       activeAbortController = null;
 
@@ -598,7 +678,6 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           return;
         }
         settled = true;
-        clearTimeout(timeoutId);
         resolve();
       };
 
@@ -607,25 +686,24 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           return;
         }
         settled = true;
-        clearTimeout(timeoutId);
         reject(error);
       };
 
-      // Single applier shared between timeout and stream — no racing second applier.
       const applier = createRuntimeApplier(set, get, finishResolve, finishReject);
 
-      const timeoutId = window.setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        // Abort the stream so no more events arrive after timeout.
-        abortController?.abort();
-        // Use the SAME applier to finalize — no second applier.
-        applier.onError({
-          terminalStatus: 'error',
-          message: 'Sherlock timed out before the turn completed',
-        });
-      }, SEND_TIMEOUT_MS);
+      // Phase 2 (sherlock-builder) — `pageContext` was snapshotted at the
+      // top of send() (above the messagesUpdate compute). The non-hook
+      // getter consumed the chip-dismiss flag there; we re-use the same
+      // value here so dismissal isn't double-consumed for one turn.
+      const patchAbortController = new AbortController();
+
+      // Phase 3 (sherlock-builder) — when a rebase is pending and the
+      // user typed a redo trigger ("yes, redo" / "redo"), rewrite the
+      // wire payload to carry the previous patch's rationale verbatim.
+      // The user's original text remains in the chat thread above; only
+      // the message sent to the supervisor is substituted.
+      const rebaseSynthetic = consumeRebaseRedo(text);
+      const wireMessage = rebaseSynthetic ?? text;
 
       streamChatMessage(
         {
@@ -633,8 +711,9 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           sessionId,
           turnId,
           operation: 'send',
-          message: text,
+          message: wireMessage,
           model,
+          ...(pageContext.kind === 'orchestration_builder' ? { pageContext } : {}),
         },
         {
           onSessionId: (runtimeSession) => {
@@ -642,7 +721,6 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
               sessionId: runtimeSession.sessionId,
               dbSessionId: runtimeSession.sessionId,
               provider: runtimeSession.provider,
-              lastAppliedSeq: runtimeSession.lastEventSeq ?? get().lastAppliedSeq,
               locked: true,
             });
             savePointer({
@@ -658,7 +736,32 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onToolCallStart: applier.onToolCallStart,
           onToolCallEnd: applier.onToolCallEnd,
           onContentDelta: applier.onContentDelta,
-          onChart: (event) => applier.onChart({ type: 'chart', payload: event, seq: event.seq }),
+          onChart: (event) => applier.onChart({ type: 'chart', payload: event.payload, saved: event.saved, chartId: event.chartId, seq: event.seq }),
+          onCanvasPatch: (event) => {
+            // Phase 2 (sherlock-builder) — applier validates, runs the
+            // hash check, surfaces a chat-thread message on mismatch, and
+            // pushes ops through the workflowBuilderStore mutators.
+            void applyCanvasPatch(event.patch, {
+              onChatMessage: (systemText) => {
+                // Inject a stand-alone assistant message into the thread —
+                // not a streaming-part append. The rebase prompt has to be
+                // visible after the turn finishes, regardless of where the
+                // turn lands. NO modal — text-only per design.
+                set((state) => ({
+                  messages: [
+                    ...state.messages,
+                    {
+                      id: nextId(),
+                      role: 'assistant',
+                      parts: [{ type: 'text', content: systemText }],
+                      status: 'complete',
+                    },
+                  ],
+                }));
+              },
+              signal: patchAbortController.signal,
+            });
+          },
           onBlueprint: applier.onBlueprint,
           onSaveResult: applier.onSaveResult,
           onStatus: applier.onStatus,
@@ -666,7 +769,9 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onError: applier.onError,
         },
       ).then((controller) => {
-        abortController = controller;
+        // Push the AbortController to module scope so `stopActiveTurn`
+        // and the next `send()` can abort an in-flight stream. This is
+        // the *only* abort path now that the wall-clock timeout is gone.
         activeAbortController = controller;
       }).catch((error) => finishReject(error instanceof Error ? error : new Error(String(error))));
     }).catch(() => {
@@ -683,7 +788,8 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
     }
 
     const applier = createRuntimeApplier(set, get);
-    set({ status: 'sending', locked: true });
+    set({ status: 'sending', locked: true, lastAppliedSeq: 0 });
+    const resumePatchAbort = new AbortController();
 
     const controller = await streamChatMessage(
       {
@@ -699,7 +805,6 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
             sessionId: runtimeSession.sessionId,
             dbSessionId: runtimeSession.sessionId,
             provider: runtimeSession.provider,
-            lastAppliedSeq: runtimeSession.lastEventSeq ?? get().lastAppliedSeq,
             locked: true,
           });
         },
@@ -709,7 +814,25 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         onToolCallStart: applier.onToolCallStart,
         onToolCallEnd: applier.onToolCallEnd,
         onContentDelta: applier.onContentDelta,
-        onChart: (event) => applier.onChart({ type: 'chart', payload: event, seq: event.seq }),
+        onChart: (event) => applier.onChart({ type: 'chart', payload: event.payload, saved: event.saved, chartId: event.chartId, seq: event.seq }),
+        onCanvasPatch: (event) => {
+          void applyCanvasPatch(event.patch, {
+            onChatMessage: (systemText) => {
+              set((state) => ({
+                messages: [
+                  ...state.messages,
+                  {
+                    id: nextId(),
+                    role: 'assistant',
+                    parts: [{ type: 'text', content: systemText }],
+                    status: 'complete',
+                  },
+                ],
+              }));
+            },
+            signal: resumePatchAbort.signal,
+          });
+        },
         onBlueprint: applier.onBlueprint,
         onSaveResult: applier.onSaveResult,
         onStatus: applier.onStatus,

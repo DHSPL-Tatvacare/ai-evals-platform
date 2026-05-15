@@ -160,7 +160,7 @@ export interface AppCollectionFilterConfig {
   description?: string;
   optionSource?: 'agents';
   /** For `async-multi-select`: which suggestion field on the backend. */
-  suggestionField?: 'prospect_id' | 'phone' | 'agent_name' | 'city' | 'stage' | 'plan_name';
+  suggestionField?: 'lead_id' | 'phone' | 'rep_name' | 'city' | 'stage' | 'plan_name';
   options?: Array<{
     value: string;
     label: string;
@@ -331,6 +331,37 @@ export interface PageActionSpec {
   requires?: string;
 }
 
+/** Sidebar quick-action spec.
+ *
+ *  Fully data-driven — `label` / `description` / `icon` / `requirements` all
+ *  live on the spec, so a tenant can add a menu item by writing a config row
+ *  with no code changes. The `kind` resolves to one of a small set of GENERIC
+ *  primitive handlers in `QUICK_ACTION_REGISTRY` (today: openModal,
+ *  triggerImperative, navigateTo). New behaviors are added by registering a
+ *  new imperative trigger from the relevant feature module — never by adding
+ *  an app-coupled kind to the registry.
+ */
+export interface QuickActionSpec {
+  /** Stable id for telemetry. */
+  id: string;
+  /** Generic primitive kind. */
+  kind: 'openModal' | 'triggerImperative' | 'navigateTo';
+  /** Display label shown in the menu row. */
+  label: string;
+  /** Sub-text shown under the label. Optional. */
+  description?: string;
+  /** Lucide icon name (e.g. ``"MessageSquare"``). Resolved via the icon map
+   *  in ``src/features/quickActions/iconMap.ts``. Missing / unknown names
+   *  fall back to a neutral `Plus` glyph. */
+  icon?: string;
+  /** Kind-specific payload (`{modalId}`, `{triggerKey}`, `{path}`). */
+  config?: Record<string, unknown>;
+  /** Permission gate. Optional — unset means visible to all. */
+  requires?: string;
+  /** Per-spec runtime gates evaluated by ``evaluateActionAvailability``. */
+  requirements?: AppActionRequirementConfig[];
+}
+
 export type EvaluatorDetailBandColor = 'emerald' | 'blue' | 'amber' | 'red';
 
 export interface EvaluatorDetailBand {
@@ -367,6 +398,9 @@ export interface AppConfig {
   pageTitles?: Partial<Record<PageType, string>>;
   /** Per-app extra header actions keyed by page type. Resolved via `PAGE_ACTION_COMPONENTS` registry. */
   pageActions?: Partial<Record<PageType, PageActionSpec[]>>;
+  /** Per-app sidebar primary-action menu items. Resolved via `QUICK_ACTION_REGISTRY`.
+   *  Empty / missing = no Run button is rendered. Order is preserved. */
+  quickActions?: QuickActionSpec[];
   /** Per-app copy/labels for the shared evaluator-detail page. Missing = neutral default. */
   evaluatorDetail?: EvaluatorDetailConfig;
 }
@@ -581,6 +615,16 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    quickActions: [
+      {
+        id: 'voice-rx-upload',
+        kind: 'triggerImperative',
+        label: 'Evaluation',
+        description: 'Single audio file evaluation',
+        icon: 'FileAudio',
+        config: { triggerKey: 'voiceRxUpload' },
+      },
+    ],
     evaluatorDetail: { interpretationBands: [] },
   },
   'kaira-bot': {
@@ -708,6 +752,35 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     pageIcons: {},
     pageTitles: {},
     pageActions: {},
+    quickActions: [
+      {
+        id: 'kaira-new-chat',
+        kind: 'triggerImperative',
+        label: 'New Chat',
+        description: 'Start a new Kaira conversation',
+        icon: 'MessageSquare',
+        config: { triggerKey: 'kaira.createSession' },
+        requirements: [
+          { source: 'appSettings', key: 'kairaChatUserId' },
+        ],
+      },
+      {
+        id: 'kaira-batch-eval',
+        kind: 'openModal',
+        label: 'Batch Evaluation',
+        description: 'Evaluate threads from CSV data',
+        icon: 'FileSpreadsheet',
+        config: { modalId: 'batchEval' },
+      },
+      {
+        id: 'kaira-adversarial',
+        kind: 'openModal',
+        label: 'Adversarial Test',
+        description: 'Run adversarial inputs against Kaira',
+        icon: 'ShieldAlert',
+        config: { modalId: 'adversarialTest' },
+      },
+    ],
     evaluatorDetail: { interpretationBands: [] },
   },
   'inside-sales': {
@@ -776,13 +849,13 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         leads: {
           filters: [
             {
-              key: 'prospectId',
-              label: 'Prospect ID',
-              pillLabel: 'Prospect',
+              key: 'leadId',
+              label: 'Lead ID',
+              pillLabel: 'Lead',
               control: 'async-multi-select',
-              fields: ['prospectId'],
-              suggestionField: 'prospect_id',
-              placeholder: 'Type to search prospect IDs...',
+              fields: ['leadId'],
+              suggestionField: 'lead_id',
+              placeholder: 'Type to search lead IDs...',
             },
             {
               key: 'phone',
@@ -836,12 +909,12 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
             },
             {
               key: 'agents',
-              label: 'Agent',
-              pillLabel: 'Agent',
+              label: 'Rep',
+              pillLabel: 'Rep',
               control: 'async-multi-select',
               fields: ['agents'],
-              suggestionField: 'agent_name',
-              placeholder: 'Type to search agents...',
+              suggestionField: 'rep_name',
+              placeholder: 'Type to search reps...',
             },
             {
               key: 'planName',
@@ -862,21 +935,21 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
           filters: [
             {
               key: 'agents',
-              label: 'Agent',
-              pillLabel: 'Agent',
+              label: 'Rep',
+              pillLabel: 'Rep',
               control: 'async-multi-select',
               fields: ['agents'],
-              suggestionField: 'agent_name',
-              placeholder: 'Type to search agents...',
+              suggestionField: 'rep_name',
+              placeholder: 'Type to search reps...',
             },
             {
-              key: 'prospectId',
-              label: 'Prospect ID',
-              pillLabel: 'Prospect',
+              key: 'leadId',
+              label: 'Lead ID',
+              pillLabel: 'Lead',
               control: 'async-multi-select',
-              fields: ['prospectId'],
-              suggestionField: 'prospect_id',
-              placeholder: 'Type to search prospect IDs...',
+              fields: ['leadId'],
+              suggestionField: 'lead_id',
+              placeholder: 'Type to search lead IDs...',
             },
             {
               key: 'direction',
@@ -931,7 +1004,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
                 { key: 'city', label: 'City' },
                 { key: 'ageGroup', label: 'Age Group' },
                 { key: 'source', label: 'Source' },
-                { key: 'agentName', label: 'Agent' },
+                { key: 'repName', label: 'Rep' },
                 { key: 'createdOn', label: 'Lead Created' },
               ],
             },
@@ -1011,6 +1084,16 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         { id: 'csv-import', kind: 'csvImport', requires: 'asset:create' },
       ],
     },
+    quickActions: [
+      {
+        id: 'inside-sales-batch-eval',
+        kind: 'openModal',
+        label: 'Batch Evaluation',
+        description: 'Evaluate a selected set of calls',
+        icon: 'FileSpreadsheet',
+        config: { modalId: 'insideSalesEval' },
+      },
+    ],
     evaluatorDetail: {
       interpretationBands: [
         { color: 'emerald', label: 'Strong', range: '80-100', description: 'Ready for independent calling' },
@@ -1185,6 +1268,7 @@ export function mergeAppConfig(appId: AppId, config?: Partial<AppConfig> | null)
       ...(fallback.pageActions ?? {}),
       ...(config.pageActions ?? {}),
     },
+    quickActions: config.quickActions ?? fallback.quickActions ?? [],
     evaluatorDetail: {
       interpretationBands:
         config.evaluatorDetail?.interpretationBands

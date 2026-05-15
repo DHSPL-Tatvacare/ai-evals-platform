@@ -100,23 +100,24 @@ export function AppSwitcher() {
   }
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative w-full" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
+        title={currentOption.name}
         className={cn(
-          'flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
+          'inline-flex max-w-full items-center gap-2 rounded-md px-2 py-1.5 transition-colors',
           'hover:bg-[var(--interactive-secondary)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1',
           isOpen && 'bg-[var(--interactive-secondary)]'
         )}
       >
-        {renderOptionIcon(currentOption, 'h-6 w-6')}
-        <span className="whitespace-nowrap text-base font-semibold text-[var(--text-primary)]">
+        {renderOptionIcon(currentOption, 'h-6 w-6 shrink-0')}
+        <span className="min-w-0 truncate text-left text-base font-semibold text-[var(--text-primary)]">
           {currentOption.name}
         </span>
         <ChevronDown
           className={cn(
-            'h-4 w-4 text-[var(--text-muted)] transition-transform',
+            'h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform',
             isOpen && 'rotate-180'
           )}
         />

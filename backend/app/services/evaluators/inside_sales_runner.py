@@ -428,20 +428,28 @@ async def run_inside_sales_evaluation(
     elif isinstance(event_codes, list):
         parsed_event_codes = tuple(int(code) for code in event_codes)
 
-    # Multi-value prospect IDs. Frontend (post-2026-04-30) sends `prospect_ids` (list);
-    # legacy single-value `prospect_id` is still honored for any in-flight job payloads.
-    prospect_ids_raw = call_selection.get("prospect_ids")
-    if isinstance(prospect_ids_raw, list) and prospect_ids_raw:
-        parsed_prospect_ids = tuple(str(pid) for pid in prospect_ids_raw if pid)
+    # Multi-value lead IDs. Frontend sends ``lead_ids`` (list) on the new
+    # canonical contract. Legacy callers may still submit the deprecated
+    # ``prospect_ids`` / ``prospect_id`` keys; both honored during the
+    # Phase 1→9 soak so any queued evaluation job continues running.
+    lead_ids_raw = (
+        call_selection.get("lead_ids")
+        or call_selection.get("prospect_ids")
+    )
+    if isinstance(lead_ids_raw, list) and lead_ids_raw:
+        parsed_lead_ids = tuple(str(pid) for pid in lead_ids_raw if pid)
     else:
-        legacy_prospect_id = call_selection.get("prospect_id")
-        parsed_prospect_ids = (str(legacy_prospect_id),) if legacy_prospect_id else ()
+        legacy_lead_id = (
+            call_selection.get("lead_id")
+            or call_selection.get("prospect_id")
+        )
+        parsed_lead_ids = (str(legacy_lead_id),) if legacy_lead_id else ()
 
     async with _async_session() as db:
         selection = await resolve_call_selection(
             InsideSalesCallFilters(
                 agents=tuple(agent_list),
-                prospect_ids=parsed_prospect_ids,
+                lead_ids=parsed_lead_ids,
                 direction=call_selection.get("direction"),
                 status=call_selection.get("status"),
                 duration_min=parsed_duration_min,
@@ -513,34 +521,35 @@ async def run_inside_sales_evaluation(
         )
         return {"status": "completed", "total": 0, "evaluated": 0}
 
-    # Resolve every prospect's display name from the synced lead mirror in
+    # Resolve every lead's display name from the synced lead mirror in
     # one query and stash it on each call dict. This replaces a per-worker
     # LSQ ``Leads.GetById`` round trip — live LSQ I/O is reserved for the
-    # sync job.
-    prospect_ids = sorted(
+    # sync job. ``normalize_activity`` still emits the LSQ-native key
+    # ``prospectId`` on call dicts, so we read that key here.
+    lead_ids = sorted(
         {call.get("prospectId", "") for call in calls if call.get("prospectId")}
     )
     lead_name_map: dict[str, str] = {}
-    if prospect_ids:
+    if lead_ids:
         async with _async_session() as db:
             rows = (await db.execute(
                 select(
-                    CrmLeadRecord.prospect_id,
+                    CrmLeadRecord.lead_id,
                     CrmLeadRecord.first_name,
                     CrmLeadRecord.last_name,
                 ).where(
                     CrmLeadRecord.tenant_id == tenant_id,
                     CrmLeadRecord.app_id == INSIDE_SALES_APP_ID,
-                    CrmLeadRecord.prospect_id.in_(prospect_ids),
+                    CrmLeadRecord.lead_id.in_(lead_ids),
                 )
             )).all()
-        for prospect_id, first_name, last_name in rows:
+        for row_lead_id, first_name, last_name in rows:
             full_name = f"{(first_name or '').strip()} {(last_name or '').strip()}".strip()
             if full_name:
-                lead_name_map[prospect_id] = full_name
+                lead_name_map[row_lead_id] = full_name
     for call in calls:
-        prospect_id = call.get("prospectId", "")
-        call["_leadName"] = lead_name_map.get(prospect_id) or (prospect_id[:8] if prospect_id else "")
+        lead_id = call.get("prospectId", "")
+        call["_leadName"] = lead_name_map.get(lead_id) or (lead_id[:8] if lead_id else "")
 
     # ── Build transcription prompt once (shared across all calls) ─
     transcription_prompt, transcription_sys = _build_transcription_prompt(transcription_config)
@@ -619,15 +628,17 @@ async def run_inside_sales_evaluation(
         call_overall_score = sum(numeric_scores) / len(numeric_scores) if numeric_scores else None
 
         # ── Step 3: Persist EvaluationRunThreadResult ─────────────────
-        agent_name = call.get("agentName", "")
-        agent_lsq_id = call.get("agentId") or ""
-        agent_id = None
+        rep_name = call.get("agentName", "")
+        # ``call.get('agentId')`` is the LSQ-native key on the
+        # ``normalize_activity`` output, not a canonical column name.
+        rep_lsq_id = call.get("agentId") or ""
+        rep_record_id: uuid.UUID | None = None
         source_snapshot = build_inside_sales_source_snapshot(call)
         async with _async_session() as db:
-            if agent_lsq_id:
+            if rep_lsq_id:
                 from app.services.lsq_client import upsert_external_agent
-                agent_id = await upsert_external_agent(
-                    db, tenant_id=tenant_id, lsq_user_id=agent_lsq_id, name=agent_name,
+                rep_record_id = await upsert_external_agent(
+                    db, tenant_id=tenant_id, lsq_user_id=rep_lsq_id, name=rep_name,
                 )
             # Canonical merged top-level ``signals`` array (Roadmap 01
             # §8.5). This is what ``populate-analytics`` reads from
@@ -643,14 +654,24 @@ async def run_inside_sales_evaluation(
                     "evaluations": eval_outputs,
                     "signals": thread_signals,
                     "transcript": transcript,
+                    # Canonical keys: ``rep_id`` / ``rep`` / ``lead_id``.
+                    # Deprecated mirrors of the same values (``agent_id`` /
+                    # ``agent`` / ``prospect_id``) ship alongside for the
+                    # Phase 1→9 soak so historical row readers keep working;
+                    # removed in Phase 9.
                     "call_metadata": {
-                        "agent_id": str(agent_id) if agent_id else None,
-                        "agent": agent_name,
+                        "rep_id": str(rep_record_id) if rep_record_id else None,
+                        "rep": rep_name,
                         "lead": call.get("_leadName", "") or call.get("prospectId", "")[:8],
-                        "prospect_id": call.get("prospectId", ""),
+                        "lead_id": call.get("prospectId", ""),
                         "direction": call.get("direction"),
                         "duration": call.get("durationSeconds"),
                         "recording_url": recording_url,
+                        # Deprecated aliases — readers should prefer the
+                        # canonical keys above.
+                        "agent_id": str(rep_record_id) if rep_record_id else None,
+                        "agent": rep_name,
+                        "prospect_id": call.get("prospectId", ""),
                     },
                     "source_snapshot": source_snapshot,
                 },

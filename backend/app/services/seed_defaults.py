@@ -1927,7 +1927,11 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 # APPS + ROLES SEEDING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-COMMON_SHERLOCK_CAPABILITIES = ["analytics", "report_builder"]
+# Sherlock v3 authoring tools are opt-in through
+# ``App.config.chat.capabilities``. Analytics remains built into v3; only
+# extra tool packs are listed here.
+COMMON_SHERLOCK_CAPABILITIES: list[str] = []
+ORCHESTRATION_AUTHORING_CAPABILITIES: list[str] = ["orchestration.authoring"]
 
 # M2: the legacy meaning-layer constants (``COMMON_SHERLOCK_ENTITY_TYPES``,
 # ``COMMON_RUN_SURFACE``, ``COMMON_RUN_RESOLVERS``) were deleted. Platform
@@ -2061,11 +2065,7 @@ APP_SEEDS = [
             },
             "chat": {
                 "enabled": True,
-                # Phase 8: voice-rx is the live test surface for the
-                # ``contract_stub`` proof pack. Keep the existing packs and
-                # append the stub so the harness-reusability demo runs on a
-                # real app without touching other app configs.
-                "capabilities": [*COMMON_SHERLOCK_CAPABILITIES, "contract_stub"],
+                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
                 # M2: meaning-layer seeds (entity types / resolvers) live in
                 # ``sherlock_ontology_*`` tables now; ``seed_sherlock_ontology``
                 # populates them at boot. Runtime reads from the bundle, not
@@ -2079,6 +2079,16 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "quickActions": [
+                {
+                    "id": "voice-rx-upload",
+                    "kind": "triggerImperative",
+                    "label": "Evaluation",
+                    "description": "Single audio file evaluation",
+                    "icon": "FileAudio",
+                    "config": {"triggerKey": "voiceRxUpload"},
+                },
+            ],
             "evaluatorDetail": {"interpretationBands": []},
         },
     },
@@ -2228,6 +2238,35 @@ APP_SEEDS = [
             "pageIcons": {},
             "pageTitles": {},
             "pageActions": {},
+            "quickActions": [
+                {
+                    "id": "kaira-new-chat",
+                    "kind": "triggerImperative",
+                    "label": "New Chat",
+                    "description": "Start a new Kaira conversation",
+                    "icon": "MessageSquare",
+                    "config": {"triggerKey": "kaira.createSession"},
+                    "requirements": [
+                        {"source": "appSettings", "key": "kairaChatUserId"},
+                    ],
+                },
+                {
+                    "id": "kaira-batch-eval",
+                    "kind": "openModal",
+                    "label": "Batch Evaluation",
+                    "description": "Evaluate threads from CSV data",
+                    "icon": "FileSpreadsheet",
+                    "config": {"modalId": "batchEval"},
+                },
+                {
+                    "id": "kaira-adversarial",
+                    "kind": "openModal",
+                    "label": "Adversarial Test",
+                    "description": "Run adversarial inputs against Kaira",
+                    "icon": "ShieldAlert",
+                    "config": {"modalId": "adversarialTest"},
+                },
+            ],
             "evaluatorDetail": {"interpretationBands": []},
         },
     },
@@ -2361,9 +2400,9 @@ APP_SEEDS = [
             },
             "chat": {
                 "enabled": True,
-                "capabilities": COMMON_SHERLOCK_CAPABILITIES,
-                # M2: meaning-layer seeds live in ``sherlock_ontology_*``
-                # tables; runtime reads from the bundle, not app config.
+                "capabilities": ORCHESTRATION_AUTHORING_CAPABILITIES,
+                # The orchestration builder lives under inside-sales; this
+                # opt-in is what lets Sherlock propose canvas patches there.
                 "promptTemplates": [
                     {"label": "Summarize recent calls", "prompt": "Summarize the most recent call evaluation results and highlight coaching opportunities"},
                     {"label": "Compare agent trends", "prompt": "Compare recent call quality trends across agents"},
@@ -2377,6 +2416,16 @@ APP_SEEDS = [
                     {"id": "csv-import", "kind": "csvImport", "requires": "asset:create"},
                 ],
             },
+            "quickActions": [
+                {
+                    "id": "inside-sales-batch-eval",
+                    "kind": "openModal",
+                    "label": "Batch Evaluation",
+                    "description": "Evaluate a selected set of calls",
+                    "icon": "FileSpreadsheet",
+                    "config": {"modalId": "insideSalesEval"},
+                },
+            ],
             "evaluatorDetail": {
                 "interpretationBands": [
                     {"color": "emerald", "label": "Strong", "range": "80-100", "description": "Ready for independent calling"},
@@ -3230,6 +3279,13 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     from app.services.evaluator_seed_catalog import reconcile_evaluator_seed_catalog
     from app.services.cost_tracking.bootstrap_seed import seed_model_pricing
     from app.services.cost_tracking.schedule_seed import seed_cost_rollup_schedule
+    from app.services.sherlock_v3.verified_queries import seed_verified_queries
+    from app.services.analytics.signal_derivation.definition_seed import (
+        seed_default_signal_definitions,
+    )
+    from app.services.analytics.signal_derivation.schedule_seed import (
+        seed_signal_derivation_schedule,
+    )
 
     logger.info("Checking seed defaults...")
     await seed_apps(session)
@@ -3243,6 +3299,13 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await seed_orchestration_defaults(session)
     await seed_model_pricing(session)
     await seed_cost_rollup_schedule(session)
+    inserted_sigdef = await seed_default_signal_definitions(session)
+    if inserted_sigdef:
+        logger.info("Seeded default signal definitions (rows=%d)", inserted_sigdef)
+    await seed_signal_derivation_schedule(session)
+    inserted_vq = await seed_verified_queries(session)
+    if inserted_vq:
+        logger.info("Seeded sherlock verified queries (rows=%d)", inserted_vq)
     reconciled, deduped = await reconcile_evaluator_seed_catalog(session)
     if reconciled or deduped:
         logger.info(

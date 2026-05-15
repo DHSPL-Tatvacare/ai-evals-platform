@@ -15,6 +15,7 @@ import {
   Workflow,
   Plug,
   Search,
+  Sparkles,
 } from 'lucide-react';
 import { routes } from './routes';
 import type { AppId } from '@/types';
@@ -77,7 +78,6 @@ const INSIDE_SALES_NAV: SidebarNavItem[] = [
     label: 'Campaigns',
     activeWhen: isCampaignsActive,
   },
-  { to: routes.insideSales.connections, icon: Plug, label: 'Connections', end: true },
   { to: routes.insideSales.logs, icon: ScrollText, label: 'Logs' },
   { to: routes.insideSales.analytics, icon: ChartArea, label: 'Analytics' },
 ];
@@ -106,6 +106,19 @@ const ADMIN_SHERLOCK_NAV: SidebarNavItem = {
   to: routes.adminSherlock,
   icon: Search,
   label: 'Sherlock',
+};
+
+const ADMIN_SHERLOCK_CONFIG_NAV: SidebarNavItem = {
+  to: routes.adminSherlockConfig,
+  icon: Sparkles,
+  label: 'Sherlock Config',
+};
+
+const ADMIN_INTEGRATIONS_NAV: SidebarNavItem = {
+  to: routes.adminIntegrations,
+  icon: Plug,
+  label: 'Integrations',
+  end: true,
 };
 
 const NAV_BY_APP: Record<AppId, SidebarNavItem[]> = {
@@ -137,6 +150,7 @@ export function getAdminNavItems(options: {
   canManageUsers: boolean;
   canViewCost: boolean;
   canManageSchedules?: boolean;
+  canManageOrchestration?: boolean;
 }): SidebarNavItem[] {
   const items: SidebarNavItem[] = [];
 
@@ -149,6 +163,9 @@ export function getAdminNavItems(options: {
   if (options.canManageSchedules) {
     items.push(ADMIN_SCHEDULED_JOBS_NAV);
   }
+  if (options.canManageOrchestration) {
+    items.push(ADMIN_INTEGRATIONS_NAV);
+  }
   // Sherlock observability — admin-only surface. The list/detail pages
   // are gated by `AdminGuard` (any admin access permission), so we
   // mirror the same "shows up in the admin nav whenever admin chrome
@@ -156,6 +173,7 @@ export function getAdminNavItems(options: {
   // If a more granular permission is ever needed we can split it then.
   if (options.canManageUsers) {
     items.push(ADMIN_SHERLOCK_NAV);
+    items.push(ADMIN_SHERLOCK_CONFIG_NAV);
   }
 
   return getVisibleNavItems(items);

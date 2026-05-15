@@ -45,7 +45,7 @@ type SourceFilter = 'all' | 'custom' | 'platform';
 type VisibilityFilter = 'all' | 'private' | 'shared';
 
 // Filter schema consumed by the shared <FilterPanel>. The platform's
-// other list pages (RunList, InsideSalesListing) use the same primitive,
+// other list pages (RunList, CrmListing) use the same primitive,
 // so keeping the shape declarative here means we don't have to
 // hand-render checkbox/pill groups on this page anymore.
 const FILTER_FIELDS: FilterFieldConfig[] = [
@@ -533,26 +533,23 @@ export function WorkflowListPage() {
           setVisibility('all');
         }}
       />
-      {showCreate && (
-        <CreateWorkflowDialog
-          onClose={() => setShowCreate(false)}
-          onCreated={(workflow) => {
-            setShowCreate(false);
-            navigate(orchestrationRoutes.campaignBuilder(workflow.id));
-          }}
-        />
-      )}
-      {cloneSource && (
-        <CloneSystemWorkflowDialog
-          sourceWorkflow={cloneSource}
-          onClose={() => setCloneSource(null)}
-          onCloned={(workflow) => {
-            setCloneSource(null);
-            void refresh();
-            navigate(orchestrationRoutes.campaignBuilder(workflow.id));
-          }}
-          />
-      )}
+      <CreateWorkflowDialog
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={(workflow) => {
+          setShowCreate(false);
+          navigate(orchestrationRoutes.campaignBuilder(workflow.id));
+        }}
+      />
+      <CloneSystemWorkflowDialog
+        sourceWorkflow={cloneSource}
+        onClose={() => setCloneSource(null)}
+        onCloned={(workflow) => {
+          setCloneSource(null);
+          void refresh();
+          navigate(orchestrationRoutes.campaignBuilder(workflow.id));
+        }}
+      />
       <ConfirmDialog
         isOpen={archiveTarget !== null}
         onClose={() => setArchiveTarget(null)}
