@@ -1,4 +1,4 @@
-import { MoreVertical } from 'lucide-react';
+import { MoreHorizontal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/utils/cn';
@@ -61,7 +61,7 @@ export function RowActionsMenu({
             aria-label={triggerLabel}
             className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <MoreVertical className="h-4 w-4" />
+            <MoreHorizontal className="h-4 w-4" />
           </button>
         </PopoverTrigger>
         <PopoverContent
