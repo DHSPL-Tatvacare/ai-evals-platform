@@ -25,11 +25,6 @@ x-backend-common: &backend-common
     # SDK reports no-op tracing when disabled. Remove if/when we want to
     # export traces to OpenAI.
     OPENAI_AGENTS_DISABLE_TRACING: "1"
-    # Tenant LLM credential encryption key — REQUIRED. Boot validator rejects
-    # missing/invalid values. Migration 0047 backfills encrypted rows with it.
-    # Sourced from .env.backend (via env_file below) or shell env; the explicit
-    # pass-through here is for visibility and to mirror docker-compose.prod.yml.
-    LLM_CREDENTIAL_KEY: ${LLM_CREDENTIAL_KEY:-}
     # Orchestration integrations (optional — absent vars don't break boot)
     WATI_BASE_URL: ${WATI_BASE_URL:-}
     WATI_TENANT_ID: ${WATI_TENANT_ID:-}
