@@ -5,9 +5,13 @@ import os
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext, get_auth_context
 from app.config import settings
+from app.database import get_db
+from app.models.tenant_llm_provider import TenantLlmProvider
 from app.schemas.base import CamelModel
 
 logger = logging.getLogger(__name__)
@@ -31,19 +35,16 @@ class DiscoverModelsRequest(CamelModel):
 
 
 @router.get("/auth-status")
-async def auth_status(auth: AuthContext = Depends(get_auth_context)):
+async def auth_status(
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
     """Report which providers the tenant has configured.
 
-    Phase 1 keeps this endpoint cheap — Phase 2 of llm-byok rewrites it
-    to consume the new admin AI Settings query surface. For now, query
-    ``tenant_llm_providers`` directly and report any row marked
-    ``is_enabled`` as available. ``serviceAccountConfigured`` continues
-    to reflect the system-tenant Gemini SA fallback path.
+    Reads ``platform.tenant_llm_providers`` for the caller's tenant; any
+    enabled row counts as available. ``serviceAccountConfigured`` still
+    reflects the system-tenant Gemini SA fallback path.
     """
-    from app.database import async_session
-    from app.models.tenant_llm_provider import TenantLlmProvider
-    from sqlalchemy import select
-
     sa_path = settings.GEMINI_SERVICE_ACCOUNT_PATH
     sa_configured = bool(sa_path and os.path.isfile(sa_path))
 
@@ -53,15 +54,14 @@ async def auth_status(auth: AuthContext = Depends(get_auth_context)):
         "azure_openai": False,
         "anthropic": False,
     }
-    async with async_session() as db:
-        rows = (
-            await db.execute(
-                select(TenantLlmProvider.provider).where(
-                    TenantLlmProvider.tenant_id == auth.tenant_id,
-                    TenantLlmProvider.is_enabled.is_(True),
-                )
+    rows = (
+        await db.execute(
+            select(TenantLlmProvider.provider).where(
+                TenantLlmProvider.tenant_id == auth.tenant_id,
+                TenantLlmProvider.is_enabled.is_(True),
             )
-        ).scalars().all()
+        )
+    ).scalars().all()
     for name in rows:
         if name in providers:
             providers[name] = True
