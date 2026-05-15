@@ -1,4 +1,31 @@
 import { useMemo, useState } from 'react';
+
+/**
+ * Derived dirty detection: compare the local form to the TanStack-cached
+ * snapshot. No store, no boolean flag — `useLifecycleState`-style derived
+ * pattern from `CLAUDE.md` (orchestration Phase 14 invariant).
+ *
+ * Rules:
+ * - apiKey is write-only on the wire; any non-empty value means "rotate".
+ * - Azure carries an api_version field that lives in `extra_config`.
+ * - curatedModels compares by sequence (order matters — admin chose it).
+ */
+function computeIsDirty(
+  form: PanelFormState,
+  config: ProviderConfig | undefined,
+  isAzure: boolean,
+): boolean {
+  if (form.apiKey !== '') return true;
+  const snapshot = hydrateForm(config);
+  if (form.isEnabled !== snapshot.isEnabled) return true;
+  if (form.baseUrl !== snapshot.baseUrl) return true;
+  if (isAzure && form.apiVersion !== snapshot.apiVersion) return true;
+  if (form.curatedModels.length !== snapshot.curatedModels.length) return true;
+  for (let i = 0; i < form.curatedModels.length; i += 1) {
+    if (form.curatedModels[i] !== snapshot.curatedModels[i]) return true;
+  }
+  return false;
+}
 import { CheckCircle2, Eye, EyeOff, Save, ShieldAlert } from 'lucide-react';
 
 import { Badge, Button, Input, Switch } from '@/components/ui';
@@ -60,6 +87,10 @@ function PanelInner({
 
   const isAzure = provider === 'azure_openai';
   const hasStoredKey = Boolean(config?.hasApiKey);
+  const isDirty = useMemo(
+    () => computeIsDirty(form, config, isAzure),
+    [form, config, isAzure],
+  );
 
   const handleSave = async () => {
     try {
@@ -244,16 +275,18 @@ function PanelInner({
         >
           Test connection
         </Button>
-        <Button
-          type="button"
-          variant="primary"
-          icon={Save}
-          onClick={handleSave}
-          isLoading={upsert.isPending}
-          disabled={upsert.isPending}
-        >
-          Save changes
-        </Button>
+        {isDirty && (
+          <Button
+            type="button"
+            variant="primary"
+            icon={Save}
+            onClick={handleSave}
+            isLoading={upsert.isPending}
+            disabled={upsert.isPending}
+          >
+            Save changes
+          </Button>
+        )}
       </footer>
     </div>
   );
