@@ -88,6 +88,17 @@ export const routes = {
   },
 };
 
+/**
+ * True when the current pathname is under the admin chrome (`/admin` or any
+ * `/admin/<sub>` route). Admin pages are tenant-scoped operational surfaces
+ * with no per-app context, so cross-app affordances that depend on an active
+ * app (the Sherlock chat widget, app-specific quick actions, etc.) suppress
+ * themselves on these routes.
+ */
+export function isAdminPath(pathname: string): boolean {
+  return pathname === routes.adminRoot || pathname.startsWith(`${routes.adminRoot}/`);
+}
+
 const appNavigationRegistry = new Map<string, AppNavigationConfig>(
   APP_IDS.map((appId) => [appId, APP_CONFIG_FALLBACKS[appId].navigation]),
 );

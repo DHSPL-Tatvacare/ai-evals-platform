@@ -25,7 +25,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { userHasAnyPermission, usePermission, USER_MANAGEMENT_PERMISSIONS } from "@/utils/permissions";
-import { routes, settingsRouteForApp } from "@/config/routes";
+import { isAdminPath, routes, settingsRouteForApp } from "@/config/routes";
 import { APP_IDS } from '@/types';
 import type { AppId } from '@/types';
 import { getAdminNavGroups, getNavItems, type SidebarNavGroup, type SidebarNavItem } from "@/config/sidebarNav";
@@ -51,7 +51,7 @@ export function Sidebar() {
   // Auth
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const isAdminView = location.pathname === routes.adminUsers || location.pathname.startsWith(`${routes.adminRoot}/`);
+  const isAdminView = isAdminPath(location.pathname);
   // App-scoped settings target. ``null`` when the current view is not bound
   // to an app (e.g. admin chrome) so ``UserMenu`` hides the Settings entry
   // — keeps the avatar menu free of dangling links into a different context.
