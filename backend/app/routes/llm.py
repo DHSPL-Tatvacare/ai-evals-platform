@@ -118,11 +118,13 @@ async def _discover_azure_openai_models(
     """Return configured Azure OpenAI deployments as model entries.
 
     Azure has no public API-key-based listing for deployments (ARM only,
-    requires Azure AD). So we return whatever the user configured in Settings:
-    ``azureOpenaiDeployments`` (comma- or newline-separated), falling back to
-    the ``AZURE_OPENAI_MODEL`` env var.
+    requires Azure AD). So we return whatever the admin configured for the
+    tenant in AI Settings, surfaced as ``extra_config["deployments"]`` on the
+    ``azure_openai`` row in ``platform.tenant_llm_providers``.
 
-    Resolution order: request override → DB settings → env fallback.
+    Resolution order: request override → tenant DB row. No env fallback —
+    BYOK only (the legacy ``AZURE_OPENAI_MODEL`` env var was removed in the
+    llm-byok Phase 1 sweep).
     """
     raw: str = ""
     if deployments_override:
