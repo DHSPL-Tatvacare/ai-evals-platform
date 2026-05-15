@@ -12,23 +12,24 @@ import type { ReactNode } from 'react';
 
 import { useCurrentAppConfig } from '@/hooks';
 import { useAuthStore } from '@/stores/authStore';
-import type { PageActionSpec } from '@/types';
+import type { QuickActionSpec } from '@/types';
 import { userHasPermission } from '@/utils/permissions';
 
 import { QUICK_ACTION_REGISTRY } from './registry';
+import { resolveQuickActionIcon } from './iconMap';
 import type { QuickActionDescriptor, QuickActionItem } from './types';
 
 /** Specs filtered for the current viewer. Pure data — no descriptor hooks
  *  called here. Unknown kinds and permission-denied items are dropped. */
 function useResolvedQuickActionSpecs(): Array<{
-  spec: PageActionSpec;
+  spec: QuickActionSpec;
   descriptor: QuickActionDescriptor;
 }> {
   const appConfig = useCurrentAppConfig();
   const user = useAuthStore((s) => s.user);
   return useMemo(() => {
     const specs = appConfig.quickActions ?? [];
-    const out: Array<{ spec: PageActionSpec; descriptor: QuickActionDescriptor }> = [];
+      const out: Array<{ spec: QuickActionSpec; descriptor: QuickActionDescriptor }> = [];
     for (const spec of specs) {
       const descriptor = QUICK_ACTION_REGISTRY[spec.kind];
       if (!descriptor) continue;
@@ -44,7 +45,7 @@ function ResolveOne({
   descriptor,
   onResolved,
 }: {
-  spec: PageActionSpec;
+  spec: QuickActionSpec;
   descriptor: QuickActionDescriptor;
   onResolved: (item: QuickActionItem) => void;
 }) {
@@ -54,20 +55,24 @@ function ResolveOne({
   // Listing the runtime fields explicitly (instead of `runtime`) is the
   // intent — we want to re-emit only when one of these primitives changes,
   // not on every parent render. The eslint-disable is precise to that.
+  // Label / description / icon now come from the SPEC (data-driven), not
+  // from the descriptor — descriptors are pure runtime kinds.
   useEffect(() => {
     onResolvedRef.current({
       id: spec.id,
       kind: spec.kind,
-      label: descriptor.label,
-      description: descriptor.description,
-      icon: descriptor.icon,
+      label: spec.label,
+      description: spec.description ?? '',
+      icon: resolveQuickActionIcon(spec.icon),
       ...runtime,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     spec.id,
     spec.kind,
-    descriptor,
+    spec.label,
+    spec.description,
+    spec.icon,
     runtime.onSelect,
     runtime.disabled,
     runtime.isLoading,

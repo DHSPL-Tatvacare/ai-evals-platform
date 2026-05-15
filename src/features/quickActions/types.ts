@@ -1,14 +1,17 @@
 /**
- * Quick-action registry types — shared between the registry data module
- * and the `<QuickActionsProvider>` component. Lives in its own file so
- * react-refresh can hot-reload the provider component cleanly.
+ * Quick-action registry types.
+ *
+ * The runtime type a kind handler returns. Kinds are generic primitives
+ * (`openModal` / `triggerImperative` / `navigateTo`); app-specific behavior
+ * lives in the spec's `config` payload and in feature modules that register
+ * imperative triggers — never as new kinds.
  */
 import type { LucideIcon } from 'lucide-react';
-import type { PageActionSpec } from '@/types';
+import type { QuickActionSpec } from '@/types';
 import type { ActionAvailabilityBlocker } from '@/utils/actionAvailability';
 
 export interface QuickActionItem {
-  /** `PageActionSpec.id` — stable per-app instance identifier. */
+  /** `QuickActionSpec.id` — stable per-app instance identifier. */
   id: string;
   /** Registry kind. */
   kind: string;
@@ -27,11 +30,8 @@ export type QuickActionRuntime = Pick<
 >;
 
 export interface QuickActionDescriptor {
-  label: string;
-  description: string;
-  icon: LucideIcon;
   /** Hook called inside an isolated child component — exactly one per spec.
-   *  Receives the spec so kinds can read `spec.config` for per-instance
-   *  parameters (none today; reserved for the tenant-overlay phase). */
-  useResolve: (spec: PageActionSpec) => QuickActionRuntime;
+   *  Receives the full spec so the kind handler can read `spec.config` for
+   *  per-instance parameters and `spec.requirements` for per-spec gates. */
+  useResolve: (spec: QuickActionSpec) => QuickActionRuntime;
 }

@@ -170,6 +170,44 @@ class PageActionSpec(CamelModel):
     requires: str | None = None
 
 
+class ActionRequirement(CamelModel):
+    """Per-spec runtime gate (settings key must be present etc).
+
+    Mirrors the FE `AppActionRequirementConfig`. ``source`` selects which
+    in-memory store to read from (appSettings | globalSettings | llmSettings),
+    ``key`` is the field on that source; ``validation`` defaults to
+    ``nonEmpty``. Empty list = no gate.
+    """
+
+    source: Literal["appSettings", "globalSettings", "llmSettings"]
+    key: str
+    validation: Literal["nonEmpty", "truthy"] | None = None
+    label: str | None = None
+
+
+class QuickActionSpec(CamelModel):
+    """Sidebar quick-action spec — fully data-driven.
+
+    Three primitive ``kind`` values are recognised by the FE registry today:
+
+    * ``openModal`` — config: ``{modalId: str}``
+    * ``triggerImperative`` — config: ``{triggerKey: str}``
+    * ``navigateTo`` — config: ``{path: str}``
+
+    New actions for new tenants/apps are expressed by emitting a different
+    ``kind``/``config`` pair from the app config row — no FE code change.
+    """
+
+    id: str
+    kind: Literal["openModal", "triggerImperative", "navigateTo"]
+    label: str
+    description: str | None = None
+    icon: str | None = None
+    config: dict[str, object] = Field(default_factory=dict)
+    requires: str | None = None
+    requirements: list[ActionRequirement] = Field(default_factory=list)
+
+
 EvaluatorDetailBandColor = Literal["emerald", "blue", "amber", "red"]
 
 
@@ -219,5 +257,5 @@ class AppConfig(CamelModel):
     page_icons: dict[PageType, str] = Field(default_factory=dict)
     page_titles: dict[PageType, str] = Field(default_factory=dict)
     page_actions: dict[PageType, list[PageActionSpec]] = Field(default_factory=dict)
-    quick_actions: list[PageActionSpec] = Field(default_factory=list)
+    quick_actions: list[QuickActionSpec] = Field(default_factory=list)
     evaluator_detail: EvaluatorDetailConfig = Field(default_factory=EvaluatorDetailConfig)

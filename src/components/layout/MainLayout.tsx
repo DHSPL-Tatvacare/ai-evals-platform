@@ -17,6 +17,7 @@ import { useFileUpload } from '@/features/upload';
 import { ACCEPTED_AUDIO_EXTENSIONS, validateAudioFiles } from '@/features/upload/utils/fileValidation';
 import { APP_IDS } from '@/types';
 import { ChatWidget } from '@/features/chat-widget/ChatWidget';
+import { KairaImperatives } from '@/features/kaira/KairaImperatives';
 import { ReviewBorderGlow } from '@/features/reviews/ReviewBorderGlow';
 import { ReviewPersistentBar } from '@/features/reviews/ReviewPersistentBar';
 import { ReviewNavigationBlocker } from '@/features/reviews/ReviewNavigationBlocker';
@@ -128,6 +129,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
       <MiniPlayerConnector />
       <JobCompletionWatcher />
+      <KairaImperatives />
       <AnimatePresence>
         {activeModal === 'batchEval' && <NewBatchEvalOverlay key="batchEval" onClose={closeModal} />}
         {activeModal === 'adversarialTest' && <NewAdversarialOverlay key="adversarialTest" onClose={closeModal} />}

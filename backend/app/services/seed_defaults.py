@@ -2080,7 +2080,14 @@ APP_SEEDS = [
             "pageTitles": {},
             "pageActions": {},
             "quickActions": [
-                {"id": "voice-rx-upload", "kind": "voiceRxUpload"},
+                {
+                    "id": "voice-rx-upload",
+                    "kind": "triggerImperative",
+                    "label": "Evaluation",
+                    "description": "Single audio file evaluation",
+                    "icon": "FileAudio",
+                    "config": {"triggerKey": "voiceRxUpload"},
+                },
             ],
             "evaluatorDetail": {"interpretationBands": []},
         },
@@ -2232,9 +2239,33 @@ APP_SEEDS = [
             "pageTitles": {},
             "pageActions": {},
             "quickActions": [
-                {"id": "kaira-new-chat", "kind": "kairaNewChat"},
-                {"id": "kaira-batch-eval", "kind": "kairaBatchEval"},
-                {"id": "kaira-adversarial", "kind": "adversarialTest"},
+                {
+                    "id": "kaira-new-chat",
+                    "kind": "triggerImperative",
+                    "label": "New Chat",
+                    "description": "Start a new Kaira conversation",
+                    "icon": "MessageSquare",
+                    "config": {"triggerKey": "kaira.createSession"},
+                    "requirements": [
+                        {"source": "appSettings", "key": "kairaChatUserId"},
+                    ],
+                },
+                {
+                    "id": "kaira-batch-eval",
+                    "kind": "openModal",
+                    "label": "Batch Evaluation",
+                    "description": "Evaluate threads from CSV data",
+                    "icon": "FileSpreadsheet",
+                    "config": {"modalId": "batchEval"},
+                },
+                {
+                    "id": "kaira-adversarial",
+                    "kind": "openModal",
+                    "label": "Adversarial Test",
+                    "description": "Run adversarial inputs against Kaira",
+                    "icon": "ShieldAlert",
+                    "config": {"modalId": "adversarialTest"},
+                },
             ],
             "evaluatorDetail": {"interpretationBands": []},
         },
@@ -2386,7 +2417,14 @@ APP_SEEDS = [
                 ],
             },
             "quickActions": [
-                {"id": "inside-sales-batch-eval", "kind": "insideSalesBatchEval"},
+                {
+                    "id": "inside-sales-batch-eval",
+                    "kind": "openModal",
+                    "label": "Batch Evaluation",
+                    "description": "Evaluate a selected set of calls",
+                    "icon": "FileSpreadsheet",
+                    "config": {"modalId": "insideSalesEval"},
+                },
             ],
             "evaluatorDetail": {
                 "interpretationBands": [
