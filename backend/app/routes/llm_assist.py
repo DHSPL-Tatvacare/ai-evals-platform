@@ -78,7 +78,7 @@ async def generate_schema(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return GenerateSchemaResponse(json_schema=schema)
+    return GenerateSchemaResponse(schema=schema)
 
 
 @router.post("/extract-structured", response_model=ExtractStructuredResponse)

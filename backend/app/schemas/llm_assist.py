@@ -34,7 +34,10 @@ class GenerateSchemaRequest(CamelModel):
 
 
 class GenerateSchemaResponse(CamelModel):
-    json_schema: dict = Field(default_factory=dict, alias="schema")
+    # Plan-literal field name (`schema`). Pydantic v2's `BaseModel.schema()`
+    # is deprecated; CamelModel sets `protected_namespaces=()` so the field
+    # name is accepted. Pyright still warns on the legacy method override.
+    schema: dict = Field(default_factory=dict)  # pyright: ignore[reportIncompatibleMethodOverride]
 
 
 class ExtractStructuredRequest(CamelModel):
