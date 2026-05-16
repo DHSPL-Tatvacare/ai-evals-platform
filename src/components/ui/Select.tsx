@@ -16,6 +16,10 @@ interface SelectProps {
   className?: string;
   disabled?: boolean;
   size?: 'sm' | 'md';
+  /** Forwarded to Radix `<Select.Content side>` — pick `'top'` when the
+   *  trigger lives near the bottom of its container (modal footers, peek
+   *  panes) so the menu opens upward instead of clipping. */
+  side?: 'top' | 'bottom';
 }
 
 export function Select({
@@ -26,6 +30,7 @@ export function Select({
   className,
   disabled = false,
   size = 'md',
+  side = 'bottom',
 }: SelectProps) {
   const selectedOption = useMemo(
     () => options.find((o) => o.value === value),
@@ -71,6 +76,7 @@ export function Select({
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content
           position="popper"
+          side={side}
           sideOffset={4}
           className={cn(
             'z-[var(--z-popover)] overflow-hidden rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] py-1 shadow-lg',

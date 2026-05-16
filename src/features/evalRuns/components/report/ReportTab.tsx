@@ -606,7 +606,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
               if (!store.open) store.toggle();
             }}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:scale-110 transition-all duration-150"
-            style={{ background: 'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, #2D1B69 100%)' }}
+            style={{ background: 'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 50%, var(--color-brand-primary-deep) 100%)' }}
             title="Build Your Own Report"
             aria-label="Build Your Own Report"
           >

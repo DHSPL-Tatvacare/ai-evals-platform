@@ -18,6 +18,9 @@ interface LLMConfigSectionProps {
   model: string;
   onModelChange: (m: string) => void;
   compact?: boolean;
+  /** Open the dropdowns upward when the section sits near the bottom of a
+   *  modal/peek panel. Forwarded as Radix `side` to both `<Select>`s. */
+  dropdownDirection?: 'up' | 'down';
 }
 
 /**
@@ -34,6 +37,7 @@ export function LLMConfigSection({
   model,
   onModelChange,
   compact = false,
+  dropdownDirection = 'down',
 }: LLMConfigSectionProps) {
   const { data: configs = [], isLoading } = useProviderConfigs();
 
@@ -45,6 +49,7 @@ export function LLMConfigSection({
     () => available.find((c) => c.provider === provider)?.curatedModels ?? [],
     [available, provider],
   );
+  const side: 'top' | 'bottom' = dropdownDirection === 'up' ? 'top' : 'bottom';
 
   if (!isLoading && available.length === 0) {
     return (
@@ -81,6 +86,7 @@ export function LLMConfigSection({
             label: PROVIDER_LABELS[c.provider],
           }))}
           placeholder="Select provider"
+          side={side}
           onChange={(value) => {
             onProviderChange(value as LLMProvider);
             onModelChange('');
@@ -105,6 +111,7 @@ export function LLMConfigSection({
                 ? 'No curated models'
                 : 'Select model'
           }
+          side={side}
           onChange={onModelChange}
         />
       </div>
