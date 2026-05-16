@@ -148,6 +148,15 @@ async def run_signal_derivation(
     per_definition: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     for definition in definitions:
+        # Snapshot the values we need for logging + error reporting BEFORE
+        # we enter the try block. `await db.rollback()` in the except path
+        # expires every attribute on every ORM object in the identity map;
+        # accessing them afterwards from synchronous code (e.g. logger arg
+        # evaluation) triggers an async refresh that can't spawn its
+        # greenlet wrapper and raises sqlalchemy.exc.MissingGreenlet,
+        # masking the real exception. Capture as primitives now.
+        definition_id = str(definition.id)
+        signal_set = definition.signal_set
         try:
             per_definition.append(await _run_one_definition(db, definition))
         except Exception as exc:  # noqa: BLE001 — one bad definition must not
@@ -155,11 +164,11 @@ async def run_signal_derivation(
             await db.rollback()
             _log.exception(
                 "signal_derivation.definition_failed id=%s set=%s",
-                definition.id,
-                definition.signal_set,
+                definition_id,
+                signal_set,
             )
             errors.append(
-                {"signal_definition_id": str(definition.id), "error": str(exc)}
+                {"signal_definition_id": definition_id, "error": str(exc)}
             )
 
     summary: dict[str, Any] = {
