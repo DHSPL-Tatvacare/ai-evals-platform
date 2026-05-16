@@ -1,9 +1,18 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useLLMSettingsStore, useGlobalSettingsStore } from '@/stores';
-import { useToast } from '@/hooks';
-import type { ThemeMode, LLMTimeoutSettings, LLMProvider } from '@/types';
 
-/** Base form values shared across all settings pages. */
+import { useGlobalSettingsStore } from '@/stores';
+import { useToast } from '@/hooks';
+import type { ThemeMode, LLMTimeoutSettings } from '@/types';
+
+/**
+ * Base form values shared across all settings pages.
+ *
+ * Phase 3 / BYOK: LLM credentials moved to /admin/ai-settings. This hook
+ * no longer touches per-user credential state — `apiKey` / per-provider
+ * keys are not persisted from app settings pages anymore. Existing pages
+ * keep the field in their typed form shape until each page is separately
+ * rewritten to drop it; here we just save app + theme + timeouts.
+ */
 export interface BaseFormValues {
   theme: ThemeMode;
   apiKey: string;
@@ -27,12 +36,6 @@ export function useSettingsForm<T extends BaseFormValues>({
 }: UseSettingsFormOptions<T>) {
   const toast = useToast();
 
-  // LLM store actions
-  const setApiKey = useLLMSettingsStore((s) => s.setApiKey);
-  const setProvider = useLLMSettingsStore((s) => s.setProvider);
-  const setProviderApiKey = useLLMSettingsStore((s) => s.setProviderApiKey);
-  const saveLLMSettings = useLLMSettingsStore((s) => s.save);
-
   // Global settings actions (slice selectors — avoid full-store subscription)
   const setTheme = useGlobalSettingsStore((s) => s.setTheme);
   const setGlobalTimeouts = useGlobalSettingsStore((s) => s.setTimeouts);
@@ -45,9 +48,9 @@ export function useSettingsForm<T extends BaseFormValues>({
   const [formValues, setFormValues] = useState<T>(storeValues);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Dirty detection via JSON comparison.
-  // Exclude `provider` (tab navigation, not a real edit) and `apiKey` (derived from
-  // per-provider keys) so that merely switching the provider tab doesn't trigger dirty.
+  // Dirty detection via JSON comparison. `provider` + `apiKey` excluded
+  // because they're vestigial fields in legacy form shapes that no longer
+  // round-trip to a real store.
   const isDirty = useMemo(() => {
     const omit = new Set(['provider', 'apiKey']);
     const strip = (obj: Record<string, unknown>) =>
@@ -63,8 +66,6 @@ export function useSettingsForm<T extends BaseFormValues>({
   }, [storeValues]);
 
   // Auto-reset edit flag when user reverts all manual changes.
-  // This unblocks store→form syncing (e.g. credential loads that finish
-  // after the user briefly touched a field and then undid the change).
   useEffect(() => {
     if (!isDirty) {
       userHasEdited.current = false;
@@ -84,35 +85,7 @@ export function useSettingsForm<T extends BaseFormValues>({
   }, [isDirty]);
 
   // Generic change handler — supports flat keys and `namespace.field` keys.
-  // Special case: when 'provider' changes, atomically clear selectedModel and
-  // recompute apiKey so dirty detection isn't falsely triggered (provider and
-  // apiKey are excluded from isDirty; selectedModel clearing is only a
-  // side-effect of the switch, not a user edit).
   const handleChange = useCallback((key: string, value: unknown) => {
-    if (key === 'provider') {
-      // Provider switch is not a "user edit" for dirty-detection purposes
-      // (provider & apiKey are excluded from isDirty). Recompute apiKey
-      // in a single state update.
-      const newProvider = value as LLMProvider;
-      setFormValues(prev => {
-        const keyMap: Record<LLMProvider, string> = {
-          gemini: (prev as Record<string, unknown>).geminiApiKey as string ?? '',
-          openai: (prev as Record<string, unknown>).openaiApiKey as string ?? '',
-          azure_openai: (prev as Record<string, unknown>).azureOpenaiApiKey as string ?? '',
-          anthropic: (prev as Record<string, unknown>).anthropicApiKey as string ?? '',
-        };
-        return {
-          ...prev,
-          provider: newProvider,
-          apiKey: keyMap[newProvider] ?? '',
-        };
-      });
-      // Also sync to the store so storeValues (reactive memo) reflects the
-      // new provider. Without this, isDirty can detect spurious mismatches.
-      setProvider(newProvider);
-      return;
-    }
-
     userHasEdited.current = true;
     setFormValues(prev => {
       if (key.includes('.')) {
@@ -126,64 +99,17 @@ export function useSettingsForm<T extends BaseFormValues>({
     });
   }, []);
 
-  // Save orchestration — common settings + app-specific
+  // Save orchestration — theme + timeouts + app-specific. LLM credentials
+  // are admin-managed and never touched here.
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     try {
-      // Theme — localStorage only
       if (formValues.theme !== storeValues.theme) {
         setTheme(formValues.theme);
       }
-      // LLM provider, API keys, model — backend-persisted
-      let llmDirty = false;
-      const fv = formValues as Record<string, unknown>;
-      const sv = storeValues as Record<string, unknown>;
-
-      if (fv.provider !== sv.provider) {
-        setProvider(fv.provider as LLMProvider);
-        llmDirty = true;
-      }
-      if (fv.geminiApiKey !== sv.geminiApiKey) {
-        setProviderApiKey('gemini', fv.geminiApiKey as string);
-        llmDirty = true;
-      }
-      if (fv.openaiApiKey !== sv.openaiApiKey) {
-        setProviderApiKey('openai', fv.openaiApiKey as string);
-        llmDirty = true;
-      }
-      if (fv.azureOpenaiApiKey !== sv.azureOpenaiApiKey) {
-        setProviderApiKey('azure_openai', fv.azureOpenaiApiKey as string);
-        llmDirty = true;
-      }
-      if (fv.anthropicApiKey !== sv.anthropicApiKey) {
-        setProviderApiKey('anthropic', fv.anthropicApiKey as string);
-        llmDirty = true;
-      }
-      // Azure-specific fields — update store directly, persisted via saveLLMSettings
-      if (
-        fv.azureOpenaiEndpoint !== sv.azureOpenaiEndpoint ||
-        fv.azureOpenaiApiVersion !== sv.azureOpenaiApiVersion ||
-        fv.azureOpenaiDeployments !== sv.azureOpenaiDeployments
-      ) {
-        useLLMSettingsStore.getState().updateLLMSettings({
-          azureOpenaiEndpoint: (fv.azureOpenaiEndpoint as string) || '',
-          azureOpenaiApiVersion: (fv.azureOpenaiApiVersion as string) || '2025-03-01-preview',
-          azureOpenaiDeployments: (fv.azureOpenaiDeployments as string) || '',
-        });
-        llmDirty = true;
-      }
-      if (formValues.apiKey !== storeValues.apiKey) {
-        setApiKey(formValues.apiKey);
-        llmDirty = true;
-      }
-      if (llmDirty) {
-        await saveLLMSettings();
-      }
-      // Timeouts — localStorage only
       if (JSON.stringify(formValues.timeouts) !== JSON.stringify(storeValues.timeouts)) {
         setGlobalTimeouts(formValues.timeouts);
       }
-      // App-specific save
       await onSaveApp(formValues, storeValues);
 
       userHasEdited.current = false;
@@ -193,7 +119,7 @@ export function useSettingsForm<T extends BaseFormValues>({
     } finally {
       setIsSaving(false);
     }
-  }, [formValues, storeValues, setTheme, setGlobalTimeouts, setApiKey, setProvider, setProviderApiKey, saveLLMSettings, onSaveApp, toast]);
+  }, [formValues, storeValues, setTheme, setGlobalTimeouts, onSaveApp, toast]);
 
   // Discard changes
   const handleDiscard = useCallback(() => {

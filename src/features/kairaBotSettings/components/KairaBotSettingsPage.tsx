@@ -1,23 +1,23 @@
 import { useCallback, useEffect } from 'react';
-import { useLLMSettingsStore, useGlobalSettingsStore, useKairaBotSettings, useAppSettingsStore } from '@/stores';
+import { Link } from 'react-router-dom';
+
+import { useGlobalSettingsStore, useKairaBotSettings, useAppSettingsStore } from '@/stores';
 import { Card, PageSurface, Tabs } from '@/components/ui';
 import { usePageMetadata } from '@/config/pageMetadata';
+import { routes } from '@/config/routes';
+import { usePermission } from '@/utils/permissions';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CollapsibleSection } from '../../settings/components/CollapsibleSection';
 import { SettingsSaveBar } from '../../settings/components/SettingsSaveBar';
-import { ProviderConfigCard } from '../../settings/components/ProviderConfigCard';
 import { TemplatesTab } from '../../settings/components/TemplatesTab';
 import { EvaluationContractsTab } from './AdversarialCatalogTab';
 import { getGlobalSettingsByCategory } from '../../settings/schemas/globalSettingsSchema';
 import { getKairaBotSettingsByCategory } from '../../settings/schemas/appSettingsSchema';
 import { useSettingsForm } from '../../settings/hooks/useSettingsForm';
-import type { LLMTimeoutSettings, LLMProvider } from '@/types';
+import type { LLMTimeoutSettings } from '@/types';
 import type { BaseFormValues } from '../../settings/hooks/useSettingsForm';
 
 interface KairaBotFormValues extends BaseFormValues {
-  provider: LLMProvider;
-  geminiApiKey: string;
-  openaiApiKey: string;
   kairaBot: {
     contextWindowSize: number;
     maxResponseLength: number;
@@ -31,20 +31,11 @@ interface KairaBotFormValues extends BaseFormValues {
 
 export function KairaBotSettingsPage() {
   const { icon, title } = usePageMetadata('settings');
-  const llmApiKey = useLLMSettingsStore((s) => s.apiKey);
-  const llmProvider = useLLMSettingsStore((s) => s.provider);
-  const llmGeminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
-  const llmOpenaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
-  const llmAzureOpenaiApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
-  const llmAzureOpenaiEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
-  const llmAzureOpenaiApiVersion = useLLMSettingsStore((s) => s.azureOpenaiApiVersion);
-  const llmAzureOpenaiDeployments = useLLMSettingsStore((s) => s.azureOpenaiDeployments);
-  const llmAnthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
   const theme = useGlobalSettingsStore((s) => s.theme);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const { settings: kairaBotSettings, updateSettings: updateKairaBotSettings } = useKairaBotSettings();
+  const canEditAISettings = usePermission('configuration:edit');
 
-  // Load credentials from backend on mount
   useEffect(() => {
     useAppSettingsStore.getState().loadCredentialsFromBackend('kaira-bot');
   }, []);
@@ -72,15 +63,7 @@ export function KairaBotSettingsPage() {
       const { kairaApiUrl, kairaAuthToken, kairaChatUserId, ...kairaBotPrefs } = kairaBotSettings;
       return {
         theme,
-        apiKey: llmApiKey,
-        provider: llmProvider,
-        geminiApiKey: llmGeminiApiKey,
-        openaiApiKey: llmOpenaiApiKey,
-        azureOpenaiApiKey: llmAzureOpenaiApiKey,
-        azureOpenaiEndpoint: llmAzureOpenaiEndpoint,
-        azureOpenaiApiVersion: llmAzureOpenaiApiVersion,
-        azureOpenaiDeployments: llmAzureOpenaiDeployments,
-        anthropicApiKey: llmAnthropicApiKey,
+        apiKey: '',
         timeouts: { ...timeouts } as LLMTimeoutSettings,
         kairaBot: kairaBotPrefs as KairaBotFormValues['kairaBot'],
         kairaApiUrl,
@@ -88,7 +71,7 @@ export function KairaBotSettingsPage() {
         kairaChatUserId,
       };
     },
-    deps: [theme, llmApiKey, llmProvider, llmGeminiApiKey, llmOpenaiApiKey, llmAzureOpenaiApiKey, llmAzureOpenaiEndpoint, llmAzureOpenaiApiVersion, llmAzureOpenaiDeployments, llmAnthropicApiKey, timeouts, kairaBotSettings],
+    deps: [theme, timeouts, kairaBotSettings],
     onSaveApp,
   });
 
@@ -108,17 +91,20 @@ export function KairaBotSettingsPage() {
       content: (
         <div className="space-y-4">
           <Card>
-            <ProviderConfigCard
-              provider={formValues.provider}
-              geminiApiKey={formValues.geminiApiKey}
-              openaiApiKey={formValues.openaiApiKey}
-              azureOpenaiApiKey={(formValues.azureOpenaiApiKey as string) || ''}
-              azureOpenaiEndpoint={(formValues.azureOpenaiEndpoint as string) || ''}
-              azureOpenaiApiVersion={(formValues.azureOpenaiApiVersion as string) || '2025-03-01-preview'}
-              azureOpenaiDeployments={(formValues.azureOpenaiDeployments as string) || ''}
-              anthropicApiKey={(formValues.anthropicApiKey as string) || ''}
-              onChange={handleChange}
-            />
+            <p className="text-[13px] text-[var(--text-secondary)]">
+              LLM providers are configured by an admin in{' '}
+              {canEditAISettings ? (
+                <Link
+                  to={routes.adminAiSettings}
+                  className="font-medium text-[var(--text-brand)] hover:underline"
+                >
+                  AI Settings
+                </Link>
+              ) : (
+                <span className="font-medium text-[var(--text-primary)]">AI Settings</span>
+              )}
+              . Per-user API keys are no longer required.
+            </p>
           </Card>
           <CollapsibleSection title="Kaira Bot API" subtitle="AI Orchestrator endpoint, auth token, and default user">
             <SettingsPanel settings={getKairaBotSettingsByCategory('api')} values={formValues} onChange={handleChange} />

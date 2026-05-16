@@ -1,41 +1,27 @@
 import { useCallback } from 'react';
-import { useLLMSettingsStore, useGlobalSettingsStore } from '@/stores';
+import { Link } from 'react-router-dom';
+
+import { useGlobalSettingsStore } from '@/stores';
 import { Card, PageSurface, Tabs } from '@/components/ui';
 import { usePageMetadata } from '@/config/pageMetadata';
+import { routes } from '@/config/routes';
+import { usePermission } from '@/utils/permissions';
 import { SettingsPanel } from '@/features/settings/components/SettingsPanel';
 import { CollapsibleSection } from '@/features/settings/components/CollapsibleSection';
 import { SettingsSaveBar } from '@/features/settings/components/SettingsSaveBar';
-import { ProviderConfigCard } from '@/features/settings/components/ProviderConfigCard';
 import { TemplatesTab } from '@/features/settings/components/TemplatesTab';
 import { getGlobalSettingsByCategory } from '@/features/settings/schemas/globalSettingsSchema';
 import { useSettingsForm } from '@/features/settings/hooks/useSettingsForm';
-import type { LLMTimeoutSettings, LLMProvider } from '@/types';
+import type { LLMTimeoutSettings } from '@/types';
 import type { BaseFormValues } from '@/features/settings/hooks/useSettingsForm';
 
-interface InsideSalesFormValues extends BaseFormValues {
-  provider: LLMProvider;
-  geminiApiKey: string;
-  openaiApiKey: string;
-  azureOpenaiApiKey: string;
-  azureOpenaiEndpoint: string;
-  azureOpenaiApiVersion: string;
-  azureOpenaiDeployments: string;
-  anthropicApiKey: string;
-}
+type InsideSalesFormValues = BaseFormValues;
 
 export function InsideSalesSettings() {
   const { icon, title } = usePageMetadata('settings');
-  const llmApiKey = useLLMSettingsStore((s) => s.apiKey);
-  const llmProvider = useLLMSettingsStore((s) => s.provider);
-  const llmGeminiApiKey = useLLMSettingsStore((s) => s.geminiApiKey);
-  const llmOpenaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
-  const llmAzureOpenaiApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
-  const llmAzureOpenaiEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
-  const llmAzureOpenaiApiVersion = useLLMSettingsStore((s) => s.azureOpenaiApiVersion);
-  const llmAzureOpenaiDeployments = useLLMSettingsStore((s) => s.azureOpenaiDeployments);
-  const llmAnthropicApiKey = useLLMSettingsStore((s) => s.anthropicApiKey);
   const theme = useGlobalSettingsStore((s) => s.theme);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
+  const canEditAISettings = usePermission('configuration:edit');
 
   const onSaveApp = useCallback(async () => {
     // No app-specific settings to save yet
@@ -46,18 +32,10 @@ export function InsideSalesSettings() {
   } = useSettingsForm<InsideSalesFormValues>({
     buildStoreValues: () => ({
       theme,
-      apiKey: llmApiKey,
-      provider: llmProvider,
-      geminiApiKey: llmGeminiApiKey,
-      openaiApiKey: llmOpenaiApiKey,
-      azureOpenaiApiKey: llmAzureOpenaiApiKey,
-      azureOpenaiEndpoint: llmAzureOpenaiEndpoint,
-      azureOpenaiApiVersion: llmAzureOpenaiApiVersion,
-      azureOpenaiDeployments: llmAzureOpenaiDeployments,
-      anthropicApiKey: llmAnthropicApiKey,
+      apiKey: '',
       timeouts: { ...timeouts } as LLMTimeoutSettings,
     }),
-    deps: [theme, llmApiKey, llmProvider, llmGeminiApiKey, llmOpenaiApiKey, llmAzureOpenaiApiKey, llmAzureOpenaiEndpoint, llmAzureOpenaiApiVersion, llmAzureOpenaiDeployments, llmAnthropicApiKey, timeouts],
+    deps: [theme, timeouts],
     onSaveApp,
   });
 
@@ -77,17 +55,20 @@ export function InsideSalesSettings() {
       content: (
         <div className="space-y-4">
           <Card>
-            <ProviderConfigCard
-              provider={formValues.provider}
-              geminiApiKey={formValues.geminiApiKey}
-              openaiApiKey={formValues.openaiApiKey}
-              azureOpenaiApiKey={formValues.azureOpenaiApiKey}
-              azureOpenaiEndpoint={formValues.azureOpenaiEndpoint}
-              azureOpenaiApiVersion={formValues.azureOpenaiApiVersion}
-              azureOpenaiDeployments={formValues.azureOpenaiDeployments}
-              anthropicApiKey={formValues.anthropicApiKey}
-              onChange={handleChange}
-            />
+            <p className="text-[13px] text-[var(--text-secondary)]">
+              LLM providers are configured by an admin in{' '}
+              {canEditAISettings ? (
+                <Link
+                  to={routes.adminAiSettings}
+                  className="font-medium text-[var(--text-brand)] hover:underline"
+                >
+                  AI Settings
+                </Link>
+              ) : (
+                <span className="font-medium text-[var(--text-primary)]">AI Settings</span>
+              )}
+              . Per-user API keys are no longer required.
+            </p>
           </Card>
           <CollapsibleSection title="Timeouts" subtitle="LLM request timeout durations (in seconds)">
             <SettingsPanel settings={getGlobalSettingsByCategory('timeouts')} values={formValues} onChange={handleChange} />

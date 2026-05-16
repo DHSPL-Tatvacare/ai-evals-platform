@@ -17,7 +17,7 @@ function SherlockIcon({ className }: { className?: string }) {
 }
 import { useAppStore, useUIStore } from '@/stores';
 import { useReviewModeStore } from '@/stores/reviewModeStore';
-import { useLLMSettingsStore, hasProviderCredentials } from '@/stores/llmSettingsStore';
+import { useProviderConfigs } from '@/services/api/aiSettingsQueries';
 import { useChatWidgetStore } from './useChatWidget';
 import { findLastChartParts, isChartPart } from './chatWidgetHelpers';
 import { ChatMessages } from './ChatMessages';
@@ -226,20 +226,17 @@ export function ChatWidget() {
     }
   }, [currentApp, newChat]);
 
-  const openaiApiKey = useLLMSettingsStore((s) => s.openaiApiKey);
-  const azureApiKey = useLLMSettingsStore((s) => s.azureOpenaiApiKey);
-  const azureEndpoint = useLLMSettingsStore((s) => s.azureOpenaiEndpoint);
-
-  const credState = {
-    geminiApiKey: '',
-    openaiApiKey,
-    azureOpenaiApiKey: azureApiKey,
-    azureOpenaiEndpoint: azureEndpoint,
-    anthropicApiKey: '',
-    _serviceAccountConfigured: false,
-  };
+  // Sherlock requires OpenAI-family credentials (OpenAI or Azure OpenAI),
+  // resolved server-side from the admin's tenant_llm_providers row.
+  const { data: providerConfigs = [] } = useProviderConfigs();
+  const hasOpenAIFamily = providerConfigs.some(
+    (c) =>
+      c.isEnabled &&
+      c.validationStatus === 'ok' &&
+      (c.provider === 'openai' || c.provider === 'azure_openai'),
+  );
   const providerDisabled: Record<ChatProvider, boolean> = {
-    openai: !hasProviderCredentials('openai', credState) && !hasProviderCredentials('azure_openai', credState),
+    openai: !hasOpenAIFamily,
   };
 
   const handleSend = useCallback(
