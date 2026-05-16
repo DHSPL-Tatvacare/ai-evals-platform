@@ -175,64 +175,10 @@ FULL_ANTHROPIC_LIST = [
 ]
 
 
-@pytest.mark.asyncio
-async def test_discover_models_filters_by_curated_list(
-    client, db_session, route_tenant_id, monkeypatch, patched_async_session
-):
-    """When the tenant has curated_models set, /api/llm/discover-models must
-    only return those names — not the full SDK list. The 7+ legacy call sites
-    (LLMConfigSection in evaluator wizards, run overlays, report builder, etc.)
-    consume this endpoint, so without the filter, admin curation is a no-op
-    until the Phase-3 frontend rewire."""
-    db_session.add(
-        TenantLlmProvider(
-            tenant_id=route_tenant_id,
-            provider="anthropic",
-            is_enabled=True,
-            api_key_encrypted=encrypt_secret("ak-x"),
-            extra_config={},
-            curated_models=["claude-sonnet-4-6"],
-        )
-    )
-    await db_session.flush()
-    _install_fake_anthropic(monkeypatch, FULL_ANTHROPIC_LIST)
-
-    resp = await client.post(
-        "/api/llm/discover-models",
-        json={"provider": "anthropic"},
-    )
-    assert resp.status_code == 200, resp.text
-    names = [m["name"] for m in resp.json()]
-    assert names == ["claude-sonnet-4-6"], names
-
-
-@pytest.mark.asyncio
-async def test_discover_models_override_path_skips_curation(
-    client, db_session, route_tenant_id, monkeypatch, patched_async_session
-):
-    """When the request carries an apiKey override (admin probing during
-    setup), we must NOT filter by curated_models — the admin needs the raw
-    list to choose what to curate."""
-    db_session.add(
-        TenantLlmProvider(
-            tenant_id=route_tenant_id,
-            provider="anthropic",
-            is_enabled=True,
-            api_key_encrypted=encrypt_secret("ak-x"),
-            extra_config={},
-            curated_models=["claude-sonnet-4-6"],
-        )
-    )
-    await db_session.flush()
-    _install_fake_anthropic(monkeypatch, FULL_ANTHROPIC_LIST)
-
-    resp = await client.post(
-        "/api/llm/discover-models",
-        json={"provider": "anthropic", "apiKey": "ak-typed-by-admin"},
-    )
-    assert resp.status_code == 200, resp.text
-    names = sorted(m["name"] for m in resp.json())
-    assert names == sorted(FULL_ANTHROPIC_LIST)
+# Tests for /api/llm/discover-models removed in Phase 3 — the route + its
+# Phase-2 curated-list bridge filter both went away once the frontend stopped
+# calling the legacy endpoint. Coverage for admin-side discovery lives in
+# test_admin_ai_settings_routes.py against /api/admin/ai-settings/<p>/discover-models.
 
 
 @pytest.mark.asyncio
