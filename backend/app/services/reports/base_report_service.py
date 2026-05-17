@@ -14,7 +14,7 @@ from app.schemas.base import CamelModel
 from app.services.access_control import readable_scope_clause
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log, make_usage_callback
-from app.services.llm_credentials import resolve_credentials
+from app.services.llm_credentials import resolve_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -123,22 +123,31 @@ class BaseReportService(ABC):
                 logger.warning("LLM setup skipped: no model specified")
                 return None, None
 
-            creds = await resolve_credentials(self.db, self.tenant_id, effective_provider)
+            resolved = await resolve_llm_call(
+                self.db, self.tenant_id, "report_generation",
+                provider_override=effective_provider or None,
+                model_override=effective_model or None,
+            )
 
             factory_kwargs: dict[str, Any] = {}
-            if creds.provider == "azure_openai":
-                factory_kwargs["azure_endpoint"] = creds.extra_config.get("base_url") or ""
-                factory_kwargs["api_version"] = creds.extra_config.get(
-                    "api_version", "2025-03-01-preview"
+            if resolved.provider == "azure_openai":
+                factory_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
+                factory_kwargs["api_version"] = (
+                    resolved.api_version
+                    or resolved.credentials.extra_config.get("api_version")
+                    or "2025-03-01-preview"
                 )
 
             provider = create_llm_provider(
-                provider=creds.provider,
-                api_key=creds.secret.get("api_key", ""),
-                model_name=effective_model,
-                service_account_path=creds.service_account_path or "",
+                provider=resolved.provider,
+                api_key=resolved.credentials.secret.get("api_key", ""),
+                model_name=resolved.model,
+                service_account_path=resolved.credentials.service_account_path or "",
                 **factory_kwargs,
             )
+            # downstream log attribution should reflect what we used
+            effective_provider = resolved.provider
+            effective_model = resolved.model
 
             usage_cb = make_usage_callback(
                 tenant_id=self.tenant_id,

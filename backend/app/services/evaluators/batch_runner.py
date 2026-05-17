@@ -178,20 +178,29 @@ async def run_batch_evaluation(
         run_id=str(run_id),
     )
 
-    from app.services.llm_credentials import resolve_credentials
+    from app.services.llm_credentials import resolve_llm_call
 
-    if not llm_provider:
-        raise RuntimeError("batch_runner requires llm_provider")
+    # batch_runner is the generic chat-quality runner. Caller-supplied
+    # llm_provider / llm_model become resolver overrides; the call site is
+    # always chat_text for this runner.
     async with async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, llm_provider)
-    api_key = creds.secret.get("api_key", "")
-    service_account_path = creds.service_account_path or ""
-    auth_method = "service_account" if creds.service_account_path else "api_key"
+        resolved = await resolve_llm_call(
+            db, tenant_id, "chat_text",
+            provider_override=llm_provider or None,
+            model_override=llm_model or None,
+        )
+    api_key = resolved.credentials.secret.get("api_key", "")
+    service_account_path = resolved.credentials.service_account_path or ""
+    auth_method = "service_account" if resolved.credentials.service_account_path else "api_key"
     azure_endpoint = ""
     api_version = ""
-    if creds.provider == "azure_openai":
-        azure_endpoint = creds.extra_config.get("base_url") or ""
-        api_version = creds.extra_config.get("api_version", "2025-03-01-preview")
+    if resolved.provider == "azure_openai":
+        azure_endpoint = resolved.credentials.extra_config.get("base_url") or ""
+        api_version = resolved.api_version or resolved.credentials.extra_config.get("api_version", "2025-03-01-preview")
+    # Caller previously passed llm_model verbatim; runner now uses the resolved
+    # model string (which may equal the override when provided).
+    llm_model = resolved.model
+    llm_provider = resolved.provider
 
     # Load data
     loader = DataLoader(

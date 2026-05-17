@@ -209,25 +209,35 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
     mime_type = file_record.mime_type or audio_file_meta.get("mimeType", "audio/mpeg")
 
     # ── Resolve LLM credentials ─────────────────────────────────
-    from app.services.llm_credentials import resolve_credentials
-    provider = params.get("provider") or ""
-    if not provider:
-        raise RuntimeError("voice_rx_runner requires params['provider']")
-    async with async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, provider)
-    api_key = creds.secret.get("api_key", "")
-    service_account_path = creds.service_account_path or ""
+    from app.services.llm_credentials import ResolvedLlmCall, resolve_llm_call
 
-    # Default model for all steps; per-step overrides via step_models
+    # Voice-Rx runs two stages with DIFFERENT call sites:
+    # - transcription/normalization → audio_transcription (audio-capable model)
+    # - critique → chat_text (text-only judge)
+    # Tenants commonly set different defaults for each (e.g. gpt-4o-transcribe
+    # for transcription, gpt-4o for critique). Reusing the transcription
+    # resolution for the critique stage would silently run critique on the
+    # wrong model.
+    provider_override = params.get("provider")
     selected_model = params.get("model") or ""
     step_models = params.get("step_models") or {}
-
-    # ── Create LLM providers ────────────────────────────────────
-    vr_azure_endpoint = ""
-    vr_api_version = ""
-    if creds.provider == "azure_openai":
-        vr_azure_endpoint = creds.extra_config.get("base_url") or ""
-        vr_api_version = creds.extra_config.get("api_version", "2025-03-01-preview")
+    async with async_session() as db:
+        transcribe_resolved = await resolve_llm_call(
+            db, tenant_id, "audio_transcription",
+            provider_override=provider_override or None,
+            model_override=selected_model or None,
+        )
+        critique_resolved = await resolve_llm_call(
+            db, tenant_id, "chat_text",
+            provider_override=provider_override or None,
+            model_override=selected_model or None,
+        )
+    # provider/service_account_path are used by downstream config-snapshot
+    # attribution; they come from the transcription resolve since that's the
+    # "primary" identity for this runner type. The per-step api_key + endpoint
+    # threading goes through _create_llm(resolved=…) instead.
+    provider = transcribe_resolved.provider
+    service_account_path = transcribe_resolved.credentials.service_account_path or ""
 
     usage_cb = make_usage_callback(
         tenant_id=tenant_id,
@@ -237,13 +247,30 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
         owner_id=eval_run_id,
     )
 
-    def _create_llm(model: str) -> BaseLLMProvider:
+    def _create_llm(model: str, *, resolved: ResolvedLlmCall) -> BaseLLMProvider:
+        """Build a logging LLM client from a resolved call site.
+
+        ``model`` is the per-step model override (or the resolved default).
+        ``resolved`` controls provider + secret + endpoint — so transcription
+        steps pass ``transcribe_resolved`` and the critique step passes
+        ``critique_resolved``; nothing leaks across the call-site boundary.
+        """
+        azure_endpoint = ""
+        api_version = ""
+        if resolved.provider == "azure_openai":
+            azure_endpoint = resolved.credentials.extra_config.get("base_url") or ""
+            api_version = (
+                resolved.api_version
+                or resolved.credentials.extra_config.get("api_version")
+                or "2025-03-01-preview"
+            )
         inner = create_llm_provider(
-            provider=provider, api_key=api_key,
+            provider=resolved.provider,
+            api_key=resolved.credentials.secret.get("api_key", ""),
             model_name=model, temperature=0.3,
-            service_account_path=service_account_path,
-            azure_endpoint=vr_azure_endpoint,
-            api_version=vr_api_version,
+            service_account_path=resolved.credentials.service_account_path or "",
+            azure_endpoint=azure_endpoint,
+            api_version=api_version,
         )
         llm = LoggingLLMWrapper(
             inner, log_callback=save_api_log, usage_callback=usage_cb,
@@ -353,7 +380,10 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
         await check_cancel()
 
         try:
-            _transcription_llm = _create_llm(step_models.get("transcription") or selected_model)
+            _transcription_llm = _create_llm(
+                step_models.get("transcription") or transcribe_resolved.model,
+                resolved=transcribe_resolved,
+            )
             if hasattr(_transcription_llm, 'set_call_purpose'):
                 _transcription_llm.set_call_purpose('transcription', stage_index=0)
             transcription_result = await _run_transcription(
@@ -406,9 +436,12 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
                     or prerequisites.get("normalization_model")
                     or selected_model
                 )
+                # Normalization is a text→text step, so it shares the
+                # critique stage's chat_text resolution (not the audio-only
+                # transcription resolution).
                 norm_result = await _run_normalization(
                     flow=flow,
-                    llm=_create_llm(norm_model),
+                    llm=_create_llm(norm_model, resolved=critique_resolved),
                     listing=listing,
                     prerequisites=prerequisites,
                     thinking=thinking,
@@ -447,7 +480,10 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
         await check_cancel()
 
         try:
-            _critique_llm = _create_llm(step_models.get("evaluation") or selected_model)
+            _critique_llm = _create_llm(
+                step_models.get("evaluation") or critique_resolved.model,
+                resolved=critique_resolved,
+            )
             if hasattr(_critique_llm, 'set_call_purpose'):
                 _critique_llm.set_call_purpose('critique', stage_index=1)
             critique_result = await _run_critique(

@@ -445,20 +445,24 @@ async def run_adversarial_evaluation(
         job_id, 0, requested_total or test_count, "Initializing...", run_id=str(run_id),
     )
 
-    from app.services.llm_credentials import resolve_credentials
+    from app.services.llm_credentials import resolve_llm_call
 
-    if not llm_provider:
-        raise RuntimeError("adversarial_runner requires llm_provider")
     async with async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, llm_provider)
-    api_key = creds.secret.get("api_key", "")
-    sa_path = creds.service_account_path or ""
-    auth_method = "service_account" if creds.service_account_path else "api_key"
+        resolved = await resolve_llm_call(
+            db, tenant_id, "chat_text",
+            provider_override=llm_provider or None,
+            model_override=llm_model or None,
+        )
+    api_key = resolved.credentials.secret.get("api_key", "")
+    sa_path = resolved.credentials.service_account_path or ""
+    auth_method = "service_account" if resolved.credentials.service_account_path else "api_key"
     azure_endpoint = ""
     api_version = ""
-    if creds.provider == "azure_openai":
-        azure_endpoint = creds.extra_config.get("base_url") or ""
-        api_version = creds.extra_config.get("api_version", "2025-03-01-preview")
+    if resolved.provider == "azure_openai":
+        azure_endpoint = resolved.credentials.extra_config.get("base_url") or ""
+        api_version = resolved.api_version or resolved.credentials.extra_config.get("api_version", "2025-03-01-preview")
+    llm_provider = resolved.provider
+    llm_model = resolved.model
     inner_llm = create_llm_provider(
         provider=llm_provider, api_key=api_key,
         model_name=llm_model or "", temperature=temperature,

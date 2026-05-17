@@ -256,26 +256,34 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
     json_schema = generate_json_schema(output_schema_data)
 
     # ── Resolve LLM credentials ─────────────────────────────────
-    from app.services.llm_credentials import resolve_credentials
-    provider_name = params.get("provider") or ""
-    if not provider_name:
-        raise RuntimeError("custom_evaluator_runner requires params['provider']")
-    async with async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, provider_name)
+    from app.services.llm_credentials import resolve_llm_call
 
-    model = params.get("model") or evaluator.model_id or ""
+    call_site = params.get("call_site") or "chat_text"
+    provider_override = params.get("provider")
+    model_override = params.get("model") or evaluator.model_id or None
+    async with async_session() as db:
+        resolved = await resolve_llm_call(
+            db, tenant_id, call_site,
+            provider_override=provider_override or None,
+            model_override=model_override,
+        )
+
     factory_kwargs: dict[str, Any] = {}
-    if creds.provider == "azure_openai":
-        factory_kwargs["azure_endpoint"] = creds.extra_config.get("base_url") or ""
-        factory_kwargs["api_version"] = creds.extra_config.get("api_version", "2025-03-01-preview")
+    if resolved.provider == "azure_openai":
+        factory_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
+        factory_kwargs["api_version"] = resolved.api_version or resolved.credentials.extra_config.get("api_version", "2025-03-01-preview")
     inner = create_llm_provider(
-        provider=creds.provider,
-        api_key=creds.secret.get("api_key", ""),
-        model_name=model,
+        provider=resolved.provider,
+        api_key=resolved.credentials.secret.get("api_key", ""),
+        model_name=resolved.model,
         temperature=0.2,
-        service_account_path=creds.service_account_path or "",
+        service_account_path=resolved.credentials.service_account_path or "",
         **factory_kwargs,
     )
+    # Remaining downstream code reads `model` / `provider_name`; re-bind to the
+    # resolved values so attribution stays consistent with what we executed.
+    model = resolved.model
+    provider_name = resolved.provider
     usage_cb = make_usage_callback(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -299,9 +307,9 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
         "template_id": str(evaluator.template_id) if evaluator.template_id else None,
         "template_branch_key": evaluator.template_branch_key,
         "model_id": model,
-        "provider": creds.provider,
+        "provider": resolved.provider,
         "evaluator_name": evaluator.name,
-        "auth_method": "service_account" if creds.service_account_path else "api_key",
+        "auth_method": "service_account" if resolved.credentials.service_account_path else "api_key",
         "thinking": thinking,
     }
 
@@ -310,7 +318,7 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
         await db.execute(
             update(EvaluationRun).where(EvaluationRun.id == eval_run_id, EvaluationRun.tenant_id == tenant_id).values(
                 config=config_snapshot,
-                llm_provider=creds.provider,
+                llm_provider=resolved.provider,
                 llm_model=model,
             )
         )

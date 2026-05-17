@@ -22,6 +22,28 @@ class PermissionGroup:
     permissions: tuple[PermissionCatalogEntry, ...]
 
 
+_PLATFORM_GROUP = PermissionGroup(
+    id='platform',
+    label='Platform',
+    description=(
+        'Cross-tenant platform-staff actions. Grant only to operators '
+        'who manage defaults that apply to every tenant.'
+    ),
+    permissions=(
+        PermissionCatalogEntry(
+            id='platform:edit',
+            label='Edit platform-wide configuration',
+            description=(
+                'Edit platform-default settings that apply across every tenant '
+                '(e.g. LLM call-site defaults seeded for tenants without their own).'
+            ),
+            group_id='platform',
+            group_label='Platform',
+        ),
+    ),
+)
+
+
 PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
     PermissionGroup(
         id='listings',
@@ -309,6 +331,9 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
             ),
         ),
     ),
+    # Platform-staff group sits last — it's a cross-tenant concern and the
+    # tenant-scoped admin role editor should surface tenant permissions first.
+    _PLATFORM_GROUP,
 )
 
 OWNER_ONLY_SURFACES: tuple[dict[str, str], ...] = (

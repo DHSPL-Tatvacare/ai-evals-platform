@@ -35,7 +35,6 @@ from agents.model_settings import ModelSettings
 from agents.models.openai_responses import OpenAIResponsesModel
 from openai.types.shared import Reasoning
 
-from app.services.sherlock_v3.azure_client import specialist_model
 from app.services.sherlock_v3.contracts import (
     SubQuestion,
     SynthesisBrief,
@@ -125,6 +124,7 @@ def build_query_synthesis_specialist(
     client: openai.AsyncOpenAI,
     app_id: str,
     *,
+    model: str,
     available_targets: list[SynthesisTarget],
 ) -> Agent:
     """Construct the query_synthesis_specialist agent for one turn.
@@ -144,7 +144,7 @@ def build_query_synthesis_specialist(
     return Agent(
         name='sherlock-query-synthesis-specialist',
         instructions=system_prompt,
-        model=OpenAIResponsesModel(specialist_model(), client),
+        model=OpenAIResponsesModel(model, client),
         model_settings=ModelSettings(
             parallel_tool_calls=False,
             reasoning=Reasoning(effort='low'),

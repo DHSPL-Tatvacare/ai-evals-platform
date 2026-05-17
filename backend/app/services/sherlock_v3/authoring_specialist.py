@@ -43,7 +43,6 @@ from app.services.orchestration_authoring.orchestration_authoring_pack import (
     OrchestrationAuthoringPack,
     node_type_enum,
 )
-from app.services.sherlock_v3.azure_client import specialist_model
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +284,7 @@ def build_authoring_specialist(
     client: openai.AsyncOpenAI,
     app_id: str,
     *,
+    model: str,
     builder_context: BuilderSnapshot,
     auth: AuthContext,
 ) -> Agent:
@@ -344,7 +344,7 @@ def build_authoring_specialist(
     return Agent(
         name='sherlock-authoring-specialist',
         instructions=system_prompt,
-        model=OpenAIResponsesModel(specialist_model(), client),
+        model=OpenAIResponsesModel(model, client),
         model_settings=ModelSettings(
             parallel_tool_calls=False,
             reasoning=Reasoning(effort='medium'),

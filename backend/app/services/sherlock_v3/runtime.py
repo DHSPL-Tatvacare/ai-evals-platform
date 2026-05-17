@@ -418,7 +418,18 @@ async def run_turn(
     On stale ``previous_response_id`` we replay once with ``None`` —
     further failures bubble up as ``error_emitted`` events.
     """
-    client = await get_sherlock_azure_client(tenant_id=ctx.tenant_id)
+    # Resolve client + both call-site models up front so the supervisor and
+    # every specialist share one client and the correct deployment strings
+    # (analytics_supervisor + analytics_specialist call sites).
+    client, supervisor_model = await get_sherlock_azure_client(
+        tenant_id=ctx.tenant_id, call_site="analytics_supervisor",
+    )
+    _spec_client, specialist_model = await get_sherlock_azure_client(
+        tenant_id=ctx.tenant_id, call_site="analytics_specialist",
+    )
+    # Same tenant + same call-site family → same credential → equivalent
+    # clients; discard the duplicate so we don't ship two sockets per turn.
+    del _spec_client
 
     # Resolve grounding before building the agent so prompt construction
     # and the submit_sql handler share the same turn context.
@@ -428,6 +439,8 @@ async def run_turn(
     supervisor = build_supervisor(
         ctx.app_id,
         client,
+        supervisor_model=supervisor_model,
+        specialist_model=specialist_model,
         grounding=grounding,
         builder_context=ctx.builder_context,
         auth=ctx.auth,

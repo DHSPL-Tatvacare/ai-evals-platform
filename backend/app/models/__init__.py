@@ -83,6 +83,7 @@ from app.models.orchestration import (
 from app.models.provider_connection import ProviderConnection
 from app.models.tenant_llm_credential import TenantLlmCredential
 from app.models.tenant_llm_deployment import TenantLlmDeployment
+from app.models.tenant_call_site_default import TenantCallSiteDefault
 
 __all__ = [
     "Base",
@@ -115,5 +116,6 @@ __all__ = [
     "ProviderConnection",
     "TenantLlmCredential",
     "TenantLlmDeployment",
+    "TenantCallSiteDefault",
     "LogClinicalActionOutbox",
 ]

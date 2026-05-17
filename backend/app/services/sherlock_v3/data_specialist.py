@@ -29,7 +29,6 @@ from agents.models.openai_responses import OpenAIResponsesModel
 from agents.tool_context import ToolContext
 from openai.types.shared import Reasoning
 
-from app.services.sherlock_v3.azure_client import specialist_model
 from app.services.sherlock_v3.data_specialist_prompt import build_data_specialist_prompt
 from app.services.sherlock_v3.grounding import GroundingContext
 
@@ -1065,6 +1064,7 @@ def build_data_specialist(
     client: openai.AsyncOpenAI,
     app_id: str,
     *,
+    model: str,
     grounding: GroundingContext | None = None,
 ) -> Agent:
     """Construct the data_specialist Agent for one app.
@@ -1114,7 +1114,7 @@ def build_data_specialist(
     return Agent(
         name='sherlock-data-specialist',
         instructions=system_prompt,
-        model=OpenAIResponsesModel(specialist_model(), client),
+        model=OpenAIResponsesModel(model, client),
         model_settings=ModelSettings(
             tool_choice='auto',
             parallel_tool_calls=False,

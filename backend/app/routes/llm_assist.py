@@ -1,8 +1,8 @@
 """Server-side LLM-assist endpoints.
 
 Replaces the legacy browser-side LLM pipeline. Each request resolves
-credentials via ``resolve_credentials`` — the encrypted key never leaves
-the backend.
+through ``resolve_llm_call`` with call site ``assist_prompt_or_schema`` —
+the encrypted key never leaves the backend.
 """
 from __future__ import annotations
 
@@ -21,9 +21,12 @@ from app.schemas.llm_assist import (
 )
 from app.services import llm_assist_service
 from app.services.llm_credentials import (
+    CallSiteCapabilityMismatch,
+    CallSiteCapabilityUnknown,
+    CallSiteNotConfiguredError,
     ProviderNotConfiguredError,
-    ResolvedCredentials,
-    resolve_credentials,
+    ResolvedLlmCall,
+    resolve_llm_call,
 )
 
 
@@ -31,11 +34,24 @@ router = APIRouter(prefix="/api/llm/assist", tags=["llm-assist"])
 
 
 async def _resolve_or_409(
-    db: AsyncSession, auth: AuthContext, provider: str
-) -> ResolvedCredentials:
+    db: AsyncSession,
+    auth: AuthContext,
+    *,
+    provider: str | None,
+    model: str | None,
+) -> ResolvedLlmCall:
     try:
-        return await resolve_credentials(db, auth.tenant_id, provider)
-    except ProviderNotConfiguredError as exc:
+        return await resolve_llm_call(
+            db, auth.tenant_id, "assist_prompt_or_schema",
+            provider_override=provider or None,
+            model_override=model or None,
+        )
+    except (
+        CallSiteNotConfiguredError,
+        CallSiteCapabilityMismatch,
+        CallSiteCapabilityUnknown,
+        ProviderNotConfiguredError,
+    ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -45,11 +61,10 @@ async def generate_prompt(
     auth: AuthContext = require_permission("asset:create"),
     db: AsyncSession = Depends(get_db),
 ):
-    creds = await _resolve_or_409(db, auth, body.provider)
+    resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)
     try:
         prompt = await llm_assist_service.run_generate_prompt(
-            creds=creds,
-            model=body.model,
+            resolved=resolved,
             prompt_type=body.prompt_type,
             user_idea=body.user_idea,
             tenant_id=auth.tenant_id,
@@ -66,11 +81,10 @@ async def generate_schema(
     auth: AuthContext = require_permission("asset:create"),
     db: AsyncSession = Depends(get_db),
 ):
-    creds = await _resolve_or_409(db, auth, body.provider)
+    resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)
     try:
         schema = await llm_assist_service.run_generate_schema(
-            creds=creds,
-            model=body.model,
+            resolved=resolved,
             prompt_type=body.prompt_type,
             user_idea=body.user_idea,
             tenant_id=auth.tenant_id,
@@ -87,10 +101,9 @@ async def extract_structured(
     auth: AuthContext = require_permission("asset:create"),
     db: AsyncSession = Depends(get_db),
 ):
-    creds = await _resolve_or_409(db, auth, body.provider)
+    resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)
     return await llm_assist_service.run_extract_structured(
-        creds=creds,
-        model=body.model,
+        resolved=resolved,
         body=body,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,

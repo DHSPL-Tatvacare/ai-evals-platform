@@ -1,8 +1,8 @@
 """Server-side prompt / schema / structured-extraction helpers.
 
-Replaces the legacy browser-side LLM pipeline. Every call resolves credentials
-via ``resolve_credentials`` upstream and is wrapped in
-``LoggingLLMWrapper`` so cost tracking continues to record
+Replaces the legacy browser-side LLM pipeline. Every call routes through
+``resolve_llm_call`` upstream (call site ``assist_prompt_or_schema``) and is
+wrapped in ``LoggingLLMWrapper`` so cost tracking continues to record
 ``analytics.fact_llm_generation`` rows.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from app.services.evaluators.llm_base import (
     create_llm_provider,
 )
 from app.services.evaluators.runner_utils import make_usage_callback
-from app.services.llm_credentials import ResolvedCredentials
+from app.services.llm_credentials import ResolvedLlmCall
 
 
 logger = logging.getLogger(__name__)
@@ -123,31 +123,34 @@ _SCHEMA_META_SCHEMA: dict = {
 }
 
 
-def _provider_kwargs(creds: ResolvedCredentials) -> dict:
-    if creds.provider == "azure_openai":
+def _provider_kwargs(resolved: ResolvedLlmCall) -> dict:
+    if resolved.provider == "azure_openai":
         return {
-            "azure_endpoint": creds.extra_config.get("base_url") or "",
-            "api_version": creds.extra_config.get("api_version", "2025-03-01-preview"),
+            "azure_endpoint": resolved.credentials.extra_config.get("base_url") or "",
+            "api_version": (
+                resolved.api_version
+                or resolved.credentials.extra_config.get("api_version")
+                or "2025-03-01-preview"
+            ),
         }
     return {}
 
 
 def _build_logging_llm(
     *,
-    creds: ResolvedCredentials,
-    model: str,
+    resolved: ResolvedLlmCall,
     tenant_id: uuid.UUID,
     user_id: Optional[uuid.UUID],
     call_purpose: str,
     temperature: float = 0.1,
 ) -> LoggingLLMWrapper:
     inner: BaseLLMProvider = create_llm_provider(
-        provider=creds.provider,
-        api_key=creds.secret.get("api_key", ""),
-        model_name=model,
+        provider=resolved.provider,
+        api_key=resolved.credentials.secret.get("api_key", ""),
+        model_name=resolved.model,
         temperature=temperature,
-        service_account_path=creds.service_account_path or "",
-        **_provider_kwargs(creds),
+        service_account_path=resolved.credentials.service_account_path or "",
+        **_provider_kwargs(resolved),
     )
     usage_cb = make_usage_callback(
         tenant_id=tenant_id,
@@ -163,8 +166,7 @@ def _build_logging_llm(
 
 async def run_generate_prompt(
     *,
-    creds: ResolvedCredentials,
-    model: str,
+    resolved: ResolvedLlmCall,
     prompt_type: str,
     user_idea: str,
     tenant_id: uuid.UUID,
@@ -175,8 +177,7 @@ async def run_generate_prompt(
     Mirrors the legacy client-side prompt-generator pipeline.
     """
     llm = _build_logging_llm(
-        creds=creds,
-        model=model,
+        resolved=resolved,
         tenant_id=tenant_id,
         user_id=user_id,
         call_purpose="assist_generate_prompt",
@@ -193,8 +194,7 @@ async def run_generate_prompt(
 
 async def run_generate_schema(
     *,
-    creds: ResolvedCredentials,
-    model: str,
+    resolved: ResolvedLlmCall,
     prompt_type: str,
     user_idea: str,
     tenant_id: uuid.UUID,
@@ -202,8 +202,7 @@ async def run_generate_schema(
 ) -> dict:
     """Generate a JSON Schema describing the desired output."""
     llm = _build_logging_llm(
-        creds=creds,
-        model=model,
+        resolved=resolved,
         tenant_id=tenant_id,
         user_id=user_id,
         call_purpose="assist_generate_schema",
@@ -228,8 +227,7 @@ async def run_generate_schema(
 
 async def run_extract_structured(
     *,
-    creds: ResolvedCredentials,
-    model: str,
+    resolved: ResolvedLlmCall,
     body,
     tenant_id: uuid.UUID,
     user_id: Optional[uuid.UUID],
@@ -242,8 +240,7 @@ async def run_extract_structured(
     from app.schemas.llm_assist import ExtractStructuredResponse
 
     llm = _build_logging_llm(
-        creds=creds,
-        model=model,
+        resolved=resolved,
         tenant_id=tenant_id,
         user_id=user_id,
         call_purpose="assist_extract_structured",

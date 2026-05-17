@@ -30,12 +30,16 @@ async def generate_evaluator_draft(
     app_id: str,
     tenant_id: str,
     user_id: str,
-    provider: str,
-    model: str,
+    provider: str | None = None,
+    model: str | None = None,
     rule_catalog: list[dict] | None = None,
     job_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """Generate evaluator draft from a prompt using the supplied LLM provider/model.
+    """Generate evaluator draft from a prompt via the ``evaluator_draft`` call site.
+
+    ``provider`` and ``model`` are optional; when supplied they flow through
+    as resolver overrides. When omitted, the resolver picks the tenant default
+    (or the platform default) for ``evaluator_draft``.
 
     Returns:
         {
@@ -47,40 +51,50 @@ async def generate_evaluator_draft(
     from app.database import async_session
     from app.services.evaluators.llm_base import create_llm_provider
     from app.services.llm_credentials import (
+        CallSiteCapabilityMismatch,
+        CallSiteCapabilityUnknown,
+        CallSiteNotConfiguredError,
         ProviderNotConfiguredError,
-        resolve_credentials,
+        resolve_llm_call,
     )
 
     output_fields: list[dict] = []
     matched_rule_ids: list[str] = []
     warnings: list[str] = []
 
-    if not provider or not model:
-        warnings.append(
-            "Missing provider/model for evaluator draft. Configure an LLM in AI Settings and select a model."
-        )
-        return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
-
     try:
         async with async_session() as db:
             try:
-                creds = await resolve_credentials(db, tenant_id, provider)
-            except ProviderNotConfiguredError as exc:
+                resolved = await resolve_llm_call(
+                    db, tenant_id, "evaluator_draft",
+                    provider_override=provider or None,
+                    model_override=model or None,
+                )
+            except (
+                CallSiteNotConfiguredError,
+                CallSiteCapabilityMismatch,
+                CallSiteCapabilityUnknown,
+                ProviderNotConfiguredError,
+            ) as exc:
                 warnings.append(str(exc))
                 return {"outputFields": [], "matchedRuleIds": [], "warnings": warnings}
 
         provider_kwargs: dict[str, Any] = {}
-        if creds.provider == "azure_openai":
-            provider_kwargs["azure_endpoint"] = creds.extra_config.get("base_url") or ""
-            provider_kwargs["api_version"] = creds.extra_config.get(
-                "api_version", "2025-03-01-preview"
+        if resolved.provider == "azure_openai":
+            provider_kwargs["azure_endpoint"] = (
+                resolved.credentials.extra_config.get("base_url") or ""
+            )
+            provider_kwargs["api_version"] = (
+                resolved.api_version
+                or resolved.credentials.extra_config.get("api_version")
+                or "2025-03-01-preview"
             )
 
         inner = create_llm_provider(
-            provider=creds.provider,
-            model_name=model,
-            api_key=creds.secret.get("api_key", ""),
-            service_account_path=creds.service_account_path or "",
+            provider=resolved.provider,
+            model_name=resolved.model,
+            api_key=resolved.credentials.secret.get("api_key", ""),
+            service_account_path=resolved.credentials.service_account_path or "",
             **provider_kwargs,
         )
 

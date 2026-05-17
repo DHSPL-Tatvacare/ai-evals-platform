@@ -99,8 +99,10 @@ class BackfillRequest:
     cost_budget_usd: float
     started_after: datetime | None
     ended_before: datetime | None
-    provider: str
-    model: str
+    # Optional overrides since Phase 2; the resolver falls back to the
+    # lead_signal_extraction call-site default when these are blank.
+    provider: str = ""
+    model: str = ""
 
 
 def parse_request(params: dict[str, Any]) -> BackfillRequest:
@@ -144,12 +146,10 @@ def parse_request(params: dict[str, Any]) -> BackfillRequest:
     if cost_budget_usd <= 0:
         raise ValueError("cost_budget_usd must be positive")
 
+    # ``provider`` / ``model`` are optional overrides; the resolver falls back
+    # to the ``lead_signal_extraction`` call-site default when both are blank.
     provider = str(params.get("provider") or "").strip()
-    if not provider:
-        raise ValueError("backfill-lead-signals requires 'provider' in params")
     model = str(params.get("model") or "").strip()
-    if not model:
-        raise ValueError("backfill-lead-signals requires 'model' in params")
 
     return BackfillRequest(
         app_id=app_id,
@@ -496,30 +496,34 @@ async def _build_llm_provider(
     """
     from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
     from app.services.evaluators.runner_utils import make_usage_callback
-    from app.services.llm_credentials import resolve_credentials
-
-    if not provider:
-        raise ValueError("backfill-lead-signals requires provider")
-    if not model:
-        raise ValueError("backfill-lead-signals requires model")
+    from app.services.llm_credentials import resolve_llm_call
 
     async with async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, provider)
+        resolved = await resolve_llm_call(
+            db, tenant_id, "lead_signal_extraction",
+            provider_override=provider or None,
+            model_override=model or None,
+        )
 
     factory_kwargs: dict[str, Any] = {}
-    if creds.provider == "azure_openai":
-        factory_kwargs["azure_endpoint"] = creds.extra_config.get("base_url") or ""
-        factory_kwargs["api_version"] = creds.extra_config.get(
-            "api_version", "2025-03-01-preview"
+    if resolved.provider == "azure_openai":
+        factory_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
+        factory_kwargs["api_version"] = (
+            resolved.api_version
+            or resolved.credentials.extra_config.get("api_version")
+            or "2025-03-01-preview"
         )
 
     inner = create_llm_provider(
-        provider=creds.provider,
-        model_name=model,
-        api_key=creds.secret.get("api_key", ""),
-        service_account_path=creds.service_account_path or "",
+        provider=resolved.provider,
+        model_name=resolved.model,
+        api_key=resolved.credentials.secret.get("api_key", ""),
+        service_account_path=resolved.credentials.service_account_path or "",
         **factory_kwargs,
     )
+    # downstream attribution should reflect what we actually used
+    provider = resolved.provider
+    model = resolved.model
 
     base_usage_cb = make_usage_callback(
         tenant_id=tenant_id,

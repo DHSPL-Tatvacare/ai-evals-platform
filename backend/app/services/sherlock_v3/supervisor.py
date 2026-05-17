@@ -40,7 +40,6 @@ from app.services.sherlock_v3.authoring_specialist import (
     build_authoring_specialist,
     extract_authoring_specialist_output,
 )
-from app.services.sherlock_v3.azure_client import supervisor_model
 from app.services.sherlock_v3.contracts import (
     SYNTHESIS_BRIEF_JSON_SCHEMA,
     SynthesisTarget,
@@ -181,6 +180,8 @@ def build_supervisor(
     app_id: str,
     client: openai.AsyncOpenAI,
     *,
+    supervisor_model: str,
+    specialist_model: str,
     grounding: Any | None = None,
     builder_context: BuilderSnapshot | None = None,
     auth: AuthContext | None = None,
@@ -216,6 +217,7 @@ def build_supervisor(
         try:
             authoring_agent = build_authoring_specialist(
                 client, app_id,
+                model=specialist_model,
                 builder_context=builder_context,
                 auth=auth,
             )
@@ -231,10 +233,13 @@ def build_supervisor(
     # ── build specialists ─────────────────────────────────────────────
     data_spec = build_data_specialist(
         client, app_id,
+        model=specialist_model,
         grounding=grounding,
     )
     synthesis_spec = build_query_synthesis_specialist(
-        client, app_id, available_targets=available_targets,
+        client, app_id,
+        model=specialist_model,
+        available_targets=available_targets,
     )
 
     # Typed ``list[Any]`` because the supervisor's ``tools=`` list mixes
@@ -288,7 +293,7 @@ def build_supervisor(
             app_id=app_id,
             available_tools_block=_format_available_tools(available_targets),
         ),
-        model=OpenAIResponsesModel(supervisor_model(), client),
+        model=OpenAIResponsesModel(supervisor_model, client),
         # gpt-5.4 reasoning models reject ``temperature`` and ``top_p``.
         # Control behavior via reasoning effort instead.
         model_settings=ModelSettings(

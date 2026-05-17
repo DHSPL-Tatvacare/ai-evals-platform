@@ -295,22 +295,28 @@ async def run_eval(
         )
 
     # ── LLM wrapper ─────────────────────────────────────────────
-    from app.services.llm_credentials import resolve_credentials
+    from app.services.llm_credentials import resolve_llm_call
 
     async with _async_session() as db:
-        creds = await resolve_credentials(db, tenant_id, params.llm_config.provider)
+        resolved = await resolve_llm_call(
+            db, tenant_id, "chat_text",
+            provider_override=params.llm_config.provider or None,
+            model_override=params.llm_config.model or None,
+        )
     provider_kwargs: dict[str, Any] = {}
-    if creds.provider == "azure_openai":
-        provider_kwargs["azure_endpoint"] = creds.extra_config.get("base_url") or ""
-        provider_kwargs["api_version"] = creds.extra_config.get(
-            "api_version", "2025-03-01-preview"
+    if resolved.provider == "azure_openai":
+        provider_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
+        provider_kwargs["api_version"] = (
+            resolved.api_version
+            or resolved.credentials.extra_config.get("api_version")
+            or "2025-03-01-preview"
         )
     provider = create_llm_provider(
-        provider=creds.provider,
-        api_key=creds.secret.get("api_key", ""),
-        model_name=params.llm_config.model or "",
+        provider=resolved.provider,
+        api_key=resolved.credentials.secret.get("api_key", ""),
+        model_name=resolved.model,
         temperature=params.llm_config.temperature,
-        service_account_path=creds.service_account_path or "",
+        service_account_path=resolved.credentials.service_account_path or "",
         **provider_kwargs,
     )
     usage_cb = make_usage_callback(
