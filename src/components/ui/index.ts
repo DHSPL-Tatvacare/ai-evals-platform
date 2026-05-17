@@ -70,3 +70,6 @@ export {
 export { MetricChip, type MetricChipTone } from './MetricChip';
 export { RecordWorkspace, type RecordWorkspaceTab } from './RecordWorkspace';
 export { RecordNavigator } from './RecordNavigator';
+export { AuroraBackdrop } from './AuroraBackdrop';
+export { BrandMark } from './BrandMark';
+export { GradientText } from './GradientText';

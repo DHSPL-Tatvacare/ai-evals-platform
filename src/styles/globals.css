@@ -293,6 +293,23 @@
   --chip-brand-bg: color-mix(in srgb, var(--interactive-primary) 10%, transparent);
   --chip-brand-border: color-mix(in srgb, var(--interactive-primary) 22%, transparent);
   --chip-brand-text: var(--interactive-primary);
+
+  /* Brand gradients — reused by hero CTAs, brand mark, tagline highlight */
+  --gradient-brand-cta: linear-gradient(90deg, var(--color-brand-primary), var(--color-brand-secondary));
+  --gradient-brand-text: linear-gradient(90deg, var(--color-brand-accent) 0%, #8b5cf6 50%, var(--color-brand-accent) 100%);
+  --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+  /* Login / landing — atmospheric backdrop primitives (dark-only surface in v1) */
+  --login-backdrop-bg: #07070d;
+  --login-aurora-primary: rgba(112, 48, 160, 0.45);
+  --login-aurora-secondary: rgba(64, 60, 207, 0.40);
+  --login-aurora-tertiary: rgba(139, 92, 246, 0.35);
+  --login-grid-line: rgba(255, 255, 255, 0.035);
+  --login-panel-bg: rgba(7, 7, 13, 0.45);
+  --login-input-bg: rgba(255, 255, 255, 0.03);
+  --login-input-border: rgba(255, 255, 255, 0.10);
+  --login-input-focus-ring: rgba(112, 48, 160, 0.18);
 }
 
 [data-theme="dark"] {
@@ -423,6 +440,23 @@
   --bg-chat-assistant: var(--color-neutral-800);
   --bg-chat-input: var(--color-neutral-800);
   --border-chat-input: var(--color-neutral-600);
+
+  /* Brand gradients — reused by hero CTAs, brand mark, tagline highlight */
+  --gradient-brand-cta: linear-gradient(90deg, var(--color-brand-primary), var(--color-brand-secondary));
+  --gradient-brand-text: linear-gradient(90deg, var(--color-brand-accent) 0%, #8b5cf6 50%, var(--color-brand-accent) 100%);
+  --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+  /* Login / landing — atmospheric backdrop primitives */
+  --login-backdrop-bg: #07070d;
+  --login-aurora-primary: rgba(112, 48, 160, 0.45);
+  --login-aurora-secondary: rgba(64, 60, 207, 0.40);
+  --login-aurora-tertiary: rgba(139, 92, 246, 0.35);
+  --login-grid-line: rgba(255, 255, 255, 0.035);
+  --login-panel-bg: rgba(7, 7, 13, 0.45);
+  --login-input-bg: rgba(255, 255, 255, 0.03);
+  --login-input-border: rgba(255, 255, 255, 0.10);
+  --login-input-focus-ring: rgba(112, 48, 160, 0.18);
 }
 
 /* Fonts loaded via @import at top of file */
