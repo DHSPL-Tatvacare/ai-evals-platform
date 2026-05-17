@@ -264,7 +264,16 @@ class AppRunDetailBehaviourConfig(CamelModel):
     failure_headline_from_result: bool = False
 
 
+RunShape = Literal["single", "batch"]
+
+
 class AppRunDetailConfig(CamelModel):
+    """Run-detail surface config. ``run_shape`` chooses the hook that drives
+    fetching and chrome: ``single`` for one-eval runs (``EvalRun`` shape, with
+    optional drilldown), ``batch`` for many-eval runs (``Run`` shape with
+    thread + adversarial sub-rows and custom banners)."""
+
+    run_shape: RunShape = "single"
     eval_types: list[EvalType] = Field(default_factory=list)
     report_tab: AppRunDetailReportTabConfig = Field(default_factory=AppRunDetailReportTabConfig)
     extras: AppRunDetailExtrasConfig = Field(default_factory=AppRunDetailExtrasConfig)

@@ -409,7 +409,14 @@ export interface AppRunDetailBehaviourConfig {
   failureHeadlineFromResult?: boolean;
 }
 
+/** Run shape selects the dispatcher path inside `useRunDetail`.
+ *  - `single` — one `EvalRun` row, optional call drilldown (voice-rx, inside-sales).
+ *  - `batch`  — one `Run` row with thread + adversarial sub-rows (kaira). */
+export type RunShape = 'single' | 'batch';
+
 export interface AppRunDetailConfig {
+  /** Dispatches which run-detail hook drives the surface. */
+  runShape: RunShape;
   /** Eval types this app produces. Drives the result-renderer registry lookup. */
   evalTypes: string[];
   reportTab: AppRunDetailReportTabConfig;
@@ -668,6 +675,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     ],
     evaluatorDetail: { interpretationBands: [] },
     runDetail: {
+      runShape: 'single',
       evalTypes: ['full_evaluation', 'custom'],
       reportTab: { enabled: true, enabledForEvalTypes: ['full_evaluation'] },
       extras: { rawPayload: true },
@@ -829,6 +837,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
     ],
     evaluatorDetail: { interpretationBands: [] },
     runDetail: {
+      runShape: 'batch',
       evalTypes: ['batch_thread', 'batch_adversarial'],
       reportTab: { enabled: true },
       extras: { review: true, adversarialAxes: true, historyTab: true },
@@ -1154,6 +1163,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       ],
     },
     runDetail: {
+      runShape: 'single',
       evalTypes: ['call_quality'],
       reportTab: { enabled: true },
       extras: {
@@ -1343,7 +1353,8 @@ function mergeRunDetailConfig(
   base: AppRunDetailConfig | undefined,
 ): AppRunDetailConfig | undefined {
   if (!override && !base) return undefined;
-  const fb = base ?? {
+  const fb: AppRunDetailConfig = base ?? {
+    runShape: 'single',
     evalTypes: [],
     reportTab: { enabled: false },
     extras: {},
@@ -1351,6 +1362,7 @@ function mergeRunDetailConfig(
   };
   if (!override) return fb;
   return {
+    runShape: override.runShape ?? fb.runShape,
     evalTypes: override.evalTypes ?? fb.evalTypes,
     reportTab: { ...fb.reportTab, ...override.reportTab },
     extras: { ...fb.extras, ...override.extras },

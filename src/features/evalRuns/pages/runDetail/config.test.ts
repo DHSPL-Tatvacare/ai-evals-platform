@@ -16,6 +16,7 @@ describe('runDetailConfigSchema', () => {
 
   test('rejects an empty evalTypes array', () => {
     const parsed = runDetailConfigSchema.safeParse({
+      runShape: 'single',
       evalTypes: [],
       reportTab: { enabled: true },
       extras: {},
@@ -29,12 +30,24 @@ describe('runDetailConfigSchema', () => {
     // model only the fields we read so this is informational, not load-bearing.
     // The schema's primary defence is requiring evalTypes/reportTab shape.
     const parsed = runDetailConfigSchema.safeParse({
+      runShape: 'single',
       evalTypes: ['call_quality'],
       reportTab: { enabled: true },
       extras: { rawPayload: true, unknownExtra: true },
       behaviour: {},
     });
     expect(parsed.success).toBe(true);
+  });
+
+  test('rejects an unknown runShape value', () => {
+    const parsed = runDetailConfigSchema.safeParse({
+      runShape: 'streaming',
+      evalTypes: ['call_quality'],
+      reportTab: { enabled: true },
+      extras: {},
+      behaviour: {},
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 
@@ -47,6 +60,7 @@ describe('mergeAppConfig runDetail', () => {
   test('shallow-merges per-section overrides from backend', () => {
     const merged = mergeAppConfig('voice-rx', {
       runDetail: {
+        runShape: 'single',
         evalTypes: ['full_evaluation', 'custom'],
         reportTab: { enabled: false },
         extras: { rawPayload: false },
@@ -62,6 +76,7 @@ describe('mergeAppConfig runDetail', () => {
     const fb = APP_CONFIG_FALLBACKS['voice-rx'].runDetail!;
     const merged = mergeAppConfig('voice-rx', {
       runDetail: {
+        runShape: fb.runShape,
         evalTypes: fb.evalTypes,
         reportTab: { enabled: true },
         extras: {},

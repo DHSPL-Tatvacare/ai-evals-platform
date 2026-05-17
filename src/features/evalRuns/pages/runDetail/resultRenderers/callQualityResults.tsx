@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone } from 'lucide-react';
+import { ArrowLeft, Phone } from 'lucide-react';
 import {
   useInlineReviewOptional,
   InlineReviewControls,
@@ -358,6 +358,73 @@ export function CallQualityDrilldown({ thread }: { thread: ThreadEvalRow }) {
       <CallResultPanel thread={thread} />
       {guardModal}
     </div>
+  );
+}
+
+/**
+ * Prev/next navigator for siblings in a call-quality drilldown. Mounted by the
+ * single-eval run-detail hook into the header `actions` slot when the URL
+ * carries `/calls/:callId`. App-agnostic — the caller composes the URL via
+ * `getCallHref` so this stays under `resultRenderers/`.
+ */
+export interface CallQualityCallNavProps {
+  thread: ThreadEvalRow;
+  siblings: ThreadEvalRow[];
+  getCallHref: (threadId: string) => string;
+}
+
+export function CallQualityCallNav({ thread, siblings, getCallHref }: CallQualityCallNavProps) {
+  const navigate = useNavigate();
+  const review = useInlineReviewOptional();
+  const { confirmNavigation } = useInlineReviewNavigationGuard();
+
+  const reviewContextItems = review?.context?.items;
+  const inScopeCallIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!reviewContextItems) return set;
+    for (const item of reviewContextItems) {
+      if (item.itemType !== 'call') continue;
+      set.add(stripReviewItemPrefix(item.itemKey));
+    }
+    return set;
+  }, [reviewContextItems]);
+
+  if (siblings.length <= 1) return null;
+
+  const currentIdx = siblings.findIndex((s) => s.thread_id === thread.thread_id);
+  const prevThread = currentIdx > 0 ? siblings[currentIdx - 1] : null;
+  const nextThread = currentIdx < siblings.length - 1 ? siblings[currentIdx + 1] : null;
+  const goToThread = (id: string) => {
+    const target = getCallHref(id);
+    if (inScopeCallIds.has(id)) {
+      navigate(target);
+      return;
+    }
+    confirmNavigation(() => navigate(target));
+  };
+
+  return (
+    <span className="inline-flex items-center gap-0.5 border border-[var(--border-subtle)] rounded-md bg-[var(--bg-secondary)]">
+      <button
+        disabled={!prevThread}
+        onClick={() => prevThread && goToThread(prevThread.thread_id)}
+        className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-l-md transition-colors cursor-pointer disabled:cursor-default"
+        title="Previous call"
+      >
+        <ArrowLeft size={14} />
+      </button>
+      <span className="text-[10px] tabular-nums px-1 border-x border-[var(--border-subtle)] text-[var(--text-secondary)]">
+        {currentIdx + 1}/{siblings.length}
+      </span>
+      <button
+        disabled={!nextThread}
+        onClick={() => nextThread && goToThread(nextThread.thread_id)}
+        className="p-1 disabled:opacity-30 hover:bg-[var(--interactive-secondary)] rounded-r-md transition-colors cursor-pointer disabled:cursor-default"
+        title="Next call"
+      >
+        <ArrowLeft size={14} className="rotate-180" />
+      </button>
+    </span>
   );
 }
 

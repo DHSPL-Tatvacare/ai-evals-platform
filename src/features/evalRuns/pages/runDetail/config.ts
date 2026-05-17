@@ -22,22 +22,22 @@ const drilldownSchema = z.object({
 });
 
 const extrasSchema = z.object({
-  /** Mount InlineReviewProvider + review-aware summary section. Kaira only today. */
+  /** Mount InlineReviewProvider + review-aware summary section. Batch shape only. */
   review: z.boolean().optional(),
-  /** Adversarial axes side panel + retry-failed-cases header action. Kaira only. */
+  /** Adversarial axes side panel + retry-failed-cases header action. Batch shape only. */
   adversarialAxes: z.boolean().optional(),
-  /** Header button + right slide-over showing raw `run.result` JSON. Voice-rx only. */
+  /** Header button + right slide-over showing raw `run.result` JSON. */
   rawPayload: z.boolean().optional(),
-  /** Adds a "History" tab backed by `ReviewHistoryTab`. Kaira only. */
+  /** Adds a "History" tab backed by `ReviewHistoryTab`. Batch shape only. */
   historyTab: z.boolean().optional(),
-  /** Drill-down sub-route (e.g. `/calls/:callId`). Inside-sales only. */
+  /** Drill-down sub-route (e.g. `/calls/:callId`). Single shape only. */
   drilldown: drilldownSchema.optional(),
 });
 
 const behaviourSchema = z.object({
-  /** Tab strip hides while the run is active. Kaira pattern. */
+  /** Tab strip hides while the run is active. */
   hideTabsWhileActive: z.boolean().optional(),
-  /** Failed-run banner replaces the body entirely (no metric cards). Inside-sales pattern. */
+  /** Failed-run banner replaces the body entirely (no metric cards). */
   bannerOnlyOnFailed: z.boolean().optional(),
   /** Status banner pulls the failure step from `run.result.failedStep` for the headline. */
   failureHeadlineFromResult: z.boolean().optional(),
@@ -53,7 +53,16 @@ const behaviourSchema = z.object({
  * config block drifts from this schema fails fast with a clear error rather
  * than silently rendering a half-broken page.
  */
+/**
+ * Run shape selects the dispatcher path inside `useRunDetail`:
+ * - `single` — one `EvalRun` row (camelCase shape); optional call drilldown.
+ * - `batch` — one `Run` row (snake_case shape) with thread + adversarial sub-rows.
+ */
+export const runShapeSchema = z.enum(['single', 'batch']);
+export type RunShape = z.infer<typeof runShapeSchema>;
+
 export const runDetailConfigSchema = z.object({
+  runShape: runShapeSchema,
   evalTypes: z.array(evalTypeSchema).min(1),
   reportTab: reportTabSchema,
   extras: extrasSchema,

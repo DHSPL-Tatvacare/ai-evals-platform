@@ -1,4 +1,4 @@
-export { CallQualityResults, CallQualityDrilldown } from './callQualityResults';
+export { CallQualityResults, CallQualityDrilldown, CallQualityCallNav } from './callQualityResults';
 export { getOverallScore } from './callQualityScore';
 export { FullEvaluationResults } from './fullEvaluationResults';
 export { CustomEvalResults } from './customEvalResults';

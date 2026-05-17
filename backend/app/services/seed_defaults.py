@@ -2090,6 +2090,7 @@ APP_SEEDS = [
             ],
             "evaluatorDetail": {"interpretationBands": []},
             "runDetail": {
+                "runShape": "single",
                 "evalTypes": ["full_evaluation", "custom"],
                 "reportTab": {
                     "enabled": True,
@@ -2276,6 +2277,7 @@ APP_SEEDS = [
             ],
             "evaluatorDetail": {"interpretationBands": []},
             "runDetail": {
+                "runShape": "batch",
                 "evalTypes": ["batch_thread", "batch_adversarial"],
                 "reportTab": {"enabled": True},
                 "extras": {
@@ -2465,6 +2467,7 @@ APP_SEEDS = [
                 ],
             },
             "runDetail": {
+                "runShape": "single",
                 "evalTypes": ["call_quality"],
                 "reportTab": {"enabled": True},
                 "extras": {
