@@ -29,7 +29,10 @@ from app.services.llm_credentials.call_sites import (
     UnknownCallSiteError,
     get_call_site,
 )
-from app.services.llm_credentials.capabilities import compute_capabilities
+from app.services.llm_credentials.capabilities import (
+    compute_capabilities,
+    unknown_capabilities,
+)
 from app.services.llm_credentials.crypto import decrypt_json
 from app.services.llm_credentials.resolver import (
     ProviderNotConfiguredError,
@@ -282,15 +285,43 @@ async def _resolve_non_azure_model(
 
 
 def _assert_capability_fit(
-    call_site: str, required: frozenset[str], available: frozenset[str]
+    call_site: str,
+    required: frozenset[str],
+    catalog_row: RefLlmModelsCatalog,
 ) -> None:
+    """Raise ``CallSiteCapabilityMismatch`` when the model's confirmed
+    capability set doesn't cover the call site's required tags.
+
+    Partitions the missing tags into two buckets so the error message tells
+    the operator which fix to apply:
+
+    - ``unknown`` — flag is NULL in the catalog (upstream hasn't been
+      consulted for this row). Action: refresh the catalog.
+    - ``confirmed_false`` — flag is explicitly false. Action: pick a
+      different model.
+    """
+    available = compute_capabilities(catalog_row)
     missing = required - available
-    if missing:
-        raise CallSiteCapabilityMismatch(
-            f"Resolved model for call site '{call_site}' does not support required "
-            f"capabilities: {sorted(missing)}. Update the default in "
-            f"/admin/llm/defaults."
+    if not missing:
+        return
+    unknown = unknown_capabilities(catalog_row) & missing
+    confirmed_false = missing - unknown
+    parts: list[str] = [
+        f"Resolved model '{catalog_row.model}' for call site '{call_site}' "
+        f"is missing required capabilities {sorted(missing)}."
+    ]
+    if unknown:
+        parts.append(
+            f"Unknown (catalog never refreshed from upstream for these flags): "
+            f"{sorted(unknown)} — run POST /api/admin/cost/refresh-models-dev "
+            f"or wait for the cost-rollup job to reconcile."
         )
+    if confirmed_false:
+        parts.append(
+            f"Confirmed unsupported by upstream: {sorted(confirmed_false)} — "
+            f"pick a different model in /admin/llm/defaults."
+        )
+    raise CallSiteCapabilityMismatch(" ".join(parts))
 
 
 async def resolve_llm_call(
@@ -393,8 +424,8 @@ async def resolve_llm_call(
         )
         api_version = creds.extra_config.get("api_version")
 
+    _assert_capability_fit(call_site, spec.required_capabilities, catalog_row)
     capabilities = compute_capabilities(catalog_row)
-    _assert_capability_fit(call_site, spec.required_capabilities, capabilities)
 
     resolved = ResolvedLlmCall(
         call_site=call_site,

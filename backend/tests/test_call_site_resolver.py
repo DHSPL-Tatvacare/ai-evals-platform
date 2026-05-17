@@ -52,8 +52,34 @@ async def seeded_tenant(db_session):
 
 @pytest_asyncio.fixture
 async def text_model_id(db_session):
-    """Insert a minimal text-only catalog row and return its UUID."""
+    """Return the UUID of a text-only catalog row.
+
+    Catalog rows are sourced from models.dev refresh at lifespan boot
+    (Phase 2 cleanup removed the in-migration seed). If the test DB already
+    has a ``gpt-4o-mini`` row from a previous lifespan/refresh, reuse it
+    rather than insert a colliding duplicate. Otherwise insert a minimal
+    row for the test to work against.
+    """
+    from sqlalchemy import select
     from app.models.cost import RefLlmModelsCatalog
+
+    existing = (
+        await db_session.execute(
+            select(RefLlmModelsCatalog).where(
+                RefLlmModelsCatalog.provider == "openai",
+                RefLlmModelsCatalog.model == "gpt-4o-mini",
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        # Ensure the flags this test depends on are set even if upstream
+        # said otherwise — keeps the test's intent (text + structured) intact.
+        existing.modalities_input = ["text"]
+        existing.modalities_output = ["text"]
+        existing.supports_structured_output = True
+        await db_session.commit()
+        return existing.id
+
     cat = RefLlmModelsCatalog(
         provider_key="openai",
         provider="openai",
@@ -89,15 +115,36 @@ async def _seed_credential(db, tenant_id, provider, api_key, *, name="default", 
 
 
 async def _seed_default(db, *, tenant_id, call_site, provider, model, credential_name="default"):
+    """Upsert the (tenant_id, call_site) default.
+
+    Migration 0051 seeds platform-level defaults that may already occupy
+    (NULL tenant, call_site) slots; reuse the row in that case so tests
+    don't trip on the unique constraint.
+    """
+    from sqlalchemy import select
     from app.models.tenant_call_site_default import TenantCallSiteDefault
-    row = TenantCallSiteDefault(
-        tenant_id=tenant_id,
-        call_site=call_site,
-        provider=provider,
-        credential_name=credential_name,
-        model_or_deployment=model,
+    stmt = select(TenantCallSiteDefault).where(
+        TenantCallSiteDefault.call_site == call_site,
     )
-    db.add(row)
+    stmt = (
+        stmt.where(TenantCallSiteDefault.tenant_id.is_(None))
+        if tenant_id is None
+        else stmt.where(TenantCallSiteDefault.tenant_id == tenant_id)
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        row = TenantCallSiteDefault(
+            tenant_id=tenant_id,
+            call_site=call_site,
+            provider=provider,
+            credential_name=credential_name,
+            model_or_deployment=model,
+        )
+        db.add(row)
+    else:
+        row.provider = provider
+        row.credential_name = credential_name
+        row.model_or_deployment = model
     await db.commit()
     return row
 
@@ -256,22 +303,40 @@ async def test_capability_mismatch_raises(
 async def test_azure_path_resolves_deployment_and_api_version(db_session, seeded_tenant):
     """Azure default carries a deployment name; resolver joins
     tenant_llm_deployments → canonical catalog row + picks api_version_override."""
+    from sqlalchemy import select
     from app.models.cost import RefLlmModelsCatalog
     from app.models.tenant_llm_deployment import TenantLlmDeployment
     from app.services.llm_credentials import resolve_llm_call
     # Catalog target (Azure deployments map to provider='openai' canonical rows).
-    cat = RefLlmModelsCatalog(
-        provider_key="openai",
-        provider="openai",
-        model_id="gpt-4o",
-        model="gpt-4o",
-        display_name="gpt-4o",
-        modalities_input=["text"],
-        modalities_output=["text"],
-        supports_tool_call=True,
-        supports_structured_output=True,
-    )
-    db_session.add(cat)
+    # Catalog rows come from models.dev at lifespan boot — reuse the row if
+    # the test DB already has it (typical after a real boot in dev), else
+    # insert a minimal row for the test.
+    cat = (
+        await db_session.execute(
+            select(RefLlmModelsCatalog).where(
+                RefLlmModelsCatalog.provider == "openai",
+                RefLlmModelsCatalog.model == "gpt-4o",
+            )
+        )
+    ).scalar_one_or_none()
+    if cat is None:
+        cat = RefLlmModelsCatalog(
+            provider_key="openai",
+            provider="openai",
+            model_id="gpt-4o",
+            model="gpt-4o",
+            display_name="gpt-4o",
+            modalities_input=["text"],
+            modalities_output=["text"],
+            supports_tool_call=True,
+            supports_structured_output=True,
+        )
+        db_session.add(cat)
+    else:
+        cat.modalities_input = ["text"]
+        cat.modalities_output = ["text"]
+        cat.supports_tool_call = True
+        cat.supports_structured_output = True
     await db_session.commit()
 
     cred = await _seed_credential(

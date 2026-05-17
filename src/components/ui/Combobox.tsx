@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { cn } from '@/utils';
@@ -9,6 +9,14 @@ export interface ComboboxOption {
   searchText?: string;
   /** Optional muted secondary text shown on the right of the option row. Also included in search. */
   meta?: string;
+  /** Optional node rendered to the left of the option label (e.g. a provider logo). */
+  leading?: ReactNode;
+  /** Optional node rendered after the label and before the meta column (e.g. capability chips). */
+  trailing?: ReactNode;
+  /** Optional rich content rendered on a second line below the label.
+   *  Use for chip strips / descriptions that would otherwise crowd the
+   *  single-row layout when option labels are long. */
+  description?: ReactNode;
 }
 
 interface ComboboxBaseProps {
@@ -254,7 +262,7 @@ export function Combobox(props: ComboboxProps) {
       >
         <span
           className={cn(
-            'truncate',
+            'truncate flex-1 min-w-0 inline-flex items-center gap-2',
             selectedLabel
               ? selectedValues.length > 0 && multi
                 ? 'font-medium text-[var(--text-brand)]'
@@ -262,7 +270,14 @@ export function Combobox(props: ComboboxProps) {
               : 'text-[var(--text-muted)]',
           )}
         >
-          {selectedLabel ?? placeholder}
+          {!multi &&
+            (() => {
+              const sel = options.find((o) => o.value === (props as SingleComboboxProps).value);
+              return sel?.leading ? (
+                <span className="shrink-0 inline-flex items-center">{sel.leading}</span>
+              ) : null;
+            })()}
+          <span className="truncate">{selectedLabel ?? placeholder}</span>
         </span>
         <div className="flex items-center gap-1 shrink-0">
           {selectedValues.length > 0 && (
@@ -361,21 +376,42 @@ export function Combobox(props: ComboboxProps) {
                           {selected && <Check className="h-2.5 w-2.5 text-[var(--text-on-color)]" />}
                         </span>
                       )}
-                      <span className="flex-1 min-w-0 truncate">{opt.label}</span>
-                      {opt.meta && (
-                        <span
-                          className={cn(
-                            'shrink min-w-0 max-w-[50%] truncate text-[11px] font-normal',
-                            selected && multi
-                              ? 'text-[var(--text-brand)]/70'
-                              : 'text-[var(--text-muted)]',
+                      {opt.leading && (
+                        <span className="shrink-0 inline-flex items-center self-start pt-0.5">
+                          {opt.leading}
+                        </span>
+                      )}
+                      <span className="flex-1 min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="flex-1 min-w-0 truncate">
+                            {opt.label}
+                          </span>
+                          {opt.meta && (
+                            <span
+                              className={cn(
+                                'shrink-0 truncate text-[11px] font-normal',
+                                selected && multi
+                                  ? 'text-[var(--text-brand)]/70'
+                                  : 'text-[var(--text-muted)]',
+                              )}
+                            >
+                              {opt.meta}
+                            </span>
                           )}
-                        >
-                          {opt.meta}
+                        </span>
+                        {opt.description && (
+                          <span className="mt-1 flex items-center gap-1">
+                            {opt.description}
+                          </span>
+                        )}
+                      </span>
+                      {opt.trailing && (
+                        <span className="shrink-0 inline-flex items-center gap-1 self-start pt-0.5">
+                          {opt.trailing}
                         </span>
                       )}
                       {!multi && selected && (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-[var(--text-brand)]" />
+                        <Check className="h-3.5 w-3.5 shrink-0 self-start pt-0.5 text-[var(--text-brand)]" />
                       )}
                     </button>
                   );

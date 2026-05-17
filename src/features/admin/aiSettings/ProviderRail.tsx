@@ -1,10 +1,7 @@
-import { Loader2 } from 'lucide-react';
-
 import { StatusDot } from '@/components/ui';
 import { LLM_PROVIDER_LABELS } from '@/constants/llmProviders';
-import type { ProviderConfig } from '@/services/api/aiSettingsApi';
-import { useProviderConfigs } from '@/services/api/aiSettingsQueries';
-import type { LlmProvider } from '@/services/api/llmCredentialsApi';
+import { useAllTenantCredentials } from '@/services/api/llmCredentialsQueries';
+import type { LlmProvider, TenantCredential } from '@/services/api/llmCredentialsApi';
 import { cn } from '@/utils';
 
 import { ProviderLogo } from './ProviderLogo';
@@ -16,62 +13,57 @@ interface ProviderRailProps {
 
 const PROVIDER_ORDER: LlmProvider[] = [
   'openai',
-  'azure_openai',
   'anthropic',
   'gemini',
-  'vertex',
+  'azure_openai',
   'bedrock',
+  'vertex',
 ];
 
 type RailDotStatus = 'success' | 'error' | 'warning' | 'neutral';
 
-function statusDotFor(p: ProviderConfig): RailDotStatus {
-  if (!p.isEnabled) return 'neutral';
-  if (p.validationStatus === 'ok') return 'success';
-  if (p.validationStatus === 'invalid') return 'error';
-  return 'warning';
-}
-
-function statusLabel(p: ProviderConfig): string {
-  if (!p.isEnabled) return 'Disabled';
-  if (!p.hasApiKey) return 'No key';
-  switch (p.validationStatus) {
-    case 'ok':
-      return 'Validated';
-    case 'invalid':
-      return 'Invalid';
-    default:
-      return 'Untested';
+function summariseProvider(creds: TenantCredential[]): {
+  dot: RailDotStatus;
+  sub: string;
+} {
+  if (creds.length === 0) return { dot: 'neutral', sub: 'Not configured' };
+  const enabled = creds.filter((c) => c.isEnabled);
+  if (enabled.length === 0) {
+    return { dot: 'neutral', sub: `${creds.length} disabled` };
   }
+  const ok = enabled.filter((c) => c.validationStatus === 'ok').length;
+  const invalid = enabled.filter((c) => c.validationStatus === 'invalid').length;
+  if (invalid > 0 && ok === 0) {
+    return { dot: 'error', sub: `${invalid} invalid` };
+  }
+  if (invalid > 0) {
+    return {
+      dot: 'warning',
+      sub: `${ok} validated · ${invalid} invalid`,
+    };
+  }
+  if (ok === enabled.length) {
+    return { dot: 'success', sub: `${ok} validated` };
+  }
+  return {
+    dot: 'warning',
+    sub: `${enabled.length} configured · ${ok} validated`,
+  };
 }
-
-const BACKEND_ONLY_PROVIDERS = new Set<LlmProvider>(['vertex', 'bedrock']);
 
 export function ProviderRail({ selected, onSelect }: ProviderRailProps) {
-  const { data, isLoading, isError } = useProviderConfigs();
+  const { credentials, isLoading } = useAllTenantCredentials();
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-[var(--text-secondary)]">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-      </div>
-    );
+  // Bucket credentials by provider for the status row. Every provider in
+  // PROVIDER_ORDER renders, even providers the tenant has zero credentials
+  // for — the rail is also the entry point to add a brand-new credential.
+  const byProvider = new Map<LlmProvider, TenantCredential[]>();
+  for (const p of PROVIDER_ORDER) byProvider.set(p, []);
+  for (const c of credentials) {
+    const arr = byProvider.get(c.provider) ?? [];
+    arr.push(c);
+    byProvider.set(c.provider, arr);
   }
-
-  if (isError || !data) {
-    return (
-      <div className="rounded-md border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-sm text-[var(--text-secondary)]">
-        Failed to load AI settings.
-      </div>
-    );
-  }
-
-  // Backend's bridge surface (`useProviderConfigs`) only knows the four
-  // api-key-shaped providers; Vertex+Bedrock get rendered as "Not configured"
-  // until the multi-credential admin UI lands.
-  const byProvider = new Map<LlmProvider, ProviderConfig>(
-    data.map((p) => [p.provider as LlmProvider, p]),
-  );
 
   return (
     <nav
@@ -79,15 +71,12 @@ export function ProviderRail({ selected, onSelect }: ProviderRailProps) {
       aria-label="LLM provider selector"
     >
       {PROVIDER_ORDER.map((provider) => {
-        const config = byProvider.get(provider);
+        const creds = byProvider.get(provider) ?? [];
+        const { dot, sub } = isLoading
+          ? { dot: 'neutral' as RailDotStatus, sub: 'Loading…' }
+          : summariseProvider(creds);
         const isSelected = selected === provider;
-        const dot: RailDotStatus = config ? statusDotFor(config) : 'neutral';
         const label = LLM_PROVIDER_LABELS[provider];
-        const sub = config
-          ? statusLabel(config)
-          : BACKEND_ONLY_PROVIDERS.has(provider)
-            ? 'Backend ready · UI pending'
-            : 'Not configured';
         return (
           <button
             key={provider}

@@ -56,7 +56,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Sequence, Union
+from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -72,232 +72,15 @@ depends_on: Union[str, Sequence[str], None] = None
 _log = logging.getLogger("alembic.runtime.migration")
 
 
-# ── Curated catalog rows seeded inline ───────────────────────────────
-#
-# Phase 2's ``0051`` migration writes ``tenant_call_site_defaults`` rows that
-# FK into ``analytics.ref_llm_models_catalog``. Alembic runs before
-# ``seed_all_defaults`` at lifespan startup, so a runtime seed file cannot
-# satisfy that FK on a fresh DB. We seed inline here.
-#
-# Capability flags are mirrored from models.dev as of 2026-05-18. The list
-# is intentionally narrow — only models actually referenced by Phase 2's
-# default call-site seed need to exist here. ``models_dev_refresh`` will
-# re-upsert these rows with fresh data on the next refresh; the structure
-# of the migration ensures it's safe to re-run.
-_SEED_CATALOG: list[dict[str, Any]] = [
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-4o",
-        "model": "gpt-4o",
-        "display_name": "GPT-4o",
-        "family": "gpt",
-        "context_limit": 128000,
-        "output_limit": 16384,
-        "supports_reasoning": False,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-4o-mini",
-        "model": "gpt-4o-mini",
-        "display_name": "GPT-4o mini",
-        "family": "gpt",
-        "context_limit": 128000,
-        "output_limit": 16384,
-        "supports_reasoning": False,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-4o-transcribe",
-        "model": "gpt-4o-transcribe",
-        "display_name": "GPT-4o transcribe",
-        "family": "gpt",
-        "context_limit": 16000,
-        "output_limit": 2048,
-        "supports_reasoning": False,
-        "supports_tool_call": False,
-        "supports_attachment": True,
-        "supports_structured_output": False,
-        "modalities_input": ["audio", "text"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-4o-mini-tts",
-        "model": "gpt-4o-mini-tts",
-        "display_name": "GPT-4o mini TTS",
-        "family": "gpt",
-        "context_limit": 2000,
-        "output_limit": 0,
-        "supports_reasoning": False,
-        "supports_tool_call": False,
-        "supports_attachment": False,
-        "supports_structured_output": False,
-        "modalities_input": ["text"],
-        "modalities_output": ["audio"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "o3-mini",
-        "model": "o3-mini",
-        "display_name": "o3-mini",
-        "family": "o-series",
-        "context_limit": 200000,
-        "output_limit": 100000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": False,
-        "supports_structured_output": True,
-        "modalities_input": ["text"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-5",
-        "model": "gpt-5",
-        "display_name": "GPT-5",
-        "family": "gpt-5",
-        "context_limit": 400000,
-        "output_limit": 128000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "openai",
-        "provider": "openai",
-        "model_id": "gpt-5-mini",
-        "model": "gpt-5-mini",
-        "display_name": "GPT-5 mini",
-        "family": "gpt-5",
-        "context_limit": 400000,
-        "output_limit": 128000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "google",
-        "provider": "gemini",
-        "model_id": "gemini-2.5-flash",
-        "model": "gemini-2.5-flash",
-        "display_name": "Gemini 2.5 Flash",
-        "family": "gemini-flash",
-        "context_limit": 1048576,
-        "output_limit": 65536,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "audio", "video", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "google",
-        "provider": "gemini",
-        "model_id": "gemini-2.5-pro",
-        "model": "gemini-2.5-pro",
-        "display_name": "Gemini 2.5 Pro",
-        "family": "gemini-pro",
-        "context_limit": 1048576,
-        "output_limit": 65536,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "audio", "video", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "anthropic",
-        "provider": "anthropic",
-        "model_id": "claude-sonnet-4-5",
-        "model": "claude-sonnet-4-5",
-        "display_name": "Claude Sonnet 4.5",
-        "family": "claude-sonnet",
-        "context_limit": 200000,
-        "output_limit": 64000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": False,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "anthropic",
-        "provider": "anthropic",
-        "model_id": "claude-haiku-4-5",
-        "model": "claude-haiku-4-5",
-        "display_name": "Claude Haiku 4.5",
-        "family": "claude-haiku",
-        "context_limit": 200000,
-        "output_limit": 64000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": False,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    # Bedrock + Vertex placeholder rows so Phase 2 call-site seeds that name a
-    # Bedrock-hosted Claude or Vertex-hosted Gemini have a FK target. These
-    # carry provider='bedrock'/'vertex' to differentiate from the upstream
-    # entries above — pricing rows live under upstream provider keys.
-    {
-        "provider_key": "anthropic",
-        "provider": "bedrock",
-        "model_id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "display_name": "Claude Sonnet 4.5 (Bedrock)",
-        "family": "claude-sonnet",
-        "context_limit": 200000,
-        "output_limit": 64000,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": False,
-        "modalities_input": ["text", "image", "pdf"],
-        "modalities_output": ["text"],
-    },
-    {
-        "provider_key": "google",
-        "provider": "vertex",
-        "model_id": "gemini-2.5-pro",
-        "model": "gemini-2.5-pro",
-        "display_name": "Gemini 2.5 Pro (Vertex)",
-        "family": "gemini-pro",
-        "context_limit": 1048576,
-        "output_limit": 65536,
-        "supports_reasoning": True,
-        "supports_tool_call": True,
-        "supports_attachment": True,
-        "supports_structured_output": True,
-        "modalities_input": ["text", "image", "audio", "video", "pdf"],
-        "modalities_output": ["text"],
-    },
-]
+# NOTE: this migration previously seeded ``analytics.ref_llm_models_catalog``
+# from a hand-curated literal. That seed is gone — the catalog's source of
+# truth is models.dev via ``cost_tracking/models_dev_refresh.apply_refresh``,
+# triggered at lifespan boot by ``_ensure_catalog_loaded`` in ``app.main``.
+# Capability flags committed to a Python list inevitably drift from reality
+# (the bug class that produced ``CallSiteCapabilityMismatch`` for
+# ``supports_structured_output`` on gpt-5-mini in May 2026). Existing prod
+# rows seeded by an earlier revision of this file remain in place; the next
+# refresh upserts them with authoritative upstream values.
 
 
 def _now() -> datetime:
@@ -491,10 +274,16 @@ def upgrade() -> None:  # noqa: C901 — one cohesive reshape, splitting hides i
         schema="analytics",
     )
 
-    # ── 12. Seed curated catalog rows ──────────────────────────────────────
-    _seed_catalog_rows(bind)
+    # ── 12. Catalog seeding intentionally removed ─────────────────────────
+    # The catalog (analytics.ref_llm_models_catalog) is sourced from
+    # models.dev via ``cost_tracking/models_dev_refresh.apply_refresh``.
+    # The lifespan-boot step ``_ensure_catalog_loaded`` runs that refresh
+    # synchronously when the catalog is empty, and fails the boot loudly if
+    # the refresh fails — no committed-to-code capability data is allowed to
+    # silently lie to the resolver. Prod rows that were seeded by an earlier
+    # revision of this migration remain until the next refresh reconciles them.
 
-    # ── 10. Backfill deployments (after catalog seed so resolution can hit) ──
+    # ── 10. Backfill deployments (after catalog ready so resolution can hit) ──
     azure_rows = [r for r in pre_rows if r["provider"] == "azure_openai"]
     for row in azure_rows:
         curated = row["curated_models"] or []
@@ -637,117 +426,6 @@ def _resolve_deployment(
         return cat_row["id"], cat_row["model"]
 
     return None, None
-
-
-def _seed_catalog_rows(bind) -> None:
-    """Upsert curated catalog rows so Phase 2's call-site seed has FK targets."""
-    now = _now()
-    for row in _SEED_CATALOG:
-        existing = bind.execute(
-            sa.text(
-                """
-                SELECT id FROM analytics.ref_llm_models_catalog
-                 WHERE provider = :provider AND model = :model
-                """
-            ),
-            {"provider": row["provider"], "model": row["model"]},
-        ).mappings().first()
-
-        if existing:
-            bind.execute(
-                sa.text(
-                    """
-                    UPDATE analytics.ref_llm_models_catalog
-                       SET provider_key = :provider_key,
-                           model_id = :model_id,
-                           display_name = :display_name,
-                           family = :family,
-                           context_limit = :context_limit,
-                           output_limit = :output_limit,
-                           supports_reasoning = :supports_reasoning,
-                           supports_tool_call = :supports_tool_call,
-                           supports_attachment = :supports_attachment,
-                           supports_structured_output = :supports_structured_output,
-                           modalities_input = CAST(:modalities_input AS TEXT[]),
-                           modalities_output = CAST(:modalities_output AS TEXT[]),
-                           status = 'active',
-                           last_seen_at = :now
-                     WHERE id = :id
-                    """
-                ),
-                {
-                    **row,
-                    "id": existing["id"],
-                    "now": now,
-                },
-            )
-        else:
-            bind.execute(
-                sa.text(
-                    """
-                    INSERT INTO analytics.ref_llm_models_catalog
-                        (id, provider_key, provider, model_id, model,
-                         display_name, family, context_limit, output_limit,
-                         supports_reasoning, supports_tool_call, supports_attachment,
-                         supports_structured_output,
-                         modalities_input, modalities_output,
-                         open_weights, status, first_seen_at, last_seen_at)
-                    VALUES
-                        (:id, :provider_key, :provider, :model_id, :model,
-                         :display_name, :family, :context_limit, :output_limit,
-                         :supports_reasoning, :supports_tool_call, :supports_attachment,
-                         :supports_structured_output,
-                         CAST(:modalities_input AS TEXT[]),
-                         CAST(:modalities_output AS TEXT[]),
-                         false, 'active', :now, :now)
-                    """
-                ),
-                {
-                    **row,
-                    "id": uuid.uuid4(),
-                    "now": now,
-                },
-            )
-
-        # Seed a baseline pricing row at zero cost so the per-call recorder has
-        # a pricing_version_id to attach to (otherwise pricing_fallback=true
-        # would flag every default-model row until models_dev_refresh runs).
-        pricing_exists = bind.execute(
-            sa.text(
-                """
-                SELECT 1 FROM analytics.ref_llm_model_pricing
-                 WHERE provider = :provider AND model = :model
-                   AND effective_to IS NULL
-                 LIMIT 1
-                """
-            ),
-            {"provider": row["provider"], "model": row["model"]},
-        ).first()
-        if not pricing_exists:
-            bind.execute(
-                sa.text(
-                    """
-                    INSERT INTO analytics.ref_llm_model_pricing
-                        (id, provider, model, effective_from, effective_to,
-                         input_per_1m_usd, cached_read_per_1m_usd,
-                         cache_write_5m_per_1m_usd, cache_write_1h_per_1m_usd,
-                         output_per_1m_usd, reasoning_per_1m_usd,
-                         currency, source, notes, created_at)
-                    VALUES
-                        (:id, :provider, :model, :now, NULL,
-                         0, 0, 0, 0, 0, 0,
-                         'USD', 'seed_baseline',
-                         'baseline row seeded by alembic 0050; refresh from models.dev',
-                         :now)
-                    """
-                ),
-                {
-                    "id": uuid.uuid4(),
-                    "provider": row["provider"],
-                    "model": row["model"],
-                    "now": now,
-                },
-            )
 
 
 def downgrade() -> None:

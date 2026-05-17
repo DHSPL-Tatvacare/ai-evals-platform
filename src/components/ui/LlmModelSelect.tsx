@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 
 import { Combobox } from '@/components/ui/Combobox';
 import { CapabilityChips } from '@/components/ui/CapabilityChip';
+import { LLMProviderLogo } from '@/components/ui/LLMProviderLogo';
 import { LLM_PROVIDER_LABELS } from '@/constants/llmProviders';
 import {
   useAllTenantCredentials,
@@ -28,7 +29,13 @@ interface LlmModelSelectProps {
   noAutoDefault?: boolean;
   disabled?: boolean;
   compact?: boolean;
-  layout?: 'stack' | 'rows';
+  /**
+   * - `stack` (default) — two stacked comboboxes with optional labels above.
+   * - `rows` — labelled grid; label column + control column per row.
+   * - `inline` — credential + model side-by-side on a single row, no labels.
+   *   Use inside tight table rows where the surrounding row carries the title.
+   */
+  layout?: 'stack' | 'rows' | 'inline';
 }
 
 /**
@@ -108,6 +115,7 @@ export function LlmModelSelect({
   const credentialOptions = filteredCreds.map((c) => ({
     value: c.id,
     label: credentialLabel(c),
+    leading: <LLMProviderLogo provider={c.provider} size={16} />,
   }));
   const handleCredentialChange = (credentialId: string) => {
     const next = filteredCreds.find((c) => c.id === credentialId);
@@ -125,8 +133,17 @@ export function LlmModelSelect({
 
   const modelComboOptions = modelOptions.map((m) => ({
     value: m.modelOrDeployment,
+    // When the catalog has a display name distinct from the deployment/model
+    // id, show the id as the dim search-friendly subtext so the user can
+    // still scan by exact string. The capability chips render below.
     label: m.displayName || m.modelOrDeployment,
-    meta: m.isDefaultForCallSite ? 'default' : undefined,
+    meta:
+      m.displayName && m.displayName !== m.modelOrDeployment
+        ? m.modelOrDeployment
+        : m.isDefaultForCallSite
+          ? 'default'
+          : undefined,
+    description: <CapabilityChips tags={m.capabilities} />,
   }));
 
   const handleModelChange = (model: string) => {
@@ -135,7 +152,7 @@ export function LlmModelSelect({
   };
 
   const modelPlaceholder = !value
-    ? 'Choose a credential first'
+    ? 'Pick provider first'
     : modelsLoading
       ? 'Loading models…'
       : modelOptions.length === 0
@@ -146,7 +163,7 @@ export function LlmModelSelect({
     <Combobox
       value={value?.credentialId ?? ''}
       options={credentialOptions}
-      placeholder="Select credential"
+      placeholder="Select provider"
       disabled={disabled || credsLoading || filteredCreds.length === 0}
       onChange={handleCredentialChange}
     />
@@ -174,7 +191,7 @@ export function LlmModelSelect({
   if (layout === 'rows') {
     return (
       <div className="space-y-3">
-        <Field label="Credential">{credentialField}</Field>
+        <Field label="Provider">{credentialField}</Field>
         <Field label="Model">
           {modelField}
           {pickedModel && (
@@ -187,12 +204,21 @@ export function LlmModelSelect({
     );
   }
 
+  if (layout === 'inline') {
+    return (
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-2">
+        <div className="min-w-0">{credentialField}</div>
+        <div className="min-w-0">{modelField}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn(compact ? 'space-y-2' : 'space-y-3')}>
       <div>
         {!compact && (
           <label className="mb-1 block text-[12px] font-medium text-[var(--text-primary)]">
-            Credential
+            Provider
           </label>
         )}
         {credentialField}

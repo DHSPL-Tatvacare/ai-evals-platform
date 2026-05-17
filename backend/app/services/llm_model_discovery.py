@@ -333,12 +333,36 @@ async def _validate_azure(creds: ResolvedCredentials) -> None:
     try:
         await asyncio.to_thread(lambda: list(client.models.list()))
     except openai.AuthenticationError as exc:
-        raise ValueError(f"Azure OpenAI authentication failed: {exc}") from exc
+        # Azure returns 401 with the generic "invalid subscription key or wrong
+        # API endpoint" body for BOTH a real key mismatch AND a network filter
+        # rejection (resource has "Disable public network access" or an IP
+        # allowlist and this caller isn't on it). The body is identical in
+        # both cases. Surface both possibilities so the operator knows where
+        # to look first.
+        masked = _mask_key(api_key)
+        raise ValueError(
+            f"Azure OpenAI authentication failed for endpoint {base_url} "
+            f"with key {masked}. Two likely causes: "
+            f"(1) the key does not belong to this resource — regenerate in "
+            f"the Azure portal and re-save; "
+            f"(2) the resource has network restrictions (private endpoint / "
+            f"IP allowlist) and this backend is not on the allowed network "
+            f"— add the backend's egress IP to the resource firewall, or "
+            f"put the backend in the allowed VNet. "
+            f"Upstream: {exc}"
+        ) from exc
     except openai.PermissionDeniedError as exc:
         raise ValueError(f"Azure OpenAI permission denied: {exc}") from exc
     except openai.NotFoundError as exc:
         # Wrong endpoint or wrong api_version comes back as 404.
         raise ValueError(f"Azure OpenAI endpoint/api-version invalid: {exc}") from exc
+
+
+def _mask_key(key: str) -> str:
+    """First-4 + last-4 mask. Matches the secret_preview convention."""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:4]}••••{key[-4:]}"
 
 
 # Catalog helper — used by Phase 2 capability gating but lives next to

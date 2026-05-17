@@ -164,6 +164,17 @@ async def lifespan(app: FastAPI):
         await seed_all_defaults(session)
     await seed_bootstrap_admin()
 
+    # Catalog (analytics.ref_llm_models_catalog) source of truth is models.dev,
+    # NOT a code-committed seed. If the catalog is empty (fresh DB), fetch
+    # synchronously and apply the refresh. Fails boot loudly if upstream is
+    # unreachable and the catalog stays empty — better than serving traffic
+    # with no models registered.
+    from app.services.cost_tracking.ensure_catalog_loaded import (
+        ensure_catalog_loaded,
+    )
+    async with async_session() as _catalog_db:
+        await ensure_catalog_loaded(_catalog_db)
+
     # Overlay DB-sourced fact_lead_signal.attribute_schemas onto the YAML
     # manifests (signal derivation framework, invariant 21 / §7.4). Runs
     # after seeding so the system-tenant signal definitions exist.

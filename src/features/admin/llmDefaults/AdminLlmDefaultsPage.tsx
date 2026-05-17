@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { MessageSquare, Mic, BarChart3, Sparkles, SlidersHorizontal, Trash2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import {
   Alert,
   Button,
-  Combobox,
+  CapabilityChips,
+  EmptyState,
+  LLMProviderLogo,
+  LlmModelSelect,
   LoadingState,
   PageSurface,
   Switch,
@@ -20,32 +24,64 @@ import {
   useUpsertPlatformDefault,
   useUpsertTenantDefault,
 } from '@/services/api/llmCallSiteDefaultsQueries';
-import { useLlmModels } from '@/services/api/llmModelsQueries';
 import type {
   CallSiteDefault,
   CallSiteSpec,
 } from '@/services/api/llmCallSiteDefaultsApi';
-import type {
-  LlmProvider,
-  TenantCredential,
-} from '@/services/api/llmCredentialsApi';
+import type { CapabilityTag } from '@/services/api/llmModelsApi';
+import type { LlmProvider } from '@/services/api/llmCredentialsApi';
 import { useAuthStore } from '@/stores/authStore';
+
+import { useDirtyDefaults, type UseDirtyDefaultsApi } from './useDirtyDefaults';
 
 type Scope = 'tenant' | 'platform';
 
-/**
- * Defaults matrix. Rows = every call site from the registry. Columns =
- * providers for which the current tenant has at least one credential. Each
- * cell carries a credential picker (when multiple credentials exist for the
- * provider) and a model picker fed by `/api/llm/models` (capability-filtered).
- *
- * Platform-scope toggle is gated by `platform:edit`; when on, the page hits
- * the platform routes and renders a persistent banner.
- */
+interface GroupSpec {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+  siteIds: string[];
+}
+
+// Capability-driven grouping. Order matters — most-used first.
+const GROUPS: GroupSpec[] = [
+  {
+    id: 'conversational',
+    label: 'Conversational',
+    icon: MessageSquare,
+    description: 'Chat surfaces — plain text, multimodal, reasoning.',
+    siteIds: ['chat_text', 'chat_vision', 'chat_reasoning'],
+  },
+  {
+    id: 'voice',
+    label: 'Voice',
+    icon: Mic,
+    description: 'Speech-to-text and text-to-speech.',
+    siteIds: ['audio_transcription', 'audio_synthesis'],
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics & reporting',
+    icon: BarChart3,
+    description: 'Sherlock supervisor / specialist and report generation.',
+    siteIds: ['analytics_supervisor', 'analytics_specialist', 'report_generation'],
+  },
+  {
+    id: 'authoring',
+    label: 'Authoring & extraction',
+    icon: Sparkles,
+    description:
+      'Generate-evaluator-draft, lead-signal-extraction, and the /assist/* endpoints.',
+    siteIds: ['assist_prompt_or_schema', 'evaluator_draft', 'lead_signal_extraction'],
+  },
+];
+
 export function AdminLlmDefaultsPage() {
   const permissions = useAuthStore((s) => s.user?.permissions ?? []);
   const canEditPlatform = permissions.includes('platform:edit');
   const [scope, setScope] = useState<Scope>('tenant');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(GROUPS[0].id);
 
   const { data: registry = [], isLoading: registryLoading } =
     useCallSiteRegistry();
@@ -59,19 +95,19 @@ export function AdminLlmDefaultsPage() {
   const deleteTenant = useDeleteTenantDefault();
   const upsertPlatform = useUpsertPlatformDefault();
 
-  const providersWithCreds = useMemo<LlmProvider[]>(() => {
-    const set = new Set<LlmProvider>();
-    for (const c of credentials) if (c.isEnabled) set.add(c.provider);
-    return Array.from(set).sort();
-  }, [credentials]);
-
   const activeDefaults: CallSiteDefault[] =
     scope === 'platform' ? platformDefaults : tenantDefaults;
-  const defaultsByKey = useMemo(() => {
+
+  // Page-level dirty/save state. Lives here so switching capability groups in
+  // the rail does NOT unmount in-flight edits.
+  const dirty = useDirtyDefaults({
+    defaults: activeDefaults,
+    credentials,
+  });
+
+  const defaultByCallSite = useMemo(() => {
     const map = new Map<string, CallSiteDefault>();
-    for (const d of activeDefaults) {
-      map.set(`${d.callSite}::${d.provider}`, d);
-    }
+    for (const d of activeDefaults) map.set(d.callSite, d);
     return map;
   }, [activeDefaults]);
 
@@ -81,18 +117,116 @@ export function AdminLlmDefaultsPage() {
     return map;
   }, [platformDefaults]);
 
+  const groupsWithRows = useMemo(() => {
+    const known = new Set(GROUPS.flatMap((g) => g.siteIds));
+    const enriched = GROUPS.map((g) => ({
+      ...g,
+      specs: g.siteIds
+        .map((id) => registry.find((s) => s.id === id))
+        .filter((s): s is CallSiteSpec => !!s),
+    }));
+    const orphans = registry.filter((s) => !known.has(s.id));
+    if (orphans.length > 0) {
+      enriched.push({
+        id: 'other',
+        label: 'Other',
+        icon: SlidersHorizontal,
+        description: 'Call sites not yet placed into a capability group.',
+        siteIds: orphans.map((s) => s.id),
+        specs: orphans,
+      });
+    }
+    return enriched;
+  }, [registry]);
+
+  const enabledCount = useMemo(
+    () => credentials.filter((c) => c.isEnabled).length,
+    [credentials],
+  );
+
+  // All hooks declared BEFORE any early-return so React's rules-of-hooks
+  // never see a varying call count between renders. Loading state moved to
+  // the render branch below.
+  const [savingAll, setSavingAll] = useState(false);
+
+  const handleClear = async (callSite: string) => {
+    if (scope === 'platform') return;
+    try {
+      await deleteTenant.mutateAsync(callSite);
+      notificationService.success(
+        `Override cleared — ${callSite} falls back to platform default`,
+      );
+    } catch (err) {
+      notificationService.error(
+        err instanceof Error ? err.message : 'Failed to clear default',
+      );
+    }
+  };
+
+  const handleSaveAll = async () => {
+    setSavingAll(true);
+    try {
+      const result = await dirty.commitAll(async (callSite, body) => {
+        if (scope === 'platform') {
+          await upsertPlatform.mutateAsync({ callSite, body });
+        } else {
+          await upsertTenant.mutateAsync({ callSite, body });
+        }
+      });
+      if (result.failed.length === 0) {
+        notificationService.success(
+          `Saved ${result.saved.length} ${result.saved.length === 1 ? 'change' : 'changes'}`,
+        );
+      } else if (result.saved.length === 0) {
+        notificationService.error(
+          `Failed to save ${result.failed.length} ${result.failed.length === 1 ? 'change' : 'changes'} — inline errors below`,
+        );
+      } else {
+        notificationService.warning(
+          `Saved ${result.saved.length}, ${result.failed.length} failed — inline errors below`,
+        );
+      }
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+  // Nav-away guard for in-app navigation would normally use react-router's
+  // ``useBlocker``, but that requires a data router (createBrowserRouter).
+  // The app currently uses ``<BrowserRouter>``, so useBlocker throws at
+  // runtime. ``beforeunload`` inside ``useDirtyDefaults`` handles tab close
+  // and reload; in-app navigation with unsaved changes is the gap until the
+  // router upgrade. The dirty-count badge in the page header + sidebar group
+  // make the unsaved state visible at all times to soften the surprise.
+
   if (registryLoading || credsLoading) {
     return <LoadingState message="Loading defaults…" />;
   }
 
+  const selectedGroup =
+    groupsWithRows.find((g) => g.id === selectedGroupId) ?? groupsWithRows[0];
+
   return (
     <PageSurface
-      icon={Sparkles}
+      icon={SlidersHorizontal}
       title={scope === 'platform' ? 'Platform LLM Defaults' : 'LLM Defaults'}
       subtitle={
         scope === 'platform'
           ? 'Edit defaults that apply to every tenant unless they override.'
-          : "Pick which credential + model resolves each call site for this tenant. Empty cells fall back to the platform default."
+          : 'One default model per call site for this tenant. Empty rows fall back to the platform default.'
+      }
+      actions={
+        dirty.dirtyCount > 0 ? (
+          <Button
+            variant="primary"
+            onClick={handleSaveAll}
+            disabled={savingAll}
+          >
+            {savingAll
+              ? 'Saving…'
+              : `Save ${dirty.dirtyCount} ${dirty.dirtyCount === 1 ? 'change' : 'changes'}`}
+          </Button>
+        ) : undefined
       }
     >
       {scope === 'platform' && (
@@ -118,268 +252,240 @@ export function AdminLlmDefaultsPage() {
         </div>
       )}
 
-      {providersWithCreds.length === 0 ? (
-        <Alert variant="info">
-          No LLM credentials configured for this tenant.{' '}
-          <a className="underline" href="/admin/llm/providers">
-            Add one in AI Settings
-          </a>{' '}
-          to start setting defaults.
-        </Alert>
+      {enabledCount === 0 ? (
+        <div className="flex flex-1 items-center justify-center">
+          <EmptyState
+            icon={Sparkles}
+            title="No LLM credentials configured"
+            description="Add a provider credential before setting call-site defaults."
+            action={{
+              label: 'Open Model Providers',
+              onClick: () => {
+                window.location.href = '/admin/llm/providers';
+              },
+            }}
+          />
+        </div>
       ) : (
-        <DefaultsMatrix
-          registry={registry}
-          credentials={credentials}
-          providers={providersWithCreds}
-          defaultsByKey={defaultsByKey}
-          platformByCallSite={platformByCallSite}
-          scope={scope}
-          onSave={async (callSite, body) => {
-            try {
-              if (scope === 'platform') {
-                await upsertPlatform.mutateAsync({ callSite, body });
-              } else {
-                await upsertTenant.mutateAsync({ callSite, body });
-              }
-              notificationService.success('Default saved');
-            } catch (err) {
-              notificationService.error(
-                err instanceof Error ? err.message : 'Failed to save default',
-              );
-            }
-          }}
-          onClear={async (callSite) => {
-            if (scope === 'platform') return; // platform rows aren't clearable
-            try {
-              await deleteTenant.mutateAsync(callSite);
-              notificationService.success(
-                'Override cleared — falls back to platform default',
-              );
-            } catch (err) {
-              notificationService.error(
-                err instanceof Error ? err.message : 'Failed to clear default',
-              );
-            }
-          }}
-        />
+        <div className="flex h-full min-h-0 flex-col gap-0 pt-4">
+          <div className="flex min-h-0 flex-1 gap-0">
+            <aside className="w-64 shrink-0 overflow-y-auto pr-5">
+              <GroupRail
+                groups={groupsWithRows}
+                selected={selectedGroupId}
+                onSelect={setSelectedGroupId}
+                overrideCount={(siteIds) =>
+                  siteIds.filter((id) => defaultByCallSite.has(id)).length
+                }
+                dirtyCountIn={(siteIds) =>
+                  siteIds.filter((id) => dirty.isDirty(id)).length
+                }
+              />
+            </aside>
+            <section className="flex min-w-0 flex-1 flex-col gap-3 border-l border-[var(--border-subtle)] pl-5">
+              <header>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  {selectedGroup.label}
+                </h2>
+                <p className="text-[12px] text-[var(--text-muted)]">
+                  {selectedGroup.description}
+                </p>
+              </header>
+              {selectedGroup.specs.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center">
+                  <EmptyState
+                    icon={selectedGroup.icon}
+                    title="No call sites in this group"
+                    description="Registry returned no entries for this capability group."
+                  />
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+                  {selectedGroup.specs.map((spec) => (
+                    <CallSiteRow
+                      key={spec.id}
+                      spec={spec}
+                      existing={defaultByCallSite.get(spec.id) ?? null}
+                      platformFallback={platformByCallSite.get(spec.id) ?? null}
+                      scope={scope}
+                      dirty={dirty}
+                      onClear={handleClear}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
       )}
     </PageSurface>
   );
 }
 
-interface MatrixProps {
-  registry: CallSiteSpec[];
-  credentials: TenantCredential[];
-  providers: LlmProvider[];
-  defaultsByKey: Map<string, CallSiteDefault>;
-  platformByCallSite: Map<string, CallSiteDefault>;
+interface RailProps {
+  groups: Array<GroupSpec & { specs: CallSiteSpec[] }>;
+  selected: string;
+  onSelect: (id: string) => void;
+  overrideCount: (siteIds: string[]) => number;
+  dirtyCountIn: (siteIds: string[]) => number;
+}
+
+function GroupRail({
+  groups,
+  selected,
+  onSelect,
+  overrideCount,
+  dirtyCountIn,
+}: RailProps) {
+  return (
+    <nav
+      className="flex w-full flex-col gap-1.5"
+      aria-label="Capability group selector"
+    >
+      {groups.map((g) => {
+        const Icon = g.icon;
+        const isSelected = selected === g.id;
+        const total = g.specs.length;
+        const overrides = overrideCount(g.specs.map((s) => s.id));
+        const dirtyHere = dirtyCountIn(g.specs.map((s) => s.id));
+        return (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => onSelect(g.id)}
+            aria-pressed={isSelected}
+            className={
+              isSelected
+                ? 'flex items-center justify-between gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-2 text-left transition-colors'
+                : 'flex items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-tertiary)]'
+            }
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+                <Icon className="h-3.5 w-3.5" aria-hidden />
+              </span>
+              <div className="flex min-w-0 flex-col">
+                <span className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  {g.label}
+                </span>
+                <span className="truncate text-[11px] text-[var(--text-muted)]">
+                  {overrides} of {total} set
+                  {dirtyHere > 0 ? ` · ${dirtyHere} unsaved` : ''}
+                </span>
+              </div>
+            </div>
+            {dirtyHere > 0 && (
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-warning)]"
+                aria-label={`${dirtyHere} unsaved`}
+              />
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+interface CallSiteRowProps {
+  spec: CallSiteSpec;
+  existing: CallSiteDefault | null;
+  platformFallback: CallSiteDefault | null;
   scope: Scope;
-  onSave: (
-    callSite: string,
-    body: {
-      provider: string;
-      credentialName: string;
-      modelOrDeployment: string;
-    },
-  ) => Promise<void>;
+  dirty: UseDirtyDefaultsApi;
   onClear: (callSite: string) => Promise<void>;
 }
 
-function DefaultsMatrix({
-  registry,
-  credentials,
-  providers,
-  defaultsByKey,
-  platformByCallSite,
+function CallSiteRow({
+  spec,
+  existing,
+  platformFallback,
   scope,
-  onSave,
+  dirty,
   onClear,
-}: MatrixProps) {
+}: CallSiteRowProps) {
+  const pick = dirty.getPick(spec.id);
+  const rowDirty = dirty.isDirty(spec.id);
+  const error = dirty.getError(spec.id);
+
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--border-subtle)]">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-            <th className="px-3 py-2 text-left text-[12px] font-semibold text-[var(--text-secondary)]">
-              Call site
-            </th>
-            {providers.map((p) => (
-              <th
-                key={p}
-                className="px-3 py-2 text-left text-[12px] font-semibold text-[var(--text-secondary)]"
-              >
-                {LLM_PROVIDER_LABELS[p]}
-              </th>
-            ))}
-            {scope === 'tenant' && (
-              <th className="px-3 py-2 text-left text-[12px] font-semibold text-[var(--text-secondary)]" />
+    <div className="px-4 py-3">
+      {/* Fixed columns: identity (1fr) | picker (1.3fr) | actions (120px).
+          Action slot is reserved so Clear appearing/disappearing never
+          reflows the picker column. Save is global (page header), never
+          per-row, so there's nothing to wrap here. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_120px] items-start gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+              {spec.id}
+            </h3>
+            <CapabilityChips
+              tags={spec.requiredCapabilities as CapabilityTag[]}
+            />
+            {rowDirty && (
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]"
+                aria-label="Unsaved"
+              />
             )}
-          </tr>
-        </thead>
-        <tbody>
-          {registry.map((spec) => (
-            <tr
-              key={spec.id}
-              className="border-b border-[var(--border-subtle)] last:border-b-0"
+          </div>
+          <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
+            {spec.description}
+          </p>
+        </div>
+
+        <div className="min-w-0">
+          <LlmModelSelect
+            callSite={spec.id}
+            value={pick}
+            onChange={(next) => dirty.setPick(spec.id, next)}
+            noAutoDefault
+            compact
+            layout="inline"
+          />
+          {error && (
+            <p className="mt-1.5 text-[11px] text-[var(--color-error)]">
+              {error}
+            </p>
+          )}
+          {!error && scope === 'tenant' && !existing && platformFallback && (
+            <div className="mt-1.5">
+              <FallbackHint platform={platformFallback} />
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2">
+          {scope === 'tenant' && existing && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Trash2}
+              onClick={() => onClear(spec.id)}
+              aria-label={`Clear override for ${spec.id}`}
             >
-              <td className="px-3 py-3 align-top">
-                <div className="font-medium text-[var(--text-primary)]">
-                  {spec.id}
-                </div>
-                <div className="text-[11px] text-[var(--text-muted)]">
-                  {spec.description}
-                </div>
-                <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-                  needs:{' '}
-                  {spec.requiredCapabilities.length
-                    ? spec.requiredCapabilities.join(', ')
-                    : '(any)'}
-                </div>
-              </td>
-              {providers.map((p) => (
-                <td key={p} className="px-3 py-3 align-top">
-                  <DefaultsCell
-                    callSite={spec.id}
-                    provider={p}
-                    credentials={credentials.filter(
-                      (c) => c.provider === p && c.isEnabled,
-                    )}
-                    existing={defaultsByKey.get(`${spec.id}::${p}`) ?? null}
-                    platformFallback={platformByCallSite.get(spec.id) ?? null}
-                    scope={scope}
-                    onSave={onSave}
-                  />
-                </td>
-              ))}
-              {scope === 'tenant' && (
-                <td className="px-3 py-3 align-top">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onClear(spec.id)}
-                  >
-                    Clear
-                  </Button>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-interface CellProps {
-  callSite: string;
-  provider: LlmProvider;
-  credentials: TenantCredential[];
-  existing: CallSiteDefault | null;
-  platformFallback: CallSiteDefault | null;
-  scope: Scope;
-  onSave: MatrixProps['onSave'];
-}
-
-function DefaultsCell({
-  callSite,
-  provider,
-  credentials,
-  existing,
-  platformFallback,
-  scope,
-  onSave,
-}: CellProps) {
-  // Local edit state seeded from server value; explicit Save commits.
-  const [credentialName, setCredentialName] = useState<string>(
-    existing?.credentialName ?? credentials[0]?.name ?? '',
-  );
-  const [model, setModel] = useState<string>(existing?.modelOrDeployment ?? '');
-
-  const credentialId =
-    credentials.find((c) => c.name === credentialName)?.id ?? null;
-  const { data: modelOptions = [], isLoading: modelsLoading } = useLlmModels(
-    callSite,
-    credentialId,
-  );
-
-  if (credentials.length === 0) {
-    return (
-      <span className="text-[12px] text-[var(--text-muted)]">
-        no credential
-      </span>
-    );
-  }
-
-  const credentialOptions = credentials.map((c) => ({
-    value: c.name,
-    label: c.name,
-  }));
-  const modelComboOptions = modelOptions.map((m) => ({
-    value: m.modelOrDeployment,
-    label: m.displayName || m.modelOrDeployment,
-  }));
-
-  const isDirty =
-    !existing ||
-    existing.credentialName !== credentialName ||
-    existing.modelOrDeployment !== model;
-
-  const showPlatformHint =
-    scope === 'tenant' && !existing && platformFallback?.provider === provider;
-
+function FallbackHint({ platform }: { platform: CallSiteDefault }) {
   return (
-    <div className="flex min-w-[260px] flex-col gap-1.5">
-      {credentials.length > 1 ? (
-        <Combobox
-          value={credentialName}
-          options={credentialOptions}
-          placeholder="Credential"
-          size="sm"
-          onChange={(v) => {
-            setCredentialName(v);
-            setModel('');
-          }}
-        />
-      ) : (
-        <div className="text-[11px] text-[var(--text-muted)]">
-          credential: {credentials[0].name}
-        </div>
-      )}
-      <Combobox
-        value={model}
-        options={modelComboOptions}
-        placeholder={
-          modelsLoading
-            ? 'Loading…'
-            : modelComboOptions.length === 0
-              ? 'No models'
-              : 'Pick model'
-        }
-        size="sm"
-        disabled={modelComboOptions.length === 0}
-        onChange={setModel}
+    <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+      <span>Falls back to platform:</span>
+      <LLMProviderLogo
+        provider={platform.provider as LlmProvider}
+        size={14}
       />
-      {showPlatformHint && (
-        <p className="text-[10px] text-[var(--text-muted)]">
-          falls back to platform: {platformFallback?.provider} /{' '}
-          {platformFallback?.modelOrDeployment}
-        </p>
-      )}
-      {isDirty && model && (
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={() =>
-            onSave(callSite, {
-              provider,
-              credentialName,
-              modelOrDeployment: model,
-            })
-          }
-        >
-          Save
-        </Button>
-      )}
+      <span className="text-[var(--text-secondary)]">
+        {LLM_PROVIDER_LABELS[platform.provider as LlmProvider]} /{' '}
+        {platform.modelOrDeployment}
+      </span>
     </div>
   );
 }

@@ -68,26 +68,47 @@ async def seeded_tenant(db_session):
 
 @pytest_asyncio.fixture
 async def gpt5_catalog(db_session):
-    """Seed a canonical OpenAI gpt-5 catalog row + supervisor/specialist tags."""
+    """Ensure canonical OpenAI gpt-5 / gpt-5-mini catalog rows exist with the
+    capability flags this suite depends on.
+
+    Catalog rows are sourced from models.dev refresh at lifespan boot. Reuse
+    existing rows if the test DB already has them, otherwise insert minimal
+    rows. Either way, force the relevant flags so the test's intent (supervisor
+    / specialist capability satisfaction) is independent of upstream drift.
+    """
+    from sqlalchemy import select
     from app.models.cost import RefLlmModelsCatalog
-    rows = [
-        RefLlmModelsCatalog(
-            provider_key="openai", provider="openai",
-            model_id="gpt-5", model="gpt-5", display_name="GPT-5",
-            modalities_input=["text"], modalities_output=["text"],
-            supports_tool_call=True, supports_structured_output=True,
-        ),
-        RefLlmModelsCatalog(
-            provider_key="openai", provider="openai",
-            model_id="gpt-5-mini", model="gpt-5-mini", display_name="GPT-5 mini",
-            modalities_input=["text"], modalities_output=["text"],
-            supports_tool_call=True, supports_structured_output=True,
-        ),
+
+    desired = [
+        ("gpt-5", "GPT-5"),
+        ("gpt-5-mini", "GPT-5 mini"),
     ]
-    for r in rows:
-        db_session.add(r)
+    out: list[RefLlmModelsCatalog] = []
+    for model_name, display in desired:
+        row = (
+            await db_session.execute(
+                select(RefLlmModelsCatalog).where(
+                    RefLlmModelsCatalog.provider == "openai",
+                    RefLlmModelsCatalog.model == model_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = RefLlmModelsCatalog(
+                provider_key="openai", provider="openai",
+                model_id=model_name, model=model_name, display_name=display,
+                modalities_input=["text"], modalities_output=["text"],
+                supports_tool_call=True, supports_structured_output=True,
+            )
+            db_session.add(row)
+        else:
+            row.modalities_input = ["text"]
+            row.modalities_output = ["text"]
+            row.supports_tool_call = True
+            row.supports_structured_output = True
+        out.append(row)
     await db_session.commit()
-    return rows
+    return out
 
 
 async def _seed_credential(db, tenant_id, provider, api_key, *, extra=None):
@@ -104,30 +125,60 @@ async def _seed_credential(db, tenant_id, provider, api_key, *, extra=None):
 
 
 async def _seed_platform_default(db, call_site, provider, model):
+    """Upsert the (NULL tenant, call_site) platform default — migration 0051
+    may already have seeded a row for this call_site."""
+    from sqlalchemy import select
     from app.models.tenant_call_site_default import TenantCallSiteDefault
-    db.add(
-        TenantCallSiteDefault(
-            tenant_id=None,
-            call_site=call_site,
-            provider=provider,
-            credential_name="default",
-            model_or_deployment=model,
+    row = (
+        await db.execute(
+            select(TenantCallSiteDefault).where(
+                TenantCallSiteDefault.tenant_id.is_(None),
+                TenantCallSiteDefault.call_site == call_site,
+            )
         )
-    )
+    ).scalar_one_or_none()
+    if row is None:
+        db.add(
+            TenantCallSiteDefault(
+                tenant_id=None,
+                call_site=call_site,
+                provider=provider,
+                credential_name="default",
+                model_or_deployment=model,
+            )
+        )
+    else:
+        row.provider = provider
+        row.credential_name = "default"
+        row.model_or_deployment = model
     await db.commit()
 
 
 async def _seed_tenant_azure_default(db, tenant_id, call_site, deployment_name):
+    from sqlalchemy import select
     from app.models.tenant_call_site_default import TenantCallSiteDefault
-    db.add(
-        TenantCallSiteDefault(
-            tenant_id=tenant_id,
-            call_site=call_site,
-            provider="azure_openai",
-            credential_name="default",
-            model_or_deployment=deployment_name,
+    row = (
+        await db.execute(
+            select(TenantCallSiteDefault).where(
+                TenantCallSiteDefault.tenant_id == tenant_id,
+                TenantCallSiteDefault.call_site == call_site,
+            )
         )
-    )
+    ).scalar_one_or_none()
+    if row is None:
+        db.add(
+            TenantCallSiteDefault(
+                tenant_id=tenant_id,
+                call_site=call_site,
+                provider="azure_openai",
+                credential_name="default",
+                model_or_deployment=deployment_name,
+            )
+        )
+    else:
+        row.provider = "azure_openai"
+        row.credential_name = "default"
+        row.model_or_deployment = deployment_name
     await db.commit()
 
 
@@ -229,16 +280,31 @@ async def test_non_openai_family_provider_resolution_raises(
     from app.services.llm_credentials import CallSiteNotConfiguredError
     from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 
-    # Seed an Anthropic catalog row that satisfies analytics_supervisor's
-    # required caps (text_input + text_output + tool_call).
-    cat = RefLlmModelsCatalog(
-        provider_key="anthropic", provider="anthropic",
-        model_id="claude-sonnet-4-5", model="claude-sonnet-4-5",
-        display_name="Claude Sonnet 4.5",
-        modalities_input=["text"], modalities_output=["text"],
-        supports_tool_call=True, supports_structured_output=False,
-    )
-    db_session.add(cat)
+    # Ensure an Anthropic catalog row exists with caps that satisfy
+    # analytics_supervisor (text_input + text_output + tool_call). Reuse if
+    # the test DB already has it (catalog comes from models.dev at lifespan).
+    from sqlalchemy import select
+    cat = (
+        await db_session.execute(
+            select(RefLlmModelsCatalog).where(
+                RefLlmModelsCatalog.provider == "anthropic",
+                RefLlmModelsCatalog.model == "claude-sonnet-4-5",
+            )
+        )
+    ).scalar_one_or_none()
+    if cat is None:
+        cat = RefLlmModelsCatalog(
+            provider_key="anthropic", provider="anthropic",
+            model_id="claude-sonnet-4-5", model="claude-sonnet-4-5",
+            display_name="Claude Sonnet 4.5",
+            modalities_input=["text"], modalities_output=["text"],
+            supports_tool_call=True, supports_structured_output=False,
+        )
+        db_session.add(cat)
+    else:
+        cat.modalities_input = ["text"]
+        cat.modalities_output = ["text"]
+        cat.supports_tool_call = True
     await _seed_credential(db_session, seeded_tenant.id, "anthropic", "ak-key")
     await _seed_platform_default(
         db_session, "analytics_supervisor", "anthropic", "claude-sonnet-4-5",
