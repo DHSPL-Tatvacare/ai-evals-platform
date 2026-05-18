@@ -142,9 +142,9 @@ const llmMethods: BrainNode[] = [
   { id: 'meth-use-provider-configs', label: 'useProviderConfigs', type: 'method', layer: 'frontend', feature: 'llm-pipeline', fullPath: 'src/services/api/aiSettingsQueries.ts' },
 ];
 
-// Settings & Config — admin AI Settings page (Phase 2) + tenant_llm_providers table (Phase 1)
+// Settings & Config — admin AI Settings page + tenant_llm_credentials table
 const settingsFiles: BrainNode[] = [
-  { id: 'file-tenant-llm-providers', label: 'tenant_llm_provider.py (ORM)', type: 'file', layer: 'backend', feature: 'settings-config', fullPath: 'backend/app/models/tenant_llm_provider.py' },
+  { id: 'file-tenant-llm-credentials', label: 'tenant_llm_credential.py (ORM)', type: 'file', layer: 'backend', feature: 'settings-config', fullPath: 'backend/app/models/tenant_llm_credential.py' },
   { id: 'file-admin-ai-settings-routes', label: 'routes/admin_ai_settings.py', type: 'file', layer: 'backend', feature: 'settings-config', fullPath: 'backend/app/routes/admin_ai_settings.py' },
   { id: 'file-admin-ai-settings-page', label: 'AdminAISettingsPage.tsx', type: 'file', layer: 'frontend', feature: 'settings-config', fullPath: 'src/features/admin/aiSettings/AdminAISettingsPage.tsx' },
   { id: 'file-job-worker', label: 'job_worker.py', type: 'file', layer: 'backend', feature: 'settings-config', fullPath: 'backend/app/services/job_worker.py' },

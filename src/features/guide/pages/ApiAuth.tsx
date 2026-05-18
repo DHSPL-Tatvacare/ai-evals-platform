@@ -3,15 +3,17 @@ import { Card, MermaidDiagram, InfoBox, PageHeader } from "@/features/guide/comp
 import { usePageExport } from "@/features/guide/hooks/usePageExport";
 
 const credentialFlowDiagram = `flowchart TD
-    Admin["Admin AI Settings UI"] -->|PUT api admin ai-settings| TenantTable["tenant_llm_providers (Fernet-encrypted)"]
+    Admin["Admin AI Settings UI"] -->|POST api admin ai-settings providers slash provider slash credentials| TenantTable["tenant_llm_credentials (Fernet-encrypted)"]
     AnyCaller["Any backend caller"] -->|resolve_llm_credentials| Resolver["llm_credentials.resolver"]
     Resolver -->|SELECT| TenantTable
     Resolver -->|decrypt + ResolvedCredentials| Result["api_key + provider + base_url + extra_config"]
     Result -->|create_llm_provider| Factory["LLM Factory"]
-    Factory -->|provider is gemini| Vertex["GeminiProvider"]
+    Factory -->|provider is gemini| Gemini["GeminiProvider"]
     Factory -->|provider is openai| OpenAI["OpenAIProvider"]
     Factory -->|provider is anthropic| Anthropic["AnthropicProvider"]
-    Factory -->|provider is azure-openai| Azure["AzureOpenAIProvider"]`;
+    Factory -->|provider is azure-openai| Azure["AzureOpenAIProvider"]
+    Factory -->|provider is vertex| Vertex["VertexProvider"]
+    Factory -->|provider is bedrock| Bedrock["BedrockProvider"]`;
 
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -100,9 +102,10 @@ export default function ApiAuth() {
                 <code> app/services/llm_credentials/resolver.py</code>.
               </InfoRow>
               <InfoRow label="Storage">
-                <code>platform.tenant_llm_providers</code> — one row per
-                tenant + provider, Fernet-encrypted via{" "}
-                <code>LLM_CREDENTIAL_KEY</code>.
+                <code>platform.tenant_llm_credentials</code> — one row per
+                tenant + provider + name, Fernet-encrypted via{" "}
+                <code>LLM_CREDENTIAL_KEY</code>. Azure deployments live in{" "}
+                <code>platform.tenant_llm_deployments</code>.
               </InfoRow>
               <InfoRow label="Base class">
                 <code>BaseLLMProvider</code> (
@@ -113,8 +116,10 @@ export default function ApiAuth() {
                 <code> analytics.fact_llm_generation</code> row.
               </InfoRow>
               <InfoRow label="Admin routes">
-                <code>/api/admin/llm/providers/*</code> (list / upsert /
-                discover-models / validate) gated by{" "}
+                <code>/api/admin/ai-settings/providers/*/credentials</code>{" "}
+                (CRUD), <code>/credentials/&#123;id&#125;/validate</code>,{" "}
+                <code>/credentials/&#123;id&#125;/discover-models</code>,{" "}
+                <code>/credentials/&#123;id&#125;/deployments</code> — all gated by{" "}
                 <code>configuration:edit</code>.
               </InfoRow>
             </tbody>

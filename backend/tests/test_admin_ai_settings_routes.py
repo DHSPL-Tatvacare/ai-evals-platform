@@ -1,17 +1,4 @@
-"""End-to-end /api/admin/ai-settings route tests — bridge surface.
-
-Asserts:
-- list returns one entry per supported provider (6 now), including empty placeholders
-- upsert (legacy bridge) creates the ``name='default'`` credential, encrypts
-  the api_key as a JSON blob, and redacts the response
-- blank apiKey on a subsequent upsert preserves the stored secret blob
-- mutating routes are gated by configuration:edit
-- unknown-provider rejections still return 400
-- Azure ``curatedModels`` from the bridge upsert synchronises into
-  ``platform.tenant_llm_deployments`` rows
-- the new per-credential CRUD surface (create/list/patch/delete) and
-  blank-secret-preserve semantics on PATCH
-"""
+"""End-to-end /api/admin/ai-settings route tests — per-credential surface."""
 from __future__ import annotations
 
 import uuid
@@ -28,7 +15,6 @@ from app.database import get_db
 from app.main import app as fastapi_app
 from app.models.tenant import Tenant
 from app.models.tenant_llm_credential import TenantLlmCredential
-from app.models.tenant_llm_deployment import TenantLlmDeployment
 from app.services.llm_credentials import invalidate_cache
 from app.services.llm_credentials.crypto import decrypt_json
 
@@ -115,7 +101,21 @@ async def non_admin_client(db_session, route_tenant_id):
         fastapi_app.dependency_overrides.pop(get_auth_context, None)
 
 
-# ── Bridge surface ───────────────────────────────────────────────────
+async def _create_openai_credential(client: httpx.AsyncClient, *, api_key: str = "sk-x") -> str:
+    resp = await client.post(
+        "/api/admin/ai-settings/providers/openai/credentials",
+        json={
+            "name": "default",
+            "isEnabled": True,
+            "secret": {"api_key": api_key},
+            "extraConfig": {},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+# ── Provider summary ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,6 @@ async def test_list_returns_all_six_providers(admin_client):
         "bedrock",
     }
     for p in body:
-        # Placeholder rows: not enabled, no key, never validated.
         assert p["isEnabled"] is False
         assert p["hasApiKey"] is False
         assert p["validationStatus"] == "untested"
@@ -143,351 +142,18 @@ async def test_list_returns_all_six_providers(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_upsert_stores_encrypted_key_and_redacts_response(
-    admin_client, db_session, route_tenant_id
-):
-    resp = await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-secret-123",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["hasApiKey"] is True
-    assert body["provider"] == "openai"
-    assert body["isEnabled"] is True
-    assert body["curatedModels"] == []
-    assert "apiKey" not in body
-    assert body["apiKeyPreview"] == "sk-s••••-123"
-
-    row = (
-        await db_session.execute(
-            select(TenantLlmCredential).where(
-                TenantLlmCredential.tenant_id == route_tenant_id,
-                TenantLlmCredential.provider == "openai",
-                TenantLlmCredential.name == "default",
-            )
-        )
-    ).scalar_one()
-    payload = decrypt_json(row.secret_blob_encrypted)
-    assert payload == {"api_key": "sk-secret-123"}
-    assert row.is_enabled is True
-
-
-@pytest.mark.asyncio
-async def test_blank_key_preserves_stored_secret(admin_client, db_session, route_tenant_id):
-    await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-first",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    first = (
-        await db_session.execute(
-            select(TenantLlmCredential).where(
-                TenantLlmCredential.tenant_id == route_tenant_id,
-                TenantLlmCredential.provider == "openai",
-                TenantLlmCredential.name == "default",
-            )
-        )
-    ).scalar_one()
-    original = bytes(first.secret_blob_encrypted)
-
-    resp = await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["hasApiKey"] is True
-
-    await db_session.refresh(first)
-    assert bytes(first.secret_blob_encrypted) == original
-
-
-@pytest.mark.asyncio
-async def test_bridge_upsert_rejects_vertex_and_bedrock(admin_client):
-    """The bridge ``apiKey`` field can't represent the multi-field secrets
-    vertex (service_account_json) or bedrock (access_key_id + secret_access_key)
-    need. The bridge route returns 400 directing operators to the per-
-    credential surface; the multi-credential POST route accepts them."""
-    for provider in ("vertex", "bedrock"):
-        resp = await admin_client.put(
-            f"/api/admin/ai-settings/providers/{provider}",
-            json={
-                "isEnabled": True,
-                "apiKey": "anything",
-                "baseUrl": None,
-                "extraConfig": {},
-                "curatedModels": [],
-            },
-        )
-        assert resp.status_code == 400, resp.text
-        assert "credentials" in resp.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_upsert_rejects_unknown_provider(admin_client):
-    resp = await admin_client.put(
-        "/api/admin/ai-settings/providers/mistral",
-        json={
-            "isEnabled": True,
-            "apiKey": "x",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_upsert_requires_configuration_edit(non_admin_client):
-    resp = await non_admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "x",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
 async def test_list_requires_configuration_edit(non_admin_client):
     resp = await non_admin_client.get("/api/admin/ai-settings/providers")
     assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_azure_curated_models_sync_into_deployments(
-    admin_client, db_session, route_tenant_id
-):
-    """The bridge form's ``curatedModels`` for Azure becomes
-    ``platform.tenant_llm_deployments`` rows (needs_mapping=true until an
-    operator maps each to a canonical catalog model)."""
-    resp = await admin_client.put(
-        "/api/admin/ai-settings/providers/azure_openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "az-key",
-            "baseUrl": "https://eu.openai.azure.com",
-            "extraConfig": {"api_version": "2025-04-01-preview"},
-            "curatedModels": ["prod-gpt5", "prod-mini"],
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert sorted(body["curatedModels"]) == ["prod-gpt5", "prod-mini"]
-
-    creds = (
-        await db_session.execute(
-            select(TenantLlmCredential).where(
-                TenantLlmCredential.tenant_id == route_tenant_id,
-                TenantLlmCredential.provider == "azure_openai",
-            )
-        )
-    ).scalar_one()
-    deployments = (
-        await db_session.execute(
-            select(TenantLlmDeployment).where(
-                TenantLlmDeployment.credential_id == creds.id
-            )
-        )
-    ).scalars().all()
-    assert sorted(d.deployment_name for d in deployments) == ["prod-gpt5", "prod-mini"]
-    assert all(d.needs_mapping is True for d in deployments)
-    assert all(d.canonical_model_id is None for d in deployments)
-
-
-@pytest.mark.asyncio
-async def test_discover_models_filters_by_search(admin_client, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from app.routes import admin_ai_settings as route_mod
-
-    monkeypatch.setattr(
-        route_mod,
-        "list_models_for_credential",
-        AsyncMock(return_value=["gpt-5.4", "gpt-5.4-mini", "o3"]),
-    )
-
-    # A default credential must exist before discover can resolve.
-    await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-x",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    resp = await admin_client.post(
-        "/api/admin/ai-settings/providers/openai/discover-models",
-        json={"search": "mini"},
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["models"] == ["gpt-5.4-mini"]
-
-
-@pytest.mark.asyncio
-async def test_discover_models_unconfigured_returns_409(admin_client):
-    resp = await admin_client.post(
-        "/api/admin/ai-settings/providers/anthropic/discover-models",
-        json={"search": ""},
-    )
-    assert resp.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_validate_marks_status_ok(admin_client, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from app.routes import admin_ai_settings as route_mod
-
-    monkeypatch.setattr(
-        route_mod,
-        "validate_credentials",
-        AsyncMock(return_value=None),
-    )
-    await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-x",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    resp = await admin_client.post(
-        "/api/admin/ai-settings/providers/openai/validate"
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["validationStatus"] == "ok"
-    assert body["detail"] is None
-
-
-@pytest.mark.asyncio
-async def test_validate_marks_status_invalid_on_value_error(admin_client, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from app.routes import admin_ai_settings as route_mod
-
-    monkeypatch.setattr(
-        route_mod,
-        "validate_credentials",
-        AsyncMock(side_effect=ValueError("OpenAI authentication failed: bad key")),
-    )
-    await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-bad",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    resp = await admin_client.post(
-        "/api/admin/ai-settings/providers/openai/validate"
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["validationStatus"] == "invalid"
-    assert "authentication" in (body["detail"] or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_validate_requires_provider_row(admin_client):
-    resp = await admin_client.post(
-        "/api/admin/ai-settings/providers/anthropic/validate"
-    )
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_validate_requires_configuration_edit(non_admin_client):
-    resp = await non_admin_client.post(
-        "/api/admin/ai-settings/providers/openai/validate"
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_discover_models_requires_configuration_edit(non_admin_client):
-    resp = await non_admin_client.post(
-        "/api/admin/ai-settings/providers/openai/discover-models",
-        json={"search": ""},
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_new_key_resets_validation_status(admin_client, db_session, route_tenant_id):
-    await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-x",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    row = (
-        await db_session.execute(
-            select(TenantLlmCredential).where(
-                TenantLlmCredential.tenant_id == route_tenant_id,
-                TenantLlmCredential.provider == "openai",
-            )
-        )
-    ).scalar_one()
-    row.validation_status = "ok"
-    await db_session.flush()
-
-    resp = await admin_client.put(
-        "/api/admin/ai-settings/providers/openai",
-        json={
-            "isEnabled": True,
-            "apiKey": "sk-new-rotated",
-            "baseUrl": None,
-            "extraConfig": {},
-            "curatedModels": [],
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["validationStatus"] == "untested"
-
-
-# ── New per-credential CRUD surface ──────────────────────────────────
+# ── Per-credential CRUD ─────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_credential_create_list_patch_delete_roundtrip(
     admin_client, db_session, route_tenant_id
 ):
-    # Create.
     resp = await admin_client.post(
         "/api/admin/ai-settings/providers/azure_openai/credentials",
         json={
@@ -506,14 +172,12 @@ async def test_credential_create_list_patch_delete_roundtrip(
     assert created["secretPreview"] == "az-e••••cret"
     assert "secret" not in created
 
-    # List.
     resp = await admin_client.get(
         "/api/admin/ai-settings/providers/azure_openai/credentials"
     )
     assert resp.status_code == 200
     assert any(c["id"] == created["id"] for c in resp.json())
 
-    # Patch with blank secret value → preserves stored blob.
     row = (
         await db_session.execute(
             select(TenantLlmCredential).where(
@@ -531,7 +195,6 @@ async def test_credential_create_list_patch_delete_roundtrip(
     await db_session.refresh(row)
     assert bytes(row.secret_blob_encrypted) == original_blob
 
-    # Patch with new secret value → rotates blob + flips status to untested.
     row.validation_status = "ok"
     await db_session.flush()
     resp = await admin_client.patch(
@@ -543,7 +206,6 @@ async def test_credential_create_list_patch_delete_roundtrip(
     assert decrypt_json(row.secret_blob_encrypted) == {"api_key": "az-eu-new"}
     assert row.validation_status == "untested"
 
-    # Delete.
     resp = await admin_client.delete(
         f"/api/admin/ai-settings/providers/azure_openai/credentials/{created['id']}",
     )
@@ -585,3 +247,133 @@ async def test_vertex_create_requires_service_account_json(admin_client):
         },
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_credential_create_rejects_unknown_provider(admin_client):
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/mistral/credentials",
+        json={
+            "name": "default",
+            "isEnabled": True,
+            "secret": {"api_key": "x"},
+            "extraConfig": {},
+        },
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_credential_create_requires_configuration_edit(non_admin_client):
+    resp = await non_admin_client.post(
+        "/api/admin/ai-settings/providers/openai/credentials",
+        json={
+            "name": "default",
+            "isEnabled": True,
+            "secret": {"api_key": "x"},
+            "extraConfig": {},
+        },
+    )
+    assert resp.status_code == 403
+
+
+# ── Validate ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_validate_marks_status_ok(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "validate_credentials",
+        AsyncMock(return_value=None),
+    )
+    credential_id = await _create_openai_credential(admin_client)
+    resp = await admin_client.post(
+        f"/api/admin/ai-settings/credentials/{credential_id}/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validationStatus"] == "ok"
+    assert body["detail"] is None
+
+
+@pytest.mark.asyncio
+async def test_validate_marks_status_invalid_on_value_error(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "validate_credentials",
+        AsyncMock(side_effect=ValueError("OpenAI authentication failed: bad key")),
+    )
+    credential_id = await _create_openai_credential(admin_client, api_key="sk-bad")
+    resp = await admin_client.post(
+        f"/api/admin/ai-settings/credentials/{credential_id}/validate"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validationStatus"] == "invalid"
+    assert "authentication" in (body["detail"] or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_unknown_credential_returns_404(admin_client):
+    resp = await admin_client.post(
+        f"/api/admin/ai-settings/credentials/{uuid.uuid4()}/validate"
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_validate_requires_configuration_edit(non_admin_client):
+    resp = await non_admin_client.post(
+        f"/api/admin/ai-settings/credentials/{uuid.uuid4()}/validate"
+    )
+    assert resp.status_code == 403
+
+
+# ── Discover models ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_discover_models_filters_by_search(admin_client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.routes import admin_ai_settings as route_mod
+
+    monkeypatch.setattr(
+        route_mod,
+        "list_models_for_credential",
+        AsyncMock(return_value=["gpt-5.4", "gpt-5.4-mini", "o3"]),
+    )
+    credential_id = await _create_openai_credential(admin_client)
+    resp = await admin_client.post(
+        f"/api/admin/ai-settings/credentials/{credential_id}/discover-models",
+        json={"search": "mini"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["models"] == ["gpt-5.4-mini"]
+
+
+@pytest.mark.asyncio
+async def test_discover_models_unknown_credential_returns_404(admin_client):
+    resp = await admin_client.post(
+        f"/api/admin/ai-settings/credentials/{uuid.uuid4()}/discover-models",
+        json={"search": ""},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_discover_models_requires_configuration_edit(non_admin_client):
+    resp = await non_admin_client.post(
+        f"/api/admin/ai-settings/credentials/{uuid.uuid4()}/discover-models",
+        json={"search": ""},
+    )
+    assert resp.status_code == 403

@@ -87,4 +87,6 @@ def merge_secret_update(
             continue
         merged[k] = v
         rotated = True
-    return encrypt_json(merged), rotated
+    if not rotated:
+        return bytes(row.secret_blob_encrypted), False
+    return encrypt_json(merged), True

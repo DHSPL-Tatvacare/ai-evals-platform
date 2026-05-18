@@ -227,7 +227,7 @@ export function ChatWidget() {
   }, [currentApp, newChat]);
 
   // Sherlock requires OpenAI-family credentials (OpenAI or Azure OpenAI),
-  // resolved server-side from the admin's tenant_llm_providers row.
+  // resolved server-side from the admin's tenant_llm_credentials rows.
   const { data: providerConfigs = [] } = useProviderConfigs();
   const hasOpenAIFamily = providerConfigs.some(
     (c) =>

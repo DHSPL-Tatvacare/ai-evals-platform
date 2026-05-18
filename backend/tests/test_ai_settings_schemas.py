@@ -22,43 +22,44 @@ def test_provider_response_redacts_key():
     assert dumped["hasApiKey"] is True
 
 
-def test_upsert_request_accepts_blank_key_meaning_preserve():
-    from app.schemas.ai_settings import ProviderConfigUpsert
+def test_credential_create_accepts_camel_case_payload():
+    from app.schemas.ai_settings import CredentialCreate
 
-    body = ProviderConfigUpsert(
-        is_enabled=True,
-        api_key="",
-        base_url=None,
-        extra_config={},
-        curated_models=[],
-    )
-    assert body.api_key == ""
-    assert body.is_enabled is True
-
-
-def test_upsert_request_parses_camel_case_payload():
-    from app.schemas.ai_settings import ProviderConfigUpsert
-
-    body = ProviderConfigUpsert.model_validate(
+    body = CredentialCreate.model_validate(
         {
+            "name": "eu-resource",
             "isEnabled": True,
-            "apiKey": "sk-test",
-            "baseUrl": "https://x.openai.azure.com",
-            "extraConfig": {"api_version": "2025-04-01-preview"},
-            "curatedModels": ["gpt-5.4"],
+            "secret": {"api_key": "sk-test"},
+            "extraConfig": {"base_url": "https://x.openai.azure.com"},
         }
     )
+    assert body.name == "eu-resource"
     assert body.is_enabled is True
-    assert body.api_key == "sk-test"
-    assert body.base_url == "https://x.openai.azure.com"
-    assert body.extra_config["api_version"] == "2025-04-01-preview"
-    assert body.curated_models == ["gpt-5.4"]
+    assert body.secret == {"api_key": "sk-test"}
+    assert body.extra_config["base_url"] == "https://x.openai.azure.com"
 
 
-def test_supported_providers_constant_covers_all_four():
+def test_credential_update_treats_blank_secret_value_as_preserve():
+    from app.schemas.ai_settings import CredentialUpdate
+
+    body = CredentialUpdate.model_validate(
+        {"isEnabled": False, "secret": {"api_key": ""}}
+    )
+    assert body.is_enabled is False
+    assert body.secret == {"api_key": ""}
+
+
+def test_supported_providers_constant_covers_all_six():
     from app.schemas.ai_settings import SUPPORTED_PROVIDERS
 
-    assert set(SUPPORTED_PROVIDERS) == {"openai", "azure_openai", "anthropic", "gemini"}
+    assert set(SUPPORTED_PROVIDERS) == {
+        "openai",
+        "azure_openai",
+        "anthropic",
+        "gemini",
+        "vertex",
+        "bedrock",
+    }
 
 
 def test_validate_response_serialises_camel_case():
