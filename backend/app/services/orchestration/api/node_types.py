@@ -14,8 +14,7 @@ Pydantic config-schema metadata keys honoured by the frontend builder:
 
   ``x-secret``    : bool — render as a password input; treat blanks on
                     edit as "leave the stored value alone".
-  ``x-provider``  : str  — narrow the connection picker to one provider
-                    (e.g. ``crm.place_bolna_call`` → ``"bolna"``).
+  ``x-provider``  : str  — narrow the connection picker to one provider.
   ``x-providers`` : list[str] — multi-provider picker.
 
 Pydantic v2 propagates ``json_schema_extra`` through ``model_json_schema``

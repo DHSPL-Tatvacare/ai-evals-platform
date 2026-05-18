@@ -25,15 +25,8 @@ from app.services.orchestration.node_protocol import ActionDispatch, ActionResul
 
 @dataclass
 class ServiceRegistry:
-    """Holds per-channel service clients. Phase 3 populates wati/bolna/lsq;
-    Phase 9 adds clinical_outbox for clinical.* handlers."""
-    wati: Any = None
-    bolna: Any = None
-    lsq: Any = None
-    sms: Any = None
-    email: Any = None
+    """Holds per-channel service clients populated by the executor."""
     webhook: Any = None
-    clinical_outbox: Any = None
 
 
 @dataclass

@@ -476,17 +476,7 @@ interface ArrayFieldProps {
   onChange(next: unknown[]): void;
 }
 
-/** Render a JSON-Schema ``array`` field.
- *
- *  - ``items.type === 'object'`` (with ``properties``) → repeated row of
- *    sub-form, with Remove per row and Add at the bottom. Used by
- *    ``logic.split.branches``, ``source.cohort_query.filters``, and
- *    ``crm.lsq_log_activity.fields``.
- *  - primitive items (``string`` / ``number`` / ``integer``) → repeated
- *    single-input rows. Used by ``source.cohort_query.payload_columns``.
- *
- *  Pre-fix the form fell back to raw JSON editing for both shapes which
- *  pushed users into editing JSON blobs — a phase-6 acceptance gap. */
+/** Render a JSON-Schema ``array`` field — object items render as sub-form rows, primitives as input rows. */
 function ArrayField({ items, value, onChange }: ArrayFieldProps) {
   const addItem = () => {
     onChange([...value, defaultForType(items)]);

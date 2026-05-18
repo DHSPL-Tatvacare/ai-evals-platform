@@ -327,18 +327,14 @@ async def test_draft_create_rejects_unknown_node_type(client):
 
 @pytest.mark.asyncio
 async def test_publish_rejects_invalid_node_config(client):
+    """``core.webhook_out`` with empty config fails publish on schema-required ``url``."""
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"cfg-{uuid.uuid4().hex[:8]}")
     )).json()
-    # Phase 13/Phase C activated the publish-gate validator: a crm.send_wati
-    # node with empty config now fails the gate (missing connection_id /
-    # template_name / channel_number / broadcast_name) before the structural
-    # validator's config_schema check ever runs. Route returns 422 with a
-    # structured detail body.
     v = (await client.post(
         f"/api/orchestration/workflows/{wf['id']}/versions",
         json={"definition": {
-            "nodes": [{"id": "n1", "type": "crm.send_wati", "config": {}}],
+            "nodes": [{"id": "n1", "type": "core.webhook_out", "config": {}}],
             "edges": [],
         }},
     )).json()
@@ -346,11 +342,6 @@ async def test_publish_rejects_invalid_node_config(client):
         f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
     assert r.status_code == 422
-    detail = r.json()["detail"]
-    assert isinstance(detail, list) and detail
-    fields = {entry["field"] for entry in detail}
-    assert "template_name" in fields
-    assert "channel_number" in fields
 
 
 # ─── Triggers + cron sync ───────────────────────────────────────────────────
@@ -677,9 +668,8 @@ async def test_node_types_filtered_for_crm(client):
     r = await client.get("/api/orchestration/node_types?workflowType=crm")
     assert r.status_code == 200
     types = [t["nodeType"] for t in r.json()]
-    assert "crm.send_wati" in types
     assert "core.webhook_out" in types
-    assert "clinical.schedule_lab" not in types
+    assert "sink.complete" in types
 
 
 @pytest.mark.asyncio

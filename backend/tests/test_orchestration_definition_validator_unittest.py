@@ -558,30 +558,25 @@ def test_publish_default_mode_is_unchanged():
         validate_definition(_wf(nodes, []), workflow_type="crm")
 
 
-def test_draft_allows_partial_crm_send_wati():
-    """The actual Sherlock-authoring scenario: a WATI dispatch node placed
-    on the canvas with no connection_id / template_slug / template_name
-    must parse in draft so the operator can fill the picker fields, but
-    publish still rejects via the schema's required-field check."""
+def test_draft_allows_partial_core_webhook_out():
+    """A dispatch node placed on canvas with no connection_id / url parses in draft
+    so the operator can fill picker fields; publish still rejects via required-field check."""
     nodes = [{
-        "id": "wati1",
-        "type": "crm.send_wati",
+        "id": "wh1",
+        "type": "core.webhook_out",
         "position": {"x": 0, "y": 0},
         "data": {},
-        "config": {},  # every required field unset — pure draft state
+        "config": {},
     }]
-    # Draft: must not raise — Pydantic 'missing' errors are filtered.
     validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
-    # Publish: still rejects (connection_id required by the schema).
     with pytest.raises(DefinitionValidationError):
         validate_definition(_wf(nodes, []), workflow_type="crm", mode="publish")
 
 
-def test_draft_rejects_partial_crm_send_wati_with_fabricated_key():
-    """Partial draft tolerance does NOT extend to fabricated keys."""
+def test_draft_rejects_partial_core_webhook_out_with_fabricated_key():
     nodes = [{
-        "id": "wati1",
-        "type": "crm.send_wati",
+        "id": "wh1",
+        "type": "core.webhook_out",
         "position": {"x": 0, "y": 0},
         "data": {},
         "config": {"fabricated_field": "smuggle"},

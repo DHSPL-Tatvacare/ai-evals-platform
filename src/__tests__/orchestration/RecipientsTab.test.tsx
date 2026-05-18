@@ -17,7 +17,7 @@ describe('RecipientsTab', () => {
     mockedListRunRecipients.mockResolvedValue([
       {
         recipientId: 'lead-1',
-        currentNodeId: 'crm.send_wati',
+        currentNodeId: 'core.webhook_out',
         status: 'waiting',
         wakeupAt: null,
         payload: {

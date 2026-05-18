@@ -30,11 +30,6 @@ from app.config import settings
 from app.models.mixins.shareable import Visibility
 from app.models.provider_connection import ProviderConnection
 from app.utils.secret_masking import mask_secret_value
-from app.services.orchestration.integrations.bolna import (
-    BolnaService,
-    BolnaServiceError,
-)
-from app.services.orchestration.integrations.wati import WatiService, WatiServiceError
 from app.services.orchestration.connections import crypto, health, provider_specs
 
 
@@ -549,88 +544,7 @@ async def get_agent_variables(
     agent_id: Optional[str] = None,
     template_name: Optional[str] = None,
 ) -> dict[str, Any]:
+    """Provider-agnostic agent/template variable lookup — empty until adapters re-register."""
+    del agent_id, template_name
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
-    cache_key = (
-        str(row.id),
-        row.provider,
-        agent_id or "",
-        template_name or "",
-        row.updated_at.isoformat() if row.updated_at else "",
-    )
-    cached = _get_cached_variables(cache_key)
-    if cached is not None:
-        return {"provider": row.provider, "variables": cached, "error": None}
-
-    config = crypto.decrypt(row.config_encrypted)
-    try:
-        variables = await _provider_agent_variables(
-            row=row,
-            config=config,
-            agent_id=agent_id,
-            template_name=template_name,
-        )
-    except (BolnaServiceError, WatiServiceError) as exc:
-        # Provider responded (or refused to respond) — that's a config /
-        # data condition, not a server bug. Surface the message inline so
-        # the variable-mapping UI can keep accepting manual entries while
-        # the operator chases down the upstream issue. Do NOT cache; a
-        # transient 4xx shouldn't poison the picker for the cache TTL.
-        return {"provider": row.provider, "variables": [], "error": str(exc)}
-    _put_cached_variables(cache_key, variables)
-    return {"provider": row.provider, "variables": variables, "error": None}
-
-
-async def _provider_agent_variables(
-    *,
-    row: ProviderConnection,
-    config: dict[str, Any],
-    agent_id: Optional[str],
-    template_name: Optional[str],
-) -> list[str]:
-    if row.provider == "bolna":
-        return await _agent_variables_for_bolna(config=config, agent_id=agent_id)
-    if row.provider == "wati":
-        return await _agent_variables_for_wati(config=config, template_name=template_name)
-    return []
-
-
-async def _agent_variables_for_bolna(
-    *,
-    config: dict[str, Any],
-    agent_id: Optional[str],
-) -> list[str]:
-    """Variable names declared by the selected live Bolna agent."""
-    if not agent_id:
-        return []
-
-    service = BolnaService(
-        base_url=str(config.get("base_url") or ""),
-        api_key=str(config.get("api_key") or ""),
-    )
-    payload = await service.get_agent(agent_id=agent_id)
-    return _extract_variable_names(payload)
-
-
-async def _agent_variables_for_wati(
-    *,
-    config: dict[str, Any],
-    template_name: Optional[str],
-) -> list[str]:
-    """Variable names declared by the selected live WATI template."""
-    if not template_name:
-        return []
-
-    service = WatiService(
-        base_url=str(config.get("base_url") or ""),
-        wati_tenant_id=str(config.get("wati_tenant_id") or ""),
-        api_token=str(config.get("api_token") or ""),
-    )
-    summaries = await service.list_message_templates_summary()
-    for summary in summaries:
-        if summary.get("name") != template_name:
-            continue
-        parameters = summary.get("parameters")
-        if not isinstance(parameters, list):
-            return []
-        return [str(item) for item in parameters if isinstance(item, str) and item]
-    return []
+    return {"provider": row.provider, "variables": [], "error": None}

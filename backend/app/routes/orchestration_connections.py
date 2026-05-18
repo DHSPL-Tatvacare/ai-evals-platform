@@ -30,11 +30,8 @@ from app.schemas.orchestration_connection import (
     ConnectionRotateTokenResponse,
     ConnectionTestResponse,
     ConnectionUpdateRequest,
-    ProviderAgentsListResponse,
     ProviderSpecResponse,
-    ProviderTemplatesListResponse,
 )
-from app.services.orchestration.api import agents as agents_service
 from app.services.orchestration.api import connections as conn_service
 
 
@@ -248,55 +245,3 @@ async def get_agent_variables(
     )
 
 
-@router.get("/{connection_id}/agents", response_model=ProviderAgentsListResponse)
-async def list_connection_agents(
-    connection_id: uuid.UUID,
-    auth: AuthContext = require_permission('orchestration:manage'),
-    db: AsyncSession = Depends(get_db),
-    refresh: bool = Query(False, description="Bypass the 30s cache."),
-):
-    """Phase 13/B.1 — Live agent listing for the Bolna picker.
-
-    Soft-error contract: HTTP 200 even when the upstream call fails;
-    the picker keeps working with manual entry while surfacing
-    ``error`` inline.
-    """
-    row = await _load_and_gate_connection(db, auth, connection_id)
-    if row.provider != "bolna":
-        raise HTTPException(
-            status_code=400,
-            detail=f"connection {connection_id} is provider={row.provider}, expected bolna",
-        )
-    return await agents_service.list_connection_bolna_agents(
-        db,
-        tenant_id=auth.tenant_id,
-        app_id=row.app_id,
-        connection_id=connection_id,
-        refresh=refresh,
-    )
-
-
-@router.get("/{connection_id}/templates", response_model=ProviderTemplatesListResponse)
-async def list_connection_templates(
-    connection_id: uuid.UUID,
-    auth: AuthContext = require_permission('orchestration:manage'),
-    db: AsyncSession = Depends(get_db),
-    refresh: bool = Query(False, description="Bypass the 30s cache."),
-):
-    """Phase 13/C.1 — Live template listing for the WATI picker.
-
-    Same soft-error envelope as the agents endpoint.
-    """
-    row = await _load_and_gate_connection(db, auth, connection_id)
-    if row.provider != "wati":
-        raise HTTPException(
-            status_code=400,
-            detail=f"connection {connection_id} is provider={row.provider}, expected wati",
-        )
-    return await agents_service.list_connection_wati_templates(
-        db,
-        tenant_id=auth.tenant_id,
-        app_id=row.app_id,
-        connection_id=connection_id,
-        refresh=refresh,
-    )

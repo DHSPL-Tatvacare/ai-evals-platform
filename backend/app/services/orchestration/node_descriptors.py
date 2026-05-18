@@ -157,27 +157,10 @@ _DISPATCH_OUTPUT_EDGES: list[dict[str, Any]] = [
     {"id": "exhausted", "label": "Exhausted", "cardinality": "one", "dynamic": False},
 ]
 
-# Mutation nodes keep success/failed (Phase 11 §6.7): a single attempt write
-# either commits to the system of record or doesn't. Tenants who want
-# retry on a transient mutation failure use a wrapping dispatch / loop node
-# in a follow-up phase, not graph spaghetti.
-_MUTATION_OUTPUT_EDGES: list[dict[str, Any]] = [
-    {"id": "success", "label": "Success", "cardinality": "one", "dynamic": False},
-    {"id": "failed", "label": "Failed", "cardinality": "one", "dynamic": False},
-]
-
 _DISPATCH_GRAPH_RULES: dict[str, Any] = {
     "requires_incoming_edges": True,
     "requires_outgoing_edges": True,
     "required_output_ids": [],  # at least one of success/exhausted must be wired
-    "allows_multiple_outgoing_per_output": False,
-    "terminal": False,
-}
-
-_MUTATION_GRAPH_RULES: dict[str, Any] = {
-    "requires_incoming_edges": True,
-    "requires_outgoing_edges": True,
-    "required_output_ids": [],
     "allows_multiple_outgoing_per_output": False,
     "terminal": False,
 }
@@ -374,129 +357,6 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
         "graph_rules": _DISPATCH_GRAPH_RULES,
         "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
     },
-    "crm.send_wati": {
-        "display_label": "WhatsApp Dispatch",
-        "display_category": "dispatch",
-        "description": "Send a WhatsApp template message through the connected provider.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": ["whatsapp_number"],
-        "emitted_payload_fields": ["wati_local_message_id"],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "crm.place_bolna_call": {
-        "display_label": "AI Call Dispatch",
-        "display_category": "dispatch",
-        "description": "Place an outbound AI voice call through the connected provider.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": ["phone"],
-        "emitted_payload_fields": ["bolna_call_id"],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "crm.send_sms": {
-        "display_label": "Message Dispatch",
-        "display_category": "dispatch",
-        "description": "Send an SMS through the connected provider.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": ["phone"],
-        "emitted_payload_fields": [],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "clinical.schedule_lab": {
-        "display_label": "Schedule Lab Order",
-        "display_category": "dispatch",
-        "description": "Schedule a lab order for the patient.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "clinical.assign_care_team_task": {
-        "display_label": "Assign Care Team Task",
-        "display_category": "dispatch",
-        "description": "Create a task for the care team to action.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "clinical.send_pro_assessment": {
-        "display_label": "Send Assessment",
-        "display_category": "dispatch",
-        "description": "Send a patient-reported outcome questionnaire to the patient.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-    "clinical.escalation_uptier": {
-        "display_label": "Escalation",
-        "display_category": "dispatch",
-        "description": "Escalate the case to a human reviewer.",
-        "authoring_status": "active",
-        "editor_hints": {},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _DISPATCH_OUTPUT_EDGES,
-        "graph_rules": _DISPATCH_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
-    },
-
-    # ─── Mutation (single-attempt, success/failed) ──────────────────────────
-    "crm.lsq_update_stage": {
-        "display_label": "Lead Stage Update",
-        "display_category": "mutation",
-        "description": "Update the lead's stage in the connected CRM.",
-        "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "FieldMappingEditor"},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _MUTATION_OUTPUT_EDGES,
-        "graph_rules": _MUTATION_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "mutation"},
-    },
-    "crm.lsq_log_activity": {
-        "display_label": "Activity Log Update",
-        "display_category": "mutation",
-        "description": "Log an activity against the lead in the connected CRM.",
-        "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "FieldMappingEditor"},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _MUTATION_OUTPUT_EDGES,
-        "graph_rules": _MUTATION_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "mutation"},
-    },
-    "clinical.emr_write": {
-        "display_label": "EMR Record Update",
-        "display_category": "mutation",
-        "description": "Write a structured record to the EMR.",
-        "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "FieldMappingEditor"},
-        "required_payload_fields": [],
-        "emitted_payload_fields": [],
-        "output_edges": _MUTATION_OUTPUT_EDGES,
-        "graph_rules": _MUTATION_GRAPH_RULES,
-        "runtime_contract": {"execution_kind": "mutation"},
-    },
-
     # ─── Termination ────────────────────────────────────────────────────────
     "sink.complete": {
         "display_label": "Workflow Complete",

@@ -231,8 +231,7 @@ user fill it in via the inspector.
 - Logic (`logic.*`) shapes flow: `split` fans out by branch, `conditional`
   is binary true/false, `wait` pauses, `merge` joins paths.
 - Filters (`filter.*`) drop recipients without dispatching anything.
-- Action nodes (`crm.*`, `clinical.*`) talk to external systems —
-  WhatsApp, Bolna, SMS, LSQ, EMR. They have side effects when run.
+- Action nodes (`core.webhook_out`) talk to external systems and have side effects when run.
 - `sink.complete` ends a branch with no side effect. **Use `sink.complete`
   as the placeholder when the user says "leave the action node empty"**;
   NEVER use `core.webhook_out` as a placeholder — it dispatches HTTP and

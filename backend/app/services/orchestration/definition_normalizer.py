@@ -52,18 +52,10 @@ from app.services.orchestration.request_body_contract import migrate_legacy_body
 from app.services.orchestration.source_catalog import reverse_lookup_by_table
 
 
-# Retry-capable dispatch node types that adopted ``success`` / ``exhausted``
-# outputs in Phase 11 (Commit 2). Legacy edges with ``output_id='failed'``
-# from these node types are rewritten to ``output_id='exhausted'``.
+# Retry-capable dispatch node types that adopt ``success`` / ``exhausted`` outputs.
+# Legacy edges with ``output_id='failed'`` from these types are rewritten to ``exhausted``.
 _RETRY_CAPABLE_NODE_TYPES: frozenset[str] = frozenset({
     "core.webhook_out",
-    "crm.send_wati",
-    "crm.place_bolna_call",
-    "crm.send_sms",
-    "clinical.schedule_lab",
-    "clinical.assign_care_team_task",
-    "clinical.send_pro_assessment",
-    "clinical.escalation_uptier",
 })
 
 

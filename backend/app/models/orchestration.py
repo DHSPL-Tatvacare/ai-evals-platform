@@ -389,6 +389,7 @@ class WorkflowRunRecipientState(Base):
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     error: Mapped[Optional[str]] = mapped_column(Text)
+    ignore_webhooks_after: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowRunRecipientAction(Base):
