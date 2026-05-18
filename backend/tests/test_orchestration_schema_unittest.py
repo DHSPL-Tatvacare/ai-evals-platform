@@ -67,7 +67,7 @@ async def test_partial_unique_index_no_double_dispatch(db_session):
     assert indexdef is not None, "missing partial unique index for double-dispatch guard"
     assert "UNIQUE" in indexdef
     assert "wa_dispatched" in indexdef
-    assert "bolna_queued" in indexdef
+    assert "voice_queued" in indexdef
     # Postgres canonicalizes the predicate; check for both raw and canonical forms.
     assert "'pending'" in indexdef
 

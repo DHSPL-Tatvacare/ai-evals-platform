@@ -360,6 +360,19 @@ export const MessagingSendWhatsappTemplateConfigSchema = z
   .strict();
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+export const VoicePlaceCallConfigSchema = z
+  .object({
+    nodeType: z.literal("voice.place_call"),
+    connection_id: z.uuid(),
+    agent_id: z.string().min(1),
+    variable_mappings: z.record(z.string(), z.string()).default({}),
+    from_phone: z.string().nullable().optional(),
+    webhook_ttl_seconds: z.number().int().min(60).default(259200),
+    mode: z.enum(["auto", "single", "batch"]).default("auto"),
+  })
+  .strict();
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const SinkCompleteConfigSchema = z
   .object({
     nodeType: z.literal("sink.complete"),
@@ -381,6 +394,7 @@ export const NodeConfigSchema = z.discriminatedUnion("nodeType", [
   LogicMergeConfigSchema,
   CoreWebhookOutConfigSchema,
   MessagingSendWhatsappTemplateConfigSchema,
+  VoicePlaceCallConfigSchema,
   SinkCompleteConfigSchema,
 ]);
 
@@ -396,6 +410,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   | typeof LogicMergeConfigSchema
   | typeof CoreWebhookOutConfigSchema
   | typeof MessagingSendWhatsappTemplateConfigSchema
+  | typeof VoicePlaceCallConfigSchema
   | typeof SinkCompleteConfigSchema
 > = {
   "source.cohort_query": SourceCohortQueryConfigSchema,
@@ -408,6 +423,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   "logic.merge": LogicMergeConfigSchema,
   "core.webhook_out": CoreWebhookOutConfigSchema,
   "messaging.send_whatsapp_template": MessagingSendWhatsappTemplateConfigSchema,
+  "voice.place_call": VoicePlaceCallConfigSchema,
   "sink.complete": SinkCompleteConfigSchema,
 };
 

@@ -244,7 +244,7 @@ class WatiAdapter:
                 await self._record_optout(db, tenant_id=tenant_id, app_id=app_id, payload=payload)
                 return
 
-        parent, node_id = await self._find_parent_with_node_id(
+        parent, node_id = await self._find_parent(
             db, tenant_id=tenant_id, payload=payload,
         )
         if parent is None:
@@ -333,7 +333,7 @@ class WatiAdapter:
                 )
         await db.flush()
 
-    async def _find_parent_with_node_id(
+    async def _find_parent(
         self,
         db: AsyncSession,
         *,
@@ -400,7 +400,7 @@ class WatiAdapter:
         app_id: str,
         payload: dict[str, Any],
     ) -> None:
-        parent, _node_id = await self._find_parent_with_node_id(
+        parent, _node_id = await self._find_parent(
             db, tenant_id=tenant_id, payload=payload,
         )
         if parent is None:

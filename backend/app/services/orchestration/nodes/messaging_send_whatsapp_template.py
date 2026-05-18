@@ -6,10 +6,8 @@ execute-time via ``resolve_adapter(capability='messaging', vendor=...)``.
 """
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +23,7 @@ from app.services.orchestration.node_protocol import (
     RecipientOutcome,
 )
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration.nodes._template import render as _render
 
 
 class _Config(BaseModel):
@@ -52,16 +51,6 @@ class _Config(BaseModel):
         ge=60,
         description="Ignore replies arriving after this many seconds. Defaults to 3 days.",
     )
-
-
-_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-
-
-def _render(value: Any, payload: dict[str, Any]) -> str:
-    """Substitute ``{{name}}`` placeholders against the recipient payload."""
-    def sub(match: re.Match[str]) -> str:
-        return str(payload.get(match.group(1).strip(), ""))
-    return _TEMPLATE_VAR_RE.sub(sub, str(value))
 
 
 @register_node(workflow_type="*", node_type="messaging.send_whatsapp_template")

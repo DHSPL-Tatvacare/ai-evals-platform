@@ -1,7 +1,7 @@
 """Capability adapter Protocols — messaging (WhatsApp et al.) and voice."""
 from __future__ import annotations
 
-from typing import Any, ClassVar, Mapping, Protocol
+from typing import Any, ClassVar, Mapping, Optional, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,10 +40,22 @@ class MessagingAdapter(Protocol):
 class VoiceAdapter(Protocol):
     capability: ClassVar[str]
     vendor: ClassVar[str]
+    # None means "vendor never batches"; integer is the cohort size at
+    # or above which the node flips from per-recipient ``place_call`` to
+    # a single ``place_call_batch`` upload.
+    batch_threshold: ClassVar[Optional[int]]
 
     async def place_call(
         self, *, connection: Any, request: CanonicalVoiceRequest,
     ) -> CanonicalVoiceResponse: ...
+
+    async def place_call_batch(
+        self,
+        *,
+        connection: Any,
+        requests: list[CanonicalVoiceRequest],
+        recipient_ids: list[str],
+    ) -> list[CanonicalVoiceResponse]: ...
 
     def normalize_webhook(self, raw: dict[str, Any]) -> CanonicalVoiceEvent: ...
 

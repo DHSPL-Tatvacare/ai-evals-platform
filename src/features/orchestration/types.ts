@@ -300,7 +300,7 @@ export interface WorkflowActionListResponse {
   offset: number;
 }
 
-const PENDING_PROVIDER_OUTCOMES = new Set(['bolna_queued']);
+const PENDING_PROVIDER_OUTCOMES = new Set(['voice_queued']);
 
 function stringField(value: unknown): string | null {
   if (value == null) return null;
@@ -324,8 +324,8 @@ export function isActionProviderTerminal(action: ActionRow): boolean {
 
 export function isActionAwaitingProviderOutcome(action: ActionRow): boolean {
   return (
-    (action.channel || '').toLowerCase() === 'bolna' &&
-    (action.actionType || '').toLowerCase() === 'bolna_queued' &&
+    (action.channel || '').toLowerCase() === 'voice' &&
+    (action.actionType || '').toLowerCase() === 'voice_queued' &&
     !isActionProviderTerminal(action)
   );
 }
