@@ -243,15 +243,14 @@ class ReportingConfigValidatorTests(unittest.IsolatedAsyncioTestCase):
         self._cascade_patch.start()
         self.addCleanup(self._cascade_patch.stop)
 
-    async def test_app_without_narrative_skips_cascade_check(self):
-        """An app whose narrative_config is disabled (or whose
-        narrativeTemplateKey is unset) must NOT require a cascade lookup."""
+    async def test_app_without_narrative_key_skips_cascade_check(self):
+        """An app whose narrativeTemplateKey is unset must NOT require a
+        cascade lookup. (The aiSummary.enabled flag is intentionally NOT a
+        skip condition — see the test below.)"""
         # Mock returns None for everything — would normally fail check 8.
         self._cascade_patch.stop()
 
         slug, cfg = _row_for("voice-rx")
-        # Disable narrative for this app.
-        cfg["analytics"]["singleRun"]["aiSummary"]["enabled"] = False
         cfg["analytics"]["assets"]["narrativeTemplateKey"] = None
 
         with patch(
@@ -261,6 +260,32 @@ class ReportingConfigValidatorTests(unittest.IsolatedAsyncioTestCase):
             await validate_reporting_config(_FakeDB([(slug, cfg)]))  # must not raise
 
         # Restart cleanup-tracked patch.
+        self._cascade_patch = _patch_cascade_resolved()
+        self._cascade_patch.start()
+        self.addCleanup(self._cascade_patch.stop)
+
+    async def test_ai_summary_disabled_does_NOT_skip_cascade_check(self):
+        """Regression gate for the wrong-gate bug fixed 2026-05-18: validator
+        used to gate on aiSummary.enabled, which would skip the cascade check
+        when an app turned off aiSummary but kept a report_config with
+        narrative.enabled=true. Runtime would then call the LLM with
+        system_prompt=None and silently degrade. The cascade must be enforced
+        whenever narrativeTemplateKey is set, regardless of aiSummary."""
+        self._cascade_patch.stop()
+
+        slug, cfg = _row_for("voice-rx")
+        cfg["analytics"]["singleRun"]["aiSummary"]["enabled"] = False
+        # narrativeTemplateKey stays set — operator's promise to provide a row.
+
+        with patch(
+            "app.services.reports.config_validator._resolve_setting_value",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                await validate_reporting_config(_FakeDB([(slug, cfg)]))
+        self.assertIn("narrativeTemplateKey", str(ctx.exception))
+        self.assertIn("cascade", str(ctx.exception).lower())
+
         self._cascade_patch = _patch_cascade_resolved()
         self._cascade_patch.start()
         self.addCleanup(self._cascade_patch.stop)

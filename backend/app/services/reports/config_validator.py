@@ -149,11 +149,21 @@ async def _validate_one_app(db: Any, slug: str, raw_config: dict | None) -> list
     # The Alembic migration 0052_seed_narrative_system_prompts seeds three
     # SYSTEM-shared application_settings rows; this check fails boot if a row
     # is missing (migration not applied, or the app's narrativeTemplateKey
-    # changed without a matching migration). Skipped when narrative is disabled
-    # OR the app has no narrativeTemplateKey configured.
+    # changed without a matching migration). Skipped only when the app has no
+    # narrativeTemplateKey configured.
+    #
+    # Why we don't gate on `single_run.ai_summary.enabled` here: that flag is
+    # the app's surface-level "is narrative on the dashboard" toggle, not the
+    # production narrative gate. The actual runtime gate is
+    # `report_config.narrative_config.enabled` (stored per ReportConfiguration
+    # in platform.report_configurations). Gating on aiSummary would skip the
+    # check for apps that turn off aiSummary but keep a report_config with
+    # narrative enabled — runtime would then call the LLM with system_prompt=
+    # None and silently degrade. If narrative_template_key is set, the operator
+    # promised a row will resolve via the cascade; that's the right invariant
+    # to assert at boot.
     narrative_key = analytics.assets.narrative_template_key
-    ai_summary_enabled = single_run.ai_summary.enabled
-    if narrative_key and ai_summary_enabled:
+    if narrative_key:
         prompt_value = await _resolve_setting_value(
             db,
             tenant_id=SYSTEM_TENANT_ID,
