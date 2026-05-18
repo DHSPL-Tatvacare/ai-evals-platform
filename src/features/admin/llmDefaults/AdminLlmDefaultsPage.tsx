@@ -410,11 +410,14 @@ function CallSiteRow({
 
   return (
     <div className="px-4 py-3">
-      {/* Fixed columns: identity (1fr) | picker (1.3fr) | actions (120px).
-          Action slot is reserved so Clear appearing/disappearing never
-          reflows the picker column. Save is global (page header), never
-          per-row, so there's nothing to wrap here. */}
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_120px] items-start gap-4">
+      {/* Fixed columns: identity (0.85fr) | picker (2fr, ~520px floor) |
+          actions (96px). The picker carries two comboboxes side-by-side
+          (provider + model), each of which needs room for full names like
+          "Azure OpenAI · default" and "gemini-2.5-flash-preview-09-2025".
+          Identity is just the call_site id + one description line, so we
+          give the picker the lion's share. Action slot is reserved so
+          Clear appearing/disappearing never reflows the picker column. */}
+      <div className="grid grid-cols-[minmax(0,0.85fr)_minmax(420px,2fr)_96px] items-start gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">

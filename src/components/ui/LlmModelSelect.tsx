@@ -205,8 +205,11 @@ export function LlmModelSelect({
   }
 
   if (layout === 'inline') {
+    // Model side gets the wider track because catalog deployment ids
+    // (``gemini-2.5-flash-preview-09-2025``, ``ai-evals-gpt-5-4-mini``)
+    // are routinely longer than the provider+credential label.
     return (
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-2">
+      <div className="grid grid-cols-[minmax(160px,1fr)_minmax(220px,1.6fr)] gap-2">
         <div className="min-w-0">{credentialField}</div>
         <div className="min-w-0">{modelField}</div>
       </div>

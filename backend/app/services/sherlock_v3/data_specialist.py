@@ -1246,6 +1246,13 @@ def build_data_specialist(
             parallel_tool_calls=False,
             reasoning=Reasoning(effort='low'),
         ),
+        # submit_sql already produces the final SpecialistResult JSON;
+        # stop_on_first_tool returns that directly as the agent's output
+        # instead of paying for a second LLM round-trip whose output the
+        # supervisor never sees (extract_data_specialist_output reads
+        # the tool result, not the post-tool LLM text). Cuts per-turn
+        # specialist latency roughly in half.
+        tool_use_behavior='stop_on_first_tool',
         tools=[
             FunctionTool(
                 name='submit_sql',

@@ -151,7 +151,15 @@ export function Combobox(props: ComboboxProps) {
         ? 'top'
         : 'bottom';
     const availableSpace = placement === 'top' ? availableAbove : availableBelow;
-    const width = Math.max(rect.width, 220);
+    // Floor of 320px so menu reveals the full label even when the trigger
+    // is constrained inside a narrow grid cell (e.g. /admin/llm/defaults
+    // rows where "gemini-2.5-flash-preview-09-2025" wouldn't fit in 220).
+    // Capped at the viewport width minus 2*pad so it never escapes the
+    // page on small screens.
+    const width = Math.min(
+      Math.max(rect.width, 320),
+      window.innerWidth - 2 * pad,
+    );
     setPosition({
       left: Math.max(pad, Math.min(rect.left, window.innerWidth - width - pad)),
       width,

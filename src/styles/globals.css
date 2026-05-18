@@ -590,23 +590,6 @@ html[data-theme-transitioning] * {
   }
 }
 
-/* Streaming-border base treatment for the chat composer while an SSE
- * stream is in flight. The flowing comet itself is now rendered as an
- * SVG <rect> stroke driven by framer-motion (see
- * ``components/ComposerStreamingBorder.tsx``) — a single dash with a
- * huge gap walks the perimeter once per cycle, mathematically
- * impossible to read as "multiple cycles". This selector only hides
- * the static border so the SVG ring isn't double-stacked at corners.
- *
- * Earlier conic-gradient approach was retired 2026-05-19 — even with a
- * single bright tip the angular-vs-perimeter distortion on rounded
- * rectangles read as multiple pulses to the eye.
- */
-.chat-composer-streaming {
-  position: relative;
-  border-color: transparent !important;
-}
-
 /* React Flow control + minimap chrome — token-driven so dark + light
    render with the rest of the app instead of the ReactFlow defaults
    (#fefefe controls, hardcoded #555 icons).
