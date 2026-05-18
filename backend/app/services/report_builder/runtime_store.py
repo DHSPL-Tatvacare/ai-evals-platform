@@ -32,7 +32,6 @@ class SherlockAgentSessionState:
     provider: str
     model: str
     message_state: list[dict[str, Any]]
-    scratchpad: dict[str, Any]
     next_event_seq: int
     status: str = 'active'
     last_error: str | None = None
@@ -48,7 +47,6 @@ def _to_runtime_state(row: SherlockAgentSession) -> SherlockAgentSessionState:
         provider=row.provider,
         model=row.model,
         message_state=list(row.message_state or []),
-        scratchpad=dict(row.scratchpad or {}),
         next_event_seq=row.next_event_seq,
         status=row.status,
         last_error=row.last_error,
@@ -179,7 +177,6 @@ async def resolve_sherlock_runtime_session(
             provider=provider,
             model=model,
             message_state=[],
-            scratchpad={},
             next_event_seq=1,
             status='active',
             last_response_id=None,
@@ -469,7 +466,6 @@ async def save_runtime_state(
     *,
     runtime_session: SherlockAgentSessionState,
     message_state: list[dict[str, Any]],
-    scratchpad: dict[str, Any],
     status: str = 'active',
     last_error: str | None = None,
     db: AsyncSession | None = None,
@@ -479,7 +475,6 @@ async def save_runtime_state(
             next_state = await save_runtime_state(
                 runtime_session=runtime_session,
                 message_state=message_state,
-                scratchpad=scratchpad,
                 status=status,
                 last_error=last_error,
                 db=session_db,
@@ -495,7 +490,6 @@ async def save_runtime_state(
     if row is None:
         raise ValueError(f'Sherlock agent session {runtime_session.chat_session_id} not found')
     row.message_state = message_state
-    row.scratchpad = scratchpad
     row.status = status
     row.last_error = last_error
     if hasattr(runtime_session, 'last_response_id'):

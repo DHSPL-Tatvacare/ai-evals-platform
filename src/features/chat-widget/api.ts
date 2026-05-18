@@ -6,8 +6,8 @@ import type {
   Artifact,
   BlueprintPart,
   BuilderSessionData,
-  ChatDefaults,
   ChartPayload,
+  ContextWindowInfo,
   RuntimeOperation,
   SaveVariant,
   TerminalStatus,
@@ -99,6 +99,18 @@ interface StreamDoneEvent {
   // llm_usage rows (Phase 2 backend). Absent when no rows were recorded —
   // consumers must handle absence without layout shift.
   usage?: TurnUsage;
+  // Authoritative context-window state at the end of this turn — the
+  // chat widget's progress pill derives its display ratio from these
+  // numbers. Single source of truth lives in
+  // ``backend/app/services/sherlock_v3/compaction.py``; the FE never
+  // hardcodes the threshold.
+  context?: ContextWindowInfo;
+}
+
+interface StreamCompactionEvent {
+  seq?: number;
+  summary: string;
+  tokensBefore: number | null;
 }
 
 interface StreamStatusEvent {
@@ -196,10 +208,6 @@ export async function getBuilderSession(appId: string, sessionId: string): Promi
   return apiRequest<BuilderSessionData>(`/api/report-builder/v2/sessions/${sessionId}?app_id=${encodeURIComponent(appId)}`);
 }
 
-export async function getChatDefaults(): Promise<ChatDefaults> {
-  return apiRequest<ChatDefaults>('/api/chat-engine/defaults');
-}
-
 export async function cancelChatTurn(
   appId: string,
   sessionId: string,
@@ -230,6 +238,11 @@ export async function streamChatMessage(
     onStatus: (event: StreamStatusEvent) => void;
     onDone: (data: StreamDoneEvent) => void;
     onError: (error: StreamErrorEvent) => void;
+    /** Server-side compaction landed mid-turn — the chat widget
+     *  inserts an in-thread "Session compacted" separator with the
+     *  summary collapsed under it. Optional so consumers that don't
+     *  care (smoke tests) can skip. */
+    onCompaction?: (event: StreamCompactionEvent) => void;
   },
 ): Promise<AbortController> {
   const controller = new AbortController();
@@ -427,6 +440,17 @@ export async function streamChatMessage(
               break;
             }
             case 'turn_finished': {
+              // The backend always emits ``turn_finished`` as the
+              // stream's closing envelope, INCLUDING after a prior
+              // ``error_emitted``. Without this guard the UI would
+              // finalize an extra "Error" bubble for every failed turn
+              // — once via onError, then again via onDone. Skip the
+              // onDone dispatch when onError already finalized; keep
+              // ``terminalReceived`` true so the post-loop "stream
+              // ended early" check stays correct.
+              if (terminalReceived) {
+                break;
+              }
               terminalReceived = true;
               const seq = typeof data.seq === 'number' ? data.seq : 0;
               const terminalStatus = normalizeTerminalStatus(data.status);
@@ -439,6 +463,9 @@ export async function streamChatMessage(
                   }))
                 : [];
               const content = typeof data.content === 'string' ? data.content : accumulatedContent;
+              const context = (data.context && typeof data.context === 'object')
+                ? (data.context as unknown as ContextWindowInfo)
+                : undefined;
               callbacks.onDone({
                 seq,
                 terminalStatus,
@@ -447,6 +474,15 @@ export async function streamChatMessage(
                 toolCalls,
                 artifacts,
                 ...(usage ? { usage } : {}),
+                ...(context ? { context } : {}),
+              });
+              break;
+            }
+            case 'compaction_emitted': {
+              callbacks.onCompaction?.({
+                seq: typeof data.seq === 'number' ? data.seq : undefined,
+                summary: String(data.summary ?? ''),
+                tokensBefore: typeof data.tokens_before === 'number' ? data.tokens_before : null,
               });
               break;
             }

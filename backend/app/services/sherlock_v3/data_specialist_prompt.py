@@ -61,7 +61,7 @@ TOOL CALL FORMAT for ``submit_sql``:
         "alias": "<column name as it appears in the SELECT result>",
         "role_hint": "<dimension|measure|temporal|ordered_categorical|key|identifier>",
         "type_hint": "<quantitative|temporal|ordinal|nominal|boolean|geo>",
-        "source_column": "<table>.<column>"  // ONLY for passthrough columns; omit for aggregates
+        "source_column": "<table>.<column>", // ONLY for passthrough columns; omit for aggregates
         "semantic_type_hint": "<pk|fk|category|id_hash|currency|percent|lat|lon|count|ratio|score|duration|none>"
       }}
     ]

@@ -97,20 +97,33 @@ async def distinct_tool_names(
 
 @router.get("/tool-calls/{tool_call_id}", response_model=SherlockToolCallDetail)
 async def get_tool_call(
-    tool_call_id: uuid.UUID,
+    tool_call_id: str,
     app_id: Optional[str] = Query(None, alias="appId"),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
+    """Resolve a tool-call by either the row's UUID PK OR the OpenAI
+    Agents SDK call_id (e.g. ``call_BD3jd…``). Browsing from the admin
+    Logs list passes a UUID; deep-linking from the chat widget passes
+    the SDK call_id (the only identifier the SSE wire carries). One
+    route, one service call, the service picks the right column.
+    """
     scoped_app_ids: frozenset[str] | None = frozenset(auth.app_access)
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
         scoped_app_ids = None
+
+    try:
+        as_uuid: uuid.UUID | None = uuid.UUID(tool_call_id)
+    except (ValueError, AttributeError):
+        as_uuid = None
+
     row = await svc.get_tool_call(
         db,
         tenant_id=auth.tenant_id,
         user_id=auth.user_id,
-        tool_call_id=tool_call_id,
+        tool_call_id=as_uuid,
+        call_id=tool_call_id if as_uuid is None else None,
         app_ids=scoped_app_ids,
         app_id=app_id,
     )

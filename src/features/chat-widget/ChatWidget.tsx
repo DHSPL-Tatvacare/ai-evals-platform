@@ -23,6 +23,7 @@ import { findLastChartParts, isChartPart } from './chatWidgetHelpers';
 import { ChatMessages } from './ChatMessages';
 import { ChatInput } from './ChatInput';
 import { ChatHistory } from './ChatHistory';
+import { ContextProgressPill } from './components/ContextProgressPill';
 import { DashboardBar } from './components/DashboardBar';
 import type { ChatProvider, SaveToastPart } from './types';
 import type { AppChatConfig } from '@/types/app.types';
@@ -90,6 +91,7 @@ export function ChatWidget() {
   const messages = useChatWidgetStore((s) => s.messages);
   const status = useChatWidgetStore((s) => s.status);
   const defaults = useChatWidgetStore((s) => s.defaults);
+  const contextWindow = useChatWidgetStore((s) => s.contextWindow);
   const view = useChatWidgetStore((s) => s.view);
   const setView = useChatWidgetStore((s) => s.setView);
   const send = useChatWidgetStore((s) => s.send);
@@ -359,6 +361,7 @@ export function ChatWidget() {
           <span className="text-[10px] font-medium text-[var(--color-brand-primary)] bg-[var(--color-brand-accent)] px-1.5 py-0.5 rounded">
             {currentApp}
           </span>
+          <ContextProgressPill context={contextWindow} />
         </div>
         <div className="flex items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
           <button

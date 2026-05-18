@@ -235,6 +235,20 @@ export interface JobBadgePart {
   resultHref?: string;
 }
 
+// Server-side compaction marker — emitted by the chat-widget stream
+// when the Responses API trips its context_management threshold and
+// summarizes earlier turns. The widget renders a full-width solid-rule
+// separator + collapsed summary expander; the assistant message that
+// CONTAINS this part is otherwise empty. Tokens-before is the SDK's
+// best estimate of the pre-compaction rendered context; nullable when
+// the API doesn't surface it.
+export interface CompactionPart {
+  type: 'compaction';
+  summary: string;
+  tokensBefore: number | null;
+  occurredAt: string; // ISO timestamp set at receive time
+}
+
 export type MessagePart =
   | TextPart
   | ToolCallPart
@@ -242,7 +256,19 @@ export type MessagePart =
   | BlueprintPart
   | SaveToastPart
   | DashboardBarPart
-  | JobBadgePart;
+  | JobBadgePart
+  | CompactionPart;
+
+// Context-window progress info surfaced on every ``turn_finished`` SSE
+// payload so the chat widget's progress pill never hardcodes the
+// threshold — it's derived per-turn from the server. Values are
+// authoritative as of that turn end.
+export interface ContextWindowInfo {
+  tokensUsed: number;
+  thresholdTokens: number;
+  progressStartRatio: number;
+  progressTickRatio: number;
+}
 
 export interface TurnUsage {
   inputTokens: number;

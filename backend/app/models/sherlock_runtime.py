@@ -24,17 +24,6 @@ class SherlockAgentSession(Base, TenantUserMixin, TimestampMixin):
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     message_state: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
-    # Audit fix: ``composed_report`` was removed from the default JSON
-    # shape (plan Phase 1 §485-512 — Sherlock Core no longer stores
-    # report-builder-specific state). Legacy rows that still carry the
-    # key are tolerated by ``default_scratchpad()`` on load.
-    scratchpad: Mapped[dict] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text(
-            "'{\"findings\": [], \"errors\": [], \"discovery\": null, \"lookups\": {}, \"resolved_entities\": {}, \"active_filters\": {}, \"discovered_schema\": {\"tables_inspected\": [], \"columns_by_table\": {}, \"relations_found\": [], \"json_structures\": {}}, \"last_analysis\": null, \"analysis_history\": [], \"last_evidence\": null, \"last_data_check\": null}'::jsonb"
-        ),
-    )
     next_event_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('1'))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -45,6 +34,14 @@ class SherlockAgentSession(Base, TenantUserMixin, TimestampMixin):
     # each turn prevents replaying the whole session's job history.
     last_job_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
+    )
+    # Running input-token total across all turns since the last
+    # server-side compaction. Used by the chat widget's "context
+    # filling" progress pill (renders once the ratio crosses
+    # CONTEXT_PROGRESS_START_RATIO from compaction.py). Reset to zero
+    # when a ``compaction_emitted`` event fires.
+    cumulative_input_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text('0'),
     )
 
     __table_args__ = (
@@ -111,10 +108,11 @@ class SherlockConversationTurn(Base, TenantUserMixin, TimestampMixin):
 class SherlockState(Base):
     """v3 — small structured cross-turn state, one row per chat_session.
 
-    Replaces the 17-key, ~21KB-per-chat scratchpad on
-    ``SherlockAgentSession.scratchpad``. Specialists update via the
-    ``state_delta`` field on ``SpecialistResult`` (architecture spec §5.2);
-    supervisor reads at the start of each turn.
+    DORMANT today. Replaced the legacy 17-key scratchpad on
+    ``SherlockAgentSession``; supervisor reads at the start of each
+    turn via ``state_store.load_state``. No producer wires writes today,
+    so the table stays empty for every session; awaiting a future
+    structured-output PR.
     """
 
     __tablename__ = 'sherlock_state'

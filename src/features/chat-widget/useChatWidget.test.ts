@@ -8,7 +8,6 @@ import { cancelChatTurn, getBuilderSession, streamChatMessage } from './api';
 vi.mock('./api', () => ({
   cancelChatTurn: vi.fn(),
   getBuilderSession: vi.fn(),
-  getChatDefaults: vi.fn(),
   streamChatMessage: vi.fn(),
 }));
 

@@ -70,7 +70,11 @@ ResultStatus = Literal['ok', 'partial', 'empty', 'needs_clarification', 'error']
 
 
 class StateDelta(BaseModel):
-    """Patch the supervisor will merge into ``platform.sherlock_state`` (§5.2)."""
+    """Patch shape for ``platform.sherlock_state`` cross-turn memory (§5.2).
+
+    DORMANT — no specialist emits this today and the orchestrator does not
+    merge it. Kept as the schema target for a future structured-output PR.
+    """
 
     model_config = ConfigDict(extra='forbid')
 

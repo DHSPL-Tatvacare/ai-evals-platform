@@ -46,6 +46,12 @@ class LogSherlockToolCall(Base, TenantUserMixin):
     __tablename__ = "log_sherlock_tool_call"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # The OpenAI Agents SDK's per-tool-invocation id (e.g. ``call_BD3jd…``).
+    # Stamped at audit time so the chat widget's "View full trace" link can
+    # resolve back to this row using the identifier it already has on the
+    # SSE wire — no extra round-trip needed. Nullable for legacy / non-SDK
+    # rows; indexed for the by-call-id lookup path.
+    call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     db_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     app_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -67,6 +73,7 @@ class LogSherlockToolCall(Base, TenantUserMixin):
         Index("idx_atl_tenant", "tenant_id", created_at.desc()),
         Index("idx_atl_tool", "tool_name", "status"),
         Index("idx_atl_session", "db_session_id"),
+        Index("idx_atl_call_id", "call_id"),
         {"schema": "analytics"},
     )
 

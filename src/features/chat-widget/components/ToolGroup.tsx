@@ -9,29 +9,15 @@ interface ToolGroupProps {
   autoCollapsed?: boolean;
 }
 
-const SPECIALIST_LABELS: Record<string, string> = {
-  data_specialist: 'data specialist',
-  retrieval_specialist: 'retrieval specialist',
-  action_specialist: 'action specialist',
-};
-
-function specialistLabel(name: string): string {
-  return SPECIALIST_LABELS[name] ?? name.replace(/_/g, ' ');
-}
-
 function summarizeConsultation(tools: ToolCallPart[]): string {
-  // Group by specialist; e.g. "consulted the data specialist (3 turns)" or
-  // "consulted the data and retrieval specialists" for the multi-specialist case.
-  const counts = new Map<string, number>();
-  for (const t of tools) {
-    counts.set(t.toolName, (counts.get(t.toolName) ?? 0) + 1);
+  // One short generic line so the header doesn't wrap awkwardly.
+  // The per-specialist breakdown is one click away (expand the group).
+  const distinct = new Set(tools.map((t) => t.toolName)).size;
+  if (distinct === 0) return '';
+  if (distinct === 1) {
+    return `Sherlock consulted 1 specialist`;
   }
-  const labels = Array.from(counts.entries()).map(([name, n]) => {
-    const label = specialistLabel(name);
-    return n > 1 ? `${label} (${n} turns)` : label;
-  });
-  if (labels.length === 1) return `Sherlock consulted the ${labels[0]}`;
-  return `Sherlock consulted the ${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`;
+  return `Sherlock consulted ${distinct} specialists`;
 }
 
 export function ToolGroup({ tools, autoCollapsed = false }: ToolGroupProps) {

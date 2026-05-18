@@ -40,6 +40,11 @@ from app.services.report_builder.turn_store import (
     mark_turn_active,
     mark_turn_terminal,
 )
+from app.services.sherlock_v3.compaction import (
+    CONTEXT_COMPACT_THRESHOLD_TOKENS,
+    CONTEXT_PROGRESS_START_RATIO,
+    CONTEXT_PROGRESS_TICK_RATIO,
+)
 from app.services.sherlock_v3.runtime import SherlockTurnContext, run_turn
 
 logger = logging.getLogger(__name__)
@@ -136,6 +141,12 @@ async def run_chat_turn(
                 _merge_finished_tool_call(tool_calls, v3_event)
             if v3_event.get('type') == 'artifact_emitted':
                 artifacts.append(_artifact_to_metadata(v3_event))
+            if v3_event.get('type') == 'compaction_emitted':
+                # Server-side compaction fired. Reset the running token
+                # total so the FE progress pill drops back to 0% on the
+                # next turn_finished. Failure here is non-fatal — the
+                # event still goes through to the FE.
+                await _reset_cumulative_tokens(runtime_session=runtime_session)
             seq += 1
             wire = _to_wire_event(v3_event, seq=seq)
             if wire is not None:
@@ -172,6 +183,14 @@ async def run_chat_turn(
         turn=turn,
         terminal_status=terminal_status,
     )
+    # Bump the cumulative input-token total used by the FE's "context
+    # filling" progress pill. Read the new total back so the
+    # turn_finished payload carries the authoritative value (after
+    # any concurrent compaction reset). Non-fatal on failure.
+    context_info = await _bump_and_read_context_window(
+        runtime_session=runtime_session,
+        usage=usage,
+    )
 
     last_published_seq = await on_event({
         'event': 'turn_finished',
@@ -183,6 +202,10 @@ async def run_chat_turn(
             'usage': usage,
             'toolCalls': tool_calls,
             'artifacts': artifacts,
+            # Single contract for FE compaction UX: server-derived ratio
+            # vs threshold. FE never hardcodes the threshold — it's read
+            # from this payload (compaction.py is the source of truth).
+            'context': context_info,
         },
     })
 
@@ -339,6 +362,37 @@ def _usage_to_camel(usage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _resolved_supervisor(
+    runtime_session: SherlockAgentSessionState,
+) -> tuple[str, str]:
+    """Resolve (provider, model) for the analytics_supervisor call-site.
+
+    ``runtime_session.model`` is the OPAQUE placeholder the FE sends at
+    session creation (``'server-resolved'`` — see the loadDefaults stub
+    in ``useChatWidget.ts``) and is NOT a real catalog model. Pricing
+    + per-call audit must look up the actual deployment via
+    ``tenant_call_site_defaults`` instead. This resolver is the single
+    source of truth and matches what ``get_sherlock_azure_client`` uses
+    inside ``runtime.run_turn`` for the supervisor.
+    """
+    from app.services.llm_credentials import resolve_llm_call
+    try:
+        async with async_session() as db:
+            resolved = await resolve_llm_call(
+                db,
+                uuid.UUID(runtime_session.tenant_id),
+                'analytics_supervisor',
+            )
+        return resolved.credentials.provider, resolved.model
+    except Exception as exc:  # noqa: BLE001 — non-fatal; fall back gracefully
+        logger.warning(
+            'sherlock_v3 supervisor call-site resolution failed for '
+            'chat_session=%s: %s — falling back to session.provider/model',
+            runtime_session.chat_session_id, exc,
+        )
+        return runtime_session.provider, runtime_session.model
+
+
 async def _price_usage(
     usage: dict[str, Any],
     *,
@@ -350,11 +404,12 @@ async def _price_usage(
     priced = dict(usage)
     if not priced:
         return priced
+    provider, model = await _resolved_supervisor(runtime_session)
     async with async_session() as db:
         pricing = await pricing_cache.get(
             db,
-            runtime_session.provider,
-            runtime_session.model,
+            provider,
+            model,
             datetime.now(UTC),
             tenant_id=uuid.UUID(runtime_session.tenant_id),
         )
@@ -405,6 +460,7 @@ async def _record_turn_llm_usage(
         'status': 'ok' if terminal_status == 'done' else terminal_status,
     }
 
+    provider, model = await _resolved_supervisor(runtime_session)
     await record_llm_usage(
         tenant_id=uuid.UUID(runtime_session.tenant_id),
         user_id=uuid.UUID(runtime_session.user_id),
@@ -412,8 +468,8 @@ async def _record_turn_llm_usage(
         owner_type='sherlock_turn',
         owner_id=uuid.UUID(turn.id),
         subsystem='sherlock_v3',
-        provider=runtime_session.provider,
-        model=runtime_session.model,
+        provider=provider,
+        model=model,
         api_surface='responses',
         call_purpose='chat_turn',
         metadata=metadata,  # type: ignore[arg-type]
@@ -434,3 +490,104 @@ async def _persist_last_response_id(
         .where(SherlockAgentSession.chat_session_id == uuid.UUID(chat_session_id))
         .values(last_response_id=last_response_id),
     )
+
+
+# ── Context-window progress + compaction reset ──────────────────────
+
+
+def _input_token_estimate(usage: dict[str, Any]) -> int:
+    """Pull the prompt-side token total off a priced usage dict.
+
+    The contract Sherlock uses across providers is camelCase with
+    ``promptTokens`` (legacy) plus the Responses-API decomposition into
+    ``inputTokens`` / ``cachedInputTokens``. We charge UNCACHED input
+    tokens against the compaction threshold — cached prefixes don't
+    re-count against the context window. Falls back to ``promptTokens``
+    when the breakdown isn't present.
+    """
+    input_tokens = usage.get('inputTokens') or usage.get('input_tokens')
+    cached = usage.get('cachedInputTokens') or usage.get('cached_input_tokens') or 0
+    if isinstance(input_tokens, int):
+        return max(0, input_tokens - (cached if isinstance(cached, int) else 0))
+    prompt = usage.get('promptTokens') or usage.get('prompt_tokens') or 0
+    return prompt if isinstance(prompt, int) else 0
+
+
+async def _reset_cumulative_tokens(
+    *, runtime_session: SherlockAgentSessionState,
+) -> None:
+    """Drop the running input-token total back to 0 — fired when the
+    Responses API emits a compaction item. Failures are non-fatal; the
+    next turn's bump simply lands against a still-high total and the
+    FE pill stays > 75% for one extra tick until the next compaction
+    cleans up. We never block the user-visible turn on this."""
+    try:
+        from sqlalchemy import update
+        from app.models.sherlock_runtime import SherlockAgentSession
+        async with async_session() as db:
+            await db.execute(
+                update(SherlockAgentSession)
+                .where(
+                    SherlockAgentSession.chat_session_id
+                    == uuid.UUID(runtime_session.chat_session_id)
+                )
+                .values(cumulative_input_tokens=0)
+            )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        logger.warning(
+            'sherlock_v3 cumulative_input_tokens reset failed for '
+            'chat_session=%s: %s', runtime_session.chat_session_id, exc,
+        )
+
+
+async def _bump_and_read_context_window(
+    *,
+    runtime_session: SherlockAgentSessionState,
+    usage: dict[str, Any],
+) -> dict[str, Any]:
+    """Add this turn's uncached input tokens to the running total, then
+    return the canonical ``context`` payload the FE renders the progress
+    pill from. Single source of truth for the threshold + tick ratio
+    (read from ``compaction.py``); FE hardcodes nothing.
+
+    Failure path: return the new total optimistically computed from
+    pre-bump cumulative + this-turn input, so the FE still has a
+    sensible number even if the DB write loses. The next successful
+    turn will reconcile.
+    """
+    increment = _input_token_estimate(usage)
+    tokens_used = 0
+    try:
+        from sqlalchemy import update
+        from app.models.sherlock_runtime import SherlockAgentSession
+        async with async_session() as db:
+            result = await db.execute(
+                update(SherlockAgentSession)
+                .where(
+                    SherlockAgentSession.chat_session_id
+                    == uuid.UUID(runtime_session.chat_session_id)
+                )
+                .values(
+                    cumulative_input_tokens=(
+                        SherlockAgentSession.cumulative_input_tokens + increment
+                    )
+                )
+                .returning(SherlockAgentSession.cumulative_input_tokens),
+            )
+            row = result.first()
+            await db.commit()
+            tokens_used = int(row[0]) if row is not None else increment
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        logger.warning(
+            'sherlock_v3 cumulative_input_tokens bump failed for '
+            'chat_session=%s: %s', runtime_session.chat_session_id, exc,
+        )
+        tokens_used = increment
+
+    return {
+        'tokensUsed': tokens_used,
+        'thresholdTokens': CONTEXT_COMPACT_THRESHOLD_TOKENS,
+        'progressStartRatio': CONTEXT_PROGRESS_START_RATIO,
+        'progressTickRatio': CONTEXT_PROGRESS_TICK_RATIO,
+    }

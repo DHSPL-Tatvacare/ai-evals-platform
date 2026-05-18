@@ -36,6 +36,7 @@ from app.services.report_builder.runtime_store import (
     get_sherlock_runtime_session,
     get_sherlock_runtime_session_snapshot,
     list_sherlock_turn_events,
+    record_user_message,
     resolve_sherlock_runtime_session,
     save_runtime_state,
     touch_sherlock_chat_session,
@@ -168,7 +169,6 @@ async def _force_interrupt_turn(
     await save_runtime_state(
         runtime_session=runtime_session,
         message_state=list(runtime_session.message_state),
-        scratchpad=dict(runtime_session.scratchpad),
         status='interrupted',
         last_error=reason,
         db=db,
@@ -659,6 +659,20 @@ async def chat_stream_v2(
             return
 
         event_queue = _register_turn_subscriber(turn.id)
+
+        # Persist the user message BEFORE the turn task starts so session
+        # restore replays "user → assistant" pairs instead of orphan
+        # assistant rows. The runtime contract (sherlock_v3/runtime.py
+        # docstring) explicitly requires this; the v3 cutover dropped the
+        # call site. Only fires on the fresh-queued-turn path — resumes
+        # skip this branch and never re-record.
+        if body.message:
+            await record_user_message(
+                runtime_session=runtime_session,
+                content=body.message,
+                db=db,
+            )
+            await db.commit()
 
         async def _on_event(event: dict[str, Any]) -> int:
             payload = dict(event.get('data') or {})

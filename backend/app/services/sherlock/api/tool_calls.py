@@ -122,22 +122,31 @@ async def get_tool_call(
     *,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
-    tool_call_id: uuid.UUID,
+    tool_call_id: Optional[uuid.UUID] = None,
+    call_id: Optional[str] = None,
     app_ids: Optional[frozenset[str]] = None,
     app_id: Optional[str] = None,
 ) -> Optional[LogSherlockToolCall]:
     """Single-row fetch for the sub-route detail page.
 
-    Returns ``None`` if the row doesn't exist OR doesn't belong to the
-    caller's tenant + user (so a leaked id from another user surfaces as
-    a 404, not a 403). When ``app_ids`` is supplied, the row's ``app_id``
-    must also be in the set.
+    Resolves by EITHER the row's UUID PK (``tool_call_id``) OR the
+    OpenAI SDK call identifier (``call_id``, e.g. ``call_BD3jd…``).
+    Exactly one of the two must be set. Returns ``None`` if the row
+    doesn't exist OR doesn't belong to the caller's tenant + user (so
+    a leaked id from another user surfaces as a 404, not a 403). When
+    ``app_ids`` is supplied, the row's ``app_id`` must also be in the
+    set.
     """
+    if tool_call_id is None and not call_id:
+        return None
     stmt = select(LogSherlockToolCall).where(
-        LogSherlockToolCall.id == tool_call_id,
         LogSherlockToolCall.tenant_id == tenant_id,
         LogSherlockToolCall.user_id == user_id,
     )
+    if tool_call_id is not None:
+        stmt = stmt.where(LogSherlockToolCall.id == tool_call_id)
+    else:
+        stmt = stmt.where(LogSherlockToolCall.call_id == call_id)
     if app_ids is not None:
         if not app_ids:
             return None

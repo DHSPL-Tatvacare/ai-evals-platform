@@ -7,6 +7,7 @@ import {
   usePageContext,
 } from '@/features/orchestration/copilot/usePageContext';
 import { BuilderContextChip } from './components/BuilderContextChip';
+import { ComposerStreamingBorder } from './components/ComposerStreamingBorder';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -26,6 +27,16 @@ interface ChatInputProps {
  * chip, textarea, and action row read as one unit instead of three stacked
  * widgets. No hex literals; design tokens only.
  */
+// Composer sizing — JS auto-grow and CSS max-height must match. Drift
+// between them was the source of the 2026-05-19 "input clips at 5 lines"
+// report: JS grew to 140px while CSS clamped to 120px, hiding the cursor
+// on the 6th line and preventing scroll.
+//
+// 6 lines × (13px font × leading-snug 1.375 ≈ 18px) + py-2 (8) + pb-1
+// (4) ≈ 120px.
+const COMPOSER_MAX_HEIGHT_PX = 120;
+const COMPOSER_MAX_CHARS = 12000;
+
 export function ChatInput({ onSend, onStop, disabled, showStop = false, placeholder }: ChatInputProps) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -50,27 +61,32 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
   }, [value]);
 
   const canSend = !!value.trim() && !disabled;
 
+  // Ref the composer container so the SVG streaming border can mirror
+  // its size/radius and overlay the perimeter exactly.
+  const composerRef = useRef<HTMLDivElement>(null);
+
   return (
-    <div className="px-2 pb-2 pt-1 border-t border-[var(--border-default)]">
+    <div className="p-2 border-t border-[var(--border-default)]">
       <div
+        ref={composerRef}
         className={cn(
           'rounded-lg border bg-[var(--bg-secondary)]',
           'border-[var(--border-default)] transition-colors',
           'focus-within:border-[var(--color-brand-accent)]',
           'focus-within:ring-1 focus-within:ring-[var(--color-brand-accent)]',
           // While the SSE stream is in flight (AbortController active →
-          // parent passes `showStop`), swap the static border for the
-          // rotating conic-gradient ring defined in globals.css. Strips
-          // off automatically the moment the turn terminates.
-          showStop ? 'chat-composer-streaming' : '',
+          // parent passes `showStop`), hide the static border so the
+          // SVG comet (mounted as a sibling overlay) reads cleanly.
+          showStop ? 'chat-composer-streaming relative' : '',
           disabled ? 'opacity-70' : '',
         )}
       >
+        {showStop ? <ComposerStreamingBorder targetRef={composerRef} /> : null}
         {showChip ? (
           <div className="px-1.5 pt-1.5 pb-0.5">
             <BuilderContextChip
@@ -80,28 +96,36 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
           </div>
         ) : null}
 
-        <textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder={placeholder ?? 'Type a message...'}
-          disabled={disabled}
-          rows={1}
-          className={cn(
-            'block w-full resize-none bg-transparent border-0 outline-none',
-            'px-3 pt-2 pb-1 text-[13px] leading-snug',
-            'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
-            'min-h-[28px] max-h-[120px]',
-          )}
-        />
-
-        <div className="flex items-center justify-end gap-1 px-1.5 pb-1.5">
+        {/* Single flex row: textarea fills, send button sits inline at
+            bottom-right. Eliminates the legacy stacked "action row" that
+            doubled the empty composer's height. Items align to the
+            bottom so when the textarea grows multi-line, the button
+            tracks the lowest line instead of floating mid-height. */}
+        <div className="flex items-end gap-1.5 px-2 py-1.5">
+          <textarea
+            ref={ref}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={placeholder ?? 'Type a message...'}
+            disabled={disabled}
+            rows={1}
+            maxLength={COMPOSER_MAX_CHARS}
+            // overflow-y-auto: when JS height hits COMPOSER_MAX_HEIGHT_PX
+            // (6 lines), the textarea's own scrollbar kicks in instead of
+            // the cursor disappearing past the visible clip.
+            className={cn(
+              'block flex-1 min-w-0 resize-none bg-transparent border-0 outline-none overflow-y-auto',
+              'py-0.5 text-[13px] leading-snug',
+              'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
+            )}
+            style={{ maxHeight: `${COMPOSER_MAX_HEIGHT_PX}px` }}
+          />
           {showStop ? (
             <button
               type="button"

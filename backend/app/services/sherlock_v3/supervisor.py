@@ -1,5 +1,19 @@
 """Sherlock v3 supervisor — pure router over three specialists.
 
+Cross-turn continuity after server-side compaction is automatic and
+transparent to this module. The Responses API's ``context_management``
+(wired in ``compaction.py``) rewrites prior conversation server-side
+under the SAME ``response.id``; the next turn passes the persisted
+``last_response_id`` as ``previous_response_id`` and the supervisor's
+LLM receives the compacted summary as its prior context, indistinguishable
+from raw history. The supervisor's "specialists are stateless — brief
+them with a self-contained question" rule handles whatever it sees
+(compacted or raw). No code path here knows compaction happened; the
+chat widget shows a separator + summary expander but the agent is
+oblivious — exactly the behavior we want.
+
+
+
 The supervisor is a thin LLM that runs the turn lifecycle via the Agents
 SDK. Its responsibilities are limited to:
 
@@ -52,6 +66,11 @@ from app.services.sherlock_v3.query_synthesis_specialist import (
     build_query_synthesis_specialist,
     make_synthesis_output_extractor,
 )
+from app.services.sherlock_v3.compaction import context_management_extra_args
+from app.services.sherlock_v3.state_store import (
+    SherlockStateSnapshot,
+    render_state_block,
+)
 
 
 _SUPERVISOR_PROMPT = """\
@@ -59,6 +78,22 @@ Role: Sherlock — analyst-by-prompt for evaluation data.
 
 # Personality
 Sharp, observant, lightly witty. Confident and warm.
+
+# How you talk to specialists (architecture)
+
+Your specialists (query_synthesis_specialist, data_specialist,
+authoring_specialist) are STATELESS sub-agents. They do not see your
+conversation. They see ONLY the input string you pass them via their
+tool call.
+
+Therefore every tool input you craft MUST be a complete, self-contained
+brief: include the user's intent, any named entities and filter values
+already established this conversation, any scope (date range, app,
+status) already in effect, and the question to answer. Do not rely on
+the specialist to "remember" what was said earlier — it cannot.
+
+You always retain the full conversation context yourself. Use it to
+brief the specialists.
 
 # Playbook (mandatory, in this order)
 
@@ -119,6 +154,8 @@ mirror — same call universe."
 
 # AVAILABLE_TOOLS this turn
 {available_tools_block}
+
+{state_block}
 
 # Output
 - Markdown. Tables for tabular data. Bold key numbers.
@@ -185,6 +222,7 @@ def build_supervisor(
     grounding: Any | None = None,
     builder_context: BuilderSnapshot | None = None,
     auth: AuthContext | None = None,
+    state_snapshot: SherlockStateSnapshot | None = None,
 ) -> Agent:
     """Build the supervisor agent for one turn.
 
@@ -287,11 +325,19 @@ def build_supervisor(
             )
         )
 
+    # Cross-turn state — DORMANT plumbing. ``state_store`` is loaded each
+    # turn but has no producer yet, so ``state_block`` is empty for every
+    # session today. Slot stays wired so a future structured-output PR can
+    # light it up without re-threading the prompt.
+    state_block = (
+        render_state_block(state_snapshot) if state_snapshot is not None else ''
+    )
     return Agent(
         name=f'sherlock-supervisor-{app_id}',
         instructions=_SUPERVISOR_PROMPT.format(
             app_id=app_id,
             available_tools_block=_format_available_tools(available_targets),
+            state_block=state_block,
         ),
         model=OpenAIResponsesModel(supervisor_model, client),
         # gpt-5.4 reasoning models reject ``temperature`` and ``top_p``.
@@ -299,6 +345,22 @@ def build_supervisor(
         model_settings=ModelSettings(
             parallel_tool_calls=False,
             reasoning=Reasoning(effort='medium'),
+            # Server-side compaction at the threshold from compaction.py.
+            # Applied ONLY here on the supervisor because the supervisor
+            # is the agent that carries the previous_response_id chain
+            # across turns — i.e. it's the only agent with cross-turn
+            # context to compact. Specialists are stateless sub-agents
+            # invoked via as_tool each turn; their context is bounded per
+            # invocation and resets, so compaction on them would be a
+            # no-op + an extra setting on every request. Same shape every
+            # LLM chat agent uses (ChatGPT, Claude): chain-owner owns
+            # compaction.
+            # extra_args spreads as TYPED kwargs into the OpenAI Python
+            # SDK's AsyncResponses.create() — which has context_management
+            # as a native typed param. extra_body (the lower-level path)
+            # was silently dropped in the 2026-05-19 Azure live test;
+            # the typed-param path lands the field correctly.
+            extra_args=context_management_extra_args(),
         ),
         tools=tools,
     )

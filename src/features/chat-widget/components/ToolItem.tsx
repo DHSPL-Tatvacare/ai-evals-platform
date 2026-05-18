@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { AlertCircle, ChevronRight, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { useAuthStore } from '@/stores/authStore';
+import { ADMIN_ACCESS_PERMISSIONS, userHasAnyPermission } from '@/utils/permissions';
 import { Shimmer } from './Shimmer';
-import { SqlBlock } from './SqlBlock';
 import type { ToolCallPart } from '../types';
 
 interface ToolItemProps {
@@ -27,10 +28,15 @@ function specialistLabel(name: string): string {
 }
 
 function hasMeaningfulDetail(part: ToolCallPart): boolean {
+  // Expanded view is worth opening when there is a brief to preserve,
+  // a bouncer diagnostic to surface, a structured error, or row-count
+  // context. SQL never qualifies — it lives in the admin tool-call
+  // detail page, not the chat widget.
   const detail = part.detail;
+  const briefSummary = (part.briefSummary || '').trim();
   return Boolean(
+    briefSummary ||
     detail?.error ||
-    detail?.sqlUsed ||
     typeof detail?.rowCount === 'number' ||
     typeof detail?.cacheHit === 'boolean' ||
     (typeof detail?.executionMs === 'number' && detail.executionMs > 0),
@@ -38,6 +44,11 @@ function hasMeaningfulDetail(part: ToolCallPart): boolean {
 }
 
 export function ToolItem({ part }: ToolItemProps) {
+  // The admin Sherlock tool-call detail page lives behind AdminGuard.
+  // Only render the deep-link when the current user can actually open
+  // it — non-admin users would land on the redirect target instead.
+  const user = useAuthStore((s) => s.user);
+  const canSeeAdminTrace = userHasAnyPermission(user, ADMIN_ACCESS_PERMISSIONS);
   // When the bouncer rejects the SQL (pre- or post-execution), the
   // SpecialistResult comes back status='error' with a structured
   // diagnostic. Render an explicit safe refusal: distinct chip copy,
@@ -48,7 +59,6 @@ export function ToolItem({ part }: ToolItemProps) {
   const isCannotAnswerSafely = bouncerInvalid && !isExecuting;
   const expandable = !isExecuting && (
     hasMeaningfulDetail(part) ||
-    Boolean(part.routing?.attemptedSql) ||
     Boolean(part.routing?.bouncer?.diagnostic)
   );
   const [expanded, setExpanded] = useState(false);
@@ -148,12 +158,19 @@ export function ToolItem({ part }: ToolItemProps) {
         ) : null}
       </button>
 
-      {/* Expanded detail panel — shows routing + bouncer diagnostic + SQL */}
+      {/* Expanded detail panel — minimal: brief (preserved), bouncer
+          diagnostic if any, error if any, link to admin Sherlock logs
+          for the full SQL + arguments + tokens trace. The chat widget
+          deliberately does NOT show SQL or routing internals — that's
+          the admin tool-call detail page's job. */}
       {expanded && expandable ? (
         <div className="mb-1 ml-[18px] mt-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2.5">
-          {/* Surface the bouncer's structured refusal first when the
-              rule fired, so the user sees the deterministic reason
-              before any chart-context fields. */}
+          {briefSummary ? (
+            <div className="mb-2 text-[11px] leading-relaxed text-[var(--text-primary)]">
+              {briefSummary}
+            </div>
+          ) : null}
+
           {part.routing?.bouncer?.diagnostic ? (
             <div className="mb-2 rounded border border-[color-mix(in_srgb,var(--interactive-danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] p-2">
               <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-[var(--interactive-danger)]">
@@ -170,49 +187,22 @@ export function ToolItem({ part }: ToolItemProps) {
             </div>
           ) : null}
 
-          {part.routing ? (
-            <dl className="mb-2 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 font-mono text-[10.5px]">
-              {part.routing.intentClass ? (
-                <>
-                  <dt className="text-[var(--text-muted)]">intent</dt>
-                  <dd className="text-[var(--text-primary)]">{part.routing.intentClass}</dd>
-                </>
-              ) : null}
-              {part.routing.allowedLayers?.length ? (
-                <>
-                  <dt className="text-[var(--text-muted)]">layers</dt>
-                  <dd className="text-[var(--text-primary)]">{part.routing.allowedLayers.join(', ')}</dd>
-                </>
-              ) : null}
-              {part.routing.projectedTables?.length ? (
-                <>
-                  <dt className="text-[var(--text-muted)]">tables</dt>
-                  <dd className="text-[var(--text-primary)]">{part.routing.projectedTables.join(', ')}</dd>
-                </>
-              ) : null}
-              {part.routing.chartPayloadKind ? (
-                <>
-                  <dt className="text-[var(--text-muted)]">result</dt>
-                  <dd className="text-[var(--text-primary)]">{part.routing.chartPayloadKind}</dd>
-                </>
-              ) : null}
-              {part.routing.executionStatus && part.routing.executionStatus !== 'ok' ? (
-                <>
-                  <dt className="text-[var(--text-muted)]">execution</dt>
-                  <dd className="text-[var(--interactive-danger)]">{part.routing.executionStatus}</dd>
-                </>
-              ) : null}
-            </dl>
-          ) : null}
-
           {part.detail?.error ? (
             <pre className="mb-2 whitespace-pre-wrap break-words rounded bg-[color-mix(in_srgb,var(--interactive-danger)_8%,var(--bg-primary))] p-2 font-mono text-[10.5px] text-[var(--interactive-danger)]">
               {part.detail.error}
             </pre>
           ) : null}
 
-          {part.routing?.attemptedSql || part.detail?.sqlUsed ? (
-            <SqlBlock sql={(part.routing?.attemptedSql ?? part.detail?.sqlUsed) as string} />
+          {part.toolCallId && canSeeAdminTrace ? (
+            <a
+              href={`/admin/sherlock/${part.toolCallId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10.5px] font-mono text-[var(--text-brand)] hover:underline"
+            >
+              View full trace in Sherlock logs
+              <ExternalLink className="h-2.5 w-2.5" />
+            </a>
           ) : null}
         </div>
       ) : null}

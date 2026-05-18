@@ -318,79 +318,8 @@ def _alias_table_map(parsed: _ParsedSelect) -> dict[str, str]:
     return alias_map
 
 
-def expand_logical_columns(sql: str, catalog: WorkbenchCatalog) -> str:
-    """Render executable SQL by replacing derived logical columns.
-
-    The LLM writes catalog logical names such as ``call_opening_score``;
-    Postgres needs the physical expression from the catalog. Passthrough
-    columns are left untouched.
-    """
-    cleaned = _strip_trailing_semicolons(sql).strip()
-    root = _parse(cleaned)
-    if root is None:
-        return cleaned
-    parsed = _flatten_select(root)
-    if parsed is None:
-        return cleaned
-
-    alias_to_table = _alias_table_map(parsed)
-    select_alias_names = {
-        e.alias.lower()
-        for e in parsed.select_expr.expressions
-        if isinstance(e, exp.Alias) and e.alias
-    }
-
-    def _replacement(node: exp.Expression) -> exp.Expression:
-        if not isinstance(node, exp.Column):
-            return node
-        col_name = node.name.lower()
-        if col_name in _UNIVERSAL_COLUMNS or col_name in select_alias_names:
-            return node
-        alias = _column_alias(node)
-        if alias is not None and alias in parsed.cte_names:
-            return node
-
-        logical = None
-        qualifier: str | None = alias
-        if alias is not None:
-            table_name = alias_to_table.get(alias)
-            table = catalog.tables.get(table_name or "")
-            logical = table.logical_column(col_name) if table is not None else None
-        elif not parsed.cte_names:
-            matches: list[tuple[str, WorkbenchTable, Any]] = []
-            for binding in parsed.base_tables:
-                table = catalog.tables.get(binding.table)
-                if table is None:
-                    continue
-                candidate = table.logical_column(col_name)
-                if candidate is not None:
-                    matches.append((binding.alias or binding.table, table, candidate))
-            if len(matches) == 1:
-                qualifier, _table, logical = matches[0]
-
-        if logical is None or not logical.is_derived or logical.expr is None:
-            return node
-        return _physical_expr_for_logical(logical.expr, qualifier)
-
-    expanded = root.transform(_replacement, copy=True)
-    return expanded.sql(dialect=_DIALECT)
-
-
-def _physical_expr_for_logical(expr_sql: str, qualifier: str | None) -> exp.Expression:
-    try:
-        expr = sqlglot.parse_one(expr_sql, read=_DIALECT)
-    except ParseError as exc:
-        raise ValueError(f"invalid workbench logical expression: {expr_sql}") from exc
-
-    if qualifier is None:
-        return expr
-
-    def _qualify(node: exp.Expression) -> exp.Expression:
-        if isinstance(node, exp.Column) and _column_alias(node) is None:
-            return exp.column(node.name, table=qualifier)
-        return node
-
-    return expr.transform(_qualify, copy=True)
+# Logical→physical lowering lives in semantic_lowering.lower_sql.
+# This module's job is rule evaluation (R1–R12) over LOGICAL SQL.
 
 
 def _has_postgres_comment(sql: str) -> bool:
@@ -1776,6 +1705,5 @@ __all__ = [
     "apply_server_limit",
     "check_after",
     "check_before",
-    "expand_logical_columns",
     "trim_rows",
 ]

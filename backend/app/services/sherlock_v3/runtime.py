@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -29,6 +30,10 @@ from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 from app.services.sherlock_v3.grounding import (
     GroundingContext,
     VerifiedExampleRef,
+)
+from app.services.sherlock_v3.state_store import (
+    SherlockStateSnapshot,
+    load_state,
 )
 from app.services.sherlock_v3.supervisor import build_supervisor
 
@@ -113,12 +118,31 @@ def normalize_to_v3_events(
     if event_type == 'RawResponsesStreamEvent':
         data = getattr(event, 'data', None)
         raw_type = str(getattr(data, 'type', '') or '')
+        # Defensive: any raw event type containing "compact" is logged so
+        # we can confirm whether Azure's Responses API actually emits
+        # compaction events when the extra_body context_management field
+        # is sent. If this never fires, the API surface doesn't yet honor
+        # the field and we need a different mechanism (likely token-based
+        # client-side compaction call).
+        if 'compact' in raw_type.lower():
+            logger.info('sherlock_v3.raw_compaction_event type=%s data=%r', raw_type, data)
         delta = getattr(data, 'delta', None)
         if isinstance(delta, str) and delta:
             if raw_type == 'response.output_text.delta':
                 return [{'type': 'content_delta', 'phase': 'final_answer', 'text': delta}]
             # function_call_arguments.delta is the supervisor LLM streaming
             # raw tool arguments — internal noise, not user-facing.
+        # Server-side compaction signal — when context_management fires on
+        # the Responses API, an item with type='compaction' (or a related
+        # 'response.compaction.*' event) appears in the raw stream. We
+        # detect both shapes defensively and emit a single normalized
+        # ``compaction_emitted`` v3 event the FE renders as the in-chat
+        # "Session compacted" separator. Summary text is extracted when
+        # the item carries it; otherwise the FE renders the separator
+        # without an expandable body.
+        compaction_event = _detect_compaction_event(raw_type, data)
+        if compaction_event is not None:
+            return [compaction_event]
         return []
 
     if event_type == 'AgentUpdatedStreamEvent':
@@ -136,6 +160,12 @@ def normalize_to_v3_events(
             call_id = _tool_call_call_id(tool_call)
             if ctx is not None and call_id:
                 ctx.scratch.setdefault('tool_call_names', {})[call_id] = specialist
+                # Wall-clock at dispatch — the SDK gives no per-tool
+                # duration, and per-specialist meta blocks vary in
+                # shape (data_specialist has latency_ms, synthesis
+                # doesn't). Stash the start; compute delta uniformly
+                # on tool_output. One source of truth.
+                ctx.scratch.setdefault('tool_call_started_at', {})[call_id] = time.monotonic()
             return [{
                 'type': 'specialist_started',
                 'specialist': specialist,
@@ -147,6 +177,7 @@ def normalize_to_v3_events(
             result = _extract_specialist_result(tool_output)
             call_id = _tool_output_call_id(tool_output)
             specialist = _tool_output_name(tool_output, ctx=ctx, call_id=call_id)
+            duration_ms = _resolve_specialist_duration(ctx=ctx, call_id=call_id, result=result)
             events: list[dict[str, Any]] = [{
                 'type': 'specialist_finished',
                 'specialist': specialist,
@@ -155,7 +186,7 @@ def normalize_to_v3_events(
                 'result_summary': str(result.get('summary') or '') if result else '',
                 'evidence_refs': _evidence_ref_ids(result),
                 'artifact_refs': _artifact_ref_ids(result),
-                'duration_ms': _specialist_latency_ms(result),
+                'duration_ms': duration_ms,
                 # Surface the routing decision + bouncer telemetry on
                 # the wire so the chat widget can narrate concretely.
                 'routing': _specialist_routing(result),
@@ -290,7 +321,58 @@ def _artifact_ref_ids(result: dict[str, Any] | None) -> list[str]:
     return [f'artifact_{idx + 1}' for idx, _artifact in enumerate(artifacts)]
 
 
+def _detect_compaction_event(
+    raw_type: str,
+    data: Any,
+) -> dict[str, Any] | None:
+    """Spot a server-side compaction in the Responses API raw stream.
+
+    Two known shapes (depending on how the Responses API surfaces the
+    compact_threshold trip):
+      * ``response.output_item.added`` with ``item.type == 'compaction'``
+      * ``response.compaction.completed`` (or ``.created``) with a
+        nested summary
+
+    Both are normalized to one wire shape: a ``compaction_emitted`` v3
+    event carrying an optional ``summary`` (text) and ``tokens_before``
+    (the SDK's pre-compaction estimate when present). The FE never sees
+    the raw shape — only this canonical event.
+    """
+    if 'compaction' not in raw_type.lower():
+        return None
+    summary_text = ''
+    tokens_before: int | None = None
+    item = getattr(data, 'item', None)
+    if item is not None:
+        summary_text = (
+            getattr(item, 'summary', None)
+            or getattr(item, 'text', None)
+            or getattr(item, 'content', None)
+            or ''
+        )
+        token_field = getattr(item, 'tokens_before', None) or getattr(item, 'compacted_tokens', None)
+        if isinstance(token_field, int):
+            tokens_before = token_field
+    if not summary_text:
+        # Some SDK shapes put a `compaction` object directly on data.
+        compaction = getattr(data, 'compaction', None)
+        if compaction is not None:
+            summary_text = getattr(compaction, 'summary', '') or ''
+    return {
+        'type': 'compaction_emitted',
+        'summary': str(summary_text or ''),
+        'tokens_before': tokens_before,
+    }
+
+
 def _specialist_latency_ms(result: dict[str, Any] | None) -> int:
+    """Fallback: read latency from the specialist's own meta block.
+
+    Used only when the SDK-level wall-clock delta is unavailable (e.g.
+    the matching tool_called event was never seen because the SDK
+    started replaying mid-stream). data_specialist sets this in its
+    SpecialistResult.meta; synthesis and authoring do not.
+    """
     if not result:
         return 0
     meta = result.get('meta')
@@ -298,6 +380,31 @@ def _specialist_latency_ms(result: dict[str, Any] | None) -> int:
         return 0
     latency = meta.get('latency_ms')
     return latency if isinstance(latency, int) else 0
+
+
+def _resolve_specialist_duration(
+    *,
+    ctx: SherlockTurnContext | None,
+    call_id: str,
+    result: dict[str, Any] | None,
+) -> int:
+    """Compute per-tool-call duration uniformly for any specialist.
+
+    Primary source: the wall-clock delta between the tool_called and
+    tool_output SDK events (stashed in ``ctx.scratch``). This works
+    for EVERY specialist regardless of payload shape — synthesis,
+    data, authoring, future ones.
+
+    Fallback: ``result.meta.latency_ms`` when the SDK delta is
+    unavailable (e.g. partial replay). Reading the per-specialist meta
+    is supportive only; the SDK timing is canonical.
+    """
+    if ctx is not None and call_id:
+        started_at_map = ctx.scratch.get('tool_call_started_at') or {}
+        started_at = started_at_map.get(call_id)
+        if isinstance(started_at, (int, float)):
+            return int(max(0.0, (time.monotonic() - started_at) * 1000.0))
+    return _specialist_latency_ms(result)
 
 
 def _specialist_routing(result: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -396,6 +503,21 @@ async def _compute_grounding(
         return GroundingContext(app_id=app_id, user_message=user_message)
 
 
+async def _load_turn_state(chat_session_id: uuid.UUID) -> SherlockStateSnapshot:
+    """Load cross-turn state. Failures degrade to an empty snapshot — state
+    is supportive memory; a load failure must not block the turn."""
+    try:
+        from app.database import async_session
+        async with async_session() as db:
+            return await load_state(db, chat_session_id)
+    except Exception as exc:  # noqa: BLE001 — non-fatal
+        logger.warning(
+            'sherlock_v3 state load failed for chat_session=%s: %s',
+            chat_session_id, exc,
+        )
+        return SherlockStateSnapshot(resolved_entities={}, active_filters={})
+
+
 # ─────────────────────────── run_turn ────────────────────────────
 
 
@@ -436,6 +558,10 @@ async def run_turn(
     grounding = await _compute_grounding(
         ctx.app_id, user_message, tenant_id=ctx.tenant_id,
     )
+    # Cross-turn state — DORMANT today (no producer writes rows). Loaded
+    # before any SSE event so wire order stays intact when a future PR
+    # lights up the producer; for now every snapshot is empty.
+    state_snapshot = await _load_turn_state(ctx.chat_session_id)
     supervisor = build_supervisor(
         ctx.app_id,
         client,
@@ -444,6 +570,7 @@ async def run_turn(
         grounding=grounding,
         builder_context=ctx.builder_context,
         auth=ctx.auth,
+        state_snapshot=state_snapshot,
     )
 
     try:

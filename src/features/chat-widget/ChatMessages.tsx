@@ -14,6 +14,7 @@ import {
 } from './chatWidgetHelpers';
 import { BlueprintCard } from './components/BlueprintCard';
 import { ChatChartCard } from './components/ChatChartCard';
+import { CompactionSeparator } from './components/CompactionSeparator';
 import { EmptyState } from './components/EmptyState';
 import { JobBadge } from './components/JobBadge';
 import { SaveToast } from './components/SaveToast';
@@ -315,6 +316,17 @@ function renderAssistantParts(
           }}
         />,
       );
+      continue;
+    }
+
+    if (part.type === 'compaction') {
+      blocks.push(
+        <CompactionSeparator
+          key={`${message.id}-compaction-${index}`}
+          part={part}
+        />,
+      );
+      continue;
     }
   }
 

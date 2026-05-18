@@ -16,7 +16,6 @@ import { VIEW_MODE_SUGGESTION_TEXT } from './components/viewModeSuggestion';
 vi.mock('./api', () => ({
   cancelChatTurn: vi.fn(),
   getBuilderSession: vi.fn(),
-  getChatDefaults: vi.fn(),
   streamChatMessage: vi.fn(() => Promise.resolve({ abort() {} })),
 }));
 

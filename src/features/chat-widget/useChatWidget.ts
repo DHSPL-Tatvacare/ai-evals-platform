@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
-import { cancelChatTurn, getBuilderSession, getChatDefaults, streamChatMessage } from './api';
+import { cancelChatTurn, getBuilderSession, streamChatMessage } from './api';
 import { CHAT_SESSION_SOURCE, chatSessionsRepository } from '@/services/api/chatApi';
 import { notificationService } from '@/services/notifications';
 import { applyCanvasPatch, consumeRebaseRedo } from '@/features/orchestration/copilot/canvasPatchApplier';
@@ -17,6 +17,8 @@ import type {
   ChatDefaults,
   ChatProvider,
   ChartPart,
+  CompactionPart,
+  ContextWindowInfo,
   MessagePart,
   SaveToastPart,
   TerminalStatus,
@@ -142,6 +144,12 @@ interface ChatWidgetStore {
   sessions: WidgetSessionSummary[];
   sessionsLoaded: boolean;
   defaults: ChatDefaults | null;
+  // Server-derived context-window state. Updated on every turn_finished;
+  // reset to null on session change / newChat. The widget header reads
+  // this to render the "context filling" progress pill (no FE-side
+  // hardcoded threshold — the backend's compaction.py is the single
+  // source of truth).
+  contextWindow: ContextWindowInfo | null;
 
   toggle: () => void;
   setView: (v: WidgetView) => void;
@@ -219,8 +227,16 @@ type RuntimeApplier = {
     }>;
     artifacts?: Artifact[] | null;
     usage?: TurnUsage;
+    context?: ContextWindowInfo;
   }) => void;
   onError: (event: { seq?: number; terminalStatus?: Extract<TerminalStatus, 'error' | 'interrupted'>; message: string; content?: string }) => void;
+  // Server-side compaction landed mid-turn. The applier inserts a
+  // standalone assistant message carrying a ``CompactionPart`` (which
+  // ChatMessages renders as a full-width "Session compacted" separator
+  // with the summary collapsed under it). Reset of the contextWindow
+  // happens server-side; the next turn_finished delivers the fresh
+  // tokensUsed value.
+  onCompaction: (event: { seq?: number; summary: string; tokensBefore: number | null }) => void;
 };
 
 function createRuntimeApplier(
@@ -444,9 +460,41 @@ function createRuntimeApplier(
         }
         finalParts = mergeTerminalText(finalParts, event.content);
         finalizeAssistantMessage(finalParts, event.terminalStatus ?? 'done', 'complete', event.usage);
+        // Refresh context-window state so the header progress pill
+        // can recompute. Server is authoritative; FE never derives.
+        if (event.context) {
+          set({ contextWindow: event.context });
+        }
         activeAbortController = null;
         set({ activeTurnId: null });
         resolveSend?.();
+      });
+    },
+
+    onCompaction: (event) => {
+      applySequencedEvent(event.seq, () => {
+        const part: CompactionPart = {
+          type: 'compaction',
+          summary: event.summary,
+          tokensBefore: event.tokensBefore,
+          occurredAt: new Date().toISOString(),
+        };
+        // Insert a standalone separator message — chronologically wedged
+        // between the prior assistant bubble and the next user message.
+        // The compaction-summary expander lives inside this single part;
+        // no other message metadata is set so the "Done · tokens" chip
+        // doesn't render.
+        set((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              id: nextId(),
+              role: 'assistant',
+              parts: [part],
+              status: 'complete',
+            },
+          ],
+        }));
       });
     },
     onError: (event) => {
@@ -488,11 +536,12 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
   activeTurnId: null,
   provider: 'openai',
   locked: false,
-  messages: [],
+  messages: [], contextWindow: null,
   status: 'idle',
   lastAppliedSeq: 0,
   streamingParts: [],
   streamingStatus: null,
+  contextWindow: null,
   sessions: [],
   sessionsLoaded: false,
   defaults: null,
@@ -577,7 +626,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         dbSessionId: null,
         activeTurnId: null,
         locked: false,
-        messages: [],
+        messages: [], contextWindow: null,
         status: 'idle',
         streamingParts: [],
         streamingStatus: null,
@@ -596,7 +645,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
               sessionId: null,
               dbSessionId: null,
               activeTurnId: null,
-              messages: [],
+              messages: [], contextWindow: null,
               streamingParts: [],
       streamingStatus: null,
               locked: false,
@@ -767,6 +816,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
           onStatus: applier.onStatus,
           onDone: (event) => applier.onDone(event),
           onError: applier.onError,
+          onCompaction: applier.onCompaction,
         },
       ).then((controller) => {
         // Push the AbortController to module scope so `stopActiveTurn`
@@ -838,6 +888,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
         onStatus: applier.onStatus,
         onDone: (event) => applier.onDone(event),
         onError: applier.onError,
+        onCompaction: applier.onCompaction,
       },
     );
     activeAbortController = controller;
@@ -885,7 +936,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       activeTurnId: null,
       provider: 'openai',
       locked: false,
-      messages: [],
+      messages: [], contextWindow: null,
       status: 'idle',
       lastAppliedSeq: 0,
       pendingPrompt: null,
@@ -910,12 +961,13 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
   },
 
   loadDefaults: async () => {
-    try {
-      const defaults = await getChatDefaults();
-      set({ defaults: { openai: defaults.openai } });
-    } catch {
-      // ignore
-    }
+    // Sherlock now resolves provider + model server-side via
+    // platform.tenant_call_site_defaults (analytics_supervisor /
+    // analytics_specialist call sites). The legacy defaults route was
+    // deleted; the front-end only needs a synthetic "ready" marker so
+    // the textarea + canSend gate can light up. The string is opaque
+    // and never sent to the backend.
+    set({ defaults: { openai: { model: 'server-resolved' } } });
   },
 
   appendMessagePart: (messageId, part) => {
@@ -946,7 +998,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       activeTurnId: null,
       provider: 'openai',
       locked: false,
-      messages: [],
+      messages: [], contextWindow: null,
       status: 'idle',
       lastAppliedSeq: 0,
       streamingParts: [],
