@@ -192,6 +192,13 @@ async def lifespan(app: FastAPI):
     async with async_session() as _pack_validator_db:
         await validate_all_app_pack_ids(_pack_validator_db)
 
+    # Reporting genericization Phase 1 — boot-time gate on App.config.analytics.
+    # Moves three classes of silent drop (unknown profile, export-not-subset,
+    # narrative-id-not-routable) from "first generate-report click" to boot.
+    from app.services.reports.config_validator import validate_reporting_config
+    async with async_session() as _reporting_validator_db:
+        await validate_reporting_config(_reporting_validator_db)
+
     # Clean up any expired refresh tokens from previous run
     await _cleanup_expired_refresh_tokens()
 

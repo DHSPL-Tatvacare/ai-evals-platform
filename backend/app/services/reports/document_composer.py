@@ -92,6 +92,11 @@ def _theme_for_variant(document_variant: str) -> PrintThemeTokenSet:
     return _THEMES_BY_VARIANT.get(document_variant, _DEFAULT_THEME)
 
 
+def known_document_variants() -> frozenset[str]:
+    # Phase 1 reporting validator reads this; do not inline _THEMES_BY_VARIANT.keys() at the call site.
+    return frozenset(_THEMES_BY_VARIANT.keys())
+
+
 def _cover_metadata(metadata: dict[str, str | None]) -> dict[str, str]:
     return {key: value for key, value in metadata.items() if value}
 
