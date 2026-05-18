@@ -386,6 +386,17 @@ export type PlatformReportSection =
   | PromptGapAnalysisSection
   | CalloutSection;
 
+/**
+ * Phase 2 — narrative_status taxonomy mirror of NarrativeStatus in
+ * backend/app/services/reports/contracts/run_report.py. Optional so older
+ * cached artifacts (no key on disk) deserialize unchanged.
+ */
+export type NarrativeStatus =
+  | 'disabled'
+  | 'skipped_no_model'
+  | 'completed'
+  | 'failed';
+
 export interface PlatformReportMetadata {
   appId: string;
   reportKind: 'single_run';
@@ -401,7 +412,26 @@ export interface PlatformReportMetadata {
   llmProvider: string | null;
   llmModel: string | null;
   narrativeModel: string | null;
+  narrativeStatus?: NarrativeStatus | null;
+  narrativeError?: string | null;
   cacheKey: string | null;
+}
+
+/**
+ * Phase 2 — DataQualityReport mirror. Optional on the payload so older cached
+ * artifacts deserialize. Renderer normalizes absent → `{ overall: 'complete',
+ * missingInputs: [], sectionStatus: {} }`.
+ */
+export type DataQualityOverall = 'complete' | 'partial' | 'degraded';
+export type DataQualitySectionStatus =
+  | 'complete'
+  | 'empty'
+  | 'dropped_from_export';
+
+export interface DataQualityReport {
+  overall: DataQualityOverall;
+  missingInputs: string[];
+  sectionStatus: Record<string, DataQualitySectionStatus>;
 }
 
 export interface PlatformReportPresentation {
@@ -426,6 +456,7 @@ export interface PlatformRunReportPayload {
   presentation: PlatformReportPresentation;
   sections: PlatformReportSection[];
   exportDocument: PlatformReportDocument;
+  dataQuality?: DataQualityReport;
 }
 
 export interface PlatformCrossRunMetadata {

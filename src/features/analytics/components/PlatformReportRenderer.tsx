@@ -3,6 +3,7 @@ import { BarChart3, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import type { AppId } from '@/types';
 import type { LLMProvider } from '@/services/api/aiSettingsApi';
 import type {
+  DataQualityReport,
   EntityTableBlock,
   FrictionAnalysisSection,
   HeatmapTableBlock,
@@ -61,6 +62,84 @@ const RICH_COMPONENT_IDS = new Set([
   'issues_recommendations',
   'entity_slices',
 ]);
+
+/**
+ * Phase 2 — partial-report banner.
+ *
+ * Older cached artifacts have no `dataQuality` key; absence is normalized to
+ * `overall: 'complete'` so the banner renders nothing for legacy reports. The
+ * print watermark CSS hook is stamped on the same root via `data-partial` for
+ * the PDF render path (see `report-print.css` `.report-partial-watermark`).
+ */
+const NARRATIVE_STATUS_COPY: Record<string, string> = {
+  disabled: 'AI narrative is turned off for this report.',
+  skipped_no_model: 'AI narrative was skipped — no model was available.',
+  failed: 'AI narrative failed to generate.',
+};
+
+function normalizeDataQuality(dq: DataQualityReport | undefined): DataQualityReport {
+  return dq ?? { overall: 'complete', missingInputs: [], sectionStatus: {} };
+}
+
+function DataQualityBanner({
+  report,
+  printMode,
+}: {
+  report: PlatformRunReportPayload;
+  printMode: boolean;
+}) {
+  const dq = normalizeDataQuality(report.dataQuality);
+  const narrativeStatus = report.metadata.narrativeStatus;
+  const narrativeMessage =
+    narrativeStatus && narrativeStatus !== 'completed'
+      ? NARRATIVE_STATUS_COPY[narrativeStatus]
+      : null;
+
+  const showBanner = dq.overall !== 'complete' || Boolean(narrativeMessage);
+  if (!showBanner) return null;
+
+  const missingCount = dq.missingInputs.length;
+  const droppedSections = Object.entries(dq.sectionStatus).filter(
+    ([, status]) => status === 'dropped_from_export' || status === 'empty',
+  );
+
+  const variant = dq.overall === 'degraded' ? 'danger' : 'warning';
+  const title =
+    dq.overall === 'degraded'
+      ? 'Report is degraded — multiple inputs are missing.'
+      : dq.overall === 'partial'
+        ? 'This report is partial.'
+        : 'AI narrative status';
+
+  return (
+    <div
+      className="report-partial-banner"
+      data-partial={dq.overall !== 'complete' ? 'true' : undefined}
+    >
+      {printMode && dq.overall !== 'complete' ? (
+        <div className="report-partial-watermark">PARTIAL</div>
+      ) : null}
+      <CalloutBox variant={variant} title={title}>
+        <div className="space-y-1">
+          {missingCount > 0 ? (
+            <div>
+              {missingCount} expected input{missingCount === 1 ? '' : 's'} missing
+              {missingCount <= 4 ? `: ${dq.missingInputs.join(', ')}` : '.'}
+            </div>
+          ) : null}
+          {droppedSections.length > 0 ? (
+            <div>
+              {droppedSections.length} section
+              {droppedSections.length === 1 ? '' : 's'} dropped or empty:{' '}
+              {droppedSections.map(([id]) => id).join(', ')}.
+            </div>
+          ) : null}
+          {narrativeMessage ? <div>{narrativeMessage}</div> : null}
+        </div>
+      </CalloutBox>
+    </div>
+  );
+}
 
 function normalizeTokenKey(key: string): string {
   return key.replace(/[_\s-]+/g, '').toLowerCase();
@@ -1044,6 +1123,7 @@ export function PlatformReportView({ report, actions, printMode = false }: Platf
   if (printMode) {
     return (
       <div className="space-y-6" style={buildReportPresentationStyle(report)}>
+        <DataQualityBanner report={report} printMode />
         {headerCard}
         {hasRenderableSections
           ? detailedSectionList
@@ -1056,6 +1136,7 @@ export function PlatformReportView({ report, actions, printMode = false }: Platf
 
   return (
     <div className="space-y-6" style={buildReportPresentationStyle(report)}>
+      <DataQualityBanner report={report} printMode={false} />
       {headerCard}
 
       {hasRenderableSections ? (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Clock, Download, FileBarChart, Loader2, RefreshCw, Settings2, Sparkles } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Button, EmptyState, LegacyLlmConfigCompat, Select, Tooltip, type SelectOption } from '@/components/ui';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
@@ -9,6 +10,13 @@ import { pollJobUntilComplete, submitAndPollJob, type JobProgress } from '@/serv
 import { reportsApi } from '@/services/api/reportsApi';
 import { notificationService } from '@/services/notifications';
 import { useProviderConfigs } from '@/services/api/aiSettingsQueries';
+import {
+  invalidateReportConfigs,
+  invalidateReportRuns,
+  useReportConfigs,
+  useReportRunArtifact,
+  useReportRuns,
+} from '@/features/reports/queries/reportsQueries';
 import type { LLMProvider } from '@/services/api/aiSettingsApi';
 import type { AppId, ReportConfigSummary, ReportRunSummary } from '@/types';
 import { usePermission } from '@/utils/permissions';
@@ -160,13 +168,54 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   supportsPdf = true,
   renderReport,
 }: Props<TReport>) {
-  const [configs, setConfigs] = useState<ReportConfigSummary[]>([]);
+  // Server data lives in TQ; selection + mutation flow stay local.
+  const queryClient = useQueryClient();
+  const configsQuery = useReportConfigs(appId, 'single_run');
+  const configs = useMemo(() => configsQuery.data ?? [], [configsQuery.data]);
+
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const [reportRuns, setReportRuns] = useState<ReportRunSummary[]>([]);
   const [selectedReportRunId, setSelectedReportRunId] = useState<string | null>(null);
-  const [report, setReport] = useState<TReport | null>(null);
-  const [status, setStatus] = useState<Status>('loading');
-  const [error, setError] = useState<string | null>(null);
+
+  // Default selectedReportId once configs land (or change) — pick the default,
+  // else the first row, else nothing.
+  useEffect(() => {
+    if (!configs.length) {
+      setSelectedReportId(null);
+      return;
+    }
+    setSelectedReportId((current) => {
+      if (current && configs.some((c) => c.reportId === current)) return current;
+      return configs.find((c) => c.isDefault)?.reportId ?? configs[0]?.reportId ?? null;
+    });
+  }, [configs]);
+
+  const runsQuery = useReportRuns({
+    appId,
+    scope: 'single_run',
+    sourceEvalRunId: runId,
+    reportId: selectedReportId,
+    limit: 20,
+  });
+  const reportRuns = useMemo(() => runsQuery.data ?? [], [runsQuery.data]);
+
+  // Default selectedReportRunId when reportRuns change — prefer the most recent
+  // completed run, fall back to whatever's first in the list.
+  useEffect(() => {
+    setSelectedReportRunId((current) => {
+      if (current && reportRuns.some((r) => r.id === current)) return current;
+      return (
+        reportRuns.find((r) => r.status === 'completed')?.id ?? reportRuns[0]?.id ?? null
+      );
+    });
+  }, [reportRuns]);
+
+  const artifactQuery = useReportRunArtifact(selectedReportRunId);
+  const report = (artifactQuery.data ?? null) as TReport | null;
+
+  // Mutation-driven state — TQ doesn't model the job-poll lifecycle, so the
+  // generate/export flow keeps its own status + error + progress trio.
+  const [mutationStatus, setMutationStatus] = useState<'idle' | 'generating' | 'error'>('idle');
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [overlayReportId, setOverlayReportId] = useState<string | null>(null);
@@ -225,60 +274,13 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
     [reportRuns, selectedReportRunId],
   );
 
-  const loadConfigs = useCallback(async () => {
-    const nextConfigs = await reportsApi.listReportConfigs(appId, 'single_run');
-    setConfigs(nextConfigs);
-    setSelectedReportId(nextConfigs.find((config) => config.isDefault)?.reportId ?? nextConfigs[0]?.reportId ?? null);
-    return nextConfigs;
-  }, [appId]);
-
-  const loadReportRuns = useCallback(async (reportId: string) => {
-    const nextRuns = await reportsApi.listReportRuns({
-      appId,
-      scope: 'single_run',
-      sourceEvalRunId: runId,
-      reportId,
-      limit: 20,
-    });
-    setReportRuns(nextRuns);
-    setSelectedReportRunId((current) => {
-      if (current && nextRuns.some((reportRun) => reportRun.id === current)) return current;
-      return nextRuns.find((reportRun) => reportRun.status === 'completed')?.id ?? nextRuns[0]?.id ?? null;
-    });
-    return nextRuns;
-  }, [appId, runId]);
-
-  const syncModelSelectionFromReport = useCallback((nextReport: TReport | null) => {
-    const metadata = getReportMetadata(nextReport);
+  // Mirror provider/model dropdowns to whatever the loaded report was generated
+  // with. Runs each time the artifact query produces a new payload.
+  useEffect(() => {
+    const metadata = getReportMetadata(report);
     if (metadata?.llmProvider) setReportProvider(metadata.llmProvider as LLMProvider);
     if (metadata?.llmModel) setReportModel(metadata.llmModel);
-  }, []);
-
-  const loadSelectedArtifact = useCallback(async (reportRun: ReportRunSummary | null) => {
-    if (!reportRun) {
-      setReport(null);
-      setStatus('idle');
-      return;
-    }
-
-    if (reportRun.status === 'failed' || reportRun.status === 'cancelled') {
-      setReport(null);
-      setError('Report generation failed. Click Generate to retry.');
-      setStatus('error');
-      return;
-    }
-
-    if (reportRun.status !== 'completed') {
-      setReport(null);
-      setStatus('generating');
-      return;
-    }
-
-    const nextReport = await reportsApi.fetchReportRunArtifact(reportRun.id) as unknown as TReport;
-    setReport(nextReport);
-    syncModelSelectionFromReport(nextReport);
-    setStatus('ready');
-  }, [syncModelSelectionFromReport]);
+  }, [report]);
 
   const handleJobProgress = useCallback((progress: JobProgress & { queuePosition?: number | null; status?: string }) => {
     const maybeStatus = progress.status;
@@ -299,7 +301,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
     pollAbortRef.current?.abort();
     const controller = new AbortController();
     pollAbortRef.current = controller;
-    setStatus('generating');
+    setMutationStatus('generating');
 
     try {
       await pollJobUntilComplete(reportRun.jobId, {
@@ -310,92 +312,108 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
         },
       });
 
-      const refreshedRuns = await loadReportRuns(reportRun.reportId);
-      const completedRun = refreshedRuns.find((entry) => entry.id === reportRun.id && entry.status === 'completed')
-        ?? refreshedRuns.find((entry) => entry.status === 'completed');
-
-      if (completedRun) {
-        setSelectedReportRunId(completedRun.id);
-        await loadSelectedArtifact(completedRun);
-      } else {
-        setStatus('idle');
-      }
+      // Refresh the runs list so the just-completed row appears; selectedReportRunId
+      // remains pinned so the artifact query refetches automatically.
+      await invalidateReportRuns(queryClient, {
+        appId,
+        scope: 'single_run',
+        sourceEvalRunId: runId,
+      });
+      setMutationStatus('idle');
     } catch (jobError) {
       if (jobError instanceof DOMException && jobError.name === 'AbortError') return;
       const message = jobError instanceof Error ? jobError.message : 'Report generation failed';
-      setError(message);
-      setStatus('error');
+      setMutationError(message);
+      setMutationStatus('error');
     } finally {
       setProgressMsg('');
       setQueuePosition(null);
       setJobPhase(null);
     }
-  }, [handleJobProgress, loadReportRuns, loadSelectedArtifact]);
+  }, [appId, handleJobProgress, queryClient, runId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setStatus('loading');
-    setError(null);
-    setReport(null);
-    setReportRuns([]);
-    setSelectedReportRunId(null);
-
-    void loadConfigs()
-      .then((nextConfigs) => {
-        if (cancelled) return;
-        if (nextConfigs.length === 0) {
-          setStatus('idle');
-        }
-      })
-      .catch((loadError) => {
-        if (cancelled) return;
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load report configs');
-        setStatus('error');
-      });
-
-    return () => {
-      cancelled = true;
-      pollAbortRef.current?.abort();
-    };
-  }, [loadConfigs, runId]);
-
-  useEffect(() => {
-    if (!selectedReportId) return;
-    let cancelled = false;
-
-    void loadReportRuns(selectedReportId)
-      .then((nextRuns) => {
-        if (cancelled) return;
-        if (nextRuns.length === 0) {
-          setReport(null);
-          setStatus('idle');
-        }
-      })
-      .catch((loadError) => {
-        if (cancelled) return;
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load report runs');
-        setStatus('error');
-      });
-
-    return () => {
-      cancelled = true;
-      pollAbortRef.current?.abort();
-    };
-  }, [loadReportRuns, selectedReportId]);
-
+  // Resume polling for an in-flight job when the user lands back on this tab
+  // mid-generation. TQ owns the artifact + runs caches; we just kick the poll.
   useEffect(() => {
     if (!selectedReportRun) return;
-
-    void loadSelectedArtifact(selectedReportRun).catch((loadError) => {
-      const message = loadError instanceof Error ? loadError.message : 'Failed to load report';
-      setError(message);
-      setStatus('error');
-    });
-
-    if ((selectedReportRun.status === 'queued' || selectedReportRun.status === 'running') && selectedReportRun.jobId) {
+    if (
+      (selectedReportRun.status === 'queued' || selectedReportRun.status === 'running') &&
+      selectedReportRun.jobId
+    ) {
       void pollExistingJob(selectedReportRun);
     }
-  }, [loadSelectedArtifact, pollExistingJob, selectedReportRun]);
+  }, [pollExistingJob, selectedReportRun]);
+
+  // Abort any in-flight poll on unmount.
+  useEffect(() => {
+    return () => {
+      pollAbortRef.current?.abort();
+    };
+  }, []);
+
+  // Derive the Status union the render block consumes. Queue / running runs
+  // count as 'generating' even when no mutation is in flight (eg. landing back
+  // on a tab with an in-progress job). Mutation status wins over query state
+  // because the user is actively driving generation.
+  const status: Status = useMemo(() => {
+    if (mutationStatus === 'generating') return 'generating';
+    if (mutationStatus === 'error') return 'error';
+    if (configsQuery.isError) return 'error';
+    if (configsQuery.isLoading) return 'loading';
+    if (configs.length === 0) return 'idle';
+    if (selectedReportId && runsQuery.isLoading && !runsQuery.data) return 'loading';
+    if (runsQuery.isError) return 'error';
+    const run = selectedReportRun;
+    if (!run) return 'idle';
+    if (run.status === 'failed' || run.status === 'cancelled') return 'error';
+    if (run.status === 'queued' || run.status === 'running') return 'generating';
+    if (artifactQuery.isLoading && !artifactQuery.data) return 'loading';
+    if (artifactQuery.isError) return 'error';
+    if (artifactQuery.data) return 'ready';
+    return 'idle';
+  }, [
+    artifactQuery.data,
+    artifactQuery.isError,
+    artifactQuery.isLoading,
+    configs.length,
+    configsQuery.isError,
+    configsQuery.isLoading,
+    mutationStatus,
+    runsQuery.data,
+    runsQuery.isError,
+    runsQuery.isLoading,
+    selectedReportId,
+    selectedReportRun,
+  ]);
+
+  const error: string | null = useMemo(() => {
+    if (mutationError) return mutationError;
+    if (configsQuery.error) {
+      return configsQuery.error instanceof Error
+        ? configsQuery.error.message
+        : 'Failed to load report configs';
+    }
+    if (runsQuery.error) {
+      return runsQuery.error instanceof Error
+        ? runsQuery.error.message
+        : 'Failed to load report runs';
+    }
+    if (artifactQuery.error) {
+      return artifactQuery.error instanceof Error
+        ? artifactQuery.error.message
+        : 'Failed to load report';
+    }
+    if (selectedReportRun?.status === 'failed' || selectedReportRun?.status === 'cancelled') {
+      return 'Report generation failed. Click Generate to retry.';
+    }
+    return null;
+  }, [
+    artifactQuery.error,
+    configsQuery.error,
+    mutationError,
+    runsQuery.error,
+    selectedReportRun,
+  ]);
 
   const handleGenerate = useCallback(async () => {
     if (!overlayConfig) return;
@@ -403,8 +421,8 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
 
     setShowGenerateOverlay(false);
     setSelectedReportId(targetReportId);
-    setStatus('generating');
-    setError(null);
+    setMutationStatus('generating');
+    setMutationError(null);
     setProgressMsg('Submitting report job…');
 
     try {
@@ -436,23 +454,22 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
           ? jobResult.reportRunId
           : null;
 
-      const nextRuns = await loadReportRuns(targetReportId);
-      const nextReportRun = nextRuns.find((entry) => entry.id === generatedReportRunId)
-        ?? nextRuns.find((entry) => entry.status === 'completed');
+      // TQ-driven refresh: invalidate the runs query so the new row appears,
+      // then pin selection to the just-generated run — the artifact query
+      // refetches automatically on the key change.
+      await invalidateReportRuns(queryClient, {
+        appId,
+        scope: 'single_run',
+        sourceEvalRunId: runId,
+      });
+      if (generatedReportRunId) setSelectedReportRunId(generatedReportRunId);
 
-      if (!nextReportRun) {
-        setReport(null);
-        setStatus('idle');
-        return;
-      }
-
-      setSelectedReportRunId(nextReportRun.id);
-      await loadSelectedArtifact(nextReportRun);
+      setMutationStatus('idle');
       notificationService.success('Report generated');
     } catch (generateError) {
       const message = generateError instanceof Error ? generateError.message : 'Report generation failed';
-      setError(message);
-      setStatus('error');
+      setMutationError(message);
+      setMutationStatus('error');
       notificationService.error(message);
     } finally {
       setProgressMsg('');
@@ -462,9 +479,8 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   }, [
     appId,
     handleJobProgress,
-    loadReportRuns,
-    loadSelectedArtifact,
     overlayConfig,
+    queryClient,
     reportModel,
     reportProvider,
     runId,
@@ -746,10 +762,10 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
         onClose={() => setShowManageBlueprints(false)}
         configs={configs}
         onConfigsChanged={async () => {
-          const nextConfigs = await loadConfigs();
-          if (!nextConfigs.some((config) => config.reportId === selectedReportId)) {
-            setSelectedReportId(nextConfigs.find((config) => config.isDefault)?.reportId ?? nextConfigs[0]?.reportId ?? null);
-          }
+          // Bust the configs cache; the useEffect that defaults selectedReportId
+          // re-runs against the new list and re-pins selection if the current
+          // one was archived/renamed.
+          await invalidateReportConfigs(queryClient, appId, 'single_run');
         }}
       />
 
