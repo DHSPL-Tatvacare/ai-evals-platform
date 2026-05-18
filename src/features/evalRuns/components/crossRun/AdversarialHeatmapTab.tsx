@@ -3,7 +3,7 @@ import type { AppId } from '@/types';
 import type { AdversarialHeatmap } from '@/types/crossRunAnalytics';
 import { runDetailForApp } from '@/config/routes';
 import SectionHeader from '../report/shared/SectionHeader';
-import Heatmap from './Heatmap';
+import { Heatmap, type HeatmapCell } from '@/components/report/Heatmap';
 
 interface Props {
   appId: AppId;
@@ -13,22 +13,19 @@ interface Props {
 export default function AdversarialHeatmapTab({ appId, heatmap }: Props) {
   const navigate = useNavigate();
 
-  const columnHeaders = heatmap.runs.map((r) => {
-    const date = r.createdAt
+  const columns = heatmap.runs.map((r) => ({
+    id: r.runId,
+    label: r.runName || r.runId.slice(0, 8),
+    sublabel: r.createdAt
       ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      : '';
-    return {
-      id: r.runId,
-      label: r.runName || r.runId.slice(0, 8),
-      sublabel: date,
-    };
-  });
+      : null,
+  }));
 
   const rows = heatmap.rows.map((r) => ({
     id: r.goal,
     label: r.goal,
-    cells: r.cells,
-    average: r.avgPassRate,
+    cells: r.cells.map((value): HeatmapCell => ({ value })),
+    trailing: { value: r.avgPassRate },
   }));
 
   return (
@@ -39,11 +36,11 @@ export default function AdversarialHeatmapTab({ appId, heatmap }: Props) {
       />
 
       <Heatmap
-        columnHeaders={columnHeaders}
+        columns={columns}
         rows={rows}
         rowHeaderLabel="Goal"
-        onColumnClick={(id) => navigate(runDetailForApp(appId, id))}
-        emptyMessage="No adversarial runs with reports found."
+        onColumnClick={(id: string) => navigate(runDetailForApp(appId, id))}
+        emptyDescription="No adversarial runs with reports found."
       />
     </div>
   );

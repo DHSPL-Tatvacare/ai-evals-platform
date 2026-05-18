@@ -23,7 +23,7 @@ import { timeAgo } from '@/utils/evalFormatters';
 import { routes } from '@/config/routes';
 import { useNavigate } from 'react-router-dom';
 import { useResolvedColor } from '@/hooks/useResolvedColor';
-import Heatmap from '@/features/evalRuns/components/crossRun/Heatmap';
+import { Heatmap, type HeatmapCell } from '@/components/report/Heatmap';
 import SectionHeader from '@/features/evalRuns/components/report/shared/SectionHeader';
 import { IssuesTab } from '@/features/evalRuns/components/crossRun';
 
@@ -304,21 +304,23 @@ function InsideSalesDimensionHeatmapPanel({
         description="Each cell shows the average score for a QA dimension in a specific run."
       />
       <Heatmap
-        columnHeaders={analytics.dimensionHeatmap.runs.map((run) => ({
+        columns={analytics.dimensionHeatmap.runs.map((run) => ({
           id: run.runId,
           label: run.runName || run.runId.slice(0, 8),
-          sublabel: run.createdAt ? new Date(run.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+          sublabel: run.createdAt ? new Date(run.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null,
         }))}
         rows={analytics.dimensionHeatmap.rows.map((row) => ({
           id: row.key,
           label: row.label,
           sublabel: `Avg ${row.avgScore.toFixed(1)} / ${row.maxPossible}`,
-          cells: row.cells.map((value) => value == null ? null : value / row.maxPossible),
-          average: row.maxPossible > 0 ? row.avgScore / row.maxPossible : 0,
+          cells: row.cells.map((value): HeatmapCell => ({
+            value: value == null ? null : value / row.maxPossible,
+          })),
+          trailing: { value: row.maxPossible > 0 ? row.avgScore / row.maxPossible : 0 },
         }))}
         rowHeaderLabel="Dimension"
         onColumnClick={onRunClick}
-        emptyMessage="No dimension data found in report caches."
+        emptyDescription="No dimension data found in report caches."
       />
     </div>
   );
@@ -338,20 +340,20 @@ function InsideSalesComplianceHeatmapPanel({
         description="Each cell shows the gate pass rate for a specific run."
       />
       <Heatmap
-        columnHeaders={analytics.complianceHeatmap.runs.map((run) => ({
+        columns={analytics.complianceHeatmap.runs.map((run) => ({
           id: run.runId,
           label: run.runName || run.runId.slice(0, 8),
-          sublabel: run.createdAt ? new Date(run.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+          sublabel: run.createdAt ? new Date(run.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null,
         }))}
         rows={analytics.complianceHeatmap.rows.map((row) => ({
           id: row.key,
           label: row.label,
-          cells: row.cells,
-          average: row.avgPassRate,
+          cells: row.cells.map((value): HeatmapCell => ({ value })),
+          trailing: { value: row.avgPassRate },
         }))}
         rowHeaderLabel="Gate"
         onColumnClick={onRunClick}
-        emptyMessage="No compliance data found in report caches."
+        emptyDescription="No compliance data found in report caches."
       />
     </div>
   );

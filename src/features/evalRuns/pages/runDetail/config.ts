@@ -12,7 +12,7 @@ const evalTypeSchema = z.enum([
 const reportTabSchema = z.object({
   enabled: z.boolean(),
   /** Restrict the Report tab to a subset of `evalTypes`; omit = all. */
-  enabledForEvalTypes: z.array(evalTypeSchema).optional(),
+  enabledForEvalTypes: z.array(evalTypeSchema).nullish(),
 });
 
 const drilldownSchema = z.object({
@@ -31,7 +31,11 @@ const extrasSchema = z.object({
   /** Adds a "History" tab backed by `ReviewHistoryTab`. Batch shape only. */
   historyTab: z.boolean().optional(),
   /** Drill-down sub-route (e.g. `/calls/:callId`). Single shape only. */
-  drilldown: drilldownSchema.optional(),
+  // `.nullish()` (not `.optional()`) because the backend Pydantic model
+  // `AppRunDetailExtrasConfig.drilldown: AppRunDetailDrilldownConfig | None = None`
+  // is serialized by CamelModel as JSON `null` when unset, not as a missing key.
+  // Same reason applies to `enabledForEvalTypes` above.
+  drilldown: drilldownSchema.nullish(),
 });
 
 const behaviourSchema = z.object({

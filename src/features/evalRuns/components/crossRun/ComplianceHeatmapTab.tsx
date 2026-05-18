@@ -3,7 +3,7 @@ import type { AppId } from '@/types';
 import type { RuleComplianceHeatmap } from '@/types/crossRunAnalytics';
 import { runDetailForApp } from '@/config/routes';
 import SectionHeader from '../report/shared/SectionHeader';
-import Heatmap from './Heatmap';
+import { Heatmap, type HeatmapCell } from '@/components/report/Heatmap';
 
 interface Props {
   appId: AppId;
@@ -13,23 +13,20 @@ interface Props {
 export default function ComplianceHeatmapTab({ appId, heatmap }: Props) {
   const navigate = useNavigate();
 
-  const columnHeaders = heatmap.runs.map((r) => {
-    const date = r.createdAt
+  const columns = heatmap.runs.map((r) => ({
+    id: r.runId,
+    label: r.runName || r.runId.slice(0, 8),
+    sublabel: r.createdAt
       ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      : '';
-    return {
-      id: r.runId,
-      label: r.runName || r.runId.slice(0, 8),
-      sublabel: date,
-    };
-  });
+      : null,
+  }));
 
   const rows = heatmap.rows.map((r) => ({
     id: r.ruleId,
     label: r.ruleId,
     sublabel: r.section,
-    cells: r.cells,
-    average: r.avgRate,
+    cells: r.cells.map((value): HeatmapCell => ({ value })),
+    trailing: { value: r.avgRate },
   }));
 
   return (
@@ -40,11 +37,11 @@ export default function ComplianceHeatmapTab({ appId, heatmap }: Props) {
       />
 
       <Heatmap
-        columnHeaders={columnHeaders}
+        columns={columns}
         rows={rows}
         rowHeaderLabel="Rule"
-        onColumnClick={(id) => navigate(runDetailForApp(appId, id))}
-        emptyMessage="No rule compliance data found in reports. Run evaluations with correctness evaluation enabled."
+        onColumnClick={(id: string) => navigate(runDetailForApp(appId, id))}
+        emptyDescription="No rule compliance data found in reports. Run evaluations with correctness evaluation enabled."
       />
     </div>
   );
