@@ -216,6 +216,7 @@ class VoiceRxReportService(BaseReportService):
                 metadata={},
                 sections=[],
                 export_config=analytics_config.single_run.export,
+                composition_theme=analytics_config.single_run.theme,
             ),
         ).sections
 
@@ -229,6 +230,7 @@ class VoiceRxReportService(BaseReportService):
             },
             sections=sections,
             export_config=analytics_config.single_run.export,
+            composition_theme=analytics_config.single_run.theme,
         )
 
         payload = compose_run_report(

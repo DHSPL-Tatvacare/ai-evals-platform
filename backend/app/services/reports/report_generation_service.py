@@ -346,6 +346,7 @@ async def _compose_single_run_payload(
             sections=[],
             export_config=export_config,
             theme_tokens=presentation_config.theme_tokens,
+            composition_theme=analytics_config.single_run.theme,
         ),
     ).sections
     export_document = compose_document(
@@ -360,6 +361,7 @@ async def _compose_single_run_payload(
         sections=pre_sections,
         export_config=export_config,
         theme_tokens=presentation_config.theme_tokens,
+        composition_theme=analytics_config.single_run.theme,
     )
     # Stamp narrative_status now so the composed payload carries it.
     metadata = metadata.model_copy(update={'narrative_status': narrative_status})
@@ -668,6 +670,7 @@ async def generate_cross_run_report_artifact(
                     sections=pre_sections,
                     export_config=export_config,
                     theme_tokens=presentation_config.theme_tokens,
+                    composition_theme=analytics_config.cross_run.theme,
                 )
             payload = compose_cross_run_report(
                 metadata=metadata,

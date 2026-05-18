@@ -22,6 +22,11 @@ from typing import Any
 
 from sqlalchemy import select
 
+# Module-level import (rather than deferred-inside-helper) so test code can
+# patch.object the symbol on this module — the empty-declared-opt-out test
+# at test_reporting_config_validator_unittest.py needs this hook.
+from app.services.reports.analytics_profiles.registry import get_analytics_profile
+
 
 # Mirrors narrative_executor.py:202-213 substring routing. Each value lists the
 # acceptable substrings — a section.id must contain at least one to receive
@@ -37,7 +42,6 @@ _NARRATIVE_INSERTION_TARGETS: dict[str, tuple[str, ...]] = {
 def _validate_one_app(slug: str, raw_config: dict | None) -> list[str]:
     """Return a list of human-readable error strings; empty list means the app passes."""
     from app.schemas.app_config import AppConfig
-    from app.services.reports.analytics_profiles.registry import get_analytics_profile
     from app.services.reports.document_composer import known_document_variants
 
     errors: list[str] = []
@@ -129,6 +133,24 @@ def _validate_one_app(slug: str, raw_config: dict | None) -> list[str]:
                 f"App '{slug}' section id='{section.id}' (type='{section.type}') will be "
                 f"silently dropped by narrative_executor — its id does not contain any of "
                 f"{list(targets)}. Either rename the id to include one, or change the section type."
+            )
+
+    # 8. Phase 3 — configured section ids must be a subset of what the profile
+    #    declares it can produce. The composer otherwise silently drops the
+    #    section at runtime. Profile opts out of this check by leaving
+    #    ``declared_single_run_section_ids = ()``.
+    profile = get_analytics_profile(profile_key) if profile_key else None
+    if profile is not None and profile.declared_single_run_section_ids:
+        declared_by_profile = set(profile.declared_single_run_section_ids)
+        configured_ids = [section.id for section in single_run.sections]
+        undeclared = [sid for sid in configured_ids if sid not in declared_by_profile]
+        if undeclared:
+            errors.append(
+                f"App '{slug}' analytics.singleRun.sections includes id(s) "
+                f"{undeclared} that profile '{profile.key}' does not declare in "
+                f"declared_single_run_section_ids. Either extend the profile's "
+                f"declared tuple (and ensure the producer actually emits the id) "
+                f"or remove the unsupported section from app config."
             )
 
     return errors
