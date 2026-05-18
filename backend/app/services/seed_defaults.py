@@ -2060,6 +2060,10 @@ APP_SEEDS = [
                 },
                 "assets": {
                     "glossaryKey": "voice-rx-report-glossary",
+                    # Phase 4 — config-shape addition only; the SHARED setting
+                    # row keyed by this string is seeded by Alembic migration
+                    # 0052_seed_narrative_system_prompts (NOT by seed_defaults).
+                    "narrativeTemplateKey": "report-narrative-template",
                 },
             },
             "chat": {

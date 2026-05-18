@@ -22,10 +22,12 @@ from typing import Any
 
 from sqlalchemy import select
 
-# Module-level import (rather than deferred-inside-helper) so test code can
-# patch.object the symbol on this module — the empty-declared-opt-out test
-# at test_reporting_config_validator_unittest.py needs this hook.
+# Module-level imports (rather than deferred-inside-helper) so test code can
+# patch.object the symbols on this module — see
+# backend/tests/test_reporting_config_validator_unittest.py.
+from app.constants import SYSTEM_TENANT_ID, SYSTEM_USER_ID
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
+from app.services.reports.asset_resolver import _resolve_setting_value
 
 
 # Mirrors narrative_executor.py:202-213 substring routing. Each value lists the
@@ -39,7 +41,7 @@ _NARRATIVE_INSERTION_TARGETS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _validate_one_app(slug: str, raw_config: dict | None) -> list[str]:
+async def _validate_one_app(db: Any, slug: str, raw_config: dict | None) -> list[str]:
     """Return a list of human-readable error strings; empty list means the app passes."""
     from app.schemas.app_config import AppConfig
     from app.services.reports.document_composer import known_document_variants
@@ -143,6 +145,40 @@ def _validate_one_app(slug: str, raw_config: dict | None) -> list[str]:
     # by running each profile against a fixture EvaluationRun and asserting the
     # composed payload contains every configured section id.
 
+    # 8. Phase 4 — narrative system prompt must resolve via the cascade.
+    # The Alembic migration 0052_seed_narrative_system_prompts seeds three
+    # SYSTEM-shared application_settings rows; this check fails boot if a row
+    # is missing (migration not applied, or the app's narrativeTemplateKey
+    # changed without a matching migration). Skipped when narrative is disabled
+    # OR the app has no narrativeTemplateKey configured.
+    narrative_key = analytics.assets.narrative_template_key
+    ai_summary_enabled = single_run.ai_summary.enabled
+    if narrative_key and ai_summary_enabled:
+        prompt_value = await _resolve_setting_value(
+            db,
+            tenant_id=SYSTEM_TENANT_ID,
+            user_id=SYSTEM_USER_ID,
+            app_id=slug,
+            key=narrative_key,
+        )
+        # Mirror asset_resolver._extract_content reader keys so we agree on
+        # what "non-empty" means.
+        resolved = None
+        if isinstance(prompt_value, dict):
+            for k in ("content", "template", "systemPrompt", "system_prompt"):
+                candidate = prompt_value.get(k)
+                if isinstance(candidate, str) and candidate.strip():
+                    resolved = candidate
+                    break
+        if not resolved:
+            errors.append(
+                f"App '{slug}' has narrativeTemplateKey='{narrative_key}' but no "
+                f"non-empty SYSTEM-shared application_settings row resolves via the "
+                f"cascade. Run migration 0052_seed_narrative_system_prompts or check "
+                f"the row at (tenant_id=SYSTEM, user_id=SYSTEM, app_id='{slug}', "
+                f"key='{narrative_key}', visibility='shared')."
+            )
+
     return errors
 
 
@@ -160,7 +196,7 @@ async def validate_reporting_config(db: Any) -> None:
     )
     errors: list[str] = []
     for slug, raw_config in result.all():
-        errors.extend(_validate_one_app(slug, raw_config))
+        errors.extend(await _validate_one_app(db, slug, raw_config))
 
     if errors:
         raise RuntimeError(

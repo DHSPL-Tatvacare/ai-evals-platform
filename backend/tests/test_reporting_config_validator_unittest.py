@@ -1,6 +1,7 @@
-"""Unit tests for the Phase 1 reporting config validator.
+"""Unit tests for the Phase 1 + Phase 4 reporting config validator.
 
-See docs/plans/2026-05-18-reporting-genericize-phase-1.md.
+See docs/plans/2026-05-18-reporting-genericize/phase-1-config-validator.md
++ docs/plans/2026-05-18-reporting-genericize/phase-4-narrative-assets-alembic.md.
 """
 
 from __future__ import annotations
@@ -8,9 +9,25 @@ from __future__ import annotations
 import copy
 import unittest
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 from app.services.reports.config_validator import validate_reporting_config
 from app.services.seed_defaults import APP_SEEDS
+
+
+# Default cascade behavior for Phase 4 check 8 — returns a non-empty prompt for
+# any (tenant, user, app, key) lookup. Tests that want to exercise the
+# missing-prompt failure mode patch this with side_effect=[None, ...] explicitly.
+def _resolved_prompt(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+    return {"systemPrompt": "Seeded SYSTEM-shared prompt content."}
+
+
+def _patch_cascade_resolved():
+    """Convenience patch — every cascade lookup returns a populated prompt row."""
+    return patch(
+        "app.services.reports.config_validator._resolve_setting_value",
+        new=AsyncMock(side_effect=_resolved_prompt),
+    )
 
 
 class _FakeResult:
@@ -44,6 +61,15 @@ def _row_for(slug: str) -> tuple[str, dict]:
 
 
 class ReportingConfigValidatorTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # Default cascade resolves to a populated SYSTEM-shared prompt — keeps
+        # Phase 1 invariant tests focused on what they actually exercise without
+        # tripping the Phase 4 check 8 narrative-prompt-resolves assertion.
+        # Tests that want to exercise check 8 failure modes start their own patch.
+        self._cascade_patch = _patch_cascade_resolved()
+        self._cascade_patch.start()
+        self.addCleanup(self._cascade_patch.stop)
+
     # --- positive case ---------------------------------------------------
 
     async def test_all_seeded_apps_pass(self):
@@ -189,6 +215,55 @@ class ReportingConfigValidatorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError) as ctx:
             await validate_reporting_config(db)
         self.assertIn("broken-app", str(ctx.exception))
+
+    # --- Phase 4: narrative prompt resolves via cascade ------------------
+
+    async def test_missing_narrative_prompt_in_cascade_fails(self):
+        """An app whose narrativeTemplateKey does not resolve via the cascade
+        must fail boot — the Phase 4 Alembic migration has not been applied or
+        rows were deleted. Tests overrides setUp's cascade patch with empty."""
+        self._cascade_patch.stop()
+        with patch(
+            "app.services.reports.config_validator._resolve_setting_value",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                await validate_reporting_config(_FakeDB(_seed_rows()))
+        msg = str(ctx.exception)
+        # Error names the app slug + the missing key so the operator knows
+        # which Alembic migration row is missing.
+        self.assertIn("narrative", msg.lower())
+        # At least one seeded app's slug must appear in the error.
+        self.assertTrue(
+            any(app["slug"] in msg for app in APP_SEEDS),
+            f"Expected at least one app slug in error message:\n{msg}",
+        )
+        # Restart the cleanup-tracked patch so addCleanup tearDown still works.
+        self._cascade_patch = _patch_cascade_resolved()
+        self._cascade_patch.start()
+        self.addCleanup(self._cascade_patch.stop)
+
+    async def test_app_without_narrative_skips_cascade_check(self):
+        """An app whose narrative_config is disabled (or whose
+        narrativeTemplateKey is unset) must NOT require a cascade lookup."""
+        # Mock returns None for everything — would normally fail check 8.
+        self._cascade_patch.stop()
+
+        slug, cfg = _row_for("voice-rx")
+        # Disable narrative for this app.
+        cfg["analytics"]["singleRun"]["aiSummary"]["enabled"] = False
+        cfg["analytics"]["assets"]["narrativeTemplateKey"] = None
+
+        with patch(
+            "app.services.reports.config_validator._resolve_setting_value",
+            new=AsyncMock(return_value=None),
+        ):
+            await validate_reporting_config(_FakeDB([(slug, cfg)]))  # must not raise
+
+        # Restart cleanup-tracked patch.
+        self._cascade_patch = _patch_cascade_resolved()
+        self._cascade_patch.start()
+        self.addCleanup(self._cascade_patch.stop)
 
 
 if __name__ == "__main__":
