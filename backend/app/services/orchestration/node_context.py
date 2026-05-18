@@ -196,6 +196,24 @@ class NodeContext:
         )
         await self.db.flush()
 
+    async def stamp_webhook_ttl(
+        self, recipient_id: str, *, deadline: datetime,
+    ) -> None:
+        """Set ignore_webhooks_after on the recipient state at dispatch time.
+
+        Reconciler webhook lookups honor this gate so replies arriving after
+        the deadline are audit-logged but do not flip the recipient.
+        """
+        await self.db.execute(
+            update(WorkflowRunRecipientState)
+            .where(
+                WorkflowRunRecipientState.run_id == self.run_id,
+                WorkflowRunRecipientState.recipient_id == recipient_id,
+            )
+            .values(ignore_webhooks_after=deadline)
+        )
+        await self.db.flush()
+
     async def set_recipient_state(
         self,
         recipient_id: str,

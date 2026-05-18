@@ -11,6 +11,7 @@ from app.services.orchestration.nodes import (  # noqa: F401
     logic_wait,
     logic_merge,
     core_webhook_out,
+    messaging_send_whatsapp_template,
     sink_complete,
 )
 

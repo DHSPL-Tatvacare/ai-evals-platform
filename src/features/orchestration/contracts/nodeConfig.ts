@@ -349,6 +349,17 @@ export const CoreWebhookOutConfigSchema = z
   .strict();
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+export const MessagingSendWhatsappTemplateConfigSchema = z
+  .object({
+    nodeType: z.literal("messaging.send_whatsapp_template"),
+    connection_id: z.uuid(),
+    template_slug: z.string().min(1),
+    variable_mappings: z.record(z.string(), z.string()).default({}),
+    webhook_ttl_seconds: z.number().int().min(60).default(259200),
+  })
+  .strict();
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const SinkCompleteConfigSchema = z
   .object({
     nodeType: z.literal("sink.complete"),
@@ -369,6 +380,7 @@ export const NodeConfigSchema = z.discriminatedUnion("nodeType", [
   LogicWaitConfigSchema,
   LogicMergeConfigSchema,
   CoreWebhookOutConfigSchema,
+  MessagingSendWhatsappTemplateConfigSchema,
   SinkCompleteConfigSchema,
 ]);
 
@@ -383,6 +395,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   | typeof LogicWaitConfigSchema
   | typeof LogicMergeConfigSchema
   | typeof CoreWebhookOutConfigSchema
+  | typeof MessagingSendWhatsappTemplateConfigSchema
   | typeof SinkCompleteConfigSchema
 > = {
   "source.cohort_query": SourceCohortQueryConfigSchema,
@@ -394,6 +407,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   "logic.wait": LogicWaitConfigSchema,
   "logic.merge": LogicMergeConfigSchema,
   "core.webhook_out": CoreWebhookOutConfigSchema,
+  "messaging.send_whatsapp_template": MessagingSendWhatsappTemplateConfigSchema,
   "sink.complete": SinkCompleteConfigSchema,
 };
 

@@ -357,6 +357,27 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
         "graph_rules": _DISPATCH_GRAPH_RULES,
         "runtime_contract": {"execution_kind": "dispatch", "supports_attempt_policy": True},
     },
+    "messaging.send_whatsapp_template": {
+        "display_label": "Send WhatsApp template",
+        "display_category": "dispatch",
+        "description": "Send a templated WhatsApp message to a contact via your connected WhatsApp provider.",
+        "authoring_status": "active",
+        "editor_hints": {},
+        "required_payload_fields": [],
+        "emitted_payload_fields": [],
+        "output_edges": [
+            {"id": "success", "label": "Sent", "cardinality": "one", "dynamic": False},
+            {"id": "failed",  "label": "Failed", "cardinality": "one", "dynamic": False},
+        ],
+        "graph_rules": {
+            "requires_incoming_edges": True,
+            "requires_outgoing_edges": True,
+            "required_output_ids": [],
+            "allows_multiple_outgoing_per_output": False,
+            "terminal": False,
+        },
+        "runtime_contract": {"execution_kind": "dispatch"},
+    },
     # ─── Termination ────────────────────────────────────────────────────────
     "sink.complete": {
         "display_label": "Workflow Complete",
