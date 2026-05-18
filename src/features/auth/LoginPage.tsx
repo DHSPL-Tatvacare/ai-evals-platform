@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEventHandler } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react';
@@ -29,7 +29,7 @@ export function LoginPage() {
 
   const canSubmit = email.trim().length > 0 && password.length > 0 && !isLoading;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit: FormEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
     setIsLoading(true);
@@ -55,7 +55,7 @@ export function LoginPage() {
     : { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: SPRING };
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div data-theme="dark" className="relative min-h-screen overflow-hidden bg-[var(--login-backdrop-bg)]">
       <AuroraBackdrop />
 
       <div className="relative z-[var(--z-base)] grid min-h-screen grid-cols-1 md:grid-cols-[1.15fr_1fr]">
@@ -128,7 +128,7 @@ export function LoginPage() {
                   autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@tatvacare.in"
+                  placeholder="Email address"
                   disabled={isLoading}
                   icon={<Mail className="h-4 w-4" />}
                 />
