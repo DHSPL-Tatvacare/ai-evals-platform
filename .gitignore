@@ -56,7 +56,7 @@ service-account*.json
 /docs/*
 !/docs/PROJECT 101.md
 !/docs/SETUP.md
-!/docs/devops-handover.md
+!/docs/DEVOPS-DETAILS.md
 # Plans + investigations + data + superpowers live on disk only — never committed.
 /docs/plans/
 /docs/investigations/

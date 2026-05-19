@@ -234,6 +234,25 @@ Silent shape-drift is the bug class this rule eliminates. The 2026-05-15 inside-
 - Common boot failures: unqualified raw SQL referencing a renamed table, missing column on a renamed table, permission denied on `COMMENT` or DDL (wrong relation owner), missing env var, ImportError in eagerly-loaded job handlers.
 - Do not destructively recover (force push, hard reset, drop revision) without explicit user authorization. Diagnose, then propose.
 
+## Commit conventions
+
+Every commit landing after 2026-05-19 MUST follow Conventional Commits.
+
+- Prefix MUST be one of: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`, `style:`, `perf:`, `build:`, `ci:`. Optional scope in parens, e.g. `feat(orchestration):` or `fix(cohorts-P1):`.
+- Subject line: imperative, ≤ 70 chars, no trailing period.
+- Body: 2–3 lines maximum. State WHAT changed and WHY in plain prose. No bullet lists, no per-file enumerations, no Phase markers.
+- No `--no-verify`, no skipped hooks, no `--amend` on shared commits.
+- Never commit unless the user explicitly says "commit". "lock in", "save", "write it" are NOT commit authorization.
+
+Example:
+
+```
+feat(orchestration): add saved-cohort source node
+
+Introduces source.saved_cohort backed by CohortDefinition rows so workflows
+can reuse versioned cohorts. Builder picker lists tenant-scoped cohorts only.
+```
+
 ## Build, run, lint
 
 ```
