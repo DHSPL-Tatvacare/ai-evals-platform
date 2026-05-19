@@ -8,6 +8,7 @@ import {
   BookOpen,
   LogOut,
   KeyRound,
+  Mail,
 } from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import {
@@ -47,6 +48,7 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
   const isGuideActive = location.pathname === routes.guide;
+  const isEmailSettingsActive = location.pathname === routes.settingsEmail;
 
   // Auth
   const user = useAuthStore((s) => s.user);
@@ -63,6 +65,7 @@ export function Sidebar() {
   const canManageSchedules = usePermission('schedule:manage');
   const canManageOrchestration = usePermission('orchestration:manage');
   const canEditConfiguration = usePermission('configuration:edit');
+  const canManageNotifications = usePermission('notifications:manage');
   // User-mgmt nav entry stays tied to user-specific permissions, even though
   // the admin chrome is now reachable via `schedule:manage` alone.
   const canManageUsers = userHasAnyPermission(user, USER_MANAGEMENT_PERMISSIONS);
@@ -72,6 +75,7 @@ export function Sidebar() {
     canManageSchedules,
     canManageOrchestration,
     canEditConfiguration,
+    canManageNotifications,
   };
   const adminNavGroups = getAdminNavGroups(adminPermissions);
   // Flat list for the collapsed sidebar rail — mirrors the grouped layout used
@@ -274,6 +278,7 @@ export function Sidebar() {
                     <UserMenu
                       settingsPath={settingsPath}
                       isSettingsActive={isSettingsActive}
+                      isEmailSettingsActive={isEmailSettingsActive}
                       canEditConfiguration={canEditConfiguration}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
@@ -369,6 +374,7 @@ export function Sidebar() {
                     <UserMenu
                       settingsPath={settingsPath}
                       isSettingsActive={isSettingsActive}
+                      isEmailSettingsActive={isEmailSettingsActive}
                       canEditConfiguration={canEditConfiguration}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
@@ -432,6 +438,7 @@ function QuickActionMenu({
 function UserMenu({
   settingsPath,
   isSettingsActive,
+  isEmailSettingsActive,
   canEditConfiguration,
   isGuideActive,
   onLogout,
@@ -441,6 +448,7 @@ function UserMenu({
    *  — Settings entry is hidden in that case. */
   settingsPath: string | null;
   isSettingsActive: boolean;
+  isEmailSettingsActive: boolean;
   canEditConfiguration: boolean;
   isGuideActive: boolean;
   onLogout: () => void;
@@ -457,6 +465,10 @@ function UserMenu({
           Settings
         </Link>
       )}
+      <Link to={routes.settingsEmail} className={isEmailSettingsActive ? activeLinkClass : menuLinkClass}>
+        <Mail className="h-4 w-4" />
+        Email settings
+      </Link>
       <Link to={routes.guide} className={isGuideActive ? activeLinkClass : menuLinkClass}>
         <BookOpen className="h-4 w-4" />
         Guide

@@ -56,6 +56,8 @@ const CampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/co
 const LegacyRunDetailRedirect = lazyWithRetry(() => import('@/features/orchestration/components/runs/LegacyRunDetailRedirect').then(m => ({ default: m.LegacyRunDetailRedirect })));
 const ConnectionsPage = lazyWithRetry(() => import('@/features/admin/integrations/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
 const DatasetDetail = lazyWithRetry(() => import('@/features/orchestration/components/datasets/DatasetDetail').then(m => ({ default: m.DatasetDetail })));
+const EmailSettingsPage = lazyWithRetry(() => import('@/features/accountSettings/email/pages/EmailSettingsPage').then(m => ({ default: m.EmailSettingsPage })));
+const AdminNotificationsPage = lazyWithRetry(() => import('@/features/admin/notifications/pages/AdminNotificationsPage').then(m => ({ default: m.AdminNotificationsPage })));
 
 const ROUTE_FALLBACK = <LoadingState />;
 
@@ -203,7 +205,27 @@ export function Router() {
             <Route path="/inside-sales/orchestration/datasets/:datasetId" element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><DatasetDetail /></Suspense></RequirePermission>} />
           </Route>
 
+          {/* Account-level user settings (no app guard — every signed-in user) */}
+          <Route
+            path={routes.settingsEmail}
+            element={
+              <Suspense fallback={ROUTE_FALLBACK}>
+                <EmailSettingsPage />
+              </Suspense>
+            }
+          />
+
           {/* Admin routes */}
+          <Route
+            path={routes.adminNotifications}
+            element={
+              <RequirePermission action="notifications:manage">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <AdminNotificationsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
           <Route
             path={routes.adminUsers}
             element={

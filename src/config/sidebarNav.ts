@@ -15,6 +15,7 @@ import {
   Plug,
   Sparkles,
   SlidersHorizontal,
+  Bell,
 } from 'lucide-react';
 import { SherlockIcon } from '@/components/ui';
 import { routes } from './routes';
@@ -112,6 +113,13 @@ const ADMIN_SCHEDULED_JOBS_NAV: SidebarNavItem = {
   end: true,
 };
 
+const ADMIN_NOTIFICATIONS_NAV: SidebarNavItem = {
+  to: routes.adminNotifications,
+  icon: Bell,
+  label: 'Notifications',
+  end: true,
+};
+
 const ADMIN_SHERLOCK_NAV: SidebarNavItem = {
   to: routes.adminSherlock,
   icon: SherlockIcon,
@@ -176,6 +184,7 @@ interface AdminNavOptions {
   canManageSchedules?: boolean;
   canManageOrchestration?: boolean;
   canEditConfiguration?: boolean;
+  canManageNotifications?: boolean;
 }
 
 /**
@@ -202,6 +211,7 @@ export function getAdminNavGroups(options: AdminNavOptions): SidebarNavGroup[] {
       title: 'Operations',
       items: gate([
         [options.canManageSchedules, ADMIN_SCHEDULED_JOBS_NAV],
+        [options.canManageNotifications, ADMIN_NOTIFICATIONS_NAV],
         [options.canManageOrchestration, ADMIN_INTEGRATIONS_NAV],
         [options.canEditConfiguration, ADMIN_AI_SETTINGS_NAV],
         [options.canEditConfiguration, ADMIN_LLM_DEFAULTS_NAV],

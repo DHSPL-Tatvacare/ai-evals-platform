@@ -22,10 +22,12 @@ export const routes = {
   adminIntegrations: '/admin/integrations',
   adminLlmProviders: '/admin/llm/providers',
   adminLlmDefaults: '/admin/llm/defaults',
+  adminNotifications: '/admin/notifications',
   adminSherlock: '/admin/sherlock',
   adminSherlockToolCall: (toolCallId: string) => `/admin/sherlock/${toolCallId}`,
   adminSherlockConfig: '/admin/sherlock-config',
   profile: '/profile',
+  settingsEmail: '/settings/email',
   guide: '/guide',
   printReportRun: (reportRunId: string) => `/print/report-runs/${reportRunId}`,
   voiceRx: {

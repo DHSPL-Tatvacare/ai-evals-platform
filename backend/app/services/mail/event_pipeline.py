@@ -32,6 +32,17 @@ EVENT_CALL_SITE: Mapping[EventType, CallSite] = {
 }
 
 
+# Group key for each event — the FE renders sections by this key and resolves
+# its label from copy. Adding a new event = one enum row + one EVENT_GROUP row
+# + one FE copy line. No other surface changes.
+EVENT_GROUP: Mapping[EventType, str] = {
+    EventType.SCHEDULED_JOB_FAILED: "scheduled_job",
+    EventType.SCHEDULED_JOB_COMPLETED: "scheduled_job",
+    EventType.WORKFLOW_RUN_FAILED: "workflow",
+    EventType.WORKFLOW_RUN_COMPLETED: "workflow",
+}
+
+
 async def _scheduled_job_failure_recipients(
     db: AsyncSession,
     *,

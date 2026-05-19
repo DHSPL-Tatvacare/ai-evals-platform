@@ -355,6 +355,8 @@ from app.routes.analytics_crm_schema import router as analytics_crm_schema_route
 from app.routes.cost import router as cost_router, admin_router as cost_admin_router
 from app.routes.analytics_admin import router as analytics_admin_router
 from app.routes.scheduled_jobs import router as scheduled_jobs_router
+from app.routes.notification_subscriptions import router as notification_subscriptions_router
+from app.routes.admin_notifications import router as admin_notifications_router
 from app.routes.orchestration_webhooks import router as orchestration_webhooks_router
 from app.routes.orchestration import router as orchestration_router
 from app.routes.orchestration_cohorts import router as orchestration_cohorts_router
@@ -401,6 +403,8 @@ app.include_router(cost_router)
 app.include_router(cost_admin_router)
 app.include_router(analytics_admin_router)
 app.include_router(scheduled_jobs_router)
+app.include_router(notification_subscriptions_router)
+app.include_router(admin_notifications_router)
 app.include_router(orchestration_webhooks_router)
 app.include_router(orchestration_router)
 app.include_router(orchestration_cohorts_router)
