@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UserMessagePart } from '@/features/sherlock/generated/sherlockContract';
-import { handleFrame } from '@/features/sherlock/sse';
+import { handleFrame, type TurnTerminal } from '@/features/sherlock/sse';
 import {
   selectSessionParts,
   useStreamStore,
 } from '@/features/sherlock/streamStore';
 
-function frame(payload: unknown): string {
-  return `data: ${JSON.stringify(payload)}`;
+function makeFrame(eventName: string, payload: unknown): string {
+  return `event: ${eventName}\ndata: ${JSON.stringify(payload)}`;
 }
 
 function userPart(id: string): UserMessagePart {
@@ -22,6 +22,22 @@ function userPart(id: string): UserMessagePart {
   };
 }
 
+function args(
+  frame: string,
+  options: {
+    sessionId?: string;
+    invalidate?: () => void;
+    onTerminal?: (t: TurnTerminal) => void;
+  } = {},
+) {
+  return {
+    frame,
+    sessionId: options.sessionId ?? 'sess-1',
+    invalidateSnapshot: options.invalidate ?? (() => undefined),
+    onTerminal: options.onTerminal ?? (() => undefined),
+  };
+}
+
 describe('sherlock sse handleFrame', () => {
   beforeEach(() => {
     useStreamStore.setState({
@@ -32,54 +48,65 @@ describe('sherlock sse handleFrame', () => {
     });
   });
 
-  it('parses {kind, seq, part} and applies to the store', () => {
+  it('part_added applies to the store and does not invalidate', () => {
     const invalidate = vi.fn();
-    handleFrame(
-      'sess-1',
-      frame({ kind: 'part_added', seq: 1, part: userPart('u1') }),
-      invalidate,
-    );
+    handleFrame(args(makeFrame('part_added', { seq: 1, part: userPart('u1') }), { invalidate }));
     expect(selectSessionParts('sess-1')(useStreamStore.getState())).toHaveLength(1);
     expect(invalidate).not.toHaveBeenCalled();
   });
 
-  it('invalidates snapshot on malformed JSON', () => {
+  it('malformed JSON triggers snapshot invalidation', () => {
     const invalidate = vi.fn();
-    handleFrame('sess-1', 'data: {bad', invalidate);
+    handleFrame(args('event: part_added\ndata: {bad', { invalidate }));
     expect(invalidate).toHaveBeenCalledOnce();
     expect(selectSessionParts('sess-1')(useStreamStore.getState())).toHaveLength(0);
   });
 
-  it('invalidates snapshot when envelope shape is wrong', () => {
+  it('part frame missing seq/part triggers snapshot invalidation', () => {
     const invalidate = vi.fn();
-    handleFrame('sess-1', frame({ wrong: 'shape' }), invalidate);
+    handleFrame(args(makeFrame('part_added', { wrong: 'shape' }), { invalidate }));
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
-  it('invalidates snapshot when part fails ajv validation', () => {
+  it('part failing ajv validation triggers snapshot invalidation', () => {
     const invalidate = vi.fn();
     handleFrame(
-      'sess-1',
-      frame({ kind: 'part_added', seq: 1, part: { type: 'user_message' /* missing required */ } }),
-      invalidate,
+      args(makeFrame('part_added', { seq: 1, part: { type: 'user_message' /* missing required */ } }), {
+        invalidate,
+      }),
     );
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
-  it('invalidates snapshot when a seq gap is detected', () => {
+  it('seq gap triggers snapshot invalidation', () => {
     useStreamStore.getState().seed('sess-1', [userPart('u0')], 1);
     const invalidate = vi.fn();
-    handleFrame(
-      'sess-1',
-      frame({ kind: 'part_added', seq: 5, part: userPart('u1') }),
-      invalidate,
-    );
+    handleFrame(args(makeFrame('part_added', { seq: 5, part: userPart('u1') }), { invalidate }));
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
-  it('ignores frames with no data: lines', () => {
+  it('unknown event names are ignored without invalidation', () => {
     const invalidate = vi.fn();
-    handleFrame('sess-1', 'event: keepalive', invalidate);
+    handleFrame(args(makeFrame('something_new', { seq: 1 }), { invalidate }));
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('session event is informational and does not touch the store', () => {
+    const invalidate = vi.fn();
+    handleFrame(args(makeFrame('session', { sessionId: 'sess-1' }), { invalidate }));
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(selectSessionParts('sess-1')(useStreamStore.getState())).toHaveLength(0);
+  });
+
+  it('turn_terminal fires onTerminal with status + lastError', () => {
+    const onTerminal = vi.fn();
+    handleFrame(args(makeFrame('turn_terminal', { status: 'error', lastError: 'oops' }), { onTerminal }));
+    expect(onTerminal).toHaveBeenCalledWith({ status: 'error', lastError: 'oops' });
+  });
+
+  it('turn_terminal with unknown status does not fire onTerminal', () => {
+    const onTerminal = vi.fn();
+    handleFrame(args(makeFrame('turn_terminal', { status: 'weird' }), { onTerminal }));
+    expect(onTerminal).not.toHaveBeenCalled();
   });
 });

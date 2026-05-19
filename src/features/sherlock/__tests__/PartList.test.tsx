@@ -83,9 +83,30 @@ const FIXTURES = {
     ...PART_BASE,
     id: 'p-c',
     type: 'chart',
-    artifact: { kind: 'empty', payload: {} },
+    artifact: {
+      kind: 'empty',
+      payload: {
+        kind: 'empty',
+        reason_code: 'CG_EMPTY',
+        title: '',
+        source_question: '',
+        sql_query: '',
+      },
+    },
   } as ChartPart,
-  evidence: { ...PART_BASE, id: 'p-e', type: 'evidence', refs: [] } as EvidencePart,
+  evidence: {
+    ...PART_BASE,
+    id: 'p-e',
+    type: 'evidence',
+    refs: [
+      {
+        ref_id: 'ev-1',
+        source: 'sql_row',
+        locator: { row_index: 0, row_count: 1 },
+        snippet: '{"name":"row"}',
+      },
+    ],
+  } as EvidencePart,
   error: {
     ...PART_BASE,
     id: 'p-err',
@@ -122,7 +143,7 @@ const FIXTURES = {
 describe('PartList', () => {
   it('renders every SherlockPart arm without crashing', () => {
     const parts = Object.values(FIXTURES);
-    const { container } = render(<PartList parts={parts} showStepMarkers />);
+    const { container } = render(<PartList parts={parts} appId="inside-sales" sessionId={null} showStepMarkers />);
     for (const part of parts) {
       const node = container.querySelector(`[data-part-id="${part.id}"]`);
       expect(node, `arm ${part.type} did not render`).not.toBeNull();
@@ -131,7 +152,7 @@ describe('PartList', () => {
 
   it('hides step_start / step_finish by default', () => {
     const parts: SherlockPart[] = [FIXTURES.step_start, FIXTURES.step_finish];
-    const { container } = render(<PartList parts={parts} />);
+    const { container } = render(<PartList parts={parts} appId="inside-sales" sessionId={null} />);
     expect(container.querySelector('[data-part-type="step_start"]')).toBeNull();
     expect(container.querySelector('[data-part-type="step_finish"]')).toBeNull();
   });

@@ -19,24 +19,32 @@ import {
   SubagentBadge,
   ToolChip,
   UserMessage,
-} from './components/placeholders';
+} from './components/parts';
 
 interface PartListProps {
   parts: SherlockPart[];
+  appId: string;
+  sessionId: string | null;
   /** When true, step_start / step_finish markers render (admin trace).
    *  Defaults to false so the chat widget hides turn segmentation noise. */
   showStepMarkers?: boolean;
 }
 
-export function PartList({ parts, showStepMarkers = false }: PartListProps) {
+export function PartList({ parts, appId, sessionId, showStepMarkers = false }: PartListProps) {
   return (
-    <>
-      {parts.map((part) => renderPart(part, showStepMarkers))}
-    </>
+    <div className="flex flex-col gap-2">
+      {parts.map((part) => renderPart(part, { appId, sessionId, showStepMarkers }))}
+    </div>
   );
 }
 
-function renderPart(part: SherlockPart, showStepMarkers: boolean) {
+interface RenderContext {
+  appId: string;
+  sessionId: string | null;
+  showStepMarkers: boolean;
+}
+
+function renderPart(part: SherlockPart, ctx: RenderContext) {
   switch (part.type) {
     case 'user_message':
       return <UserMessage key={part.id} part={part} />;
@@ -51,7 +59,9 @@ function renderPart(part: SherlockPart, showStepMarkers: boolean) {
     case 'reasoning':
       return <ReasoningBlock key={part.id} part={part} />;
     case 'chart':
-      return <ChartCard key={part.id} part={part} />;
+      return (
+        <ChartCard key={part.id} part={part} appId={ctx.appId} sessionId={ctx.sessionId} />
+      );
     case 'evidence':
       return <EvidenceRefs key={part.id} part={part} />;
     case 'error':
@@ -59,8 +69,8 @@ function renderPart(part: SherlockPart, showStepMarkers: boolean) {
     case 'compaction':
       return <CompactionMarker key={part.id} part={part} />;
     case 'step_start':
-      return showStepMarkers ? <StepStartMarker key={part.id} part={part} /> : null;
+      return ctx.showStepMarkers ? <StepStartMarker key={part.id} part={part} /> : null;
     case 'step_finish':
-      return showStepMarkers ? <StepFinishMarker key={part.id} part={part} /> : null;
+      return ctx.showStepMarkers ? <StepFinishMarker key={part.id} part={part} /> : null;
   }
 }

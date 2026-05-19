@@ -57,7 +57,6 @@ class SpecialistRuntimeCapTests(unittest.IsolatedAsyncioTestCase):
 
         parsed = json.loads(raw_result)
         self.assertEqual(parsed['status'], 'error')
-        self.assertIn('cap', parsed['summary'].lower())
         self.assertIn(str(MAX_SPECIALIST_ATTEMPTS), parsed['summary'])
         self.assertEqual(scratch['_submit_sql_attempts'], MAX_SPECIALIST_ATTEMPTS + 1)
 
@@ -79,7 +78,7 @@ class SpecialistRuntimeCapTests(unittest.IsolatedAsyncioTestCase):
         await handler(tool_ctx, '{}')
 
         stashed = scratch.get('_last_data_specialist_attempt')
-        self.assertIsNotNone(stashed)
+        assert stashed is not None
         self.assertEqual(stashed.status, 'execution_error')
         self.assertIn(str(MAX_SPECIALIST_ATTEMPTS), stashed.error_message or '')
 

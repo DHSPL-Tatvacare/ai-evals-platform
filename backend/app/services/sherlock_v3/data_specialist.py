@@ -159,9 +159,9 @@ def _make_submit_sql_handler(
             scratch['_submit_sql_attempts'] = attempt_no
             if attempt_no > MAX_SPECIALIST_ATTEMPTS:
                 cap_message = (
-                    f'data_specialist hit the per-turn cap of '
-                    f'{MAX_SPECIALIST_ATTEMPTS} submit_sql attempts; '
-                    'refusing further attempts on this turn.'
+                    f'Sherlock tried {MAX_SPECIALIST_ATTEMPTS} times and '
+                    f"couldn't get a clean answer. Try rephrasing your "
+                    f'question.'
                 )
                 if emitter is not None:
                     await emitter.emit(ErrorPart(
