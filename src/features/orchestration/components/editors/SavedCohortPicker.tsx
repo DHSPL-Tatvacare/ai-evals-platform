@@ -24,25 +24,19 @@ export function SavedCohortPicker({ value, onChange }: Props) {
   const cfg = value as SavedCohortConfig;
   const { data: cohorts = [] } = useCohorts(appId);
 
-  // Reverse-lookup the cohort that owns the currently-pinned version so the
-  // cohort picker can preselect it.
-  const selectedCohortId = useMemo(() => {
+  // Reverse-lookup the cohort that owns the currently-pinned version. The
+  // list response now carries `versionIds` (every version id this cohort
+  // owns), so a workflow pinned to an older version still pre-selects
+  // correctly — D9 version-pinning case.
+  const resolvedCohortId = useMemo(() => {
     if (!cfg.cohort_definition_version_id) return '';
     for (const c of cohorts) {
-      if (c.latestVersion?.id === cfg.cohort_definition_version_id) return c.id;
+      if (c.versionIds?.includes(cfg.cohort_definition_version_id)) return c.id;
     }
     return '';
   }, [cfg.cohort_definition_version_id, cohorts]);
 
-  const { data: detail } = useCohort(selectedCohortId || null);
-
-  // Pinned version may be older than the cohort's latestVersion — once we
-  // load the detail, prefer its versions list for resolving the cohort id.
-  const resolvedCohortId = useMemo(() => {
-    if (selectedCohortId) return selectedCohortId;
-    if (!cfg.cohort_definition_version_id) return '';
-    return ''; // fallback empty — user re-picks
-  }, [selectedCohortId, cfg.cohort_definition_version_id]);
+  const { data: detail } = useCohort(resolvedCohortId || null);
 
   const cohortOptions = useMemo(
     () =>

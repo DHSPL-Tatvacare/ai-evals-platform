@@ -37,7 +37,12 @@ export function DatasetPicker({ value, onChange }: Props) {
       if (cancelled) return;
       setDatasets(rows);
       if (cfg.dataset_version_id) {
-        const match = rows.find((d) => d.latestVersion?.id === cfg.dataset_version_id);
+        // Match against any version id the dataset owns — pinning an
+        // older version must still pre-select. List response now carries
+        // versionIds for this reason.
+        const match = rows.find((d) =>
+          (d.versionIds ?? []).includes(cfg.dataset_version_id!),
+        );
         if (match) setSelectedDatasetId(match.id);
       }
     });

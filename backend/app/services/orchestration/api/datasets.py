@@ -78,6 +78,7 @@ def _serialize_dataset(
     row: CohortDataset,
     *,
     latest_version: Optional[CohortDatasetVersion] = None,
+    version_ids: Optional[list[uuid.UUID]] = None,
 ) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -94,6 +95,7 @@ def _serialize_dataset(
         "latest_version": (
             _serialize_version(latest_version) if latest_version is not None else None
         ),
+        "version_ids": list(version_ids or []),
     }
 
 
@@ -282,9 +284,10 @@ async def list_datasets(
     if not datasets:
         return []
 
-    # Second round-trip: latest version per dataset_id via DISTINCT ON ordered by
-    # version_number DESC. One query, no N+1. Tenant filter is implicit through
-    # the dataset_id IN (...) restriction (datasets already pre-filtered).
+    # Second round-trip: fetch the (id, version_number, dataset_id) of
+    # every version owned by these datasets. Derive (a) the latest row per
+    # dataset and (b) the full list of version_ids the picker needs to
+    # reverse-resolve an older pinned version.
     dataset_ids = [d.id for d in datasets]
     versions_stmt = (
         select(CohortDatasetVersion)
@@ -293,14 +296,19 @@ async def list_datasets(
             CohortDatasetVersion.dataset_id,
             CohortDatasetVersion.version_number.desc(),
         )
-        .distinct(CohortDatasetVersion.dataset_id)
     )
-    latest_rows = (await db.execute(versions_stmt)).scalars().all()
-    latest_by_ds: dict[uuid.UUID, CohortDatasetVersion] = {
-        v.dataset_id: v for v in latest_rows
-    }
+    version_rows = (await db.execute(versions_stmt)).scalars().all()
+    latest_by_ds: dict[uuid.UUID, CohortDatasetVersion] = {}
+    ids_by_ds: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for v in version_rows:
+        latest_by_ds.setdefault(v.dataset_id, v)
+        ids_by_ds.setdefault(v.dataset_id, []).append(v.id)
     return [
-        _serialize_dataset(d, latest_version=latest_by_ds.get(d.id))
+        _serialize_dataset(
+            d,
+            latest_version=latest_by_ds.get(d.id),
+            version_ids=ids_by_ds.get(d.id, []),
+        )
         for d in datasets
     ]
 
@@ -320,7 +328,11 @@ async def get_dataset(
         )
     ).scalars().all()
     latest = versions[0] if versions else None
-    payload = _serialize_dataset(dataset, latest_version=latest)
+    payload = _serialize_dataset(
+        dataset,
+        latest_version=latest,
+        version_ids=[v.id for v in versions],
+    )
     payload["versions"] = [_serialize_version(v) for v in versions]
     return payload
 

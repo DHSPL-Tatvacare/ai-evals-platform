@@ -52,6 +52,10 @@ export interface CohortResponse {
   updatedAt: string;
   currentPublishedVersionId: string | null;
   latestVersion: CohortVersionResponse | null;
+  /** All version ids owned by this cohort. Used by the source.saved_cohort
+   *  picker to reverse-resolve which cohort owns a pinned (possibly older)
+   *  version_id without an extra round-trip per row. */
+  versionIds: string[];
   usedByWorkflowCount: number;
 }
 

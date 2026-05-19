@@ -104,6 +104,7 @@ def _serialize_cohort(
         "updated_at": c.updated_at,
         "current_published_version_id": c.current_published_version_id,
         "latest_version": _serialize_version(latest) if latest else None,
+        "version_ids": [v.id for v in versions],
         "used_by_workflow_count": used_by_workflow_count,
         "versions": [_serialize_version(v) for v in sorted(versions, key=lambda v: -v.version)],
     }

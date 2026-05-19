@@ -67,6 +67,9 @@ class DatasetResponse(CamelORMModel):
     # Used by the list endpoint so the table can show "row count / imported_at"
     # without a per-row round-trip.
     latest_version: Optional[DatasetVersionResponse] = None
+    # All version ids — lets the source.dataset picker resolve which
+    # dataset owns a pinned (possibly older) version_id.
+    version_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class DatasetDetailResponse(DatasetResponse):

@@ -61,6 +61,10 @@ export interface DatasetResponse {
   createdAt: string;
   updatedAt: string;
   latestVersion: DatasetVersionResponse | null;
+  /** All version ids owned by this dataset. Used by the source.dataset
+   *  picker to reverse-resolve which dataset owns a pinned (possibly
+   *  older) version_id without an extra round-trip per row. */
+  versionIds: string[];
 }
 
 export interface DatasetDetailResponse extends DatasetResponse {

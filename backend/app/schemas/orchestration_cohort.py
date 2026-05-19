@@ -90,6 +90,10 @@ class CohortResponse(CamelORMModel):
     current_published_version_id: Optional[uuid.UUID] = None
     # Inlined latest version for list rendering.
     latest_version: Optional[CohortVersionResponse] = None
+    # All version ids (no bodies). The source-node picker uses this to
+    # resolve which cohort owns a pinned (possibly older) version_id
+    # without an extra round-trip per row.
+    version_ids: list[uuid.UUID] = Field(default_factory=list)
     # Number of distinct workflows whose any version pins any version of this
     # cohort. Drives the "Used by N" badge on the cohorts list page.
     used_by_workflow_count: int = 0
