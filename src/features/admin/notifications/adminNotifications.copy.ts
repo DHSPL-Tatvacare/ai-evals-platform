@@ -36,8 +36,10 @@ export const adminNotificationsCopy = {
       created: 'Added',
       actions: '',
     },
+    requiredBadge: 'Required',
     action: {
       delete: 'Remove subscription',
+      cancel: 'Cancel',
     },
     confirmDelete:
       'Remove this subscription? The user can re-enable it from their own settings.',

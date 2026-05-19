@@ -25,7 +25,7 @@ export interface SendLogListQuery {
   pageSize?: number;
 }
 
-function buildQuery(params: Record<string, unknown>): string {
+export function buildQuery(params: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Mail } from 'lucide-react';
 import type { ColumnDef } from '@/components/ui/DataTable';
 import { DataTable } from '@/components/ui/DataTable';
-import { Pagination } from '@/components/ui/Pagination';
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -171,7 +170,6 @@ export function SendLogTab() {
         />
       )}
 
-      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
     </div>
   );
 }

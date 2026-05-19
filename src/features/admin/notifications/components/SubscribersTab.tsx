@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Trash2, Lock, Users as UsersIcon } from 'lucide-react';
 import type { ColumnDef } from '@/components/ui/DataTable';
 import { DataTable } from '@/components/ui/DataTable';
-import { Pagination } from '@/components/ui/Pagination';
 import { Switch } from '@/components/ui/Switch';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -117,7 +116,7 @@ export function SubscribersTab() {
       render: (row) =>
         row.isRequired ? (
           <Badge variant="primary" icon={Lock}>
-            Required
+            {adminNotificationsCopy.subscribers.requiredBadge}
           </Badge>
         ) : (
           <span className="text-[12px] text-[var(--text-tertiary)]">—</span>
@@ -204,7 +203,7 @@ export function SubscribersTab() {
         title={adminNotificationsCopy.subscribers.action.delete}
         description={adminNotificationsCopy.subscribers.confirmDelete}
         confirmLabel={adminNotificationsCopy.subscribers.action.delete}
-        cancelLabel="Cancel"
+        cancelLabel={adminNotificationsCopy.subscribers.action.cancel}
         variant="danger"
         onClose={() => setPendingDelete(null)}
         onConfirm={() => {
@@ -231,11 +230,6 @@ export function SubscribersTab() {
         isLoading={deleteMutation.isPending}
       />
 
-      <Pagination
-        page={page}
-        totalPages={totalPages}
-        onPageChange={setPage}
-      />
     </div>
   );
 }

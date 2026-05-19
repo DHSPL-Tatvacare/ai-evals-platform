@@ -617,6 +617,14 @@ async def create_user(
     db.add(user)
     await db.flush()
 
+    from app.services.mail.onboarding import provision_required_subscriptions_for_user
+    await provision_required_subscriptions_for_user(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        user_email=user.email,
+    )
+
     await write_audit_log(
         db,
         tenant_id=auth.tenant_id,

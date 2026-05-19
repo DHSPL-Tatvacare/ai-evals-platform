@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiQueryFn } from '@/services/api/queryFn';
-import { adminNotificationsApi, type SendLogListQuery, type SubscriptionListQuery } from './api';
+import {
+  adminNotificationsApi,
+  buildQuery,
+  type SendLogListQuery,
+  type SubscriptionListQuery,
+} from './api';
 import type {
   AdminMailSendList,
   AdminSubscriptionList,
@@ -18,16 +23,6 @@ export const adminNotificationsKeys = {
     [...adminNotificationsKeys.all, 'send-log', q] as const,
 };
 
-function qs(params: Record<string, unknown> | SubscriptionListQuery | SendLogListQuery): string {
-  const search = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === '') continue;
-    search.set(k, String(v));
-  }
-  const out = search.toString();
-  return out ? `?${out}` : '';
-}
-
 export function useNotificationDefaults() {
   return useQuery<NotificationDefaultsResponse>({
     queryKey: adminNotificationsKeys.defaults(),
@@ -41,7 +36,7 @@ export function useAdminSubscriptions(query: SubscriptionListQuery) {
     queryKey: adminNotificationsKeys.subscriptions(query),
     queryFn: () =>
       apiQueryFn<AdminSubscriptionList>(
-        `/api/admin/notifications/subscriptions${qs(query)}`,
+        `/api/admin/notifications/subscriptions${buildQuery(query as Record<string, unknown>)}`,
       ),
   });
 }
@@ -51,7 +46,7 @@ export function useAdminSendLog(query: SendLogListQuery) {
     queryKey: adminNotificationsKeys.sendLog(query),
     queryFn: () =>
       apiQueryFn<AdminMailSendList>(
-        `/api/admin/notifications/send-log${qs(query)}`,
+        `/api/admin/notifications/send-log${buildQuery(query as Record<string, unknown>)}`,
       ),
   });
 }

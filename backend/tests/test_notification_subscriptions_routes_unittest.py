@@ -391,3 +391,60 @@ class TestRecentSends:
         assert "tenant_id" in rendered
         assert "recipient" in rendered
         assert "sent_at" in rendered
+
+
+class TestTenantIsolation:
+    """Every user-self read MUST filter by tenant_id + user_id."""
+
+    @pytest.mark.asyncio
+    async def test_list_filters_by_tenant_and_user(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_result([])
+        await nsub_routes.list_email_settings(auth=auth, db=db)
+        rendered = str(db.executed[0])
+        assert "tenant_id" in rendered
+        assert "user_id" in rendered
+
+    @pytest.mark.asyncio
+    async def test_update_recipient_filters_by_tenant_and_user(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_result([])
+        with patch.object(
+            nsub_routes,
+            "_load_tenant_allowed_domains",
+            new=AsyncMock(return_value=[]),
+        ):
+            await nsub_routes.update_recipient(
+                payload=RecipientUpdate(recipient_email="alice@x.in"),
+                auth=auth,
+                db=db,
+            )
+        rendered = str(db.executed[0])
+        assert "tenant_id" in rendered
+        assert "user_id" in rendered
+
+    @pytest.mark.asyncio
+    async def test_upsert_filters_by_tenant_and_user(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(None)
+        await nsub_routes.upsert_subscription(
+            event_type="scheduled_job.failed",
+            payload=SubscriptionUpdate(is_active=True),
+            auth=auth,
+            db=db,
+        )
+        rendered = str(db.scalar_calls[0])
+        assert "tenant_id" in rendered
+        assert "user_id" in rendered
+
+
+class TestUpdateRecipientNegative:
+    @pytest.mark.asyncio
+    async def test_pydantic_rejects_invalid_email_format(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RecipientUpdate(recipient_email="not-an-email")

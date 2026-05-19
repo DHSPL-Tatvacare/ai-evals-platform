@@ -1,12 +1,4 @@
-"""User-self notification subscriptions + recent-sends.
-
-Powers `/settings/email` (Phase 5A). Admin surfaces land in Phase 5B under
-`/api/admin/*`.
-
-Permission model: any authenticated user can read + write their OWN
-subscription rows. Every read filters by `tenant_id == auth.tenant_id`
-AND `user_id == auth.user_id`. No bypass.
-"""
+"""User-self notification subscriptions + recent-sends."""
 from __future__ import annotations
 
 import uuid
@@ -39,8 +31,7 @@ router = APIRouter(
 )
 
 
-# Re-exported behind an underscore so tests can monkeypatch without poking
-# at the upstream module path. Production callers use the same callable.
+# Re-exported as a test-monkeypatch seam — production calls the same function.
 _load_tenant_allowed_domains = load_tenant_allowed_domains
 
 
@@ -67,10 +58,6 @@ async def list_email_settings(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ) -> EmailSettingsResponse:
-    """Return one row per known EventType for the current user.
-
-    Missing rows render as inactive with `recipient_email = user.email`.
-    """
     result = await db.execute(
         select(NotificationSubscription).where(
             NotificationSubscription.tenant_id == auth.tenant_id,
@@ -101,7 +88,6 @@ async def update_recipient(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ) -> EmailSettingsResponse:
-    """Bulk-update every subscription owned by the current user."""
     new_recipient = payload.recipient_email.strip()
     allowed = await _load_tenant_allowed_domains(db, auth.tenant_id)
     if not is_email_domain_allowed(new_recipient, allowed):
@@ -140,7 +126,6 @@ async def upsert_subscription(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationSubscriptionRow:
-    """Create or toggle a subscription for the current user."""
     if event_type not in _VALID_EVENT_TYPES:
         raise HTTPException(status_code=400, detail="Unknown event type.")
     et_enum = EventType(event_type)
@@ -187,7 +172,6 @@ async def list_recent_sends(
     db: AsyncSession = Depends(get_db),
     limit: int = 50,
 ) -> list[RecentSendRow]:
-    """Last 7 days of mail send-log rows addressed to the current user."""
     capped_limit = max(1, min(limit, 200))
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     result = await db.execute(

@@ -1,9 +1,4 @@
-"""Admin notification management: defaults, subscribers, send-log.
-
-Permission: `notifications:manage`. All reads/writes are tenant-scoped via
-`auth.tenant_id`. The `always-notify` admin list uses subscription rows with
-`user_id IS NULL` + `is_required=true` so the Phase 4 resolver picks them up.
-"""
+"""Admin notification management: defaults, subscribers, send-log."""
 from __future__ import annotations
 
 import uuid

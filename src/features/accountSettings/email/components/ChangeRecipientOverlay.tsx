@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { emailSettingsCopy } from '../emailSettings.copy';
 import { recipientSchema } from '../emailSettings.schema';
 
@@ -74,14 +75,14 @@ export function ChangeRecipientOverlay({
           <span className="text-[12px] font-medium text-[var(--text-secondary)]">
             {emailSettingsCopy.recipientLabel}
           </span>
-          <input
+          <Input
             type="email"
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
               if (localError) setLocalError(null);
             }}
-            className="mt-1.5 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:border-[var(--interactive-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--interactive-primary)]/30"
+            className="mt-1.5"
             placeholder="name@workspace.com"
             autoFocus
           />

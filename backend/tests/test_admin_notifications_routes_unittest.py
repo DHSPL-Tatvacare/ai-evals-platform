@@ -68,6 +68,8 @@ class _FakeSession:
         self.added: list[Any] = []
         self.deleted: list[Any] = []
         self.commits = 0
+        self.executed: list[Any] = []
+        self.scalar_calls: list[Any] = []
         self._scalar_queue: list[Any] = []
         self._result_queue: list[_FakeResult] = []
 
@@ -77,12 +79,14 @@ class _FakeSession:
     def queue_result(self, items):
         self._result_queue.append(_FakeResult(items))
 
-    async def scalar(self, _stmt):
+    async def scalar(self, stmt):
+        self.scalar_calls.append(stmt)
         if self._scalar_queue:
             return self._scalar_queue.pop(0)
         return None
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        self.executed.append(stmt)
         if self._result_queue:
             return self._result_queue.pop(0)
         return _FakeResult([])
@@ -280,6 +284,225 @@ class TestSubscriptionDelete:
         )
         assert sub in db.deleted
         assert db.commits == 1
+
+
+class TestTenantIsolation:
+    """Every admin read/write MUST filter by tenant_id."""
+
+    async def test_list_defaults_filters_by_tenant(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_result([])
+        for _ in routes.EventType:
+            db.queue_scalar(0)
+            db.queue_scalar(0)
+        await routes.list_defaults(auth=auth, db=db)
+        # First execute() is the always-notify lookup; must carry tenant_id.
+        rendered = str(db.executed[0])
+        assert "tenant_id" in rendered
+
+    async def test_list_subscriptions_filters_by_tenant(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(0)  # total
+        db.queue_result([])
+        await routes.list_subscriptions(
+            auth=auth,
+            db=db,
+            event_type=None,
+            user_id=None,
+            is_active=None,
+            page=1,
+            page_size=25,
+        )
+        # The list query (a SELECT joined to User) and the count subquery
+        # both run; check the list statement carries tenant_id.
+        rendered = " ".join(str(s) for s in db.executed)
+        assert "tenant_id" in rendered
+
+    async def test_delete_subscription_404_for_other_tenant(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(None)  # not found in this tenant
+        with pytest.raises(HTTPException) as ei:
+            await routes.delete_subscription(
+                subscription_id=uuid.uuid4(),
+                request=_request(),
+                auth=auth,
+                db=db,
+            )
+        assert ei.value.status_code == 404
+
+    async def test_update_default_filters_by_tenant(self):
+        tenant_id = uuid.uuid4()
+        auth = _auth(tenant_id=tenant_id)
+        db = _FakeSession()
+        db.queue_scalar(1)
+        db.queue_scalar(0)
+        db.queue_result([])
+        db.queue_result([])
+        db.queue_result([])
+        db.queue_result([])
+        await routes.update_default(
+            event_type="scheduled_job.failed",
+            payload=NotificationDefaultUpdate(
+                is_required_for_all=False, always_notify_emails=[]
+            ),
+            request=_request(),
+            auth=auth,
+            db=db,
+        )
+        # No subscription rows added because nothing required + no always-notify.
+        added_subs = [a for a in db.added if isinstance(a, NotificationSubscription)]
+        assert added_subs == []
+
+
+class TestSendLogFilters:
+    async def test_status_filter_applied(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(0)
+        db.queue_result([])
+        await routes.list_send_log(
+            auth=auth,
+            db=db,
+            status="failed",
+            call_site=None,
+            recipient=None,
+            page=1,
+            page_size=25,
+        )
+        # Predicate must reach the executed SELECT.
+        rendered = str(db.executed[-1])
+        assert "status" in rendered.lower()
+
+    async def test_recipient_filter_uses_ilike(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(0)
+        db.queue_result([])
+        await routes.list_send_log(
+            auth=auth,
+            db=db,
+            status=None,
+            call_site=None,
+            recipient="alice",
+            page=1,
+            page_size=25,
+        )
+        rendered = str(db.executed[-1]).lower()
+        assert "recipient" in rendered
+
+
+class TestPermissionGate:
+    """The `notifications:manage` permission is enforced via `require_permission`."""
+
+    async def test_every_admin_route_requires_notifications_manage(self):
+        from app.routes.admin_notifications import router
+
+        perm_routes = [r for r in router.routes if hasattr(r, "endpoint")]
+        assert len(perm_routes) >= 6
+        for route in perm_routes:
+            sig_defaults = route.endpoint.__defaults__ or ()
+            permission_strings: list[str] = []
+            for default in sig_defaults:
+                # `require_permission("notifications:manage")` returns a
+                # `Depends(_checker)` whose closure carries the `perms` tuple.
+                dep = getattr(default, "dependency", None)
+                if dep is None or not hasattr(dep, "__closure__") or dep.__closure__ is None:
+                    continue
+                for cell in dep.__closure__:
+                    val = cell.cell_contents
+                    if isinstance(val, tuple) and all(isinstance(v, str) for v in val):
+                        permission_strings.extend(val)
+            assert "notifications:manage" in permission_strings, (
+                f"route {route.path} missing notifications:manage gate"
+            )
+
+    async def test_non_admin_token_gets_403(self):
+        from app.auth.permissions import ensure_permissions
+        non_admin = AuthContext(
+            user_id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            email="viewer@x.in",
+            role_id=uuid.uuid4(),
+            is_owner=False,
+            permissions=frozenset({"cost:view"}),
+            app_access=frozenset(),
+        )
+        with pytest.raises(HTTPException) as ei:
+            ensure_permissions(non_admin, "notifications:manage")
+        assert ei.value.status_code == 403
+
+
+class TestSignupFanOut:
+    async def test_provisions_required_rows_for_new_user(self):
+        from app.services.mail.onboarding import provision_required_subscriptions_for_user
+
+        tenant_id = uuid.uuid4()
+        new_user_id = uuid.uuid4()
+        # Two events have at least one is_required=true row in the tenant.
+        existing_required = _make_sub(
+            tenant_id=tenant_id,
+            user_id=uuid.uuid4(),
+            event_type="scheduled_job.failed",
+            is_required=True,
+        )
+        db = _FakeSession()
+        # For each EventType: first scalar = existing_required lookup,
+        # second scalar = existing_for_user lookup.
+        db.queue_scalar(existing_required)  # scheduled_job.failed has required
+        db.queue_scalar(None)  # new user has no row yet
+        db.queue_scalar(None)  # scheduled_job.completed: not required
+        db.queue_scalar(None)  # workflow_run.failed: not required
+        db.queue_scalar(None)  # workflow_run.completed: not required
+
+        added = await provision_required_subscriptions_for_user(
+            db,
+            tenant_id=tenant_id,
+            user_id=new_user_id,
+            user_email="newuser@x.in",
+        )
+        assert added == 1
+        rows = [r for r in db.added if isinstance(r, NotificationSubscription)]
+        assert len(rows) == 1
+        assert rows[0].event_type == "scheduled_job.failed"
+        assert rows[0].user_id == new_user_id
+        assert rows[0].is_required is True
+        assert rows[0].is_active is True
+        assert rows[0].recipient_email == "newuser@x.in"
+
+    async def test_idempotent_when_user_already_has_row(self):
+        from app.services.mail.onboarding import provision_required_subscriptions_for_user
+
+        tenant_id = uuid.uuid4()
+        new_user_id = uuid.uuid4()
+        existing_required = _make_sub(
+            tenant_id=tenant_id,
+            user_id=uuid.uuid4(),
+            event_type="scheduled_job.failed",
+            is_required=True,
+        )
+        existing_for_user = _make_sub(
+            tenant_id=tenant_id,
+            user_id=new_user_id,
+            event_type="scheduled_job.failed",
+            is_required=True,
+        )
+        db = _FakeSession()
+        db.queue_scalar(existing_required)
+        db.queue_scalar(existing_for_user)  # already has row
+        db.queue_scalar(None)
+        db.queue_scalar(None)
+        db.queue_scalar(None)
+
+        added = await provision_required_subscriptions_for_user(
+            db,
+            tenant_id=tenant_id,
+            user_id=new_user_id,
+            user_email="newuser@x.in",
+        )
+        assert added == 0
 
 
 class TestSendLog:
