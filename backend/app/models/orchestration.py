@@ -624,7 +624,8 @@ class CohortDatasetVersion(Base):
             "id_strategy IN ('column','uuid')", name="ck_dataset_id_strategy"
         ),
         CheckConstraint(
-            "source_type IN ('csv','gsheet','api')", name="ck_dataset_source_type"
+            "source_type IN ('csv','xlsx','gsheet','api')",
+            name="ck_dataset_source_type",
         ),
         CheckConstraint(
             "id_strategy <> 'column' OR id_column IS NOT NULL",

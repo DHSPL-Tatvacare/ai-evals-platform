@@ -22,7 +22,6 @@ to HTTP. Service stays HTTP-agnostic.
 """
 from __future__ import annotations
 
-import io
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -39,7 +38,7 @@ from app.models.orchestration import (
     Workflow,
     WorkflowVersion,
 )
-from app.services.orchestration.datasets.csv_importer import parse_csv
+from app.services.orchestration.datasets.dataset_validator import ImportedDataset
 
 
 class DatasetNotFound(LookupError):
@@ -407,31 +406,21 @@ async def import_version(
     *,
     tenant_id: uuid.UUID,
     dataset_id: uuid.UUID,
-    file_handle: io.TextIOBase,
+    imported: ImportedDataset,
+    source_type: str,
     source_filename: Optional[str],
     source_byte_size: Optional[int],
     id_strategy: str,
     id_column: Optional[str],
     imported_by: uuid.UUID,
 ) -> dict[str, Any]:
-    # Lock the dataset row so concurrent uploads serialise on version_number.
     dataset = await _load_dataset(
         db, tenant_id=tenant_id, dataset_id=dataset_id, for_update=True,
     )
 
-    # Parse first — if the CSV is malformed we don't want to bump the
-    # version number. CsvImportError propagates untouched (route maps to 400).
-    imported = parse_csv(
-        file_handle, id_strategy=id_strategy, id_column=id_column,
-    )
-
     next_version = (
         await db.scalar(
-            select(
-                # COALESCE(MAX(version_number), 0) + 1
-                # — done in Python from MAX() to keep the SQL portable.
-                CohortDatasetVersion.version_number
-            )
+            select(CohortDatasetVersion.version_number)
             .where(CohortDatasetVersion.dataset_id == dataset.id)
             .order_by(CohortDatasetVersion.version_number.desc())
             .limit(1)
@@ -444,7 +433,7 @@ async def import_version(
         dataset_id=dataset.id,
         tenant_id=tenant_id,
         version_number=next_version,
-        source_type="csv",
+        source_type=source_type,
         source_filename=source_filename,
         source_byte_size=source_byte_size,
         row_count=len(imported.rows),

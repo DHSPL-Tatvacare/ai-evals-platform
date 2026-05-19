@@ -71,6 +71,15 @@ export interface DatasetDetailResponse extends DatasetResponse {
   versions: DatasetVersionResponse[];
 }
 
+export interface DatasetFormatResponse {
+  sourceType: string;
+  extensions: string[];
+  mimeTypes: string[];
+  label: string;
+  maxUploadBytes: number;
+  supportsClientPreview: boolean;
+}
+
 export interface CreateDatasetBody {
   appId: string;
   name: string;
@@ -154,6 +163,8 @@ export const orchestrationDatasetsApi = {
     }),
   remove: (id: string) =>
     apiRequest<void>(`/api/orchestration/datasets/${id}`, { method: 'DELETE' }),
+  formats: () =>
+    apiRequest<DatasetFormatResponse[]>('/api/orchestration/datasets/formats'),
   uploadVersion: (
     datasetId: string,
     file: File,

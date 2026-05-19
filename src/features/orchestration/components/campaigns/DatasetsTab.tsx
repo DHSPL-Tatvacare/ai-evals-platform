@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ExternalLink, Trash2 } from 'lucide-react';
 
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { FilterPills } from '@/components/ui/FilterPills';
+import {
+  RowActionsMenu,
+  type RowAction,
+} from '@/components/ui/RowActionsMenu';
+import { VisibilityBadge } from '@/components/ui/VisibilityBadge';
 import { useCurrentAppId } from '@/hooks';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
-import { ApiError } from '@/services/api/client';
 import {
-  orchestrationDatasetsApi,
-  type DatasetResponse,
-} from '@/services/api/orchestrationDatasets';
+  useDatasets,
+  useDeleteDataset,
+} from '@/features/orchestration/queries/datasets';
+import { ApiError } from '@/services/api/client';
+import { type DatasetResponse } from '@/services/api/orchestrationDatasets';
 import { notificationService } from '@/services/notifications';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -53,8 +58,6 @@ export function DatasetsTab({
   const _canManage = canManageOrchestration(user);
   void _canManage;
 
-  const [rows, setRows] = useState<DatasetResponse[]>([]);
-  const [loading, setLoading] = useState(true);
   const [creatingLocal, setCreatingLocal] = useState(false);
   const creating = showCreateProp ?? creatingLocal;
   const setCreating = (next: boolean) => {
@@ -63,42 +66,18 @@ export function DatasetsTab({
   };
   const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [deleteTarget, setDeleteTarget] = useState<DatasetResponse | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await orchestrationDatasetsApi.list(appId, visibility);
-      setRows(result);
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Failed to load datasets';
-      notificationService.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [appId, visibility]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const { data: rows = [], isLoading } = useDatasets(appId, visibility);
+  const deleteDataset = useDeleteDataset();
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    setDeleting(true);
     try {
-      await orchestrationDatasetsApi.remove(deleteTarget.id);
+      await deleteDataset.mutateAsync(deleteTarget.id);
       notificationService.success(`Deleted "${deleteTarget.name}"`);
       setDeleteTarget(null);
-      await refresh();
     } catch (err) {
-      // 409 surfaces a workflow-binding list inside `detail`; show the
-      // server's exact message so the operator knows which workflow(s)
-      // are still bound.
       const msg =
         err instanceof ApiError
           ? err.message
@@ -106,8 +85,6 @@ export function DatasetsTab({
             ? err.message
             : 'Failed to delete dataset';
       notificationService.error(msg);
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -115,29 +92,34 @@ export function DatasetsTab({
     {
       key: 'name',
       header: 'Name',
+      width: 'min-w-[260px] max-w-[420px]',
       render: (d) => (
         <div className="flex flex-col gap-0.5">
           <Link
             to={orchestrationRoutes.datasetDetail(d.id)}
-            className="text-[var(--text-primary)] hover:text-[var(--color-brand-accent)]"
+            className="truncate text-[var(--text-primary)] hover:text-[var(--color-brand-accent)]"
             onClick={(e) => e.stopPropagation()}
           >
             {d.name}
           </Link>
           {d.description ? (
-            <span className="line-clamp-1 text-[11px] text-[var(--text-secondary)]">
+            <span className="line-clamp-1 text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
               {d.description}
             </span>
           ) : null}
-          <Badge variant={d.visibility === 'shared' ? 'info' : 'neutral'} size="sm">
-            {d.visibility}
-          </Badge>
         </div>
       ),
     },
     {
+      key: 'visibility',
+      header: 'Visibility',
+      width: 'w-[120px]',
+      render: (d) => <VisibilityBadge visibility={d.visibility} compact />,
+    },
+    {
       key: 'latestVersion',
       header: 'Latest',
+      width: 'w-[90px]',
       render: (d) =>
         d.latestVersion ? (
           <span className="font-mono text-[var(--text-primary)]">
@@ -150,9 +132,10 @@ export function DatasetsTab({
     {
       key: 'rowCount',
       header: 'Rows',
+      width: 'w-[100px]',
       render: (d) =>
         d.latestVersion ? (
-          <span className="text-[var(--text-primary)]">
+          <span className="tabular-nums text-[var(--text-primary)]">
             {d.latestVersion.rowCount.toLocaleString()}
           </span>
         ) : (
@@ -162,6 +145,8 @@ export function DatasetsTab({
     {
       key: 'importedAt',
       header: 'Imported',
+      width: 'min-w-[160px]',
+      textBehavior: 'nowrap',
       render: (d) => (
         <span className="text-[var(--text-secondary)]">
           {fmtDate(d.latestVersion?.importedAt ?? null)}
@@ -169,36 +154,38 @@ export function DatasetsTab({
       ),
     },
     {
-      key: '_actions',
-      header: '',
-      width: '160px',
+      key: 'actions',
+      header: 'Actions',
+      width: 'w-[80px]',
+      headerClassName: 'text-right',
+      cellClassName: 'text-right',
       render: (d) => {
         const canEdit = canEditOrchestrationAsset(user, d.createdBy);
+        const actions: RowAction[] = [
+          {
+            id: 'open',
+            icon: ExternalLink,
+            label: 'Open',
+            onClick: () => navigate(orchestrationRoutes.datasetDetail(d.id)),
+          },
+          {
+            id: 'delete',
+            icon: Trash2,
+            label: 'Delete',
+            danger: true,
+            disabled: !canEdit,
+            onClick: () => setDeleteTarget(d),
+          },
+        ];
         return (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(orchestrationRoutes.datasetDetail(d.id));
-            }}
-          >
-            Open
-          </Button>
-          <Button
-            size="sm"
-            variant="danger-outline"
-            disabled={!canEdit}
-            onClick={(e) => {
-              e.stopPropagation();
-              setDeleteTarget(d);
-            }}
-          >
-            Delete
-          </Button>
-        </div>
-      );
+          <div className="flex items-center justify-end">
+            <RowActionsMenu
+              actions={actions}
+              open={openMenuId === d.id}
+              onOpenChange={(open) => setOpenMenuId(open ? d.id : null)}
+            />
+          </div>
+        );
       },
     },
   ];
@@ -220,9 +207,10 @@ export function DatasetsTab({
             data={rows}
             columns={columns}
             keyExtractor={(d) => d.id}
-            loading={loading}
+            loading={isLoading}
             emptyTitle="No datasets yet"
             emptyDescription="Create a cohort dataset to feed campaigns with a CSV-based recipient list."
+            onRowClick={(d) => navigate(orchestrationRoutes.datasetDetail(d.id))}
           />
         </div>
       </div>
@@ -233,16 +221,15 @@ export function DatasetsTab({
         onClose={() => setCreating(false)}
         onCreated={(dataset) => {
           setCreating(false);
-          // Land on the detail page so the operator can immediately upload
-          // a first version — the create endpoint returns a dataset with
-          // ``latestVersion: null`` and the detail view owns the upload UX.
           navigate(orchestrationRoutes.datasetDetail(dataset.id));
         }}
       />
 
       <ConfirmDialog
         isOpen={Boolean(deleteTarget)}
-        onClose={() => (deleting ? null : setDeleteTarget(null))}
+        onClose={() =>
+          deleteDataset.isPending ? null : setDeleteTarget(null)
+        }
         onConfirm={handleDelete}
         title="Delete dataset"
         description={
@@ -250,9 +237,9 @@ export function DatasetsTab({
             ? `Delete "${deleteTarget.name}" and all its versions? This cannot be undone. Workflows bound to this dataset will be blocked from running.`
             : ''
         }
-        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        confirmLabel={deleteDataset.isPending ? 'Deleting…' : 'Delete'}
         variant="danger"
-        isLoading={deleting}
+        isLoading={deleteDataset.isPending}
       />
     </>
   );
