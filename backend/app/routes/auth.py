@@ -36,18 +36,19 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 async def _check_allowed_domains(email: str, tenant_id, db: AsyncSession) -> None:
     """Raise 403 if the tenant restricts email domains and this email doesn't match."""
-    config = await db.scalar(
-        select(TenantConfiguration).where(TenantConfiguration.tenant_id == tenant_id)
+    from app.services.tenant_policy import (
+        is_email_domain_allowed,
+        load_tenant_allowed_domains,
     )
-    if not config or not config.allowed_domains:
-        return  # No restrictions
-    email_lower = email.strip().lower()
-    for domain in config.allowed_domains:
-        if email_lower.endswith(domain.lower()):
-            return
+
+    allowed = await load_tenant_allowed_domains(db, tenant_id)
+    if not allowed:
+        return
+    if is_email_domain_allowed(email, allowed):
+        return
     raise HTTPException(
         403,
-        detail=f"Email domain not allowed. Permitted domains: {', '.join(config.allowed_domains)}",
+        detail=f"Email domain not allowed. Permitted domains: {', '.join(allowed)}",
     )
 
 

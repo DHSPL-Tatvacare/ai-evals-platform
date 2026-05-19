@@ -996,6 +996,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
             # Re-fetch job in a fresh session and mark as failed.
             # Retry up to 3 times so a transient DB error doesn't
             # leave the job stuck in "running" forever.
+            emit_args: dict | None = None
             for attempt in range(3):
                 try:
                     async with async_session() as db2:
@@ -1072,6 +1073,26 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                 j,
                                 worker_id=WORKER_INSTANCE_ID,
                                 retry_delay_seconds=transition.get("retry_delay_seconds"),
+                            )
+                            # Capture scalars while db2 is still open, then exit
+                            # the session before opening a fresh one for the
+                            # notification fan-out. Avoids holding two pooled
+                            # connections per failure.
+                            if j.status == "failed" and j.scheduled_job_id is not None:
+                                emit_args = {
+                                    "tenant_id": j.tenant_id,
+                                    "definition_id": j.scheduled_job_id,
+                                    "run_id": j.id,
+                                    "error_message": j.error_message,
+                                    "completed_at": j.completed_at,
+                                }
+                    if emit_args is not None:
+                        try:
+                            await _emit_scheduled_job_failed(**emit_args)
+                        except Exception as emit_err:
+                            logger.warning(
+                                "scheduled_job_failed_emit_event_error: %s",
+                                emit_err,
                             )
                     break
                 except Exception as db_err:
@@ -1917,6 +1938,81 @@ async def handle_resume_waiting_cohorts(
         n = await poll_and_resume(db)
         await db.commit()
         return {"resumed": n}
+
+
+async def _emit_scheduled_job_failed(
+    *,
+    tenant_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    run_id: uuid.UUID,
+    error_message: str | None,
+    completed_at: datetime | None,
+) -> None:
+    """Fan a SCHEDULED_JOB_FAILED event out via the mail subsystem."""
+    from zoneinfo import ZoneInfo
+
+    from app.models.scheduled_job import ScheduledJobDefinition
+    from app.services.mail.event_pipeline import EventType, emit_event
+
+    failed_at = completed_at or datetime.now(timezone.utc)
+    failed_at_display = failed_at.astimezone(ZoneInfo("Asia/Kolkata")).strftime(
+        "%d %b %Y, %H:%M IST"
+    )
+    error_summary_raw = error_message or ""
+    truncated = len(error_summary_raw) > 500
+    error_summary_display = (
+        f"{error_summary_raw[:500]}…" if truncated else error_summary_raw
+    )
+
+    app_base = (settings.APP_BASE_URL or "").rstrip("/")
+    job_url = (
+        f"{app_base}/admin/scheduled-jobs"
+        f"?history={definition_id}&run={run_id}"
+    )
+
+    async with async_session() as db3:
+        # Tenant-filtered load — never resolve a definition owned by
+        # another tenant even if IDs were crossed.
+        defn = await db3.scalar(
+            select(ScheduledJobDefinition).where(
+                ScheduledJobDefinition.id == definition_id,
+                ScheduledJobDefinition.tenant_id == tenant_id,
+            )
+        )
+        job_name = defn.name if defn else "(removed schedule)"
+        await emit_event(
+            db3,
+            tenant_id=tenant_id,
+            event_type=EventType.SCHEDULED_JOB_FAILED,
+            payload={
+                "job_name": job_name,
+                "run_id": str(run_id),
+                "failed_at_display": failed_at_display,
+                "error_summary": error_summary_display,
+                "job_url": job_url,
+            },
+            resource_type="scheduled_job_definition",
+            resource_id=definition_id,
+            correlation_id=str(run_id),
+        )
+        await db3.commit()
+
+
+@register_job_handler(
+    "send-mail",
+    queue_class="standard",
+    priority=20,
+    retry_safe=False,
+)
+async def handle_send_mail(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Render + send + log a transactional email via the mail subsystem."""
+    from app.services.mail.send_mail_job import run_send_mail_job
+
+    return await run_send_mail_job(
+        job_id, params, tenant_id=tenant_id, user_id=user_id,
+    )
 
 
 

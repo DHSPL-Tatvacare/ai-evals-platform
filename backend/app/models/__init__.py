@@ -85,13 +85,14 @@ from app.models.tenant_llm_credential import TenantLlmCredential
 from app.models.tenant_llm_deployment import TenantLlmDeployment
 from app.models.tenant_call_site_default import TenantCallSiteDefault
 from app.models.mail_send_log import MailSendLog
+from app.models.notification_subscription import NotificationSubscription
 
 __all__ = [
     "Base",
     "Tenant", "TenantConfiguration", "User", "IdentityRefreshToken", "IdentityInviteLink", "IdentityInviteLinkUse",
     "Application", "AccessRole", "AccessRoleApplicationGrant", "AccessRolePermission", "AuditEventLog",
     "EvaluationDataset", "ApplicationUploadedFile", "LibraryPromptDefinition", "LibraryOutputSchemaDefinition", "Evaluator",
-    "MailSendLog",
+    "MailSendLog", "NotificationSubscription",
     "ChatSession", "ChatMessage", "ApplicationEventHistory", "ApplicationSetting", "LibraryAdversarialTestCase", "ApplicationTag",
     "BackgroundJob",
     "EvaluationRun", "EvaluationRunThreadResult", "EvaluationRunAdversarialResult",
