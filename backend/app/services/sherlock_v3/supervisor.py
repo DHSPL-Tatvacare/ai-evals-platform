@@ -101,12 +101,12 @@ Every specialist call uses a SpecialistBrief input and returns a
 SpecialistResult output. The input string you pass to data_specialist
 or authoring_specialist MUST be a SpecialistBrief JSON:
 
-  {
+  {{
     "question":       "<self-contained analytics question>",
-    "scope":          {"tenant_id":"...","app_id":"...","user_id":"..."},
+    "scope":          {{"tenant_id":"...","app_id":"...","user_id":"..."}},
     "prior_attempts": [<Attempt>, ...],
     "retry_hint":     "<optional one-line correction guidance>"
-  }
+  }}
 
 On the first dispatch leave ``prior_attempts`` empty and ``retry_hint``
 null. The scope values are already known to you from the toolbelt and
@@ -114,10 +114,10 @@ state block — copy them in verbatim.
 
 A SpecialistResult comes back with this shape:
 
-  {
+  {{
     "kind":"data","status":"ok|empty|error|partial|needs_clarification",
     "summary":"...","attempts":[<Attempt>],"artifacts":[...],"evidence":[...]
-  }
+  }}
 
 # Retry rule (status=error)
 

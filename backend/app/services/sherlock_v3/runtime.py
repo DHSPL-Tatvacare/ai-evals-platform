@@ -15,17 +15,21 @@ from app.services.orchestration_authoring.builder_snapshot import BuilderSnapsho
 from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 from app.services.sherlock_v3.contracts import (
     AssistantTextPart,
+    Attempt,
     CompactionPart,
     ErrorPart,
     ReasoningPart,
+    RetryPart,
     SpecialistBrief,
     SpecialistScope,
     StepFinishPart,
     StepStartPart,
     SubtaskPart,
+    UserMessagePart,
     new_part_id,
 )
 from app.services.sherlock_v3.emitter import PartEmitter
+from app.services.sherlock_v3.limits import MAX_SPECIALIST_ATTEMPTS
 from app.services.sherlock_v3.grounding import (
     GroundingContext,
     VerifiedExampleRef,
@@ -37,9 +41,6 @@ from app.services.sherlock_v3.state_store import (
 from app.services.sherlock_v3.supervisor import build_supervisor
 
 logger = logging.getLogger(__name__)
-
-
-MAX_SPECIALIST_ATTEMPTS = 3
 
 
 @dataclass
@@ -186,6 +187,13 @@ async def run_turn(
         created_at=0,
         turn_id=str(ctx.turn_id),
     ))
+    await ctx.emitter.emit(UserMessagePart(
+        id=new_part_id(),
+        chat_session_id='',
+        seq=0,
+        created_at=0,
+        text=user_message,
+    ))
 
     try:
         usage, last_response_id = await _stream_once(
@@ -331,7 +339,22 @@ async def _emit_part_for_sdk_event(event: Any, ctx: SherlockTurnContext) -> None
             tool_call = getattr(event, 'item', None)
             specialist = _tool_call_name(tool_call)
             call_id = _tool_call_call_id(tool_call) or f'call_{uuid.uuid4().hex[:12]}'
-            brief = _tool_call_brief(tool_call, ctx=ctx)
+            counts = ctx.scratch.setdefault('_specialist_dispatch_counts', {})
+            counts[specialist] = counts.get(specialist, 0) + 1
+            attempt_number = counts[specialist]
+            if attempt_number > 1:
+                prior = ctx.scratch.get('_last_data_specialist_attempt') if specialist == 'data_specialist' else None
+                if isinstance(prior, Attempt):
+                    await emitter.emit(RetryPart(
+                        id=new_part_id(),
+                        chat_session_id='',
+                        seq=0,
+                        created_at=0,
+                        specialist=specialist,
+                        attempt_number=attempt_number,
+                        failed_attempt=prior,
+                    ))
+            brief = await _tool_call_brief(tool_call, ctx=ctx)
             await emitter.emit(SubtaskPart(
                 id=new_part_id(),
                 chat_session_id='',
@@ -406,7 +429,8 @@ def _tool_call_call_id(item: Any) -> str:
     return str(getattr(raw, 'call_id', '') or '')
 
 
-def _tool_call_brief(item: Any, *, ctx: SherlockTurnContext) -> SpecialistBrief:
+async def _tool_call_brief(item: Any, *, ctx: SherlockTurnContext) -> SpecialistBrief:
+    """Parse the supervisor's tool args into a typed SpecialistBrief, emitting an ErrorPart when the payload does not match — so a malformed brief is visible in the timeline instead of silently downgraded."""
     raw = getattr(item, 'raw_item', item)
     args = raw.get('arguments') if isinstance(raw, dict) else getattr(raw, 'arguments', None)
     scope = SpecialistScope(
@@ -414,27 +438,57 @@ def _tool_call_brief(item: Any, *, ctx: SherlockTurnContext) -> SpecialistBrief:
         app_id=ctx.app_id,
         user_id=str(ctx.user_id),
     )
-    if isinstance(args, str) and args.strip():
-        try:
-            payload = json.loads(args)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
-            try:
-                brief = SpecialistBrief.model_validate({
-                    'question': payload.get('question') or payload.get('task') or payload.get('input') or '',
-                    'scope': scope.model_dump(),
-                    'prior_attempts': payload.get('prior_attempts') or [],
-                    'retry_hint': payload.get('retry_hint'),
-                })
-                return brief
-            except Exception:  # noqa: BLE001
-                pass
-            return SpecialistBrief(
-                question=str(payload.get('task') or payload.get('input') or payload.get('question') or args)[:2000],
-                scope=scope,
-            )
-    return SpecialistBrief(question=str(args or '')[:2000], scope=scope)
+    emitter = ctx.emitter
+    if not (isinstance(args, str) and args.strip()):
+        return SpecialistBrief(question=str(args or '')[:2000], scope=scope)
+    try:
+        payload = json.loads(args)
+    except json.JSONDecodeError as exc:
+        if emitter is not None:
+            await emitter.emit(ErrorPart(
+                id=new_part_id(),
+                chat_session_id='',
+                seq=0,
+                created_at=0,
+                source='supervisor',
+                message=f'SpecialistBrief was not valid JSON: {exc.msg}',
+                recoverable=True,
+            ))
+        return SpecialistBrief(question=args[:2000], scope=scope)
+    if not isinstance(payload, dict):
+        if emitter is not None:
+            await emitter.emit(ErrorPart(
+                id=new_part_id(),
+                chat_session_id='',
+                seq=0,
+                created_at=0,
+                source='supervisor',
+                message='SpecialistBrief must be a JSON object',
+                recoverable=True,
+            ))
+        return SpecialistBrief(question=str(payload)[:2000], scope=scope)
+    try:
+        return SpecialistBrief.model_validate({
+            'question': payload.get('question') or '',
+            'scope': scope.model_dump(),
+            'prior_attempts': payload.get('prior_attempts') or [],
+            'retry_hint': payload.get('retry_hint'),
+        })
+    except Exception as exc:  # noqa: BLE001
+        if emitter is not None:
+            await emitter.emit(ErrorPart(
+                id=new_part_id(),
+                chat_session_id='',
+                seq=0,
+                created_at=0,
+                source='supervisor',
+                message=f'SpecialistBrief failed validation: {exc}',
+                recoverable=True,
+            ))
+        return SpecialistBrief(
+            question=str(payload.get('question') or payload.get('task') or args)[:2000],
+            scope=scope,
+        )
 
 
 def _compaction_payload(raw_type: str, data: Any) -> dict[str, Any] | None:

@@ -18,6 +18,9 @@ from app.services.sherlock_v3.contracts import (
     Artifact,
     Attempt,
     AttemptStatus,
+    ChartPart,
+    ErrorPart,
+    EvidencePart,
     EvidenceRef,
     SpecialistMeta,
     SpecialistResult,
@@ -29,6 +32,7 @@ from app.services.sherlock_v3.contracts import (
 )
 from app.services.sherlock_v3.data_specialist_prompt import build_data_specialist_prompt
 from app.services.sherlock_v3.grounding import GroundingContext
+from app.services.sherlock_v3.limits import MAX_SPECIALIST_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +153,38 @@ def _make_submit_sql_handler(
         sdk_call_id = getattr(ctx, 'tool_call_id', None) or f'call_{uuid.uuid4().hex[:12]}'
         emitter = getattr(sherlock_ctx, 'emitter', None)
 
+        scratch = getattr(sherlock_ctx, 'scratch', None)
+        if isinstance(scratch, dict):
+            attempt_no = scratch.get('_submit_sql_attempts', 0) + 1
+            scratch['_submit_sql_attempts'] = attempt_no
+            if attempt_no > MAX_SPECIALIST_ATTEMPTS:
+                cap_message = (
+                    f'data_specialist hit the per-turn cap of '
+                    f'{MAX_SPECIALIST_ATTEMPTS} submit_sql attempts; '
+                    'refusing further attempts on this turn.'
+                )
+                if emitter is not None:
+                    await emitter.emit(ErrorPart(
+                        id=new_part_id(),
+                        chat_session_id='',
+                        seq=0,
+                        created_at=0,
+                        source='data_specialist',
+                        message=cap_message,
+                        recoverable=False,
+                    ))
+                cap_attempt = Attempt(
+                    sql='',
+                    verdict=_invalid_arg_verdict(),
+                    status='execution_error',
+                    error_message=cap_message,
+                )
+                _stash_last_attempt(sherlock_ctx, cap_attempt)
+                return _result_json_from_attempt(
+                    attempt=cap_attempt, app_id=app_id, started=started,
+                    summary=cap_message,
+                )
+
         try:
             parsed = json.loads(args) if args.strip() else {}
         except json.JSONDecodeError as exc:
@@ -167,6 +203,7 @@ def _make_submit_sql_handler(
                 emitter=emitter, tool_part=tool_part, started=started,
                 error_message=attempt.error_message or 'submit_sql args invalid',
             )
+            _stash_last_attempt(sherlock_ctx, attempt)
             return _result_json_from_attempt(
                 attempt=attempt, app_id=app_id, started=started,
                 summary=attempt.error_message or 'invalid arguments',
@@ -202,6 +239,7 @@ def _make_submit_sql_handler(
                 emitter=emitter, tool_part=tool_part, started=started,
                 error_message=attempt.error_message or 'catalog load failed',
             )
+            _stash_last_attempt(sherlock_ctx, attempt)
             return _result_json_from_attempt(
                 attempt=attempt, app_id=app_id, started=started,
                 summary=attempt.error_message or 'catalog load failed',
@@ -305,6 +343,7 @@ async def _run_workbench_pipeline(
             emitter=emitter, tool_part=tool_part, started=started,
             error_message=summary,
         )
+        _stash_last_attempt(sherlock_ctx, attempt)
         return _result_json_from_attempt(
             attempt=attempt, app_id=app_id, started=started, summary=summary,
         )
@@ -335,6 +374,7 @@ async def _run_workbench_pipeline(
             emitter=emitter, tool_part=tool_part, started=started,
             error_message=summary,
         )
+        _stash_last_attempt(sherlock_ctx, attempt)
         return _result_json_from_attempt(
             attempt=attempt, app_id=app_id, started=started, summary=summary,
         )
@@ -361,6 +401,7 @@ async def _run_workbench_pipeline(
             emitter=emitter, tool_part=tool_part, started=started,
             error_message=summary,
         )
+        _stash_last_attempt(sherlock_ctx, attempt)
         return _result_json_from_attempt(
             attempt=attempt, app_id=app_id, started=started, summary=summary,
         )
@@ -389,6 +430,7 @@ async def _run_workbench_pipeline(
             emitter=emitter, tool_part=tool_part, started=started,
             error_message=summary,
         )
+        _stash_last_attempt(sherlock_ctx, attempt)
         return _result_json_from_attempt(
             attempt=attempt, app_id=app_id, started=started, summary=summary,
         )
@@ -429,6 +471,24 @@ async def _run_workbench_pipeline(
     )
     artifact_models = [Artifact.model_validate(a) for a in artifacts_raw]
     evidence_models = [EvidenceRef.model_validate(e) for e in evidence_raw]
+    _stash_last_attempt(sherlock_ctx, attempt)
+    if emitter is not None:
+        for artifact_model in artifact_models:
+            await emitter.emit(ChartPart(
+                id=new_part_id(),
+                chat_session_id='',
+                seq=0,
+                created_at=0,
+                artifact=artifact_model,
+            ))
+        if evidence_models:
+            await emitter.emit(EvidencePart(
+                id=new_part_id(),
+                chat_session_id='',
+                seq=0,
+                created_at=0,
+                refs=evidence_models,
+            ))
     await _finalize_tool_part_completed(
         emitter=emitter, tool_part=tool_part, started=started,
         title=chart_title or summary,
@@ -625,6 +685,13 @@ def _result_json_from_attempt(
         ),
     )
     return result.model_dump_json()
+
+
+def _stash_last_attempt(sherlock_ctx: Any, attempt: Attempt) -> None:
+    """Persist the most-recent Attempt where runtime can read it to build a RetryPart on the next dispatch."""
+    scratch = getattr(sherlock_ctx, 'scratch', None)
+    if isinstance(scratch, dict):
+        scratch['_last_data_specialist_attempt'] = attempt
 
 
 # ─────────────────────── chart pipeline ───────────────────────
