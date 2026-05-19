@@ -3,9 +3,19 @@ import { Copy, Ruler, Save } from 'lucide-react';
 import { Button, Tooltip } from '@/components/ui';
 import { notificationService } from '@/services/notifications';
 import { reportsApi } from '@/services/api/reportsApi';
-import { buildComposedReportOutline } from '../chatWidgetHelpers';
 import type { BlueprintPart, SaveToastPart } from '../types';
 import { getSectionTypeMeta } from './sectionTypeMeta';
+
+function buildComposedReportOutline(report: {
+  reportName: string;
+  sections: BlueprintPart['sections'];
+}): string {
+  const lines = report.sections.map((section) => {
+    const title = section.title?.trim() || section.type;
+    return `- ${title} (${section.type})`;
+  });
+  return [report.reportName, ...lines].join('\n');
+}
 
 interface BlueprintCardProps {
   part: BlueprintPart;

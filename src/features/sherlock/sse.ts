@@ -37,9 +37,17 @@ export interface TurnTerminal {
   lastError: string | null;
 }
 
+export interface StreamSession {
+  sessionId: string;
+  provider: string;
+  model: string;
+}
+
 export interface StreamTurnOptions {
   appId: string;
-  sessionId: string;
+  /** Null when starting a brand-new conversation; the backend will mint one and
+   *  echo it on the `session` frame. */
+  sessionId: string | null;
   turnId: string;
   /** Required for `operation: 'send'`; must be absent for `operation: 'resume'`. */
   message?: string;
@@ -48,6 +56,9 @@ export interface StreamTurnOptions {
   operation?: 'send' | 'resume';
   resumeFromSeq?: number;
   queryClient: QueryClient;
+  /** Fires once with the backend-resolved session metadata (always before any
+   *  Part frame). The orchestrator uses it to commit the new sessionId. */
+  onSession?(session: StreamSession): void;
   /** Optional terminal callback for the host (status pill, error toast, etc.). */
   onTerminal?(payload: TurnTerminal): void;
 }
@@ -73,14 +84,53 @@ export function streamTurn(options: StreamTurnOptions): TurnStreamControls {
     rejectDone = reject;
   });
 
+  let resolvedSessionId: string | null = options.sessionId;
+  const pendingFrames: string[] = [];
+
   const invalidateSnapshot = () => {
+    if (!resolvedSessionId) return;
     void options.queryClient.invalidateQueries({
-      queryKey: sherlockPartsQueryKeys.sessionParts(options.sessionId),
+      queryKey: sherlockPartsQueryKeys.sessionParts(resolvedSessionId),
     });
   };
 
   const setStatus = useStreamStore.getState().setStatus;
   setStatus('streaming');
+
+  const drainFrame = (frame: string) => {
+    if (!resolvedSessionId) {
+      pendingFrames.push(frame);
+      return;
+    }
+    handleFrame({
+      frame,
+      sessionId: resolvedSessionId,
+      invalidateSnapshot,
+      onTerminal: finalize,
+      onSession: (session) => {
+        if (!resolvedSessionId) {
+          resolvedSessionId = session.sessionId;
+          options.onSession?.(session);
+          // Drain any frames we received before the session frame arrived.
+          const queued = pendingFrames.splice(0);
+          for (const queuedFrame of queued) {
+            handleFrame({
+              frame: queuedFrame,
+              sessionId: resolvedSessionId,
+              invalidateSnapshot,
+              onTerminal: finalize,
+              onSession: () => {},
+            });
+          }
+        } else if (session.sessionId !== resolvedSessionId) {
+          resolvedSessionId = session.sessionId;
+          options.onSession?.(session);
+        } else {
+          options.onSession?.(session);
+        }
+      },
+    });
+  };
 
   const finalize = (payload: TurnTerminal) => {
     if (resolved) return;
@@ -151,12 +201,7 @@ export function streamTurn(options: StreamTurnOptions): TurnStreamControls {
         while (boundary >= 0) {
           const frame = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
-          handleFrame({
-            frame,
-            sessionId: options.sessionId,
-            invalidateSnapshot,
-            onTerminal: finalize,
-          });
+          drainFrame(frame);
           boundary = buffer.indexOf('\n\n');
         }
       }
@@ -198,6 +243,7 @@ interface HandleFrameArgs {
   sessionId: string;
   invalidateSnapshot(): void;
   onTerminal(payload: TurnTerminal): void;
+  onSession?(session: StreamSession): void;
 }
 
 export function handleFrame({
@@ -205,6 +251,7 @@ export function handleFrame({
   sessionId,
   invalidateSnapshot,
   onTerminal,
+  onSession,
 }: HandleFrameArgs): void {
   let eventName = 'message';
   const dataLines: string[] = [];
@@ -231,7 +278,8 @@ export function handleFrame({
     return;
   }
   if (eventName === 'session') {
-    // Session metadata frame — informational; nothing to apply.
+    const session = readSession(payload);
+    if (session) onSession?.(session);
     return;
   }
   if (eventName !== 'part_added' && eventName !== 'part_updated') {
@@ -272,6 +320,18 @@ function isPartFramePayload(
     typeof v.part === 'object' &&
     v.part !== null
   );
+}
+
+function readSession(value: unknown): StreamSession | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const sessionId = typeof v.sessionId === 'string' ? v.sessionId : null;
+  if (!sessionId) return null;
+  return {
+    sessionId,
+    provider: typeof v.provider === 'string' ? v.provider : 'openai',
+    model: typeof v.model === 'string' ? v.model : '',
+  };
 }
 
 function readTerminal(value: unknown): TurnTerminal | null {
