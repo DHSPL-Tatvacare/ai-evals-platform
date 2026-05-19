@@ -295,7 +295,8 @@ async def create_cohort(
         status="draft",
     )
     db.add(version)
-    await db.flush()
+    await db.commit()
+    await db.refresh(cohort)
     return _serialize_cohort(cohort, versions=[version], used_by_workflow_count=0)
 
 
@@ -366,7 +367,7 @@ async def update_cohort(
     if active is not None:
         cohort.active = active
     cohort.updated_at = datetime.now(timezone.utc)
-    await db.flush()
+    await db.commit()
     return await get_cohort(db, tenant_id=tenant_id, cohort_id=cohort_id)
 
 
@@ -396,7 +397,7 @@ async def delete_cohort(
         )
     cohort.active = False
     cohort.updated_at = datetime.now(timezone.utc)
-    await db.flush()
+    await db.commit()
 
 
 # ─── version operations ─────────────────────────────────────────────────────
@@ -431,7 +432,7 @@ async def create_draft_version(
         status="draft",
     )
     db.add(row)
-    await db.flush()
+    await db.commit()
     return _serialize_version(row)
 
 
@@ -456,7 +457,7 @@ async def edit_draft_version(
     version.lookback_hours = payload.get("lookback_hours")
     version.lookback_column = payload.get("lookback_column")
     version.consent_gate_channel = payload.get("consent_gate_channel")
-    await db.flush()
+    await db.commit()
     return _serialize_version(version)
 
 
@@ -471,7 +472,7 @@ async def publish_version(
     """Flip a draft version to published AND point the cohort's
     ``current_published_version_id`` at it inside one transaction. The
     deferred FK on ``cohort_definitions.current_published_version_id`` fires
-    at commit, tolerating the in-progress state.
+    at COMMIT, so both UPDATEs share the same commit that releases it.
     """
     version = await _load_version(
         db, tenant_id=tenant_id, cohort_id=cohort_id, version_id=version_id,
@@ -482,17 +483,17 @@ async def publish_version(
         )
 
     now = datetime.now(timezone.utc)
-    async with db.begin_nested():
-        await db.execute(
-            update(CohortDefinitionVersion)
-            .where(CohortDefinitionVersion.id == version_id)
-            .values(status="published", published_by=published_by, published_at=now)
-        )
-        await db.execute(
-            update(CohortDefinition)
-            .where(CohortDefinition.id == cohort_id)
-            .values(current_published_version_id=version_id, updated_at=now)
-        )
+    await db.execute(
+        update(CohortDefinitionVersion)
+        .where(CohortDefinitionVersion.id == version_id)
+        .values(status="published", published_by=published_by, published_at=now)
+    )
+    await db.execute(
+        update(CohortDefinition)
+        .where(CohortDefinition.id == cohort_id)
+        .values(current_published_version_id=version_id, updated_at=now)
+    )
+    await db.commit()
 
     refreshed = await _load_version(
         db, tenant_id=tenant_id, cohort_id=cohort_id, version_id=version_id,
