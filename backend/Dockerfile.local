@@ -22,6 +22,14 @@ COPY . .
 # Create uploads directory
 RUN mkdir -p /app/uploads
 
+# Match prod boot: entrypoint applies pending Alembic migrations (gated by
+# the advisory lock in run_alembic_with_lock) before execing the CMD. The
+# CMD differs from prod by adding ``--reload`` so editing files under the
+# mounted ``./backend/app`` volume hot-reloads uvicorn in place.
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8721
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8721", "--reload"]
