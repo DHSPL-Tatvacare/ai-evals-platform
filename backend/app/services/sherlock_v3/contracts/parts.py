@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.services.sherlock_v3.contracts.artifact import Artifact
 from app.services.sherlock_v3.contracts.brief import Attempt, SpecialistBrief
@@ -180,3 +180,16 @@ SherlockPart = Annotated[
 def new_part_id() -> PartID:
     """Generate a fresh Part identifier with a typed prefix."""
     return f'prt_{uuid.uuid4().hex}'
+
+
+SHERLOCK_PART_ADAPTER: TypeAdapter[Any] = TypeAdapter(SherlockPart)
+
+
+def sherlock_part_json_schema() -> dict[str, Any]:
+    """Emit the JSON Schema the frontend codegen + ajv validator consume.
+
+    Stable across invocations — Pydantic produces deterministic output for
+    a frozen model set, which is what the byte-identical drift gate relies
+    on (mirrors ``chart_payload_json_schema`` in chart_contract.py).
+    """
+    return SHERLOCK_PART_ADAPTER.json_schema()

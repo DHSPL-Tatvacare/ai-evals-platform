@@ -24,6 +24,7 @@ from app.services.sherlock_v3.contracts.evidence import (
     EvidenceSource,
 )
 from app.services.sherlock_v3.contracts.parts import (
+    SHERLOCK_PART_ADAPTER,
     AssistantTextPart,
     CallID,
     ChartPart,
@@ -45,6 +46,7 @@ from app.services.sherlock_v3.contracts.parts import (
     ToolStateRunning,
     UserMessagePart,
     new_part_id,
+    sherlock_part_json_schema,
 )
 from app.services.sherlock_v3.contracts.result import (
     ResultKind,
@@ -81,8 +83,9 @@ __all__ = [
     # parts
     'AssistantTextPart', 'CallID', 'ChartPart', 'CompactionPart',
     'ErrorPart', 'EvidencePart', 'PartID', 'ReasoningPart', 'RetryPart',
-    'SherlockPart', 'StepFinishPart', 'StepStartPart', 'SubtaskPart',
-    'ToolPart', 'ToolState', 'ToolStateCompleted', 'ToolStateError',
-    'ToolStatePending', 'ToolStateRunning', 'UserMessagePart',
-    'new_part_id',
+    'SHERLOCK_PART_ADAPTER', 'SherlockPart', 'StepFinishPart',
+    'StepStartPart', 'SubtaskPart', 'ToolPart', 'ToolState',
+    'ToolStateCompleted', 'ToolStateError', 'ToolStatePending',
+    'ToolStateRunning', 'UserMessagePart', 'new_part_id',
+    'sherlock_part_json_schema',
 ]

@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "codegen:chart-contract": "PYTHONPATH=backend python scripts/codegen/generate_chart_contract.py && node scripts/codegen/generate_chart_contract.js"
+    "codegen:chart-contract": "PYTHONPATH=backend python scripts/codegen/generate_chart_contract.py && node scripts/codegen/generate_chart_contract.js",
+    "codegen:sherlock-contract": "PYTHONPATH=backend python scripts/codegen/generate_sherlock_contract.py && node scripts/codegen/generate_sherlock_contract.js"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
