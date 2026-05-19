@@ -105,6 +105,43 @@ class SherlockConversationTurn(Base, TenantUserMixin, TimestampMixin):
     )
 
 
+class SherlockPart(Base, TenantUserMixin):
+    """One typed row per emit through PartEmitter — payload shape is identical to SSE wire + React prop."""
+
+    __tablename__ = 'sherlock_parts'
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    chat_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('platform.chat_sessions.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    app_id: Mapped[str] = mapped_column(Text, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint('chat_session_id', 'seq', name='uq_sherlock_parts_session_seq'),
+        Index('idx_sherlock_parts_session_seq', 'chat_session_id', 'seq'),
+        Index('idx_sherlock_parts_type', 'type'),
+        Index(
+            'idx_sherlock_parts_call_id',
+            'call_id',
+            postgresql_where=text('call_id IS NOT NULL'),
+        ),
+        Index(
+            'idx_sherlock_parts_tenant_created',
+            'tenant_id', 'created_at',
+        ),
+        {"schema": "platform"},
+    )
+
+
 class SherlockState(Base):
     """v3 — small structured cross-turn state, one row per chat_session.
 

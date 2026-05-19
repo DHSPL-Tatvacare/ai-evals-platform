@@ -419,6 +419,7 @@ async def _run_workbench_pipeline(
         artifacts=artifacts, evidence=evidence,
         sherlock_ctx=sherlock_ctx, arguments=arguments,
         executed_sql=safe_sql,
+        sdk_call_id=sdk_call_id,
     )
 
 

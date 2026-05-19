@@ -37,12 +37,14 @@ only source of truth.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import sqlglot
 import sqlglot.expressions as exp
 from sqlglot.errors import ParseError
 
+from app.services.chat_engine.scope import (
+    ScopeBindings as _ScopeBindings,
+    compute_scope_bindings as _compute_scope_bindings,
+)
 from app.services.chat_engine.sql_bouncer import (
     _UNIVERSAL_COLUMNS,
     _DIALECT,
@@ -55,20 +57,6 @@ from app.services.chat_engine.workbench_catalog import (
     WorkbenchCatalog,
     WorkbenchTable,
 )
-
-
-@dataclass(slots=True)
-class _ScopeBindings:
-    """Per-SELECT-scope view of what columns resolve to where.
-
-    ``catalog_aliases``: alias (or bare name) → manifest table name, for
-        every catalog table directly in this scope's FROM/JOINs.
-    ``cte_aliases``: names that refer to CTEs / derived subqueries in
-        scope; references qualified by these are pass-through.
-    """
-
-    catalog_aliases: dict[str, str]
-    cte_aliases: set[str]
 
 
 def lower_sql(sql: str, catalog: WorkbenchCatalog) -> str:
@@ -153,76 +141,6 @@ def lower_sql(sql: str, catalog: WorkbenchCatalog) -> str:
 
     expanded = root.transform(_resolve, copy=True)
     return expanded.sql(dialect=_DIALECT)
-
-
-def _compute_scope_bindings(select_node: exp.Select) -> _ScopeBindings:
-    """Walk one SELECT's immediate FROM + JOINs to build its binding.
-
-    ONLY this scope's direct sources — does NOT recurse into nested
-    SELECTs (those compute their own bindings when the walker reaches
-    them).
-    """
-    catalog_aliases: dict[str, str] = {}
-    cte_aliases: set[str] = set()
-
-    # CTEs declared by this select's WITH clause (or any ancestor).
-    for cte in _ctes_in_scope(select_node):
-        cte_aliases.add(cte.lower())
-
-    # sqlglot's From stores the single base source as .this and ALSO
-    # cross-join sources in .expressions (``FROM a, b`` puts ``a`` in
-    # .this and ``b`` in the first JOIN). Joins live in select.args.joins.
-    sources: list[exp.Expression] = []
-    from_clause = select_node.args.get('from')
-    if isinstance(from_clause, exp.From):
-        if isinstance(from_clause.this, exp.Expression):
-            sources.append(from_clause.this)
-        sources.extend(from_clause.expressions)
-    for join in select_node.args.get('joins') or []:
-        if isinstance(join, exp.Join):
-            this = join.this
-            if isinstance(this, exp.Expression):
-                sources.append(this)
-
-    for source in sources:
-        if isinstance(source, exp.Table):
-            name = (source.name or '').lower()
-            if not name:
-                continue
-            if name in cte_aliases:
-                # FROM a CTE — record the alias as a CTE handle so
-                # qualified references to it pass through.
-                alias = (source.alias or source.name or '').lower()
-                if alias:
-                    cte_aliases.add(alias)
-                continue
-            alias = (source.alias or source.name or '').lower()
-            catalog_aliases.setdefault(alias, name)
-        elif isinstance(source, exp.Subquery):
-            # Derived subquery — register its alias as a CTE-like
-            # handle. Its inner SELECT gets its own scope when the
-            # walker reaches it.
-            alias = (source.alias_or_name or '').lower()
-            if alias:
-                cte_aliases.add(alias)
-
-    return _ScopeBindings(catalog_aliases=catalog_aliases, cte_aliases=cte_aliases)
-
-
-def _ctes_in_scope(select_node: exp.Select) -> list[str]:
-    """Return CTE names visible from this select (declared on it OR any
-    ancestor query). Uniform handling means a reference to ``x`` inside
-    a CTE body still resolves to the enclosing CTE name."""
-    names: list[str] = []
-    node: exp.Expression | None = select_node
-    while node is not None:
-        with_arg = node.args.get('with') if hasattr(node, 'args') else None
-        if isinstance(with_arg, exp.With):
-            for cte in with_arg.expressions or []:
-                if isinstance(cte, exp.CTE):
-                    names.append(cte.alias_or_name)
-        node = node.parent
-    return names
 
 
 def _expand_expr(expr_sql: str, qualifier: str | None) -> exp.Expression:
