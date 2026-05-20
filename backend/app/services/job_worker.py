@@ -1845,6 +1845,39 @@ async def handle_finalize_run_cancel(
 
 
 @register_job_handler(
+    "orchestration-waiting-tail-sweep",
+    queue_class="standard",
+    priority=10,
+    retry_safe=True,
+    # Platform-wide daily seal across all tenants (app_id=""). platform_managed so
+    # the user-facing registry doesn't advertise a workload users can't create
+    # (ScheduledJobCreate enforces app_id min_length=1); the seed path writes the
+    # system-tenant row directly.
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Waiting-tail TTL sweep",
+    schedule_description=(
+        "Aborts recipients still waiting after a workflow run completed beyond its TTL. "
+        "Seed creates a default 02:00 UTC schedule under the system tenant."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
+async def handle_waiting_tail_sweep(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Abort recipients parked in 'waiting' past their completed run's TTL."""
+    from app.services.orchestration.cancel.waiting_tail_sweep import (
+        sweep_waiting_tail_ttl,
+    )
+
+    async with async_session() as db:
+        swept = await sweep_waiting_tail_ttl(db)
+        await db.commit()
+        return {"recipients_aborted": swept}
+
+
+@register_job_handler(
     "fire-orchestration-trigger",
     queue_class="standard",
     priority=5,

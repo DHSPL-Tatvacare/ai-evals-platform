@@ -13,6 +13,7 @@ from app.models.mixins.shareable import Visibility
 from app.models.orchestration import (
     Workflow,
     WorkflowRun,
+    WorkflowRunCancelAudit,
     WorkflowRunNodeStep,
     WorkflowRunRecipientAction,
     WorkflowRunRecipientOverride,
@@ -238,6 +239,25 @@ async def list_actions(
     if action_type:
         stmt = stmt.where(WorkflowRunRecipientAction.action_type == action_type)
     stmt = stmt.order_by(WorkflowRunRecipientAction.created_at.desc()).limit(limit).offset(offset)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def list_cancel_audits(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> list[WorkflowRunCancelAudit]:
+    stmt = (
+        select(WorkflowRunCancelAudit)
+        .where(
+            WorkflowRunCancelAudit.run_id == run_id,
+            WorkflowRunCancelAudit.tenant_id == tenant_id,
+        )
+        # id tiebreaker keeps ordering stable when finalize writes a batch of
+        # audits in one commit (shared created_at).
+        .order_by(WorkflowRunCancelAudit.created_at.asc(), WorkflowRunCancelAudit.id.asc())
+    )
     return list((await db.execute(stmt)).scalars().all())
 
 

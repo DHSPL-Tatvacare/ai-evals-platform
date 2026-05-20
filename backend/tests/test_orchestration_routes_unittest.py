@@ -8,6 +8,7 @@ workflow rows remain editable; system rows stay read-only).
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -22,6 +23,7 @@ from app.main import app as fastapi_app
 from app.models.orchestration import (
     Workflow,
     WorkflowRun,
+    WorkflowRunCancelAudit,
     WorkflowRunRecipientOverride,
     WorkflowTrigger,
     WorkflowVersion,
@@ -743,4 +745,49 @@ async def test_cancel_unknown_run_returns_404(client):
     r = await client.post(
         f"/api/orchestration/runs/{uuid.uuid4()}/cancel", json={"reason": "operator"},
     )
+    assert r.status_code == 404
+
+
+# ─── Cancel audits read ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_cancel_audits_returns_rows_ordered(client, db_session, route_tenant_id):
+    run = await _seed_running_run(db_session, route_tenant_id)
+    conn_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    # Insert newest-first so a passing order assertion proves the query sorts by
+    # created_at asc rather than echoing insertion order.
+    db_session.add(WorkflowRunCancelAudit(
+        id=uuid.uuid4(), run_id=run.id, tenant_id=route_tenant_id,
+        provider_connection_id=conn_id, outcome="noop_already_terminal",
+        provider_message="msg-newer", created_at=now,
+    ))
+    db_session.add(WorkflowRunCancelAudit(
+        id=uuid.uuid4(), run_id=run.id, tenant_id=route_tenant_id,
+        provider_connection_id=conn_id, outcome="cancelled",
+        provider_message="msg-older", created_at=now - timedelta(seconds=30),
+    ))
+    await db_session.flush()
+
+    r = await client.get(f"/api/orchestration/runs/{run.id}/cancel-audits")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [row["outcome"] for row in body] == ["cancelled", "noop_already_terminal"]
+    assert body[0]["runId"] == str(run.id)
+    assert body[0]["providerConnectionId"] == str(conn_id)
+    assert "createdAt" in body[0]
+
+
+@pytest.mark.asyncio
+async def test_list_cancel_audits_empty_when_none(client, db_session, route_tenant_id):
+    run = await _seed_running_run(db_session, route_tenant_id)
+    r = await client.get(f"/api/orchestration/runs/{run.id}/cancel-audits")
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_cancel_audits_unknown_run_returns_404(client):
+    r = await client.get(f"/api/orchestration/runs/{uuid.uuid4()}/cancel-audits")
     assert r.status_code == 404

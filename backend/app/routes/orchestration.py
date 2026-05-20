@@ -28,6 +28,7 @@ from app.schemas.orchestration import (
     ActionResponse,
     ActionTemplateResponse,
     ActionTemplateUpsertRequest,
+    CancelAuditRead,
     CancelRunRequest,
     CloneSystemWorkflowRequest,
     CohortSourceResponse,
@@ -772,6 +773,20 @@ async def cancel_run(
         raise HTTPException(status_code=404, detail="run not found")
     await db.commit()
     return receipt
+
+
+@router.get("/runs/{run_id}/cancel-audits", response_model=list[CancelAuditRead])
+async def list_run_cancel_audits(
+    run_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Provider-cancel outcomes written by finalize-run-cancel. The Stop receipt
+    panel polls this; rows appearing means the async finalize ran."""
+    await _load_and_gate_run(db, auth, run_id)
+    return await run_service.list_cancel_audits(
+        db, tenant_id=auth.tenant_id, run_id=run_id,
+    )
 
 
 @router.post(

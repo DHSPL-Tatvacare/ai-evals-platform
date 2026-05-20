@@ -80,6 +80,8 @@ class Workflow(ShareableMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Seconds a recipient may stay 'waiting' after run completion before the sweep aborts it; NULL → sweep default.
+    max_wait_after_completion_seconds: Mapped[Optional[int]] = mapped_column(Integer)
     user_id = synonym("created_by")
 
 

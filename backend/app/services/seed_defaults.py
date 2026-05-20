@@ -3332,6 +3332,9 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     from app.services.analytics.signal_derivation.schedule_seed import (
         seed_signal_derivation_schedule,
     )
+    from app.services.orchestration.cancel.schedule_seed import (
+        seed_waiting_tail_sweep_schedule,
+    )
 
     logger.info("Checking seed defaults...")
     await seed_apps(session)
@@ -3345,6 +3348,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await seed_orchestration_defaults(session)
     await seed_model_pricing(session)
     await seed_cost_rollup_schedule(session)
+    await seed_waiting_tail_sweep_schedule(session)
     inserted_sigdef = await seed_default_signal_definitions(session)
     if inserted_sigdef:
         logger.info("Seeded default signal definitions (rows=%d)", inserted_sigdef)
