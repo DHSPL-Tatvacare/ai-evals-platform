@@ -1,11 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AppFeaturesConfig } from '@/types';
 
-/**
- * Declarative gating for a settings tab. Each tab states the two signals that
- * decide whether a user sees it; the resolver reads the platform's existing
- * app-config + permission systems — there is no parallel gate.
- */
+// A tab's gating signals; resolveSettingsTabs reads the existing app-config + permission systems, never a parallel gate.
 export interface SettingsTabSpec {
   id: string;
   label: string;

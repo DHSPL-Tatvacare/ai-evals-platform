@@ -3,6 +3,7 @@ import { Lock } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { LoadingState } from '@/components/ui/LoadingState';
+import { Alert } from '@/components/ui/Alert';
 import { cn } from '@/utils/cn';
 import { emailSettingsCopy } from '../emailSettings.copy';
 import { EMAIL_REGEX } from '../emailSettings.schema';
@@ -71,10 +72,10 @@ export function NotificationsSettingsTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-[13px] text-[var(--text-secondary)]">{emailSettingsCopy.subtitle}</p>
+      <Alert variant="info">{emailSettingsCopy.subtitle}</Alert>
 
-      <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
-        <div className="min-w-0 shrink-0">
+      <section className="flex items-center justify-between gap-6 rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3.5">
+        <div className="min-w-0">
           <label htmlFor="notification-recipient" className="block text-[13px] font-medium text-[var(--text-primary)]">
             {emailSettingsCopy.recipientLabel}
           </label>
@@ -93,7 +94,7 @@ export function NotificationsSettingsTab({
           value={recipient}
           onChange={(e) => setRecipient(e.target.value)}
           placeholder="name@workspace.com"
-          className={cn('h-9 min-w-[260px] flex-1', recipientInvalid && 'border-[var(--color-error)]')}
+          className={cn('h-9 w-[280px] shrink-0', recipientInvalid && 'border-[var(--color-error)]')}
           aria-invalid={recipientInvalid}
         />
       </section>

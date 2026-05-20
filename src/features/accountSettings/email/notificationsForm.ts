@@ -59,7 +59,8 @@ export async function saveNotifications(
 
   for (const toggle of form.toggles) {
     const prev = store.toggles.find((t) => t.eventType === toggle.eventType);
-    if (prev && prev.isActive !== toggle.isActive) {
+    // Skip admin-locked rows so a required flip set server-side mid-edit never sends a doomed PUT.
+    if (prev && !prev.isRequired && prev.isActive !== toggle.isActive) {
       await mutators.setActive(toggle.eventType, toggle.isActive);
     }
   }

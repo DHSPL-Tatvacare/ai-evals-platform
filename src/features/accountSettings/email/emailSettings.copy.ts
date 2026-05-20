@@ -26,7 +26,6 @@ export const emailSettingsCopy = {
 
   error: {
     recipientInvalid: 'Enter a valid email address.',
-    recipientDomainBlocked: 'That domain is not allowed for this workspace.',
     subscriptionLocked: 'This notification is required by your admin and cannot be changed.',
     listFailed: 'Could not load your notification settings.',
     recentSendsFailed: 'Could not load recent activity.',
@@ -35,7 +34,6 @@ export const emailSettingsCopy = {
   groups: {
     scheduled_job: 'Scheduled jobs',
     workflow: 'Workflows',
-    system: 'System',
   } as Record<string, string>,
 
   events: {

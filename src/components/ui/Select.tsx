@@ -2,7 +2,7 @@ import { useMemo, useCallback, type ReactNode } from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/utils';
-import { fromRadixValue, toRadixValue } from './selectValue';
+import { fromRadixValue, selectRootValue, toRadixValue } from './selectValue';
 
 export interface SelectOption {
   value: string;
@@ -54,7 +54,7 @@ export function Select({
 
   return (
     <SelectPrimitive.Root
-      value={hasEmptyOption ? toRadixValue(value) : value}
+      value={selectRootValue(value, hasEmptyOption)}
       onValueChange={handleChange}
       disabled={disabled}
     >

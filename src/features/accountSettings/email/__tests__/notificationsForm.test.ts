@@ -47,11 +47,19 @@ describe('saveNotifications', () => {
     expect(setRecipient).not.toHaveBeenCalled();
   });
 
-  it('persists a changed recipient', async () => {
+  it('persists a changed recipient with no toggle changes', async () => {
     const setActive = vi.fn().mockResolvedValue(undefined);
     const setRecipient = vi.fn().mockResolvedValue(undefined);
     await saveNotifications({ ...store, recipientEmail: 'b@x.com' }, store, { setActive, setRecipient });
     expect(setRecipient).toHaveBeenCalledWith('b@x.com');
+    expect(setActive).not.toHaveBeenCalled();
+  });
+
+  it('treats a whitespace-only recipient change as unchanged', async () => {
+    const setActive = vi.fn().mockResolvedValue(undefined);
+    const setRecipient = vi.fn().mockResolvedValue(undefined);
+    await saveNotifications({ ...store, recipientEmail: '  a@x.com  ' }, store, { setActive, setRecipient });
+    expect(setRecipient).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid recipient before writing', async () => {
@@ -61,5 +69,29 @@ describe('saveNotifications', () => {
       saveNotifications({ ...store, recipientEmail: 'not-an-email' }, store, { setActive, setRecipient }),
     ).rejects.toThrow();
     expect(setRecipient).not.toHaveBeenCalled();
+  });
+
+  it('rejects clearing the recipient to empty when one was set', async () => {
+    const setActive = vi.fn().mockResolvedValue(undefined);
+    const setRecipient = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      saveNotifications({ ...store, recipientEmail: '' }, store, { setActive, setRecipient }),
+    ).rejects.toThrow();
+    expect(setRecipient).not.toHaveBeenCalled();
+  });
+
+  it('never writes an admin-locked (required) toggle even if its active state differs', async () => {
+    const setActive = vi.fn().mockResolvedValue(undefined);
+    const setRecipient = vi.fn().mockResolvedValue(undefined);
+    const lockedStore = {
+      recipientEmail: 'a@x.com',
+      toggles: [{ eventType: 'scheduled_job.failed', group: 'scheduled_job', isActive: true, isRequired: true }],
+    };
+    const form = {
+      ...lockedStore,
+      toggles: lockedStore.toggles.map((t) => ({ ...t, isActive: false })),
+    };
+    await saveNotifications(form, lockedStore, { setActive, setRecipient });
+    expect(setActive).not.toHaveBeenCalled();
   });
 });

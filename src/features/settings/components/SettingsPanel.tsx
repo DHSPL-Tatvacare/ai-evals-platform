@@ -246,20 +246,18 @@ export function SettingsPanel({ settings, values, onChange, onReset, layout = 's
   if (layout === 'inline') {
     return (
       <>
-        <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
+        <div className="flex flex-col">
           {visible.map((setting) => {
-            // Textareas and file pickers need full width, so they span both
-            // columns and keep the stacked treatment.
+            // Textareas and file pickers need full width, so they keep the
+            // stacked treatment even inside an inline panel.
             const wide = setting.type === 'textarea' || setting.type === 'file';
             const isToggle = setting.type === 'toggle';
             return (
               <div
                 key={setting.key}
                 className={cn(
-                  'border-b border-[var(--border-subtle)] py-3',
-                  wide
-                    ? 'flex flex-col gap-2 md:col-span-2'
-                    : 'flex items-center justify-between gap-6',
+                  'border-b border-[var(--border-subtle)] py-3.5 last:border-0',
+                  wide ? 'flex flex-col gap-2' : 'flex items-center justify-between gap-6',
                 )}
               >
                 <div className="min-w-0">
@@ -271,7 +269,7 @@ export function SettingsPanel({ settings, values, onChange, onReset, layout = 's
                     <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{setting.description}</p>
                   )}
                 </div>
-                <div className={cn(wide ? 'w-full' : 'shrink-0', !isToggle && !wide && 'w-[200px]')}>
+                <div className={cn(wide ? 'w-full' : 'shrink-0', !isToggle && !wide && 'w-[280px]')}>
                   {renderSetting(setting)}
                 </div>
               </div>

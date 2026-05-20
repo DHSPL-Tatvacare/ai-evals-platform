@@ -50,3 +50,5 @@ export function useNotificationsSettings(enabled: boolean) {
     recentError: recentQuery.isError,
   };
 }
+
+export type NotificationsSettings = ReturnType<typeof useNotificationsSettings>;
