@@ -3,9 +3,8 @@ import { Download, Mail } from 'lucide-react';
 import type { ColumnDef } from '@/components/ui/DataTable';
 import { DataTable } from '@/components/ui/DataTable';
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
+import { FilterButton, FilterPanel, useTabsHeaderActions, type FilterFieldConfig } from '@/components/ui';
 import { notificationService } from '@/services/notifications';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { emailSettingsCopy } from '@/features/accountSettings/email/emailSettings.copy';
@@ -24,21 +23,44 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   not_configured: 'neutral',
 };
 
-const STATUS_OPTIONS = [
-  { value: '', label: adminNotificationsCopy.sendLog.filters.allStatuses },
-  { value: 'sent', label: emailSettingsCopy.status.sent },
-  { value: 'failed', label: emailSettingsCopy.status.failed },
-  { value: 'bounced', label: emailSettingsCopy.status.bounced },
-  { value: 'not_configured', label: emailSettingsCopy.status.not_configured },
-];
-
-const CALL_SITE_OPTIONS = [
-  { value: '', label: adminNotificationsCopy.sendLog.filters.allEvents },
-  { value: 'mail.signup_invite', label: 'Signup invite' },
-  ...Object.keys(emailSettingsCopy.events).map((eventType) => ({
-    value: `mail.${eventType.replace('.', '_')}`,
-    label: emailSettingsCopy.events[eventType] ?? eventType,
-  })),
+const FILTER_FIELDS: FilterFieldConfig[] = [
+  {
+    key: 'status',
+    label: adminNotificationsCopy.sendLog.filters.status,
+    control: 'select',
+    placeholder: adminNotificationsCopy.sendLog.filters.allStatuses,
+    options: [
+      { value: 'sent', label: emailSettingsCopy.status.sent },
+      { value: 'failed', label: emailSettingsCopy.status.failed },
+      { value: 'bounced', label: emailSettingsCopy.status.bounced },
+      { value: 'not_configured', label: emailSettingsCopy.status.not_configured },
+    ],
+  },
+  {
+    key: 'callSite',
+    label: adminNotificationsCopy.sendLog.filters.event,
+    control: 'select',
+    placeholder: adminNotificationsCopy.sendLog.filters.allEvents,
+    options: [
+      { value: 'mail.signup_invite', label: 'Signup invite' },
+      ...Object.keys(emailSettingsCopy.events).map((eventType) => ({
+        value: `mail.${eventType.replace('.', '_')}`,
+        label: emailSettingsCopy.events[eventType] ?? eventType,
+      })),
+    ],
+  },
+  {
+    key: 'recipient',
+    label: adminNotificationsCopy.sendLog.filters.recipient,
+    control: 'text',
+    placeholder: 'alice@…',
+  },
+  {
+    key: 'date',
+    label: `${adminNotificationsCopy.sendLog.filters.fromDate} / ${adminNotificationsCopy.sendLog.filters.toDate}`,
+    control: 'date-range',
+    fields: ['fromDate', 'toDate'],
+  },
 ];
 
 function formatTime(iso: string): string {
@@ -56,6 +78,7 @@ export function SendLogTab() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [page, setPage] = useState(1);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -71,6 +94,8 @@ export function SendLogTab() {
     page,
     pageSize: PAGE_SIZE,
   });
+
+  const activeCount = [status, callSite, recipient, fromDate, toDate].filter(Boolean).length;
 
   const handleExport = async () => {
     setExporting(true);
@@ -94,6 +119,41 @@ export function SendLogTab() {
     } finally {
       setExporting(false);
     }
+  };
+
+  useTabsHeaderActions(
+    'sendLog',
+    <div className="flex items-center gap-2">
+      <Button
+        variant="secondary"
+        size="sm"
+        icon={Download}
+        isLoading={exporting}
+        disabled={exporting}
+        onClick={handleExport}
+      >
+        {adminNotificationsCopy.sendLog.exportCsv}
+      </Button>
+      <FilterButton activeCount={activeCount} onClick={() => setFilterOpen(true)} iconOnly />
+    </div>,
+  );
+
+  const handleFilterChange = (patch: Record<string, unknown>) => {
+    if ('status' in patch) setStatus(String(patch.status ?? ''));
+    if ('callSite' in patch) setCallSite(String(patch.callSite ?? ''));
+    if ('recipient' in patch) setRecipient(String(patch.recipient ?? ''));
+    if ('fromDate' in patch) setFromDate(String(patch.fromDate ?? ''));
+    if ('toDate' in patch) setToDate(String(patch.toDate ?? ''));
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setStatus('');
+    setCallSite('');
+    setRecipient('');
+    setFromDate('');
+    setToDate('');
+    setPage(1);
   };
 
   const columns: ColumnDef<AdminMailSendRow>[] = [
@@ -145,80 +205,7 @@ export function SendLogTab() {
   const totalPages = Math.max(1, Math.ceil((query.data?.total ?? 0) / PAGE_SIZE));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.status}</span>
-          <Select
-            size="sm"
-            value={status}
-            onChange={(v) => {
-              setStatus(v);
-              setPage(1);
-            }}
-            options={STATUS_OPTIONS}
-          />
-        </div>
-        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.event}</span>
-          <Select
-            size="sm"
-            value={callSite}
-            onChange={(v) => {
-              setCallSite(v);
-              setPage(1);
-            }}
-            options={CALL_SITE_OPTIONS}
-          />
-        </div>
-        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.recipient}</span>
-          <Input
-            value={recipient}
-            onChange={(e) => {
-              setRecipient(e.target.value);
-              setPage(1);
-            }}
-            placeholder="alice@…"
-            className="h-8 w-[220px]"
-          />
-        </div>
-        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.fromDate}</span>
-          <Input
-            type="date"
-            value={fromDate}
-            onChange={(e) => {
-              setFromDate(e.target.value);
-              setPage(1);
-            }}
-            className="h-8 w-[160px]"
-          />
-        </div>
-        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.toDate}</span>
-          <Input
-            type="date"
-            value={toDate}
-            onChange={(e) => {
-              setToDate(e.target.value);
-              setPage(1);
-            }}
-            className="h-8 w-[160px]"
-          />
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={Download}
-          isLoading={exporting}
-          disabled={exporting}
-          onClick={handleExport}
-        >
-          {adminNotificationsCopy.sendLog.exportCsv}
-        </Button>
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col">
       {query.isError ? (
         <p className="text-[13px] text-[var(--color-error)]">
           {adminNotificationsCopy.sendLog.loadFailed}
@@ -242,6 +229,15 @@ export function SendLogTab() {
           }}
         />
       )}
+
+      <FilterPanel
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        fields={FILTER_FIELDS}
+        values={{ status, callSite, recipient, fromDate, toDate }}
+        onChange={handleFilterChange}
+        onClear={handleClearFilters}
+      />
 
       <SendLogPreviewOverlay
         sendLogId={previewId}

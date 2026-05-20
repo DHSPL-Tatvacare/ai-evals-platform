@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Select } from '@/components/ui/Select';
+import { FilterButton, FilterPanel, useTabsHeaderActions, type FilterFieldConfig } from '@/components/ui';
 import { notificationService } from '@/services/notifications';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { emailSettingsCopy } from '@/features/accountSettings/email/emailSettings.copy';
@@ -20,18 +20,27 @@ import type { AdminSubscriptionRow } from '../types';
 
 const PAGE_SIZE = 25;
 
-const EVENT_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '', label: adminNotificationsCopy.subscribers.filters.allEvents },
-  ...Object.keys(emailSettingsCopy.events).map((eventType) => ({
-    value: eventType,
-    label: emailSettingsCopy.events[eventType] ?? eventType,
-  })),
-];
-
-const ACTIVE_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '', label: adminNotificationsCopy.subscribers.filters.allStatuses },
-  { value: 'true', label: adminNotificationsCopy.subscribers.filters.activeYes },
-  { value: 'false', label: adminNotificationsCopy.subscribers.filters.activeNo },
+const FILTER_FIELDS: FilterFieldConfig[] = [
+  {
+    key: 'eventType',
+    label: adminNotificationsCopy.subscribers.filters.event,
+    control: 'select',
+    placeholder: adminNotificationsCopy.subscribers.filters.allEvents,
+    options: Object.keys(emailSettingsCopy.events).map((eventType) => ({
+      value: eventType,
+      label: emailSettingsCopy.events[eventType] ?? eventType,
+    })),
+  },
+  {
+    key: 'active',
+    label: adminNotificationsCopy.subscribers.filters.active,
+    control: 'select',
+    placeholder: adminNotificationsCopy.subscribers.filters.allStatuses,
+    options: [
+      { value: 'true', label: adminNotificationsCopy.subscribers.filters.activeYes },
+      { value: 'false', label: adminNotificationsCopy.subscribers.filters.activeNo },
+    ],
+  },
 ];
 
 function formatTime(iso: string): string {
@@ -46,8 +55,16 @@ export function SubscribersTab() {
   const [eventFilter, setEventFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<AdminSubscriptionRow | null>(null);
   const [pendingRequiredFlip, setPendingRequiredFlip] = useState<AdminSubscriptionRow | null>(null);
+
+  const activeCount = [eventFilter, activeFilter].filter(Boolean).length;
+
+  useTabsHeaderActions(
+    'subscribers',
+    <FilterButton activeCount={activeCount} onClick={() => setFilterOpen(true)} iconOnly />,
+  );
 
   const isActive =
     activeFilter === 'true' ? true : activeFilter === 'false' ? false : undefined;
@@ -59,6 +76,18 @@ export function SubscribersTab() {
   });
   const patchMutation = usePatchSubscription();
   const deleteMutation = useDeleteSubscription();
+
+  const handleFilterChange = (patch: Record<string, unknown>) => {
+    if ('eventType' in patch) setEventFilter(String(patch.eventType ?? ''));
+    if ('active' in patch) setActiveFilter(String(patch.active ?? ''));
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setEventFilter('');
+    setActiveFilter('');
+    setPage(1);
+  };
 
   const columns: ColumnDef<AdminSubscriptionRow>[] = [
     {
@@ -162,28 +191,7 @@ export function SubscribersTab() {
   const totalPages = Math.max(1, Math.ceil((query.data?.total ?? 0) / PAGE_SIZE));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <FilterSelect
-          label={adminNotificationsCopy.subscribers.filters.event}
-          value={eventFilter}
-          options={EVENT_FILTER_OPTIONS}
-          onChange={(v) => {
-            setEventFilter(v);
-            setPage(1);
-          }}
-        />
-        <FilterSelect
-          label={adminNotificationsCopy.subscribers.filters.active}
-          value={activeFilter}
-          options={ACTIVE_FILTER_OPTIONS}
-          onChange={(v) => {
-            setActiveFilter(v);
-            setPage(1);
-          }}
-        />
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col">
       {query.isError ? (
         <p className="text-[13px] text-[var(--color-error)]">
           {adminNotificationsCopy.subscribers.loadFailed}
@@ -206,6 +214,15 @@ export function SubscribersTab() {
           }}
         />
       )}
+
+      <FilterPanel
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        fields={FILTER_FIELDS}
+        values={{ eventType: eventFilter, active: activeFilter }}
+        onChange={handleFilterChange}
+        onClear={handleClearFilters}
+      />
 
       <ConfirmDialog
         isOpen={pendingDelete !== null}
@@ -283,25 +300,6 @@ export function SubscribersTab() {
         }}
         isLoading={patchMutation.isPending}
       />
-    </div>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
-      <span className="font-medium">{label}</span>
-      <Select size="sm" value={value} onChange={onChange} options={options} />
     </div>
   );
 }

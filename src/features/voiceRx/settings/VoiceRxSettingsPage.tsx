@@ -2,10 +2,12 @@ import { useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useGlobalSettingsStore, useVoiceRxSettings, useAppSettingsStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { Card, PageSurface, Tabs } from '@/components/ui';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { routes } from '@/config/routes';
-import { usePermission } from '@/utils/permissions';
+import { userHasPermission } from '@/utils/permissions';
+import { useCurrentAppConfig } from '@/hooks';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CollapsibleSection } from '../../settings/components/CollapsibleSection';
 import { SettingsSaveBar } from '../../settings/components/SettingsSaveBar';
@@ -13,6 +15,11 @@ import { TemplatesTab } from '../../settings/components/TemplatesTab';
 import { getGlobalSettingsByCategory } from '../../settings/schemas/globalSettingsSchema';
 import { getVoiceRxSettingsByCategory } from '../../settings/schemas/appSettingsSchema';
 import { useSettingsForm } from '../../settings/hooks/useSettingsForm';
+import { resolveSettingsTabs, type SettingsTabSpec } from '@/features/settings/settingsTabs';
+import { emailSettingsCopy } from '@/features/accountSettings/email/emailSettings.copy';
+import { NotificationsSettingsTab } from '@/features/accountSettings/email/components/NotificationsSettingsTab';
+import { useNotificationsSettings } from '@/features/accountSettings/email/useNotificationsSettings';
+import type { NotificationsFormValue } from '@/features/accountSettings/email/notificationsForm';
 import { useToast } from '@/hooks';
 import type { LLMTimeoutSettings } from '@/types';
 import type { BaseFormValues } from '../../settings/hooks/useSettingsForm';
@@ -25,6 +32,7 @@ interface VoiceRxFormValues extends BaseFormValues {
   };
   voiceRxApiUrl: string;
   voiceRxApiKey: string;
+  notifications: NotificationsFormValue;
 }
 
 const defaultVoiceRxPrefs = {
@@ -40,21 +48,32 @@ export function VoiceRxSettingsPage() {
   const theme = useGlobalSettingsStore((s) => s.theme);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const { settings: voiceRxSettings, updateSettings: updateVoiceRxSettings } = useVoiceRxSettings();
-  const canEditAISettings = usePermission('configuration:edit');
+  const features = useCurrentAppConfig().features;
+  const user = useAuthStore((s) => s.user);
+  const can = useCallback((action: string) => userHasPermission(user, action), [user]);
+  const canEditConfiguration = can('configuration:edit');
+  const notifications = useNotificationsSettings(features.hasNotifications);
 
   useEffect(() => {
-    useAppSettingsStore.getState().loadCredentialsFromBackend('voice-rx');
-  }, []);
+    if (canEditConfiguration) {
+      useAppSettingsStore.getState().loadCredentialsFromBackend('voice-rx');
+    }
+  }, [canEditConfiguration]);
 
   const onSaveApp = useCallback(async (form: VoiceRxFormValues, store: VoiceRxFormValues) => {
-    if (JSON.stringify(form.voiceRx) !== JSON.stringify(store.voiceRx)) {
-      updateVoiceRxSettings(form.voiceRx);
+    if (canEditConfiguration) {
+      if (JSON.stringify(form.voiceRx) !== JSON.stringify(store.voiceRx)) {
+        updateVoiceRxSettings(form.voiceRx);
+      }
+      if (form.voiceRxApiUrl !== store.voiceRxApiUrl || form.voiceRxApiKey !== store.voiceRxApiKey) {
+        updateVoiceRxSettings({ voiceRxApiUrl: form.voiceRxApiUrl, voiceRxApiKey: form.voiceRxApiKey });
+      }
+      await useAppSettingsStore.getState().saveCredentialsToBackend('voice-rx');
     }
-    if (form.voiceRxApiUrl !== store.voiceRxApiUrl || form.voiceRxApiKey !== store.voiceRxApiKey) {
-      updateVoiceRxSettings({ voiceRxApiUrl: form.voiceRxApiUrl, voiceRxApiKey: form.voiceRxApiKey });
+    if (notifications.enabled) {
+      await notifications.save(form.notifications, store.notifications);
     }
-    await useAppSettingsStore.getState().saveCredentialsToBackend('voice-rx');
-  }, [updateVoiceRxSettings]);
+  }, [updateVoiceRxSettings, canEditConfiguration, notifications]);
 
   const {
     formValues, setFormValues, isDirty, isSaving, handleChange, handleSave, handleDiscard,
@@ -67,48 +86,61 @@ export function VoiceRxSettingsPage() {
         voiceRx: voiceRxPrefs as VoiceRxFormValues['voiceRx'],
         voiceRxApiUrl,
         voiceRxApiKey,
+        notifications: notifications.storeValue,
       };
     },
-    deps: [theme, timeouts, voiceRxSettings],
+    deps: [theme, timeouts, voiceRxSettings, notifications.storeValue],
     onSaveApp,
   });
 
-  const tabs = [
+  const notificationsValue = formValues.notifications;
+
+  const specs: SettingsTabSpec[] = [
     {
       id: 'appearance',
       label: 'Appearance',
       content: (
         <Card>
-          <SettingsPanel settings={getGlobalSettingsByCategory('appearance')} values={formValues} onChange={handleChange} />
+          <SettingsPanel settings={getGlobalSettingsByCategory('appearance')} values={formValues} onChange={handleChange} layout="inline" />
         </Card>
       ),
     },
     {
+      id: 'notifications',
+      label: emailSettingsCopy.tabLabel,
+      feature: 'hasNotifications',
+      content: (
+        <NotificationsSettingsTab
+          value={notificationsValue}
+          onChange={(next) => handleChange('notifications', next)}
+          loading={notifications.loading}
+          isError={notifications.isError}
+          recentSends={notifications.recentSends}
+          recentLoading={notifications.recentLoading}
+          recentError={notifications.recentError}
+        />
+      ),
+    },
+    {
       id: 'ai',
-      label: 'AI Configuration',
+      label: 'API Configuration',
+      requires: 'configuration:edit',
       content: (
         <div className="space-y-4">
           <Card>
             <p className="text-[13px] text-[var(--text-secondary)]">
               LLM providers are configured by an admin in{' '}
-              {canEditAISettings ? (
-                <Link
-                  to={routes.adminLlmProviders}
-                  className="font-medium text-[var(--text-brand)] hover:underline"
-                >
-                  AI Settings
-                </Link>
-              ) : (
-                <span className="font-medium text-[var(--text-primary)]">AI Settings</span>
-              )}
+              <Link to={routes.adminLlmProviders} className="font-medium text-[var(--text-brand)] hover:underline">
+                AI Settings
+              </Link>
               . Per-user API keys are no longer required.
             </p>
           </Card>
           <CollapsibleSection title="Voice RX API" subtitle="Transcription service endpoint and credentials">
-            <SettingsPanel settings={getVoiceRxSettingsByCategory('api')} values={formValues} onChange={handleChange} />
+            <SettingsPanel settings={getVoiceRxSettingsByCategory('api')} values={formValues} onChange={handleChange} layout="inline" />
           </CollapsibleSection>
           <CollapsibleSection title="Timeouts" subtitle="LLM request timeout durations (in seconds)">
-            <SettingsPanel settings={getGlobalSettingsByCategory('timeouts')} values={formValues} onChange={handleChange} />
+            <SettingsPanel settings={getGlobalSettingsByCategory('timeouts')} values={formValues} onChange={handleChange} layout="inline" />
           </CollapsibleSection>
         </div>
       ),
@@ -116,6 +148,7 @@ export function VoiceRxSettingsPage() {
     {
       id: 'transcription',
       label: 'Language & Script',
+      requires: 'configuration:edit',
       content: (
         <Card>
           <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
@@ -143,9 +176,12 @@ export function VoiceRxSettingsPage() {
     {
       id: 'templates',
       label: 'Templates',
+      requires: 'configuration:edit',
       content: <Card><TemplatesTab /></Card>,
     },
   ];
+
+  const tabs = resolveSettingsTabs(specs, { features, can });
 
   return (
     <PageSurface icon={icon} title={title}>

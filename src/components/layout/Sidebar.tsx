@@ -8,7 +8,6 @@ import {
   BookOpen,
   LogOut,
   KeyRound,
-  Mail,
 } from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import {
@@ -48,7 +47,6 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
   const isGuideActive = location.pathname === routes.guide;
-  const isEmailSettingsActive = location.pathname === routes.settingsEmail;
 
   // Auth
   const user = useAuthStore((s) => s.user);
@@ -278,8 +276,6 @@ export function Sidebar() {
                     <UserMenu
                       settingsPath={settingsPath}
                       isSettingsActive={isSettingsActive}
-                      isEmailSettingsActive={isEmailSettingsActive}
-                      canEditConfiguration={canEditConfiguration}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
                       onChangePassword={() => {
@@ -374,8 +370,6 @@ export function Sidebar() {
                     <UserMenu
                       settingsPath={settingsPath}
                       isSettingsActive={isSettingsActive}
-                      isEmailSettingsActive={isEmailSettingsActive}
-                      canEditConfiguration={canEditConfiguration}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
                       onChangePassword={() => {
@@ -438,8 +432,6 @@ function QuickActionMenu({
 function UserMenu({
   settingsPath,
   isSettingsActive,
-  isEmailSettingsActive,
-  canEditConfiguration,
   isGuideActive,
   onLogout,
   onChangePassword,
@@ -448,8 +440,6 @@ function UserMenu({
    *  — Settings entry is hidden in that case. */
   settingsPath: string | null;
   isSettingsActive: boolean;
-  isEmailSettingsActive: boolean;
-  canEditConfiguration: boolean;
   isGuideActive: boolean;
   onLogout: () => void;
   onChangePassword: () => void;
@@ -459,16 +449,12 @@ function UserMenu({
 
   return (
     <div className="py-1">
-      {settingsPath && canEditConfiguration && (
+      {settingsPath && (
         <Link to={settingsPath} className={isSettingsActive ? activeLinkClass : menuLinkClass}>
           <Settings className="h-4 w-4" />
           Settings
         </Link>
       )}
-      <Link to={routes.settingsEmail} className={isEmailSettingsActive ? activeLinkClass : menuLinkClass}>
-        <Mail className="h-4 w-4" />
-        Email settings
-      </Link>
       <Link to={routes.guide} className={isGuideActive ? activeLinkClass : menuLinkClass}>
         <BookOpen className="h-4 w-4" />
         Guide

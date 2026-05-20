@@ -1958,6 +1958,7 @@ APP_SEEDS = [
                 "hasHumanReview": True,
                 "hasReviews": True,
                 "hasOrchestration": False,
+                "hasNotifications": False,
             },
             "reviews": {
                 "enabled": True,
@@ -2122,6 +2123,7 @@ APP_SEEDS = [
                 "hasHumanReview": False,
                 "hasReviews": True,
                 "hasOrchestration": False,
+                "hasNotifications": False,
             },
             "reviews": {
                 "enabled": True,
@@ -2308,6 +2310,7 @@ APP_SEEDS = [
                 "hasHumanReview": False,
                 "hasReviews": True,
                 "hasOrchestration": True,
+                "hasNotifications": True,
             },
             "reviews": {
                 "enabled": True,

@@ -57,6 +57,10 @@ export interface AppFeaturesConfig {
    *  render. Per-app capability; the backend orchestration engine still
    *  gates execution by `ORCHESTRATION_DEFAULT_APP_ID`. */
   hasOrchestration: boolean;
+  /** Surfaces the user-level Notifications tab on the app settings page.
+   *  Per-app capability; the notification pipeline still gates sends by
+   *  subscription + admin defaults. */
+  hasNotifications: boolean;
 }
 
 export interface AppReviewsConfig {
@@ -541,6 +545,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       hasHumanReview: false,
       hasReviews: true,
       hasOrchestration: false,
+      hasNotifications: false,
     },
     reviews: {
       enabled: true,
@@ -692,6 +697,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       hasHumanReview: false,
       hasReviews: true,
       hasOrchestration: false,
+      hasNotifications: false,
     },
     reviews: {
       enabled: true,
@@ -852,6 +858,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       hasHumanReview: false,
       hasReviews: true,
       hasOrchestration: true,
+      hasNotifications: true,
     },
     reviews: {
       enabled: true,

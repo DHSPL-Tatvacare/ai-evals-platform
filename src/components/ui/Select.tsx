@@ -2,6 +2,7 @@ import { useMemo, useCallback, type ReactNode } from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/utils';
+import { fromRadixValue, toRadixValue } from './selectValue';
 
 export interface SelectOption {
   value: string;
@@ -38,16 +39,22 @@ export function Select({
     [options, value],
   );
 
+  const hasEmptyOption = useMemo(
+    () => options.some((o) => o.value === ''),
+    [options],
+  );
+
   const handleChange = useCallback(
     (next: string) => {
-      if (next !== value) onChange(next);
+      const mapped = fromRadixValue(next);
+      if (mapped !== value) onChange(mapped);
     },
     [onChange, value],
   );
 
   return (
     <SelectPrimitive.Root
-      value={value}
+      value={hasEmptyOption ? toRadixValue(value) : value}
       onValueChange={handleChange}
       disabled={disabled}
     >
@@ -84,8 +91,8 @@ export function Select({
           <SelectPrimitive.Viewport>
             {options.map((option) => (
               <SelectPrimitive.Item
-                key={option.value}
-                value={option.value}
+                key={toRadixValue(option.value)}
+                value={toRadixValue(option.value)}
                 textValue={option.label}
                 className={cn(
                   'relative flex w-full cursor-default items-center justify-between gap-3 px-3 py-2 text-[13px] outline-none transition-colors',

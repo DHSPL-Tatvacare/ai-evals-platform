@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Switch } from '@/components/ui/Switch';
 import { Button } from '@/components/ui/Button';
+import { cn } from '@/utils';
 import { notificationService } from '@/services/notifications';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { EmailChipInput } from '@/features/admin/scheduledJobs/components/EmailChipInput';
@@ -93,7 +94,7 @@ export function DefaultsTab() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       {groups.map(({ group, rows }) => (
         <section
           key={group}
@@ -114,16 +115,32 @@ export function DefaultsTab() {
               const isPending =
                 mutation.isPending && mutation.variables?.eventType === row.eventType;
               return (
-                <div key={row.eventType} className="flex flex-col gap-3 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-[var(--text-primary)]">
-                        {emailSettingsCopy.events[row.eventType] ?? row.eventType}
-                      </div>
-                      <p className="mt-1 text-[12px] text-[var(--text-tertiary)]">
-                        {adminNotificationsCopy.defaults.requiredHelp}
-                      </p>
+                <div
+                  key={row.eventType}
+                  className="grid grid-cols-1 gap-4 px-4 py-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,1.4fr)_auto] lg:items-start"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium text-[var(--text-primary)]">
+                      {emailSettingsCopy.events[row.eventType] ?? row.eventType}
                     </div>
+                    <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
+                      {adminNotificationsCopy.defaults.requiredHelp}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                      {adminNotificationsCopy.defaults.alwaysNotifyLabel}
+                    </div>
+                    <EmailChipInput
+                      value={draft.alwaysNotifyEmails}
+                      onChange={(next) =>
+                        updateDraft(row.eventType, { alwaysNotifyEmails: next })
+                      }
+                      placeholder={adminNotificationsCopy.defaults.alwaysNotifyHelp}
+                      inputAriaLabel={adminNotificationsCopy.defaults.alwaysNotifyLabel}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 lg:flex-col lg:items-end lg:gap-2.5">
                     <div className="flex items-center gap-2">
                       <span className="text-[12px] text-[var(--text-secondary)]">
                         {adminNotificationsCopy.defaults.requiredLabel}
@@ -138,30 +155,13 @@ export function DefaultsTab() {
                         aria-label={adminNotificationsCopy.defaults.requiredLabel}
                       />
                     </div>
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[12px] font-medium text-[var(--text-secondary)]">
-                      {adminNotificationsCopy.defaults.alwaysNotifyLabel}
-                    </div>
-                    <p className="mb-2 text-[12px] text-[var(--text-tertiary)]">
-                      {adminNotificationsCopy.defaults.alwaysNotifyHelp}
-                    </p>
-                    <EmailChipInput
-                      value={draft.alwaysNotifyEmails}
-                      onChange={(next) =>
-                        updateDraft(row.eventType, { alwaysNotifyEmails: next })
-                      }
-                      placeholder="name@workspace.com"
-                      inputAriaLabel={adminNotificationsCopy.defaults.alwaysNotifyLabel}
-                    />
-                  </div>
-                  <div className="flex justify-end">
                     <Button
                       size="sm"
                       variant="primary"
                       disabled={!dirty || isPending}
                       isLoading={isPending}
                       onClick={() => handleSave(row)}
+                      className={cn(!dirty && 'invisible')}
                     >
                       {adminNotificationsCopy.defaults.save}
                     </Button>

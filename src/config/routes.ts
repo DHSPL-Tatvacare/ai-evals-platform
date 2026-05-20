@@ -27,7 +27,6 @@ export const routes = {
   adminSherlockToolCall: (toolCallId: string) => `/admin/sherlock/${toolCallId}`,
   adminSherlockConfig: '/admin/sherlock-config',
   profile: '/profile',
-  settingsEmail: '/settings/email',
   guide: '/guide',
   printReportRun: (reportRunId: string) => `/print/report-runs/${reportRunId}`,
   voiceRx: {

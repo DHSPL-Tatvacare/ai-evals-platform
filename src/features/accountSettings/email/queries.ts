@@ -13,18 +13,20 @@ export const emailSettingsKeys = {
   recentSends: () => [...emailSettingsKeys.all, 'recentSends'] as const,
 };
 
-export function useEmailSettings() {
+export function useEmailSettings(options?: { enabled?: boolean }) {
   return useQuery<EmailSettingsPayload>({
     queryKey: emailSettingsKeys.list(),
     queryFn: () => apiQueryFn<EmailSettingsPayload>('/api/notification-subscriptions'),
+    enabled: options?.enabled ?? true,
   });
 }
 
-export function useRecentSends() {
+export function useRecentSends(options?: { enabled?: boolean }) {
   return useQuery<RecentSendRow[]>({
     queryKey: emailSettingsKeys.recentSends(),
     queryFn: () =>
       apiQueryFn<RecentSendRow[]>('/api/notification-subscriptions/recent-sends?limit=50'),
+    enabled: options?.enabled ?? true,
   });
 }
 

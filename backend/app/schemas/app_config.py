@@ -32,6 +32,7 @@ class AppFeaturesConfig(CamelModel):
     has_human_review: bool = False
     has_reviews: bool = False
     has_orchestration: bool = False
+    has_notifications: bool = False
 
 
 class AppReviewsConfig(CamelModel):

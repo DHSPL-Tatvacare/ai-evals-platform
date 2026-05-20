@@ -56,7 +56,6 @@ const CampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/co
 const LegacyRunDetailRedirect = lazyWithRetry(() => import('@/features/orchestration/components/runs/LegacyRunDetailRedirect').then(m => ({ default: m.LegacyRunDetailRedirect })));
 const ConnectionsPage = lazyWithRetry(() => import('@/features/admin/integrations/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
 const DatasetDetail = lazyWithRetry(() => import('@/features/orchestration/components/datasets/DatasetDetail').then(m => ({ default: m.DatasetDetail })));
-const EmailSettingsPage = lazyWithRetry(() => import('@/features/accountSettings/email/pages/EmailSettingsPage').then(m => ({ default: m.EmailSettingsPage })));
 const AdminNotificationsPage = lazyWithRetry(() => import('@/features/admin/notifications/pages/AdminNotificationsPage').then(m => ({ default: m.AdminNotificationsPage })));
 
 const ROUTE_FALLBACK = <LoadingState />;
@@ -135,7 +134,7 @@ export function Router() {
             <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
             <Route
               path={routes.voiceRx.settings}
-              element={<RequirePermission action="configuration:edit"><VoiceRxSettingsPage /></RequirePermission>}
+              element={<VoiceRxSettingsPage />}
             />
           </Route>
 
@@ -149,7 +148,7 @@ export function Router() {
             <Route path={routes.kaira.chat} element={<KairaBotHomePage />} />
             <Route
               path={routes.kaira.settings}
-              element={<RequirePermission action="configuration:edit"><KairaBotSettingsPage /></RequirePermission>}
+              element={<KairaBotSettingsPage />}
             />
             <Route
               path={routes.kaira.settingsTags}
@@ -194,7 +193,7 @@ export function Router() {
             <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
             <Route path={`${routes.insideSales.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
             <Route path={`${routes.insideSales.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
-            <Route path={routes.insideSales.settings} element={<RequirePermission action="configuration:edit"><InsideSalesSettings /></RequirePermission>} />
+            <Route path={routes.insideSales.settings} element={<InsideSalesSettings />} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
             <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
@@ -204,16 +203,6 @@ export function Router() {
             <Route path="/inside-sales/orchestration/runs/:runId" element={<Suspense fallback={ROUTE_FALLBACK}><LegacyRunDetailRedirect /></Suspense>} />
             <Route path="/inside-sales/orchestration/datasets/:datasetId" element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><DatasetDetail /></Suspense></RequirePermission>} />
           </Route>
-
-          {/* Account-level user settings (no app guard — every signed-in user) */}
-          <Route
-            path={routes.settingsEmail}
-            element={
-              <Suspense fallback={ROUTE_FALLBACK}>
-                <EmailSettingsPage />
-              </Suspense>
-            }
-          />
 
           {/* Admin routes */}
           <Route

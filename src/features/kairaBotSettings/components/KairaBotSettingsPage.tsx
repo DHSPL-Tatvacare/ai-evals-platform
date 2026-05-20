@@ -2,10 +2,12 @@ import { useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useGlobalSettingsStore, useKairaBotSettings, useAppSettingsStore } from '@/stores';
+import { useAuthStore } from '@/stores/authStore';
 import { Card, PageSurface, Tabs } from '@/components/ui';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { routes } from '@/config/routes';
-import { usePermission } from '@/utils/permissions';
+import { userHasPermission } from '@/utils/permissions';
+import { useCurrentAppConfig } from '@/hooks';
 import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { CollapsibleSection } from '../../settings/components/CollapsibleSection';
 import { SettingsSaveBar } from '../../settings/components/SettingsSaveBar';
@@ -14,6 +16,11 @@ import { EvaluationContractsTab } from './AdversarialCatalogTab';
 import { getGlobalSettingsByCategory } from '../../settings/schemas/globalSettingsSchema';
 import { getKairaBotSettingsByCategory } from '../../settings/schemas/appSettingsSchema';
 import { useSettingsForm } from '../../settings/hooks/useSettingsForm';
+import { resolveSettingsTabs, type SettingsTabSpec } from '@/features/settings/settingsTabs';
+import { emailSettingsCopy } from '@/features/accountSettings/email/emailSettings.copy';
+import { NotificationsSettingsTab } from '@/features/accountSettings/email/components/NotificationsSettingsTab';
+import { useNotificationsSettings } from '@/features/accountSettings/email/useNotificationsSettings';
+import type { NotificationsFormValue } from '@/features/accountSettings/email/notificationsForm';
 import type { LLMTimeoutSettings } from '@/types';
 import type { BaseFormValues } from '../../settings/hooks/useSettingsForm';
 
@@ -27,6 +34,7 @@ interface KairaBotFormValues extends BaseFormValues {
   kairaApiUrl: string;
   kairaAuthToken: string;
   kairaChatUserId: string;
+  notifications: NotificationsFormValue;
 }
 
 export function KairaBotSettingsPage() {
@@ -34,27 +42,38 @@ export function KairaBotSettingsPage() {
   const theme = useGlobalSettingsStore((s) => s.theme);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
   const { settings: kairaBotSettings, updateSettings: updateKairaBotSettings } = useKairaBotSettings();
-  const canEditAISettings = usePermission('configuration:edit');
+  const features = useCurrentAppConfig().features;
+  const user = useAuthStore((s) => s.user);
+  const can = useCallback((action: string) => userHasPermission(user, action), [user]);
+  const canEditConfiguration = can('configuration:edit');
+  const notifications = useNotificationsSettings(features.hasNotifications);
 
   useEffect(() => {
-    useAppSettingsStore.getState().loadCredentialsFromBackend('kaira-bot');
-  }, []);
+    if (canEditConfiguration) {
+      useAppSettingsStore.getState().loadCredentialsFromBackend('kaira-bot');
+    }
+  }, [canEditConfiguration]);
 
   const onSaveApp = useCallback(async (form: KairaBotFormValues, store: KairaBotFormValues) => {
-    if (JSON.stringify(form.kairaBot) !== JSON.stringify(store.kairaBot)) {
-      updateKairaBotSettings(form.kairaBot);
+    if (canEditConfiguration) {
+      if (JSON.stringify(form.kairaBot) !== JSON.stringify(store.kairaBot)) {
+        updateKairaBotSettings(form.kairaBot);
+      }
+      if (form.kairaApiUrl !== store.kairaApiUrl ||
+        form.kairaAuthToken !== store.kairaAuthToken ||
+        form.kairaChatUserId !== store.kairaChatUserId) {
+        updateKairaBotSettings({
+          kairaApiUrl: form.kairaApiUrl,
+          kairaAuthToken: form.kairaAuthToken,
+          kairaChatUserId: form.kairaChatUserId,
+        });
+      }
+      await useAppSettingsStore.getState().saveCredentialsToBackend('kaira-bot');
     }
-    if (form.kairaApiUrl !== store.kairaApiUrl ||
-      form.kairaAuthToken !== store.kairaAuthToken ||
-      form.kairaChatUserId !== store.kairaChatUserId) {
-      updateKairaBotSettings({
-        kairaApiUrl: form.kairaApiUrl,
-        kairaAuthToken: form.kairaAuthToken,
-        kairaChatUserId: form.kairaChatUserId,
-      });
+    if (notifications.enabled) {
+      await notifications.save(form.notifications, store.notifications);
     }
-    await useAppSettingsStore.getState().saveCredentialsToBackend('kaira-bot');
-  }, [updateKairaBotSettings]);
+  }, [updateKairaBotSettings, canEditConfiguration, notifications]);
 
   const {
     formValues, isDirty, isSaving, handleChange, handleSave, handleDiscard,
@@ -68,48 +87,61 @@ export function KairaBotSettingsPage() {
         kairaApiUrl,
         kairaAuthToken,
         kairaChatUserId,
+        notifications: notifications.storeValue,
       };
     },
-    deps: [theme, timeouts, kairaBotSettings],
+    deps: [theme, timeouts, kairaBotSettings, notifications.storeValue],
     onSaveApp,
   });
 
-  const tabs = [
+  const notificationsValue = formValues.notifications;
+
+  const specs: SettingsTabSpec[] = [
     {
       id: 'appearance',
       label: 'Appearance',
       content: (
         <Card>
-          <SettingsPanel settings={getGlobalSettingsByCategory('appearance')} values={formValues} onChange={handleChange} />
+          <SettingsPanel settings={getGlobalSettingsByCategory('appearance')} values={formValues} onChange={handleChange} layout="inline" />
         </Card>
       ),
     },
     {
+      id: 'notifications',
+      label: emailSettingsCopy.tabLabel,
+      feature: 'hasNotifications',
+      content: (
+        <NotificationsSettingsTab
+          value={notificationsValue}
+          onChange={(next) => handleChange('notifications', next)}
+          loading={notifications.loading}
+          isError={notifications.isError}
+          recentSends={notifications.recentSends}
+          recentLoading={notifications.recentLoading}
+          recentError={notifications.recentError}
+        />
+      ),
+    },
+    {
       id: 'ai',
-      label: 'AI Configuration',
+      label: 'API Configuration',
+      requires: 'configuration:edit',
       content: (
         <div className="space-y-4">
           <Card>
             <p className="text-[13px] text-[var(--text-secondary)]">
               LLM providers are configured by an admin in{' '}
-              {canEditAISettings ? (
-                <Link
-                  to={routes.adminLlmProviders}
-                  className="font-medium text-[var(--text-brand)] hover:underline"
-                >
-                  AI Settings
-                </Link>
-              ) : (
-                <span className="font-medium text-[var(--text-primary)]">AI Settings</span>
-              )}
+              <Link to={routes.adminLlmProviders} className="font-medium text-[var(--text-brand)] hover:underline">
+                AI Settings
+              </Link>
               . Per-user API keys are no longer required.
             </p>
           </Card>
           <CollapsibleSection title="Kaira Bot API" subtitle="AI Orchestrator endpoint, auth token, and default user">
-            <SettingsPanel settings={getKairaBotSettingsByCategory('api')} values={formValues} onChange={handleChange} />
+            <SettingsPanel settings={getKairaBotSettingsByCategory('api')} values={formValues} onChange={handleChange} layout="inline" />
           </CollapsibleSection>
           <CollapsibleSection title="Timeouts" subtitle="LLM request timeout durations (in seconds)">
-            <SettingsPanel settings={getGlobalSettingsByCategory('timeouts')} values={formValues} onChange={handleChange} />
+            <SettingsPanel settings={getGlobalSettingsByCategory('timeouts')} values={formValues} onChange={handleChange} layout="inline" />
           </CollapsibleSection>
         </div>
       ),
@@ -117,14 +149,18 @@ export function KairaBotSettingsPage() {
     {
       id: 'templates',
       label: 'Templates',
+      requires: 'configuration:edit',
       content: <Card><TemplatesTab /></Card>,
     },
     {
       id: 'adversarial',
       label: 'Evaluation Contracts',
+      requires: 'configuration:edit',
       content: <EvaluationContractsTab />,
     },
   ];
+
+  const tabs = resolveSettingsTabs(specs, { features, can });
 
   return (
     <PageSurface icon={icon} title={title}>
