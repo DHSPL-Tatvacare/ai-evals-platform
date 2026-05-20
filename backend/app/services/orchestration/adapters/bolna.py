@@ -17,6 +17,8 @@ from app.models.orchestration import (
     WorkflowRunRecipientState,
 )
 from app.services.orchestration.adapters.canonical import (
+    CancelDispatchOutcome,
+    CancelDispatchResult,
     CanonicalVoiceEvent,
     CanonicalVoiceRequest,
     CanonicalVoiceResponse,
@@ -44,6 +46,13 @@ _COST_PRECISION = Decimal("0.0001")
 def _make_client(timeout: float = 30.0) -> httpx.AsyncClient:
     """Hook for tests — monkeypatch to inject httpx.MockTransport."""
     return httpx.AsyncClient(timeout=timeout)
+
+
+def _safe_message(resp: httpx.Response) -> Optional[str]:
+    try:
+        return resp.json().get("message")
+    except Exception:
+        return None
 
 
 def classify_outcome(status: Optional[str], status_reason: Optional[str]) -> str:
@@ -265,6 +274,81 @@ class BolnaAdapter:
             )
             for req in requests
         ]
+
+    async def cancel_dispatch(
+        self, *, connection: dict[str, Any], action: Any,
+    ) -> CancelDispatchResult:
+        execution_id = getattr(action, "bolna_execution_id", None)
+        if not execution_id:
+            return CancelDispatchResult(
+                outcome=CancelDispatchOutcome.noop_already_terminal,
+                provider_message="no execution_id on action",
+            )
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        headers = {"Authorization": f"Bearer {connection.get('api_key')}"}
+        async with _make_client() as client:
+            resp = await client.post(
+                f"{base_url}/call/{execution_id}/stop", headers=headers,
+            )
+        if resp.status_code == 200:
+            return CancelDispatchResult(
+                outcome=CancelDispatchOutcome.stopped, provider_status_code=200,
+            )
+        if resp.status_code in (400, 404):
+            return CancelDispatchResult(
+                outcome=CancelDispatchOutcome.noop_already_delivered,
+                provider_status_code=resp.status_code,
+                provider_message=_safe_message(resp),
+            )
+        return CancelDispatchResult(
+            outcome=CancelDispatchOutcome.provider_error,
+            provider_status_code=resp.status_code,
+            provider_message=_safe_message(resp),
+        )
+
+    async def cancel_batch(
+        self, *, connection: dict[str, Any], batch_id: str,
+    ) -> CancelDispatchResult:
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        headers = {"Authorization": f"Bearer {connection.get('api_key')}"}
+        async with _make_client() as client:
+            resp = await client.post(
+                f"{base_url}/batches/{batch_id}/stop", headers=headers,
+            )
+        if resp.status_code == 200:
+            return CancelDispatchResult(
+                outcome=CancelDispatchOutcome.cancelled, provider_status_code=200,
+            )
+        if resp.status_code == 404:
+            return CancelDispatchResult(
+                outcome=CancelDispatchOutcome.noop_already_terminal,
+                provider_status_code=404,
+                provider_message=_safe_message(resp),
+            )
+        return CancelDispatchResult(
+            outcome=CancelDispatchOutcome.provider_error,
+            provider_status_code=resp.status_code,
+            provider_message=_safe_message(resp),
+        )
+
+    async def cancel_run_actions(
+        self, *, connection: dict[str, Any], actions: list[Any],
+    ) -> list[CancelDispatchResult]:
+        # Batch dispatch is cancelled once at the batch level; only standalone
+        # single-call executions get a per-call stop.
+        results: list[CancelDispatchResult] = []
+        batch_ids = {
+            getattr(a, "bolna_batch_id", None)
+            for a in actions
+            if getattr(a, "bolna_batch_id", None)
+        }
+        for bid in batch_ids:
+            results.append(await self.cancel_batch(connection=connection, batch_id=str(bid)))
+        for action in actions:
+            if getattr(action, "bolna_batch_id", None):
+                continue
+            results.append(await self.cancel_dispatch(connection=connection, action=action))
+        return results
 
     def normalize_webhook(self, raw: dict[str, Any]) -> CanonicalVoiceEvent:
         status = raw.get("status")

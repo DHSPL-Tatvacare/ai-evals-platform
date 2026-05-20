@@ -6,6 +6,7 @@ CLAUDE.md invariant; both fields are required on the canonical response and even
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Optional
 
 
@@ -62,3 +63,19 @@ class CanonicalVoiceEvent:
     transcript: Optional[str] = None
     recording_url: Optional[str] = None
     vendor_raw: dict[str, Any] = field(default_factory=dict)
+
+
+class CancelDispatchOutcome(StrEnum):
+    stopped = "stopped"
+    cancelled = "cancelled"
+    noop_unsupported = "noop_unsupported"
+    noop_already_delivered = "noop_already_delivered"
+    noop_already_terminal = "noop_already_terminal"
+    provider_error = "provider_error"
+
+
+@dataclass(frozen=True)
+class CancelDispatchResult:
+    outcome: CancelDispatchOutcome
+    provider_status_code: Optional[int] = None
+    provider_message: Optional[str] = None

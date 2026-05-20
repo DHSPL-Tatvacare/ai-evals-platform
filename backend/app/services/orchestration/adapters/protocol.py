@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Mapping, Optional, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.orchestration.adapters.canonical import (
+    CancelDispatchResult,
     CanonicalMessagingEvent,
     CanonicalSendRequest,
     CanonicalSendResponse,
@@ -35,6 +36,14 @@ class MessagingAdapter(Protocol):
         app_id: str,
         payload: dict[str, Any],
     ) -> None: ...
+
+    async def cancel_dispatch(
+        self, *, connection: Any, action: Any,
+    ) -> CancelDispatchResult: ...
+
+    async def cancel_run_actions(
+        self, *, connection: Any, actions: list[Any],
+    ) -> list[CancelDispatchResult]: ...
 
 
 class VoiceAdapter(Protocol):
@@ -69,3 +78,15 @@ class VoiceAdapter(Protocol):
         app_id: str,
         payload: dict[str, Any],
     ) -> None: ...
+
+    async def cancel_dispatch(
+        self, *, connection: Any, action: Any,
+    ) -> CancelDispatchResult: ...
+
+    async def cancel_batch(
+        self, *, connection: Any, batch_id: str,
+    ) -> CancelDispatchResult: ...
+
+    async def cancel_run_actions(
+        self, *, connection: Any, actions: list[Any],
+    ) -> list[CancelDispatchResult]: ...

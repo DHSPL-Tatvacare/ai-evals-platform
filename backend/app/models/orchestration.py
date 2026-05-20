@@ -296,6 +296,45 @@ class WorkflowRun(Base):
     error: Mapped[Optional[str]] = mapped_column(Text)
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancel_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    cancel_requested_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    cancel_finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class WorkflowRunCancelAudit(Base):
+    """One row per CancelDispatchResult written by the finalize-run-cancel job."""
+
+    __tablename__ = "workflow_run_cancel_audits"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('stopped','cancelled','noop_unsupported',"
+            "'noop_already_delivered','noop_already_terminal','provider_error')",
+            name="ck_cancel_audit_outcome",
+        ),
+        Index("ix_cancel_audit_run", "run_id"),
+        {"schema": "orchestration"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration.workflow_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    provider_connection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    action_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    batch_correlation_id: Mapped[Optional[str]] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_status_code: Mapped[Optional[int]] = mapped_column(Integer)
+    provider_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class WorkflowRunNodeStep(Base):

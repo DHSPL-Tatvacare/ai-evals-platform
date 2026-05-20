@@ -24,6 +24,7 @@ from app.models.orchestration import (
     WorkflowRun,
     WorkflowRunRecipientOverride,
     WorkflowTrigger,
+    WorkflowVersion,
 )
 from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.tenant import Tenant
@@ -561,13 +562,17 @@ async def test_cancel_run(client, db_session):
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
     r = await client.post(f"/api/orchestration/runs/{run['id']}/cancel")
-    assert r.status_code == 204
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["runId"] == run["id"]
+    assert body["status"] == "cancelled"
 
     row = (await db_session.execute(
         select(WorkflowRun).where(WorkflowRun.id == uuid.UUID(run["id"]))
     )).scalar_one()
     assert row.status == "cancelled"
     assert row.completed_at is not None
+    assert row.cancel_requested_at is not None
 
 
 @pytest.mark.asyncio
@@ -679,3 +684,63 @@ async def test_node_type_descriptor_includes_config_schema(client):
     cond = descs["logic.conditional"]
     schema = cond["configSchema"]
     assert "properties" in schema
+
+
+# ─── Run cancel (TerminationReceipt) ─────────────────────────────────────────
+
+
+async def _seed_running_run(db_session, tenant_id):
+    wf = Workflow(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id="inside-sales",
+        workflow_type="crm", slug=f"cancel-{uuid.uuid4().hex[:8]}",
+        name="Cancel", created_by=SYSTEM_USER_ID,
+    )
+    db_session.add(wf)
+    await db_session.flush()
+    ver = WorkflowVersion(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id="inside-sales",
+        workflow_id=wf.id, version=1,
+        definition={"nodes": [], "edges": []}, status="published",
+    )
+    db_session.add(ver)
+    await db_session.flush()
+    run = WorkflowRun(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id="inside-sales",
+        workflow_id=wf.id, workflow_version_id=ver.id,
+        triggered_by="manual", triggered_by_user_id=SYSTEM_USER_ID,
+        status="running",
+    )
+    db_session.add(run)
+    await db_session.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_returns_termination_receipt(client, db_session, route_tenant_id):
+    run = await _seed_running_run(db_session, route_tenant_id)
+    r = await client.post(
+        f"/api/orchestration/runs/{run.id}/cancel", json={"reason": "operator"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["runId"] == str(run.id)
+    assert body["status"] == "cancelled"
+    assert "recipientsAborted" in body
+    assert "finalizeJobId" in body
+    assert "cancelRequestedAt" in body
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_defaults_reason_when_body_omitted(client, db_session, route_tenant_id):
+    run = await _seed_running_run(db_session, route_tenant_id)
+    r = await client.post(f"/api/orchestration/runs/{run.id}/cancel")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_unknown_run_returns_404(client):
+    r = await client.post(
+        f"/api/orchestration/runs/{uuid.uuid4()}/cancel", json={"reason": "operator"},
+    )
+    assert r.status_code == 404

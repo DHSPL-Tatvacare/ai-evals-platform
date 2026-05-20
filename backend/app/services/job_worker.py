@@ -1816,6 +1816,35 @@ async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, use
 
 
 @register_job_handler(
+    "finalize-run-cancel",
+    queue_class="standard",
+    priority=5,
+    retry_safe=True,
+)
+async def handle_finalize_run_cancel(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Invoke provider cancel APIs for an already-Stopped run and write audits.
+
+    The synchronous DB flip happened in run_terminator; this job only fans the
+    provider calls out asynchronously. Idempotent on run.cancel_finalized_at.
+    """
+    from app.services.orchestration.cancel.finalize_run_cancel import (
+        run_finalize_run_cancel,
+    )
+
+    run_id_raw = params.get("run_id")
+    if not run_id_raw:
+        raise ValueError("run_id is required")
+    run_id = uuid.UUID(str(run_id_raw))
+
+    async with async_session() as db:
+        await run_finalize_run_cancel(db, run_id=run_id, tenant_id=tenant_id)
+        await db.commit()
+        return {"status": "finalized", "run_id": str(run_id)}
+
+
+@register_job_handler(
     "fire-orchestration-trigger",
     queue_class="standard",
     priority=5,

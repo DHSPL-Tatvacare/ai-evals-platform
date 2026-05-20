@@ -11,6 +11,8 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.orchestration.adapters.canonical import (
+    CancelDispatchOutcome,
+    CancelDispatchResult,
     CanonicalMessagingEvent,
     CanonicalSendRequest,
     CanonicalSendResponse,
@@ -105,6 +107,24 @@ class AiSensyAdapter:
             status_code=503,
             detail=_AISENSY_INBOUND_NOT_HANDLED,
         )
+
+    async def cancel_dispatch(
+        self, *, connection: dict[str, Any], action: Any,  # noqa: ARG002
+    ) -> CancelDispatchResult:
+        # AiSensy exposes no public recall API; once submitted to Meta the
+        # template message is unrecallable.
+        return CancelDispatchResult(
+            outcome=CancelDispatchOutcome.noop_unsupported,
+            provider_message="aisensy: no recall api",
+        )
+
+    async def cancel_run_actions(
+        self, *, connection: dict[str, Any], actions: list[Any],
+    ) -> list[CancelDispatchResult]:
+        return [
+            await self.cancel_dispatch(connection=connection, action=a)
+            for a in actions
+        ]
 
 
 from app.services.orchestration.adapters import register_adapter  # noqa: E402
