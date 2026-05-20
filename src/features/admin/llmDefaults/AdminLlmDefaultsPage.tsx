@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { MessageSquare, Mic, BarChart3, Sparkles, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { MessageSquare, Mic, BarChart3, Sparkles, SlidersHorizontal, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import {
@@ -41,6 +41,7 @@ interface GroupSpec {
   label: string;
   icon: LucideIcon;
   description: string;
+  reference: string;
   siteIds: string[];
 }
 
@@ -51,6 +52,7 @@ const GROUPS: GroupSpec[] = [
     label: 'Conversational',
     icon: MessageSquare,
     description: 'Chat surfaces — plain text, multimodal, reasoning.',
+    reference: 'Evaluation runner chat replies.',
     siteIds: ['chat_text', 'chat_vision', 'chat_reasoning'],
   },
   {
@@ -58,6 +60,7 @@ const GROUPS: GroupSpec[] = [
     label: 'Voice',
     icon: Mic,
     description: 'Speech-to-text and text-to-speech.',
+    reference: 'Audio evaluation transcription · text-to-speech.',
     siteIds: ['audio_transcription', 'audio_synthesis'],
   },
   {
@@ -65,14 +68,15 @@ const GROUPS: GroupSpec[] = [
     label: 'Analytics & reporting',
     icon: BarChart3,
     description: 'Sherlock supervisor / specialist and report generation.',
+    reference: 'Sherlock analytics chat · report generation.',
     siteIds: ['analytics_supervisor', 'analytics_specialist', 'report_generation'],
   },
   {
     id: 'authoring',
     label: 'Authoring & extraction',
     icon: Sparkles,
-    description:
-      'Generate-evaluator-draft, lead-signal-extraction, and the /assist/* endpoints.',
+    description: 'Rubric drafting, structured extraction, and on-demand assist.',
+    reference: 'generate-evaluator-draft · backfill-lead-signals · assist endpoints.',
     siteIds: ['assist_prompt_or_schema', 'evaluator_draft', 'lead_signal_extraction'],
   },
 ];
@@ -132,6 +136,7 @@ export function AdminLlmDefaultsPage() {
         label: 'Other',
         icon: SlidersHorizontal,
         description: 'Call sites not yet placed into a capability group.',
+        reference: 'Ungrouped call sites.',
         siteIds: orphans.map((s) => s.id),
         specs: orphans,
       });
@@ -290,6 +295,10 @@ export function AdminLlmDefaultsPage() {
                 <p className="text-[12px] text-[var(--text-muted)]">
                   {selectedGroup.description}
                 </p>
+                <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                  <span className="text-[var(--text-secondary)]">Used by</span>{' '}
+                  {selectedGroup.reference}
+                </p>
               </header>
               {selectedGroup.specs.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center">
@@ -410,15 +419,12 @@ function CallSiteRow({
 
   return (
     <div className="px-4 py-3">
-      {/* Fixed columns: identity (0.85fr) | picker (2fr, ~520px floor) |
-          actions (96px). The picker carries two comboboxes side-by-side
-          (provider + model), each of which needs room for full names like
-          "Azure OpenAI · default" and "gemini-2.5-flash-preview-09-2025".
-          Identity is just the call_site id + one description line, so we
-          give the picker the lion's share. Action slot is reserved so
-          Clear appearing/disappearing never reflows the picker column. */}
-      <div className="grid grid-cols-[minmax(0,0.85fr)_minmax(420px,2fr)_96px] items-start gap-4">
-        <div className="min-w-0">
+      {/* Identity flexes; the picker cluster + clear slot are fixed-width and
+          right-anchored so every row's dropdowns line up. The clear slot is
+          always reserved so its appearing/disappearing never reflows the
+          picker. */}
+      <div className="flex items-start gap-4">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
               {spec.id}
@@ -436,9 +442,13 @@ function CallSiteRow({
           <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
             {spec.description}
           </p>
+          <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+            <span className="text-[var(--text-secondary)]">Used by</span>{' '}
+            {spec.reference}
+          </p>
         </div>
 
-        <div className="min-w-0">
+        <div className="w-[480px] shrink-0">
           <LlmModelSelect
             callSite={spec.id}
             value={pick}
@@ -459,17 +469,16 @@ function CallSiteRow({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2">
+        <div className="flex w-7 shrink-0 items-center justify-end">
           {scope === 'tenant' && existing && (
             <Button
               variant="ghost"
               size="sm"
-              icon={Trash2}
+              icon={X}
+              iconOnly
               onClick={() => onClear(spec.id)}
               aria-label={`Clear override for ${spec.id}`}
-            >
-              Clear
-            </Button>
+            />
           )}
         </div>
       </div>

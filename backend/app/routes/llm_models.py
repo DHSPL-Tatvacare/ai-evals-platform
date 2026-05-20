@@ -47,6 +47,7 @@ class CallSiteSpecResponse(CamelModel):
     required_capabilities: list[str]
     optional_capabilities: list[str]
     description: str
+    reference: str
 
 
 class ModelOptionResponse(CamelModel):
@@ -78,6 +79,7 @@ async def get_call_sites_registry(
             required_capabilities=sorted(spec.required_capabilities),
             optional_capabilities=sorted(spec.optional_capabilities),
             description=spec.description,
+            reference=spec.reference,
         )
         for spec in list_call_sites()
     ]

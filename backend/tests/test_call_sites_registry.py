@@ -39,6 +39,7 @@ def test_spec_rejects_unknown_capability_tag():
             required_capabilities=frozenset({"text_input", "nope"}),
             optional_capabilities=frozenset(),
             description="...",
+            reference="...",
         )
 
 
@@ -64,6 +65,24 @@ def test_call_site_ids_match_field_id():
     from app.services.llm_credentials.call_sites import CALL_SITES
     for key, spec in CALL_SITES.items():
         assert key == spec.id, f"dict key {key!r} mismatches spec.id {spec.id!r}"
+
+
+def test_every_spec_has_nonempty_reference():
+    """Each call site declares where the capability is consumed, for the
+    LLM Defaults admin UI."""
+    from app.services.llm_credentials.call_sites import CALL_SITES
+    for spec in CALL_SITES.values():
+        assert spec.reference.strip(), f"{spec.id} has an empty reference"
+
+
+def test_no_app_names_in_descriptions_or_references():
+    """Naming invariant: registry copy is capability-named, never app-named."""
+    from app.services.llm_credentials.call_sites import CALL_SITES
+    banned = ("voice-rx", "voice_rx", "kaira", "inside-sales", "inside_sales", "tatva")
+    for spec in CALL_SITES.values():
+        blob = f"{spec.description} {spec.reference}".lower()
+        for token in banned:
+            assert token not in blob, f"{spec.id} copy leaks app name {token!r}"
 
 
 def test_required_capabilities_per_site_match_plan_table():

@@ -7,6 +7,7 @@ export interface CallSiteSpec {
   requiredCapabilities: string[];
   optionalCapabilities: string[];
   description: string;
+  reference: string;
 }
 
 export interface CallSiteDefault {
