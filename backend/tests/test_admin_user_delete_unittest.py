@@ -40,7 +40,7 @@ class DeleteUserPermanentlyTests(unittest.IsolatedAsyncioTestCase):
         db.scalar.return_value = user
 
         result = await delete_user_permanently(
-            user_id=str(user.id),
+            user_id=user.id,
             request=None,
             auth=auth,
             db=db,
@@ -58,7 +58,7 @@ class DeleteUserPermanentlyTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await delete_user_permanently(
-                user_id=str(user.id),
+                user_id=user.id,
                 request=None,
                 auth=auth,
                 db=db,

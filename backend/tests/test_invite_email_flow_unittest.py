@@ -228,6 +228,7 @@ class CreateInviteLinkAuditTests(unittest.IsolatedAsyncioTestCase):
             recipient_email='ok@allowed.com',
             user_name='Jane',
         )
+        db.scalar = AsyncMock(return_value=SimpleNamespace(id=uuid.UUID(body.role_id)))
         request = SimpleNamespace(
             headers={'origin': 'http://localhost:5173'},
             client=SimpleNamespace(host='127.0.0.1'),

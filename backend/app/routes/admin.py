@@ -30,6 +30,7 @@ from app.models.application_setting import ApplicationSetting
 from app.models.mixins.shareable import Visibility
 from app.models.application_tag import ApplicationTag
 from app.models.user import User, IdentityRefreshToken
+from app.models.role import AccessRole
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfiguration
 from app.schemas.base import CamelModel
@@ -555,6 +556,26 @@ async def erase_data(
 
 # ── User Management ──────────────────────────────────────────────────────────
 
+async def _resolve_tenant_role(
+    db: AsyncSession, role_id: str, tenant_id: _uuid.UUID
+) -> AccessRole:
+    """Resolve a client-supplied role id to a role in this tenant.
+
+    Raises 400 for a malformed id and 404 for one outside the tenant, so role
+    assignment never 500s on bad input or silently binds another tenant's role.
+    """
+    try:
+        parsed = _uuid.UUID(role_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(400, "Invalid role id")
+    role = await db.scalar(
+        select(AccessRole).where(AccessRole.id == parsed, AccessRole.tenant_id == tenant_id)
+    )
+    if not role:
+        raise HTTPException(404, "Role not found")
+    return role
+
+
 @router.get("/users")
 async def list_users(
     auth: AuthContext = Depends(get_auth_context),
@@ -607,12 +628,14 @@ async def create_user(
     if existing:
         raise HTTPException(400, "A user with this email already exists in this tenant")
 
+    role = await _resolve_tenant_role(db, body.role_id, auth.tenant_id)
+
     user = User(
         tenant_id=auth.tenant_id,
         email=body.email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
-        role_id=_uuid.UUID(body.role_id),
+        role_id=role.id,
     )
     db.add(user)
     await db.flush()
@@ -684,7 +707,8 @@ async def update_user(
     if body.display_name is not None:
         user.display_name = body.display_name
     if body.role_id is not None:
-        user.role_id = _uuid.UUID(body.role_id)
+        role = await _resolve_tenant_role(db, body.role_id, auth.tenant_id)
+        user.role_id = role.id
     if body.is_active is not None:
         user.is_active = body.is_active
 
@@ -719,7 +743,7 @@ class AdminResetPasswordRequest(CamelModel):
 
 @router.put("/users/{user_id}/password")
 async def admin_reset_password(
-    user_id: str,
+    user_id: _uuid.UUID,
     body: AdminResetPasswordRequest,
     request: Request,
     auth: AuthContext = require_permission('user:reset_password'),
@@ -733,7 +757,7 @@ async def admin_reset_password(
         raise HTTPException(400, detail=strength_error)
 
     user = await db.scalar(
-        select(User).where(User.id == _uuid.UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == user_id, User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
@@ -765,19 +789,19 @@ async def admin_reset_password(
     )
 
     await db.commit()
-    return {"status": "ok", "id": user_id}
+    return {"status": "ok", "id": str(user_id)}
 
 
 @router.delete("/users/{user_id}")
 async def deactivate_user(
-    user_id: str,
+    user_id: _uuid.UUID,
     request: Request,
     auth: AuthContext = require_permission('user:deactivate'),
     db: AsyncSession = Depends(get_db),
 ):
     """Deactivate a user. Does not delete data."""
     user = await db.scalar(
-        select(User).where(User.id == _uuid.UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == user_id, User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
@@ -799,19 +823,19 @@ async def deactivate_user(
     )
 
     await db.commit()
-    return {"deactivated": True, "id": user_id}
+    return {"deactivated": True, "id": str(user_id)}
 
 
 @router.delete("/users/{user_id}/permanent")
 async def delete_user_permanently(
-    user_id: str,
+    user_id: _uuid.UUID,
     request: Request,
     auth: AuthContext = require_permission('user:delete'),
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a user and their refresh tokens."""
     user = await db.scalar(
-        select(User).where(User.id == _uuid.UUID(user_id), User.tenant_id == auth.tenant_id)
+        select(User).where(User.id == user_id, User.tenant_id == auth.tenant_id)
     )
     if not user:
         raise HTTPException(404, "User not found")
@@ -839,7 +863,7 @@ async def delete_user_permanently(
 
     await db.delete(user)
     await db.commit()
-    return {"deleted": True, "id": user_id}
+    return {"deleted": True, "id": str(user_id)}
 
 
 # ── Tenant Management ────────────────────────────────────────────────────────
@@ -976,6 +1000,8 @@ async def create_invite_link(
         # yet. Hard-reject so an admin can't issue an unredeemable invite.
         raise HTTPException(501, detail="SSO invites are not yet supported")
 
+    role = await _resolve_tenant_role(db, body.role_id, auth.tenant_id)
+
     raw_token, token_hash = create_refresh_token()  # reuse same random+hash pattern
 
     invite = IdentityInviteLink(
@@ -983,7 +1009,7 @@ async def create_invite_link(
         created_by=auth.user_id,
         token_hash=token_hash,
         label=body.label,
-        role_id=_uuid.UUID(body.role_id),
+        role_id=role.id,
         max_uses=body.max_uses,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours),
         status=InviteStatus.active,
@@ -1203,7 +1229,7 @@ async def _load_latest_invite_sends(
 
 @router.post("/invite-links/{link_id}/revoke")
 async def revoke_invite_link_v2(
-    link_id: str,
+    link_id: _uuid.UUID,
     request: Request,
     auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
@@ -1218,7 +1244,7 @@ async def revoke_invite_link_v2(
         invite = await invite_link_service.revoke_invite_link(
             db,
             tenant_id=auth.tenant_id,
-            invite_id=_uuid.UUID(link_id),
+            invite_id=link_id,
             actor_id=auth.user_id,
             actor_email=auth.email,
             request=request,
@@ -1237,7 +1263,7 @@ async def revoke_invite_link_v2(
 
 @router.delete("/invite-links/{link_id}")
 async def hard_delete_invite_link(
-    link_id: str,
+    link_id: _uuid.UUID,
     request: Request,
     auth: AuthContext = require_permission('invite_link:delete'),
     db: AsyncSession = Depends(get_db),
@@ -1252,7 +1278,7 @@ async def hard_delete_invite_link(
         await invite_link_service.hard_delete_invite_link(
             db,
             tenant_id=auth.tenant_id,
-            invite_id=_uuid.UUID(link_id),
+            invite_id=link_id,
             actor_id=auth.user_id,
             request=request,
         )
@@ -1267,12 +1293,12 @@ async def hard_delete_invite_link(
             ),
         )
     await db.commit()
-    return {"deleted": True, "id": link_id}
+    return {"deleted": True, "id": str(link_id)}
 
 
 @router.get("/invite-links/{link_id}/uses")
 async def list_invite_link_uses(
-    link_id: str,
+    link_id: _uuid.UUID,
     auth: AuthContext = require_permission('invite_link:manage'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1284,7 +1310,7 @@ async def list_invite_link_uses(
     """
     invite = await db.scalar(
         select(IdentityInviteLink).where(
-            IdentityInviteLink.id == _uuid.UUID(link_id),
+            IdentityInviteLink.id == link_id,
             IdentityInviteLink.tenant_id == auth.tenant_id,
         )
     )
