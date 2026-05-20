@@ -1,7 +1,8 @@
 import { BrickWallShield, Headset, ShieldAlert, type LucideIcon } from 'lucide-react';
 import { cn } from '@/utils';
+import type { AppIconKind } from './appIconKind';
 
-export type AppIconKind = 'image' | 'glyph';
+export type { AppIconKind };
 
 // Glyph names (lucide kebab-case) an app/admin config may reference.
 const GLYPHS: Record<string, LucideIcon> = {

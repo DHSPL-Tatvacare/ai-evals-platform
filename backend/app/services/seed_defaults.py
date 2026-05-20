@@ -2295,10 +2295,10 @@ APP_SEEDS = [
         "slug": "inside-sales",
         "display_name": "Inside Sales",
         "description": "Inside sales call quality evaluation",
-        "icon_url": "/inside-sales-icon.svg",
+        "icon_url": "headset",
         "config": {
             "displayName": "Inside Sales",
-            "icon": "/inside-sales-icon.svg",
+            "icon": "headset",
             "description": "Inside sales call quality evaluation",
             "features": {
                 "hasRules": False,

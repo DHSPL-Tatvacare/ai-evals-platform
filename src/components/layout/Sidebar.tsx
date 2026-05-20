@@ -31,6 +31,7 @@ import type { AppId } from '@/types';
 import { getAdminNavGroups, getNavItems, type SidebarNavGroup, type SidebarNavItem } from "@/config/sidebarNav";
 import { AppSwitcher } from "./AppSwitcher";
 import { AppIcon, type AppIconKind } from "./AppIcon";
+import { iconKindOf } from "./appIconKind";
 import { KairaSidebarContent } from "./KairaSidebarContent";
 import { VoiceRxSidebarContent } from "./VoiceRxSidebarContent";
 import { InsideSalesSidebarContent } from "./InsideSalesSidebarContent";
@@ -191,11 +192,11 @@ export function Sidebar() {
   const isInsideSales = appId === 'inside-sales';
 
   // Resolves to the icon shown in the collapsed-sidebar header. Single source
-  // for both apps (image URL from metadata) and admin (the shield glyph),
-  // so adding a new app surface only touches the metadata config.
+  // for both apps (image or glyph, detected from metadata) and admin (the
+  // shield glyph), so adding a new app surface only touches the metadata config.
   const collapsedAppIcon: { iconType: AppIconKind; iconValue: string; name: string } = isAdminView
     ? { iconType: 'glyph', iconValue: 'shield-alert', name: 'Admin' }
-    : { iconType: 'image', iconValue: appMetadata.icon, name: appMetadata.name };
+    : { iconType: iconKindOf(appMetadata.icon), iconValue: appMetadata.icon, name: appMetadata.name };
 
   // App content key for the AnimatePresence crossfade — changes when the user
   // switches apps or enters/leaves admin view.
@@ -280,6 +281,7 @@ export function Sidebar() {
                       isSettingsActive={isSettingsActive}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
+                      onClose={() => setUserMenuOpen(false)}
                       onChangePassword={() => {
                         setUserMenuOpen(false);
                         setIsChangePasswordOpen(true);
@@ -374,6 +376,7 @@ export function Sidebar() {
                       isSettingsActive={isSettingsActive}
                       isGuideActive={isGuideActive}
                       onLogout={logout}
+                      onClose={() => setUserMenuOpen(false)}
                       onChangePassword={() => {
                         setUserMenuOpen(false);
                         setIsChangePasswordOpen(true);
@@ -437,6 +440,7 @@ function UserMenu({
   isGuideActive,
   onLogout,
   onChangePassword,
+  onClose,
 }: {
   /** ``null`` when the current view has no app-scoped settings (e.g. admin)
    *  — Settings entry is hidden in that case. */
@@ -445,6 +449,9 @@ function UserMenu({
   isGuideActive: boolean;
   onLogout: () => void;
   onChangePassword: () => void;
+  /** Dismiss the popover. Navigating items don't unmount the menu, so each
+   *  must close it explicitly. */
+  onClose: () => void;
 }) {
   const menuLinkClass = "flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-[var(--text-secondary)] hover:bg-[var(--interactive-secondary)] hover:text-[var(--text-primary)]";
   const activeLinkClass = "flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors bg-[var(--color-brand-accent)]/20 text-[var(--text-brand)]";
@@ -452,12 +459,12 @@ function UserMenu({
   return (
     <div className="py-1">
       {settingsPath && (
-        <Link to={settingsPath} className={isSettingsActive ? activeLinkClass : menuLinkClass}>
+        <Link to={settingsPath} onClick={onClose} className={isSettingsActive ? activeLinkClass : menuLinkClass}>
           <Settings className="h-4 w-4" />
           Settings
         </Link>
       )}
-      <Link to={routes.guide} className={isGuideActive ? activeLinkClass : menuLinkClass}>
+      <Link to={routes.guide} onClick={onClose} className={isGuideActive ? activeLinkClass : menuLinkClass}>
         <BookOpen className="h-4 w-4" />
         Guide
       </Link>
@@ -470,7 +477,10 @@ function UserMenu({
         Change Password
       </button>
       <button
-        onClick={onLogout}
+        onClick={() => {
+          onClose();
+          onLogout();
+        }}
         className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-red-400 hover:bg-red-500/10 hover:text-red-300"
       >
         <LogOut className="h-4 w-4" />

@@ -12,6 +12,7 @@ import {
   userHasPermission,
 } from '@/utils/permissions';
 import { AppIcon, type AppIconKind } from './AppIcon';
+import { iconKindOf } from './appIconKind';
 
 interface AppConfig {
   id: AppId | 'admin-view';
@@ -19,11 +20,6 @@ interface AppConfig {
   route: string;
   iconType: AppIconKind;
   iconValue: string;
-}
-
-// A path/URL renders as an image; anything else is a lucide glyph name.
-function iconKindOf(icon: string): AppIconKind {
-  return icon.startsWith('/') || icon.includes('://') ? 'image' : 'glyph';
 }
 
 export function AppSwitcher() {
