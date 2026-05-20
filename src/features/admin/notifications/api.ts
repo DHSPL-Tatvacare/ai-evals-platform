@@ -1,6 +1,7 @@
-import { apiRequest } from '@/services/api/client';
+import { apiDownload, apiRequest } from '@/services/api/client';
 import type {
   AdminMailSendList,
+  AdminMailSendPreview,
   AdminSubscriptionList,
   AdminSubscriptionRow,
   NotificationDefaultRow,
@@ -21,6 +22,8 @@ export interface SendLogListQuery {
   status?: string;
   callSite?: string;
   recipient?: string;
+  fromDate?: string;
+  toDate?: string;
   page?: number;
   pageSize?: number;
 }
@@ -33,6 +36,30 @@ export function buildQuery(params: Record<string, unknown>): string {
   }
   const qs = search.toString();
   return qs ? `?${qs}` : '';
+}
+
+// Wire param keys are snake_case (platform convention — FastAPI query params
+// are not camel-aliased like request bodies). These mappers are the single
+// source of the send-log + subscriptions query strings.
+export function subscriptionParams(query: SubscriptionListQuery): string {
+  return buildQuery({
+    event_type: query.eventType,
+    user_id: query.userId,
+    is_active: query.isActive,
+    page: query.page,
+    page_size: query.pageSize,
+  });
+}
+
+export function sendLogParams(query: SendLogListQuery, withPaging = true): string {
+  return buildQuery({
+    status: query.status,
+    call_site: query.callSite,
+    recipient: query.recipient,
+    from_date: query.fromDate,
+    to_date: query.toDate,
+    ...(withPaging ? { page: query.page, page_size: query.pageSize } : {}),
+  });
 }
 
 export const adminNotificationsApi = {
@@ -49,13 +76,7 @@ export const adminNotificationsApi = {
 
   listSubscriptions: (query: SubscriptionListQuery = {}) =>
     apiRequest<AdminSubscriptionList>(
-      `${BASE}/subscriptions${buildQuery({
-        eventType: query.eventType,
-        userId: query.userId,
-        isActive: query.isActive,
-        page: query.page,
-        pageSize: query.pageSize,
-      })}`,
+      `${BASE}/subscriptions${subscriptionParams(query)}`,
     ),
 
   patchSubscription: (
@@ -73,13 +94,13 @@ export const adminNotificationsApi = {
     }),
 
   listSendLog: (query: SendLogListQuery = {}) =>
-    apiRequest<AdminMailSendList>(
-      `${BASE}/send-log${buildQuery({
-        status: query.status,
-        callSite: query.callSite,
-        recipient: query.recipient,
-        page: query.page,
-        pageSize: query.pageSize,
-      })}`,
+    apiRequest<AdminMailSendList>(`${BASE}/send-log${sendLogParams(query)}`),
+
+  previewSendLog: (id: string) =>
+    apiRequest<AdminMailSendPreview>(
+      `${BASE}/send-log/${encodeURIComponent(id)}/preview`,
     ),
+
+  exportSendLogCsv: (query: SendLogListQuery = {}) =>
+    apiDownload(`${BASE}/send-log.csv${sendLogParams(query, false)}`),
 };

@@ -21,6 +21,7 @@ async def write_log(
     provider_response: dict[str, Any] | None = None,
     error_message: str | None = None,
     correlation_id: str | None = None,
+    html_cached_at_send: str | None = None,
 ) -> MailSendLog:
     row = MailSendLog(
         tenant_id=tenant_id,
@@ -31,6 +32,7 @@ async def write_log(
         provider_response=provider_response,
         error_message=error_message,
         correlation_id=correlation_id,
+        html_cached_at_send=html_cached_at_send,
     )
     db.add(row)
     await db.flush()

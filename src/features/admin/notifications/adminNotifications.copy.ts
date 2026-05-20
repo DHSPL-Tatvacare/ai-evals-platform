@@ -40,6 +40,15 @@ export const adminNotificationsCopy = {
     action: {
       delete: 'Remove subscription',
       cancel: 'Cancel',
+      requiredToggle: 'Required',
+      promoteRequiredTitle: 'Make this subscription required?',
+      promoteRequiredBody:
+        'The user will no longer be able to unsubscribe from this notification. Confirm the escalation.',
+      promoteRequiredConfirm: 'Make required',
+      demoteRequiredTitle: 'Drop the required flag?',
+      demoteRequiredBody:
+        'The user will be able to unsubscribe from this notification again.',
+      demoteRequiredConfirm: 'Drop required',
     },
     confirmDelete:
       'Remove this subscription? The user can re-enable it from their own settings.',
@@ -74,8 +83,23 @@ export const adminNotificationsCopy = {
       status: 'Status',
       event: 'Notification',
       recipient: 'Recipient contains…',
+      fromDate: 'From',
+      toDate: 'To',
       allStatuses: 'All',
       allEvents: 'All',
+    },
+    exportCsv: 'Export CSV',
+    exportFailed: 'Could not export the send log.',
+    preview: {
+      title: 'Email preview',
+      openLabel: 'View email',
+      cancel: 'Close',
+      loading: 'Loading preview…',
+      loadFailed: 'Could not load this email.',
+      noHtml:
+        'No rendered HTML on this row. Older sends were logged before the preview cache shipped.',
+      providerResponseHeading: 'Provider response',
+      errorHeading: 'Error',
     },
   },
 

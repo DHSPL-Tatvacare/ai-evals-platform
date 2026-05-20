@@ -61,3 +61,14 @@ class AdminMailSendRow(CamelModel):
 class AdminMailSendList(CamelModel):
     rows: list[AdminMailSendRow]
     total: int
+
+
+class AdminMailSendPreview(CamelModel):
+    id: str
+    subject: str
+    recipient: str
+    status: str
+    sent_at: datetime
+    html: Optional[str] = None
+    provider_response: Optional[dict] = None
+    error_message: Optional[str] = None

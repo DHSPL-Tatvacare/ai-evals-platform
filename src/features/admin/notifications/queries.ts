@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiQueryFn } from '@/services/api/queryFn';
 import {
   adminNotificationsApi,
-  buildQuery,
   type SendLogListQuery,
   type SubscriptionListQuery,
 } from './api';
 import type {
   AdminMailSendList,
+  AdminMailSendPreview,
   AdminSubscriptionList,
   AdminSubscriptionRow,
   NotificationDefaultRow,
@@ -21,33 +20,28 @@ export const adminNotificationsKeys = {
     [...adminNotificationsKeys.all, 'subscriptions', q] as const,
   sendLog: (q: SendLogListQuery) =>
     [...adminNotificationsKeys.all, 'send-log', q] as const,
+  sendLogPreview: (id: string) =>
+    [...adminNotificationsKeys.all, 'send-log', 'preview', id] as const,
 };
 
 export function useNotificationDefaults() {
   return useQuery<NotificationDefaultsResponse>({
     queryKey: adminNotificationsKeys.defaults(),
-    queryFn: () =>
-      apiQueryFn<NotificationDefaultsResponse>('/api/admin/notifications/defaults'),
+    queryFn: () => adminNotificationsApi.listDefaults(),
   });
 }
 
 export function useAdminSubscriptions(query: SubscriptionListQuery) {
   return useQuery<AdminSubscriptionList>({
     queryKey: adminNotificationsKeys.subscriptions(query),
-    queryFn: () =>
-      apiQueryFn<AdminSubscriptionList>(
-        `/api/admin/notifications/subscriptions${buildQuery(query as Record<string, unknown>)}`,
-      ),
+    queryFn: () => adminNotificationsApi.listSubscriptions(query),
   });
 }
 
 export function useAdminSendLog(query: SendLogListQuery) {
   return useQuery<AdminMailSendList>({
     queryKey: adminNotificationsKeys.sendLog(query),
-    queryFn: () =>
-      apiQueryFn<AdminMailSendList>(
-        `/api/admin/notifications/send-log${buildQuery(query as Record<string, unknown>)}`,
-      ),
+    queryFn: () => adminNotificationsApi.listSendLog(query),
   });
 }
 
@@ -94,6 +88,14 @@ export function usePatchSubscription() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: adminNotificationsKeys.all });
     },
+  });
+}
+
+export function useSendLogPreview(id: string | null) {
+  return useQuery<AdminMailSendPreview>({
+    queryKey: adminNotificationsKeys.sendLogPreview(id ?? ''),
+    queryFn: () => adminNotificationsApi.previewSendLog(id ?? ''),
+    enabled: id !== null,
   });
 }
 

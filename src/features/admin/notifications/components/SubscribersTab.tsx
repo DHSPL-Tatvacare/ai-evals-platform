@@ -47,6 +47,7 @@ export function SubscribersTab() {
   const [activeFilter, setActiveFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<AdminSubscriptionRow | null>(null);
+  const [pendingRequiredFlip, setPendingRequiredFlip] = useState<AdminSubscriptionRow | null>(null);
 
   const isActive =
     activeFilter === 'true' ? true : activeFilter === 'false' ? false : undefined;
@@ -112,15 +113,23 @@ export function SubscribersTab() {
     {
       key: 'required',
       header: adminNotificationsCopy.subscribers.columns.required,
-      width: '120px',
-      render: (row) =>
-        row.isRequired ? (
-          <Badge variant="primary" icon={Lock}>
-            {adminNotificationsCopy.subscribers.requiredBadge}
-          </Badge>
-        ) : (
-          <span className="text-[12px] text-[var(--text-tertiary)]">—</span>
-        ),
+      width: '150px',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <Switch
+            size="sm"
+            checked={row.isRequired}
+            disabled={patchMutation.isPending && patchMutation.variables?.id === row.id}
+            onCheckedChange={() => setPendingRequiredFlip(row)}
+            aria-label={adminNotificationsCopy.subscribers.action.requiredToggle}
+          />
+          {row.isRequired ? (
+            <Badge variant="primary" icon={Lock}>
+              {adminNotificationsCopy.subscribers.requiredBadge}
+            </Badge>
+          ) : null}
+        </div>
+      ),
     },
     {
       key: 'created',
@@ -230,6 +239,50 @@ export function SubscribersTab() {
         isLoading={deleteMutation.isPending}
       />
 
+      <ConfirmDialog
+        isOpen={pendingRequiredFlip !== null}
+        title={
+          pendingRequiredFlip?.isRequired
+            ? adminNotificationsCopy.subscribers.action.demoteRequiredTitle
+            : adminNotificationsCopy.subscribers.action.promoteRequiredTitle
+        }
+        description={
+          pendingRequiredFlip?.isRequired
+            ? adminNotificationsCopy.subscribers.action.demoteRequiredBody
+            : adminNotificationsCopy.subscribers.action.promoteRequiredBody
+        }
+        confirmLabel={
+          pendingRequiredFlip?.isRequired
+            ? adminNotificationsCopy.subscribers.action.demoteRequiredConfirm
+            : adminNotificationsCopy.subscribers.action.promoteRequiredConfirm
+        }
+        cancelLabel={adminNotificationsCopy.subscribers.action.cancel}
+        variant={pendingRequiredFlip?.isRequired ? 'warning' : 'primary'}
+        onClose={() => setPendingRequiredFlip(null)}
+        onConfirm={() => {
+          if (!pendingRequiredFlip) return;
+          const row = pendingRequiredFlip;
+          const next = !row.isRequired;
+          patchMutation.mutate(
+            { id: row.id, isRequired: next },
+            {
+              onSuccess: () => {
+                notificationService.success(adminNotificationsCopy.toast.subscriptionUpdated);
+                setPendingRequiredFlip(null);
+              },
+              onError: (err) => {
+                notificationService.error(
+                  summarizeApiErrorBody(
+                    decodeApiError(err),
+                    adminNotificationsCopy.subscribers.updateFailed,
+                  ),
+                );
+              },
+            },
+          );
+        }}
+        isLoading={patchMutation.isPending}
+      />
     </div>
   );
 }

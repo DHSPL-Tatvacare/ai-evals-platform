@@ -505,6 +505,132 @@ class TestSignupFanOut:
         assert added == 0
 
 
+class TestPreviewSendLog:
+    async def test_returns_html_for_existing_row_in_tenant(self):
+        from app.models.mail_send_log import MailSendLog
+
+        tenant_id = uuid.uuid4()
+        auth = _auth(tenant_id=tenant_id)
+        row = MailSendLog(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            call_site="mail.scheduled_job_failed",
+            recipient="alice@x.in",
+            subject="Scheduled job failed",
+            status="sent",
+            provider_response={"errors": [], "message": "ok"},
+            error_message=None,
+            correlation_id=None,
+            html_cached_at_send="<html><body>hi</body></html>",
+            sent_at=datetime.now(timezone.utc),
+        )
+        db = _FakeSession()
+        db.queue_scalar(row)
+        preview = await routes.preview_send_log(
+            send_log_id=row.id, auth=auth, db=db
+        )
+        assert preview.html == "<html><body>hi</body></html>"
+        assert preview.provider_response == {"errors": [], "message": "ok"}
+        assert preview.recipient == "alice@x.in"
+
+    async def test_404_for_other_tenant_row(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(None)
+        with pytest.raises(HTTPException) as ei:
+            await routes.preview_send_log(
+                send_log_id=uuid.uuid4(), auth=auth, db=db
+            )
+        assert ei.value.status_code == 404
+
+    async def test_returns_null_html_for_pre_cache_row(self):
+        from app.models.mail_send_log import MailSendLog
+
+        tenant_id = uuid.uuid4()
+        auth = _auth(tenant_id=tenant_id)
+        row = MailSendLog(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            call_site="mail.scheduled_job_failed",
+            recipient="alice@x.in",
+            subject="Older email",
+            status="sent",
+            provider_response=None,
+            error_message=None,
+            correlation_id=None,
+            html_cached_at_send=None,
+            sent_at=datetime.now(timezone.utc),
+        )
+        db = _FakeSession()
+        db.queue_scalar(row)
+        preview = await routes.preview_send_log(
+            send_log_id=row.id, auth=auth, db=db
+        )
+        assert preview.html is None
+
+
+class TestSendLogDateFilter:
+    async def test_from_and_to_predicates_applied(self):
+        auth = _auth()
+        db = _FakeSession()
+        db.queue_scalar(0)
+        db.queue_result([])
+        await routes.list_send_log(
+            auth=auth,
+            db=db,
+            status=None,
+            call_site=None,
+            recipient=None,
+            from_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            to_date=datetime(2026, 5, 20, tzinfo=timezone.utc),
+            page=1,
+            page_size=25,
+        )
+        rendered = " ".join(str(s) for s in db.executed)
+        assert "sent_at" in rendered
+
+
+class TestCsvExport:
+    async def test_streams_csv_with_header(self):
+        from app.models.mail_send_log import MailSendLog
+
+        tenant_id = uuid.uuid4()
+        auth = _auth(tenant_id=tenant_id)
+        row = MailSendLog(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            call_site="mail.scheduled_job_failed",
+            recipient="alice@x.in",
+            subject="Scheduled job failed",
+            status="sent",
+            provider_response=None,
+            error_message=None,
+            correlation_id="corr-1",
+            html_cached_at_send=None,
+            sent_at=datetime(2026, 5, 20, 10, 0, tzinfo=timezone.utc),
+        )
+        db = _FakeSession()
+        db.queue_result([row])
+        response = await routes.export_send_log_csv(
+            auth=auth,
+            db=db,
+            status=None,
+            call_site=None,
+            recipient=None,
+            from_date=None,
+            to_date=None,
+        )
+        body_chunks: list[bytes | str] = []
+        async for chunk in response.body_iterator:
+            body_chunks.append(chunk)
+        body = "".join(c if isinstance(c, str) else c.decode() for c in body_chunks)
+        lines = body.splitlines()
+        assert lines[0] == "sent_at,call_site,recipient,subject,status,correlation_id,error_message"
+        assert "alice@x.in" in body
+        assert "corr-1" in body
+        assert response.media_type == "text/csv"
+
+
 class TestSendLog:
     async def test_returns_paginated_rows(self):
         from app.models.mail_send_log import MailSendLog

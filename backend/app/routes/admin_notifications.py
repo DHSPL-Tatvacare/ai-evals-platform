@@ -1,10 +1,14 @@
 """Admin notification management: defaults, subscribers, send-log."""
 from __future__ import annotations
 
+import csv
+import io
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +19,7 @@ from app.models.notification_subscription import NotificationSubscription
 from app.models.user import User
 from app.schemas.admin_notifications import (
     AdminMailSendList,
+    AdminMailSendPreview,
     AdminMailSendRow,
     AdminSubscriptionList,
     AdminSubscriptionPatch,
@@ -397,6 +402,28 @@ async def delete_subscription(
 # ---------------------------------------------------------------------------
 
 
+def _apply_send_log_filters(
+    base,
+    *,
+    status: Optional[str],
+    call_site: Optional[str],
+    recipient: Optional[str],
+    from_date: Optional[datetime],
+    to_date: Optional[datetime],
+):
+    if status:
+        base = base.where(MailSendLog.status == status)
+    if call_site:
+        base = base.where(MailSendLog.call_site == call_site)
+    if recipient:
+        base = base.where(MailSendLog.recipient.ilike(f"%{recipient}%"))
+    if from_date is not None:
+        base = base.where(MailSendLog.sent_at >= from_date)
+    if to_date is not None:
+        base = base.where(MailSendLog.sent_at <= to_date)
+    return base
+
+
 @router.get("/send-log", response_model=AdminMailSendList)
 async def list_send_log(
     auth: AuthContext = require_permission("notifications:manage"),
@@ -404,17 +431,19 @@ async def list_send_log(
     status: Optional[str] = Query(None),
     call_site: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
 ) -> AdminMailSendList:
-    base = select(MailSendLog).where(MailSendLog.tenant_id == auth.tenant_id)
-    if status:
-        base = base.where(MailSendLog.status == status)
-    if call_site:
-        base = base.where(MailSendLog.call_site == call_site)
-    if recipient:
-        base = base.where(MailSendLog.recipient.ilike(f"%{recipient}%"))
-
+    base = _apply_send_log_filters(
+        select(MailSendLog).where(MailSendLog.tenant_id == auth.tenant_id),
+        status=status,
+        call_site=call_site,
+        recipient=recipient,
+        from_date=from_date,
+        to_date=to_date,
+    )
     total = (await db.scalar(select(func.count()).select_from(base.subquery()))) or 0
 
     rows_stmt = (
@@ -438,4 +467,77 @@ async def list_send_log(
             for r in rows
         ],
         total=int(total),
+    )
+
+
+@router.get("/send-log/{send_log_id}/preview", response_model=AdminMailSendPreview)
+async def preview_send_log(
+    send_log_id: uuid.UUID,
+    auth: AuthContext = require_permission("notifications:manage"),
+    db: AsyncSession = Depends(get_db),
+) -> AdminMailSendPreview:
+    row = await db.scalar(
+        select(MailSendLog).where(
+            MailSendLog.id == send_log_id,
+            MailSendLog.tenant_id == auth.tenant_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Send-log entry not found.")
+    return AdminMailSendPreview(
+        id=str(row.id),
+        subject=row.subject,
+        recipient=row.recipient,
+        status=row.status,
+        sent_at=row.sent_at,
+        html=row.html_cached_at_send,
+        provider_response=row.provider_response,
+        error_message=row.error_message,
+    )
+
+
+@router.get("/send-log.csv")
+async def export_send_log_csv(
+    auth: AuthContext = require_permission("notifications:manage"),
+    db: AsyncSession = Depends(get_db),
+    status: Optional[str] = Query(None),
+    call_site: Optional[str] = Query(None),
+    recipient: Optional[str] = Query(None),
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
+) -> StreamingResponse:
+    base = _apply_send_log_filters(
+        select(MailSendLog).where(MailSendLog.tenant_id == auth.tenant_id),
+        status=status,
+        call_site=call_site,
+        recipient=recipient,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    # Cap the export — protects the worker + browser from a huge dump.
+    rows = (
+        await db.execute(base.order_by(MailSendLog.sent_at.desc()).limit(10000))
+    ).scalars().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["sent_at", "call_site", "recipient", "subject", "status", "correlation_id", "error_message"])
+    for r in rows:
+        writer.writerow(
+            [
+                r.sent_at.isoformat() if r.sent_at else "",
+                r.call_site,
+                r.recipient,
+                r.subject,
+                r.status,
+                r.correlation_id or "",
+                (r.error_message or "").replace("\n", " ").replace("\r", " "),
+            ]
+        )
+    buf.seek(0)
+    filename = f"mail-send-log-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

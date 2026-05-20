@@ -1,14 +1,19 @@
 import { useState } from 'react';
-import { Mail } from 'lucide-react';
+import { Download, Mail } from 'lucide-react';
 import type { ColumnDef } from '@/components/ui/DataTable';
 import { DataTable } from '@/components/ui/DataTable';
 import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Button } from '@/components/ui/Button';
+import { notificationService } from '@/services/notifications';
+import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { emailSettingsCopy } from '@/features/accountSettings/email/emailSettings.copy';
 import { adminNotificationsCopy } from '../adminNotifications.copy';
+import { adminNotificationsApi, type SendLogListQuery } from '../api';
 import { useAdminSendLog } from '../queries';
 import type { AdminMailSendRow } from '../types';
+import { SendLogPreviewOverlay } from './SendLogPreviewOverlay';
 
 const PAGE_SIZE = 25;
 
@@ -48,15 +53,48 @@ export function SendLogTab() {
   const [status, setStatus] = useState('');
   const [callSite, setCallSite] = useState('');
   const [recipient, setRecipient] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [page, setPage] = useState(1);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
-  const query = useAdminSendLog({
+  const sharedFilters: SendLogListQuery = {
     status: status || undefined,
     callSite: callSite || undefined,
     recipient: recipient || undefined,
+    fromDate: fromDate ? new Date(fromDate).toISOString() : undefined,
+    toDate: toDate ? new Date(toDate).toISOString() : undefined,
+  };
+  const query = useAdminSendLog({
+    ...sharedFilters,
     page,
     pageSize: PAGE_SIZE,
   });
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await adminNotificationsApi.exportSendLogCsv(sharedFilters);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mail-send-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      notificationService.error(
+        summarizeApiErrorBody(
+          decodeApiError(err),
+          adminNotificationsCopy.sendLog.exportFailed,
+        ),
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const columns: ColumnDef<AdminMailSendRow>[] = [
     {
@@ -145,6 +183,40 @@ export function SendLogTab() {
             className="h-8 w-[220px]"
           />
         </div>
+        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
+          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.fromDate}</span>
+          <Input
+            type="date"
+            value={fromDate}
+            onChange={(e) => {
+              setFromDate(e.target.value);
+              setPage(1);
+            }}
+            className="h-8 w-[160px]"
+          />
+        </div>
+        <div className="flex flex-col gap-1 text-[12px] text-[var(--text-secondary)]">
+          <span className="font-medium">{adminNotificationsCopy.sendLog.filters.toDate}</span>
+          <Input
+            type="date"
+            value={toDate}
+            onChange={(e) => {
+              setToDate(e.target.value);
+              setPage(1);
+            }}
+            className="h-8 w-[160px]"
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={Download}
+          isLoading={exporting}
+          disabled={exporting}
+          onClick={handleExport}
+        >
+          {adminNotificationsCopy.sendLog.exportCsv}
+        </Button>
       </div>
 
       {query.isError ? (
@@ -156,6 +228,7 @@ export function SendLogTab() {
           columns={columns}
           data={query.data?.rows ?? []}
           keyExtractor={(row) => row.id}
+          onRowClick={(row) => setPreviewId(row.id)}
           loading={query.isLoading}
           emptyIcon={Mail}
           emptyTitle={adminNotificationsCopy.sendLog.empty}
@@ -170,6 +243,10 @@ export function SendLogTab() {
         />
       )}
 
+      <SendLogPreviewOverlay
+        sendLogId={previewId}
+        onClose={() => setPreviewId(null)}
+      />
     </div>
   );
 }

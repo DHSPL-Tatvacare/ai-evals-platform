@@ -92,6 +92,7 @@ async def send_mail(
             status="failed",
             error_message=f"{type(exc).__name__}: {exc}",
             correlation_id=correlation_id,
+            html_cached_at_send=rendered.html,
         )
         logger.warning(
             "mail.send_failed",
@@ -114,4 +115,5 @@ async def send_mail(
         status="sent",
         provider_response={"errors": errors, "message": message},
         correlation_id=correlation_id,
+        html_cached_at_send=rendered.html,
     )

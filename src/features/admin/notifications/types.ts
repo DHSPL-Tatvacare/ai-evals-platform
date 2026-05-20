@@ -41,3 +41,14 @@ export interface AdminMailSendList {
   rows: AdminMailSendRow[];
   total: number;
 }
+
+export interface AdminMailSendPreview {
+  id: string;
+  subject: string;
+  recipient: string;
+  status: string;
+  sentAt: string;
+  html: string | null;
+  providerResponse: Record<string, unknown> | null;
+  errorMessage: string | null;
+}
