@@ -2,7 +2,7 @@
 
 These cases mock the AsyncSession so the validation path can run without
 a live Postgres. The DB-integration suite covers the persistence side via
-test_orchestration_routes_unittest (port 5433 required).
+test_orchestration_routes_unittest (port 5432 required).
 """
 from __future__ import annotations
 

@@ -130,7 +130,7 @@ Silent shape-drift is the bug class this rule eliminates. The 2026-05-15 inside-
 - There is no `startup_schema.py`, no bootstrap-create script. Schema change = new revision + matching ORM edit in the same commit.
 - Three Postgres schemas: `platform`, `analytics`, `orchestration`. The default search path is `"$user", public` — every raw SQL string (`text(...)`, `op.execute(...)`, hand-written SQL in seeds, indexes, triggers) MUST schema-qualify: `platform.evaluators`, `analytics.fact_evaluation`, etc. ORM queries propagate the schema via `__table_args__` and are safe. Bare names crash boot.
 - `COMMENT ON COLUMN` comes from manifests via `sync_column_comments` in the FastAPI lifespan. Alembic does not own column comments.
-- Verify table shape and runtime gates against the real source: read the ORM model file, run `\d schema.table` against the live DB (docker-compose Postgres on `localhost:5433`), trace runtime gates at the actual consumer. Unit-test mocks paper over shape drift; a docker-compose migrate + backend boot is the only acceptance gate.
+- Verify table shape and runtime gates against the real source: read the ORM model file, run `\d schema.table` against the live DB (docker-compose Postgres on `localhost:5432`), trace runtime gates at the actual consumer. Unit-test mocks paper over shape drift; a docker-compose migrate + backend boot is the only acceptance gate.
 
 ## Seed defaults
 
