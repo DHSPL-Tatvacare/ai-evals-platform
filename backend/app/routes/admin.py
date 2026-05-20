@@ -817,7 +817,7 @@ async def delete_user_permanently(
         raise HTTPException(404, "User not found")
     if user.id == auth.user_id:
         raise HTTPException(400, "Cannot delete yourself")
-    if user.is_owner:
+    if user.role.is_system and user.role.name == "Owner":
         raise HTTPException(400, "Cannot delete the tenant owner")
 
     # Remove refresh tokens first
