@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.models.orchestration import (
     CohortDefinition,
     CohortDefinitionVersion,
+    WorkflowRun,
     WorkflowRunRecipient,
 )
 from app.services.orchestration.recipient_freezer import (
@@ -164,5 +165,111 @@ async def test_freeze_is_idempotent(
         )
     ).scalars().all()
     assert len(rows) == 2
+
+
+# ── Inline-mode freeze tests (cohort_version=None) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_inline_freeze_hashes_predicate_and_leaves_version_null(
+    db_session, seed_full_run, sample_recipient_rows
+):
+    run, *_ = seed_full_run
+    predicate = {
+        "source_ref": "platform.leads",
+        "filters": [{"field": "stage", "op": "eq", "value": "new"}],
+        "payload_fields": ["phone"],
+    }
+    receipt = await freeze_recipients(
+        db_session,
+        run=run,
+        cohort_version=None,
+        resolved_rows=sample_recipient_rows,
+        inline_predicate=predicate,
+    )
+    assert receipt.frozen_count == 2
+    assert receipt.predicate_hash
+    rows = (
+        await db_session.execute(
+            select(WorkflowRunRecipient).where(WorkflowRunRecipient.run_id == run.id)
+        )
+    ).scalars().all()
+    assert all(r.source_cohort_version_id is None for r in rows)
+    assert all(r.predicate_hash == receipt.predicate_hash for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_inline_freeze_hash_is_stable_and_predicate_sensitive(
+    db_session, seed_full_run, seed_tenant_user_app, sample_recipient_rows
+):
+    run, *_ = seed_full_run
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    predicate_a = {
+        "source_ref": "platform.leads",
+        "filters": [{"field": "stage", "op": "eq", "value": "new"}],
+    }
+    receipt1 = await freeze_recipients(
+        db_session,
+        run=run,
+        cohort_version=None,
+        resolved_rows=sample_recipient_rows,
+        inline_predicate=predicate_a,
+    )
+    receipt2 = await freeze_recipients(
+        db_session,
+        run=run,
+        cohort_version=None,
+        resolved_rows=sample_recipient_rows,
+        inline_predicate=predicate_a,
+    )
+    assert receipt1.predicate_hash == receipt2.predicate_hash
+
+    other_run = WorkflowRun(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        app_id=app_id,
+        workflow_id=run.workflow_id,
+        workflow_version_id=run.workflow_version_id,
+        triggered_by="manual",
+        triggered_by_user_id=user_id,
+        status="running",
+    )
+    db_session.add(other_run)
+    await db_session.flush()
+    predicate_b = {
+        "source_ref": "platform.leads",
+        "filters": [{"field": "stage", "op": "eq", "value": "won"}],
+    }
+    receipt3 = await freeze_recipients(
+        db_session,
+        run=other_run,
+        cohort_version=None,
+        resolved_rows=sample_recipient_rows,
+        inline_predicate=predicate_b,
+    )
+    assert receipt3.predicate_hash != receipt1.predicate_hash
+
+
+@pytest.mark.asyncio
+async def test_inline_freeze_rejects_empty_predicate(
+    db_session, seed_full_run, sample_recipient_rows
+):
+    run, *_ = seed_full_run
+    with pytest.raises(ValueError, match="non-empty inline_predicate"):
+        await freeze_recipients(
+            db_session,
+            run=run,
+            cohort_version=None,
+            resolved_rows=sample_recipient_rows,
+            inline_predicate=None,
+        )
+    with pytest.raises(ValueError, match="non-empty inline_predicate"):
+        await freeze_recipients(
+            db_session,
+            run=run,
+            cohort_version=None,
+            resolved_rows=sample_recipient_rows,
+            inline_predicate={},
+        )
 
 

@@ -92,7 +92,9 @@ async def freeze_recipients(
         predicate_hash = _hash_predicate(cohort_version)
         source_cohort_version_id = cohort_version.id
     else:
-        predicate_hash = _hash_predicate_payload(inline_predicate or {})
+        if not inline_predicate:
+            raise ValueError("inline freeze requires a non-empty inline_predicate")
+        predicate_hash = _hash_predicate_payload(inline_predicate)
         source_cohort_version_id = None
     frozen = 0
     invalid = 0

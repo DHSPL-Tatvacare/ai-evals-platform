@@ -1,16 +1,7 @@
-"""source.cohort — entry node that materializes a recipient set, two modes.
-
-  ``mode='inline'`` — author declares source + fields + filters on the node;
-    the query runs live each run (dynamic re-execution, D2).
-  ``mode='saved'``  — author references a pinned ``CohortDefinitionVersion``;
-    the saved row is the canonical predicate, rebuilt into a transient
-    ``CohortQueryConfig`` at each run.
-
-Both modes share one tail: resolve source → compile → insert recipient
-states → stamp run params → freeze the manifest → T0 cap preview.
-"""
+"""source.cohort — entry node that materializes a recipient set in inline or saved mode."""
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Literal, Optional
 
@@ -173,7 +164,7 @@ async def _materialize_cohort(
             "WHERE id = :run_id"
         ),
         {
-            "provenance": _to_json(provenance),
+            "provenance": json.dumps(provenance),
             "size": cohort_size,
             "run_id": ctx.run_id,
         },
@@ -262,12 +253,6 @@ class _Handler:
             cohort_version=None,
             provenance={"enrolled_source_ref": config.source_ref},
         )
-
-
-def _to_json(obj: dict[str, str]) -> str:
-    import json
-
-    return json.dumps(obj)
 
 
 def _extract_phone(payload) -> str | None:
