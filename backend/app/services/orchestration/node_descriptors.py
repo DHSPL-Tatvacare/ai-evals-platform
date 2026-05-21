@@ -276,15 +276,14 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     "logic.conditional": {
         "display_label": "Conditional Branch",
         "display_category": "routing",
-        "description": "Route each contact to a true or false branch based on a rule.",
+        "description": "Route each contact to the first matching criteria branch, or a default.",
         "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "PredicateBuilder"},
+        "editor_hints": {"preferred_editor": "ConditionalBranchesEditor"},
         "required_payload_fields": [],
         "emitted_payload_fields": [],
-        "output_edges": [
-            {"id": "true", "label": "True", "cardinality": "one", "dynamic": False},
-            {"id": "false", "label": "False", "cardinality": "one", "dynamic": False},
-        ],
+        # Branches are dynamic — output_ids derived per-config (branch ids +
+        # implicit 'default'). Validator reads config to know the valid set.
+        "output_edges": [],
         "graph_rules": {
             "requires_incoming_edges": True,
             "requires_outgoing_edges": True,

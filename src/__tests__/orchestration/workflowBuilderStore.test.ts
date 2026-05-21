@@ -16,7 +16,11 @@ describe("workflowBuilderStore", () => {
       type: "logic.conditional",
       position: { x: 0, y: 0 },
       data: { label: "Conditional", nodeType: "logic.conditional" },
-      config: { predicate: { field: "x", op: "eq", value: 1 } },
+      config: {
+        branches: [
+          { id: "vip", label: "VIP", predicate: { field: "x", op: "eq", value: 1 } },
+        ],
+      },
     });
     const s2 = useWorkflowBuilderStore.getState();
     expect(s2.nodes).toHaveLength(1);

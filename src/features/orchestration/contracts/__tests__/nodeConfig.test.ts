@@ -186,7 +186,7 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
   it("predicate leaf transform normalises value for the operator", () => {
     // `op = exists` does not need a value — the leaf transform should
     // strip it on parse so the on-wire shape stays canonical.
-    const result = parseNodeConfig("logic.conditional", {
+    const result = parseNodeConfig("filter.eligibility", {
       predicate: { field: "opt_in", op: "exists", value: "leftover" },
     });
     expect(result.ok).toBe(true);
@@ -198,13 +198,50 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
   });
 
   it("predicate leaf with op=in coerces value to a list", () => {
-    const result = parseNodeConfig("logic.conditional", {
+    const result = parseNodeConfig("filter.eligibility", {
       predicate: { field: "plan", op: "in", value: "gold, silver" },
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
       const pred = result.data.predicate as Record<string, unknown>;
       expect(pred.value).toEqual(["gold", "silver"]);
+    }
+  });
+
+  it("logic.conditional parses branches with per-branch predicates", () => {
+    const result = parseNodeConfig("logic.conditional", {
+      branches: [
+        { id: "vip", label: "VIP", predicate: { field: "tier", op: "eq", value: "vip" } },
+        {
+          id: "warm",
+          label: "Warm",
+          predicate: { field: "score", op: "in", value: "50, 60" },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const branches = result.data.branches as Array<Record<string, unknown>>;
+      expect(branches).toHaveLength(2);
+      const warm = branches[1].predicate as Record<string, unknown>;
+      // The per-branch leaf transform still runs through PredicateAstSchema.
+      expect(warm.value).toEqual(["50", "60"]);
+    }
+  });
+
+  it("logic.conditional rejects the legacy top-level predicate shape", () => {
+    const result = parseNodeConfig("logic.conditional", {
+      predicate: { field: "x", op: "eq", value: 1 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.issues.some(
+          (i) =>
+            i.field.includes("predicate") ||
+            i.message.toLowerCase().includes("predicate"),
+        ),
+      ).toBe(true);
     }
   });
 

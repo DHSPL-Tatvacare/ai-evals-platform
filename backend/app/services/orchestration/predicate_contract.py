@@ -2,7 +2,7 @@
 
 Used by:
   - ``filter.eligibility``      — pass / skip
-  - ``logic.conditional``       — true / false
+  - ``logic.conditional``       — per-branch criteria routing (one predicate per branch)
   - ``logic.wait`` ``event_match`` — match inbound event payloads on resume
 
 Wire-shape (recursive, JSON-serializable). All four forms are dicts so that

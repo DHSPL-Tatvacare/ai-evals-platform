@@ -44,7 +44,7 @@ describe('NodeConfigPanel — descriptor-driven rendering', () => {
     ).toBeInTheDocument();
   });
 
-  it('uses PredicateBuilder for filter.eligibility', () => {
+  it('uses the shared RuleSetBuilder for filter.eligibility', () => {
     const desc = descriptor({
       nodeType: 'filter.eligibility',
       editorHints: { preferredEditor: 'PredicateBuilder' },
@@ -60,9 +60,34 @@ describe('NodeConfigPanel — descriptor-driven rendering', () => {
     });
     store.setSelectedNode('n1');
     render(<NodeConfigPanel />);
-    // PredicateBuilder shows the kind switcher.
-    expect(screen.getByText('Leaf')).toBeInTheDocument();
-    expect(screen.getByText('AND')).toBeInTheDocument();
+    // RuleSetBuilder shows the Match ALL/ANY rule-set header and a stacked rule.
+    expect(screen.getByText('of these rules')).toBeInTheDocument();
+    expect(screen.getByText('Operator')).toBeInTheDocument();
+  });
+
+  it('uses ConditionalBranchesEditor for logic.conditional', () => {
+    const desc = descriptor({
+      nodeType: 'logic.conditional',
+      displayLabel: 'Conditional Branch',
+      displayCategory: 'routing',
+      editorHints: { preferredEditor: 'ConditionalBranchesEditor' },
+      runtimeContract: { executionKind: 'routing' },
+      category: 'logic',
+    });
+    const store = useWorkflowBuilderStore.getState();
+    store.setPaletteCatalog([desc]);
+    store.addNode({
+      id: 'n1',
+      type: 'logic.conditional',
+      position: { x: 0, y: 0 },
+      data: { label: 'conditional' },
+      config: { branches: [] },
+    });
+    store.setSelectedNode('n1');
+    render(<NodeConfigPanel />);
+    expect(screen.getByText('Add branch')).toBeInTheDocument();
+    // The implicit default output is always shown.
+    expect(screen.getByText('default')).toBeInTheDocument();
   });
 
   it('uses WaitConditionEditor for logic.wait', () => {

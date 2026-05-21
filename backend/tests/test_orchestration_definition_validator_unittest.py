@@ -287,6 +287,65 @@ def test_split_routes_unknown_branch_fails():
     assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
+def _conditional_node(branches):
+    return {
+        "id": "cond",
+        "type": "logic.conditional",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {"branches": branches},
+    }
+
+
+def test_conditional_dynamic_branch_edges_accepted():
+    cond = _conditional_node([
+        {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+        {"id": "warm", "label": "Warm", "predicate": {"field": "score", "op": "gte", "value": 50}},
+    ])
+    sink2 = {**_VALID_SINK_NODE, "id": "sink2"}
+    sink3 = {**_VALID_SINK_NODE, "id": "sink3"}
+    defn = _wf(
+        [_VALID_SOURCE_NODE, cond, _VALID_SINK_NODE, sink2, sink3],
+        [
+            {"id": "e_in", "source": "src", "target": "cond", "output_id": "default"},
+            {"id": "e_vip", "source": "cond", "target": "done", "output_id": "vip"},
+            {"id": "e_warm", "source": "cond", "target": "sink2", "output_id": "warm"},
+            {"id": "e_def", "source": "cond", "target": "sink3", "output_id": "default"},
+        ],
+    )
+    validate_definition(defn, workflow_type="crm")
+
+
+def test_conditional_routes_unknown_branch_fails():
+    cond = _conditional_node([
+        {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+    ])
+    defn = _wf(
+        [_VALID_SOURCE_NODE, cond, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "cond", "output_id": "default"},
+            {"id": "e_bad", "source": "cond", "target": "done", "output_id": "ghost"},
+        ],
+    )
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(defn, workflow_type="crm")
+    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
+
+
+def test_conditional_default_edge_always_valid():
+    cond = _conditional_node([
+        {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+    ])
+    defn = _wf(
+        [_VALID_SOURCE_NODE, cond, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "cond", "output_id": "default"},
+            {"id": "e_def", "source": "cond", "target": "done", "output_id": "default"},
+        ],
+    )
+    validate_definition(defn, workflow_type="crm")
+
+
 def test_wait_event_mode_with_only_wakeup_edge_fails():
     wait_node = {
         "id": "wait",

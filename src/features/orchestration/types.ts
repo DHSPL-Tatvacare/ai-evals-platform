@@ -500,6 +500,16 @@ export interface SplitBranch {
   weight?: number | null;
 }
 
+/** One branch on a `logic.conditional` router. `id` is the stable routing
+ *  key (matches the edge `output_id`); `label` is display-only; `predicate`
+ *  is the criteria the contact must match to take this branch. Branches
+ *  evaluate top-to-bottom; first match wins, unmatched fall to `default`. */
+export interface ConditionalBranch {
+  id: string;
+  label: string;
+  predicate: PredicateAst;
+}
+
 export type MergePolicy = 'dedupe' | 'last_wins' | 'merge_lists';
 export type PayloadPolicy = 'last_wins' | 'first_wins' | 'union' | 'preserve';
 

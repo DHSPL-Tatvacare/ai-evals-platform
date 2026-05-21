@@ -458,6 +458,31 @@ def validate_definition(
                         field="config.default_branch_id",
                     )
                 )
+        elif node_type == "logic.conditional":
+            branch_ids = {
+                b["id"]
+                for b in (n.get("config") or {}).get("branches", [])
+                if isinstance(b, dict) and b.get("id")
+            }
+            if not branch_ids and not is_draft:
+                errors.append(
+                    _err(
+                        "conditional node has no branches",
+                        node_id=nid,
+                        field="config.branches",
+                    )
+                )
+            valid_ids = branch_ids | {"default"}
+            for e in outs:
+                oid = e.get("output_id")
+                if oid not in valid_ids:
+                    errors.append(
+                        _err(
+                            f"conditional edge {e.get('id')!r} routes to unknown branch id {oid!r}",
+                            node_id=nid,
+                            field=f"edges.{oid}" if oid else "edges",
+                        )
+                    )
         elif node_type == "logic.wait":
             try:
                 expected = set(expected_output_ids_for_config(n.get("config") or {}))

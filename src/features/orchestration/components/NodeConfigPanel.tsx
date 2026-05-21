@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useCurrentAppId } from '@/hooks';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type {
+  ConditionalBranch,
   MergePolicy,
   PayloadPolicy,
   PredicateAst,
@@ -14,11 +15,13 @@ import type {
 
 import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
 import { InspectorSection } from './inspector/InspectorPrimitives';
+import { ConditionalBranchesEditor } from './editors/ConditionalBranchesEditor';
 import { DatasetPicker } from './editors/DatasetPicker';
 import { MergePolicyEditor } from './editors/MergePolicyEditor';
-import { PredicateBuilder } from './editors/PredicateBuilder';
+import { RuleSetBuilder } from './editors/RuleSetBuilder';
 import { SavedCohortPicker } from './editors/SavedCohortPicker';
 import { SplitBranchEditor } from './editors/SplitBranchEditor';
+import { upstreamPayloadFields } from './editors/upstreamPayloadFields';
 import { WaitConditionEditor } from './editors/WaitConditionEditor';
 
 export function NodeConfigPanel() {
@@ -28,6 +31,8 @@ export function NodeConfigPanel() {
     s.nodes.find((n) => n.id === selectedNodeId) ?? null,
   );
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
+  const nodes = useWorkflowBuilderStore((s) => s.nodes);
+  const edges = useWorkflowBuilderStore((s) => s.edges);
   const workflowType = useWorkflowBuilderStore((s) => s.workflowType);
   const updateConfig = useWorkflowBuilderStore((s) => s.updateNodeConfig);
   const clearSelection = useWorkflowBuilderStore((s) => s.clearSelection);
@@ -44,6 +49,13 @@ export function NodeConfigPanel() {
   const desc = useMemo(
     () => palette.find((p) => p.nodeType === node?.type) ?? null,
     [palette, node?.type],
+  );
+
+  // Payload keys reachable at this node, walked upstream — feeds the field
+  // dropdown for predicate-driven editors. Empty list degrades to free-text.
+  const upstreamFields = useMemo(
+    () => (node ? upstreamPayloadFields(node.id, nodes, edges) : []),
+    [node, nodes, edges],
   );
 
   const editorHints = desc?.editorHints;
@@ -99,6 +111,8 @@ export function NodeConfigPanel() {
   // separate `patch` shape.
   const setConfig = (next: Record<string, unknown>) => updateConfig(node.id, next);
 
+  const fieldOptions = upstreamFields.length > 0 ? upstreamFields : undefined;
+
   let body: React.ReactNode;
 
   switch (preferredEditor) {
@@ -121,11 +135,9 @@ export function NodeConfigPanel() {
       break;
     }
     case 'PredicateBuilder': {
-      const predicate = config.predicate as PredicateAst | undefined;
-      const eventMatch = config.event_match as PredicateAst | undefined;
-      // `logic.wait` uses the WaitConditionEditor (which embeds a predicate
-      // builder for event_match). `filter.eligibility` and
-      // `logic.conditional` use the predicate builder directly.
+      // `logic.wait` embeds a predicate builder for event_match; the
+      // eligibility filter uses the shared RuleSetBuilder on its single
+      // predicate. (`logic.conditional` routes to ConditionalBranchesEditor.)
       const isWait = node.type === 'logic.wait';
       body = isWait ? (
         <WaitConditionEditor
@@ -133,19 +145,25 @@ export function NodeConfigPanel() {
           onChange={(next) => setConfig({ ...config, ...next })}
         />
       ) : (
-        <PredicateBuilder
-          value={predicate ?? eventMatch}
-          onChange={(next) =>
-            setConfig({ ...config, predicate: next })
-          }
+        <RuleSetBuilder
+          value={config.predicate as PredicateAst | undefined}
+          onChange={(next) => setConfig({ ...config, predicate: next })}
+          fieldOptions={fieldOptions}
+        />
+      );
+      break;
+    }
+    case 'ConditionalBranchesEditor': {
+      body = (
+        <ConditionalBranchesEditor
+          value={config as { branches?: ConditionalBranch[] }}
+          onChange={(next) => setConfig({ ...config, ...next })}
+          fieldOptions={fieldOptions}
         />
       );
       break;
     }
     case 'SplitBranchEditor': {
-      // Field suggestions are not yet plumbed through the builder store
-      // (the upstream source's allowed columns aren't available here yet);
-      // SplitBranchEditor falls back to a free-text field input.
       body = (
         <SplitBranchEditor
           value={config as {
@@ -156,6 +174,7 @@ export function NodeConfigPanel() {
             drop_unmatched?: boolean;
           }}
           onChange={(next) => setConfig({ ...config, ...next })}
+          fieldOptions={fieldOptions}
         />
       );
       break;
