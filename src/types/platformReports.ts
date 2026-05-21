@@ -114,6 +114,7 @@ export interface HeatmapCell {
 
 export interface HeatmapTableRow {
   label: string;
+  sublabel?: string | null;
   cells: HeatmapCell[];
 }
 
@@ -276,6 +277,7 @@ export interface HeatmapPoint {
 export interface HeatmapRow {
   key: string;
   label: string;
+  sublabel?: string | null;
   cells: HeatmapPoint[];
 }
 

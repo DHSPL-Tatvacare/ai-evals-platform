@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,13 @@ class AnalyticsDashboard(Base, TenantUserMixin, ShareableMixin, TimestampMixin):
     # Ordered list of chart IDs + optional per-chart layout overrides
     # [{chart_id: "uuid", width: "half"|"full", order: 0}, ...]
     chart_entries: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
+    # System-owned platform dashboards (e.g. the cross-run report) surface in
+    # every tenant's library via the shared-scope clause; this is the explicit
+    # marker the list badges/pins and that blocks tenant edits.
+    is_platform: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+    )
     source_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('platform.chat_sessions.id', ondelete='SET NULL'),

@@ -51,6 +51,7 @@ export interface SavedDashboard {
   title: string;
   description: string;
   chartEntries: Array<{ chartId: string; width: 'half' | 'full'; order: number }>;
+  isPlatform: boolean;
   sourceSessionId?: string | null;
   visibility: 'private' | 'shared';
   createdAt: string;

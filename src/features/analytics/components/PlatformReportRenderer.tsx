@@ -382,6 +382,7 @@ function ReportHeatmapBlockView({ block }: { block: HeatmapTableBlock }) {
   const rows: HeatmapRow[] = block.rows.map((row, rowIdx) => ({
     id: `${row.label}-${rowIdx}`,
     label: row.label,
+    sublabel: row.sublabel ?? undefined,
     cells: row.cells.map((cell): HeatmapCell => ({
       value: cell.value,
       tier: tierFromTone(cell.tone),
@@ -658,6 +659,7 @@ function SectionContent({
     const rows: HeatmapRow[] = heatRows.map((row) => ({
       id: row.key,
       label: row.label,
+      sublabel: row.sublabel ?? undefined,
       cells: row.cells.map((cell): HeatmapCell => ({
         value: cell.value,
         tier: tierFromTone(cell.tone),

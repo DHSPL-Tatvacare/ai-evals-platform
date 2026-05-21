@@ -115,6 +115,7 @@ class HeatmapPoint(CamelModel):
 class HeatmapRow(CamelModel):
     key: str
     label: str
+    sublabel: str | None = None
     cells: list[HeatmapPoint]
 
 

@@ -275,7 +275,10 @@ async def list_dashboards(
             AnalyticsDashboard.archived_at.is_(None),
             readable_scope_clause(AnalyticsDashboard, auth),
         )
-        .order_by(AnalyticsDashboard.created_at.desc())
+        .order_by(
+            AnalyticsDashboard.is_platform.desc(),
+            AnalyticsDashboard.created_at.desc(),
+        )
     )
     result = await db.execute(q)
     dashboards = result.scalars().all()
@@ -498,6 +501,7 @@ def _dashboard_to_dict(dashboard: AnalyticsDashboard) -> dict:
         "title": dashboard.title,
         "description": dashboard.description,
         "chartEntries": dashboard.chart_entries,
+        "isPlatform": dashboard.is_platform,
         "sourceSessionId": str(dashboard.source_session_id) if dashboard.source_session_id else None,
         "visibility": dashboard.visibility.value if dashboard.visibility else "private",
         "createdAt": dashboard.created_at.isoformat() if dashboard.created_at else None,

@@ -21,6 +21,7 @@ from app.models.role import AccessRole, AccessRoleApplicationGrant
 from app.models.eval_template import EvaluationTemplate
 from app.models.evaluator import Evaluator
 from app.models.report_config import ReportConfiguration
+from app.models.analytics_dashboard import AnalyticsDashboard
 from app.models.mixins.shareable import Visibility
 from app.schemas.app_config import AppConfig
 from app.services.asset_policy import default_app_authorization_config
@@ -2377,7 +2378,7 @@ APP_SEEDS = [
                         {"id": "inside-sales-dimensions", "type": "metric_breakdown", "title": "Dimension Breakdown", "variant": "dimension_scores"},
                         {"id": "inside-sales-compliance", "type": "compliance_table", "title": "Compliance Gates", "variant": "gate_pass_rates"},
                         {"id": "inside-sales-flags", "type": "flags", "title": "Behavioral Signals", "variant": "flag_rollups"},
-                        {"id": "inside-sales-agents", "type": "entity_slices", "title": "Agent Performance", "variant": "agent_slices"},
+                        {"id": "inside-sales-agents", "type": "heatmap", "title": "Agent Performance", "variant": "agent_performance"},
                         {"id": "inside-sales-recommendations", "type": "issues_recommendations", "title": "Recommendations", "variant": "coaching_actions"},
                     ],
                     "export": {
@@ -2939,6 +2940,52 @@ async def _seed_report_configs(session: AsyncSession) -> None:
     await session.flush()
 
 
+def _build_platform_dashboard_seeds() -> list[dict]:
+    """Platform-owned dashboard catalog entries. The cross-run report rides the
+    analytics library as a system dashboard (SYSTEM-owned + shared so the
+    shared-scope clause surfaces it to every tenant), flagged ``is_platform``."""
+    seeds: list[dict] = []
+    for app_seed in APP_SEEDS:
+        app_config = AppConfig.model_validate(app_seed["config"])
+        if not app_config.analytics.cross_run.sections:
+            continue
+        slug = app_seed["slug"]
+        seeds.append(
+            {
+                "id": uuid.uuid5(uuid.NAMESPACE_URL, f"platform-dashboard::cross-run::{slug}"),
+                "tenant_id": SYSTEM_TENANT_ID,
+                "user_id": SYSTEM_USER_ID,
+                "app_id": slug,
+                "title": "Cross-Run Report",
+                "description": f"Cross-run analytics across {app_seed['display_name']} evaluation runs.",
+                "chart_entries": [],
+                "visibility": Visibility.SHARED,
+                "shared_by": SYSTEM_USER_ID,
+                "is_platform": True,
+            }
+        )
+    return seeds
+
+
+async def _seed_platform_dashboards(session: AsyncSession) -> None:
+    """Upsert platform dashboard entries by their deterministic system id."""
+    for seed in _build_platform_dashboard_seeds():
+        existing = await session.scalar(
+            select(AnalyticsDashboard).where(AnalyticsDashboard.id == seed["id"])
+        )
+        if existing:
+            existing.app_id = seed["app_id"]
+            existing.title = seed["title"]
+            existing.description = seed["description"]
+            existing.visibility = seed["visibility"]
+            existing.shared_by = seed["shared_by"]
+            existing.is_platform = True
+            existing.archived_at = None
+            continue
+        session.add(AnalyticsDashboard(**seed))
+    await session.flush()
+
+
 async def _seed_adversarial_contract_defaults(session: AsyncSession) -> None:
     """Seed the canonical Kaira adversarial contract as a system-shared setting."""
     stmt = build_setting_upsert_stmt(
@@ -3342,6 +3389,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await _seed_adversarial_contract_defaults(session)
     await _seed_report_prompt_references(session)
     await _seed_report_configs(session)
+    await _seed_platform_dashboards(session)
     await _seed_eval_templates(session)
     await seed_sherlock_ontology(session)
     from app.services.orchestration_seed import seed_orchestration_defaults

@@ -255,6 +255,7 @@ def _render_section_blocks(section: PlatformReportSection) -> list[PlatformDocum
                 rows=[
                     HeatmapTableRow(
                         label=row.label,
+                        sublabel=row.sublabel,
                         cells=[
                             {
                                 'label': cell.label,

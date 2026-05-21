@@ -65,6 +65,7 @@ class HeatmapCell(CamelModel):
 
 class HeatmapTableRow(CamelModel):
     label: str
+    sublabel: str | None = None
     cells: list[HeatmapCell]
 
 

@@ -36,6 +36,7 @@ interface AnalyticsRow {
   chartType?: string;
   description: string;
   visibility: 'private' | 'shared';
+  isPlatform: boolean;
   updatedAt: string;
 }
 
@@ -125,6 +126,7 @@ export function AnalyticsLibraryPage() {
       chartType: c.chartConfig.renderer.type,
       description: c.sourceQuestion?.slice(0, 80) || c.description.slice(0, 80),
       visibility: c.visibility,
+      isPlatform: false,
       updatedAt: c.updatedAt,
     }));
     const dashRows: AnalyticsRow[] = dashboards.map((d) => ({
@@ -133,11 +135,15 @@ export function AnalyticsLibraryPage() {
       itemType: 'dashboard',
       description: d.description.slice(0, 80) || `${d.chartEntries.length} chart${d.chartEntries.length !== 1 ? 's' : ''}`,
       visibility: d.visibility,
+      isPlatform: d.isPlatform,
       updatedAt: d.updatedAt,
     }));
-    return [...chartRows, ...dashRows].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    // Platform entries (e.g. the cross-run report) pin to the top; the rest
+    // sort by recency.
+    return [...chartRows, ...dashRows].sort((a, b) => {
+      if (a.isPlatform !== b.isPlatform) return a.isPlatform ? -1 : 1;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
   }, [charts, dashboards]);
 
   const handleRowClick = useCallback((row: AnalyticsRow) => {
@@ -158,6 +164,9 @@ export function AnalyticsLibraryPage() {
           <div className="flex items-center gap-2">
             <Icon className="h-4 w-4 text-[var(--text-brand)]" />
             <span className="font-medium text-sm text-[var(--text-primary)]">{row.title}</span>
+            {row.isPlatform ? (
+              <Badge variant="info" size="sm">System</Badge>
+            ) : null}
           </div>
         );
       },
@@ -199,7 +208,9 @@ export function AnalyticsLibraryPage() {
     {
       key: 'actions',
       header: '',
-      render: (row) => (
+      // System-owned platform entries are read-only to tenants (the backend
+      // owns them); no edit/share/delete affordances.
+      render: (row) => row.isPlatform ? null : (
         <Popover>
           <PopoverTrigger asChild>
             <button

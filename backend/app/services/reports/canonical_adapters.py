@@ -25,7 +25,7 @@ from app.services.reports.report_composer import compose_cross_run_report, compo
 from app.services.reports.schemas import ReportPayload
 from app.services.reports.cross_run_aggregator import CrossRunAISummary, CrossRunAnalytics
 from app.services.reports.inside_sales_cross_run import InsideSalesCrossRunAnalytics
-from app.services.reports.inside_sales_schemas import InsideSalesReportPayload
+from app.services.reports.inside_sales_schemas import DimensionStats, InsideSalesReportPayload
 
 
 def _now_iso() -> str:
@@ -46,6 +46,14 @@ def _rate_tone(value: float) -> str:
     if value >= 85:
         return 'positive'
     if value >= 60:
+        return 'warning'
+    return 'negative'
+
+
+def _dimension_tone(value: float, dim: DimensionStats) -> str:
+    if value >= dim.green_threshold:
+        return 'positive'
+    if value >= dim.yellow_threshold:
         return 'warning'
     return 'negative'
 
@@ -456,6 +464,7 @@ def adapt_kaira_cross_run(
             'columns': [run.run_name or run.run_id[:8] for run in analytics.rule_compliance_heatmap.runs],
             'rows': [
                 {
+                    'key': row.rule_id,
                     'label': row.rule_id,
                     'cells': [
                         {
@@ -494,6 +503,7 @@ def adapt_kaira_cross_run(
             'columns': [run.run_name or run.run_id[:8] for run in analytics.adversarial_heatmap.runs],
             'rows': [
                 {
+                    'key': row.goal,
                     'label': row.goal,
                     'cells': [
                         {
@@ -660,6 +670,7 @@ def adapt_kaira_cross_run_from_runs(
     all_rule_ids = sorted({rule_id for mapping in rule_rows_by_run for rule_id in mapping.keys()})
     section_payloads['kaira-cross-compliance']['rows'] = [
         {
+            'key': rule_id,
             'label': rule_id,
             'cells': [
                 {
@@ -685,6 +696,7 @@ def adapt_kaira_cross_run_from_runs(
             'columns': run_labels,
             'rows': [
                 {
+                    'key': goal,
                     'label': goal,
                     'cells': [
                         {
@@ -838,25 +850,38 @@ def adapt_inside_sales_run_report(
             for key, gate in payload.compliance_breakdown.items()
         ],
         'inside-sales-flags': flag_items,
-        'inside-sales-agents': [
-            {
-                'entityId': key,
-                # "unknown" is the aggregator's sentinel for calls with no
-                # rep_external_id / rep_label in metadata. Render as a friendly
-                # label so the agent row reads as "Unassigned" instead of a
-                # lowercased placeholder.
-                'label': 'Unassigned' if key == 'unknown' or not agent.agent_name or agent.agent_name == 'unknown' else agent.agent_name,
-                'summary': {
-                    'callCount': agent.call_count,
-                    'avgQaScore': round(agent.avg_qa_score, 1),
-                },
-                'details': {
-                    dim_key: round(dim.avg, 1)
-                    for dim_key, dim in agent.dimensions.items()
-                },
-            }
-            for key, agent in payload.agent_slices.items()
-        ],
+        # Agents × skills heatmap: rows are agents, columns lead with Avg QA
+        # then one per scored dimension. Dimension tone keys off that
+        # dimension's green/yellow thresholds; Avg QA off the 0–100 band.
+        'inside-sales-agents': {
+            'columns': ['Avg QA', *[dim.label for dim in payload.dimension_breakdown.values()]],
+            'rows': [
+                {
+                    'key': key,
+                    # "unknown" is the aggregator's sentinel for calls with no
+                    # rep_external_id / rep_label in metadata. Render as a
+                    # friendly label instead of a lowercased placeholder.
+                    'label': 'Unassigned' if key == 'unknown' or not agent.agent_name or agent.agent_name == 'unknown' else agent.agent_name,
+                    'sublabel': f'{agent.call_count} call{"" if agent.call_count == 1 else "s"}',
+                    'cells': [
+                        {
+                            'label': 'Avg QA',
+                            'value': round(agent.avg_qa_score, 1),
+                            'tone': _rate_tone(agent.avg_qa_score),
+                        },
+                        *[
+                            {
+                                'label': dim.label,
+                                'value': round(agent.dimensions[dim_key].avg, 1) if dim_key in agent.dimensions else None,
+                                'tone': _dimension_tone(agent.dimensions[dim_key].avg, dim) if dim_key in agent.dimensions else 'neutral',
+                            }
+                            for dim_key, dim in payload.dimension_breakdown.items()
+                        ],
+                    ],
+                }
+                for key, agent in payload.agent_slices.items()
+            ],
+        },
     }
     if payload.narrative:
         section_payloads['inside-sales-narrative'] = {
@@ -1001,6 +1026,7 @@ def adapt_inside_sales_cross_run(
             'columns': [run.run_name or run.run_id[:8] for run in analytics.dimension_heatmap.runs],
             'rows': [
                 {
+                    'key': row.label,
                     'label': row.label,
                     'cells': [
                         {
@@ -1018,6 +1044,7 @@ def adapt_inside_sales_cross_run(
             'columns': [run.run_name or run.run_id[:8] for run in analytics.compliance_heatmap.runs],
             'rows': [
                 {
+                    'key': row.label,
                     'label': row.label,
                     'cells': [
                         {
@@ -1178,6 +1205,7 @@ def adapt_inside_sales_cross_run_from_runs(
             'columns': run_labels,
             'rows': [
                 {
+                    'key': label,
                     'label': label,
                     'cells': [
                         {
@@ -1195,6 +1223,7 @@ def adapt_inside_sales_cross_run_from_runs(
             'columns': run_labels,
             'rows': [
                 {
+                    'key': label,
                     'label': label,
                     'cells': [
                         {
