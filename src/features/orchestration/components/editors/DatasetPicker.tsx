@@ -131,6 +131,7 @@ export function DatasetPicker({ value, onChange }: Props) {
             onChange={setVersion}
             options={versionOptions}
             placeholder="Pick a version…"
+            side="top"
           />
         </InspectorField>
       ) : null}

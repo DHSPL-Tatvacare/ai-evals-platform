@@ -20,6 +20,7 @@ import { PredicateBuilder } from './editors/PredicateBuilder';
 import { SourceCohortPicker } from './editors/SourceCohortPicker';
 import { SplitBranchEditor } from './editors/SplitBranchEditor';
 import { WaitConditionEditor } from './editors/WaitConditionEditor';
+import { WebhookOutEditor } from './editors/WebhookOutEditor';
 
 export function NodeConfigPanel() {
   const appId = useCurrentAppId();
@@ -181,27 +182,11 @@ export function NodeConfigPanel() {
       break;
     }
     case 'StructuredRequestBodyEditor': {
-      // The webhook editor still needs URL / method / headers / timeout
-      // / attempt_policy — render the generic schema form for those, but
-      // override the `body` field with the structured editor.
       body = (
-        <DynamicConfigForm
-          schema={desc.configSchema as unknown as JsonSchema}
+        <WebhookOutEditor
           value={config}
           onChange={setConfig}
-          hiddenFields={hiddenFields}
           appId={appId}
-          connectionIdForVariables={
-            typeof config.connection_id === 'string' ? config.connection_id : undefined
-          }
-          agentIdForVariables={
-            typeof config.agent_id === 'string' && config.agent_id
-              ? config.agent_id
-              : undefined
-          }
-          templateNameForVariables={
-            typeof config.template_name === 'string' ? config.template_name : undefined
-          }
         />
       );
       break;
