@@ -73,14 +73,41 @@ def test_unknown_node_type_fails():
 
 
 def test_invalid_node_config_fails():
-    # source.saved_cohort with empty config is missing the required
-    # cohort_definition_version_id — validator rejects at publish.
+    # source.cohort with empty config has no mode — validator rejects at publish.
     bad_cohort = {
         "id": "src",
-        "type": "source.saved_cohort",
+        "type": "source.cohort",
         "position": {"x": 0, "y": 0},
         "data": {},
         "config": {},
+    }
+    defn = _wf([bad_cohort, _VALID_SINK_NODE],
+               [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}])
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(defn, workflow_type="crm")
+
+
+def test_source_cohort_saved_without_version_fails_publish():
+    bad_cohort = {
+        "id": "src",
+        "type": "source.cohort",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"mode": "saved"},  # no cohort_definition_version_id
+    }
+    defn = _wf([bad_cohort, _VALID_SINK_NODE],
+               [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}])
+    with pytest.raises(DefinitionValidationError):
+        validate_definition(defn, workflow_type="crm")
+
+
+def test_source_cohort_inline_without_source_ref_fails_publish():
+    bad_cohort = {
+        "id": "src",
+        "type": "source.cohort",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"mode": "inline"},  # no source_ref
     }
     defn = _wf([bad_cohort, _VALID_SINK_NODE],
                [{"id": "e1", "source": "src", "target": "done", "output_id": "default"}])
@@ -353,13 +380,13 @@ def test_cycle_detected():
 
 
 def test_draft_allows_missing_required_runtime_fields():
-    """A partial source.saved_cohort (no cohort pinned yet) parses in draft."""
+    """A partial source.cohort (no mode picked yet) parses in draft."""
     nodes = [{
         "id": "src",
-        "type": "source.saved_cohort",
+        "type": "source.cohort",
         "position": {"x": 0, "y": 0},
         "data": {},
-        "config": {},  # no cohort_definition_version_id — incomplete authoring
+        "config": {},  # no mode / selectors — incomplete authoring
     }]
     validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
 

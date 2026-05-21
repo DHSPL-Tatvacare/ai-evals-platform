@@ -1,8 +1,8 @@
 """Phase 11 — registered cohort sources.
 
-A ``source.saved_cohort`` node selects a cohort source by a stable
-``source_ref`` key (e.g. ``crm.lead_record``) stored on its pinned
-``cohort_definition_versions`` row. The catalog says which
+A ``source.cohort`` node selects a cohort source by a stable
+``source_ref`` key (e.g. ``crm.lead_record``) — set inline on the node or
+stored on its pinned ``cohort_definition_versions`` row. The catalog says which
 underlying ``schema.table`` and id column back that ref, plus the columns
 authors are allowed to project into payload, filter on, or use as a lookback
 column. Authors never name raw tables or column lists themselves — that

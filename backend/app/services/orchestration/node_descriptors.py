@@ -168,12 +168,12 @@ _DISPATCH_GRAPH_RULES: dict[str, Any] = {
 
 _CONTRACT_META: dict[str, _ContractMeta] = {
     # ─── Ingress ────────────────────────────────────────────────────────────
-    "source.saved_cohort": {
-        "display_label": "Saved cohort",
+    "source.cohort": {
+        "display_label": "Cohort",
         "display_category": "ingress",
-        "description": "Reuse a saved audience. Picks up new matching contacts each time the workflow runs.",
+        "description": "Pull contacts from a source — build inline, or reuse a saved cohort.",
         "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "SavedCohortPicker"},
+        "editor_hints": {"preferred_editor": "SourceCohortPicker"},
         "required_payload_fields": [],
         "emitted_payload_fields": [],
         "output_edges": [{"id": "default", "label": "Cohort", "cardinality": "one", "dynamic": False}],

@@ -48,26 +48,32 @@ def normalise_phone_e164(raw: str | None, default_region: str = "IN") -> str | N
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
-def _hash_predicate(version: CohortDefinitionVersion) -> str:
-    payload = {
-        "version_id": str(version.id),
-        "source_ref": version.source_ref,
-        "filters": version.filters or [],
-        "payload_fields": version.payload_fields or [],
-        "lookback_hours": version.lookback_hours,
-        "lookback_column": version.lookback_column,
-        "consent_gate_channel": version.consent_gate_channel,
-    }
+def _hash_predicate_payload(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _hash_predicate(version: CohortDefinitionVersion) -> str:
+    return _hash_predicate_payload(
+        {
+            "version_id": str(version.id),
+            "source_ref": version.source_ref,
+            "filters": version.filters or [],
+            "payload_fields": version.payload_fields or [],
+            "lookback_hours": version.lookback_hours,
+            "lookback_column": version.lookback_column,
+            "consent_gate_channel": version.consent_gate_channel,
+        }
+    )
 
 
 async def freeze_recipients(
     db: AsyncSession,
     *,
     run: WorkflowRun,
-    cohort_version: CohortDefinitionVersion,
+    cohort_version: CohortDefinitionVersion | None,
     resolved_rows: Iterable[tuple[str, str | None]],
+    inline_predicate: dict | None = None,
 ) -> FreezeReceipt:
     """Persist the frozen manifest.
 
@@ -76,8 +82,18 @@ async def freeze_recipients(
     cohort source node. Invalid phones are dropped with an audit count; the
     write is idempotent against the ``(run_id, recipient_id)`` unique
     constraint so re-firing the freezer for the same run is safe.
+
+    Saved-mode sources pass a ``cohort_version`` row; inline-mode sources pass
+    ``inline_predicate`` (the resolved query shape) and leave
+    ``cohort_version`` None — the manifest still carries a stable predicate
+    hash, with ``source_cohort_version_id`` left NULL.
     """
-    predicate_hash = _hash_predicate(cohort_version)
+    if cohort_version is not None:
+        predicate_hash = _hash_predicate(cohort_version)
+        source_cohort_version_id = cohort_version.id
+    else:
+        predicate_hash = _hash_predicate_payload(inline_predicate or {})
+        source_cohort_version_id = None
     frozen = 0
     invalid = 0
     rows_to_insert: list[dict] = []
@@ -93,7 +109,7 @@ async def freeze_recipients(
                 "app_id": run.app_id,
                 "recipient_id": recipient_id,
                 "phone_e164": e164,
-                "source_cohort_version_id": cohort_version.id,
+                "source_cohort_version_id": source_cohort_version_id,
                 "predicate_hash": predicate_hash,
             }
         )

@@ -14,7 +14,7 @@ into the Phase 11 canonical contract:
     builder see one form)
   - ``logic.merge.dedupe`` -> ``merge_policy`` + ``payload_policy``
   - ``filter.consent_gate.require_explicit_optin`` -> ``consent_policy`` enum
-  - ``source.saved_cohort`` / ``source.dataset`` legacy ``next_node_id`` removed
+  - ``source.cohort`` / ``source.dataset`` legacy ``next_node_id`` removed
     (engine reads from outgoing ``default`` edge under Phase 11)
   - retry-capable dispatch node legacy ``failed`` outgoing edges ->
     ``exhausted`` (Phase 11 §6.6) — only when the descriptor declares
@@ -179,7 +179,7 @@ def _normalize_webhook_out_node(node: dict[str, Any]) -> None:
 
 _PER_TYPE_NORMALIZERS = {
     "source.event_trigger": _drop_next_node_id,
-    "source.saved_cohort":  _drop_next_node_id,
+    "source.cohort":        _drop_next_node_id,
     "source.dataset":       _drop_next_node_id,
     "logic.wait":           _normalize_wait_node,
     "logic.merge":          _normalize_merge_node,

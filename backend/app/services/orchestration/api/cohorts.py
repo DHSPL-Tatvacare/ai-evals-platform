@@ -42,7 +42,7 @@ class CohortVersionAlreadyPublished(ValueError):
 
 class CohortInUse(ValueError):
     """Delete rejected because at least one workflow version still pins a
-    version of this cohort via ``source.saved_cohort`` node config.
+    version of this cohort via ``source.cohort`` node config.
 
     Carries ``workflow_ids`` and ``workflow_names`` so the route layer can
     build a structured 409 detail.
@@ -168,7 +168,7 @@ async def _count_used_by(
     version_ids: list[uuid.UUID],
 ) -> int:
     """COUNT(DISTINCT workflow_id) of workflow_versions whose definition
-    contains a ``source.saved_cohort`` node pinned to any of the cohort's
+    contains a ``source.cohort`` node pinned to any of the cohort's
     versions. Backed by the GIN index on ``workflow_versions.definition``.
     """
     if not version_ids:
@@ -230,7 +230,7 @@ async def _find_workflow_bindings(
         for node in definition.get("nodes") or []:
             if not isinstance(node, dict):
                 continue
-            if node.get("type") != "source.saved_cohort":
+            if node.get("type") != "source.cohort":
                 continue
             cfg = node.get("config")
             if not isinstance(cfg, dict):
