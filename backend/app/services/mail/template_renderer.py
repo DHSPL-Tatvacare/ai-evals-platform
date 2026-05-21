@@ -21,8 +21,9 @@ from app.models.tenant_config import TenantConfiguration
 from app.services.mail.call_sites import CallSite
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_PLATFORM_LOGO_FILE = _REPO_ROOT / "public" / "tatva_logo.jpeg"
+# Co-located with the package so it ships in the backend image (build context
+# is `backend/`, so a repo-root `public/` asset never makes it into prod).
+_PLATFORM_LOGO_FILE = Path(__file__).parent / "assets" / "tatva_logo.jpeg"
 _PLATFORM_NAME = "TatvaCare"
 # Gmail/Outlook strip data: URIs in <img>; the logo must travel as a related
 # inline part referenced by this Content-ID.
