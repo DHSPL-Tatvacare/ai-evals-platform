@@ -49,8 +49,9 @@ function emptyLeaf(): LeafPredicate {
 }
 
 /**
- * Phase 11 (Commit 2) — predicate builder used by `filter.eligibility`,
- * `logic.conditional`, and the event-match slot of `logic.wait`.
+ * Predicate builder used by the event-match slot of `logic.wait`.
+ * (`filter.eligibility` and `logic.conditional` use the shared
+ * RuleSetBuilder.)
  *
  * Renders the recursive AST defined in
  * ``backend/app/services/orchestration/predicate_contract.py``. Authors

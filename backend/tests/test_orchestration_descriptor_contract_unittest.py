@@ -30,6 +30,7 @@ _SUPPORTED_PREFERRED_EDITORS = {
     "SourceCohortPicker",
     "DatasetPicker",
     "PredicateBuilder",
+    "ConditionalBranchesEditor",
     "SplitBranchEditor",
     "WaitConditionEditor",
     "MergePolicyEditor",
@@ -83,6 +84,12 @@ def test_source_nodes_have_only_default_output():
 def test_split_outputs_are_dynamic_per_config():
     d = build_descriptor(node_type="logic.split", workflow_type="*")
     assert d.output_edges == []
+
+
+def test_conditional_outputs_are_dynamic_per_config():
+    d = build_descriptor(node_type="logic.conditional", workflow_type="*")
+    assert d.output_edges == []
+    assert d.editor_hints.preferred_editor == "ConditionalBranchesEditor"
 
 
 def test_wait_descriptor_lists_all_three_outputs_for_validator():

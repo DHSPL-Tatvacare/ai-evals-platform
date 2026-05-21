@@ -241,10 +241,25 @@ export const FilterEligibilityConfigSchema = z
   .strict();
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// Mirrors backend `logic_conditional._Branch`. `id` is the stable routing
+// key (matches the edge `output_id`); `label` is display-only; `predicate`
+// is the per-branch criteria.
+const ConditionalBranchSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string(),
+    predicate: PredicateAstSchema,
+  })
+  .strict();
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// N-way criteria router (mirrors backend `logic_conditional._Config`):
+// branches evaluate in order, first match wins, unmatched fall to the
+// implicit `default` output.
 export const LogicConditionalConfigSchema = z
   .object({
     nodeType: z.literal("logic.conditional"),
-    predicate: PredicateAstSchema,
+    branches: z.array(ConditionalBranchSchema).default([]),
   })
   .strict();
 

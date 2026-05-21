@@ -170,7 +170,7 @@ async def test_consent_gate_strict_mode_blocks_unknown(db_session, seed_full_run
 
 
 @pytest.mark.asyncio
-async def test_conditional_routes_true_false(db_session, seed_full_run):
+async def test_conditional_routes_first_matching_branch(db_session, seed_full_run):
     run, version, workflow, _, tenant_id, app_id = seed_full_run
     from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
 
@@ -179,30 +179,74 @@ async def test_conditional_routes_true_false(db_session, seed_full_run):
                               node_id="cond", node_type="logic.conditional")
     await db_session.flush()
 
-    # Predicate contract is strict: missing fields raise PredicateError so the
-    # author is forced to write 'exists'/'missing' branches explicitly. Use an
-    # OR with 'missing' to opt in to "default-to-false on absence".
     cfg = _Config(
-        predicate={
-            "or": [
-                {"field": "replied", "op": "eq", "value": True},
-            ],
-        }
+        branches=[
+            {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+            {"id": "warm", "label": "Warm", "predicate": {"field": "score", "op": "gte", "value": 50}},
+            {"id": "named", "label": "Has name", "predicate": {"field": "name", "op": "exists"}},
+        ]
     )
-    # The strict contract drives the routing semantics; a plain eq with a
-    # missing field is a hard error and tested in the predicate-contract unit
-    # tests, not here.
     ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
                     tenant_id=tenant_id, app_id=app_id, node_id="cond", step_id=step_id)
     cohort = CohortStream([
-        ("r-yes", {"replied": True}),
-        ("r-no", {"replied": False}),
+        ("r-vip", {"tier": "vip", "score": 90, "name": "A"}),  # matches vip first
+        ("r-warm", {"tier": "std", "score": 80, "name": "B"}),  # skips vip, hits warm
+        ("r-named", {"tier": "std", "score": 10, "name": "C"}),  # skips vip+warm, hits named
+        ("r-default", {"tier": "std", "score": 10}),  # matches nothing -> default
     ])
     result = await _Handler().execute(cohort, cfg, ctx)
-    yes = [o.recipient_id for o in result.by_output_id["true"]]
-    no = sorted(o.recipient_id for o in result.by_output_id["false"])
-    assert yes == ["r-yes"]
-    assert no == ["r-no"]
+    assert [o.recipient_id for o in result.by_output_id["vip"]] == ["r-vip"]
+    assert [o.recipient_id for o in result.by_output_id["warm"]] == ["r-warm"]
+    assert [o.recipient_id for o in result.by_output_id["named"]] == ["r-named"]
+    assert [o.recipient_id for o in result.by_output_id["default"]] == ["r-default"]
+
+
+@pytest.mark.asyncio
+async def test_conditional_compound_branch_predicate(db_session, seed_full_run):
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="cond2", node_type="logic.conditional")
+    await db_session.flush()
+
+    cfg = _Config(
+        branches=[
+            {
+                "id": "qualified",
+                "label": "Qualified",
+                "predicate": {
+                    "and": [
+                        {"field": "score", "op": "gte", "value": 50},
+                        {"field": "consent", "op": "eq", "value": True},
+                    ]
+                },
+            },
+        ]
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="cond2", step_id=step_id)
+    cohort = CohortStream([
+        ("r-both", {"score": 60, "consent": True}),
+        ("r-noconsent", {"score": 60, "consent": False}),
+    ])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    assert [o.recipient_id for o in result.by_output_id["qualified"]] == ["r-both"]
+    assert [o.recipient_id for o in result.by_output_id["default"]] == ["r-noconsent"]
+
+
+@pytest.mark.asyncio
+async def test_conditional_output_edges_mirror_branches_plus_default(db_session, seed_full_run):
+    from app.services.orchestration.nodes.logic_conditional import _Config, output_edges_for_config
+
+    cfg = _Config(
+        branches=[
+            {"id": "a", "label": "A", "predicate": {"field": "x", "op": "exists"}},
+            {"id": "b", "label": "B", "predicate": {"field": "y", "op": "exists"}},
+        ]
+    )
+    assert output_edges_for_config(cfg) == ["a", "b", "default"]
 
 
 # ─── logic.split ─────────────────────────────────────────────────────────────

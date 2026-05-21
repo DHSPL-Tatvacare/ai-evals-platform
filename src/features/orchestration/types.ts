@@ -504,6 +504,16 @@ export interface SplitBranch {
 export type MergePolicy = 'dedupe' | 'first_wins' | 'last_wins';
 export type PayloadPolicy = 'first_wins' | 'last_wins' | 'shallow_merge';
 
+/** One branch on a `logic.conditional` router. `id` is the stable routing
+ *  key (matches the edge `output_id`); `label` is display-only; `predicate`
+ *  is the criteria the contact must match to take this branch. Branches
+ *  evaluate top-to-bottom; first match wins, unmatched fall to `default`. */
+export interface ConditionalBranch {
+  id: string;
+  label: string;
+  predicate: PredicateAst;
+}
+
 /** Reference to a recipient payload field in a ``core.webhook_out.body``
  *  leaf, mirroring backend
  *  ``request_body_contract`` ``{"$payload": "field_name"}``. */
