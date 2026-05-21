@@ -426,11 +426,17 @@ def validate_definition(
         # except for split (dynamic outputs) and wait (mode-dependent
         # outputs — handled below).
         if node_type == "logic.split":
+            config_raw = n.get("config") or {}
             branch_ids: set[str] = {
                 b["id"]
-                for b in (n.get("config") or {}).get("branches", [])
+                for b in config_raw.get("branches", [])
                 if isinstance(b, dict) and b.get("id")
             }
+            # percentage mode: the reserved 'control' edge is valid when holdout is set.
+            valid_output_ids = set(branch_ids)
+            if config_raw.get("mode") == "percentage" and config_raw.get("holdout_percent"):
+                from app.services.orchestration.nodes.logic_split import CONTROL_EDGE_ID
+                valid_output_ids.add(CONTROL_EDGE_ID)
             if not branch_ids and not is_draft:
                 errors.append(
                     _err(
@@ -441,7 +447,7 @@ def validate_definition(
                 )
             for e in outs:
                 oid = e.get("output_id")
-                if oid not in branch_ids:
+                if oid not in valid_output_ids:
                     errors.append(
                         _err(
                             f"split edge {e.get('id')!r} routes to unknown branch id {oid!r}",

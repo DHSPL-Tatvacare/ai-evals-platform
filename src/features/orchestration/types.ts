@@ -488,16 +488,17 @@ export type WaitMode =
   | 'event'
   | 'event_or_timeout';
 
-export type SplitMode = 'by_field' | 'random';
+export type SplitMode = 'by_field' | 'random' | 'percentage';
 
 export interface SplitBranch {
   id: string;
   label: string;
-  /** by_field: routing key matched against ``payload[field]``.
-   *  random:   not present — branches carry weights instead. */
+  /** by_field mode: value matched against payload[field]. */
   match?: string | null;
-  /** random mode only. */
+  /** random mode: relative weight. */
   weight?: number | null;
+  /** percentage mode: share of recipients (0-100). */
+  percent?: number | null;
 }
 
 export type MergePolicy = 'dedupe' | 'last_wins' | 'merge_lists';

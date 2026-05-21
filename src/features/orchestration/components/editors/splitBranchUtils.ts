@@ -9,6 +9,7 @@ interface SplitConfig {
   branches?: SplitBranch[];
   default_branch_id?: string;
   drop_unmatched?: boolean;
+  holdout_percent?: number;
 }
 
 function normalizeBranchForMode(branch: SplitBranch, mode: SplitMode): SplitBranch {
@@ -27,9 +28,16 @@ function normalizeBranchForMode(branch: SplitBranch, mode: SplitMode): SplitBran
             : String(branch.match),
     };
   }
+  if (mode === 'random') {
+    return {
+      ...base,
+      weight: typeof branch.weight === 'number' ? branch.weight : 1,
+    };
+  }
+  // percentage
   return {
     ...base,
-    weight: typeof branch.weight === 'number' ? branch.weight : 1,
+    percent: typeof branch.percent === 'number' ? branch.percent : 0,
   };
 }
 
@@ -54,6 +62,9 @@ export function normalizeSplitConfigForMode(
     nextConfig.field = value.field ?? '';
   } else {
     delete nextConfig.field;
+  }
+  if (nextMode !== 'percentage') {
+    delete nextConfig.holdout_percent;
   }
   return nextConfig;
 }
