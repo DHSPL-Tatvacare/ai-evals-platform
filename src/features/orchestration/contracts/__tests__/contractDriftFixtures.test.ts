@@ -34,13 +34,13 @@ function loadFixture(name: string): { node_type: string; config: unknown } {
 const VALID = [
   "logic_split.valid_draft.json",
   "logic_wait.valid_draft.json",
-  "source_cohort_query.valid_draft.json",
+  "source_cohort.valid_draft.json",
 ];
 
 const INVALID = [
   "logic_split.invalid_fabricated_key.json",
   "logic_wait.invalid_fabricated_key.json",
-  "source_cohort_query.invalid_fabricated_key.json",
+  "source_cohort.invalid_fabricated_key.json",
 ];
 
 describe("contract drift fixtures — frontend half", () => {

@@ -1,0 +1,14 @@
+{
+  "node_type": "source.cohort",
+  "config": {
+    "mode": "inline",
+    "source_ref": "static:patients",
+    "payload_fields": ["contact", "name"],
+    "filters": [
+      { "column": "plan", "op": "eq", "value": "gold" }
+    ],
+    "lookback_hours": 24,
+    "lookback_column": "enrolled_at",
+    "consent_gate_channel": "wa"
+  }
+}

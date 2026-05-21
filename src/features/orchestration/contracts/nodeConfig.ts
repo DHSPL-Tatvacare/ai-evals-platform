@@ -152,12 +152,57 @@ export const COHORT_FILTER_OPS = [
 ] as const;
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
-export const SourceSavedCohortConfigSchema = z
+// Mirrors backend `_cohort_query_compiler.CohortQueryFilter`. Op enum reuses
+// the shared COHORT_FILTER_OPS so the inline-cohort editor and the saved
+// cohort-version editor stay on one source of truth.
+const CohortFilterSchema = z
   .object({
-    nodeType: z.literal("source.saved_cohort"),
-    cohort_definition_version_id: z.uuid(),
+    column: z.string(),
+    op: z.enum(COHORT_FILTER_OPS),
+    value: z.unknown(),
   })
   .strict();
+
+// Sentinel on superRefine-emitted issues so draft mode can defer the
+// mode-conditional completeness checks the same way the backend
+// model_validator defers them under `context.mode == 'draft'`.
+const MODE_REQUIRED_PARAM = "mode_required";
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+// Mirrors backend `source_cohort.SourceCohortConfig` — a flat union where
+// `mode` selects which selector fields are required at publish. Draft defers
+// the cross-field checks (see parseNodeConfig's draft filter).
+export const SourceCohortConfigSchema = z
+  .object({
+    nodeType: z.literal("source.cohort"),
+    mode: z.enum(["inline", "saved"]).optional(),
+    cohort_definition_version_id: z.uuid().optional(),
+    source_ref: z.string().optional(),
+    payload_fields: z.array(z.string()).default([]),
+    filters: z.array(CohortFilterSchema).default([]),
+    lookback_hours: z.number().int().nullable().optional(),
+    lookback_column: z.string().nullable().optional(),
+    consent_gate_channel: z.string().nullable().optional(),
+  })
+  .strict()
+  .superRefine((cfg, ctx) => {
+    if (cfg.mode === "saved" && cfg.cohort_definition_version_id == null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["cohort_definition_version_id"],
+        message: "'cohort_definition_version_id' required when mode='saved'",
+        params: { kind: MODE_REQUIRED_PARAM },
+      });
+    }
+    if (cfg.mode === "inline" && !cfg.source_ref) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source_ref"],
+        message: "'source_ref' required when mode='inline'",
+        params: { kind: MODE_REQUIRED_PARAM },
+      });
+    }
+  });
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const SourceDatasetConfigSchema = z
@@ -373,7 +418,7 @@ export const SinkCompleteConfigSchema = z
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const NodeConfigSchema = z.discriminatedUnion("nodeType", [
-  SourceSavedCohortConfigSchema,
+  SourceCohortConfigSchema,
   SourceDatasetConfigSchema,
   SourceEventTriggerConfigSchema,
   FilterConsentGateConfigSchema,
@@ -390,7 +435,7 @@ export const NodeConfigSchema = z.discriminatedUnion("nodeType", [
 
 const NODE_TYPE_TO_SCHEMA: Record<
   string,
-  | typeof SourceSavedCohortConfigSchema
+  | typeof SourceCohortConfigSchema
   | typeof SourceDatasetConfigSchema
   | typeof SourceEventTriggerConfigSchema
   | typeof FilterConsentGateConfigSchema
@@ -404,7 +449,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   | typeof VoicePlaceCallConfigSchema
   | typeof SinkCompleteConfigSchema
 > = {
-  "source.saved_cohort": SourceSavedCohortConfigSchema,
+  "source.cohort": SourceCohortConfigSchema,
   "source.dataset": SourceDatasetConfigSchema,
   "source.event_trigger": SourceEventTriggerConfigSchema,
   "filter.consent_gate": FilterConsentGateConfigSchema,
@@ -466,6 +511,7 @@ interface MappedZodIssue {
   code: string;
   keys?: ReadonlyArray<string>;
   input?: unknown;
+  params?: Record<string, unknown>;
 }
 
 function zodIssuesToParseIssues(
@@ -495,6 +541,15 @@ function isDraftOmittedRequiredIssue(issue: MappedZodIssue): boolean {
     issue.code === "invalid_type" &&
     issue.input === undefined &&
     issue.path.length > 0
+  );
+}
+
+// Mode-conditional completeness issues (source.cohort's superRefine) are
+// publish-time only; draft authoring tolerates a half-picked mode the same
+// way the backend model_validator defers them under context.mode == 'draft'.
+function isDraftDeferredModeIssue(issue: MappedZodIssue): boolean {
+  return (
+    issue.code === "custom" && issue.params?.kind === MODE_REQUIRED_PARAM
   );
 }
 
@@ -548,7 +603,9 @@ export function parseNodeConfig(
   const issues =
     options?.mode === "draft"
       ? result.error.issues.filter(
-          (issue) => !isDraftOmittedRequiredIssue(issue),
+          (issue) =>
+            !isDraftOmittedRequiredIssue(issue) &&
+            !isDraftDeferredModeIssue(issue),
         )
       : result.error.issues;
   if (options?.mode === "draft" && issues.length === 0) {

@@ -138,6 +138,104 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
     }
   });
 
+  it("source.cohort inline mode with source_ref parses cleanly", () => {
+    const result = parseNodeConfig("source.cohort", {
+      mode: "inline",
+      source_ref: "static:patients",
+      payload_fields: ["contact", "name"],
+      filters: [{ column: "plan", op: "eq", value: "gold" }],
+      lookback_hours: 24,
+      lookback_column: "enrolled_at",
+      consent_gate_channel: "wa",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).not.toHaveProperty("nodeType");
+      expect(result.data.mode).toBe("inline");
+      expect(result.data.source_ref).toBe("static:patients");
+      expect(result.data.filters).toEqual([
+        { column: "plan", op: "eq", value: "gold" },
+      ]);
+    }
+  });
+
+  it("source.cohort saved mode with version id parses cleanly", () => {
+    const result = parseNodeConfig("source.cohort", {
+      mode: "saved",
+      cohort_definition_version_id: "22222222-2222-4222-a222-222222222222",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.mode).toBe("saved");
+      expect(result.data.cohort_definition_version_id).toBe(
+        "22222222-2222-4222-a222-222222222222",
+      );
+      // Array fields default to empty so the on-wire shape stays canonical.
+      expect(result.data.payload_fields).toEqual([]);
+      expect(result.data.filters).toEqual([]);
+    }
+  });
+
+  it("source.cohort draft mode tolerates missing mode and selector fields", () => {
+    const result = parseNodeConfig("source.cohort", {}, { mode: "draft" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("source.cohort draft mode tolerates a chosen mode without its selector", () => {
+    // mode=saved without a version id, mode=inline without a source_ref —
+    // both are valid half-authored drafts and must not surface issues.
+    const saved = parseNodeConfig(
+      "source.cohort",
+      { mode: "saved" },
+      { mode: "draft" },
+    );
+    expect(saved.ok).toBe(true);
+    const inline = parseNodeConfig(
+      "source.cohort",
+      { mode: "inline" },
+      { mode: "draft" },
+    );
+    expect(inline.ok).toBe(true);
+  });
+
+  it("source.cohort strict mode rejects unknown keys", () => {
+    const result = parseNodeConfig("source.cohort", {
+      mode: "inline",
+      source_ref: "static:patients",
+      definitely_not_a_real_field: "oops",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.issues.some((i) =>
+          i.field.includes("definitely_not_a_real_field"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("source.cohort publish mode rejects saved without version id", () => {
+    const result = parseNodeConfig("source.cohort", { mode: "saved" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.issues.some((i) =>
+          i.field.includes("cohort_definition_version_id"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("source.cohort publish mode rejects inline without source_ref", () => {
+    const result = parseNodeConfig("source.cohort", { mode: "inline" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((i) => i.field.includes("source_ref"))).toBe(
+        true,
+      );
+    }
+  });
+
   it("logic.wait correlation accepts recipient_id_field only", () => {
     const ok = parseNodeConfig("logic.wait", {
       mode: "event",

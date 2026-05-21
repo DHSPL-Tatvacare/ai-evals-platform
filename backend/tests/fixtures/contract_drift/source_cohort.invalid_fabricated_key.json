@@ -1,0 +1,8 @@
+{
+  "node_type": "source.cohort",
+  "config": {
+    "mode": "inline",
+    "source_ref": "static:patients",
+    "fabricated_key": "should-be-rejected"
+  }
+}
