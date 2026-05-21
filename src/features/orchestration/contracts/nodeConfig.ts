@@ -249,15 +249,14 @@ export const LogicConditionalConfigSchema = z
   .strict();
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
-// Mirrors backend `logic_split._Branch` exactly. `predicate` and the
-// `by_rules` mode were FE-only inventions — they had no backend handler
-// and silently broke at publish. Removed to match the canonical contract.
+// Mirrors backend `logic_split._Branch` exactly.
 const SplitBranchSchema = z
   .object({
     id: z.string().min(1),
     label: z.string(),
     match: z.string().nullable().optional(),
     weight: z.number().nullable().optional(),
+    percent: z.number().int().min(0).max(100).nullable().optional(),
   })
   .strict();
 
@@ -265,15 +264,16 @@ type SplitBranchOutput = z.output<typeof SplitBranchSchema>;
 
 interface LogicSplitConfigOutput {
   nodeType: "logic.split";
-  mode: "by_field" | "random";
+  mode: "by_field" | "random" | "percentage";
   field?: string;
   branches: SplitBranchOutput[];
   default_branch_id?: string;
   drop_unmatched: boolean;
+  holdout_percent?: number;
 }
 
 function normaliseSplitBranches(
-  mode: "by_field" | "random",
+  mode: "by_field" | "random" | "percentage",
   branches: SplitBranchOutput[],
 ): SplitBranchOutput[] {
   return branches.map((branch) => {
@@ -289,9 +289,16 @@ function normaliseSplitBranches(
               : String(branch.match),
       };
     }
+    if (mode === "random") {
+      return {
+        ...base,
+        weight: typeof branch.weight === "number" ? branch.weight : 1,
+      };
+    }
+    // percentage
     return {
       ...base,
-      weight: typeof branch.weight === "number" ? branch.weight : 1,
+      percent: typeof branch.percent === "number" ? branch.percent : 0,
     };
   });
 }
@@ -300,18 +307,15 @@ function normaliseSplitBranches(
 export const LogicSplitConfigSchema = z
   .object({
     nodeType: z.literal("logic.split"),
-    mode: z.enum(["by_field", "random"]).default("by_field"),
+    mode: z.enum(["by_field", "random", "percentage"]).default("by_field"),
     field: z.string().optional(),
     branches: z.array(SplitBranchSchema).default([]),
     default_branch_id: z.string().optional(),
     drop_unmatched: z.boolean().default(false),
+    holdout_percent: z.number().int().min(0).max(100).optional(),
   })
   .strict()
   .transform((cfg): LogicSplitConfigOutput => {
-    // Mirrors `splitBranchUtils.normalizeSplitConfigForMode`. Pruning
-    // branch fields that don't apply to the active mode keeps the on-wire
-    // config minimal — and the editors no longer need to call the
-    // normaliser on every dropdown change.
     const mode = cfg.mode;
     const normalisedBranches = normaliseSplitBranches(mode, cfg.branches);
     const stillHasDefault = normalisedBranches.some(
@@ -326,6 +330,9 @@ export const LogicSplitConfigSchema = z
     };
     if (mode === "by_field") {
       next.field = cfg.field ?? "";
+    }
+    if (mode === "percentage" && cfg.holdout_percent != null) {
+      next.holdout_percent = cfg.holdout_percent;
     }
     return next;
   });
