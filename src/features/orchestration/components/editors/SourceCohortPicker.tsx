@@ -10,6 +10,7 @@ import {
 } from '@/features/orchestration/components/inspector/InspectorPrimitives';
 import { useCohortSources } from '@/features/orchestration/queries/cohorts';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import type { CohortColumnType } from '@/features/orchestration/types';
 import { useCurrentAppId } from '@/hooks';
 import type { CohortFilter } from '@/services/api/orchestrationCohorts';
 
@@ -61,6 +62,12 @@ export function SourceCohortPicker({ value, onChange }: Props) {
     ],
     [selectedSource],
   );
+
+  // Build a name→type map from the source's schema descriptor for the filter editor.
+  const columnTypes = useMemo((): Record<string, CohortColumnType> => {
+    const cols = selectedSource?.schemaDescriptor?.columns ?? [];
+    return Object.fromEntries(cols.map((c) => [c.name, c.type]));
+  }, [selectedSource]);
 
   function setMode(next: Mode) {
     // Always carry mode; preserve the per-mode slice each branch owns so a
@@ -134,6 +141,8 @@ export function SourceCohortPicker({ value, onChange }: Props) {
               value={cfg.filters ?? []}
               onChange={setFilters}
               columnOptions={cfg.payload_fields ?? []}
+              columnTypes={columnTypes}
+              sourceRef={cfg.source_ref}
             />
           </InspectorField>
           <InspectorField

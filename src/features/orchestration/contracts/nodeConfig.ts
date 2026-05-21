@@ -159,7 +159,8 @@ const CohortFilterSchema = z
   .object({
     column: z.string(),
     op: z.enum(COHORT_FILTER_OPS),
-    value: z.unknown(),
+    // Accepts scalar types (eq/neq/gt/gte/lt/lte/contains) and arrays (in/not_in).
+    value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]).optional(),
   })
   .strict();
 

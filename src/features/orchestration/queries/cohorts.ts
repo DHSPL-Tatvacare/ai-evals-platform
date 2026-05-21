@@ -2,10 +2,13 @@
  * Saved cohort TanStack Query hooks. Server data via apiQueryFn so the
  * shared 401-refresh-and-retry flow stays in effect.
  */
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { fetchCohortSources } from '@/services/api/orchestration';
+import { fetchCohortColumnValues, fetchCohortSources } from '@/services/api/orchestration';
+import { useDebounce } from '@/hooks/useDebounce';
 import type { CohortSource, WorkflowType } from '@/features/orchestration/types';
+import type { ComboboxOption } from '@/components/ui/Combobox';
 import {
   createCohort,
   createDraftVersion,
@@ -32,6 +35,8 @@ export const cohortQueryKeys = {
     ['orchestration', 'cohorts', 'used-by', cohortId] as const,
   sources: (workflowType: string, appId: string) =>
     ['orchestration', 'cohort-sources', workflowType, appId] as const,
+  columnValues: (sourceRef: string, column: string, q: string) =>
+    ['orchestration', 'cohortColumnValues', sourceRef, column, q] as const,
 };
 
 export function useCohortSources(
@@ -47,6 +52,34 @@ export function useCohortSources(
       }),
     enabled: Boolean(appId),
   });
+}
+
+/** Async column-value typeahead for the datatype-driven filter value picker.
+ *  Debounces the search query 250 ms before issuing a network request so the
+ *  user can type freely without hammering the endpoint. */
+export function useCohortColumnValues(
+  sourceRef: string | null | undefined,
+  column: string | null | undefined,
+  { limit = 50 }: { limit?: number } = {},
+): { options: ComboboxOption[]; loading: boolean; onSearchChange: (q: string) => void } {
+  const [rawQuery, setRawQuery] = useState('');
+  const debouncedQuery = useDebounce(rawQuery, 250);
+
+  const { data, isFetching } = useQuery<{ values: string[]; hasMore: boolean }>({
+    queryKey: cohortQueryKeys.columnValues(sourceRef ?? '', column ?? '', debouncedQuery),
+    queryFn: () =>
+      fetchCohortColumnValues({
+        sourceRef: sourceRef as string,
+        column: column as string,
+        q: debouncedQuery || undefined,
+        limit,
+      }),
+    enabled: Boolean(sourceRef) && Boolean(column),
+    staleTime: 30_000,
+  });
+
+  const options: ComboboxOption[] = (data?.values ?? []).map((v) => ({ value: v, label: v }));
+  return { options, loading: isFetching, onSearchChange: setRawQuery };
 }
 
 export function useCohorts(appId: string | null | undefined) {

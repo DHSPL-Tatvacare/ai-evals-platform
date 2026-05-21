@@ -497,6 +497,12 @@ class CohortSourceResponse(CamelModel):
     imported_at: Optional[datetime] = None
 
 
+class ColumnValuesResponse(CamelModel):
+    """Distinct filter values for one column on a cohort source."""
+    values: list[str]
+    has_more: bool
+
+
 class TerminationReceipt(CamelModel):
     """Informational result of a hard-Stop: synchronous flip done, provider
     cancels fanned out to the finalize-run-cancel job."""
@@ -540,6 +546,6 @@ __all__ = [
     "RecipientStateResponse", "ActionResponse",
     "OverrideRequest", "OverrideResponse",
     "NodeTypeDescriptor", "NodeOutputEdge",
-    "CohortSourceResponse",
+    "CohortSourceResponse", "ColumnValuesResponse",
     "TerminationReceipt", "CancelRunRequest", "CancelAuditRead",
 ]

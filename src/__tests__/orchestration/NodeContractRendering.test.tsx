@@ -24,10 +24,34 @@ const cohortSource: CohortSource = {
   schemaDescriptor: null,
 };
 
+const cohortSourceTyped: CohortSource = {
+  sourceRef: 'crm.leads_typed',
+  displayLabel: 'CRM Leads (typed)',
+  description: 'Source with schema descriptor',
+  kind: 'static',
+  workflowTypes: ['crm'],
+  appIds: ['inside-sales'],
+  idColumn: 'lead_id',
+  allowedPayloadColumns: ['name', 'score'],
+  allowedFilterColumns: ['name', 'score'],
+  allowedLookbackColumns: [],
+  schemaDescriptor: {
+    columns: [
+      { name: 'name', type: 'string' },
+      { name: 'score', type: 'number' },
+    ],
+  },
+};
+
 vi.mock('@/features/orchestration/queries/cohorts', () => ({
-  useCohortSources: () => ({ data: [cohortSource] }),
+  useCohortSources: () => ({ data: [cohortSource, cohortSourceTyped] }),
   useCohorts: () => ({ data: [] }),
   useCohort: () => ({ data: undefined }),
+  useCohortColumnValues: () => ({
+    options: [{ value: 'Alice', label: 'Alice' }, { value: 'Bob', label: 'Bob' }],
+    loading: false,
+    onSearchChange: () => undefined,
+  }),
 }));
 
 function descriptor(
@@ -224,5 +248,105 @@ describe('NodeConfigPanel — descriptor-driven rendering', () => {
     // Saved branch renders the saved-cohort empty state (no cohorts mocked).
     expect(screen.getByText(/No saved cohorts yet/i)).toBeInTheDocument();
     expect(screen.queryByText('Filters')).not.toBeInTheDocument();
+  });
+
+  it('shows async value combobox for a string column filter', () => {
+    // Mount with a typed source that has a string column and an existing filter.
+    const store = useWorkflowBuilderStore.getState();
+    const desc = descriptor({
+      nodeType: 'source.cohort',
+      displayLabel: 'Cohort Source',
+      displayCategory: 'ingress',
+      configSchema: { type: 'object', properties: {} },
+      editorHints: { preferredEditor: 'SourceCohortPicker' },
+      runtimeContract: { executionKind: 'entry_sql' },
+      category: 'source',
+    });
+    store.setPaletteCatalog([desc]);
+    useWorkflowBuilderStore.setState({ workflowType: 'crm' });
+    store.addNode({
+      id: 'n2',
+      type: 'source.cohort',
+      position: { x: 0, y: 0 },
+      data: { label: 'cohort' },
+      config: {
+        mode: 'inline',
+        source_ref: 'crm.leads_typed',
+        payload_fields: ['name', 'score'],
+        filters: [{ column: 'name', op: 'eq', value: '' }],
+      },
+    });
+    store.setSelectedNode('n2');
+    render(<NodeConfigPanel />);
+    // With a string column + eq op the Combobox renders a "select a value…" placeholder.
+    expect(screen.getByText('select a value…')).toBeInTheDocument();
+  });
+
+  it('shows a numeric input for a number column filter', () => {
+    const store = useWorkflowBuilderStore.getState();
+    const desc = descriptor({
+      nodeType: 'source.cohort',
+      displayLabel: 'Cohort Source',
+      displayCategory: 'ingress',
+      configSchema: { type: 'object', properties: {} },
+      editorHints: { preferredEditor: 'SourceCohortPicker' },
+      runtimeContract: { executionKind: 'entry_sql' },
+      category: 'source',
+    });
+    store.setPaletteCatalog([desc]);
+    useWorkflowBuilderStore.setState({ workflowType: 'crm' });
+    store.addNode({
+      id: 'n3',
+      type: 'source.cohort',
+      position: { x: 0, y: 0 },
+      data: { label: 'cohort' },
+      config: {
+        mode: 'inline',
+        source_ref: 'crm.leads_typed',
+        payload_fields: ['name', 'score'],
+        filters: [{ column: 'score', op: 'gt', value: '' }],
+      },
+    });
+    store.setSelectedNode('n3');
+    render(<NodeConfigPanel />);
+    // Number column renders a numeric input with placeholder "value".
+    const inputs = screen.getAllByPlaceholderText('value');
+    const numInput = inputs.find(
+      (el) => el instanceof HTMLInputElement && el.type === 'number',
+    );
+    expect(numInput).toBeDefined();
+  });
+
+  it('narrows operator list by column type', () => {
+    const store = useWorkflowBuilderStore.getState();
+    const desc = descriptor({
+      nodeType: 'source.cohort',
+      displayLabel: 'Cohort Source',
+      displayCategory: 'ingress',
+      configSchema: { type: 'object', properties: {} },
+      editorHints: { preferredEditor: 'SourceCohortPicker' },
+      runtimeContract: { executionKind: 'entry_sql' },
+      category: 'source',
+    });
+    store.setPaletteCatalog([desc]);
+    useWorkflowBuilderStore.setState({ workflowType: 'crm' });
+    store.addNode({
+      id: 'n4',
+      type: 'source.cohort',
+      position: { x: 0, y: 0 },
+      data: { label: 'cohort' },
+      config: {
+        mode: 'inline',
+        source_ref: 'crm.leads_typed',
+        payload_fields: ['name', 'score'],
+        filters: [{ column: 'score', op: 'gt', value: 10 }],
+      },
+    });
+    store.setSelectedNode('n4');
+    render(<NodeConfigPanel />);
+    // For a number column the operator select should NOT offer "contains" (string-only).
+    expect(screen.queryByText('contains')).not.toBeInTheDocument();
+    // But it should offer numeric comparators.
+    expect(screen.getByText('gt')).toBeInTheDocument();
   });
 });

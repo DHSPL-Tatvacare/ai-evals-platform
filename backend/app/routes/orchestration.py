@@ -32,6 +32,7 @@ from app.schemas.orchestration import (
     CancelRunRequest,
     CloneSystemWorkflowRequest,
     CohortSourceResponse,
+    ColumnValuesResponse,
     ConsentResponse,
     ConsentSetRequest,
     NodeTypeDescriptor,
@@ -67,7 +68,7 @@ from app.services.orchestration.api import (
     workflows as wf_service,
 )
 from app.services.orchestration.api.node_types import list_node_types
-from app.services.orchestration.api.source_catalog import list_cohort_sources
+from app.services.orchestration.api.source_catalog import fetch_column_values, list_cohort_sources
 from app.services.orchestration.cancel.run_terminator import terminate_run
 from app.services.orchestration.definition_validator import (
     DispatchRequiredFieldsError,
@@ -914,3 +915,35 @@ async def get_source_catalog(
         app_id=app_id,
         app_ids=scoped_app_ids,
     )
+
+
+@router.get(
+    "/source_catalog/{source_ref:path}/columns/{column}/values",
+    response_model=ColumnValuesResponse,
+)
+async def get_source_column_values(
+    source_ref: str,
+    column: str,
+    app_id: str = Query(..., alias="appId"),
+    q: Optional[str] = Query(None),
+    limit: int = Query(default=50, le=50, ge=1),
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Distinct values for a filter column on a cohort source.
+
+    Only columns in allowed_filter_columns are accessible. Supports optional
+    substring search (q) and a hard limit cap of 50. hasMore=true signals the
+    caller that there are further results beyond the returned slice.
+    """
+    await ensure_registered_app_access(db, auth, app_id)
+    result = await fetch_column_values(
+        db,
+        source_ref=source_ref,
+        column=column,
+        tenant_id=auth.tenant_id,
+        app_id=app_id,
+        q=q,
+        limit=limit,
+    )
+    return ColumnValuesResponse(values=result["values"], has_more=result["has_more"])

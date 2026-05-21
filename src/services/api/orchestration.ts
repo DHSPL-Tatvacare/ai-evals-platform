@@ -313,6 +313,22 @@ export async function fetchCohortSources(params?: {
   );
 }
 
+export async function fetchCohortColumnValues(params: {
+  sourceRef: string;
+  column: string;
+  q?: string;
+  limit?: number;
+}): Promise<{ values: string[]; hasMore: boolean }> {
+  const { sourceRef, column, q, limit } = params;
+  const search = new URLSearchParams();
+  if (q) search.set('q', q);
+  if (limit != null) search.set('limit', String(limit));
+  const qs = search.toString();
+  return apiRequest<{ values: string[]; hasMore: boolean }>(
+    `/api/orchestration/source_catalog/${encodeURIComponent(sourceRef)}/columns/${encodeURIComponent(column)}/values${qs ? `?${qs}` : ''}`,
+  );
+}
+
 export interface WorkflowValidateIssue {
   nodeId: string | null;
   field: string | null;
