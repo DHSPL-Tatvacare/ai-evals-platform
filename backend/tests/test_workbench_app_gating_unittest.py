@@ -46,6 +46,17 @@ class WorkbenchFullRolloutTests(unittest.TestCase):
                 self.assertGreaterEqual(len(catalog.verified_queries), 3)
                 validate_workbench_against_manifest(catalog, get_manifest(app_id))
 
+    def test_inside_sales_omits_never_populated_fact_columns(self) -> None:
+        """intent/route/result_verdict are NULL for every inside-sales row (the
+        call_quality extractor never sets them; result_verdict has no producer at
+        all), so surfacing them trips bouncer R12 on every answer. The curated
+        catalog must not advertise columns the app never populates."""
+        _clear_catalog_cache_for_tests()
+        catalog = load_workbench_catalog_strict('inside-sales')
+        names = {c.name for c in catalog.tables['fact_evaluation'].all_logical_columns()}
+        for dead in ('intent', 'route', 'result_verdict'):
+            self.assertNotIn(dead, names)
+
     def test_all_sherlock_apps_build_workbench_prompt(self) -> None:
         for app_id in SHERLOCK_APPS:
             with self.subTest(app_id=app_id):

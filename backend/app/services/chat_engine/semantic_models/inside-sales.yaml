@@ -95,9 +95,9 @@ tables:
       - { name: evaluator_type, expr: evaluator_type, data_type: nominal, physical_type: text }
       - { name: item_id, expr: item_id, data_type: nominal, physical_type: text }
       - { name: item_type, expr: item_type, data_type: nominal, physical_type: text }
-      - { name: result_verdict, expr: result_verdict, data_type: nominal, physical_type: text }
-      - { name: intent, expr: intent, data_type: nominal, physical_type: text }
-      - { name: route, expr: route, data_type: nominal, physical_type: text }
+      # result_verdict/intent/route are never populated for inside-sales (the
+      # call_quality extractor leaves them NULL; result_verdict has no producer),
+      # so surfacing them only trips bouncer R12 all-null on every answer.
       - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
       # ── JSONB-derived: call_rubric numeric scores ──
       - name: call_opening_score
