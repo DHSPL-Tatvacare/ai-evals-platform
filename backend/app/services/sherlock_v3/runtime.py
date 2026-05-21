@@ -43,6 +43,7 @@ from app.services.sherlock_v3.state_store import (
     load_state,
 )
 from app.services.sherlock_v3.supervisor import build_supervisor
+from app.services.sherlock_v3.compaction import CONTEXT_COMPACT_THRESHOLD_TOKENS
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +255,14 @@ async def run_turn(
             ))
             return TurnResult(status='error', usage={}, last_response_id=None, error=str(exc2))
 
+    last_response_id = await _maybe_compact_supervisor(
+        ctx=ctx,
+        client=client,
+        model=supervisor_model,
+        last_response_id=last_response_id,
+        cumulative_tokens=await _session_cumulative_tokens(ctx),
+    )
+
     await ctx.emitter.emit(StepFinishPart(
         id=new_part_id(),
         chat_session_id='',
@@ -292,6 +301,54 @@ async def _stream_once(
     last_response_id = getattr(streaming, 'last_response_id', None)
     usage = _extract_usage(streaming)
     return usage, last_response_id
+
+
+async def _session_cumulative_tokens(ctx: SherlockTurnContext) -> int:
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.sherlock_runtime import SherlockAgentSession
+
+    async with async_session() as db:
+        val = await db.scalar(
+            select(SherlockAgentSession.cumulative_input_tokens)
+            .where(SherlockAgentSession.chat_session_id == ctx.chat_session_id)
+            .where(SherlockAgentSession.tenant_id == ctx.tenant_id)
+            .where(SherlockAgentSession.user_id == ctx.user_id)
+        )
+    return int(val or 0)
+
+
+async def _maybe_compact_supervisor(
+    *,
+    ctx: SherlockTurnContext,
+    client: Any,
+    model: str,
+    last_response_id: str | None,
+    cumulative_tokens: int,
+) -> str | None:
+    """Compact the supervisor chain once accumulated context crosses the
+    threshold, continuing from the compacted response id. Supervisor only —
+    it owns the cross-turn previous_response_id chain; specialists are
+    stateless per ``as_tool`` call. Trigger is the same
+    ``cumulative_input_tokens`` the FE context pill reads, so UI and
+    compaction stay in lockstep. The Azure v1 client exposes /responses/compact."""
+    if not last_response_id:
+        return last_response_id
+    if cumulative_tokens < CONTEXT_COMPACT_THRESHOLD_TOKENS:
+        return last_response_id
+    compacted = await client.responses.compact(
+        model=model, previous_response_id=last_response_id,
+    )
+    assert ctx.emitter is not None
+    await ctx.emitter.emit(CompactionPart(
+        id=new_part_id(),
+        chat_session_id='',
+        seq=0,
+        created_at=0,
+        tokens_before=cumulative_tokens,
+    ))
+    return compacted.id
 
 
 async def _emit_part_for_sdk_event(event: Any, ctx: SherlockTurnContext) -> None:

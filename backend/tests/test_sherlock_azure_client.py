@@ -222,8 +222,9 @@ async def test_openai_platform_default_yields_async_openai_client(
 async def test_azure_tenant_row_yields_azure_client_and_deployment_name(
     db_session, seeded_tenant, gpt5_catalog, _patch_async_session
 ):
-    """Azure tenant row preserved by migration 0051 → AsyncAzureOpenAI client +
-    the tenant-chosen deployment string."""
+    """Azure tenant row → a plain AsyncOpenAI client on the Azure v1 surface
+    (base_url=.../openai/v1/, NOT the classic AsyncAzureOpenAI deployment
+    routing) + the tenant-chosen deployment string as the model."""
     from app.models.tenant_llm_deployment import TenantLlmDeployment
     cred = await _seed_credential(
         db_session, seeded_tenant.id, "azure_openai", "az-key",
@@ -248,7 +249,9 @@ async def test_azure_tenant_row_yields_azure_client_and_deployment_name(
     client, model = await get_sherlock_azure_client(
         tenant_id=seeded_tenant.id, call_site="analytics_supervisor",
     )
-    assert isinstance(client, openai.AsyncAzureOpenAI)
+    assert isinstance(client, openai.AsyncOpenAI)
+    assert not isinstance(client, openai.AsyncAzureOpenAI)
+    assert str(client.base_url).rstrip("/").endswith("/openai/v1")
     assert model == "my-sherlock-gpt5"
 
 

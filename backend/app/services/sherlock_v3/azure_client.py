@@ -30,11 +30,12 @@ from app.services.llm_credentials import (
 
 _SHERLOCK_CALL_SITES = ("analytics_supervisor", "analytics_specialist")
 
-# Sherlock has historically pinned a newer api_version than the rest of the
-# platform (which defaults to 2025-03-01-preview when the credential doesn't
-# carry one). Kept distinct here because the OpenAI Responses API surface
-# Sherlock uses was introduced in 2025-04-01-preview.
-_SHERLOCK_AZURE_API_VERSION_FALLBACK = "2025-04-01-preview"
+# Azure's v1 API surface (/openai/v1/) is the flat, OpenAI-compatible path —
+# the only one exposing the Responses /compact endpoint and the latest
+# features. Reached with a plain AsyncOpenAI(base_url=.../openai/v1/), NOT the
+# legacy AzureOpenAI deployment-routing sugar (/openai/deployments/{dep}/...),
+# which has no /compact path. The rolling "preview" api-version selects it.
+_AZURE_V1_API_VERSION = "preview"
 
 
 async def get_sherlock_azure_client(
@@ -67,11 +68,11 @@ async def get_sherlock_azure_client(
         raise ProviderNotConfiguredError(creds.provider, creds.name)
 
     if creds.provider == "azure_openai":
-        client = openai.AsyncAzureOpenAI(
+        endpoint = (creds.extra_config.get("base_url") or "").rstrip("/")
+        client = openai.AsyncOpenAI(
             api_key=api_key,
-            azure_endpoint=creds.extra_config.get("base_url") or "",
-            api_version=resolved.api_version
-            or creds.extra_config.get("api_version", _SHERLOCK_AZURE_API_VERSION_FALLBACK),
+            base_url=f"{endpoint}/openai/v1/",
+            default_query={"api-version": _AZURE_V1_API_VERSION},
         )
     elif creds.provider == "openai":
         client = openai.AsyncOpenAI(

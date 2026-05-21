@@ -66,7 +66,6 @@ from app.services.sherlock_v3.query_synthesis_specialist import (
     build_query_synthesis_specialist,
     make_synthesis_output_extractor,
 )
-from app.services.sherlock_v3.compaction import context_management_extra_args
 from app.services.sherlock_v3.state_store import (
     SherlockStateSnapshot,
     render_state_block,
@@ -384,22 +383,6 @@ def build_supervisor(
         model_settings=ModelSettings(
             parallel_tool_calls=False,
             reasoning=Reasoning(effort='medium'),
-            # Server-side compaction at the threshold from compaction.py.
-            # Applied ONLY here on the supervisor because the supervisor
-            # is the agent that carries the previous_response_id chain
-            # across turns — i.e. it's the only agent with cross-turn
-            # context to compact. Specialists are stateless sub-agents
-            # invoked via as_tool each turn; their context is bounded per
-            # invocation and resets, so compaction on them would be a
-            # no-op + an extra setting on every request. Same shape every
-            # LLM chat agent uses (ChatGPT, Claude): chain-owner owns
-            # compaction.
-            # extra_args spreads as TYPED kwargs into the OpenAI Python
-            # SDK's AsyncResponses.create() — which has context_management
-            # as a native typed param. extra_body (the lower-level path)
-            # was silently dropped in the 2026-05-19 Azure live test;
-            # the typed-param path lands the field correctly.
-            extra_args=context_management_extra_args(),
         ),
         tools=tools,
     )
