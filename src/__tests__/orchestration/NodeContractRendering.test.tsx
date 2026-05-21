@@ -1,9 +1,34 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { NodeConfigPanel } from '@/features/orchestration/components/NodeConfigPanel';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
-import type { NodeTypeDescriptor } from '@/features/orchestration/types';
+import type { CohortSource, NodeTypeDescriptor } from '@/features/orchestration/types';
+
+vi.mock('@/hooks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks')>();
+  return { ...actual, useCurrentAppId: () => 'inside-sales' };
+});
+
+const cohortSource: CohortSource = {
+  sourceRef: 'crm.leads',
+  displayLabel: 'CRM Leads',
+  description: 'Live CRM lead table',
+  kind: 'static',
+  workflowTypes: ['crm'],
+  appIds: ['inside-sales'],
+  idColumn: 'lead_id',
+  allowedPayloadColumns: ['name', 'phone'],
+  allowedFilterColumns: ['stage'],
+  allowedLookbackColumns: ['updated_at'],
+  schemaDescriptor: null,
+};
+
+vi.mock('@/features/orchestration/queries/cohorts', () => ({
+  useCohortSources: () => ({ data: [cohortSource] }),
+  useCohorts: () => ({ data: [] }),
+  useCohort: () => ({ data: undefined }),
+}));
 
 function descriptor(
   override: Partial<NodeTypeDescriptor>,
@@ -149,5 +174,55 @@ describe('NodeConfigPanel — descriptor-driven rendering', () => {
     expect(screen.getByText('recipient_id')).toBeInTheDocument();
     expect(screen.getByText('Emits payload fields')).toBeInTheDocument();
     expect(screen.getByText('response_id')).toBeInTheDocument();
+  });
+
+  function mountSourceCohort(config: Record<string, unknown>) {
+    const desc = descriptor({
+      nodeType: 'source.cohort',
+      displayLabel: 'Cohort Source',
+      displayCategory: 'ingress',
+      configSchema: { type: 'object', properties: {} },
+      editorHints: { preferredEditor: 'SourceCohortPicker' },
+      runtimeContract: { executionKind: 'entry_sql' },
+      category: 'source',
+    });
+    const store = useWorkflowBuilderStore.getState();
+    store.setPaletteCatalog([desc]);
+    useWorkflowBuilderStore.setState({ workflowType: 'crm' });
+    store.addNode({
+      id: 'n1',
+      type: 'source.cohort',
+      position: { x: 0, y: 0 },
+      data: { label: 'cohort' },
+      config,
+    });
+    store.setSelectedNode('n1');
+  }
+
+  it('dispatches source.cohort to SourceCohortPicker with a mode toggle', () => {
+    mountSourceCohort({ mode: 'inline', source_ref: '', payload_fields: [] });
+    render(<NodeConfigPanel />);
+    expect(screen.getByText('Audience')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Inline' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Saved' })).toBeInTheDocument();
+  });
+
+  it('shows the inline source picker by default and switches to the saved branch', () => {
+    mountSourceCohort({ mode: 'inline', source_ref: '', payload_fields: [] });
+    render(<NodeConfigPanel />);
+    // Inline branch renders the source/filters sub-form.
+    expect(screen.getByText('Source')).toBeInTheDocument();
+    expect(screen.getByText('Filters')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Saved' }));
+
+    // Store now carries mode='saved'.
+    const updated = useWorkflowBuilderStore
+      .getState()
+      .nodes.find((n) => n.id === 'n1');
+    expect((updated?.config as { mode?: string }).mode).toBe('saved');
+    // Saved branch renders the saved-cohort empty state (no cohorts mocked).
+    expect(screen.getByText(/No saved cohorts yet/i)).toBeInTheDocument();
+    expect(screen.queryByText('Filters')).not.toBeInTheDocument();
   });
 });

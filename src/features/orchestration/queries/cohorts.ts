@@ -4,6 +4,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { fetchCohortSources } from '@/services/api/orchestration';
+import type { CohortSource, WorkflowType } from '@/features/orchestration/types';
 import {
   createCohort,
   createDraftVersion,
@@ -28,7 +30,24 @@ export const cohortQueryKeys = {
     ['orchestration', 'cohorts', 'detail', cohortId] as const,
   usedBy: (cohortId: string) =>
     ['orchestration', 'cohorts', 'used-by', cohortId] as const,
+  sources: (workflowType: string, appId: string) =>
+    ['orchestration', 'cohort-sources', workflowType, appId] as const,
 };
+
+export function useCohortSources(
+  workflowType: WorkflowType | null | undefined,
+  appId: string | null | undefined,
+) {
+  return useQuery<CohortSource[]>({
+    queryKey: cohortQueryKeys.sources(workflowType ?? '', appId ?? ''),
+    queryFn: () =>
+      fetchCohortSources({
+        workflowType: workflowType as WorkflowType,
+        appId: appId as string,
+      }),
+    enabled: Boolean(appId),
+  });
+}
 
 export function useCohorts(appId: string | null | undefined) {
   return useQuery<CohortResponse[]>({

@@ -30,6 +30,7 @@ export { DebugFab } from './DebugFab';
 export { Select, type SelectOption } from './Select';
 export { Combobox, type ComboboxOption } from './Combobox';
 export { ProviderToggle } from './ProviderToggle';
+export { SegmentedControl } from './SegmentedControl';
 export { LLMProviderLogo } from './LLMProviderLogo';
 export { SherlockIcon } from './SherlockIcon';
 export { Switch } from './Switch';

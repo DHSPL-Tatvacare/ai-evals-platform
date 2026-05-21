@@ -17,7 +17,7 @@ import { InspectorSection } from './inspector/InspectorPrimitives';
 import { DatasetPicker } from './editors/DatasetPicker';
 import { MergePolicyEditor } from './editors/MergePolicyEditor';
 import { PredicateBuilder } from './editors/PredicateBuilder';
-import { SavedCohortPicker } from './editors/SavedCohortPicker';
+import { SourceCohortPicker } from './editors/SourceCohortPicker';
 import { SplitBranchEditor } from './editors/SplitBranchEditor';
 import { WaitConditionEditor } from './editors/WaitConditionEditor';
 
@@ -102,9 +102,9 @@ export function NodeConfigPanel() {
   let body: React.ReactNode;
 
   switch (preferredEditor) {
-    case 'SavedCohortPicker': {
+    case 'SourceCohortPicker': {
       body = (
-        <SavedCohortPicker
+        <SourceCohortPicker
           value={config}
           onChange={(next) => setConfig({ ...config, ...next })}
         />
