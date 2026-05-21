@@ -45,7 +45,7 @@ const EMPTY_OVERLAY: Record<string, NodeStepState> = Object.freeze({});
  * `config.branches[*].label`, so the canvas must recompute them per node
  * config — the static descriptor for split is empty and would otherwise
  * collapse into a single `default` handle. */
-function deriveOutputEdges(
+export function deriveOutputEdges(
   node: WorkflowDefinitionNode,
   desc: NodeTypeDescriptor | undefined,
 ): string[] {
@@ -56,7 +56,21 @@ function deriveOutputEdges(
     const ids = branches
       .map((b) => (typeof b?.id === 'string' ? b.id.trim() : ''))
       .filter((s) => s.length > 0);
+    // Percentage holdout routes its share to a reserved ``control`` edge.
+    const scfg = (node.config ?? {}) as { mode?: string; holdout_percent?: number | null };
+    if (scfg.mode === 'percentage' && (scfg.holdout_percent ?? 0) > 0 && !ids.includes('control')) {
+      ids.push('control');
+    }
     if (ids.length > 0) return ids;
+  }
+  if (node.type === 'logic.conditional') {
+    // Branch ids are the routing keys; unmatched contacts always fall to
+    // ``default``, so the canvas shows one handle per branch plus default.
+    const branches = (node.config?.branches as Array<{ id?: string }> | undefined) ?? [];
+    const ids = branches
+      .map((b) => (typeof b?.id === 'string' ? b.id.trim() : ''))
+      .filter((s) => s.length > 0);
+    return [...ids, 'default'];
   }
   if (node.type === 'logic.wait') {
     // Phase 11 §6.4: only the outputs that match the configured wait mode
@@ -76,18 +90,23 @@ function deriveOutputEdges(
  *  canvas card (e.g. ``success`` -> ``Success``). Split nodes use the
  *  branch's editable label, mirroring the ``id -> label`` shape declared
  *  on the descriptor for static outputs. */
-function deriveOutputEdgeLabels(
+export function deriveOutputEdgeLabels(
   node: WorkflowDefinitionNode,
   desc: NodeTypeDescriptor | undefined,
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  if (node.type === 'logic.split') {
+  if (node.type === 'logic.split' || node.type === 'logic.conditional') {
     const branches =
       (node.config?.branches as Array<{ id?: string; label?: string }> | undefined) ?? [];
     for (const b of branches) {
       if (typeof b?.id === 'string' && b.id.trim().length > 0) {
         out[b.id] = typeof b.label === 'string' && b.label.trim().length > 0 ? b.label : b.id;
       }
+    }
+    if (node.type === 'logic.conditional') out.default = 'Default';
+    const scfg = (node.config ?? {}) as { mode?: string; holdout_percent?: number | null };
+    if (node.type === 'logic.split' && scfg.mode === 'percentage' && (scfg.holdout_percent ?? 0) > 0) {
+      out.control = 'Control';
     }
     return out;
   }
