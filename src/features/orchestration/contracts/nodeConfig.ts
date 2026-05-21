@@ -364,10 +364,10 @@ export const LogicMergeConfigSchema = z
   .object({
     nodeType: z.literal("logic.merge"),
     merge_policy: z
-      .enum(["dedupe", "last_wins", "merge_lists"])
+      .enum(["dedupe", "first_wins", "last_wins"])
       .default("dedupe"),
     payload_policy: z
-      .enum(["last_wins", "first_wins", "union", "preserve"])
+      .enum(["first_wins", "last_wins", "shallow_merge"])
       .default("last_wins"),
   })
   .strict();
