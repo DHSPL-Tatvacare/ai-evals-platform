@@ -152,9 +152,142 @@ def _extract_reply_type(raw: dict[str, Any]) -> Optional[str]:
     return None
 
 
+_TEMPLATE_PAGE_SIZE = 100
+_MAX_TEMPLATE_PAGES = 20
+
+
+def _extract_template_candidates(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("messageTemplates", "templates", "data", "result"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _parameter_quality(parameters: list[str]) -> tuple[int, int]:
+    if not parameters:
+        return (0, 0)
+    has_named = any(not p.isdigit() for p in parameters)
+    return (2 if has_named else 1, len(parameters))
+
+
+def _extract_template_parameters(candidate: dict[str, Any]) -> list[str]:
+    """Extract ordered placeholder names from a WATI template candidate."""
+    import re as _re
+    for key in ("parameters", "placeholders", "variables", "customParams"):
+        value = candidate.get(key)
+        if isinstance(value, list) and value:
+            names: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    names.append(item)
+                elif isinstance(item, dict):
+                    name = (
+                        item.get("name") or item.get("paramName")
+                        or item.get("key") or item.get("id")
+                    )
+                    if isinstance(name, str) and name:
+                        names.append(name)
+            if names:
+                return names
+    # Scan component bodies for {{N}} positional placeholders.
+    body_strings: list[str] = []
+    components = candidate.get("components")
+    if isinstance(components, list):
+        for component in components:
+            if isinstance(component, dict):
+                text = component.get("text") or component.get("body")
+                if isinstance(text, str):
+                    body_strings.append(text)
+    for legacy in ("body", "text", "message"):
+        v = candidate.get(legacy)
+        if isinstance(v, str):
+            body_strings.append(v)
+    numbers: list[str] = []
+    seen: set[str] = set()
+    for body in body_strings:
+        for m in _re.finditer(r"\{\{(\d+)\}\}", body):
+            n = m.group(1)
+            if n not in seen:
+                seen.add(n)
+                numbers.append(n)
+    return sorted(numbers, key=int)
+
+
+def _normalize_template_candidate(candidate: dict[str, Any]) -> Optional[dict[str, Any]]:
+    name = (
+        candidate.get("template_name") or candidate.get("templateName")
+        or candidate.get("elementName") or candidate.get("name") or ""
+    )
+    if not name:
+        return None
+    language = candidate.get("language") or candidate.get("templateLanguage") or ""
+    if isinstance(language, dict):
+        language = (
+            language.get("value") or language.get("key") or language.get("text") or ""
+        )
+    return {
+        "name": str(name),
+        "language": str(language or ""),
+        "status": str(candidate.get("status") or candidate.get("templateStatus") or ""),
+        "parameters": _extract_template_parameters(candidate),
+    }
+
+
 class WatiAdapter:
     capability = "messaging"
     vendor = "wati"
+
+    async def list_message_templates(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
+        """Fetch all WATI templates paginated, return normalised {name, language, status, parameters} list."""
+        base_url = connection.get("base_url") or ""
+        tenant_id = connection.get("wati_tenant_id") or ""
+        api_token = connection.get("api_token") or ""
+        if not (base_url and tenant_id and api_token):
+            raise WatiServiceError("WATI connection missing base_url / wati_tenant_id / api_token")
+        endpoint = resolve_wati_api_endpoint(base_url, tenant_id)
+        url = f"{endpoint}/api/v2/getMessageTemplates"
+        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+
+        out_by_name: dict[str, dict[str, Any]] = {}
+        for page_number in range(1, _MAX_TEMPLATE_PAGES + 1):
+            async with _make_client() as client:
+                resp = await client.get(
+                    url, headers=headers,
+                    params={"pageSize": _TEMPLATE_PAGE_SIZE, "pageNumber": page_number},
+                )
+                if 400 <= resp.status_code < 500:
+                    try:
+                        err_body = resp.json()
+                    except Exception:
+                        err_body = {"text": resp.text[:200]}
+                    raise WatiServiceError(f"WATI {resp.status_code}: {err_body}")
+                resp.raise_for_status()
+                payload = resp.json()
+            candidates = _extract_template_candidates(payload)
+            if not candidates:
+                break
+            for candidate in candidates:
+                normalized = _normalize_template_candidate(candidate)
+                if normalized is None:
+                    continue
+                existing = out_by_name.get(normalized["name"])
+                if existing is None:
+                    out_by_name[normalized["name"]] = normalized
+                else:
+                    if not existing["language"] and normalized["language"]:
+                        existing["language"] = normalized["language"]
+                    if existing["status"] != "APPROVED" and normalized["status"] == "APPROVED":
+                        existing["status"] = normalized["status"]
+                    if _parameter_quality(normalized["parameters"]) > _parameter_quality(existing["parameters"]):
+                        existing["parameters"] = normalized["parameters"]
+            if len(candidates) < _TEMPLATE_PAGE_SIZE:
+                break
+
+        return sorted(out_by_name.values(), key=lambda item: item["name"].lower())
 
     async def send_template(
         self, *, connection: dict[str, Any], request: CanonicalSendRequest,
@@ -440,4 +573,11 @@ from app.services.orchestration.adapters import register_adapter  # noqa: E402
 register_adapter(capability="messaging", vendor="wati", adapter=WatiAdapter())
 
 
-__all__ = ["WatiAdapter", "WatiServiceError", "resolve_wati_api_endpoint"]
+__all__ = [
+    "WatiAdapter",
+    "WatiServiceError",
+    "resolve_wati_api_endpoint",
+    "_extract_template_candidates",
+    "_normalize_template_candidate",
+    "_extract_template_parameters",
+]

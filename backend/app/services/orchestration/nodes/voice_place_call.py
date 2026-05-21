@@ -40,10 +40,12 @@ class _Config(BaseModel):
         ...,
         min_length=1,
         description="Voice agent that will handle the conversation.",
+        json_schema_extra={"x-type": "bolna_agent_picker"},
     )
     variable_mappings: dict[str, str] = Field(
         default_factory=dict,
         description="Values passed to the agent as call variables, by name.",
+        json_schema_extra={"x-type": "variable_mapping_list"},
     )
     from_phone: Optional[str] = Field(
         default=None,

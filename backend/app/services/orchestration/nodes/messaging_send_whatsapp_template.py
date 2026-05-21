@@ -45,9 +45,28 @@ class _Config(BaseModel):
         min_length=1,
         description="Approved template name registered with your WhatsApp provider.",
     )
+    # WATI picker fields — required at publish time; empty string is draft-safe.
+    template_name: str = Field(
+        "",
+        title="WATI Template",
+        description="Pick the live WATI template the cohort receives.",
+        json_schema_extra={"x-type": "wati_template_picker"},
+    )
+    channel_number: str = Field(
+        "",
+        title="Channel Number",
+        description="Pick the WhatsApp sender number this campaign goes from.",
+        json_schema_extra={"x-type": "wati_channel_picker"},
+    )
+    broadcast_name: str = Field(
+        "",
+        title="Broadcast Name",
+        description="Campaign label sent to WATI as broadcast_name.",
+    )
     variable_mappings: dict[str, str] = Field(
         default_factory=dict,
         description="Values bound to the template's placeholders, by name.",
+        json_schema_extra={"x-type": "variable_mapping_list"},
     )
     webhook_ttl_seconds: int = Field(
         default=259200,

@@ -30,9 +30,12 @@ from app.schemas.orchestration_connection import (
     ConnectionRotateTokenResponse,
     ConnectionTestResponse,
     ConnectionUpdateRequest,
+    ProviderAgentsListResponse,
+    ProviderTemplatesListResponse,
     ProviderSpecResponse,
 )
 from app.services.orchestration.api import connections as conn_service
+from app.services.orchestration.api import provider_listings as listings_service
 
 
 router = APIRouter(prefix="/api/orchestration/connections", tags=["orchestration"])
@@ -232,13 +235,63 @@ async def get_agent_variables(
     connection_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
+    agent_id: Optional[str] = Query(None, alias="agentId"),
+    template_name: Optional[str] = Query(None, alias="templateName"),
 ):
-    """Vendor-agnostic variable-introspection stub — adapters re-populate in P2/P3."""
+    """Return variable list for a Bolna agent or WATI template. Soft-error envelope."""
     await _load_and_gate_connection(db, auth, connection_id)
-    return await conn_service.get_agent_variables(
+    return await listings_service.get_agent_variables(
         db,
         tenant_id=auth.tenant_id,
         connection_id=connection_id,
+        agent_id=agent_id,
+        template_name=template_name,
+    )
+
+
+@router.get("/{connection_id}/agents", response_model=ProviderAgentsListResponse)
+async def list_connection_agents(
+    connection_id: uuid.UUID,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+    refresh: bool = Query(False, description="Bypass the 30 s cache."),
+):
+    """Live agent listing for the Bolna picker. Soft-error contract: HTTP 200 on upstream failure."""
+    row = await _load_and_gate_connection(db, auth, connection_id)
+    if row.provider != "bolna":
+        raise HTTPException(
+            status_code=400,
+            detail=f"connection {connection_id} is provider={row.provider!r}, expected bolna",
+        )
+    return await listings_service.list_connection_bolna_agents(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=row.app_id,
+        connection_id=connection_id,
+        refresh=refresh,
+    )
+
+
+@router.get("/{connection_id}/templates", response_model=ProviderTemplatesListResponse)
+async def list_connection_templates(
+    connection_id: uuid.UUID,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+    refresh: bool = Query(False, description="Bypass the 30 s cache."),
+):
+    """Live template listing for the WATI picker. Same soft-error envelope as the agents endpoint."""
+    row = await _load_and_gate_connection(db, auth, connection_id)
+    if row.provider != "wati":
+        raise HTTPException(
+            status_code=400,
+            detail=f"connection {connection_id} is provider={row.provider!r}, expected wati",
+        )
+    return await listings_service.list_connection_wati_templates(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=row.app_id,
+        connection_id=connection_id,
+        refresh=refresh,
     )
 
 

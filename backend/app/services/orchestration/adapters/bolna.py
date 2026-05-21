@@ -275,6 +275,61 @@ class BolnaAdapter:
             for req in requests
         ]
 
+    async def list_agents(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
+        """Fetch all agents from GET /v2/agent/all, return normalised {id, name, status, type} list."""
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        async with _make_client() as client:
+            resp = await client.get(f"{base_url}/v2/agent/all", headers=headers)
+            if 400 <= resp.status_code < 500:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = {"text": resp.text[:200]}
+                raise BolnaServiceError(f"Bolna {resp.status_code}: {err}")
+            resp.raise_for_status()
+            payload = resp.json()
+        if isinstance(payload, dict) and "agents" in payload:
+            payload = payload["agents"]
+        if not isinstance(payload, list):
+            raise BolnaServiceError(
+                f"Bolna /v2/agent/all returned unexpected shape: {type(payload).__name__}"
+            )
+        out: list[dict[str, Any]] = []
+        for raw in payload:
+            if not isinstance(raw, dict):
+                continue
+            out.append({
+                "id": str(raw.get("id") or raw.get("agent_id") or ""),
+                "name": str(raw.get("agent_name") or raw.get("name") or ""),
+                "status": str(raw.get("agent_status") or raw.get("status") or ""),
+                "type": str(raw.get("agent_type") or raw.get("type") or ""),
+            })
+        return out
+
+    async def get_agent(self, connection: dict[str, Any], *, agent_id: str) -> dict[str, Any]:
+        """Fetch a single agent from GET /v2/agent/{agent_id}."""
+        if not agent_id:
+            raise ValueError("BolnaAdapter.get_agent requires agent_id")
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        async with _make_client() as client:
+            resp = await client.get(f"{base_url}/v2/agent/{agent_id}", headers=headers)
+            if 400 <= resp.status_code < 500:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = {"text": resp.text[:200]}
+                raise BolnaServiceError(f"Bolna {resp.status_code}: {err}")
+            resp.raise_for_status()
+            return resp.json()
+
     async def cancel_dispatch(
         self, *, connection: dict[str, Any], action: Any,
     ) -> CancelDispatchResult:
