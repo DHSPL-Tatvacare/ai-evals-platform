@@ -36,12 +36,22 @@ interface Props {
   agentId?: string;
   templateName?: string;
   templateParameters?: string[];
+  /** Recipient payload keys available upstream. When non-empty, the
+   *  "Recipient field" picker is a dropdown over these instead of free text;
+   *  per recipient it resolves to that recipient's payload value. */
+  payloadFieldOptions?: string[];
 }
 
 const SOURCE_OPTIONS = [
   { value: 'payload', label: 'Recipient field' },
   { value: 'static', label: 'Static value' },
 ];
+
+// Keep an already-saved field selectable even if it isn't in the upstream set.
+function payloadFieldSelectOptions(options: string[], current?: string) {
+  const names = Array.from(new Set([...(current ? [current] : []), ...options]));
+  return names.map((n) => ({ value: n, label: n }));
+}
 
 function asVariableMappings(value: unknown): VariableMapping[] {
   if (!Array.isArray(value)) return [];
@@ -70,6 +80,7 @@ export function VariableMappingField({
   agentId,
   templateName,
   templateParameters,
+  payloadFieldOptions,
 }: Props) {
   const rows = useMemo(() => {
     const parsed = asVariableMappings(value);
@@ -203,13 +214,23 @@ export function VariableMappingField({
                 className="gap-1"
               >
                 {row.source_kind === 'payload' ? (
-                  <Input
-                    value={row.payload_field ?? ''}
-                    onChange={(e) =>
-                      updateRow(idx, { payload_field: e.target.value })
-                    }
-                    placeholder="recipient.payload field"
-                  />
+                  payloadFieldOptions && payloadFieldOptions.length > 0 ? (
+                    <Combobox
+                      size="sm"
+                      value={row.payload_field ?? ''}
+                      onChange={(next) => updateRow(idx, { payload_field: next })}
+                      options={payloadFieldSelectOptions(payloadFieldOptions, row.payload_field)}
+                      placeholder="Pick a recipient field"
+                    />
+                  ) : (
+                    <Input
+                      value={row.payload_field ?? ''}
+                      onChange={(e) =>
+                        updateRow(idx, { payload_field: e.target.value })
+                      }
+                      placeholder="recipient.payload field"
+                    />
+                  )
                 ) : (
                   <Input
                     value={row.static_value ?? ''}

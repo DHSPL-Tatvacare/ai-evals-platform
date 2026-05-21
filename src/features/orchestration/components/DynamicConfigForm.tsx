@@ -88,6 +88,9 @@ interface Props {
   connectionIdForVariables?: string;
   agentIdForVariables?: string;
   templateNameForVariables?: string;
+  /** Recipient payload keys available upstream — fed to variable-mapping rows
+   *  so the "Recipient field" picker is a dropdown, not free text. */
+  payloadFieldOptions?: string[];
 }
 
 export function DynamicConfigForm({
@@ -101,6 +104,7 @@ export function DynamicConfigForm({
   connectionIdForVariables,
   agentIdForVariables,
   templateNameForVariables,
+  payloadFieldOptions,
 }: Props) {
   const properties = schema?.properties ?? {};
   const variableMappingFieldKey = Object.entries(properties).find(
@@ -174,6 +178,7 @@ export function DynamicConfigForm({
               agentIdForVariables={agentIdForVariables}
               templateNameForVariables={templateNameForVariables}
               templateParametersForVariables={templateParametersForVariables}
+              payloadFieldOptions={payloadFieldOptions}
             />
           </InspectorField>
         );
@@ -206,6 +211,7 @@ interface FieldRendererProps {
   agentIdForVariables?: string;
   templateNameForVariables?: string;
   templateParametersForVariables?: string[];
+  payloadFieldOptions?: string[];
 }
 
 function FieldRenderer({
@@ -222,6 +228,7 @@ function FieldRenderer({
   agentIdForVariables,
   templateNameForVariables,
   templateParametersForVariables,
+  payloadFieldOptions,
 }: FieldRendererProps) {
   // Specialised x-type renderers run before the generic type/enum
   // dispatch so they can override the default password / array behavior.
@@ -301,6 +308,7 @@ function FieldRenderer({
         agentId={agentIdForVariables}
         templateName={templateNameForVariables}
         templateParameters={templateParametersForVariables}
+        payloadFieldOptions={payloadFieldOptions}
       />
     );
   }

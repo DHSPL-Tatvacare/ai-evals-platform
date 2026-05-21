@@ -113,4 +113,27 @@ describe('VariableMappingField', () => {
       ]);
     });
   });
+
+  it('renders the recipient field as a dropdown of upstream payload fields', async () => {
+    const onChange = vi.fn();
+    render(
+      <VariableMappingField
+        value={[{ agent_variable: 'user_name', source_kind: 'payload', payload_field: '' }]}
+        onChange={onChange}
+        payloadFieldOptions={['name', 'email', 'city']}
+      />,
+    );
+
+    // No free-text fallback when upstream fields are available.
+    expect(
+      screen.queryByPlaceholderText('recipient.payload field'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Pick a recipient field/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^email$/i }));
+
+    expect(onChange).toHaveBeenCalledWith([
+      { agent_variable: 'user_name', source_kind: 'payload', payload_field: 'email' },
+    ]);
+  });
 });

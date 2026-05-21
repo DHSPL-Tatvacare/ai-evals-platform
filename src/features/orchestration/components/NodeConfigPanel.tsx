@@ -229,6 +229,7 @@ export function NodeConfigPanel() {
           templateNameForVariables={
             typeof config.template_name === 'string' ? config.template_name : undefined
           }
+          payloadFieldOptions={fieldOptions}
         />
       );
     }
