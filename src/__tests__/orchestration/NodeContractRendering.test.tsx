@@ -160,7 +160,7 @@ describe('NodeConfigPanel — descriptor-driven rendering', () => {
     });
     store.setSelectedNode('n1');
     render(<NodeConfigPanel />);
-    expect(screen.getByPlaceholderText('hours to wait')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
   });
 
   it('shows the hidden-node warning when authoringStatus=hidden', () => {

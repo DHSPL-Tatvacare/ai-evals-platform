@@ -179,9 +179,7 @@ def test_percentage_proportions_hold(monkeypatch):
     )
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(
-        _Handler().execute(cohort, cfg, ctx)
-    )
+    result = asyncio.run(_Handler().execute(cohort, cfg, ctx))
 
     counts = {bid: len(outs) for bid, outs in result.by_output_id.items()}
     total = sum(counts.values())
@@ -222,9 +220,7 @@ def test_holdout_routes_to_control_edge(monkeypatch):
     )
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(
-        _Handler().execute(cohort, cfg, ctx)
-    )
+    result = asyncio.run(_Handler().execute(cohort, cfg, ctx))
 
     total = sum(len(v) for v in result.by_output_id.values())
     assert total == 2000

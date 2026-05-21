@@ -12,7 +12,7 @@ describe('WaitConditionEditor', () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByPlaceholderText('hours to wait')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText('hours before timeout fires'),
     ).not.toBeInTheDocument();
@@ -32,7 +32,7 @@ describe('WaitConditionEditor', () => {
         onChange={onChange}
       />,
     );
-    expect(screen.queryByPlaceholderText('hours to wait')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('amount')).not.toBeInTheDocument();
     expect(
       screen.getByPlaceholderText('2026-05-01T00:00:00Z'),
     ).toBeInTheDocument();
@@ -58,6 +58,6 @@ describe('WaitConditionEditor', () => {
       screen.getByPlaceholderText('hours before timeout fires'),
     ).toBeInTheDocument();
     // No duration input.
-    expect(screen.queryByPlaceholderText('hours to wait')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('amount')).not.toBeInTheDocument();
   });
 });
