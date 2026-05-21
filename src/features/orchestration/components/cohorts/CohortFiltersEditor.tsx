@@ -10,6 +10,9 @@ interface Props {
   value: CohortFilter[];
   onChange: (next: CohortFilter[]) => void;
   disabled?: boolean;
+  // When provided, the column becomes a picker over these names instead of free
+  // text — the inline cohort node feeds it the selected fields.
+  columnOptions?: string[];
 }
 
 const OP_OPTIONS = COHORT_FILTER_OPS.map((op) => ({ value: op, label: op }));
@@ -43,7 +46,15 @@ function valueToInputString(value: unknown): string {
   return String(value);
 }
 
-export function CohortFiltersEditor({ value, onChange, disabled }: Props) {
+export function CohortFiltersEditor({ value, onChange, disabled, columnOptions }: Props) {
+  // Keep an out-of-list column (loaded config, deselected field) selectable.
+  function columnSelectOptions(current: string) {
+    const names = Array.from(
+      new Set([...(current ? [current] : []), ...(columnOptions ?? [])]),
+    );
+    return names.map((c) => ({ value: c, label: c }));
+  }
+
   function updateFilter(index: number, patch: Partial<CohortFilter>) {
     const next = [...value];
     next[index] = { ...next[index], ...patch };
@@ -66,44 +77,63 @@ export function CohortFiltersEditor({ value, onChange, disabled }: Props) {
         </p>
       ) : null}
       {value.map((f, idx) => (
-        <div key={idx} className="flex items-start gap-2">
-          <Input
-            value={f.column}
-            onChange={(e) => updateFilter(idx, { column: e.target.value })}
-            placeholder="column"
-            disabled={disabled}
-            className="flex-[2]"
-          />
-          <div className="flex-1">
-            <Select
-              value={f.op}
-              onChange={(op) =>
-                updateFilter(idx, {
-                  op: op as CohortFilter['op'],
-                  // Reset value when switching to/from list ops so a stale
-                  // string doesn't fail the server-side shape check.
-                  value: isListOp(op) === isListOp(f.op) ? f.value : isListOp(op) ? [] : '',
-                })
-              }
-              options={OP_OPTIONS}
+        <div
+          key={idx}
+          className="flex flex-col gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2"
+        >
+          <div className="flex items-center gap-2">
+            {columnOptions ? (
+              <div className="min-w-0 flex-1">
+                <Select
+                  value={f.column}
+                  onChange={(col) => updateFilter(idx, { column: col })}
+                  options={columnSelectOptions(f.column)}
+                  placeholder={columnOptions.length === 0 ? 'select fields first' : 'column'}
+                  disabled={disabled}
+                />
+              </div>
+            ) : (
+              <Input
+                value={f.column}
+                onChange={(e) => updateFilter(idx, { column: e.target.value })}
+                placeholder="column"
+                disabled={disabled}
+                className="min-w-0 flex-1"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => removeFilter(idx)}
+              disabled={disabled}
+              aria-label="Remove filter"
+              className="shrink-0 rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--color-error)] disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-24 shrink-0">
+              <Select
+                value={f.op}
+                onChange={(op) =>
+                  updateFilter(idx, {
+                    op: op as CohortFilter['op'],
+                    // Reset value when switching to/from list ops so a stale
+                    // string doesn't fail the server-side shape check.
+                    value: isListOp(op) === isListOp(f.op) ? f.value : isListOp(op) ? [] : '',
+                  })
+                }
+                options={OP_OPTIONS}
+              />
+            </div>
+            <Input
+              value={valueToInputString(f.value)}
+              onChange={(e) => updateFilter(idx, { value: coerceValue(f.op, e.target.value) })}
+              placeholder={isListOp(f.op) ? 'comma, separated, values' : 'value'}
+              disabled={disabled}
+              className="min-w-0 flex-1"
             />
           </div>
-          <Input
-            value={valueToInputString(f.value)}
-            onChange={(e) => updateFilter(idx, { value: coerceValue(f.op, e.target.value) })}
-            placeholder={isListOp(f.op) ? 'comma, separated, values' : 'value'}
-            disabled={disabled}
-            className="flex-[2]"
-          />
-          <button
-            type="button"
-            onClick={() => removeFilter(idx)}
-            disabled={disabled}
-            aria-label="Remove filter"
-            className="mt-1 rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--color-error)] disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
         </div>
       ))}
       <Button

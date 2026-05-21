@@ -133,6 +133,7 @@ export function SourceCohortPicker({ value, onChange }: Props) {
             <CohortFiltersEditor
               value={cfg.filters ?? []}
               onChange={setFilters}
+              columnOptions={cfg.payload_fields ?? []}
             />
           </InspectorField>
           <InspectorField
