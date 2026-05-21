@@ -2,312 +2,200 @@
 
 The single reference for *how Sherlock is wired together and how to add things to it*. If you find yourself explaining Sherlock architecture in a chat more than once, update this file instead.
 
-File paths are clickable; use them as the jump points.
+This describes **Sherlock v3** — the live runtime under `backend/app/services/sherlock_v3/`. The older v2 design (a single `chat_engine` agent with a scratchpad, `sql_agent`, `tool_handlers`, and a `sherlock_turn_events` log) is retired. The chart pipeline (`result_set_typer → chartability_gate → chart_type_picker → vega_lite_emitter`) and the manifests survive from v2 and are still used by the v3 data specialist.
 
 ---
 
 ## 1. What Sherlock is
 
-A **constrained analytics agent** scoped to one app at a time (`kaira-bot`, `voice-rx`, `inside-sales`).
+A **constrained analytics agent**, scoped to one app at a time (`kaira-bot`, `voice-rx`, `inside-sales`), built on the **OpenAI Agents SDK**.
 
-- Users ask natural-language questions about their data.
-- Sherlock orchestrates a fixed set of tools to discover schema, resolve entities, and run SQL.
-- SQL results flow through a **deterministic Python pipeline** that decides chart-vs-table, picks a chart type, and emits a validated Vega-Lite v5 spec.
-- The frontend renders the returned payload. It never infers chart type; the backend owns that decision.
+- One **supervisor** agent runs the turn. It decomposes the question and dispatches **specialists** registered as tools (`as_tool`).
+- Specialists do one job each and return a typed `SpecialistResult`. The data specialist writes SQL, which is validated by a **bouncer** and rendered through a **deterministic Python chart pipeline**.
+- Everything the turn does is emitted as a stream of **typed Parts** (`sherlock_parts`), persisted and pushed to the frontend over SSE. The frontend renders Parts; it never infers chart type or stitches state.
 
-The agent is an LLM. The pipeline is code. The boundary between them is strict.
+The agents are LLMs. The bouncer, the chart pipeline, and the Part stream are code. The boundary is strict.
+
+Canonical rule (also in CLAUDE.md): **all** agent orchestration on this platform follows the supervisor + specialist + Agents-SDK pattern. No bespoke chat engines.
 
 ---
 
 ## 2. End-to-end request flow
 
 ```
-user message
-   │
+POST /api/report-builder/v2/chat/stream            [routes/report_builder.py]
+   │  resolve session → get_or_create_turn(status='queued') → asyncio.create_task
    ▼
-Scope classifier ──────────── [entity_recognition.py]
-   │   (is this about this app's data? any entities to resolve?)
+run_chat_turn(...)                                  [sherlock_v3/turn_orchestrator.py]
+   │  create assistant message · mark turn active · build PartEmitter + SherlockTurnContext
    ▼
-Outer Sherlock LLM ────────── [prompts/base.py + prompt_generator + app_context + user_context + scratchpad]
-   │   (chooses tools, composes questions)
+run_turn(user_message, ctx)                         [sherlock_v3/runtime.py]
+   │  get_sherlock_azure_client(analytics_supervisor) → (client, model)   [sherlock_v3/azure_client.py]
+   │  compute grounding (top-k verified queries)     [sherlock_v3/grounding.py]
+   │  build_supervisor(...) with specialists as_tool [sherlock_v3/supervisor.py]
    ▼
-Tool dispatch ─────────────── [report_builder/tool_handlers.py]
-   │
-   ├─ catalog_* / discover / lookup / resolve_entity / data_check / get_surface_records
-   │
-   └─ data_query(question) ─── [sql_agent.py]
-          │   Inner SQL LLM → {sql, chart_title, output_columns}
-          ▼
-      Execute SQL
-          │
-          ▼
-      result_set_typer ────── [result_set_typer.py]        (manifest-tagged TypedResultSet)
-          │
-          ▼
-      chartability_gate ───── [chartability_gate.py]       (chart / kpi / summary / table / empty + reason_code)
-          │
-          ▼
-      chart_type_picker ───── [chart_type_picker.py]       (bar|grouped_bar|stacked_bar|line|multi_line|area|pie)
-          │
-          ▼
-      vega_lite_emitter ───── [vega_lite_emitter.py]       (Vega-Lite v5 spec, validated)
-          │
-          ▼
-      ChartPayload (discriminated union) → frontend
+Runner.run_streamed(supervisor, ..., previous_response_id)   (Agents SDK)
+   │  for each SDK event → _emit_part_for_sdk_event → ctx.emitter.emit(<Part>)
+   │     supervisor calls a specialist → SubtaskPart(running→completed|error)
+   │       data_specialist.submit_sql → bouncer → SQL → chart pipeline → ToolPart + ChartPart + EvidencePart
+   ▼
+_maybe_compact_supervisor(...)   (if cumulative tokens ≥ threshold → responses.compact())
+   ▼
+StepFinishPart(status, last_response_id) → mark_turn_terminal · finalize assistant message
 ```
 
-Everything after `data_query` runs deterministically in Python. The picker and emitter **do not call an LLM**.
+Each emitted Part is (1) written to `platform.sherlock_parts` and (2) published to the live SSE queue, which `report_builder.py` formats as SSE frames. Everything after the SQL executes runs deterministically in Python — the chart picker and emitter never call an LLM.
 
 ---
 
-## 3. Single sources of truth
+## 3. The agents
 
-Know these six files. Everything else is derived.
+Built fresh each turn in [`supervisor.py`](backend/app/services/sherlock_v3/supervisor.py) via `build_supervisor(...)`. The supervisor is one Agents-SDK `Agent` whose tools are specialists wrapped with `.as_tool(...)`.
 
-| Source | What it owns |
-|---|---|
-| [`backend/app/services/chat_engine/manifests/<app-id>.yaml`](backend/app/services/chat_engine/manifests/) | Catalog tables, data surfaces, column roles/types, synonyms, allowed values, per-app vocabulary |
-| [`backend/app/services/chat_engine/manifests/_schema.yaml`](backend/app/services/chat_engine/manifests/_schema.yaml) | JSONSchema for manifest validation |
-| [`backend/app/services/chat_engine/chart_type_picker.py`](backend/app/services/chat_engine/chart_type_picker.py) | Which chart mark to pick, given a TypedResultSet |
-| [`backend/app/services/chat_engine/vega_lite_emitter.py`](backend/app/services/chat_engine/vega_lite_emitter.py) | How each mark becomes a Vega-Lite v5 spec |
-| [`backend/app/services/chat_engine/prompts/base.py`](backend/app/services/chat_engine/prompts/base.py) | Sherlock persona + orchestration + chart-type request rules |
-| [`backend/app/services/report_builder/tool_definitions.py`](backend/app/services/report_builder/tool_definitions.py) | Tool specs the agent sees (names, descriptions, schemas) |
-
-Everything downstream (column comments in Postgres, TOOLS section of the prompt, SQL agent's column-role hints, frontend translator) is **generated** from these. Do not hand-edit generated artifacts.
-
----
-
-## 4. Catalog tables vs data surfaces
-
-Both are declared in the per-app manifest. They serve different purposes and are invoked via different tools.
-
-| | Catalog table | Data surface |
+| Specialist | File | Job |
 |---|---|---|
-| **Purpose** | Structured analytics — counts, aggregates, trends, charts | Raw evidence — individual records, nested JSONB, transcripts |
-| **Declared under** | `catalog_tables:` | `data_surfaces:` |
-| **Agent tool** | `data_query(question)` | `get_surface_records(surface_key, ...)` |
-| **Backs** | A real Postgres table; columns typed with role/data_type/semantic_type | A logical record view; `backed_by:` points to a catalog table OR an external ORM source |
-| **Typical shape** | `analytics_run_facts`, `analytics_eval_facts`, `analytics_criterion_facts` | `thread_records`, `recording_records`, `adversarial_case_records` |
-| **Produces charts?** | Yes | No — raw rows only |
+| `query_synthesis_specialist` | [`query_synthesis_specialist.py`](backend/app/services/sherlock_v3/query_synthesis_specialist.py) | Rewrite the user message into a self-contained question, classify it (answerable / ambiguous / non-data), decompose into sub-questions each targeting a specialist. |
+| `data_specialist` | [`data_specialist.py`](backend/app/services/sherlock_v3/data_specialist.py) | Answer analytics questions: emit `submit_sql`, pass it through the bouncer (pre + post), run it, type/gate/pick the chart, return rows + evidence + chart artifact. |
+| `authoring_specialist` | [`authoring_specialist.py`](backend/app/services/sherlock_v3/authoring_specialist.py) | Propose orchestration canvas patches — only when a builder context is present in edit mode and the caller has `orchestration:manage`. |
 
-Rule of thumb (already baked into [base.py](backend/app/services/chat_engine/prompts/base.py)):
-- *"show counts / trends / breakdown"* → catalog table.
-- *"show me thread / transcript / the actual payload"* → data surface.
+The supervisor owns the loop: synthesis first, dispatch per decomposition, and on a specialist `status=error` it **re-dispatches with the prior attempts** (capped at `MAX_SPECIALIST_ATTEMPTS = 3`, see [`limits.py`](backend/app/services/sherlock_v3/limits.py)).
 
----
+### Typed envelopes (do not add fields outside these)
 
-## 5. Playbooks — how to add things
+- **Down:** `SpecialistBrief` — `{question, scope{tenant_id, app_id, user_id}, prior_attempts[], retry_hint}` ([`contracts/brief.py`](backend/app/services/sherlock_v3/contracts/brief.py)). On a retry, `prior_attempts` carries the exact failed SQL + `Verdict` + status, so the specialist acts on history.
+- **Up:** `SpecialistResult` — `{kind, status, summary, attempts[], evidence[], artifacts[], meta}` ([`contracts/result.py`](backend/app/services/sherlock_v3/contracts/result.py)).
 
-Follow these exactly. Each playbook lists the *only* files you should touch. If you find yourself editing something outside the list, stop and read this doc again.
-
-### 5.1 Add a column to an existing catalog table
-
-1. Add the column in your ORM model if it's a new physical column. Run the Alembic migration.
-2. Edit the manifest:
-   ```yaml
-   catalog_tables:
-     analytics_run_facts:
-       columns:
-         your_new_column:
-           role: dimension | measure | temporal | ordered_categorical | key | identifier
-           type: text | int | float | timestamptz | ...
-           data_type: nominal | quantitative | temporal | ordinal | boolean
-           semantic_type: category | count | percent | ratio | score | duration | id_hash | pk | fk | currency | none
-           # Optional:
-           allowed_values: ["A", "B"]
-           synonyms: ["business name", "alias"]
-           ordering: ["EASY", "MEDIUM", "HARD"]
-           unit: percent
-           measure_kind: count | percent | duration_ms | ...
-           description: "Short, user-facing."
-   ```
-3. **Nothing else.** Boot the app. The manifest validator ([manifest_validator.py](backend/app/services/chat_engine/manifest_validator.py)) confirms the column exists in Postgres and matches the taxonomy. The comment emitter ([comment_emitter.py](backend/app/services/chat_engine/comment_emitter.py)) writes `COMMENT ON COLUMN` so the SQL agent sees the role/type/synonyms. The SQL agent's column-role hints ([sql_agent.py](backend/app/services/chat_engine/sql_agent.py)) pick it up from the manifest.
-
-**What NOT to do:** do not edit `COMMENT ON COLUMN` SQL by hand, do not touch the TOOLS block in `prompts/base.py`, do not add hand-written rules to the SQL agent prompt for this column.
-
-### 5.2 Add a new catalog table
-
-1. Add the ORM model under `backend/app/models/`. Migrate.
-2. Edit the manifest:
-   ```yaml
-   catalog_tables:
-     your_new_table:
-       orm: YourOrmClassName
-       alias: optional_sql_alias
-       columns:
-         id: { role: identifier, data_type: nominal, semantic_type: pk }
-         tenant_id: { role: identifier, data_type: nominal, semantic_type: id_hash }
-         app_id: { role: dimension, data_type: nominal, semantic_type: category }
-         # ...other columns
-   ```
-3. Ensure every tenant-scoped query path is satisfied: tables must have `tenant_id` and (usually) `app_id` columns; the SQL agent always filters on `:tenant_id` and `:app_id`.
-4. Boot. Manifest validator checks physical drift. Generators handle everything else.
-
-**Gotchas:**
-- `measure` role requires `data_type: quantitative` (validator error otherwise).
-- `temporal` role requires `data_type: temporal`.
-- `measure` without `semantic_type` logs a warning but is allowed.
-
-### 5.3 Add a data surface
-
-Used when you want the agent to fetch *raw records* by entity (thread id, run id, etc.).
-
-1. Confirm the backing source exists — either a declared catalog table in this manifest, or one of the known external sources ([manifest.py](backend/app/services/chat_engine/manifest.py) → `EXTERNAL_SURFACE_SOURCES` = `eval_runs`, `api_logs`, `thread_evaluations`, `adversarial_evaluations`).
-2. Edit the manifest:
-   ```yaml
-   data_surfaces:
-     - key: your_surface_key              # lowercase_snake
-       label: "Human-readable label"
-       description: "What this surface returns"
-       backed_by: thread_evaluations      # catalog table name OR external source
-       entity_types: [thread_id, run_id]  # entities the agent can filter by
-       entity_field_map:
-         thread_id: item_id               # map entity_type → column name
-       fields: [item_id, result_status, result_detail]  # default projection
-       default_limit: 10
-   ```
-3. If `backed_by` isn't already known — i.e., not in `EXTERNAL_SURFACE_SOURCES` and not a declared catalog table — either add it to `catalog_tables` or extend `EXTERNAL_SURFACE_SOURCES` (rare).
-4. Boot. `get_surface_records` resolution logic in [data_surfaces.py](backend/app/services/chat_engine/data_surfaces.py) picks up the new key automatically. The TOOLS block in the agent prompt lists surface keys dynamically via [prompt_generator.py](backend/app/services/chat_engine/prompt_generator.py).
-
-### 5.4 Add a new tool
-
-Tools are agent-callable functions. Adding one = spec + handler + registration.
-
-1. **Define the spec** in [tool_definitions.py](backend/app/services/report_builder/tool_definitions.py): name, description, JSONSchema for args. You can use `{{catalog_tables}}` and `{{surface_keys}}` tokens in the description — [tool_description_generator.py](backend/app/services/chat_engine/tool_description_generator.py) substitutes them per app.
-2. **Write the handler** in [tool_handlers.py](backend/app/services/report_builder/tool_handlers.py) as `async def handle_your_tool(...)`.
-3. **Register** in the `TOOL_HANDLERS` dict at the bottom of the same file.
-4. **Add a summarizer line** in `_summarize_tool_result` in [chat_handler.py](backend/app/services/report_builder/chat_handler.py) so the UI shows a meaningful badge.
-5. **Add a one-line rule** to `ORCHESTRATION` in [prompts/base.py](backend/app/services/chat_engine/prompts/base.py) telling the agent *when* to call this tool. Add an entry to the numbered list in [prompt_generator.py](backend/app/services/chat_engine/prompt_generator.py) so it appears in the TOOLS block.
-
-**Gotcha:** tool names are global. Adding a tool with the same name as an existing one silently shadows it. Check `TOOL_HANDLERS` first.
-
-### 5.5 Add a new chart type
-
-Only do this when an actual user question cannot be answered by any of the 7 existing marks: `bar | grouped_bar | stacked_bar | line | multi_line | area | pie`. In practice, almost never.
-
-If you must:
-
-1. **Add a branch to the picker** in [chart_type_picker.py](backend/app/services/chat_engine/chart_type_picker.py) with the precondition (what column roles/types/rows produce this mark).
-2. **Add an emitter case** in [vega_lite_emitter.py](backend/app/services/chat_engine/vega_lite_emitter.py) producing a Vega-Lite v5 spec that passes schema validation.
-3. **Extend the translator** at [`src/features/analytics/vegaLiteToRecharts.ts`](src/features/analytics/vegaLiteToRecharts.ts) and the `RechartsChartType` type.
-4. **Add a renderer branch** in [`src/features/analytics/components/ChartRenderer.tsx`](src/features/analytics/components/ChartRenderer.tsx) and update `CHART_MAP`.
-5. **Update chart-type hints** in [`prompts/base.py`](backend/app/services/chat_engine/prompts/base.py) → `CHART TYPE REQUESTS` so the agent knows how to ask `data_query` for this shape.
-6. **Tests**: extend `chartLayout.test.ts`, `chartReplay.test.ts`, and picker/emitter Python tests.
+These contracts are mirrored to the frontend as a generated JSON schema (`src/features/sherlock/generated/`). Changing a contract means regenerating that schema.
 
 ---
 
-## 6. The prompt stack
+## 4. The Part stream
 
-Sherlock's system prompt is assembled per turn in [`chat_handler.py:assemble_context`](backend/app/services/report_builder/chat_handler.py):
+Every observable thing in a turn is a **Part**. Defined in [`contracts/parts.py`](backend/app/services/sherlock_v3/contracts/parts.py) as a discriminated union on `type`:
 
-```
-base.render()                       # Persona + orchestration + chart-type rules.     STATIC per app.
-render_tools_section(app_id)        # TOOLS block with catalog tables + surface keys. GENERATED from manifest.
-app_context.render(session, db)     # App name, description, domain context.           DB-backed.
-user_context.render(session, db)    # Saved report templates, recent tool usage.       DB-backed.
-scratchpad.render(session)          # SESSION STATE: findings, discovery cache, etc.   PER-TURN.
+`step_start · user_message · reasoning · assistant_text · subtask · retry · tool · chart · evidence · error · compaction · step_finish`
+
+- **`SubtaskPart`** carries the specialist dispatch + a `state` envelope (`running → completed | error`) — the uniform lifecycle the FE reads directly.
+- **`ToolPart`** is the `submit_sql` lifecycle inside the data specialist (`pending → running → completed | error`).
+- **`ChartPart`** carries the Vega-Lite artifact; **`EvidencePart`** carries citation refs; **`CompactionPart`** marks a context compaction.
+
+[`PartEmitter`](backend/app/services/sherlock_v3/emitter.py) is the only writer. `emit(part)` locks + increments `sherlock_agent_sessions.next_event_seq`, inserts a `sherlock_parts` row (`payload = part.model_dump`), and publishes `{kind: 'part_added', seq, part}` to the SSE queue. `update(part)` rewrites a part's payload in place (state transitions) and publishes `part_updated`. The frontend hydrates a turn from `sherlock_parts` and applies live `part_added`/`part_updated` frames.
+
+---
+
+## 5. SQL path + the bouncer
+
+The data specialist may only reach what the per-app **semantic model** declares.
+
+- **Semantic model** — [`semantic_models/<app>.yaml`](backend/app/services/chat_engine/semantic_models/) → `WorkbenchCatalog` ([`workbench_catalog.py`](backend/app/services/chat_engine/workbench_catalog.py)). The **curated** surface the LLM may query: tables, dimensions/time-dimensions/facts, metrics, relationships, and verified-query exemplars. This is the single source for *both* the specialist's prompt **and** the bouncer's allow-list — they read the same `WorkbenchCatalog`, so adding/removing a column moves both in lockstep.
+- **SQL bouncer** — [`sql_bouncer.py`](backend/app/services/chat_engine/sql_bouncer.py). Validates `submit_sql` output **before** execution (read-only, allowed tables/columns/joins, complete GROUP BY, tenant+app scope filters, honest LIMIT, fan/chasm-trap guards) and the result **after** execution (grain match, no duplicate grain, row-limit truth, and **R12 = no all-null columns**). A failure returns a `Verdict` with a diagnostic (rule id + hint + `available_*` / `did_you_mean`) that threads into the next retry brief.
+- **Chart pipeline** (deterministic, no LLM): rows → `result_set_typer` (typed result set) → `chartability_gate` (chart / kpi / summary / table / empty + reason code) → `chart_type_picker` (`bar | grouped_bar | stacked_bar | line | multi_line | area | pie`) → `vega_lite_emitter` (validated Vega-Lite v5) → `ChartPart`.
+
+> Practical note: a column declared in the semantic model that is **never populated** for an app makes the specialist select it and the bouncer reject the all-null result (R12). Trim the semantic model to what the app actually populates. (This is exactly why `intent`/`route`/`result_verdict` were removed from `semantic_models/inside-sales.yaml`.)
+
+---
+
+## 6. Manifest vs semantic model
+
+Two per-app YAMLs, different jobs. The boot validator ([`manifest_validator.py`](backend/app/services/chat_engine/manifest_validator.py)) cross-checks them against live Postgres and **refuses startup on drift**.
+
+| | Manifest (`manifests/<app>.yaml`) | Semantic model (`semantic_models/<app>.yaml`) |
+|---|---|---|
+| Owns | Physical/logical truth: every physical column, chart taxonomy, `COMMENT ON COLUMN` source | The curated subset the LLM may query (`WorkbenchCatalog`) |
+| Drift rule | Every declared column must exist in Postgres | Every referenced column/table must exist **in the manifest** (semantic ⊆ manifest) |
+| Consumed by | Column comments, chart taxonomy, validator | Data-specialist prompt + bouncer allow-list |
+
+Because the rule is *semantic ⊆ manifest*, **removing** a column from the semantic model can never cause drift (the set shrinks); the manifest keeps documenting the physical column.
+
+---
+
+## 7. Persistence tables
+
+All under schema `platform`. Models in [`models/sherlock_runtime.py`](backend/app/models/sherlock_runtime.py).
+
+| Table | Role |
+|---|---|
+| `sherlock_agent_sessions` | One row per (tenant, user, app) session. Holds `last_response_id` (the cross-turn chain), `cumulative_input_tokens`, `next_event_seq`, status. |
+| `sherlock_conversation_turns` | One row per turn. `status` ∈ `queued / active / done / degraded / error / interrupted`; links the assistant message. |
+| `sherlock_parts` | Append-only typed event log (the Part stream). Source of truth for FE hydration + audit. |
+| `sherlock_evidence` | Citation ledger — rows referenced by `EvidencePart`. |
+| `sherlock_verified_queries` | Curated SQL exemplars used for few-shot grounding. |
+| `sherlock_ontology_*`, `sherlock_entity_resolvers` | Baseline ontology / entity-resolution reference data. |
+| `sherlock_state` | **Dormant.** Cross-turn structured memory (`resolved_entities`/`active_filters`). Read each turn but no producer writes it — `previous_response_id` is the live memory (see §9). Pending removal. |
+
+Retired: `sherlock_turn_events` and `analytics.log_sherlock_tool_call` were **dropped** (Alembic `0063`); the Part stream replaced them.
+
+Every LLM call also writes one `analytics.fact_llm_generation` row (`owner_type='sherlock_turn'`, `subsystem='sherlock_v3'`). Request handlers never write fact tables directly.
+
+---
+
+## 8. LLM client + call sites — the Azure v1 divergence
+
+Sherlock resolves a client per call site through [`azure_client.py`](backend/app/services/sherlock_v3/azure_client.py) → `get_sherlock_azure_client(tenant_id, call_site)`, where `call_site ∈ {analytics_supervisor, analytics_specialist}`. Resolution goes through `resolve_llm_call` (tenant `tenant_call_site_defaults` → platform fallback, with capability gating + the deployment→canonical-model mapping). **Admin Model Providers / LLM Defaults are unchanged by the item below** — only client *construction* differs, not resolution.
+
+**Divergence (deliberate):** for an `azure_openai` credential, Sherlock builds a **plain `openai.AsyncOpenAI` pointed at Azure's v1 surface**:
+
+```python
+openai.AsyncOpenAI(base_url=f"{endpoint}/openai/v1/", default_query={"api-version": "preview"})
 ```
 
-Plus a pre-turn classifier ([entity_recognition.py](backend/app/services/chat_engine/entity_recognition.py)) that decides if the question is in-scope and flags entity references.
-
-Plus a separate inner SQL agent ([sql_agent.py](backend/app/services/chat_engine/sql_agent.py)) invoked by `data_query`. It sees its own prompt (`SQL_AGENT_PROMPT`) with schema, column role hints, and strict output shape. **The outer agent never sees SQL.**
-
-### When to edit which prompt
-
-| Goal | Edit |
-|---|---|
-| Teach Sherlock new orchestration rules (when to call which tool, how to phrase a chart request) | `prompts/base.py` |
-| Add/rename a tool in the numbered list | `prompt_generator.py` |
-| Change SQL generation behavior (new aggregate hint, new formatting rule) | `sql_agent.py` → `SQL_AGENT_PROMPT` |
-| Add a domain hint specific to one app (e.g., kaira-bot's adversarial concepts) | `apps.config.chat.context` in the database — surfaces via `app_context.render` |
-| Teach the agent about a new chart type's required data shape | `prompts/base.py` → `CHART TYPE REQUESTS` section |
-
-**Never** edit `prompts/base.py`'s TOOLS block by hand — it's injected by the generator. **Never** hand-type `COMMENT ON COLUMN` — it's emitted by [comment_emitter.py](backend/app/services/chat_engine/comment_emitter.py) from the manifest.
+The rest of the platform (evaluators, reports, model discovery) uses the classic `openai.AzureOpenAI(azure_endpoint=..., api_version="2025-xx-xx-preview")`, which routes to `/openai/deployments/{model}/...`. That classic surface has `/responses` (so `create()` works) but **no `/responses/compact`** — the compact endpoint and newer features live only on `/openai/v1/`. Same credential, same API key, same Azure resource, same deployment string as `model`; only the URL differs. (`AzureOpenAI` is just SDK sugar for the deployment URL + an `api-version` query param; it is a subclass of `AsyncOpenAI`, so the `tuple[AsyncOpenAI, str]` return type still holds.) Unifying the whole platform onto the v1 surface is the clean end-state, deferred. See the `[[sherlock-azure-v1-surface]]` memory.
 
 ---
 
-## 7. Runtime telemetry
+## 9. Cross-turn memory + compaction
 
-Every Sherlock turn creates rows in three tables (invariant, do not sidestep):
+**Memory = the `previous_response_id` chain.** Each turn passes `sherlock_agent_sessions.last_response_id` into `Runner.run_streamed(..., previous_response_id=...)`; the supervisor LLM therefore sees prior turns server-side and resolves references ("those reps", "that period") without the frontend stitching anything. After the turn, `turn_orchestrator` persists the new `last_response_id`. 30-day TTL: if the stored id is stale, `runtime.run_turn` replays local history with `previous_response_id=None` ([`runtime._history_input_for_context`](backend/app/services/sherlock_v3/runtime.py)). `sherlock_state` is **not** used for this.
 
-| Table | Content |
-|---|---|
-| `sherlock_agent_sessions` | One row per chat session, per (tenant, user, app) |
-| `sherlock_conversation_turns` | One row per user message → agent reply cycle |
-| `sherlock_turn_events` | Tool calls, LLM generations, final response — full trace |
+**Compaction = explicit `responses.compact()` on the supervisor chain.** When a session grows past `CONTEXT_COMPACT_THRESHOLD_TOKENS` ([`compaction.py`](backend/app/services/sherlock_v3/compaction.py), the same value the FE context pill reads), `runtime._maybe_compact_supervisor` calls `client.responses.compact(previous_response_id=last_response_id)`, emits a `CompactionPart`, and continues the chain from the **compacted** response id. The orchestrator sees the CompactionPart and resets `cumulative_input_tokens`.
 
-Plus:
-- `llm_usage` rows for every LLM call (outer agent, inner SQL agent, entity recognizer) — owner_type=`sherlock_turn`.
-- `analytics_charts` for saved charts; `analytics_dashboards` for user-curated dashboards.
-
-Read these to debug agent behavior. Do not write to them from request handlers.
+- **Supervisor only.** It owns the chain; specialists are stateless per `as_tool` call, so they have nothing to compact.
+- **Requires the v1 surface** (§8). `/responses/compact` 404s on classic deployment routing.
+- The Responses API's *automatic* `context_management` compaction is **not** used: it only runs under `store=false`, which is incompatible with `previous_response_id` chaining. That dead `extra_args` was removed.
 
 ---
 
-## 8. Common failure modes
+## 10. Playbooks
 
-### Agent answered in prose instead of rendering a chart
-The picker couldn't produce the requested chart type because the data didn't have the right shape. Most commonly: user asked for *pie* but the SQL returned counts, not percentages. The agent computed percentages in its head and narrated them.
+### 10.1 Make a column queryable by Sherlock
+1. Ensure the physical column exists (ORM + Alembic) and is declared in `manifests/<app>.yaml`.
+2. Add it to `semantic_models/<app>.yaml` under the table's `dimensions` / `time_dimensions` / `facts` (a derived column declares its `expr` + `source_table`).
+3. Boot. The validator confirms it exists in the manifest; the specialist prompt and bouncer allow-list pick it up from the same `WorkbenchCatalog`.
+4. **Only declare columns the app actually populates** — empty columns trip bouncer R12.
 
-Fix: teach the agent how to ask `data_query` for the required shape — already in [`prompts/base.py`](backend/app/services/chat_engine/prompts/base.py) under `CHART TYPE REQUESTS`. If a new chart type keeps failing, extend that block.
+### 10.2 Add a specialist
+1. Build the agent in its own `*_specialist.py`, returning a `SpecialistResult`.
+2. Register it in `build_supervisor` via `.as_tool(name=...)`, with an output extractor that validates the `SpecialistResult` JSON.
+3. Teach the supervisor *when* to dispatch it in the supervisor prompt + the synthesis decomposition targets. Do not add a parallel orchestration path.
 
-### Chart picked wasn't what you expected
-Check the scratchpad on the next turn — it tells you `Last result rendered as a {mark} chart. (reason: {code})`. Trace back:
-1. What semantic_types did `output_columns` declare? (SQL agent prompt behavior)
-2. Were column roles correct? (manifest vs manifest_validator output at boot)
-3. Did the gate degrade? (look at `reason_code`)
-
-### Agent tried to read a table not in the manifest
-Manifest validator would have logged drift at boot. Also: `catalog_inspect`/`data_query` reject unknown tables. Add the table to the manifest, don't loosen the guard.
-
-### Manifest drift error on boot
-[manifest_validator.py](backend/app/services/chat_engine/manifest_validator.py) refuses startup when a declared table/column doesn't exist in Postgres, or when role/data_type taxonomy contradicts itself (e.g., `role: measure` + `data_type: nominal`). Fix the manifest or the migration; don't silence the validator.
+### 10.3 Add a chart type
+Backend owns chart type. Add a branch in `chart_type_picker.py`, an emitter case in `vega_lite_emitter.py`, then extend the FE translator (`vegaLiteToRecharts.ts`) + `ChartRenderer.tsx`. Never infer chart type on the frontend.
 
 ---
 
-## 9. What NOT to do
+## 11. What NOT to do
 
-- **Do not** edit `COMMENT ON COLUMN` SQL by hand — regenerated from manifest.
-- **Do not** hand-write per-table rules in the SQL agent prompt — they go in the manifest as column metadata.
-- **Do not** edit the TOOLS numbered list in `prompts/base.py` — it's in `prompt_generator.py`.
-- **Do not** add chart-type inference logic to the frontend — backend owns chart type.
-- **Do not** introduce new agent-side state between the outer agent and the inner SQL agent. They communicate via `data_query`'s `question` string + its typed result. Nothing else.
-- **Do not** reintroduce the retired `kaira-evals` app id anywhere.
-- **Do not** create subdirectory agent rule files (`agents/`, `.cursor/`). `CLAUDE.md` is the source.
+- **No bespoke chat engine.** Supervisor + specialists + Agents SDK is the only pattern.
+- **No frontend state stitching.** The FE reads Parts; it never infers chart type, specialist lifecycle, or context.
+- **No new persistence for traces.** `sherlock_agent_sessions` / `sherlock_conversation_turns` / `sherlock_parts` are it. No parallel logging tables.
+- **Don't hand-edit** `COMMENT ON COLUMN`, the generated FE contract schema, or the bouncer allow-list — change the manifest / semantic model.
+- **Don't declare columns the app doesn't populate** in the semantic model (R12 all-null rejections).
+- **Don't put Sherlock on the classic `AzureOpenAI` client** — it loses `/responses/compact`. Use the v1 surface (§8).
+- **Cross-scope is forbidden.** Always filter by `tenant_id` + `user_id` + `app_id`.
 
 ---
 
-## 10. Test entry points
-
-If you change any of the above, these should pass:
+## 12. Test entry points
 
 ```bash
-# Python
-PYTHONPATH=backend pytest backend/tests/test_chart_type_picker.py
-PYTHONPATH=backend pytest backend/tests/test_vega_lite_emitter.py
-PYTHONPATH=backend pytest backend/tests/test_chartability_gate.py
-PYTHONPATH=backend pytest backend/tests/test_manifest_validator.py
-
-# Frontend
-npm run test -- src/features/analytics/chartLayout.test.ts
-npm run test -- src/features/analytics/chartReplay.test.ts
-npm run test -- src/features/analytics/vegaLiteToRecharts.test.ts
-npm run test -- src/features/analytics/components/ChartRenderer.test.tsx
+PYTHONPATH=backend python -m pytest \
+  backend/tests/test_supervisor_compaction_unittest.py \
+  backend/tests/test_sherlock_runtime_idempotency_unittest.py \
+  backend/tests/test_recover_orphaned_turns_unittest.py \
+  backend/tests/test_turn_orchestrator_cancel_unittest.py \
+  backend/tests/test_workbench_app_gating_unittest.py \
+  backend/tests/test_sql_bouncer_unittest.py \
+  backend/tests/test_sherlock_azure_client.py
 ```
 
-Boot the backend — manifest validator runs automatically. If you see `ManifestDriftError`, stop and fix the manifest or the migration before doing anything else.
-
----
-
-## 11. Where to go next
-
-| Question | File |
-|---|---|
-| "What apps exist and what tables does each use?" | [manifests/](backend/app/services/chat_engine/manifests/) |
-| "How is a chart type decided?" | [chart_type_picker.py](backend/app/services/chat_engine/chart_type_picker.py) |
-| "How is a result typed?" | [result_set_typer.py](backend/app/services/chat_engine/result_set_typer.py) |
-| "When does the system degrade to table/KPI/summary?" | [chartability_gate.py](backend/app/services/chat_engine/chartability_gate.py) |
-| "What does the agent see on a given turn?" | Scratchpad rows + [`assemble_context`](backend/app/services/report_builder/chat_handler.py) |
-| "How do tool results flow back to the agent?" | [`openai_agents_adapter.py`](backend/app/services/chat_engine/openai_agents_adapter.py) + [`_summarize_tool_result`](backend/app/services/report_builder/chat_handler.py) |
-
-That's the whole system. If a problem doesn't map to one of the playbooks above, it's probably not a Sherlock problem — look at the data, the LLM settings, or the frontend.
+Then boot the backend — `manifest_validator` runs at startup and refuses to boot on manifest/semantic-model drift. Fix the manifest or the migration before anything else.
