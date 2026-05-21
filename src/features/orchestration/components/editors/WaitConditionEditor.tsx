@@ -1,11 +1,17 @@
+import { cn } from '@/utils/cn';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import type { PredicateAst, WaitMode } from '@/features/orchestration/types';
 
 import { PredicateBuilder } from './PredicateBuilder';
 
+type DurationUnit = 'minutes' | 'hours' | 'days';
+
 interface WaitConfig {
   mode?: WaitMode;
+  duration_value?: number;
+  duration_unit?: DurationUnit;
+  /** @deprecated legacy — kept for back-compat; coerced by the backend model_validator */
   duration_hours?: number;
   until_datetime?: string;
   event_name?: string;
@@ -13,6 +19,12 @@ interface WaitConfig {
   event_match?: PredicateAst;
   timeout_hours?: number;
 }
+
+const UNIT_OPTIONS: { value: DurationUnit; label: string }[] = [
+  { value: 'minutes', label: 'Minutes' },
+  { value: 'hours',   label: 'Hours'   },
+  { value: 'days',    label: 'Days'    },
+];
 
 interface Props {
   value: WaitConfig;
@@ -37,11 +49,11 @@ export function WaitConditionEditor({ value, onChange }: Props) {
   const mode: WaitMode = value.mode ?? 'duration';
 
   const setMode = (next: WaitMode) => {
-    // Drop the fields that don't belong to the new mode. We don't try to
-    // preserve them silently — that would let an author switch back and
-    // discover stale state from the prior mode they thought they'd cleared.
     const base: WaitConfig = { mode: next };
-    if (next === 'duration') base.duration_hours = value.duration_hours ?? 1;
+    if (next === 'duration') {
+      base.duration_value = value.duration_value ?? value.duration_hours ?? 1;
+      base.duration_unit = value.duration_unit ?? 'hours';
+    }
     if (next === 'until_datetime') base.until_datetime = value.until_datetime ?? '';
     if (next === 'event' || next === 'event_or_timeout') {
       base.event_name = value.event_name ?? '';
@@ -68,19 +80,36 @@ export function WaitConditionEditor({ value, onChange }: Props) {
       </Field>
 
       {mode === 'duration' ? (
-        <Field label="Duration (hours)">
-          <Input
-            type="number"
-            min={0}
-            value={value.duration_hours ?? ''}
-            onChange={(e) =>
-              onChange({
-                ...value,
-                duration_hours: Number(e.target.value),
-              })
-            }
-            placeholder="hours to wait"
-          />
+        <Field label="Duration">
+          <div className={cn('flex gap-2')}>
+            <Input
+              type="number"
+              min={0}
+              className="flex-1"
+              value={value.duration_value ?? value.duration_hours ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  duration_value: Number(e.target.value),
+                  duration_unit: value.duration_unit ?? 'hours',
+                })
+              }
+              placeholder="amount"
+            />
+            <div className="w-32">
+              <Select
+                value={value.duration_unit ?? 'hours'}
+                onChange={(next) =>
+                  onChange({
+                    ...value,
+                    duration_unit: next as DurationUnit,
+                    duration_value: value.duration_value ?? value.duration_hours ?? 1,
+                  })
+                }
+                options={UNIT_OPTIONS}
+              />
+            </div>
+          </div>
         </Field>
       ) : null}
 

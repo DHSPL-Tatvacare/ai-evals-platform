@@ -73,3 +73,62 @@ def test_expected_output_ids_per_mode():
     assert expected_output_ids_for_config({"duration_hours": 4}) == ["wakeup"]
     with pytest.raises(ValueError):
         expected_output_ids_for_config({"mode": "absurd"})
+
+
+# ── duration_value + duration_unit tests ──────────────────────────────────────
+
+def test_duration_value_minutes():
+    cfg = _wait_config(mode="duration", duration_value=30, duration_unit="minutes")
+    assert cfg.duration_value == 30
+    assert cfg.duration_unit == "minutes"
+
+
+def test_duration_value_hours():
+    cfg = _wait_config(mode="duration", duration_value=2, duration_unit="hours")
+    assert cfg.duration_value == 2
+    assert cfg.duration_unit == "hours"
+
+
+def test_duration_value_days():
+    cfg = _wait_config(mode="duration", duration_value=3, duration_unit="days")
+    assert cfg.duration_value == 3
+    assert cfg.duration_unit == "days"
+
+
+def test_legacy_duration_hours_coerces_to_value_unit():
+    """Legacy duration_hours coerces → value+unit with unit='hours'."""
+    cfg = _wait_config(duration_hours=4)
+    assert cfg.duration_value == 4
+    assert cfg.duration_unit == "hours"
+    # duration_hours is kept for back-compat reads
+    assert cfg.duration_hours == 4
+
+
+def test_duration_mode_requires_value_or_legacy_hours():
+    """duration mode without any value field raises."""
+    with pytest.raises(Exception):
+        _wait_config(mode="duration")
+
+
+def test_duration_unit_invalid_value_raises():
+    with pytest.raises(Exception):
+        _wait_config(mode="duration", duration_value=5, duration_unit="weeks")
+
+
+def test_duration_timedelta_minutes():
+    """Runtime timedelta is correct for minutes."""
+    from datetime import timedelta
+    from app.services.orchestration.nodes.logic_wait import _duration_timedelta
+    assert _duration_timedelta(90, "minutes") == timedelta(minutes=90)
+
+
+def test_duration_timedelta_hours():
+    from datetime import timedelta
+    from app.services.orchestration.nodes.logic_wait import _duration_timedelta
+    assert _duration_timedelta(2.5, "hours") == timedelta(hours=2.5)
+
+
+def test_duration_timedelta_days():
+    from datetime import timedelta
+    from app.services.orchestration.nodes.logic_wait import _duration_timedelta
+    assert _duration_timedelta(7, "days") == timedelta(days=7)

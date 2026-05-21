@@ -1,25 +1,4 @@
-"""logic.wait — suspend recipients until time and / or event conditions release them.
-
-Phase 11 contract — flat config with a ``mode`` discriminator:
-
-  ``duration``         -> output: ``wakeup``                — wakes after N hours
-  ``until_datetime``   -> output: ``wakeup``                — wakes at exact UTC datetime
-  ``event``            -> output: ``event``                 — waits for matching event
-  ``event_or_timeout`` -> outputs: ``event`` and ``timeout`` — first to fire wins
-
-Time-only modes leave the runtime path unchanged: the resume poller wakes
-recipients at ``wakeup_at`` and they advance along the ``wakeup`` edge.
-Event modes are scaffolded in this commit at the **contract** layer — the
-event-correlation runtime, ``event_match`` evaluation, and payload-merge
-semantics ship in a later commit. Saving and publishing event-mode wait
-configs validates today; runtime emission of the ``event`` / ``timeout``
-edges is wired in alongside that later commit.
-
-Legacy configs (``duration_hours`` / ``until_datetime`` set with no
-``mode``) are coerced to ``mode='duration'`` / ``mode='until_datetime'`` by
-the model's ``before`` validator so pre-Phase-11 saved definitions still
-load.
-"""
+"""logic.wait — suspend recipients until time and / or event conditions release them."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -34,6 +13,16 @@ from app.services.orchestration.predicate_contract import parse as parse_predica
 
 
 WaitMode = Literal["duration", "until_datetime", "event", "event_or_timeout"]
+DurationUnit = Literal["minutes", "hours", "days"]
+
+
+def _duration_timedelta(value: float, unit: DurationUnit) -> timedelta:
+    """Convert a (value, unit) pair to a timedelta."""
+    if unit == "minutes":
+        return timedelta(minutes=value)
+    if unit == "hours":
+        return timedelta(hours=value)
+    return timedelta(days=value)
 
 
 class _EventCorrelation(BaseModel):
@@ -50,21 +39,22 @@ class _EventCorrelation(BaseModel):
 
 
 class _Config(BaseModel):
-    """Flat union — only the fields valid for the chosen ``mode`` are required.
-
-    The ``model_validator`` below enforces shape per mode so authoring tools
-    surface clear errors instead of relying on per-mode subclasses.
-    """
+    """Flat union — only the fields valid for the chosen ``mode`` are required."""
     model_config = strict_node_config_dict()
 
     mode: WaitMode = "duration"
 
+    # New canonical fields for duration mode.
+    duration_value: Optional[float] = None
+    duration_unit: Optional[DurationUnit] = None
+    # Legacy field kept for back-compat reads; coerced into value+unit by the before-validator.
     duration_hours: Optional[float] = None
+
     until_datetime: Optional[datetime] = None
 
     event_name: Optional[str] = None
     correlation: Optional[_EventCorrelation] = None
-    event_match: Optional[dict[str, Any]] = None  # Predicate AST — see predicate_contract
+    event_match: Optional[dict[str, Any]] = None
     timeout_hours: Optional[float] = None
 
     @field_validator("event_match")
@@ -81,14 +71,20 @@ class _Config(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_legacy(cls, raw: Any, info: ValidationInfo) -> Any:
-        if not isinstance(raw, dict) or "mode" in raw:
+        if not isinstance(raw, dict):
             return raw
-        if raw.get("duration_hours") is not None:
+        raw = dict(raw)
+        # Coerce legacy duration_hours → duration_value + duration_unit.
+        if raw.get("duration_hours") is not None and raw.get("duration_value") is None:
+            raw["duration_value"] = raw["duration_hours"]
+            raw["duration_unit"] = raw.get("duration_unit") or "hours"
+        if "mode" in raw:
+            return raw
+        if raw.get("duration_hours") is not None or raw.get("duration_value") is not None:
             return {**raw, "mode": "duration"}
         if raw.get("until_datetime") is not None:
             return {**raw, "mode": "until_datetime"}
-        # Draft mode tolerates an in-progress wait node with no mode picked
-        # yet. Publish still requires the mode discriminator.
+        # Draft mode tolerates an in-progress wait node with no mode picked yet.
         if info.context and info.context.get("mode") == "draft":
             return raw
         raise ValueError(
@@ -98,14 +94,16 @@ class _Config(BaseModel):
 
     @model_validator(mode="after")
     def _check_mode_fields(self, info: ValidationInfo) -> "_Config":
-        # Every check here is "required when mode=X" — pure cross-field
-        # completeness. Defer the whole block in draft so the author can
-        # save a half-filled wait node.
         if info.context and info.context.get("mode") == "draft":
             return self
         if self.mode == "duration":
-            if self.duration_hours is None:
-                raise ValueError("'duration_hours' required when mode='duration'")
+            if self.duration_value is None and self.duration_hours is None:
+                raise ValueError(
+                    "'duration_value' (or legacy 'duration_hours') required when mode='duration'"
+                )
+            # Sync duration_hours for callers that still read it.
+            if self.duration_value is not None and self.duration_unit == "hours":
+                object.__setattr__(self, "duration_hours", self.duration_value)
         elif self.mode == "until_datetime":
             if self.until_datetime is None:
                 raise ValueError("'until_datetime' required when mode='until_datetime'")
@@ -136,8 +134,10 @@ class _Handler:
     async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
         wakeup_at: Optional[datetime] = None
         if config.mode == "duration":
-            assert config.duration_hours is not None
-            wakeup_at = datetime.now(timezone.utc) + timedelta(hours=config.duration_hours)
+            value = config.duration_value if config.duration_value is not None else config.duration_hours
+            unit: DurationUnit = config.duration_unit if config.duration_unit is not None else "hours"
+            assert value is not None
+            wakeup_at = datetime.now(timezone.utc) + _duration_timedelta(value, unit)
         elif config.mode == "until_datetime":
             assert config.until_datetime is not None
             wakeup_at = config.until_datetime
