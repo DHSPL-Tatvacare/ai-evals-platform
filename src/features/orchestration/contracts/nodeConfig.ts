@@ -347,6 +347,9 @@ export const LogicWaitConfigSchema = z
     mode: z
       .enum(["duration", "until_datetime", "event", "event_or_timeout"])
       .default("duration"),
+    // Canonical duration fields (new). Legacy duration_hours kept for back-compat reads.
+    duration_value: z.number().nullable().optional(),
+    duration_unit: z.enum(["minutes", "hours", "days"]).nullable().optional(),
     duration_hours: z.number().nullable().optional(),
     until_datetime: z.string().nullable().optional(),
     event_name: z.string().nullable().optional(),
