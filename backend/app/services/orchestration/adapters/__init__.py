@@ -67,3 +67,12 @@ __all__ = [
     "registered_adapters",
     "resolve_adapter",
 ]
+
+
+# Import vendor modules for their registration side effects so EVERY entrypoint
+# (backend, worker, tests) that touches the adapters package gets the full
+# registry — not just the backend lifespan. Kept last: register_adapter must be
+# defined before these run, and the submodules only import that symbol back.
+from app.services.orchestration.adapters import aisensy as _aisensy  # noqa: E402,F401
+from app.services.orchestration.adapters import bolna as _bolna  # noqa: E402,F401
+from app.services.orchestration.adapters import wati as _wati  # noqa: E402,F401
