@@ -243,4 +243,43 @@ describe("NodeConfigSchema registry coverage", () => {
     const r = NodeConfigSchema.safeParse({ unrelated: true });
     expect(r.success).toBe(false);
   });
+
+  // ── logic.merge contract alignment ─────────────────────────────────────────
+
+  it("logic.merge accepts all backend-literal merge_policy values", () => {
+    for (const merge_policy of ["dedupe", "first_wins", "last_wins"] as const) {
+      const result = parseNodeConfig("logic.merge", { merge_policy, payload_policy: "last_wins" });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  it("logic.merge accepts all backend-literal payload_policy values", () => {
+    for (const payload_policy of ["first_wins", "last_wins", "shallow_merge"] as const) {
+      const result = parseNodeConfig("logic.merge", { merge_policy: "dedupe", payload_policy });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  it("logic.merge rejects merge_policy values that don't exist in the backend", () => {
+    for (const bogus of ["merge_lists", "union", "preserve", "keep_all"]) {
+      const result = parseNodeConfig("logic.merge", { merge_policy: bogus, payload_policy: "last_wins" });
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it("logic.merge rejects payload_policy values that don't exist in the backend", () => {
+    for (const bogus of ["union", "preserve", "deep_merge"]) {
+      const result = parseNodeConfig("logic.merge", { merge_policy: "dedupe", payload_policy: bogus });
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it("logic.merge defaults apply when fields are omitted", () => {
+    const result = parseNodeConfig("logic.merge", {});
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.merge_policy).toBe("dedupe");
+      expect(result.data.payload_policy).toBe("last_wins");
+    }
+  });
 });

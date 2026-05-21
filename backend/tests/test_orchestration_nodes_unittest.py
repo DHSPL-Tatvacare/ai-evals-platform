@@ -332,6 +332,71 @@ async def test_merge_dedupe(db_session, seed_full_run):
     assert out == ["a", "b"]
 
 
+@pytest.mark.asyncio
+async def test_merge_payload_first_wins(db_session, seed_full_run):
+    """first_wins: payload from the first arrival is kept when a dup arrives."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_merge import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="m2", node_type="logic.merge")
+    await db_session.flush()
+    cfg = _Config(merge_policy="dedupe", payload_policy="first_wins")
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="m2", step_id=step_id)
+    cohort = CohortStream([("a", {"score": 1, "name": "alpha"}),
+                           ("a", {"score": 99, "name": "beta"})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    outs = {o.recipient_id: o.payload_delta for o in result.by_output_id["default"]}
+    assert outs["a"]["score"] == 1
+    assert outs["a"]["name"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_merge_payload_last_wins(db_session, seed_full_run):
+    """last_wins: payload from the last arrival replaces the first."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_merge import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="m3", node_type="logic.merge")
+    await db_session.flush()
+    cfg = _Config(merge_policy="dedupe", payload_policy="last_wins")
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="m3", step_id=step_id)
+    cohort = CohortStream([("a", {"score": 1, "name": "alpha"}),
+                           ("a", {"score": 99, "name": "beta"})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    outs = {o.recipient_id: o.payload_delta for o in result.by_output_id["default"]}
+    assert outs["a"]["score"] == 99
+    assert outs["a"]["name"] == "beta"
+
+
+@pytest.mark.asyncio
+async def test_merge_payload_shallow_merge(db_session, seed_full_run):
+    """shallow_merge: later arrival overrides colliding keys; absent keys preserved."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_merge import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="m4", node_type="logic.merge")
+    await db_session.flush()
+    cfg = _Config(merge_policy="dedupe", payload_policy="shallow_merge")
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="m4", step_id=step_id)
+    cohort = CohortStream([("a", {"score": 1, "name": "alpha", "keep": True}),
+                           ("a", {"score": 99, "extra": "new"})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    outs = {o.recipient_id: o.payload_delta for o in result.by_output_id["default"]}
+    assert outs["a"]["score"] == 99       # overridden by second arrival
+    assert outs["a"]["name"] == "alpha"   # preserved from first (not in second)
+    assert outs["a"]["keep"] is True      # preserved from first
+    assert outs["a"]["extra"] == "new"    # added by second arrival
+
+
 # ─── core.webhook_out ────────────────────────────────────────────────────────
 
 

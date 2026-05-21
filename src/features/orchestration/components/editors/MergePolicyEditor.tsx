@@ -12,16 +12,15 @@ interface Props {
 }
 
 const MERGE_OPTIONS: { value: MergePolicy; label: string; help: string }[] = [
-  { value: 'dedupe',      label: 'Dedupe by recipient',  help: 'Same recipient arriving from multiple branches becomes a single continuation.' },
-  { value: 'last_wins',   label: 'Last-arriving wins',   help: 'Recipients pass through; if the same recipient arrives twice, the last branch state replaces earlier state.' },
-  { value: 'merge_lists', label: 'Merge list fields',    help: 'Combine list-typed payload fields across branches.' },
+  { value: 'dedupe',      label: 'Dedupe by recipient',  help: 'If the same recipient arrives from multiple branches, emit it once. Payload is resolved by the payload policy below.' },
+  { value: 'first_wins',  label: 'First-arriving wins',  help: 'Emit each recipient once, keeping the first branch arrival. Later duplicates are discarded.' },
+  { value: 'last_wins',   label: 'Last-arriving wins',   help: 'Emit each recipient once, keeping the last branch arrival. Earlier duplicates are discarded.' },
 ];
 
 const PAYLOAD_OPTIONS: { value: PayloadPolicy; label: string; help: string }[] = [
-  { value: 'last_wins',  label: 'Last branch wins',   help: 'Latest payload overrides earlier ones field-by-field.' },
-  { value: 'first_wins', label: 'First branch wins',  help: 'Earliest payload values are preserved.' },
-  { value: 'union',      label: 'Union',              help: 'Merge keys; conflicts resolved deterministically.' },
-  { value: 'preserve',   label: 'Preserve unchanged', help: 'Keep recipient payload as-is; ignore merging branches.' },
+  { value: 'first_wins',    label: 'First branch wins',   help: 'The payload from the first branch to arrive is preserved; later arrivals for the same recipient are ignored.' },
+  { value: 'last_wins',     label: 'Last branch wins',    help: 'The payload from the last branch to arrive replaces any earlier payload for the same recipient.' },
+  { value: 'shallow_merge', label: 'Shallow merge',       help: 'Later arrivals override colliding keys field-by-field; keys absent in the later payload are preserved from earlier ones.' },
 ];
 
 /**
@@ -32,7 +31,7 @@ const PAYLOAD_OPTIONS: { value: PayloadPolicy; label: string; help: string }[] =
  * "what happens when the same recipient arrives twice" is never undefined.
  */
 export function MergePolicyEditor({ value, onChange }: Props) {
-  const mp = value.merge_policy ?? 'last_wins';
+  const mp = value.merge_policy ?? 'dedupe';
   const pp = value.payload_policy ?? 'last_wins';
   return (
     <div className="flex flex-col gap-3">

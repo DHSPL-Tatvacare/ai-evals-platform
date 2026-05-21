@@ -69,12 +69,24 @@ class _Handler:
     category = "logic"
 
     async def execute(self, input_cohort, config: _Config, ctx) -> NodeResult:
-        seen_first: dict[str, RecipientOutcome] = {}
-        async for rid, _payload in input_cohort:
-            if config.merge_policy == "dedupe" and rid in seen_first:
-                continue
-            seen_first[rid] = RecipientOutcome(recipient_id=rid)
-        outs = list(seen_first.values())
+        # seen maps recipient_id → accumulated payload_delta
+        seen: dict[str, dict[str, Any]] = {}
+        async for rid, payload in input_cohort:
+            incoming = dict(payload) if payload else {}
+            if rid not in seen:
+                seen[rid] = incoming
+            else:
+                # Apply payload_policy to the duplicate arrival
+                if config.payload_policy == "last_wins":
+                    seen[rid] = incoming
+                elif config.payload_policy == "shallow_merge":
+                    seen[rid] = {**seen[rid], **incoming}
+                # first_wins: keep seen[rid] unchanged
+        # All merge_policy variants deduplicate in sequential mode; seen keys are unique
+        outs = [
+            RecipientOutcome(recipient_id=rid, payload_delta=pl)
+            for rid, pl in seen.items()
+        ]
         return NodeResult(
             by_output_id={"default": outs},
             summary={

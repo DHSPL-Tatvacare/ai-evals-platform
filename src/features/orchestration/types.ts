@@ -500,8 +500,8 @@ export interface SplitBranch {
   weight?: number | null;
 }
 
-export type MergePolicy = 'dedupe' | 'last_wins' | 'merge_lists';
-export type PayloadPolicy = 'last_wins' | 'first_wins' | 'union' | 'preserve';
+export type MergePolicy = 'dedupe' | 'first_wins' | 'last_wins';
+export type PayloadPolicy = 'first_wins' | 'last_wins' | 'shallow_merge';
 
 /** Reference to a recipient payload field in a ``core.webhook_out.body``
  *  leaf, mirroring backend
