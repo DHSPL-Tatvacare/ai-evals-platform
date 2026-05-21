@@ -20,8 +20,11 @@ from app.services.orchestration.node_protocol import (
     NodeResult,
     RecipientOutcome,
 )
+from app.services.orchestration.connections.variable_mapping import (
+    VariableMappingRow,
+    apply_variable_mappings_dict,
+)
 from app.services.orchestration.node_registry import register_node
-from app.services.orchestration.nodes._template import render as _render
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
 
 
@@ -42,9 +45,9 @@ class _Config(BaseModel):
         description="Voice agent that will handle the conversation.",
         json_schema_extra={"x-type": "bolna_agent_picker"},
     )
-    variable_mappings: dict[str, str] = Field(
-        default_factory=dict,
-        description="Values passed to the agent as call variables, by name.",
+    variable_mappings: list[VariableMappingRow] = Field(
+        default_factory=list,
+        description="Agent call variables — each bound to a static value or a recipient field.",
         json_schema_extra={"x-type": "variable_mapping_list"},
     )
     from_phone: Optional[str] = Field(
@@ -110,10 +113,9 @@ class _Handler:
 
         def _build_request(rid: str, payload: dict[str, Any]) -> tuple[str, CanonicalVoiceRequest, str]:
             contact = str(payload.get("contact") or payload.get("phone") or rid)
-            variables = {
-                name: _render(value, payload)
-                for name, value in config.variable_mappings.items()
-            }
+            variables = apply_variable_mappings_dict(
+                [m.model_dump() for m in config.variable_mappings], payload,
+            )
             variables.setdefault("recipient_id", rid)
             request = CanonicalVoiceRequest(
                 contact=contact,

@@ -24,8 +24,11 @@ from app.services.orchestration.node_protocol import (
     NodeResult,
     RecipientOutcome,
 )
+from app.services.orchestration.connections.variable_mapping import (
+    VariableMappingRow,
+    apply_variable_mappings_dict,
+)
 from app.services.orchestration.node_registry import register_node
-from app.services.orchestration.nodes._template import render as _render
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
 
 
@@ -63,9 +66,9 @@ class _Config(BaseModel):
         title="Broadcast Name",
         description="Campaign label sent to WATI as broadcast_name.",
     )
-    variable_mappings: dict[str, str] = Field(
-        default_factory=dict,
-        description="Values bound to the template's placeholders, by name.",
+    variable_mappings: list[VariableMappingRow] = Field(
+        default_factory=list,
+        description="Template placeholders — each bound to a static value or a recipient field.",
         json_schema_extra={"x-type": "variable_mapping_list"},
     )
     webhook_ttl_seconds: int = Field(
@@ -121,10 +124,9 @@ class _Handler:
             request = CanonicalSendRequest(
                 contact=contact,
                 template_slug=config.template_slug,
-                variables={
-                    name: _render(value, payload)
-                    for name, value in config.variable_mappings.items()
-                },
+                variables=apply_variable_mappings_dict(
+                    [m.model_dump() for m in config.variable_mappings], payload,
+                ),
             )
             idem = ctx.idempotency_key(rid, "whatsapp_template", config.template_slug)
             dispatch = await ctx.dispatch_actions([

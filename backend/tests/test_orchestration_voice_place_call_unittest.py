@@ -40,7 +40,7 @@ def test_config_minimum_required_fields():
     cfg = _Config(connection_id=cid, agent_id="agent_xyz")
     assert cfg.connection_id == cid
     assert cfg.agent_id == "agent_xyz"
-    assert cfg.variable_mappings == {}
+    assert cfg.variable_mappings == []
     assert cfg.from_phone is None
     assert cfg.webhook_ttl_seconds == 259200
 

@@ -408,6 +408,15 @@ export const CoreWebhookOutConfigSchema = z
   })
   .strict();
 
+// Each mapping binds an agent/template variable to a static value or a
+// recipient payload field (resolved per recipient at dispatch).
+const VariableMappingSchema = z.object({
+  agent_variable: z.string(),
+  source_kind: z.enum(["payload", "static"]).default("payload"),
+  payload_field: z.string().nullish(),
+  static_value: z.string().nullish(),
+});
+
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
 export const MessagingSendWhatsappTemplateConfigSchema = z
   .object({
@@ -417,7 +426,7 @@ export const MessagingSendWhatsappTemplateConfigSchema = z
     template_name: z.string().default(""),
     channel_number: z.string().default(""),
     broadcast_name: z.string().default(""),
-    variable_mappings: z.record(z.string(), z.string()).default({}),
+    variable_mappings: z.array(VariableMappingSchema).default([]),
     webhook_ttl_seconds: z.number().int().min(60).default(259200),
   })
   .strict();
@@ -428,7 +437,7 @@ export const VoicePlaceCallConfigSchema = z
     nodeType: z.literal("voice.place_call"),
     connection_id: z.uuid(),
     agent_id: z.string().min(1),
-    variable_mappings: z.record(z.string(), z.string()).default({}),
+    variable_mappings: z.array(VariableMappingSchema).default([]),
     from_phone: z.string().nullable().optional(),
     webhook_ttl_seconds: z.number().int().min(60).default(259200),
     mode: z.enum(["auto", "single", "batch"]).default("auto"),

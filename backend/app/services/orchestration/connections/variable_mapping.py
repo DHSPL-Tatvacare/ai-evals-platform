@@ -14,7 +14,22 @@ as a node-step failure rather than a silent empty payload.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel
+
+from app.services.orchestration._config_strictness import strict_node_config_dict
+
+
+class VariableMappingRow(BaseModel):
+    """One mapping row as stored in a dispatch node's ``variable_mappings``."""
+
+    model_config = strict_node_config_dict()
+
+    agent_variable: str
+    source_kind: Literal["payload", "static"] = "payload"
+    payload_field: Optional[str] = None
+    static_value: Optional[str] = None
 
 
 class VariableMappingConfigError(ValueError):
@@ -70,6 +85,7 @@ def apply_variable_mappings_list(
 
 
 __all__ = [
+    "VariableMappingRow",
     "VariableMappingConfigError",
     "apply_variable_mappings_dict",
     "apply_variable_mappings_list",

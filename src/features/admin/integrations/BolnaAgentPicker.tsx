@@ -41,7 +41,7 @@ export function BolnaAgentPicker({ connectionId, value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <Combobox
             options={options}
             value={value}

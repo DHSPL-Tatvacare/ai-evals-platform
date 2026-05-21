@@ -44,7 +44,7 @@ def test_config_minimum_required_fields():
     cfg = _Config(connection_id=cid, template_slug="welcome_v1")
     assert cfg.connection_id == cid
     assert cfg.template_slug == "welcome_v1"
-    assert cfg.variable_mappings == {}
+    assert cfg.variable_mappings == []
     assert cfg.webhook_ttl_seconds == 259200  # 3 days
 
 

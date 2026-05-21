@@ -38,8 +38,32 @@ async def probe_webhook(config: dict[str, Any]) -> dict[str, Any]:
     return await _probe_get(base, headers=headers)
 
 
+async def probe_wati(config: dict[str, Any]) -> dict[str, Any]:
+    """A successful template listing proves the WATI creds reach the API."""
+    from app.services.orchestration.adapters.wati import WatiAdapter
+
+    try:
+        templates = await WatiAdapter().list_message_templates(config)
+        return _ok(f"{len(templates)} template(s) reachable")
+    except Exception as exc:  # noqa: BLE001 — surface the vendor error verbatim
+        return _fail(f"{exc}"[:200])
+
+
+async def probe_bolna(config: dict[str, Any]) -> dict[str, Any]:
+    """A successful agent listing proves the Bolna creds reach the API."""
+    from app.services.orchestration.adapters.bolna import BolnaAdapter
+
+    try:
+        agents = await BolnaAdapter().list_agents(config)
+        return _ok(f"{len(agents)} agent(s) reachable")
+    except Exception as exc:  # noqa: BLE001 — surface the vendor error verbatim
+        return _fail(f"{exc}"[:200])
+
+
 _PROBES: dict[str, Any] = {
     "webhook": probe_webhook,
+    "wati": probe_wati,
+    "bolna": probe_bolna,
 }
 
 
