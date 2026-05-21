@@ -1,6 +1,7 @@
 """Sherlock v3 turn orchestrator — owns DB side-effects around one Part-stream turn."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -108,8 +109,18 @@ async def run_chat_turn(
             previous_response_id=runtime_session.last_response_id,
         )
 
+        cancelled = False
         try:
             result: TurnResult = await run_turn(user_message, ctx)
+        except asyncio.CancelledError:
+            # CancelledError is a BaseException, so `except Exception` misses it;
+            # without this branch an SSE-disconnect/shutdown strands the turn 'active'.
+            cancelled = True
+            result = TurnResult(
+                status='interrupted', usage={}, last_response_id=None,
+                error='Turn interrupted (client disconnect or server shutdown).',
+            )
+            collected['error_message'] = result.error
         except Exception as exc:  # noqa: BLE001
             logger.exception('sherlock_v3 turn orchestrator failed')
             result = TurnResult(
@@ -118,7 +129,7 @@ async def run_chat_turn(
             )
             collected['error_message'] = result.error
         finally:
-            await emitter_db.commit()
+            await asyncio.shield(emitter_db.commit())
 
     if collected['compaction_fired']:
         await _reset_cumulative_tokens(runtime_session=runtime_session)
@@ -140,35 +151,43 @@ async def run_chat_turn(
     final_message_status = 'complete' if collected['error_message'] is None else 'error'
     final_error = collected['error_message']
 
-    async with async_session() as db:
-        metadata = {
-            'terminalStatus': _to_frontend_terminal_status(terminal_status),
-            'usage': _usage_to_camel(usage),
-            'context': context_info,
-        }
-        await finalize_assistant_message(
-            runtime_session=runtime_session,
-            message_id=assistant_message_id,
-            content=final_text,
-            metadata=metadata,
-            status=final_message_status,
-            error_message=final_error,
-            db=db,
-        )
-        await mark_turn_terminal(
-            turn_id=turn.id,
-            status=terminal_status,
-            last_event_seq=int(collected['last_seq']),
-            last_error=final_error,
-            db=db,
-        )
-        if result.last_response_id:
-            await db.execute(
-                update(SherlockAgentSession)
-                .where(SherlockAgentSession.chat_session_id == uuid.UUID(runtime_session.chat_session_id))
-                .values(last_response_id=result.last_response_id),
+    async def _persist_terminal() -> None:
+        async with async_session() as db:
+            metadata = {
+                'terminalStatus': _to_frontend_terminal_status(terminal_status),
+                'usage': _usage_to_camel(usage),
+                'context': context_info,
+            }
+            await finalize_assistant_message(
+                runtime_session=runtime_session,
+                message_id=assistant_message_id,
+                content=final_text,
+                metadata=metadata,
+                status=final_message_status,
+                error_message=final_error,
+                db=db,
             )
-        await db.commit()
+            await mark_turn_terminal(
+                turn_id=turn.id,
+                status=terminal_status,
+                last_event_seq=int(collected['last_seq']),
+                last_error=final_error,
+                db=db,
+            )
+            if result.last_response_id:
+                await db.execute(
+                    update(SherlockAgentSession)
+                    .where(SherlockAgentSession.chat_session_id == uuid.UUID(runtime_session.chat_session_id))
+                    .values(last_response_id=result.last_response_id),
+                )
+            await db.commit()
+
+    # Shield so a turn cancelled mid-flight still reaches a terminal status
+    # (the in-process path); a hard kill is caught by recover_orphaned_turns at boot.
+    await asyncio.shield(_persist_terminal())
+
+    if cancelled:
+        raise asyncio.CancelledError()
 
 
 def _wrap_publish(inner: Any, _turn_id: str) -> PublishFn:

@@ -1,6 +1,7 @@
 """Durable turn persistence helpers for Sherlock agent sessions."""
 from __future__ import annotations
 
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -9,8 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session
 from app.models.sherlock_runtime import SherlockConversationTurn
 from app.services.report_builder.runtime_store import SherlockAgentSessionState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -142,6 +146,34 @@ async def mark_turn_terminal(
     row.last_error = last_error
     await db.flush()
     return _to_turn_state(row)
+
+
+async def recover_orphaned_turns() -> int:
+    """Fail Sherlock turns left non-terminal by a crashed or restarted process.
+
+    A turn runs as an in-process asyncio task (report_builder route). A
+    deploy/OOM/SIGKILL — or a cancellation that skipped terminal marking —
+    strands it in 'queued'/'active'. At boot the owning task is gone, so any
+    non-terminal turn is orphaned: mark it 'interrupted' so the streaming/poll
+    path treats it as terminal instead of waiting on a stream that never resumes.
+    """
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(SherlockConversationTurn).where(
+                    SherlockConversationTurn.status.in_(('queued', 'active'))
+                )
+            )
+        ).scalars().all()
+        for row in rows:
+            row.status = 'interrupted'
+            row.last_error = 'Turn was interrupted by a server restart.'
+            logger.warning('Recovered orphaned Sherlock turn %s', row.id)
+        if rows:
+            await db.flush()
+            await db.commit()
+            logger.info('Recovered %d orphaned Sherlock turn(s)', len(rows))
+        return len(rows)
 
 
 async def get_turn(

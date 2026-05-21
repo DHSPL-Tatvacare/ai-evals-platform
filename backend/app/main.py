@@ -148,6 +148,12 @@ async def lifespan(app: FastAPI):
     async with async_session() as _validator_db:
         await run_manifest_validator(_validator_db)
 
+    # Fail any Sherlock turn stranded 'active'/'queued' by a prior crash/restart.
+    # Turns run as in-process asyncio tasks in THIS (web) process, so recovery
+    # runs regardless of JOB_RUN_EMBEDDED_WORKER — unlike the job reapers below.
+    from app.services.report_builder.turn_store import recover_orphaned_turns
+    await recover_orphaned_turns()
+
     # Fail boot if any mirror->fact mapping YAML is malformed, registers a
     # duplicate ``(app_id, source_table, target_fact, activity_type)``, or
     # collides on the ``for_table`` lookup key. Phase 2 of
