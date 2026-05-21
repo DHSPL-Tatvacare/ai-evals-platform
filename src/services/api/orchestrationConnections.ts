@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { apiQueryFn } from '@/features/orchestration/queries/queryFn';
 import type { AssetVisibility } from '@/types/settings.types';
 
 /** Provider known to the backend `provider_specs` registry. New providers
@@ -87,6 +88,34 @@ export interface AgentVariablesResponse {
 export interface AgentVariablesParams {
   agentId?: string;
   templateName?: string;
+}
+
+export interface ProviderAgentSummary {
+  id: string;
+  name: string;
+  status: string;
+  type: string;
+}
+
+export interface ProviderAgentsListResponse {
+  provider: string;
+  items: ProviderAgentSummary[];
+  /** Soft error: HTTP stays 200; picker keeps working with manual entry. */
+  error: string | null;
+}
+
+export interface ProviderTemplateSummary {
+  name: string;
+  language: string;
+  status: string;
+  /** Ordered placeholder names declared by the WATI template. */
+  parameters: string[];
+}
+
+export interface ProviderTemplatesListResponse {
+  provider: string;
+  items: ProviderTemplateSummary[];
+  error: string | null;
 }
 
 export interface CreateConnectionBody {
@@ -208,5 +237,29 @@ export async function getAgentVariables(
   const qs = q.toString();
   return apiRequest<AgentVariablesResponse>(
     `/api/orchestration/connections/${connectionId}/agent-variables${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function listConnectionAgents(
+  connectionId: string,
+  params?: { refresh?: boolean },
+): Promise<ProviderAgentsListResponse> {
+  const q = new URLSearchParams();
+  if (params?.refresh) q.set('refresh', 'true');
+  const qs = q.toString();
+  return apiQueryFn<ProviderAgentsListResponse>(
+    `/api/orchestration/connections/${connectionId}/agents${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function listConnectionTemplates(
+  connectionId: string,
+  params?: { refresh?: boolean },
+): Promise<ProviderTemplatesListResponse> {
+  const q = new URLSearchParams();
+  if (params?.refresh) q.set('refresh', 'true');
+  const qs = q.toString();
+  return apiQueryFn<ProviderTemplatesListResponse>(
+    `/api/orchestration/connections/${connectionId}/templates${qs ? `?${qs}` : ''}`,
   );
 }

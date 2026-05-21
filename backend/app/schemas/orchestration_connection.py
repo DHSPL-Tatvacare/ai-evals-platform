@@ -108,7 +108,35 @@ class ProviderSpecResponse(CamelModel):
 
 
 class AgentVariablesResponse(CamelModel):
-    """Variable-introspection envelope — empty list until adapters re-register in P2/P3."""
+    """Variable-introspection envelope."""
     provider: str
     variables: list[str]
+    error: Optional[str] = None
+
+
+class ProviderAgentSummary(CamelModel):
+    id: str
+    name: str
+    status: str
+    type: str
+
+
+class ProviderAgentsListResponse(CamelModel):
+    """Live agent list from the bound provider (e.g. Bolna). Soft-error contract: HTTP 200 even on upstream failure."""
+    provider: str
+    items: list[ProviderAgentSummary]
+    error: Optional[str] = None
+
+
+class ProviderTemplateSummary(CamelModel):
+    name: str
+    language: str
+    status: str
+    parameters: list[str]
+
+
+class ProviderTemplatesListResponse(CamelModel):
+    """Live template list from the bound provider (e.g. WATI). Soft-error contract: HTTP 200 even on upstream failure."""
+    provider: str
+    items: list[ProviderTemplateSummary]
     error: Optional[str] = None

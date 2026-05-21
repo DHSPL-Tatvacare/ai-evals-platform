@@ -356,19 +356,17 @@ async def test_rotate_token_changes_webhook_url(client):
 
 @pytest.mark.asyncio
 async def test_agent_variables_route_uses_live_provider_lookup(client, monkeypatch):
-    async def _fake_get_agent(self, *, agent_id):
+    # Bolna agent response shape: agent_config.variables is the canonical list.
+    async def _fake_get_agent(self, connection, *, agent_id):
         assert agent_id == "agent-7"
         return {
-            "agent": {
-                "prompt_variables": [
-                    {"name": "user_name"},
-                    {"name": "preferred_time"},
-                ]
-            }
+            "id": agent_id,
+            "agent_name": "TestAgent",
+            "agent_config": {"variables": ["user_name", "preferred_time"]},
         }
 
     monkeypatch.setattr(
-        "app.services.orchestration.api.connections.BolnaService.get_agent",
+        "app.services.orchestration.adapters.bolna.BolnaAdapter.get_agent",
         _fake_get_agent,
     )
 
@@ -384,7 +382,7 @@ async def test_agent_variables_route_uses_live_provider_lookup(client, monkeypat
 
 @pytest.mark.asyncio
 async def test_agent_variables_route_uses_selected_wati_template_name(client, monkeypatch):
-    async def _fake_list_templates(self):
+    async def _fake_list_templates(self, connection):
         return [
             {
                 "name": "concierge_qualify_v1",
@@ -401,7 +399,7 @@ async def test_agent_variables_route_uses_selected_wati_template_name(client, mo
         ]
 
     monkeypatch.setattr(
-        "app.services.orchestration.api.connections.WatiService.list_message_templates_summary",
+        "app.services.orchestration.adapters.wati.WatiAdapter.list_message_templates",
         _fake_list_templates,
     )
 

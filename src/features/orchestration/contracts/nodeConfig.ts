@@ -343,6 +343,9 @@ export const MessagingSendWhatsappTemplateConfigSchema = z
     nodeType: z.literal("messaging.send_whatsapp_template"),
     connection_id: z.uuid(),
     template_slug: z.string().min(1),
+    template_name: z.string().default(""),
+    channel_number: z.string().default(""),
+    broadcast_name: z.string().default(""),
     variable_mappings: z.record(z.string(), z.string()).default({}),
     webhook_ttl_seconds: z.number().int().min(60).default(259200),
   })
