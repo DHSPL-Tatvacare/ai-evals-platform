@@ -1,10 +1,37 @@
-import { type ReactNode, useState, useCallback } from 'react';
+import { type ReactNode, type MouseEvent as ReactMouseEvent, useState, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Inbox, Info } from 'lucide-react';
 import { cn } from '@/utils';
 import { EmptyState } from './EmptyState';
 import { Pagination } from './Pagination';
 import { Tooltip } from './Tooltip';
+
+// Elements that own their own click behaviour — a click on any of these (or
+// their descendants) must not also trigger row navigation. Cells can opt a
+// custom container out with `data-row-click-ignore`.
+const INTERACTIVE_TARGET_SELECTOR = [
+  'button',
+  'a[href]',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="combobox"]',
+  '[role="listbox"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[contenteditable="true"]',
+  '[data-row-click-ignore]',
+].join(',');
+
+function isInteractiveEventTarget(event: ReactMouseEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  return !!target?.closest?.(INTERACTIVE_TARGET_SELECTOR);
+}
 
 export type SortOrder = 'asc' | 'desc';
 
@@ -131,7 +158,15 @@ export function DataTable<T>({
   const isExpandable = !!renderExpandedRow;
 
   const handleRowClick = useCallback(
-    (row: T) => {
+    (row: T, event: ReactMouseEvent) => {
+      // Row navigation must never fire when the click originated from an
+      // interactive control inside the row (buttons, links, form fields,
+      // dropdown options, inline-review rails, etc.). Centralising this here
+      // means individual cell renderers never have to remember to
+      // `stopPropagation` — the recurring "edit control navigates the row"
+      // bug class is structurally impossible. `closest` matches the real
+      // DOM target even when the control is portaled (popover / select).
+      if (isInteractiveEventTarget(event)) return;
       if (renderExpandedRow) {
         const key = keyExtractor(row);
         setExpandedKey((prev) => (prev === key ? null : key));
@@ -243,7 +278,7 @@ export function DataTable<T>({
                       columns={columns}
                       isExpanded={isExpanded}
                       isClickable={isClickable}
-                      onClick={() => handleRowClick(row)}
+                      onClick={(event) => handleRowClick(row, event)}
                       renderExpanded={isExpanded ? renderExpandedRow : undefined}
                     />
                   );
@@ -280,7 +315,7 @@ function ExpandableRow<T>({
   columns: ColumnDef<T>[];
   isExpanded: boolean;
   isClickable: boolean;
-  onClick: () => void;
+  onClick: (event: ReactMouseEvent) => void;
   renderExpanded?: (row: T) => ReactNode;
 }) {
   return (

@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Phone } from 'lucide-react';
+import { DataTable, type ColumnDef, type SortState } from '@/components/ui/DataTable';
+import { FilterPills } from '@/components/ui';
 import {
   useInlineReviewOptional,
   InlineReviewControls,
@@ -24,6 +26,8 @@ import {
 } from '../components';
 import { getOverallScore } from './callQualityScore';
 
+const BAND_ORDER = ['Strong', 'Good', 'Needs work', 'Poor'] as const;
+
 export interface CallQualityResultsProps {
   runId: string;
   runStatus: AnyRunStatus;
@@ -46,19 +50,53 @@ export function CallQualityResults({
 }: CallQualityResultsProps) {
   const navigate = useNavigate();
   const { confirmNavigation, guardModal } = useInlineReviewNavigationGuard();
+  const [sortState, setSortState] = useState<SortState>({ key: 'score', order: 'desc' });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [bandFilter, setBandFilter] = useState<Set<string>>(new Set());
+
+  const bandOptions = useMemo(() => {
+    const present = new Set(threads.map((t) => getScoreBand(getOverallScore(t))));
+    return BAND_ORDER.filter((b) => present.has(b)).map((b) => ({ id: b, label: b }));
+  }, [threads]);
+
+  const toggleBand = (b: string) => {
+    setBandFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(b)) next.delete(b);
+      else next.add(b);
+      return next;
+    });
+    setPage(1);
+  };
 
   const filteredThreads = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    if (!q) return threads;
     return threads.filter((t) => {
-      const meta = (t.result as unknown as Record<string, unknown>)?.call_metadata as
-        | Record<string, unknown>
-        | undefined;
-      const rep = (meta?.rep_label as string) || '';
-      const lead = (meta?.lead_id as string) || '';
-      return rep.toLowerCase().includes(q) || lead.toLowerCase().includes(q) || t.thread_id.includes(q);
+      if (q) {
+        const meta = readCallMeta(t);
+        const rep = ((meta?.rep_label as string) || '').toLowerCase();
+        const lead = ((meta?.lead_id as string) || '').toLowerCase();
+        if (!rep.includes(q) && !lead.includes(q) && !t.thread_id.includes(q)) return false;
+      }
+      if (bandFilter.size > 0 && !bandFilter.has(getScoreBand(getOverallScore(t)))) return false;
+      return true;
     });
-  }, [threads, searchQuery]);
+  }, [threads, searchQuery, bandFilter]);
+
+  const sortedThreads = useMemo(() => {
+    const arr = [...filteredThreads];
+    arr.sort((a, b) => {
+      const cmp = compareCallRows(a, b, sortState.key);
+      return sortState.order === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [filteredThreads, sortState]);
+
+  const totalItems = sortedThreads.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedThreads = sortedThreads.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const evaluated = threads.filter((t) => t.success_status).length;
   const failed = threads.length - evaluated;
@@ -92,8 +130,131 @@ export function CallQualityResults({
     return dist;
   }, [humanVerdicts, threads]);
 
+  const columns: ColumnDef<ThreadEvalRow>[] = [
+    {
+      key: 'agent',
+      header: 'Agent',
+      sortable: true,
+      width: 'min-w-[150px]',
+      render: (t) => (
+        <span className="text-[var(--text-primary)]">
+          {(readCallMeta(t)?.rep_label as string) || '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'lead',
+      header: 'Lead',
+      sortable: true,
+      width: 'min-w-[150px]',
+      render: (t) => (
+        <span className="text-[var(--text-primary)]">
+          {(readCallMeta(t)?.lead_id as string) || '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      sortable: true,
+      width: 'w-[110px]',
+      render: (t) => {
+        const duration = (readCallMeta(t)?.duration_seconds as number) || 0;
+        return (
+          <span className="text-[var(--text-secondary)]">
+            {duration > 0 ? formatDuration(duration) : '—'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'score',
+      header: 'Score',
+      sortable: true,
+      width: 'w-[90px]',
+      render: (t) => {
+        const score = getOverallScore(t);
+        return (
+          <span className="font-bold" style={{ color: scoreColor(score) }}>
+            {score !== null ? score : '—'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'band',
+      header: 'Band',
+      width: 'min-w-[120px]',
+      render: (t) => (
+        <VerdictBadge
+          verdict={getScoreBand(getOverallScore(t))}
+          category="status"
+          humanVerdict={humanVerdicts?.get(t.thread_id)?.get('overall_verdict')}
+        />
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      width: 'w-[80px]',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center',
+      render: (t) =>
+        t.success_status ? (
+          <span className="text-[var(--color-success)]">{'✓'}</span>
+        ) : (
+          <span className="text-[var(--color-error)]">{'✗'}</span>
+        ),
+    },
+    ...(hasAnyReviewData
+      ? ([
+          {
+            key: 'human_review',
+            header: 'Human Review',
+            width: 'w-[120px]',
+            render: (t: ThreadEvalRow) => {
+              const isReviewed =
+                (reviewedIds?.has(t.thread_id) ?? false) ||
+                !!humanVerdicts?.get(t.thread_id);
+              return isReviewed ? (
+                <span className="font-semibold text-[var(--text-brand)]">Yes</span>
+              ) : (
+                <span className="text-[var(--text-muted)]">No</span>
+              );
+            },
+          },
+        ] satisfies ColumnDef<ThreadEvalRow>[])
+      : []),
+  ];
+
+  const handleRowClick = (t: ThreadEvalRow) => {
+    const target = getCallHref(t.thread_id);
+    if (inScopeCallIds.has(t.thread_id)) {
+      navigate(target);
+      return;
+    }
+    confirmNavigation(() => navigate(target));
+  };
+
+  if (threads.length === 0) {
+    return (
+      <div className="flex flex-1 min-h-0 flex-col py-2">
+        <RunResultsEmptyState
+          status={runStatus}
+          hasAnyData={false}
+          hasFilteredData={false}
+          emptyIcon={Phone}
+          emptyTitle="No results"
+          emptyMessage="No evaluated calls found."
+          processingMessage="Results will appear here as calls are evaluated."
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4 py-2">
+    <div className="flex flex-1 min-h-0 flex-col gap-4 py-2">
       <RunMetricCards>
         <StatPill
           label="Calls Evaluated"
@@ -137,34 +298,49 @@ export function CallQualityResults({
                   <p className="text-[10px] text-[var(--text-muted)] mb-0.5">AI</p>
                   <DistributionBar
                     distribution={scoreBands}
-                    order={['Strong', 'Good', 'Needs work', 'Poor'] as const}
+                    order={BAND_ORDER}
                   />
                 </div>
                 <div>
                   <p className="text-[10px] text-[var(--text-brand)] mb-0.5">Reviewed</p>
                   <DistributionBar
                     distribution={reviewedScoreBands}
-                    order={['Strong', 'Good', 'Needs work', 'Poor'] as const}
+                    order={BAND_ORDER}
                   />
                 </div>
               </div>
             ) : (
               <DistributionBar
                 distribution={scoreBands}
-                order={['Strong', 'Good', 'Needs work', 'Poor'] as const}
+                order={BAND_ORDER}
               />
             )}
           </div>
         </div>
       )}
 
-      <RunResultsSearch
-        status={runStatus}
-        resultCount={threads.length}
-        value={searchQuery}
-        onChange={onSearchChange}
-        placeholder="Search agent, lead…"
-      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <RunResultsSearch
+          status={runStatus}
+          resultCount={threads.length}
+          value={searchQuery}
+          onChange={onSearchChange}
+          placeholder="Search agent, lead…"
+          className="w-60 max-w-none"
+        />
+        {bandOptions.length > 0 && (
+          <FilterPills
+            size="sm"
+            options={bandOptions}
+            selected={[...bandFilter]}
+            onToggle={toggleBand}
+          />
+        )}
+        <span className="text-xs text-[var(--text-muted)] ml-auto">
+          {filteredThreads.length}
+          {filteredThreads.length !== threads.length ? ` of ${threads.length}` : ''} calls
+        </span>
+      </div>
 
       {filteredThreads.length === 0 ? (
         <RunResultsEmptyState
@@ -177,84 +353,69 @@ export function CallQualityResults({
           processingMessage="Results will appear here as calls are evaluated."
         />
       ) : (
-        <div className="rounded-md border border-[var(--border-default)] overflow-auto">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-[var(--bg-secondary)] z-10">
-              <tr className="border-b border-[var(--border-default)]">
-                <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Agent &rarr; Lead</th>
-                <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Duration</th>
-                <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Score</th>
-                <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Band</th>
-                <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
-                {hasAnyReviewData && (
-                  <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Human Review</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredThreads.map((t) => {
-                const score = getOverallScore(t);
-                const meta = (t.result as unknown as Record<string, unknown>)?.call_metadata as
-                  | Record<string, unknown>
-                  | undefined;
-                const rep = (meta?.rep_label as string) || '—';
-                const lead = (meta?.lead_id as string) || '—';
-                const duration = (meta?.duration_seconds as number) || 0;
-                const aiBand = getScoreBand(score);
-                const humanBand = humanVerdicts?.get(t.thread_id)?.get('overall_verdict');
-                const isReviewed = (reviewedIds?.has(t.thread_id) ?? false) || !!humanVerdicts?.get(t.thread_id);
-
-                return (
-                  <tr
-                    key={t.id}
-                    onClick={() => {
-                      const target = getCallHref(t.thread_id);
-                      if (inScopeCallIds.has(t.thread_id)) {
-                        navigate(target);
-                        return;
-                      }
-                      confirmNavigation(() => navigate(target));
-                    }}
-                    className="border-b border-[var(--border-subtle)] cursor-pointer hover:bg-[var(--interactive-secondary)] transition-colors"
-                  >
-                    <td className="px-3 py-2.5 text-[var(--text-primary)]">
-                      {rep} <span className="text-[var(--text-muted)]">&rarr;</span> {lead}
-                    </td>
-                    <td className="px-3 py-2.5 text-[var(--text-secondary)]">
-                      {duration > 0 ? formatDuration(duration) : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 font-bold" style={{ color: scoreColor(score) }}>
-                      {score !== null ? score : '—'}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <VerdictBadge verdict={aiBand} category="status" humanVerdict={humanBand} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {t.success_status ? (
-                        <span className="text-[var(--color-success)]">{'✓'}</span>
-                      ) : (
-                        <span className="text-[var(--color-error)]">{'✗'}</span>
-                      )}
-                    </td>
-                    {hasAnyReviewData && (
-                      <td className="px-3 py-2.5 text-[11px] font-semibold">
-                        {isReviewed ? (
-                          <span className="text-[var(--text-brand)]">Yes</span>
-                        ) : (
-                          <span className="text-[var(--text-muted)]">No</span>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={pagedThreads}
+          keyExtractor={(t) => String(t.id)}
+          onRowClick={handleRowClick}
+          sortState={sortState}
+          onSortChange={(next) => {
+            setSortState(next);
+            setPage(1);
+          }}
+          pagination={{
+            page: safePage,
+            totalPages,
+            pageSize,
+            totalItems,
+            showCount: true,
+            onPageChange: setPage,
+            onPageSizeChange: (n) => {
+              setPageSize(n);
+              setPage(1);
+            },
+          }}
+          minWidth="720px"
+          emptyIcon={Phone}
+          emptyTitle="No results"
+        />
       )}
       {guardModal}
     </div>
   );
+}
+
+/** Reads the `call_metadata` blob off a call-quality thread row. */
+function readCallMeta(t: ThreadEvalRow): Record<string, unknown> | undefined {
+  return (t.result as unknown as Record<string, unknown>)?.call_metadata as
+    | Record<string, unknown>
+    | undefined;
+}
+
+/** Column-keyed comparator for the calls table. Returns ascending order; the
+ *  caller flips the sign for descending. Missing values sort last. */
+function compareCallRows(a: ThreadEvalRow, b: ThreadEvalRow, key: string): number {
+  switch (key) {
+    case 'agent':
+      return ((readCallMeta(a)?.rep_label as string) || '').localeCompare(
+        (readCallMeta(b)?.rep_label as string) || '',
+      );
+    case 'lead':
+      return ((readCallMeta(a)?.lead_id as string) || '').localeCompare(
+        (readCallMeta(b)?.lead_id as string) || '',
+      );
+    case 'duration':
+      return (
+        ((readCallMeta(a)?.duration_seconds as number) || 0) -
+        ((readCallMeta(b)?.duration_seconds as number) || 0)
+      );
+    case 'score':
+      return (getOverallScore(a) ?? -1) - (getOverallScore(b) ?? -1);
+    case 'status':
+      return a.success_status - b.success_status;
+    default:
+      return 0;
+  }
 }
 
 /**

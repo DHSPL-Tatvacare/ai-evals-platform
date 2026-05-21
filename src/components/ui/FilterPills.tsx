@@ -7,11 +7,16 @@ interface FilterPillOption {
 
 interface FilterPillsProps {
   options: FilterPillOption[];
-  active: string;
-  onChange: (id: string) => void;
   /** `md` (default) = px-3 py-1.5 text-[13px]; `sm` = px-2.5 py-0.5 text-[11px]. */
   size?: 'sm' | 'md';
   className?: string;
+  /** Single-select mode: the active option id. */
+  active?: string;
+  onChange?: (id: string) => void;
+  /** Multi-select mode: the set of selected ids. When provided, pills toggle
+   *  individually via `onToggle` instead of single-selecting. */
+  selected?: string[];
+  onToggle?: (id: string) => void;
 }
 
 const SIZE_CLASSES: Record<NonNullable<FilterPillsProps['size']>, string> = {
@@ -19,15 +24,24 @@ const SIZE_CLASSES: Record<NonNullable<FilterPillsProps['size']>, string> = {
   sm: 'px-2.5 py-0.5 text-[11px]',
 };
 
-export function FilterPills({ options, active, onChange, size = 'md', className }: FilterPillsProps) {
+export function FilterPills({
+  options,
+  size = 'md',
+  className,
+  active,
+  onChange,
+  selected,
+  onToggle,
+}: FilterPillsProps) {
+  const isMulti = selected !== undefined;
   return (
     <div className={cn('flex flex-wrap gap-2', className)}>
       {options.map((opt) => {
-        const isActive = active === opt.id;
+        const isActive = isMulti ? selected!.includes(opt.id) : active === opt.id;
         return (
           <button
             key={opt.id}
-            onClick={() => onChange(opt.id)}
+            onClick={() => (isMulti ? onToggle?.(opt.id) : onChange?.(opt.id))}
             className={cn(
               'rounded-full font-medium cursor-pointer transition-colors',
               SIZE_CLASSES[size],

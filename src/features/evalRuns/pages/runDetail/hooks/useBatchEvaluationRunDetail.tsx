@@ -553,7 +553,7 @@ export function useBatchEvaluationRunDetail(
   const resultsContent = (
     <div className="flex flex-1 min-h-0 flex-col gap-4">
       {threadEvals.length > 0 && (
-        <BatchThreadResults run={run} threadEvals={threadEvals} />
+        <BatchThreadResults run={run} threadEvals={threadEvals} appId={appId} />
       )}
 
       {adversarialEvals.length > 0 && (

@@ -171,6 +171,10 @@ export function useSingleEvaluationRunDetail(
   }
 
   const runIsReviewable = isReviewable(run.status);
+  // Mirror the batch hook: the tab strip only mounts for a reviewable run that
+  // isn't in inline-review mode. Active / failed / cancelled runs render the
+  // results body bare, exactly like `useBatchEvaluationRunDetail`.
+  const showTabs = !isInReview && runIsReviewable;
 
   const runMetaTooltip = (
     <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)]">
@@ -466,24 +470,31 @@ export function useSingleEvaluationRunDetail(
       subtitle: runSubtitle,
       actions: runActions,
     },
-    body: (
-      <>
-        {runIsActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
-        <RunStatusBanner
-          status={run.status}
-          errorMessage={run.errorMessage}
-          failureHeadline={failureHeadline}
-        />
-        {detailConfig.behaviour.bannerOnlyOnFailed && run.status === 'failed' && (
-          <SelectionDiagnosticsPanel run={run} />
-        )}
-        <RunDetailTabs
-          status={run.status}
-          resultsTab={{ id: 'results', label: resultsTabLabel, content: resultsBody }}
-          reportTab={reportTab}
-        />
-      </>
-    ),
+    // When `bannerOnlyOnFailed` is set, the diagnostics panel is the whole
+    // failure surface — it replaces the generic status banner AND the empty
+    // results body, so a failed run shows one rich panel, not a stacked pair.
+    body:
+      detailConfig.behaviour.bannerOnlyOnFailed && run.status === 'failed' ? (
+        <SelectionDiagnosticsPanel run={run} />
+      ) : (
+        <>
+          {runIsActive && <RunProgressBar job={activeJob} elapsed={elapsed} />}
+          <RunStatusBanner
+            status={run.status}
+            errorMessage={run.errorMessage}
+            failureHeadline={failureHeadline}
+          />
+          {showTabs ? (
+            <RunDetailTabs
+              status={run.status}
+              resultsTab={{ id: 'results', label: resultsTabLabel, content: resultsBody }}
+              reportTab={reportTab}
+            />
+          ) : (
+            <div className="flex flex-1 min-h-0 flex-col">{resultsBody}</div>
+          )}
+        </>
+      ),
     dialogs: (
       <>
         {deleteDialog}

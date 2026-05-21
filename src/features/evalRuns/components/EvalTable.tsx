@@ -10,7 +10,6 @@ import {
 import type { ThreadEvalRow, EvaluatorDescriptor, ReviewableItem } from '@/types';
 import VerdictBadge from './VerdictBadge';
 import { pct, normalizeLabel } from '@/utils/evalFormatters';
-import { routes } from '@/config/routes';
 
 interface Props {
   evaluations: ThreadEvalRow[];
@@ -20,6 +19,9 @@ interface Props {
   /** Map of threadId → attributeKey → reviewedValue for before→after chips on verdict cells */
   humanVerdicts?: Map<string, Map<string, string>>;
   reviewableItems?: Map<string, ReviewableItem>;
+  /** Builds the thread-detail URL for the mounting app. Returns `null` when the
+   *  app has no thread-detail route, in which case the row renders un-linked. */
+  getThreadHref: (threadId: string, runId: string) => string | null;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -175,6 +177,7 @@ export default function EvalTable({
   reviewedThreadIds,
   humanVerdicts,
   reviewableItems,
+  getThreadHref,
 }: Props) {
   const descriptors = evaluatorDescriptors ?? DEFAULT_DESCRIPTORS;
   const navigate = useNavigate();
@@ -233,15 +236,21 @@ export default function EvalTable({
         header: 'Thread ID',
         sortable: true,
         width: 'min-w-[180px]',
-        render: (e) => (
-          <Link
-            to={routes.kaira.threadDetail(e.thread_id, e.run_id)}
-            className="font-mono text-sm text-[var(--text-brand)] hover:underline"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            {e.thread_id}
-          </Link>
-        ),
+        render: (e) => {
+          const href = getThreadHref(e.thread_id, e.run_id);
+          if (!href) {
+            return <span className="font-mono text-sm text-[var(--text-primary)]">{e.thread_id}</span>;
+          }
+          return (
+            <Link
+              to={href}
+              className="font-mono text-sm text-[var(--text-brand)] hover:underline"
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              {e.thread_id}
+            </Link>
+          );
+        },
       },
       {
         key: 'message_count',
@@ -345,7 +354,7 @@ export default function EvalTable({
     }
 
     return cols;
-  }, [descriptors, reviewableItems, reviewedThreadIds, showReviewColumns, showReviewSummaryColumn, humanVerdicts, review]);
+  }, [descriptors, reviewableItems, reviewedThreadIds, showReviewColumns, showReviewSummaryColumn, humanVerdicts, review, getThreadHref]);
 
   return (
     <>
@@ -354,7 +363,8 @@ export default function EvalTable({
         data={paged}
         keyExtractor={(row) => String(row.id)}
         onRowClick={(row) => {
-          const target = routes.kaira.threadDetail(row.thread_id, row.run_id);
+          const target = getThreadHref(row.thread_id, row.run_id);
+          if (!target) return;
           // Threads belonging to this review's scope are still inside the
           // review — dirty edits are shared via reviewModeStore, so there's
           // nothing to save before navigating. Only guard out-of-scope rows

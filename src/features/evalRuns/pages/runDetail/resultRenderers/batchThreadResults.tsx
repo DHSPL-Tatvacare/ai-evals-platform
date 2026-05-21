@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   MetricInfo,
   EvalTable,
@@ -11,17 +11,25 @@ import { CORRECTNESS_ORDER, EFFICIENCY_ORDER } from '@/utils/evalColors';
 import { getLabelDefinition } from '@/config/labelDefinitions';
 import { STATUS_COLORS } from '@/utils/statusColors';
 import { pct, formatMetric, normalizeLabel } from '@/utils/evalFormatters';
-import type { Run, ThreadEvalRow, EvaluatorDescriptor } from '@/types';
+import { threadDetailForApp } from '@/config/routes';
+import { FilterPills } from '@/components/ui';
+import type { AppId, Run, ThreadEvalRow, EvaluatorDescriptor } from '@/types';
 import { RunMetricCards, RunResultsSearch } from '../components';
 
 export interface BatchThreadResultsProps {
   run: Run;
   threadEvals: ThreadEvalRow[];
+  /** Mounting app — resolves the thread-detail route so this renderer stays app-agnostic. */
+  appId: AppId;
 }
 
-export function BatchThreadResults({ run, threadEvals }: BatchThreadResultsProps) {
+export function BatchThreadResults({ run, threadEvals, appId }: BatchThreadResultsProps) {
   const [search, setSearch] = useState('');
   const [verdictFilter, setVerdictFilter] = useState<Set<string>>(new Set());
+  const getThreadHref = useCallback(
+    (threadId: string, runId: string) => threadDetailForApp(appId, threadId, runId),
+    [appId],
+  );
 
   const summaryErrors = (run.summary?.errors as number) ?? 0;
   const summaryTotal = (run.summary?.total_threads as number) ?? 0;
@@ -152,24 +160,17 @@ export function BatchThreadResults({ run, threadEvals }: BatchThreadResultsProps
             placeholder="Search thread ID, verdict…"
             className="w-60 max-w-none"
           />
-          <div className="flex gap-1 flex-wrap">
-            {allVerdicts.map((v) => {
-              const def = getLabelDefinition(v, 'correctness');
-              return (
-                <button
-                  key={v}
-                  onClick={() => toggleVerdictFilter(v)}
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] ${
-                    verdictFilter.has(v)
-                      ? 'bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]'
-                      : 'bg-[var(--bg-primary)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-default)]'
-                  }`}
-                >
-                  {def.displayName}
-                </button>
-              );
-            })}
-          </div>
+          {allVerdicts.length > 0 && (
+            <FilterPills
+              size="sm"
+              options={allVerdicts.map((v) => ({
+                id: v,
+                label: getLabelDefinition(v, 'correctness').displayName,
+              }))}
+              selected={[...verdictFilter]}
+              onToggle={toggleVerdictFilter}
+            />
+          )}
           <span className="text-xs text-[var(--text-muted)] ml-auto">
             {filteredThreads.length}
             {filteredThreads.length !== threadEvals.length ? ` of ${threadEvals.length}` : ''} threads
@@ -182,6 +183,7 @@ export function BatchThreadResults({ run, threadEvals }: BatchThreadResultsProps
           evaluations={filteredThreads}
           evaluatorDescriptors={run.evaluator_descriptors}
           runId={run.run_id}
+          getThreadHref={getThreadHref}
         />
       </div>
     </div>
@@ -403,10 +405,11 @@ function ReviewAwareSummarySection({
   );
 }
 
-function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors, runId }: {
+function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors, runId, getThreadHref }: {
   evaluations: ThreadEvalRow[];
   evaluatorDescriptors?: EvaluatorDescriptor[];
   runId: string;
+  getThreadHref: (threadId: string, runId: string) => string | null;
 }) {
   const { reviewableItems, reviewedIds, humanVerdicts } = useReviewTableData(runId, { itemType: 'thread' });
   return (
@@ -416,6 +419,7 @@ function ReviewAwareEvalTable({ evaluations, evaluatorDescriptors, runId }: {
       reviewedThreadIds={reviewedIds}
       humanVerdicts={humanVerdicts}
       reviewableItems={reviewableItems}
+      getThreadHref={getThreadHref}
     />
   );
 }
