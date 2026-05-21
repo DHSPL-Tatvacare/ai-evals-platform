@@ -202,9 +202,9 @@ async def _materialize_cohort(
             "UPDATE orchestration.workflow_runs "
             "SET params = COALESCE(params, '{}'::jsonb) || "
             "    jsonb_build_object('preview', jsonb_build_object("
-            "        'cappedCount', :capped, "
-            "        'invalidPhoneCount', :invalid)) "
-            "WHERE id = :run_id"
+            "        'cappedCount', (:capped)::int, "
+            "        'invalidPhoneCount', (:invalid)::int)) "
+            "WHERE id = (:run_id)::uuid"
         ),
         {
             "capped": capped_count,

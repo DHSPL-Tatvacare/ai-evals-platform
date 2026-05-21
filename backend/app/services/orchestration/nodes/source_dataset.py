@@ -87,9 +87,9 @@ class _Handler:
             text(
                 "UPDATE orchestration.workflow_runs "
                 "SET params = COALESCE(params, '{}'::jsonb) || "
-                "    jsonb_build_object('enrolled_dataset_version_id', :vid), "
-                "    cohort_size_at_entry = :size "
-                "WHERE id = :run_id"
+                "    jsonb_build_object('enrolled_dataset_version_id', (:vid)::text), "
+                "    cohort_size_at_entry = (:size)::int "
+                "WHERE id = (:run_id)::uuid"
             ),
             {
                 "vid": str(config.dataset_version_id),
