@@ -393,6 +393,7 @@ export interface CohortSourceSchemaDescriptor {
   columns: Array<{
     name: string;
     type: CohortColumnType;
+    isJsonb?: boolean;
     sampleValues?: string[];
     distinctCount?: number;
   }>;
@@ -415,6 +416,8 @@ export interface CohortSource {
   allowedPayloadColumns: string[];
   allowedFilterColumns: string[];
   allowedLookbackColumns: string[];
+  /** Live-derived JSONB key names from raw_payload (static sources only). */
+  jsonbKeys?: string[];
   schemaDescriptor?: CohortSourceSchemaDescriptor | null;
   rowCount?: number | null;
   importedAt?: string | null;

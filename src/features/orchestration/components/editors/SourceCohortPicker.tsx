@@ -143,6 +143,7 @@ export function SourceCohortPicker({ value, onChange }: Props) {
               columnOptions={cfg.payload_fields ?? []}
               columnTypes={columnTypes}
               sourceRef={cfg.source_ref}
+              appId={appId ?? undefined}
             />
           </InspectorField>
           <InspectorField

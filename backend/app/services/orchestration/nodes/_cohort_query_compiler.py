@@ -82,15 +82,21 @@ _DATASET_TYPE_CASTS: dict[str, str] = {
 ColumnResolver = Callable[[str], str]
 
 
-def _static_column_resolver(allowed: Optional[set[str]] = None) -> ColumnResolver:
-    """Resolver for the static (CohortSource) branch — emits bare ``src.{col}``.
+def _static_column_resolver(jsonb_keys: Optional[frozenset[str]] = None) -> ColumnResolver:
+    """Resolver for the static (CohortSource) branch.
 
-    ``allowed`` is reserved for future per-source allowed_filter_columns
-    enforcement; today the static branch trusts the catalog + the
-    field_validator on ``CohortQueryFilter.column`` for safety.
+    Real columns emit ``src.{col}``; JSONB keys emit
+    ``src.raw_payload->>'key'`` so filters and payload projection work
+    against the JSONB bag without an UndefinedColumn error.
+    When ``jsonb_keys`` is None/empty, all columns resolve to bare ``src.{col}``.
     """
+    keys = jsonb_keys or frozenset()
+
     def _resolve(col: str) -> str:
+        if col in keys:
+            return f"src.raw_payload->>'{col}'"
         return f"src.{col}"
+
     return _resolve
 
 
@@ -392,6 +398,7 @@ def _compile_static(
         cfg,
         schema_qualified_table=source.schema_qualified_table,
         id_column=source.id_column,
+        jsonb_keys=frozenset(source.jsonb_keys),
         run_id=run_id,
         workflow_id=workflow_id,
         workflow_version_id=workflow_version_id,
@@ -406,6 +413,7 @@ def _emit_static_sql(
     *,
     schema_qualified_table: str,
     id_column: str,
+    jsonb_keys: Optional[frozenset[str]] = None,
     run_id: uuid.UUID,
     workflow_id: uuid.UUID,
     workflow_version_id: uuid.UUID,
@@ -429,7 +437,8 @@ def _emit_static_sql(
         "next_node_id": next_node_id,
     }
 
-    resolver = _static_column_resolver()
+    # Use the JSONB-aware resolver so filter + payload columns route correctly.
+    resolver = _static_column_resolver(jsonb_keys)
     for i, f in enumerate(cfg.filters):
         fragment, bind = _filter_to_sql(f, i, column_resolver=resolver)
         where_parts.append(fragment)
@@ -439,6 +448,7 @@ def _emit_static_sql(
         if not cfg.lookback_column:
             raise CohortQueryCompileError("lookback_column required when lookback_hours is set")
         # lookback_hours is an int (Pydantic-validated), so embedding it directly is safe.
+        # Lookback column is always a real column (allowed_lookback_columns = real datetime cols).
         where_parts.append(
             f"src.{cfg.lookback_column} >= now() - INTERVAL '{int(cfg.lookback_hours)} hours'"
         )
@@ -458,7 +468,8 @@ def _emit_static_sql(
     where_clause = " AND ".join(where_parts)
 
     if payload_columns:
-        payload_args = ", ".join(f"'{c}', src.{c}" for c in payload_columns)
+        # Use the resolver so JSONB keys project via raw_payload->>'key'.
+        payload_args = ", ".join(f"'{c}', {resolver(c)}" for c in payload_columns)
         payload_expr = f"jsonb_build_object({payload_args})"
     else:
         payload_expr = "'{}'::jsonb"

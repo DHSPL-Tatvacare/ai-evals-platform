@@ -53,6 +53,9 @@ class CohortSource(BaseModel):
     ``allowed_lookback_columns`` lists timestamp columns valid for the
     ``lookback_hours`` mechanic; if empty, lookback is not supported on
     this source.
+    ``jsonb_keys`` is populated at runtime by the API layer after live
+    introspection; the compiler uses it to route column references to
+    ``src.raw_payload->>'key'`` instead of bare ``src.key``.
     """
     source_ref: str
     display_label: str
@@ -64,6 +67,8 @@ class CohortSource(BaseModel):
     allowed_payload_columns: list[str] = Field(default_factory=list)
     allowed_filter_columns: list[str] = Field(default_factory=list)
     allowed_lookback_columns: list[str] = Field(default_factory=list)
+    # Live-derived JSONB key set — populated by the API layer, not the static catalog.
+    jsonb_keys: list[str] = Field(default_factory=list)
 
 
 _CATALOG: dict[str, CohortSource] = {
@@ -74,30 +79,14 @@ _CATALOG: dict[str, CohortSource] = {
         workflow_types=["crm"],
         app_ids=["inside-sales"],
         schema_qualified_table="analytics.crm_lead_record",
-        # Phase 11 (Commit 2 hotfix): the actual recipient id column on
-        # ``analytics.crm_lead_record`` is ``prospect_id`` — there is no
-        # ``lead_id`` column. The cohort query compiler emits
-        # ``src.{id_column}::text`` so a wrong value here fails at runtime
-        # with ``UndefinedColumn``.
-        id_column="prospect_id",
-        # Allowed columns must match the actual model
-        # (``app/models/source_records.py::CrmLeadRecord``). The original
-        # list aspirated columns that don't exist on this table.
-        allowed_payload_columns=[
-            "prospect_id", "first_name", "last_name", "phone", "email",
-            "city", "prospect_stage", "plan_name", "age_group", "condition",
-            "hba1c_band", "intent_to_pay", "mql_score", "source",
-            "source_campaign", "agent_name", "created_on", "first_activity_on",
-            "last_activity_on", "rnr_count", "answered_count", "total_dials",
-            "connect_rate", "frt_seconds", "lead_age_days",
-            "days_since_last_contact",
-        ],
-        allowed_filter_columns=[
-            "prospect_id", "prospect_stage", "plan_name", "city", "source",
-            "agent_name", "mql_score", "created_on", "last_activity_on",
-            "condition", "hba1c_band",
-        ],
-        allowed_lookback_columns=["created_on", "last_activity_on"],
+        # Real id column post-Alembic-0043; prospect_id moved to raw_payload.
+        id_column="lead_id",
+        # Curation hints are intentionally empty — the live field set (real
+        # columns + raw_payload JSONB keys) is derived at request time by
+        # _introspect_static_schema_descriptor so it can never drift.
+        allowed_payload_columns=[],
+        allowed_filter_columns=[],
+        allowed_lookback_columns=["created_on"],
     ),
     "clinical.dim_patient": CohortSource(
         source_ref="clinical.dim_patient",

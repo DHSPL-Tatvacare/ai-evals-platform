@@ -35,8 +35,8 @@ export const cohortQueryKeys = {
     ['orchestration', 'cohorts', 'used-by', cohortId] as const,
   sources: (workflowType: string, appId: string) =>
     ['orchestration', 'cohort-sources', workflowType, appId] as const,
-  columnValues: (sourceRef: string, column: string, q: string) =>
-    ['orchestration', 'cohortColumnValues', sourceRef, column, q] as const,
+  columnValues: (sourceRef: string, column: string, appId: string, q: string) =>
+    ['orchestration', 'cohortColumnValues', sourceRef, column, appId, q] as const,
 };
 
 export function useCohortSources(
@@ -56,25 +56,29 @@ export function useCohortSources(
 
 /** Async column-value typeahead for the datatype-driven filter value picker.
  *  Debounces the search query 250 ms before issuing a network request so the
- *  user can type freely without hammering the endpoint. */
+ *  user can type freely without hammering the endpoint.
+ *  Requires appId — the route enforces app-scoped access and the query is
+ *  disabled until all three (sourceRef, column, appId) are present. */
 export function useCohortColumnValues(
   sourceRef: string | null | undefined,
   column: string | null | undefined,
+  appId: string | null | undefined,
   { limit = 50 }: { limit?: number } = {},
 ): { options: ComboboxOption[]; loading: boolean; onSearchChange: (q: string) => void } {
   const [rawQuery, setRawQuery] = useState('');
   const debouncedQuery = useDebounce(rawQuery, 250);
 
   const { data, isFetching } = useQuery<{ values: string[]; hasMore: boolean }>({
-    queryKey: cohortQueryKeys.columnValues(sourceRef ?? '', column ?? '', debouncedQuery),
+    queryKey: cohortQueryKeys.columnValues(sourceRef ?? '', column ?? '', appId ?? '', debouncedQuery),
     queryFn: () =>
       fetchCohortColumnValues({
         sourceRef: sourceRef as string,
         column: column as string,
+        appId: appId as string,
         q: debouncedQuery || undefined,
         limit,
       }),
-    enabled: Boolean(sourceRef) && Boolean(column),
+    enabled: Boolean(sourceRef) && Boolean(column) && Boolean(appId),
     staleTime: 30_000,
   });
 

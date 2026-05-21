@@ -10,6 +10,10 @@ engineering-owned static catalog. The response carries a ``kind``
 discriminator so the frontend picker can group the two visually. Dataset
 entries derive their allowed-column lists from the persisted
 ``schema_descriptor`` (lookback columns = datetime-typed columns).
+
+Phase 13 (JSONB unpack): static sources with a ``raw_payload`` JSONB column
+surface their distinct JSONB keys alongside real columns so the column
+picker never drifts from the actual DB schema.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.orchestration import CohortSourceResponse
 from app.services.orchestration.source_catalog import (
+    CohortSource,
     DatasetSource,
     list_dataset_sources,
     list_sources,
@@ -40,8 +45,21 @@ _PLAIN_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 _MAX_VALUES_LIMIT = 50
 
-# Map Postgres data_type strings → frontend CohortColumnType literals.
+# Infra/mixin columns that are never authoring-visible payload or filter fields.
+_INFRA_COLUMNS: frozenset[str] = frozenset({
+    "id", "tenant_id", "app_id", "created_at", "updated_at",
+    "source_system", "source_record_hash",
+    "first_synced_at", "last_synced_at", "last_seen_in_source_at",
+    "last_synced_by_user_id",
+    "raw_payload",  # the JSONB container itself is never a filter field
+})
+
+# Map information_schema data_type strings → frontend CohortColumnType literals.
 _PG_TYPE_MAP: dict[str, str] = {
+    "character varying": "string",
+    "text": "string",
+    "uuid": "string",
+    "character": "string",
     "smallint": "integer",
     "integer": "integer",
     "bigint": "integer",
@@ -54,7 +72,6 @@ _PG_TYPE_MAP: dict[str, str] = {
 
 
 def _pg_type_to_cohort_type(pg_type: str) -> str:
-    """Map a Postgres data_type value to a frontend CohortColumnType literal."""
     if pg_type in _PG_TYPE_MAP:
         return _PG_TYPE_MAP[pg_type]
     if pg_type.startswith("timestamp") or pg_type == "date":
@@ -66,31 +83,67 @@ async def _introspect_static_schema_descriptor(
     db: AsyncSession,
     *,
     schema_qualified_table: str,
-    allowed_columns: set[str],
+    tenant_id: uuid.UUID,
+    app_id: str,
+    allowed_columns: Optional[set[str]] = None,
 ) -> dict[str, Any]:
-    """Query information_schema.columns for the given table and return schema_descriptor.
+    """Query information_schema + raw_payload JSONB keys for the given table.
 
-    Only columns present in ``allowed_columns`` are included; missing ones are
-    silently omitted (the table may not exist yet or the column list may be aspirational).
-    Params are bound — never interpolated — so the schema/table pair is safe.
+    Returns a schema_descriptor with all authoring-visible columns:
+      - Real columns (non-infra, non-raw_payload) from information_schema
+      - Distinct JSONB keys from raw_payload for this tenant+app
+
+    Each column entry carries: {name, type, isJsonb}.
+    ``allowed_columns`` is an optional curation filter; when None (or empty)
+    all non-infra columns are included so the live set can never drift.
     """
     dot_pos = schema_qualified_table.index(".")
     tbl_schema = schema_qualified_table[:dot_pos]
     tbl_name = schema_qualified_table[dot_pos + 1:]
 
-    stmt = text(
+    real_stmt = text(
         "SELECT column_name, data_type"
         " FROM information_schema.columns"
         " WHERE table_schema = :tbl_schema AND table_name = :tbl_name"
         " ORDER BY ordinal_position"
     )
-    result = await db.execute(stmt, {"tbl_schema": tbl_schema, "tbl_name": tbl_name})
-    columns = [
-        {"name": row[0], "type": _pg_type_to_cohort_type(row[1])}
-        for row in result.all()
-        if row[0] in allowed_columns
-    ]
-    return {"columns": columns}
+    result = await db.execute(real_stmt, {"tbl_schema": tbl_schema, "tbl_name": tbl_name})
+    all_rows = result.all()
+
+    columns: list[dict] = []
+    has_raw_payload = False
+
+    for col_name, data_type in all_rows:
+        if col_name == "raw_payload":
+            has_raw_payload = True
+            continue
+        if col_name in _INFRA_COLUMNS:
+            continue
+        # Apply optional curation allowlist (only when non-empty)
+        if allowed_columns and col_name not in allowed_columns:
+            continue
+        columns.append({"name": col_name, "type": _pg_type_to_cohort_type(data_type), "isJsonb": False})
+
+    # Fetch distinct JSONB keys from raw_payload for this tenant+app
+    jsonb_keys: list[str] = []
+    if has_raw_payload:
+        jsonb_stmt = text(
+            f"SELECT DISTINCT jsonb_object_keys(raw_payload)"  # noqa: S608
+            f" FROM {schema_qualified_table}"
+            " WHERE tenant_id = :tenant_id AND app_id = :app_id"
+            " LIMIT 200"
+        )
+        jresult = await db.execute(
+            jsonb_stmt, {"tenant_id": str(tenant_id), "app_id": app_id}
+        )
+        for (key,) in jresult.all():
+            if _PLAIN_IDENT_RE.match(key):
+                jsonb_keys.append(key)
+        jsonb_keys.sort()
+        for key in jsonb_keys:
+            columns.append({"name": key, "type": "string", "isJsonb": True})
+
+    return {"columns": columns, "jsonb_keys": jsonb_keys}
 
 
 async def fetch_column_values(
@@ -107,7 +160,8 @@ async def fetch_column_values(
 
     Enforces:
     - column identifier regex (no injection)
-    - column must be in the source's allowed_filter_columns
+    - column must be in the live field set (real columns + JSONB keys); the
+      static catalog's allowed_filter_columns lists are curation hints only
     - tenant_id + app_id predicates always present
     - limit capped at _MAX_VALUES_LIMIT
     """
@@ -118,10 +172,30 @@ async def fetch_column_values(
 
     static_source = lookup_source(source_ref)
     if static_source is not None:
-        if column not in static_source.allowed_filter_columns:
+        # Derive live field set and validate against it (prevents drift from hardcoded list)
+        descriptor = await _introspect_static_schema_descriptor(
+            db,
+            schema_qualified_table=static_source.schema_qualified_table,
+            tenant_id=tenant_id,
+            app_id=app_id,
+        )
+        col_entry = next(
+            (c for c in descriptor["columns"] if c["name"] == column), None
+        )
+        if col_entry is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"column {column!r} is not in allowed_filter_columns for {source_ref!r}",
+            )
+        if col_entry.get("isJsonb"):
+            return await _fetch_static_jsonb_column_values(
+                db,
+                table=static_source.schema_qualified_table,
+                column=column,
+                tenant_id=tenant_id,
+                app_id=app_id,
+                q=q,
+                limit=limit,
             )
         return await _fetch_static_column_values(
             db,
@@ -185,6 +259,40 @@ async def _fetch_static_column_values(
     }
     if q:
         base_sql += f" AND {column}::text ILIKE (:q)::text"
+        params["q"] = f"%{q}%"
+    base_sql += f" ORDER BY 1 LIMIT (:limit)::int"
+
+    result = await db.execute(text(base_sql), params)
+    rows = result.all()
+    values = [r[0] for r in rows if r[0] is not None]
+    return {"values": values, "has_more": len(rows) == limit}
+
+
+async def _fetch_static_jsonb_column_values(
+    db: AsyncSession,
+    *,
+    table: str,
+    column: str,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    q: Optional[str],
+    limit: int,
+) -> dict[str, Any]:
+    # column is regex-validated at call site — safe to use as JSONB key.
+    base_sql = (
+        f"SELECT DISTINCT raw_payload->>:column_key"
+        f" FROM {table}"
+        f" WHERE tenant_id = (:tenant_id)::uuid AND app_id = (:app_id)::text"
+        f"   AND raw_payload->>:column_key IS NOT NULL"
+    )
+    params: dict[str, Any] = {
+        "column_key": column,
+        "tenant_id": tenant_id,
+        "app_id": app_id,
+        "limit": limit,
+    }
+    if q:
+        base_sql += f" AND (raw_payload->>:column_key) ILIKE (:q)::text"
         params["q"] = f"%{q}%"
     base_sql += f" ORDER BY 1 LIMIT (:limit)::int"
 
@@ -279,16 +387,31 @@ async def list_cohort_sources(
 
     static_entries: list[CohortSourceResponse] = []
     for s in filtered_static:
-        allowed = (
-            set(s.allowed_filter_columns)
-            | set(s.allowed_payload_columns)
-            | set(s.allowed_lookback_columns)
-        )
-        schema_desc = await _introspect_static_schema_descriptor(
-            db,
-            schema_qualified_table=s.schema_qualified_table,
-            allowed_columns=allowed,
-        )
+        try:
+            eff_app_id = app_id or (s.app_ids[0] if s.app_ids else "")
+            # Pass allowed_columns=None so all non-infra columns are included
+            # (no drift from stale curation hints). Lookback is filtered separately.
+            descriptor = await _introspect_static_schema_descriptor(
+                db,
+                schema_qualified_table=s.schema_qualified_table,
+                tenant_id=tenant_id,
+                app_id=eff_app_id,
+                allowed_columns=None,
+            )
+        except Exception:
+            # Never crash the catalog listing on introspection failure
+            descriptor = {"columns": [], "jsonb_keys": []}
+
+        all_col_names = [c["name"] for c in descriptor["columns"]]
+        jsonb_keys = descriptor.get("jsonb_keys", [])
+        lookback_names = [
+            c["name"] for c in descriptor["columns"]
+            if not c.get("isJsonb") and c.get("type") == "datetime"
+        ]
+        # Intersect with catalog curation hint for lookback if provided
+        if s.allowed_lookback_columns:
+            lookback_names = [n for n in lookback_names if n in set(s.allowed_lookback_columns)]
+
         static_entries.append(CohortSourceResponse(
             source_ref=s.source_ref,
             display_label=s.display_label,
@@ -297,10 +420,11 @@ async def list_cohort_sources(
             workflow_types=list(s.workflow_types),
             app_ids=list(s.app_ids),
             id_column=s.id_column,
-            allowed_payload_columns=list(s.allowed_payload_columns),
-            allowed_filter_columns=list(s.allowed_filter_columns),
-            allowed_lookback_columns=list(s.allowed_lookback_columns),
-            schema_descriptor=schema_desc,
+            allowed_payload_columns=list(all_col_names),
+            allowed_filter_columns=list(all_col_names),
+            allowed_lookback_columns=list(lookback_names),
+            jsonb_keys=list(jsonb_keys),
+            schema_descriptor=descriptor,
         ))
     dataset_entries = [
         _dataset_to_response(ds)

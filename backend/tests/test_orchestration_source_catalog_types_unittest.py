@@ -132,20 +132,36 @@ class _FakeResult:
         return list(self._rows)
 
 
+# Introspection side_effect: call 1 = information_schema cols, call 2 = jsonb_keys.
+# prospect_stage is a JSONB key on crm_lead_record post-Alembic-0043.
+_INFRA_COLS = [("id", "uuid"), ("tenant_id", "uuid"), ("app_id", "text"),
+               ("created_at", "timestamp with time zone"), ("updated_at", "timestamp with time zone")]
+_CRM_REAL_COLS = [("lead_id", "character varying"), ("first_name", "character varying"),
+                  ("last_name", "character varying"), ("phone", "character varying"),
+                  ("email", "character varying"), ("city", "text"),
+                  ("created_on", "timestamp with time zone"),
+                  ("raw_payload", "jsonb")]
+_CRM_INFO_SCHEMA = _INFRA_COLS + _CRM_REAL_COLS
+_CRM_JSONB_KEYS = [("prospect_stage",), ("plan_name",), ("agent_name",)]
+
+
 @pytest.mark.asyncio
 async def test_column_not_in_allowlist_raises_400():
-    """Column absent from allowed_filter_columns must raise HTTPException 400."""
+    """Column not in live field set (raw_payload is infra) raises HTTPException 400."""
     from fastapi import HTTPException
     from app.services.orchestration.api.source_catalog import fetch_column_values
 
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([])
-
+    # raw_payload is an infra column — excluded from both real and JSONB lists
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+    ]
     with pytest.raises(HTTPException) as exc_info:
         await fetch_column_values(
             db,
             source_ref="crm.lead_record",
-            column="raw_payload",  # not in allowed_filter_columns
+            column="raw_payload",  # infra col — not in live field set
             tenant_id=uuid.uuid4(),
             app_id="inside-sales",
             q=None,
@@ -161,7 +177,6 @@ async def test_invalid_column_identifier_raises_400():
     from app.services.orchestration.api.source_catalog import fetch_column_values
 
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([])
 
     with pytest.raises(HTTPException) as exc_info:
         await fetch_column_values(
@@ -183,7 +198,12 @@ async def test_fetch_column_values_tenant_predicate_present():
 
     tenant_id = uuid.uuid4()
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([("active",), ("pending",)])
+    # prospect_stage is a JSONB key — needs 3 calls: info_schema, jsonb_keys, values
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult([("active",), ("pending",)]),
+    ]
 
     await fetch_column_values(
         db,
@@ -196,6 +216,7 @@ async def test_fetch_column_values_tenant_predicate_present():
     )
 
     assert db.execute.called
+    # The values query is the last call
     call_args = db.execute.call_args
     params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
 
@@ -212,7 +233,11 @@ async def test_fetch_column_values_ilike_applied_when_q_given():
     from app.services.orchestration.api.source_catalog import fetch_column_values
 
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([("Active",)])
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult([("Active",)]),
+    ]
 
     await fetch_column_values(
         db,
@@ -239,7 +264,11 @@ async def test_fetch_column_values_no_ilike_when_q_empty():
     from app.services.orchestration.api.source_catalog import fetch_column_values
 
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([("Active",)])
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult([("Active",)]),
+    ]
 
     await fetch_column_values(
         db,
@@ -262,7 +291,11 @@ async def test_fetch_column_values_limit_capped_at_50():
     from app.services.orchestration.api.source_catalog import fetch_column_values
 
     db = AsyncMock()
-    db.execute.return_value = _FakeResult([])
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult([]),
+    ]
 
     await fetch_column_values(
         db,
@@ -286,7 +319,11 @@ async def test_fetch_column_values_has_more_true_when_results_equal_limit():
 
     rows = [(f"val{i}",) for i in range(5)]
     db = AsyncMock()
-    db.execute.return_value = _FakeResult(rows)
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult(rows),
+    ]
 
     result = await fetch_column_values(
         db,
@@ -309,7 +346,11 @@ async def test_fetch_column_values_has_more_false_when_results_under_limit():
 
     rows = [("active",), ("pending",)]
     db = AsyncMock()
-    db.execute.return_value = _FakeResult(rows)
+    db.execute.side_effect = [
+        _FakeResult(_CRM_INFO_SCHEMA),
+        _FakeResult(_CRM_JSONB_KEYS),
+        _FakeResult(rows),
+    ]
 
     result = await fetch_column_values(
         db,

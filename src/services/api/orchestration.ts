@@ -316,16 +316,18 @@ export async function fetchCohortSources(params?: {
 export async function fetchCohortColumnValues(params: {
   sourceRef: string;
   column: string;
+  appId: string;
   q?: string;
   limit?: number;
 }): Promise<{ values: string[]; hasMore: boolean }> {
-  const { sourceRef, column, q, limit } = params;
+  const { sourceRef, column, appId, q, limit } = params;
   const search = new URLSearchParams();
+  search.set('appId', appId);
   if (q) search.set('q', q);
   if (limit != null) search.set('limit', String(limit));
   const qs = search.toString();
   return apiRequest<{ values: string[]; hasMore: boolean }>(
-    `/api/orchestration/source_catalog/${encodeURIComponent(sourceRef)}/columns/${encodeURIComponent(column)}/values${qs ? `?${qs}` : ''}`,
+    `/api/orchestration/source_catalog/${encodeURIComponent(sourceRef)}/columns/${encodeURIComponent(column)}/values?${qs}`,
   );
 }
 

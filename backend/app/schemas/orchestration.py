@@ -492,6 +492,8 @@ class CohortSourceResponse(CamelModel):
     allowed_payload_columns: list[str] = Field(default_factory=list)
     allowed_filter_columns: list[str] = Field(default_factory=list)
     allowed_lookback_columns: list[str] = Field(default_factory=list)
+    # Live-derived JSONB key names from raw_payload — serialized as jsonbKeys.
+    jsonb_keys: list[str] = Field(default_factory=list)
     schema_descriptor: Optional[dict[str, Any]] = None
     row_count: Optional[int] = None
     imported_at: Optional[datetime] = None

@@ -69,6 +69,8 @@ interface FilterRowProps {
   /** When present (inline mode), drives operator narrowing + smart value control. */
   columnTypes?: Record<string, CohortColumnType>;
   sourceRef?: string;
+  /** App ID required by the column-values endpoint — disables typeahead when absent. */
+  appId?: string;
   onUpdate: (index: number, patch: Partial<CohortFilter>) => void;
   onRemove: (index: number) => void;
 }
@@ -80,6 +82,7 @@ function FilterRow({
   columnOptions,
   columnTypes,
   sourceRef,
+  appId,
   onUpdate,
   onRemove,
 }: FilterRowProps) {
@@ -124,10 +127,11 @@ function FilterRow({
     });
   }
 
-  // Async combobox for string column values — only fires when isTyped + column set.
+  // Async combobox for string column values — only fires when isTyped + column + appId set.
   const { options: asyncOptions, loading: asyncLoading, onSearchChange } = useCohortColumnValues(
     isTyped && colType === 'string' ? sourceRef : null,
     isTyped && colType === 'string' && f.column ? f.column : null,
+    appId ?? null,
   );
 
   // ─── Value control rendering ─────────────────────────────────────────────
@@ -296,9 +300,11 @@ interface Props {
   columnTypes?: Record<string, CohortColumnType>;
   /** Source reference passed to the column-values endpoint. */
   sourceRef?: string;
+  /** App ID required by the column-values endpoint. */
+  appId?: string;
 }
 
-export function CohortFiltersEditor({ value, onChange, disabled, columnOptions, columnTypes, sourceRef }: Props) {
+export function CohortFiltersEditor({ value, onChange, disabled, columnOptions, columnTypes, sourceRef, appId }: Props) {
   function updateFilter(index: number, patch: Partial<CohortFilter>) {
     const next = [...value];
     next[index] = { ...next[index], ...patch };
@@ -329,6 +335,7 @@ export function CohortFiltersEditor({ value, onChange, disabled, columnOptions, 
           columnOptions={columnOptions}
           columnTypes={columnTypes}
           sourceRef={sourceRef}
+          appId={appId}
           onUpdate={updateFilter}
           onRemove={removeFilter}
         />

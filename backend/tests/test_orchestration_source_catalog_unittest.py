@@ -41,9 +41,9 @@ def test_seeded_refs_present():
 def test_get_source_returns_canonical_table():
     s = get_source("crm.lead_record")
     assert s.schema_qualified_table == "analytics.crm_lead_record"
-    assert s.id_column == "prospect_id"
-    assert "first_name" in s.allowed_payload_columns
-    assert "prospect_stage" in s.allowed_filter_columns
+    # lead_id is the real column post-Alembic-0043; prospect_id lives in raw_payload
+    assert s.id_column == "lead_id"
+    # Curation hint lists are intentionally empty — live field set is derived at request time
     assert "created_on" in s.allowed_lookback_columns
 
 
