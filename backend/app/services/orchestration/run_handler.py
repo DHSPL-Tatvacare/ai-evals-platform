@@ -236,14 +236,16 @@ async def _execute_source_nodes(executor: RunExecutor) -> None:
         handler = resolve_handler(workflow_type=executor.workflow.workflow_type, node_type=node["type"])
         config = handler.config_schema(**(node.get("config") or {}))
         node_step_id = uuid.uuid4()
+        started = datetime.now(timezone.utc)
         step = WorkflowRunNodeStep(
             id=node_step_id,
             tenant_id=executor.run.tenant_id, app_id=executor.run.app_id,
             workflow_id=executor.workflow.id, workflow_version_id=executor.version.id,
             run_id=executor.run.id, node_id=node["id"], node_type=node["type"],
             status="running", inputs_summary={"cohort_size": 0},
-            started_at=datetime.now(timezone.utc),
+            started_at=started,
         )
+        executor._step_started[node_step_id] = started
         executor.db.add(step)
         await executor.db.flush()
 
@@ -259,6 +261,20 @@ async def _execute_source_nodes(executor: RunExecutor) -> None:
         )
         empty_cohort = CohortStream([])
         result: NodeResult = await handler.execute(empty_cohort, config, ctx)
+
+        # Source steps are roots; stamp them as the routing parent for the
+        # recipients they just seeded into downstream nodes (audit lineage).
+        downstream = {t for outs in executor._edge_index.get(node["id"], {}).values() for t in outs}
+        if downstream:
+            seeded = await executor.db.execute(
+                select(WorkflowRunRecipientState.recipient_id).where(
+                    WorkflowRunRecipientState.run_id == executor.run.id,
+                    WorkflowRunRecipientState.status == "ready",
+                    WorkflowRunRecipientState.current_node_id.in_(downstream),
+                )
+            )
+            executor.record_source_routing(node_step_id, [r for (r,) in seeded.all()])
+
         step.status = "completed"
         step.outputs_summary = {"summary": result.summary, "suspended": result.suspended}
         step.completed_at = datetime.now(timezone.utc)

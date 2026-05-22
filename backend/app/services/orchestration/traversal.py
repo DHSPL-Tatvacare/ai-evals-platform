@@ -70,6 +70,23 @@ class RunExecutor:
             output_id = e.get("output_id") or e.get("label") or "default"
             self._edge_index[e["source"]][output_id].append(e["target"])
 
+        # recipient_id -> step that last routed it into its current node (audit lineage).
+        self._routed_by: dict[str, uuid.UUID] = {}
+        # step id -> started_at, so fan-in can pick the most-recent parent without a re-read.
+        self._step_started: dict[uuid.UUID, datetime] = {}
+
+    def record_source_routing(self, step_id: uuid.UUID, recipient_ids: list[str]) -> None:
+        """Stamp a source step as the routing parent for the recipients it seeds (run_handler entry)."""
+        for rid in recipient_ids:
+            self._routed_by[rid] = step_id
+
+    def _pick_parent_step(self, recipient_ids: list[str]) -> Optional[uuid.UUID]:
+        """Parent = the step that routed this wave here. Fan-in: most-recent step (lossy)."""
+        candidates = {self._routed_by[rid] for rid in recipient_ids if rid in self._routed_by}
+        if not candidates:
+            return None
+        return max(candidates, key=lambda sid: self._step_started.get(sid, datetime.min.replace(tzinfo=timezone.utc)))
+
     async def run_until_quiescent(self, max_iterations: int = 1000) -> None:
         """Loop until no recipients are in 'ready' status. Safety bound to prevent infinite loops."""
         for _ in range(max_iterations):
@@ -113,6 +130,7 @@ class RunExecutor:
 
         node_step_id = uuid.uuid4()
         started = datetime.now(timezone.utc)
+        parent_step_id = self._pick_parent_step([r for r, _ in cohort_payloads])
         node_step = WorkflowRunNodeStep(
             id=node_step_id,
             tenant_id=self.run.tenant_id,
@@ -122,10 +140,12 @@ class RunExecutor:
             run_id=self.run.id,
             node_id=node_id,
             node_type=node["type"],
+            parent_node_step_id=parent_step_id,
             status="running",
             inputs_summary={"cohort_size": len(cohort_payloads)},
             started_at=started,
         )
+        self._step_started[node_step_id] = started
         self.db.add(node_step)
         await self.db.flush()
 
@@ -195,7 +215,7 @@ class RunExecutor:
             )
             raise
 
-        await self._advance_recipients(node_id, result, cohort_payloads)
+        await self._advance_recipients(node_id, node_step_id, result, cohort_payloads)
         node_step.status = "completed"
         node_step.outputs_summary = {
             "by_output_id": {
@@ -300,6 +320,7 @@ class RunExecutor:
     async def _advance_recipients(
         self,
         from_node_id: str,
+        from_node_step_id: uuid.UUID,
         result: NodeResult,
         cohort_payloads: list[tuple[str, dict[str, Any]]],
     ) -> None:
@@ -340,6 +361,7 @@ class RunExecutor:
                     )
                 else:
                     target = targets[0]
+                    self._routed_by[outcome.recipient_id] = from_node_step_id
                     update_values: dict[str, Any] = {
                         "status": "ready",
                         "current_node_id": target,

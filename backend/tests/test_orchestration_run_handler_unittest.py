@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.models.orchestration import (
     WorkflowRun,
+    WorkflowRunNodeStep,
     WorkflowRunRecipientState,
 )
 from app.services.orchestration.node_protocol import NodeResult
@@ -87,3 +88,37 @@ async def test_run_workflow_job_dispatches_source_then_terminal(db_session, seed
         select(WorkflowRun.status).where(WorkflowRun.id == run.id)
     )
     assert refreshed.scalar() == "completed"
+
+
+@pytest.mark.asyncio
+async def test_source_step_is_parent_of_first_traversal_step(db_session, seed_full_run):
+    """Source node step is a root (NULL parent); the first traversal step's parent is the source step."""
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    version.definition = {
+        "nodes": [
+            {"id": "n_entry", "type": "test.entry_seeder", "config": {}},
+            {"id": "n_term", "type": "test.term", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "n_entry", "target": "n_term", "label": "default"},
+        ],
+        "canvas": {},
+    }
+    await db_session.flush()
+
+    from app.services.orchestration.run_handler import run_workflow_job
+    result = await run_workflow_job(run.id, db_session)
+    assert result["status"] == "completed"
+
+    rows = await db_session.execute(
+        select(
+            WorkflowRunNodeStep.node_id,
+            WorkflowRunNodeStep.id,
+            WorkflowRunNodeStep.parent_node_step_id,
+        ).where(WorkflowRunNodeStep.run_id == run.id)
+    )
+    by_node = {n: (sid, parent) for n, sid, parent in rows.all()}
+    entry_id, entry_parent = by_node["n_entry"]
+    _term_id, term_parent = by_node["n_term"]
+    assert entry_parent is None
+    assert term_parent == entry_id

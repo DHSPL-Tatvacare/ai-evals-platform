@@ -74,6 +74,23 @@ class _TerminalPayloadHandler:
         return NodeResult(by_output_id={"default": outcomes})
 
 
+@register_node(workflow_type="*", node_type="test.split_by_parity")
+class _SplitByParityHandler:
+    """Routes recipients down 'even'/'odd' output edges by trailing digit parity."""
+    node_type = "test.split_by_parity"
+    config_schema = _NoopConfig
+    output_edges = ["even", "odd"]
+    category = "logic"
+
+    async def execute(self, input_cohort, config, ctx):
+        del config, ctx
+        buckets: dict[str, list] = {"even": [], "odd": []}
+        async for rid, _payload in input_cohort:
+            bucket = "even" if int(rid.rsplit("-", 1)[-1]) % 2 == 0 else "odd"
+            buckets[bucket].append(RecipientOutcome(recipient_id=rid))
+        return NodeResult(by_output_id=buckets)
+
+
 def _make_definition():
     return {
         "nodes": [
@@ -216,3 +233,123 @@ async def test_terminal_branch_merges_payload_delta_without_outgoing_edges(
     row = state.scalar_one()
     assert row.status == "completed"
     assert row.payload["final_note"] == "queued"
+
+
+async def _steps_by_node(db_session, run_id):
+    rows = await db_session.execute(
+        select(
+            WorkflowRunNodeStep.node_id,
+            WorkflowRunNodeStep.id,
+            WorkflowRunNodeStep.parent_node_step_id,
+        ).where(WorkflowRunNodeStep.run_id == run_id)
+    )
+    return {node_id: (sid, parent) for node_id, sid, parent in rows.all()}
+
+
+@pytest.mark.asyncio
+async def test_linear_run_stamps_parent_node_step_id(db_session, seed_full_run):
+    """A→B: step B.parent_node_step_id == step A.id; A is a root (NULL)."""
+    run, version, workflow, _entry_step, tenant_id, app_id = seed_full_run
+    version.definition = _make_definition()
+    await db_session.flush()
+
+    db_session.add(WorkflowRunRecipientState(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+        workflow_id=workflow.id, workflow_version_id=version.id,
+        run_id=run.id, recipient_id="r-1", current_node_id="n_entry",
+        status="ready", payload={},
+    ))
+    await db_session.flush()
+
+    executor = RunExecutor(db=db_session, run=run, version=version, workflow=workflow, job_id=None)
+    await executor.run_until_quiescent()
+
+    by_node = await _steps_by_node(db_session, run.id)
+    a_id, a_parent = by_node["n_entry"]
+    b_id, b_parent = by_node["n_b"]
+    assert a_parent is None
+    assert b_parent == a_id
+
+
+@pytest.mark.asyncio
+async def test_branch_run_stamps_each_child_parent_to_conditional(db_session, seed_full_run):
+    """A conditional fans recipients down two edges; each child step's parent == the conditional step."""
+    run, version, workflow, _entry_step, tenant_id, app_id = seed_full_run
+    version.definition = {
+        "nodes": [
+            {"id": "n_split", "type": "test.split_by_parity", "config": {}},
+            {"id": "n_even", "type": "test.terminal", "config": {}},
+            {"id": "n_odd", "type": "test.terminal", "config": {}},
+        ],
+        "edges": [
+            {"id": "e_even", "source": "n_split", "target": "n_even", "output_id": "even"},
+            {"id": "e_odd", "source": "n_split", "target": "n_odd", "output_id": "odd"},
+        ],
+        "canvas": {},
+    }
+    await db_session.flush()
+
+    for rid in ["r-2", "r-3"]:
+        db_session.add(WorkflowRunRecipientState(
+            id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+            workflow_id=workflow.id, workflow_version_id=version.id,
+            run_id=run.id, recipient_id=rid, current_node_id="n_split",
+            status="ready", payload={},
+        ))
+    await db_session.flush()
+
+    executor = RunExecutor(db=db_session, run=run, version=version, workflow=workflow, job_id=None)
+    await executor.run_until_quiescent()
+
+    by_node = await _steps_by_node(db_session, run.id)
+    split_id, split_parent = by_node["n_split"]
+    even_id, even_parent = by_node["n_even"]
+    odd_id, odd_parent = by_node["n_odd"]
+    assert split_parent is None
+    assert even_parent == split_id
+    assert odd_parent == split_id
+
+
+@pytest.mark.asyncio
+async def test_fan_in_stamps_most_recent_parent(db_session, seed_full_run):
+    """Two upstream nodes feed one merge node; the merge step records the most-recent parent (lossy)."""
+    run, version, workflow, _entry_step, tenant_id, app_id = seed_full_run
+    # n_a and n_b both route into n_merge along their own edges.
+    version.definition = {
+        "nodes": [
+            {"id": "n_a", "type": "test.passthrough", "config": {}},
+            {"id": "n_b", "type": "test.passthrough", "config": {}},
+            {"id": "n_merge", "type": "test.terminal", "config": {}},
+        ],
+        "edges": [
+            {"id": "e_a", "source": "n_a", "target": "n_merge", "output_id": "default"},
+            {"id": "e_b", "source": "n_b", "target": "n_merge", "output_id": "default"},
+        ],
+        "canvas": {},
+    }
+    await db_session.flush()
+
+    db_session.add(WorkflowRunRecipientState(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+        workflow_id=workflow.id, workflow_version_id=version.id,
+        run_id=run.id, recipient_id="ra-1", current_node_id="n_a",
+        status="ready", payload={},
+    ))
+    db_session.add(WorkflowRunRecipientState(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+        workflow_id=workflow.id, workflow_version_id=version.id,
+        run_id=run.id, recipient_id="rb-1", current_node_id="n_b",
+        status="ready", payload={},
+    ))
+    await db_session.flush()
+
+    executor = RunExecutor(db=db_session, run=run, version=version, workflow=workflow, job_id=None)
+    await executor.run_until_quiescent()
+
+    by_node = await _steps_by_node(db_session, run.id)
+    a_id, _ = by_node["n_a"]
+    b_id, _ = by_node["n_b"]
+    _merge_id, merge_parent = by_node["n_merge"]
+    # Fan-in rule (a): most-recent upstream step that routed this wave, never NULL when a parent is known, never fabricated.
+    assert merge_parent in {a_id, b_id}
+    assert merge_parent is not None
