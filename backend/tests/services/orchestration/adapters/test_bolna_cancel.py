@@ -17,10 +17,15 @@ def _connection(api_key: str = "tok", base_url: str = "https://api.bolna.ai"):
 
 
 def _action(execution_id: str | None = "exec-1", batch_id: str | None = None):
+    # One generic correlation contract: provider_correlation_id holds the
+    # send-time id (batch_id for batch mode, execution_id for single), and
+    # payload.mode — not a vendor column — distinguishes batch vs single.
+    if batch_id:
+        return SimpleNamespace(
+            id=uuid4(), provider_correlation_id=batch_id, payload={"mode": "batch"},
+        )
     return SimpleNamespace(
-        id=uuid4(),
-        bolna_execution_id=execution_id,
-        bolna_batch_id=batch_id,
+        id=uuid4(), provider_correlation_id=execution_id, payload={"mode": "single"},
     )
 
 

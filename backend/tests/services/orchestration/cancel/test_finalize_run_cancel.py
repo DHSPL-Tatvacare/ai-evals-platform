@@ -69,8 +69,10 @@ async def cancelled_run_with_bolna_actions(db_session, seed_full_run, monkeypatc
     await db_session.flush()
 
     batch_id = f"batch-{uuid.uuid4().hex[:8]}"
-    # In-flight Bolna calls: dispatch succeeded (status='success', queued at the
-    # provider) but no terminal webhook yet (provider_terminal=False).
+    # In-flight Bolna batch calls: dispatch succeeded (status='success', queued
+    # at the provider) but no terminal webhook yet (provider_terminal=False).
+    # Batch mode → provider_correlation_id == the shared batch_id, payload.mode
+    # == 'batch' (the one generic correlation contract; no vendor columns).
     for exec_id in ("e1", "e2"):
         db_session.add(
             WorkflowRunRecipientAction(
@@ -88,9 +90,8 @@ async def cancelled_run_with_bolna_actions(db_session, seed_full_run, monkeypatc
                 provider_status="queued",
                 provider_terminal=False,
                 idempotency_key=f"idem-{exec_id}-{uuid.uuid4().hex[:6]}",
-                bolna_execution_id=exec_id,
-                bolna_batch_id=batch_id,
-                payload={"contact": "+919876500000"},
+                provider_correlation_id=batch_id,
+                payload={"contact": "+919876500000", "mode": "batch"},
             )
         )
     # A call that already reached a terminal webhook must NOT be re-cancelled.
@@ -110,9 +111,8 @@ async def cancelled_run_with_bolna_actions(db_session, seed_full_run, monkeypatc
             provider_status="completed",
             provider_terminal=True,
             idempotency_key=f"idem-done-{uuid.uuid4().hex[:6]}",
-            bolna_execution_id="e-done",
-            bolna_batch_id=f"batch-other-{uuid.uuid4().hex[:6]}",
-            payload={"contact": "+919876500001"},
+            provider_correlation_id=f"batch-other-{uuid.uuid4().hex[:6]}",
+            payload={"contact": "+919876500001", "mode": "batch"},
         )
     )
     await db_session.flush()
