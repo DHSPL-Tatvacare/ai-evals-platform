@@ -6,9 +6,16 @@ from types import SimpleNamespace
 from sqlalchemy.dialects import postgresql
 
 from app.models.analytics_lead_facts import DimLead, FactLeadActivity  # noqa: E402
+from app.services.evaluators.selection.binding import (  # noqa: E402
+    _fact_lead_activity_call_predicates,
+    BindContext,
+)
+from app.services.evaluators.selection.spec import EvaluationSelectionSpec  # noqa: E402
 from app.services.inside_sales_dataset_resolver import InsideSalesCallFilters, InsideSalesLeadFilters  # noqa: E402
 from app.services.inside_sales_queries import (  # noqa: E402
     INSIDE_SALES_STALE_AFTER,
+    _build_call_filter_clauses,
+    build_call_activity_predicates,
     build_call_count_query,
     build_call_listing_query,
     build_lead_count_query,
@@ -26,6 +33,10 @@ def _compile(statement) -> str:
             compile_kwargs={"literal_binds": True},
         )
     )
+
+
+def _compile_clause(clause) -> str:
+    return str(clause.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
 
 def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
@@ -55,13 +66,14 @@ def test_build_call_listing_query_applies_sql_filters_ordering_and_pagination():
     assert "analytics.fact_lead_activity.tenant_id =" in sql
     assert "analytics.fact_lead_activity.app_id =" in sql
     assert "analytics.fact_lead_activity.activity_type = 'call'" in sql
-    assert "lower(analytics.fact_lead_activity.actor_label) IN ('agent amy', 'agent bob')" in sql
+    assert "regexp_replace(trim(lower(analytics.fact_lead_activity.actor_label)), " in sql
+    assert "IN ('agent amy', 'agent bob')" in sql
     assert "analytics.fact_lead_activity.lead_id ILIKE '%%pros-1%%'" in sql
-    assert "(analytics.fact_lead_activity.attributes ->> 'direction') = 'inbound'" in sql
+    assert "lower(analytics.fact_lead_activity.attributes ->> 'direction') = 'inbound'" in sql
     assert "lower(analytics.fact_lead_activity.attributes ->> 'status') = 'answered'" in sql
     assert "CAST(nullif(analytics.fact_lead_activity.attributes ->> 'duration_seconds', '') AS INTEGER) >= 30" in sql
     assert "CAST(nullif(analytics.fact_lead_activity.attributes ->> 'duration_seconds', '') AS INTEGER) <= 600" in sql
-    assert "(analytics.fact_lead_activity.attributes ->> 'has_recording') = 'true'" in sql
+    assert "nullif(analytics.fact_lead_activity.attributes ->> 'recording_url', '') IS NOT NULL" in sql
     assert "analytics.fact_lead_activity.source_event_code IN (21, 22)" in sql
     assert (
         "ORDER BY analytics.fact_lead_activity.occurred_at DESC NULLS LAST, "
@@ -124,8 +136,10 @@ def test_build_lead_listing_query_applies_filters_against_dim_columns():
     )
     sql = _compile(statement)
 
-    assert "lower(analytics.dim_lead.assigned_rep_label) IN ('agent amy')" in sql
-    assert "lower(analytics.dim_lead.latest_stage_observed) IN ('new lead', 'call back')" in sql
+    assert "regexp_replace(trim(lower(analytics.dim_lead.assigned_rep_label)), " in sql
+    assert "IN ('agent amy')" in sql
+    assert "regexp_replace(trim(lower(analytics.dim_lead.latest_stage_observed)), " in sql
+    assert "IN ('new lead', 'call back')" in sql
     assert "(analytics.dim_lead.attributes_at_first_seen ->> 'condition') ILIKE '%%diabetes%%'" in sql
     assert "(analytics.dim_lead.attributes_at_first_seen ->> 'condition') ILIKE '%%pcos%%'" in sql
     assert "analytics.dim_lead.city ILIKE '%%mumbai%%'" in sql
@@ -359,3 +373,106 @@ class InsideSalesFreshnessTests(unittest.IsolatedAsyncioTestCase):
         assert freshness['lastSyncedAt'] == completed_at
         assert freshness['syncInProgress'] is False
         assert freshness['stale'] is True
+
+
+# ── unified canonical call predicate builder ──────────────────────────────
+
+
+def _rep_clause(clauses) -> str:
+    for clause in clauses:
+        sql = _compile_clause(clause)
+        if "actor_label" in sql and "IN" in sql:
+            return sql
+    raise AssertionError("no rep clause found")
+
+
+def test_rep_filter_normalizes_column_side_to_match_trailing_space_rows():
+    # input "Madhu Priya" must match actor_label "Madhu Priya " (trailing space).
+    # The column side trims+lowers+collapses, not just lower().
+    clauses = build_call_activity_predicates(agents=("Madhu Priya",))
+    sql = _rep_clause(clauses)
+    assert "regexp_replace(trim(lower(analytics.fact_lead_activity.actor_label)), " in sql
+    assert "IN ('madhu priya')" in sql
+    # column side is not bare lower() — that's the bug we fixed.
+    assert sql != "lower(analytics.fact_lead_activity.actor_label) IN ('madhu priya')"
+
+
+def test_listing_and_selection_paths_produce_equivalent_call_predicates():
+    """Same logical filter → same compiled SQL for rep/direction/status/
+    has_recording/date clauses across the two formerly-forked paths."""
+    listing = _build_call_filter_clauses(
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        app_id="inside-sales",
+        filters=InsideSalesCallFilters(
+            agents=("Madhu Priya",),
+            direction="outbound",
+            status="Answered",
+            has_recording=True,
+            call_date_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            call_date_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        ),
+    )
+    selection = _fact_lead_activity_call_predicates(
+        BindContext(tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"), app_id="inside-sales"),
+        EvaluationSelectionSpec(
+            agents=("Madhu Priya",),
+            direction="outbound",
+            status="Answered",
+            has_recording="only",
+            call_date_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            call_date_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        ),
+    )
+    # listing carries the 3 tenant/app/type scoping clauses up front; drop them.
+    listing_shared = {_compile_clause(c) for c in listing[3:]}
+    selection_shared = {_compile_clause(c) for c in selection}
+    assert listing_shared == selection_shared
+
+
+def test_has_recording_only_pins_to_recording_url_is_not_null():
+    clauses = build_call_activity_predicates(has_recording="only")
+    sql = " | ".join(_compile_clause(c) for c in clauses)
+    assert "nullif(analytics.fact_lead_activity.attributes ->> 'recording_url', '') IS NOT NULL" in sql
+
+
+def test_has_recording_exclude_pins_to_recording_url_is_null():
+    clauses = build_call_activity_predicates(has_recording="exclude")
+    sql = " | ".join(_compile_clause(c) for c in clauses)
+    assert "nullif(analytics.fact_lead_activity.attributes ->> 'recording_url', '') IS NULL" in sql
+
+
+def test_call_date_range_builds_half_open_occurred_at_clauses():
+    clauses = build_call_activity_predicates(
+        date_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        date_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+    )
+    sql = " | ".join(_compile_clause(c) for c in clauses)
+    assert "analytics.fact_lead_activity.occurred_at >= '2026-04-01 00:00:00+00:00'" in sql
+    # half-open: < to + 1 day so the whole 'to' day is included.
+    assert "analytics.fact_lead_activity.occurred_at < '2026-05-01 00:00:00+00:00'" in sql
+
+
+def test_call_date_range_supports_from_only_and_to_only():
+    from_only = build_call_activity_predicates(date_from=datetime(2026, 4, 1, tzinfo=timezone.utc))
+    sql_from = " | ".join(_compile_clause(c) for c in from_only)
+    assert "occurred_at >=" in sql_from
+    assert "occurred_at <" not in sql_from
+
+    to_only = build_call_activity_predicates(date_to=datetime(2026, 4, 30, tzinfo=timezone.utc))
+    sql_to = " | ".join(_compile_clause(c) for c in to_only)
+    assert "occurred_at <" in sql_to
+    assert "occurred_at >=" not in sql_to
+
+
+def test_lead_created_date_range_builds_half_open_lsq_created_on_clauses():
+    statement = build_lead_count_query(
+        tenant_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+        app_id="inside-sales",
+        filters=InsideSalesLeadFilters(
+            lead_created_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            lead_created_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        ),
+    )
+    sql = _compile(statement)
+    assert "analytics.dim_lead.lsq_created_on >= '2026-04-01 00:00:00+00:00'" in sql
+    assert "analytics.dim_lead.lsq_created_on < '2026-05-01 00:00:00+00:00'" in sql

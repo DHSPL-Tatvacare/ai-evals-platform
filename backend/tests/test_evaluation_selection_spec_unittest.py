@@ -7,6 +7,7 @@ rule must produce a clear error rather than silently coercing.
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
@@ -80,6 +81,21 @@ class SpecValidationTests(unittest.TestCase):
         spec = EvaluationSelectionSpec()
         with self.assertRaises(ValidationError):
             spec.mode = "sample"  # type: ignore[misc]
+
+    def test_call_date_range_defaults_none_and_omitted_from_summary(self):
+        spec = EvaluationSelectionSpec()
+        self.assertIsNone(spec.call_date_from)
+        self.assertIsNone(spec.call_date_to)
+        self.assertNotIn("call_date_from", spec.predicate_summary())
+
+    def test_call_date_range_flows_into_predicate_summary(self):
+        spec = EvaluationSelectionSpec(
+            call_date_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            call_date_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        )
+        summary = spec.predicate_summary()
+        self.assertEqual(summary["call_date_from"], "2026-04-01T00:00:00+00:00")
+        self.assertEqual(summary["call_date_to"], "2026-04-30T00:00:00+00:00")
 
 
 if __name__ == "__main__":

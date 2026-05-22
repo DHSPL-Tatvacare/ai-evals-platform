@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import Integer as _SAInteger, Select, delete, func, or_, select
+from sqlalchemy import Integer as _SAInteger, ColumnElement, Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analytics_lead_facts import (
@@ -91,49 +91,119 @@ def _normalize_text_values(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def normalized_label_column(column: Any) -> Any:
+    """SQL expression mirroring ``_normalize_text_values`` on the column side.
+
+    Prod ``actor_label`` / ``assigned_rep_label`` / ``latest_stage_observed``
+    carry trailing/internal whitespace for many rows; the input is normalized
+    but the column was only ``lower()``, so dirty rows silently never matched.
+    Normalizing both sides identically is the fix."""
+    return func.regexp_replace(func.trim(func.lower(column)), r"\s+", " ", "g")
+
+
+_LeadIdMatch = Literal["substring", "exact"]
+_RecordingMode = Literal["any", "only", "exclude"]
+
+
+def build_call_activity_predicates(
+    *,
+    agents: tuple[str, ...] = (),
+    lead_ids: tuple[str, ...] = (),
+    direction: str | None = None,
+    status: str | None = None,
+    duration_min: int | None = None,
+    duration_max: int | None = None,
+    has_recording: _RecordingMode = "any",
+    event_codes: tuple[int, ...] = (),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    lead_id_match: _LeadIdMatch = "substring",
+) -> list[ColumnElement[Any]]:
+    """Canonical call-dimension predicates over ``fact_lead_activity``.
+
+    The single source of truth for call filtering shared by the listing path
+    and the eval-run selection path. Tenant / app / activity_type scoping stays
+    in the caller. ``lead_id_match`` is the only intentional per-caller knob:
+    interactive listing substring-matches, selection matches exact ids."""
+    attrs = FactLeadActivity.attributes
+    out: list[ColumnElement[Any]] = []
+
+    rep_names = _normalize_text_values(agents)
+    if rep_names:
+        out.append(normalized_label_column(FactLeadActivity.actor_label).in_(rep_names))
+
+    cleaned_lead_ids = tuple(lid.strip() for lid in lead_ids if lid and lid.strip())
+    if cleaned_lead_ids:
+        if lead_id_match == "exact":
+            out.append(FactLeadActivity.lead_id.in_(cleaned_lead_ids))
+        else:
+            out.append(
+                or_(*(FactLeadActivity.lead_id.ilike(f"%{lid}%") for lid in cleaned_lead_ids))
+            )
+
+    if direction is not None and direction.strip():
+        out.append(func.lower(_attr(attrs, "direction")) == direction.strip().lower())
+
+    if status is not None and status.strip():
+        out.append(func.lower(_attr(attrs, "status")) == status.strip().lower())
+
+    if duration_min is not None:
+        out.append(_attr_int(attrs, "duration_seconds") >= duration_min)
+
+    if duration_max is not None:
+        out.append(_attr_int(attrs, "duration_seconds") <= duration_max)
+
+    if has_recording == "only":
+        out.append(func.nullif(_attr(attrs, "recording_url"), "").isnot(None))
+    elif has_recording == "exclude":
+        out.append(func.nullif(_attr(attrs, "recording_url"), "").is_(None))
+
+    if event_codes:
+        out.append(FactLeadActivity.source_event_code.in_(event_codes))
+
+    out.extend(_occurred_at_range_clauses(date_from, date_to))
+
+    return out
+
+
+def _occurred_at_range_clauses(
+    date_from: datetime | None, date_to: datetime | None
+) -> list[ColumnElement[Any]]:
+    """Inclusive day range on ``occurred_at`` — half-open so the whole 'to' day counts."""
+    out: list[ColumnElement[Any]] = []
+    if date_from is not None:
+        out.append(FactLeadActivity.occurred_at >= date_from)
+    if date_to is not None:
+        out.append(FactLeadActivity.occurred_at < date_to + timedelta(days=1))
+    return out
+
+
 def _build_call_filter_clauses(
     *,
     tenant_id: uuid.UUID,
     app_id: str,
     filters: InsideSalesCallFilters,
 ) -> list[Any]:
-    attrs = FactLeadActivity.attributes
     clauses: list[Any] = [
         FactLeadActivity.tenant_id == tenant_id,
         FactLeadActivity.app_id == app_id,
         FactLeadActivity.activity_type == "call",
     ]
-
-    rep_names = _normalize_text_values(filters.agents)
-    if rep_names:
-        clauses.append(func.lower(FactLeadActivity.actor_label).in_(rep_names))
-
-    call_lead_ids = tuple(lid.strip() for lid in filters.lead_ids if lid.strip())
-    if call_lead_ids:
-        clauses.append(
-            or_(*(FactLeadActivity.lead_id.ilike(f"%{lid}%") for lid in call_lead_ids))
+    clauses.extend(
+        build_call_activity_predicates(
+            agents=filters.agents,
+            lead_ids=filters.lead_ids,
+            direction=filters.direction,
+            status=filters.status,
+            duration_min=filters.duration_min,
+            duration_max=filters.duration_max,
+            has_recording="only" if filters.has_recording is True else "any",
+            event_codes=filters.event_codes or (),
+            date_from=filters.call_date_from,
+            date_to=filters.call_date_to,
+            lead_id_match="substring",
         )
-
-    if filters.direction:
-        clauses.append(_attr(attrs, "direction") == filters.direction)
-
-    if filters.status:
-        clauses.append(
-            func.lower(_attr(attrs, "status")) == filters.status.strip().lower()
-        )
-
-    if filters.duration_min is not None:
-        clauses.append(_attr_int(attrs, "duration_seconds") >= filters.duration_min)
-
-    if filters.duration_max is not None:
-        clauses.append(_attr_int(attrs, "duration_seconds") <= filters.duration_max)
-
-    if filters.has_recording is True:
-        clauses.append(_attr(attrs, "has_recording") == "true")
-
-    if filters.event_codes:
-        clauses.append(FactLeadActivity.source_event_code.in_(filters.event_codes))
-
+    )
     return clauses
 
 
@@ -284,11 +354,11 @@ def _build_lead_filter_clauses(
 
     rep_names = _normalize_text_values(filters.agents)
     if rep_names:
-        clauses.append(func.lower(DimLead.assigned_rep_label).in_(rep_names))
+        clauses.append(normalized_label_column(DimLead.assigned_rep_label).in_(rep_names))
 
     stages = _normalize_text_values(filters.stage)
     if stages:
-        clauses.append(func.lower(DimLead.latest_stage_observed).in_(stages))
+        clauses.append(normalized_label_column(DimLead.latest_stage_observed).in_(stages))
 
     conditions = tuple(c.strip() for c in filters.condition if c.strip())
     if conditions:
@@ -338,6 +408,11 @@ def _build_lead_filter_clauses(
             )
         )
         clauses.append(DimLead.lead_id.in_(mql_subq))
+
+    if filters.lead_created_from is not None:
+        clauses.append(DimLead.lsq_created_on >= filters.lead_created_from)
+    if filters.lead_created_to is not None:
+        clauses.append(DimLead.lsq_created_on < filters.lead_created_to + timedelta(days=1))
 
     if filters.q:
         needle = filters.q.strip()

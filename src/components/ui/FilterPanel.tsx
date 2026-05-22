@@ -4,6 +4,7 @@ import { cn } from '@/utils';
 import { Button } from './Button';
 import { Select } from './Select';
 import { Combobox } from './Combobox';
+import { DateRangeField } from './DateRangeField';
 import { RightSlideOverShell } from './RightSlideOverShell';
 
 export type FilterControl =
@@ -178,21 +179,13 @@ function FilterControlInput({
       const fromVal = typeof values[fromKey] === 'string' ? (values[fromKey] as string) : '';
       const toVal = typeof values[toKey] === 'string' ? (values[toKey] as string) : '';
       return (
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={fromVal}
-            onChange={(e) => onChange({ [fromKey]: e.target.value })}
-            className={INPUT_CLASS}
-          />
-          <span className="text-[var(--text-muted)]">–</span>
-          <input
-            type="date"
-            value={toVal}
-            onChange={(e) => onChange({ [toKey]: e.target.value })}
-            className={INPUT_CLASS}
-          />
-        </div>
+        <DateRangeField
+          from={fromVal}
+          to={toVal}
+          onFromChange={(v) => onChange({ [fromKey]: v })}
+          onToChange={(v) => onChange({ [toKey]: v })}
+          inputClassName={INPUT_CLASS}
+        />
       );
     }
     case 'segmented': {

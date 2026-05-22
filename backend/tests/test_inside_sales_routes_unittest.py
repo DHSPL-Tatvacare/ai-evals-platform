@@ -256,6 +256,78 @@ async def test_get_collection_status_rejects_unknown_family():
 
 
 @pytest.mark.asyncio
+async def test_list_calls_parses_iso_date_params_into_filters():
+    """`/calls` parses YYYY-MM-DD date params into the call filters dataclass."""
+    auth = _auth()
+    db = _FakeSession()
+    captured: dict[str, Any] = {}
+
+    from types import SimpleNamespace
+
+    async def _fake_list(*_args, **kwargs):
+        captured["filters"] = kwargs["filters"]
+        return SimpleNamespace(records=[], total=0, page=1, page_size=50)
+
+    async def _fake_freshness(*_args, **_kwargs):
+        return {"lastSyncedAt": None, "syncInProgress": False, "stale": True}
+
+    async def _fake_mask(records, **_kwargs):
+        return records
+
+    with patch.object(inside_sales_routes, "list_calls_from_source", new=_fake_list), \
+        patch.object(inside_sales_routes, "get_collection_freshness", new=_fake_freshness), \
+        patch.object(inside_sales_routes, "mask_crm_pii", new=_fake_mask):
+        await inside_sales_routes.list_calls(
+            page=1,
+            page_size=50,
+            scope="page",
+            agents=None,
+            lead_id=None,
+            direction=None,
+            status=None,
+            duration_min=None,
+            duration_max=None,
+            has_recording=None,
+            event_codes=None,
+            call_date_from="2026-04-01",
+            call_date_to="2026-04-30",
+            auth=auth,
+            db=db,
+        )
+
+    filters = captured["filters"]
+    assert filters.call_date_from == datetime(2026, 4, 1)
+    assert filters.call_date_to == datetime(2026, 4, 30)
+
+
+@pytest.mark.asyncio
+async def test_list_calls_rejects_malformed_date_param():
+    import fastapi
+
+    auth = _auth()
+    db = _FakeSession()
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await inside_sales_routes.list_calls(
+            page=1,
+            page_size=50,
+            scope="page",
+            agents=None,
+            lead_id=None,
+            direction=None,
+            status=None,
+            duration_min=None,
+            duration_max=None,
+            has_recording=None,
+            event_codes=None,
+            call_date_from="04/01/2026",
+            call_date_to=None,
+            auth=auth,
+            db=db,
+        )
+    assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_refresh_collection_leads_family_omits_event_codes():
     auth = _auth()
     db = _FakeSession()

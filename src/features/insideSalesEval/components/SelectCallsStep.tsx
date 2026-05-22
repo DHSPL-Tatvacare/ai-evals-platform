@@ -25,6 +25,8 @@ export interface CallSelectionConfig {
   durationMax: string;
   hasRecording: boolean;
   eventCodes: string;
+  callDateFrom: string;
+  callDateTo: string;
   // Eval-specific modifiers
   selectionMode: 'all' | 'sample' | 'specific';
   sampleSize: number;
@@ -61,6 +63,8 @@ function activeFilterCount(config: CallSelectionConfig): number {
     config.durationMax,
     config.hasRecording ? 'y' : '',
     config.eventCodes,
+    config.callDateFrom,
+    config.callDateTo,
   ].filter(Boolean).length;
 }
 
@@ -92,6 +96,8 @@ export function SelectCallsStep({
     eventCodes: config.eventCodes,
     durationMin: config.durationMin,
     durationMax: config.durationMax,
+    callDateFrom: config.callDateFrom,
+    callDateTo: config.callDateTo,
   }), [
     config.agents,
     config.leadId,
@@ -101,6 +107,8 @@ export function SelectCallsStep({
     config.eventCodes,
     config.durationMin,
     config.durationMax,
+    config.callDateFrom,
+    config.callDateTo,
   ]);
 
   const handleFilterReset = useCallback(() => {
@@ -113,6 +121,8 @@ export function SelectCallsStep({
       durationMax: '',
       hasRecording: false,
       eventCodes: '',
+      callDateFrom: '',
+      callDateTo: '',
     });
   }, [onConfigChange]);
 
@@ -268,6 +278,12 @@ export function SelectCallsStep({
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
               Duration: {config.durationMin || '0'}s – {config.durationMax ? config.durationMax + 's' : '∞'}
               <button onClick={() => onConfigChange({ durationMin: '', durationMax: '' })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
+            </span>
+          )}
+          {(config.callDateFrom || config.callDateTo) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+              Call Date: {config.callDateFrom || '…'} – {config.callDateTo || '…'}
+              <button onClick={() => onConfigChange({ callDateFrom: '', callDateTo: '' })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-3 w-3" /></button>
             </span>
           )}
           {config.hasRecording && (

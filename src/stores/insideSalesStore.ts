@@ -26,6 +26,8 @@ function buildCallsFilterHash(filters: CallFilters, pageSize: number): string {
     filters.eventCodes ?? '',
     filters.durationMin ?? '',
     filters.durationMax ?? '',
+    filters.callDateFrom ?? '',
+    filters.callDateTo ?? '',
     pageSize,
   ].join('|');
 }
@@ -41,6 +43,8 @@ function buildLeadsFilterHash(filters: LeadFilters, pageSize: number): string {
     (filters.phone ?? []).join(','),
     (filters.planName ?? []).join(','),
     (filters.q ?? '').trim(),
+    filters.leadCreatedFrom ?? '',
+    filters.leadCreatedTo ?? '',
     pageSize,
   ].join('|');
 }
@@ -83,6 +87,8 @@ const DEFAULT_FILTERS: CallFilters = {
   eventCodes: '',
   durationMin: '',
   durationMax: '',
+  callDateFrom: '',
+  callDateTo: '',
 };
 
 export const useInsideSalesStore = create<InsideSalesState>((set, get) => ({
@@ -231,6 +237,8 @@ const DEFAULT_LEAD_FILTERS: LeadFilters = {
   phone: [],
   planName: [],
   q: '',
+  leadCreatedFrom: '',
+  leadCreatedTo: '',
 };
 
 interface LeadsState {

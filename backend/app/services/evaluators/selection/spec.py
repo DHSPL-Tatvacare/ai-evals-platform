@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -30,6 +31,8 @@ class EvaluationSelectionSpec(BaseModel):
     duration_min_seconds: int | None = None
     duration_max_seconds: int | None = None
     has_recording: RecordingMode = "any"
+    call_date_from: datetime | None = None
+    call_date_to: datetime | None = None
 
     # Mode + quantity
     mode: SelectionMode = "all"
@@ -89,6 +92,10 @@ class EvaluationSelectionSpec(BaseModel):
             out["duration_max_seconds"] = self.duration_max_seconds
         if self.has_recording != "any":
             out["has_recording"] = self.has_recording
+        if self.call_date_from is not None:
+            out["call_date_from"] = self.call_date_from.isoformat()
+        if self.call_date_to is not None:
+            out["call_date_to"] = self.call_date_to.isoformat()
         if self.mode == "sample":
             out["sample_size"] = self.sample_size
         if self.mode == "specific":

@@ -16,11 +16,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Integer as _SAInteger, ColumnElement, func, or_
+from sqlalchemy import ColumnElement, func
 
 from app.models.analytics_lead_facts import FactLeadActivity
 from app.services.evaluators.selection.record import EvaluableCall
 from app.services.evaluators.selection.spec import EvaluationSelectionSpec
+from app.services.inside_sales_queries import build_call_activity_predicates
 
 
 @dataclass(frozen=True)
@@ -56,17 +57,6 @@ class DatasetBinding:
     row_to_record: Callable[[Any], EvaluableCall]
 
 
-# ── helpers for the JSONB attribute bag ────────────────────────────────
-
-
-def _attr(column: Any, key: str) -> Any:
-    return column.op("->>")(key)
-
-
-def _attr_int(column: Any, key: str) -> Any:
-    return func.nullif(column.op("->>")(key), "").cast(_SAInteger)
-
-
 # ── concrete binding: analytics.fact_lead_activity rows where activity_type='call' ──
 
 
@@ -84,47 +74,19 @@ def _fact_lead_activity_call_predicates(
     ctx: BindContext,  # noqa: ARG001 — ctx unused; kept for signature uniformity
     spec: EvaluationSelectionSpec,
 ) -> list[ColumnElement[bool]]:
-    attrs = FactLeadActivity.attributes
-    out: list[ColumnElement[bool]] = []
-
-    if spec.agents:
-        normalized = tuple(
-            " ".join(a.strip().lower().split()) for a in spec.agents if a and a.strip()
-        )
-        if normalized:
-            out.append(func.lower(FactLeadActivity.actor_label).in_(normalized))
-
-    if spec.lead_ids:
-        cleaned = tuple(lid.strip() for lid in spec.lead_ids if lid and lid.strip())
-        if cleaned:
-            out.append(FactLeadActivity.lead_id.in_(cleaned))
-
-    if spec.direction is not None:
-        out.append(func.lower(_attr(attrs, "direction")) == spec.direction.lower())
-
-    if spec.status is not None and spec.status.strip():
-        out.append(func.lower(_attr(attrs, "status")) == spec.status.strip().lower())
-
-    if spec.event_codes:
-        out.append(FactLeadActivity.source_event_code.in_(spec.event_codes))
-
-    if spec.duration_min_seconds is not None:
-        out.append(_attr_int(attrs, "duration_seconds") >= spec.duration_min_seconds)
-    if spec.duration_max_seconds is not None:
-        out.append(_attr_int(attrs, "duration_seconds") <= spec.duration_max_seconds)
-
-    if spec.has_recording == "only":
-        out.append(_attr(attrs, "recording_url").isnot(None))
-        out.append(_attr(attrs, "recording_url") != "")
-    elif spec.has_recording == "exclude":
-        out.append(
-            or_(
-                _attr(attrs, "recording_url").is_(None),
-                _attr(attrs, "recording_url") == "",
-            )
-        )
-
-    return out
+    return build_call_activity_predicates(
+        agents=spec.agents,
+        lead_ids=spec.lead_ids,
+        direction=spec.direction,
+        status=spec.status,
+        duration_min=spec.duration_min_seconds,
+        duration_max=spec.duration_max_seconds,
+        has_recording=spec.has_recording,
+        event_codes=spec.event_codes,
+        date_from=spec.call_date_from,
+        date_to=spec.call_date_to,
+        lead_id_match="exact",
+    )
 
 
 def _fact_lead_activity_call_row_to_record(row: FactLeadActivity) -> EvaluableCall:

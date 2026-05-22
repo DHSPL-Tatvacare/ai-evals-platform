@@ -272,6 +272,63 @@ async def test_direction_is_case_insensitive(db_session, seed_tenant_user_app):
     await _cleanup(db_session, tenant_id=tenant_id, app_id=app_id)
 
 
+async def test_rep_filter_matches_trailing_space_rows(
+    db_session, seed_tenant_user_app
+):
+    """REGRESSION: prod actor_label carries a trailing space for many reps.
+    Clean input "Madhu Priya" must still match "Madhu Priya " — both sides
+    are trim+lower+collapse normalized now, not just lower() on the column."""
+    tenant_id, user_id, _ = seed_tenant_user_app
+    app_id = f"test-sel-{uuid.uuid4().hex[:8]}"
+    rows = await _seed_calls(db_session, tenant_id=tenant_id, app_id=app_id, count=2)
+    # Dirty the stored label: trailing space + mixed case.
+    rows[0].actor_label = "Madhu Priya "
+    rows[1].actor_label = "Someone Else"
+    await db_session.flush()
+    binding = get_binding("fact_lead_activity_call")
+
+    result = await resolve_selection(
+        db_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        binding=binding,
+        spec=EvaluationSelectionSpec(agents=("Madhu Priya",)),
+    )
+    assert result.diagnostics.selected == 1
+    assert result.records[0].rep_label == "Madhu Priya "
+    await _cleanup(db_session, tenant_id=tenant_id, app_id=app_id)
+
+
+async def test_call_date_range_filters_occurred_at_inclusive(
+    db_session, seed_tenant_user_app
+):
+    """call_date_to is inclusive of the whole 'to' day (half-open < to+1day)."""
+    tenant_id, user_id, _ = seed_tenant_user_app
+    app_id = f"test-sel-{uuid.uuid4().hex[:8]}"
+    rows = await _seed_calls(db_session, tenant_id=tenant_id, app_id=app_id, count=3)
+    rows[0].occurred_at = datetime(2026, 3, 31, 12, 0, tzinfo=timezone.utc)
+    rows[1].occurred_at = datetime(2026, 4, 30, 23, 59, tzinfo=timezone.utc)
+    rows[2].occurred_at = datetime(2026, 5, 1, 0, 1, tzinfo=timezone.utc)
+    await db_session.flush()
+    binding = get_binding("fact_lead_activity_call")
+
+    result = await resolve_selection(
+        db_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        binding=binding,
+        spec=EvaluationSelectionSpec(
+            call_date_from=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            call_date_to=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        ),
+    )
+    assert result.diagnostics.selected == 1
+    assert result.records[0].activity_id == rows[1].source_activity_id
+    await _cleanup(db_session, tenant_id=tenant_id, app_id=app_id)
+
+
 async def test_lead_id_filter_uses_exact_match_not_substring(
     db_session, seed_tenant_user_app
 ):

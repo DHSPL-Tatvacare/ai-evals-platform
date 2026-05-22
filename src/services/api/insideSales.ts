@@ -108,6 +108,9 @@ export interface CallFilters {
   eventCodes: string;
   durationMin: string;
   durationMax: string;
+  /** ISO YYYY-MM-DD; native date input emits this directly. */
+  callDateFrom: string;
+  callDateTo: string;
 }
 
 export interface LeadCallRecord {
@@ -184,6 +187,9 @@ export interface LeadFilters {
   /** Multi-select via the suggestions endpoint; CSV-joined on the wire. */
   planName: string[];
   q: string;
+  /** ISO YYYY-MM-DD; native date input emits this directly. */
+  leadCreatedFrom: string;
+  leadCreatedTo: string;
 }
 
 export type CallQueryScope = 'page' | 'all';
@@ -250,6 +256,8 @@ function buildCallSearchParams(
   if (filters.durationMin) params.set('duration_min', filters.durationMin);
   if (filters.durationMax) params.set('duration_max', filters.durationMax);
   if (filters.eventCodes) params.set('event_codes', filters.eventCodes);
+  if (filters.callDateFrom) params.set('call_date_from', filters.callDateFrom);
+  if (filters.callDateTo) params.set('call_date_to', filters.callDateTo);
 
   return params;
 }
@@ -290,6 +298,8 @@ export async function fetchLeads(
   if (filters.leadId && filters.leadId.length > 0) params.set('lead_id', filters.leadId.join(','));
   if (filters.phone && filters.phone.length > 0) params.set('phone', filters.phone.join(','));
   if (filters.planName && filters.planName.length > 0) params.set('plan_name', filters.planName.join(','));
+  if (filters.leadCreatedFrom) params.set('lead_created_from', filters.leadCreatedFrom);
+  if (filters.leadCreatedTo) params.set('lead_created_to', filters.leadCreatedTo);
   if (q) params.set('q', q);
 
   return apiRequest<LeadListResponse>(`/api/inside-sales/leads?${params.toString()}`);

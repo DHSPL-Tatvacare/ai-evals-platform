@@ -9,6 +9,7 @@ date-window or shadow-normalized contract anymore.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
 
@@ -41,6 +42,8 @@ class InsideSalesCallFilters:
     duration_max: int | None = None
     has_recording: bool | None = None
     event_codes: tuple[int, ...] | None = None
+    call_date_from: datetime | None = None
+    call_date_to: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -54,3 +57,5 @@ class InsideSalesLeadFilters:
     phones: tuple[str, ...] = ()
     plan_names: tuple[str, ...] = ()
     q: str | None = None
+    lead_created_from: datetime | None = None
+    lead_created_to: datetime | None = None

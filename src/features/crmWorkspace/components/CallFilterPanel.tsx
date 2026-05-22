@@ -8,7 +8,7 @@
 
 import { useId } from 'react';
 import { X } from 'lucide-react';
-import { Button, Combobox, RightSlideOverShell } from '@/components/ui';
+import { Button, Combobox, DateRangeField, RightSlideOverShell } from '@/components/ui';
 import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
@@ -206,6 +206,16 @@ function renderFilterControl(
             className={INPUT_CLASS}
           />
         </div>
+      );
+    case 'date-range':
+      return (
+        <DateRangeField
+          from={String(values[fields[0] as keyof typeof values] ?? '')}
+          to={String(values[fields[1] as keyof typeof values] ?? '')}
+          onFromChange={(value) => setPatch({ [fields[0]]: value })}
+          onToChange={(value) => setPatch({ [fields[1]]: value })}
+          inputClassName={INPUT_CLASS}
+        />
       );
     case 'toggle':
       return (

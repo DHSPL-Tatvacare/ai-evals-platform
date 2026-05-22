@@ -579,7 +579,7 @@ def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
         "preferredCallTime": raw.get("mx_Preferred_Time_for_Call_with_Health_Counsellor"),
         "rnrCount": int(raw.get("mx_RNR_Count") or 0),
         "answeredCount": int(raw.get("mx_Answered_Call_Count") or 0),
-        "agentName": raw.get("OwnerIdName"),
+        "agentName": " ".join((raw.get("OwnerIdName") or "").split()) or None,
         "createdOn": (raw.get("CreatedOn") or "").split(".")[0],
         "firstActivityOn": (raw.get("ProspectActivityDate_Min") or "").split(".")[0] or None,
         "lastActivityOn": (raw.get("ProspectActivityDate_Max") or "").split(".")[0] or None,
@@ -628,7 +628,9 @@ def normalize_activity(raw: dict[str, Any]) -> dict[str, Any]:
         "activityId": raw.get("ProspectActivityId", ""),
         "prospectId": raw.get("RelatedProspectId", ""),
         "agentId": raw.get("CreatedBy", ""),
-        "agentName": raw.get("CreatedByName", ""),
+        # Trim + collapse whitespace at the ingestion chokepoint; preserve case
+        # for display. LSQ rep names carry trailing spaces that broke filtering.
+        "agentName": " ".join((raw.get("CreatedByName") or "").split()),
         "agentEmail": raw.get("CreatedByEmailAddress", ""),
         "eventCode": event_code,
         "direction": "inbound" if event_code == 21 else "outbound",

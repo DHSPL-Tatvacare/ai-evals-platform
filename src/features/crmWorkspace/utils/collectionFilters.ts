@@ -84,6 +84,22 @@ function formatFilterValue(filter: AppCollectionFilterConfig, state: object): st
       }
       return null;
     }
+    case 'date-range': {
+      const fromValue = typeof primaryValue === 'string' ? primaryValue.trim() : '';
+      const toValue = typeof getValue(state, secondField) === 'string'
+        ? (getValue(state, secondField) as string).trim()
+        : '';
+      if (fromValue && toValue) {
+        return `${fromValue} – ${toValue}`;
+      }
+      if (fromValue) {
+        return `from ${fromValue}`;
+      }
+      if (toValue) {
+        return `until ${toValue}`;
+      }
+      return null;
+    }
     case 'toggle':
       return typeof primaryValue === 'boolean' && primaryValue ? filter.label : null;
     case 'text':
@@ -105,6 +121,7 @@ export function getFilterClearPatch(filter: AppCollectionFilterConfig): Record<s
     case 'toggle':
       return { [fields[0]]: false };
     case 'number-range':
+    case 'date-range':
       return Object.fromEntries(fields.map((field) => [field, '']));
     case 'segmented':
     case 'text':

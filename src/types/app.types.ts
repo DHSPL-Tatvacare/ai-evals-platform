@@ -155,6 +155,7 @@ export interface AppCollectionFilterConfig {
     | 'multi-select'
     | 'segmented'
     | 'number-range'
+    | 'date-range'
     | 'toggle'
     /** Multi-select backed by a server suggestions endpoint. */
     | 'async-multi-select';
@@ -910,6 +911,13 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         leads: {
           filters: [
             {
+              key: 'leadDateRange',
+              label: 'Created',
+              pillLabel: 'Created',
+              control: 'date-range',
+              fields: ['leadCreatedFrom', 'leadCreatedTo'],
+            },
+            {
               key: 'leadId',
               label: 'Lead ID',
               pillLabel: 'Lead',
@@ -994,6 +1002,13 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         calls: {
           filters: [
+            {
+              key: 'callDateRange',
+              label: 'Call Date',
+              pillLabel: 'Call Date',
+              control: 'date-range',
+              fields: ['callDateFrom', 'callDateTo'],
+            },
             {
               key: 'agents',
               label: 'Rep',

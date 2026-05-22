@@ -7,6 +7,8 @@ out to LSQ at request time. Operators control freshness via the scheduled
 ``sync-external-source`` job cadence.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,6 +80,18 @@ def _parse_csv_query(value: str | None) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
+def _parse_iso_date(value: str | None) -> datetime | None:
+    """Parse a ``YYYY-MM-DD`` filter param into a UTC midnight datetime."""
+    if not value or not value.strip():
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Date filters must be ISO YYYY-MM-DD"
+        ) from exc
+
+
 def _validate_source_family(source_family: str) -> str:
     family = source_family.strip().lower()
     if family not in {"calls", "leads"}:
@@ -98,6 +112,8 @@ async def list_calls(
     duration_max: int | None = Query(None, description="Max call duration in seconds (inclusive)"),
     has_recording: bool | None = Query(None, description="If true, only calls with a recording URL"),
     event_codes: str | None = Query(None, description="Comma-separated event codes"),
+    call_date_from: str | None = Query(None, description="Earliest call date, inclusive (YYYY-MM-DD)"),
+    call_date_to: str | None = Query(None, description="Latest call date, inclusive (YYYY-MM-DD)"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -121,6 +137,8 @@ async def list_calls(
             duration_max=duration_max,
             has_recording=has_recording,
             event_codes=tuple(int(code) for code in _parse_csv_query(event_codes)) or None,
+            call_date_from=_parse_iso_date(call_date_from),
+            call_date_to=_parse_iso_date(call_date_to),
         ),
         page=page,
         page_size=page_size,
@@ -205,6 +223,8 @@ async def list_leads(
     phone: str | None = Query(None, description="Comma-separated mobiles; digits-only compare per value"),
     plan_name: str | None = Query(None, description="Comma-separated plan names; each is substring-matched"),
     q: str | None = Query(None, description="Substring search across first name, last name, phone"),
+    lead_created_from: str | None = Query(None, description="Earliest lead-created date, inclusive (YYYY-MM-DD)"),
+    lead_created_to: str | None = Query(None, description="Latest lead-created date, inclusive (YYYY-MM-DD)"),
     auth: AuthContext = require_fixed_app_access('inside-sales'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -223,6 +243,8 @@ async def list_leads(
             phones=_parse_csv_query(phone),
             plan_names=_parse_csv_query(plan_name),
             q=q,
+            lead_created_from=_parse_iso_date(lead_created_from),
+            lead_created_to=_parse_iso_date(lead_created_to),
         ),
         page=page,
         page_size=page_size,

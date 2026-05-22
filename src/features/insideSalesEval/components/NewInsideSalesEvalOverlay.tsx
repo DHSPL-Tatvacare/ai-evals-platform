@@ -10,6 +10,7 @@ import { LLMConfigStep, type LLMConfig } from '@/features/evalRuns/components/LL
 import { ParallelConfigSection } from '@/features/evalRuns/components/ParallelConfigSection';
 import { ReviewStep, type ReviewSummary, type ReviewSection } from '@/features/evalRuns/components/ReviewStep';
 import { SelectCallsStep, type CallSelectionConfig } from './SelectCallsStep';
+import { buildInsideSalesSelection } from './buildInsideSalesSelection';
 import { TranscriptionConfigStep, type TranscriptionConfig } from './TranscriptionConfigStep';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
@@ -90,6 +91,8 @@ export function NewInsideSalesEvalOverlay({
       durationMax: f.durationMax ?? '',
       hasRecording: f.hasRecording ?? false,
       eventCodes: f.eventCodes ?? '',
+      callDateFrom: f.callDateFrom ?? '',
+      callDateTo: f.callDateTo ?? '',
       selectionMode: ids.length ? 'specific' : 'all',
       sampleSize: 20,
       selectedCallIds: ids,
@@ -194,6 +197,7 @@ export function NewInsideSalesEvalOverlay({
         ...(callConfig.direction ? [{ key: 'Direction', value: callConfig.direction }] : []),
         ...(callConfig.status ? [{ key: 'Status', value: callConfig.status === 'not answered' ? 'Missed' : 'Answered' }] : []),
         ...((callConfig.durationMin || callConfig.durationMax) ? [{ key: 'Duration', value: `${callConfig.durationMin || '0'}s – ${callConfig.durationMax ? callConfig.durationMax + 's' : '∞'}` }] : []),
+        ...((callConfig.callDateFrom || callConfig.callDateTo) ? [{ key: 'Call Date', value: `${callConfig.callDateFrom || '…'} – ${callConfig.callDateTo || '…'}` }] : []),
         ...(callConfig.hasRecording ? [{ key: 'Recording', value: 'Required' }] : []),
         ...(callConfig.eventCodes ? [{ key: 'Event Codes', value: callConfig.eventCodes }] : []),
       ],
@@ -226,40 +230,7 @@ export function NewInsideSalesEvalOverlay({
   ], [callConfig, callCount, transcriptionConfig, selectedEvaluatorIds, availableEvaluators, llmConfig, parallelEnabled, parallelWorkers]);
 
   const handleSubmit = useCallback(async () => {
-    // Build the EvaluationSelectionSpec the backend expects (Pydantic
-    // extra='forbid' — no legacy keys). Empty strings → null; the wizard's
-    // duration boxes are free-form text but the spec wants ints.
-    const parseDuration = (v: string): number | null => {
-      const n = parseInt(v, 10);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
-    const eventCodesList = callConfig.eventCodes
-      .split(',')
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((n) => Number.isFinite(n));
-    const hasRecordingMode: 'only' | 'any' = callConfig.hasRecording ? 'only' : 'any';
-    // Floor toggle ⇒ effective duration_min_seconds = 10 unless the user
-    // already set a higher explicit floor.
-    const explicitMin = parseDuration(callConfig.durationMin);
-    const effectiveDurationMin = callConfig.minDuration
-      ? Math.max(10, explicitMin ?? 10)
-      : explicitMin;
-
-    const selection = {
-      agents: callConfig.agents,
-      lead_ids: callConfig.leadId,
-      direction: (callConfig.direction || null) as 'inbound' | 'outbound' | null,
-      status: callConfig.status || null,
-      event_codes: eventCodesList,
-      duration_min_seconds: effectiveDurationMin,
-      duration_max_seconds: parseDuration(callConfig.durationMax),
-      has_recording: hasRecordingMode,
-      mode: callConfig.selectionMode,
-      sample_size: callConfig.selectionMode === 'sample' ? callConfig.sampleSize : null,
-      selected_ids: callConfig.selectionMode === 'specific' ? callConfig.selectedCallIds : [],
-      skip_evaluated: callConfig.skipEvaluated,
-      skip_evaluated_scope: 'self' as const,
-    };
+    const selection = buildInsideSalesSelection(callConfig);
 
     await submitJob('evaluate-inside-sales', {
       app_id: 'inside-sales',
