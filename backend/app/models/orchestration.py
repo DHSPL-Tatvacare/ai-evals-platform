@@ -144,6 +144,14 @@ class WorkflowTrigger(Base):
             "active",
         ),
         Index("idx_workflow_triggers_workflow_active", "workflow_id", "active"),
+        # Real DB-side uniqueness on webhook_token is a partial index
+        # (WHERE webhook_token IS NOT NULL) owned by migration 0077. The plain
+        # Index below mirrors the column for ORM metadata only.
+        Index(
+            "uq_workflow_triggers_webhook_token_orm",
+            "webhook_token",
+            unique=False,
+        ),
         {"schema": "orchestration"},
     )
 
@@ -164,6 +172,13 @@ class WorkflowTrigger(Base):
         ForeignKey("platform.scheduled_job_definitions.id", ondelete="SET NULL"),
     )
     event_name: Mapped[Optional[str]] = mapped_column(String(64))
+    # Per-trigger inbound webhook token (Model A): one token resolves exactly
+    # one trigger → one workflow + tenant. Generated for event triggers.
+    webhook_token: Mapped[Optional[str]] = mapped_column(String(64))
+    # Event-source vendor whose native payload this trigger ingests.
+    vendor: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="webhook", server_default=text("'webhook'")
+    )
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
@@ -173,6 +188,37 @@ class WorkflowTrigger(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class EventIngestLog(Base):
+    """Replay-dedupe ledger — one row per (trigger, vendor ingest id).
+
+    A CRM retry of an already-ingested event resolves the existing row and
+    returns the prior run ids instead of creating a second run. The unique
+    index on (trigger_id, ingest_key) is the idempotency guard.
+    """
+    __tablename__ = "event_ingest_log"
+    __table_args__ = (
+        UniqueConstraint(
+            "trigger_id", "ingest_key", name="uq_event_ingest_log_trigger_key",
+        ),
+        Index("idx_event_ingest_log_tenant_created", "tenant_id", "created_at"),
+        {"schema": "orchestration"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform.tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    trigger_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration.workflow_triggers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ingest_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    run_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class WorkflowActionTemplate(Base):

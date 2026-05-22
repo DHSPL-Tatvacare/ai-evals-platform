@@ -209,6 +209,8 @@ class TriggerCreateRequest(CamelModel):
     kind: TriggerKind
     cron_expression: Optional[str] = None
     event_name: Optional[str] = None
+    # Event-source vendor whose native payload this trigger ingests.
+    vendor: str = "webhook"
     params: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
 
@@ -233,17 +235,32 @@ class TriggerUpdateRequest(CamelModel):
         return self
 
 
-class TriggerResponse(CamelORMModel):
+class TriggerResponse(CamelModel):
     id: uuid.UUID
     workflow_id: uuid.UUID
     kind: str
     cron_expression: Optional[str]
     event_name: Optional[str]
+    vendor: str
     scheduled_job_id: Optional[uuid.UUID]
     params: dict[str, Any]
     active: bool
+    # Token is never returned in the clear on reads — only masked. The full
+    # token rides webhook_url, returned at create / on rotate.
+    webhook_token_masked: str
+    webhook_url: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+class TriggerRotateTokenResponse(CamelModel):
+    webhook_url: Optional[str]
+    webhook_token_masked: str
+
+
+class EventCatalogResponse(CamelModel):
+    workflow_type: str
+    events: list[str]
 
 
 # ─── Action Templates ────────────────────────────────────────────────────────

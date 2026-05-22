@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.orchestration.adapters.canonical import (
+    CanonicalEventBatch,
+    CanonicalEventRecipient,
     CanonicalMessagingEvent,
     CanonicalSendRequest,
     CanonicalSendResponse,
@@ -12,6 +14,7 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalVoiceResponse,
 )
 from app.services.orchestration.adapters.protocol import (
+    EventSourceAdapter,
     MessagingAdapter,
     VoiceAdapter,
 )
@@ -54,12 +57,15 @@ def capability_for_vendor(vendor: str) -> str | None:
 
 __all__ = [
     "AdapterNotRegisteredError",
+    "CanonicalEventBatch",
+    "CanonicalEventRecipient",
     "CanonicalMessagingEvent",
     "CanonicalSendRequest",
     "CanonicalSendResponse",
     "CanonicalVoiceEvent",
     "CanonicalVoiceRequest",
     "CanonicalVoiceResponse",
+    "EventSourceAdapter",
     "MessagingAdapter",
     "VoiceAdapter",
     "capability_for_vendor",
@@ -76,3 +82,7 @@ __all__ = [
 from app.services.orchestration.adapters import aisensy as _aisensy  # noqa: E402,F401
 from app.services.orchestration.adapters import bolna as _bolna  # noqa: E402,F401
 from app.services.orchestration.adapters import wati as _wati  # noqa: E402,F401
+from app.services.orchestration.adapters.event_source import frappe as _es_frappe  # noqa: E402,F401
+from app.services.orchestration.adapters.event_source import lsq as _es_lsq  # noqa: E402,F401
+from app.services.orchestration.adapters.event_source import mytatva as _es_mytatva  # noqa: E402,F401
+from app.services.orchestration.adapters.event_source import webhook as _es_webhook  # noqa: E402,F401

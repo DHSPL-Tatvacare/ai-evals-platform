@@ -33,6 +33,8 @@ EXPECTED_TABLES = {
     # Saved cohort definitions (cohorts-P1).
     "cohort_definitions",
     "cohort_definition_versions",
+    # Event-trigger replay-dedupe ledger.
+    "event_ingest_log",
 }
 
 
@@ -136,6 +138,8 @@ async def test_cross_schema_fks_to_platform(db_session):
         # rows-table denormalization chain).
         "cohort_definitions",
         "cohort_definition_versions",
+        # Event-trigger replay-dedupe ledger.
+        "event_ingest_log",
     }
     assert set(tenant_fks) == expected_fk_tables, (
         f"tenant_id FK targets mismatch. expected={expected_fk_tables}, got={set(tenant_fks)}"

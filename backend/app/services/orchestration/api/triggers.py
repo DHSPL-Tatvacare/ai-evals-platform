@@ -24,10 +24,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.orchestration import Workflow, WorkflowTrigger
 from app.models.scheduled_job import ScheduledJobDefinition
+from app.services.audit import write_audit_log
 from app.services.scheduler.engine import next_cron_tick, validate_cron_expression
+from app.utils.secret_masking import mask_secret_value
+from app.utils.webhook_token import generate_webhook_token
 
 
 _TRIGGER_SCHEDULE_KEY_PREFIX = "orchestration:trigger:"
+_EVENT_WEBHOOK_PATH_PREFIX = "/api/orchestration/webhooks/event"
+_TRIGGER_ENTITY_TYPE = "workflow_trigger"
+
+
+def _compose_event_webhook_url(
+    *, vendor: str, token: Optional[str], base_url: str,
+) -> Optional[str]:
+    """``{base}/api/orchestration/webhooks/event/{vendor}/{token}``; None without a token."""
+    if not token:
+        return None
+    path = f"{_EVENT_WEBHOOK_PATH_PREFIX}/{vendor}/{token}"
+    return f"{base_url.rstrip('/')}{path}" if base_url else path
+
+
+def serialize_trigger(trigger: WorkflowTrigger, *, base_url: str = "") -> dict[str, Any]:
+    """Trigger view with the token MASKED. The full token only ever rides the
+    composed ``webhook_url`` (returned at create / on explicit rotate)."""
+    return {
+        "id": trigger.id,
+        "workflow_id": trigger.workflow_id,
+        "kind": trigger.kind,
+        "cron_expression": trigger.cron_expression,
+        "event_name": trigger.event_name,
+        "vendor": trigger.vendor,
+        "scheduled_job_id": trigger.scheduled_job_id,
+        "params": trigger.params,
+        "active": trigger.active,
+        "webhook_token_masked": mask_secret_value(trigger.webhook_token),
+        "webhook_url": _compose_event_webhook_url(
+            vendor=trigger.vendor, token=trigger.webhook_token, base_url=base_url,
+        ),
+        "created_at": trigger.created_at,
+        "updated_at": trigger.updated_at,
+    }
 
 
 def _schedule_key_for_trigger(trigger_id: uuid.UUID) -> str:
@@ -77,6 +114,7 @@ async def create_trigger(
     params: dict[str, Any],
     active: bool,
     created_by: uuid.UUID,
+    vendor: str = "webhook",
 ) -> Optional[WorkflowTrigger]:
     wf = (await db.execute(
         select(Workflow).where(Workflow.id == workflow_id, Workflow.tenant_id == tenant_id)
@@ -87,6 +125,9 @@ async def create_trigger(
     if kind == "cron":
         validate_cron_expression(cron_expression or "")
 
+    # Event triggers get a unique inbound token (Model A); other kinds do not.
+    webhook_token = generate_webhook_token() if kind == "event" else None
+
     trigger = WorkflowTrigger(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -95,6 +136,8 @@ async def create_trigger(
         kind=kind,
         cron_expression=cron_expression,
         event_name=event_name,
+        vendor=vendor,
+        webhook_token=webhook_token,
         params=params,
         active=active,
         created_by=created_by,
@@ -112,6 +155,16 @@ async def create_trigger(
             cron_expression=cron_expression or "",
             created_by=created_by,
         )
+
+    await write_audit_log(
+        db,
+        tenant_id=tenant_id,
+        actor_id=created_by,
+        action="orchestration.trigger.create",
+        entity_type=_TRIGGER_ENTITY_TYPE,
+        entity_id=trigger.id,
+        after_state={"kind": kind, "vendor": vendor, "event_name": event_name},
+    )
 
     await db.commit()
     await db.refresh(trigger)
@@ -209,8 +262,47 @@ async def update_trigger(
     return trig
 
 
+async def rotate_trigger_token(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    trigger_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    base_url: str = "",
+) -> dict[str, Any]:
+    """Mint a fresh webhook token for an event trigger and audit the rotation."""
+    trig = (await db.execute(
+        select(WorkflowTrigger).where(
+            WorkflowTrigger.id == trigger_id,
+            WorkflowTrigger.tenant_id == tenant_id,
+        )
+    )).scalar_one_or_none()
+    if trig is None:
+        raise ValueError("trigger not found")
+    if trig.kind != "event":
+        raise ValueError("only event triggers carry a webhook token")
+    trig.webhook_token = generate_webhook_token()
+    await write_audit_log(
+        db,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        action="orchestration.trigger.rotate_token",
+        entity_type=_TRIGGER_ENTITY_TYPE,
+        entity_id=trig.id,
+    )
+    await db.commit()
+    await db.refresh(trig)
+    return {
+        "webhook_url": _compose_event_webhook_url(
+            vendor=trig.vendor, token=trig.webhook_token, base_url=base_url,
+        ),
+        "webhook_token_masked": mask_secret_value(trig.webhook_token),
+    }
+
+
 async def delete_trigger(
     db: AsyncSession, *, tenant_id: uuid.UUID, trigger_id: uuid.UUID,
+    actor_id: Optional[uuid.UUID] = None,
 ) -> bool:
     trig = (await db.execute(
         select(WorkflowTrigger).where(
@@ -220,6 +312,16 @@ async def delete_trigger(
     )).scalar_one_or_none()
     if trig is None:
         return False
+    if actor_id is not None:
+        await write_audit_log(
+            db,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action="orchestration.trigger.delete",
+            entity_type=_TRIGGER_ENTITY_TYPE,
+            entity_id=trig.id,
+            before_state={"kind": trig.kind, "vendor": trig.vendor},
+        )
     if trig.scheduled_job_id is not None:
         sched = (await db.execute(
             select(ScheduledJobDefinition).where(

@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ from app.schemas.orchestration import (
     ColumnValuesResponse,
     ConsentResponse,
     ConsentSetRequest,
+    EventCatalogResponse,
     NodeTypeDescriptor,
     OverrideRequest,
     OverrideResponse,
@@ -48,6 +49,7 @@ from app.schemas.orchestration import (
     TriggerCreateRequest,
     TriggerUpdateRequest,
     TriggerResponse,
+    TriggerRotateTokenResponse,
     WorkflowActionGlobalRow,
     WorkflowActionListResponse,
     WorkflowCreateRequest,
@@ -454,7 +456,34 @@ async def publish_draft(
     return v
 
 
+# ─── Event catalog ────────────────────────────────────────────────────────────
+
+
+@router.get("/event-catalog", response_model=EventCatalogResponse)
+async def get_event_catalog(
+    workflow_type: str = Query(..., alias="workflowType"),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Canonical event names for the event-trigger combobox, gated by workflow_type.
+
+    Keys are lowercase ``crm`` / ``clinical``; any other value (including
+    uppercase) returns an empty list."""
+    from app.services.orchestration.event_catalog import catalog_for_workflow_type
+
+    return EventCatalogResponse(
+        workflow_type=workflow_type,
+        events=catalog_for_workflow_type(workflow_type),
+    )
+
+
 # ─── Triggers ───────────────────────────────────────────────────────────────
+
+
+def _trigger_view(trig, request: Request) -> TriggerResponse:
+    from app.services.orchestration.api.connections import resolve_base_url
+
+    base_url = resolve_base_url(request.headers.get("origin"))
+    return TriggerResponse(**trig_service.serialize_trigger(trig, base_url=base_url))
 
 
 @router.post(
@@ -465,6 +494,7 @@ async def publish_draft(
 async def create_trigger(
     workflow_id: uuid.UUID,
     body: TriggerCreateRequest,
+    request: Request,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -473,14 +503,15 @@ async def create_trigger(
         trig = await trig_service.create_trigger(
             db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
             kind=body.kind, cron_expression=body.cron_expression,
-            event_name=body.event_name, params=body.params, active=body.active,
+            event_name=body.event_name, vendor=body.vendor,
+            params=body.params, active=body.active,
             created_by=auth.user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if trig is None:
         raise HTTPException(status_code=404, detail="workflow not found")
-    return trig
+    return _trigger_view(trig, request)
 
 
 @router.get(
@@ -489,19 +520,22 @@ async def create_trigger(
 )
 async def list_triggers(
     workflow_id: uuid.UUID,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_workflow(db, auth, workflow_id)
-    return await trig_service.list_triggers(
+    rows = await trig_service.list_triggers(
         db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
     )
+    return [_trigger_view(t, request) for t in rows]
 
 
 @router.patch("/triggers/{trigger_id}", response_model=TriggerResponse)
 async def update_trigger(
     trigger_id: uuid.UUID,
     body: TriggerUpdateRequest,
+    request: Request,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -523,7 +557,35 @@ async def update_trigger(
         raise HTTPException(status_code=400, detail=str(exc))
     if updated is None:
         raise HTTPException(status_code=404, detail="trigger not found")
-    return updated
+    return _trigger_view(updated, request)
+
+
+@router.post(
+    "/triggers/{trigger_id}/rotate-token",
+    response_model=TriggerRotateTokenResponse,
+)
+async def rotate_trigger_token(
+    trigger_id: uuid.UUID,
+    request: Request,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+):
+    trig = await trig_service.get_trigger(db, tenant_id=auth.tenant_id, trigger_id=trigger_id)
+    if trig is None:
+        raise HTTPException(status_code=404, detail="trigger not found")
+    await ensure_registered_app_access(db, auth, trig.app_id)
+    await _load_and_gate_workflow(db, auth, trig.workflow_id, action="edit")
+    from app.services.orchestration.api.connections import resolve_base_url
+
+    base_url = resolve_base_url(request.headers.get("origin"))
+    try:
+        result = await trig_service.rotate_trigger_token(
+            db, tenant_id=auth.tenant_id, trigger_id=trigger_id,
+            actor_id=auth.user_id, base_url=base_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return TriggerRotateTokenResponse(**result)
 
 
 @router.delete("/triggers/{trigger_id}", status_code=204)
@@ -539,7 +601,7 @@ async def delete_trigger(
     await ensure_registered_app_access(db, auth, trig.app_id)
     await _load_and_gate_workflow(db, auth, trig.workflow_id, action="edit")
     if not await trig_service.delete_trigger(
-        db, tenant_id=auth.tenant_id, trigger_id=trigger_id,
+        db, tenant_id=auth.tenant_id, trigger_id=trigger_id, actor_id=auth.user_id,
     ):
         raise HTTPException(status_code=404, detail="trigger not found")
     return Response(status_code=204)

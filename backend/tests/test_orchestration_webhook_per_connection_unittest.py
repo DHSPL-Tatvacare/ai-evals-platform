@@ -202,32 +202,3 @@ async def test_bolna_webhook_with_valid_connection_token_accepts(
         app.dependency_overrides.pop(get_db, None)
 
 
-@pytest.mark.asyncio
-async def test_lsq_webhook_still_uses_env_secret(db_session, seed_full_run, monkeypatch):
-    """LSQ has supports_webhook=False; route still uses env-shared secret."""
-    run, version, workflow, _step, tenant_id, app_id = seed_full_run
-    monkeypatch.setattr(
-        "app.config.settings.ORCHESTRATION_DEFAULT_TENANT_ID", str(tenant_id),
-    )
-    monkeypatch.setattr(
-        "app.config.settings.ORCHESTRATION_DEFAULT_APP_ID", app_id,
-    )
-    monkeypatch.setattr("app.config.settings.LSQ_WEBHOOK_SECRET", "shh")
-
-    _override_db_with_session(db_session)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            # Wrong secret → 404 (closed by _check_secret).
-            r1 = await client.post(
-                "/api/orchestration/webhooks/lsq/wrong", json={},
-            )
-            assert r1.status_code == 404
-            # Correct secret + missing lead identifier → 400 (route reached).
-            r2 = await client.post(
-                "/api/orchestration/webhooks/lsq/shh", json={"foo": "bar"},
-            )
-            assert r2.status_code == 400
-    finally:
-        app.dependency_overrides.pop(get_db, None)
