@@ -57,6 +57,7 @@ export {
 } from './FilterPanel';
 export { FilterButton } from './FilterButton';
 export { DateRangeField, type DateRangeFieldProps } from './DateRangeField';
+export { Calendar, type CalendarProps } from './Calendar';
 export { PageHeaderSearch } from './PageHeaderSearch';
 export { TableToolbar, type TableToolbarSearch } from './TableToolbar';
 export { RingGauge, type RingGaugeTone } from './RingGauge';
