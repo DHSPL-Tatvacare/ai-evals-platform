@@ -326,10 +326,10 @@ class CrossRunNarrativeSectionTests(unittest.TestCase):
             f"{slug}: expected narrative section id '{expected_id}' not found in {ids}",
         )
         nc = _build_narrative_config("cross_run", cross, assets)
-        self.assertIn(
-            expected_id,
+        self.assertEqual(
             nc["outputInsertionPoints"],
-            f"{slug}: '{expected_id}' missing from outputInsertionPoints {nc['outputInsertionPoints']}",
+            [expected_id],
+            f"{slug}: outputInsertionPoints must be exactly ['{expected_id}'], got {nc['outputInsertionPoints']}",
         )
 
     def test_voice_rx_cross_run_has_narrative_section(self):
@@ -395,7 +395,7 @@ class CrossRunNarrativeSectionTests(unittest.TestCase):
             summary_idx = next(
                 (i for i, s in enumerate(cross.sections) if s.type == "summary_cards"), None
             )
-            self.assertIsNotNone(summary_idx, f"{slug}: no summary_cards section found")
+            assert summary_idx is not None, f"{slug}: no summary_cards section found"
             self.assertEqual(
                 ids[summary_idx + 1],
                 narrative_id,
