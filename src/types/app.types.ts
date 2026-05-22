@@ -214,6 +214,7 @@ export type AnalyticsSectionType =
   | 'summary_cards'
   | 'narrative'
   | 'metric_breakdown'
+  | 'trend_chart'
   | 'distribution_chart'
   | 'compliance_table'
   | 'friction_analysis'
@@ -221,6 +222,7 @@ export type AnalyticsSectionType =
   | 'entity_slices'
   | 'flags'
   | 'issues_recommendations'
+  | 'insight_panels'
   | 'exemplars'
   | 'prompt_gap_analysis'
   | 'callout';
@@ -630,9 +632,10 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
       crossRun: {
         sections: [
           { id: 'voice-rx-cross-summary', type: 'summary_cards', title: 'Cross-Run Summary', description: null, variant: 'voice_rx_cross_run', printable: true },
-          { id: 'voice-rx-cross-metrics', type: 'metric_breakdown', title: 'Accuracy Trends', description: null, variant: 'voice_rx_trends', printable: true },
+          { id: 'voice-rx-cross-narrative', type: 'narrative', title: 'AI Narrative', description: null, variant: 'executive_summary', printable: true },
+          { id: 'voice-rx-cross-metrics', type: 'trend_chart', title: 'Accuracy Trends', description: null, variant: 'voice_rx_trends', printable: true },
           { id: 'voice-rx-cross-severity', type: 'heatmap', title: 'Severity Heatmap', description: null, variant: 'voice_rx_heatmap', printable: true },
-          { id: 'voice-rx-cross-issues', type: 'issues_recommendations', title: 'Recurring Issues', description: null, variant: 'voice_rx_recurring', printable: true },
+          { id: 'voice-rx-cross-insights', type: 'insight_panels', title: 'Recurring Insights', description: null, variant: 'cross_run', printable: true },
         ],
         export: {
           enabled: false,
@@ -642,7 +645,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         aiSummary: {
           enabled: true,
-          sectionIds: ['voice-rx-cross-summary', 'voice-rx-cross-severity', 'voice-rx-cross-issues'],
+          sectionIds: ['voice-rx-cross-summary', 'voice-rx-cross-severity', 'voice-rx-cross-insights'],
         },
       },
       assets: {
@@ -775,7 +778,14 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
       },
       crossRun: {
-        sections: [],
+        sections: [
+          { id: 'kaira-cross-summary', type: 'summary_cards', title: 'Cross-Run Summary', description: null, variant: 'kaira_cross_run', printable: true },
+          { id: 'kaira-cross-narrative', type: 'narrative', title: 'AI Narrative', description: null, variant: 'executive_summary', printable: true },
+          { id: 'kaira-cross-trend', type: 'trend_chart', title: 'Health Trends', description: null, variant: 'trend_line', printable: true },
+          { id: 'kaira-cross-compliance', type: 'heatmap', title: 'Rule Compliance Heatmap', description: null, variant: 'rule_compliance', printable: true },
+          { id: 'kaira-cross-adversarial', type: 'heatmap', title: 'Adversarial Heatmap', description: null, variant: 'adversarial_goals', printable: true },
+          { id: 'kaira-cross-insights', type: 'insight_panels', title: 'Recurring Insights', description: null, variant: 'cross_run', printable: true },
+        ],
         export: {
           enabled: false,
           format: 'pdf',
@@ -784,7 +794,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         aiSummary: {
           enabled: true,
-          sectionIds: [],
+          sectionIds: ['kaira-cross-summary', 'kaira-cross-trend', 'kaira-cross-insights'],
         },
       },
       assets: {
@@ -1117,7 +1127,15 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
       },
       crossRun: {
-        sections: [],
+        sections: [
+          { id: 'inside-sales-cross-summary', type: 'summary_cards', title: 'Cross-Run Summary', description: null, variant: 'inside_sales_cross_run', printable: true },
+          { id: 'inside-sales-cross-narrative', type: 'narrative', title: 'AI Narrative', description: null, variant: 'executive_summary', printable: true },
+          { id: 'inside-sales-cross-trend', type: 'trend_chart', title: 'QA Score Trend', description: null, variant: 'qa_trend', printable: true },
+          { id: 'inside-sales-cross-dimensions', type: 'heatmap', title: 'Dimension Heatmap', description: null, variant: 'dimensions', printable: true },
+          { id: 'inside-sales-cross-compliance', type: 'heatmap', title: 'Compliance Heatmap', description: null, variant: 'compliance', printable: true },
+          { id: 'inside-sales-cross-flags', type: 'flags', title: 'Flag Rollups', description: null, variant: 'behavioral_outcomes', printable: true },
+          { id: 'inside-sales-cross-insights', type: 'insight_panels', title: 'Recurring Insights', description: null, variant: 'cross_run', printable: true },
+        ],
         export: {
           enabled: false,
           format: 'pdf',
@@ -1126,7 +1144,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         },
         aiSummary: {
           enabled: true,
-          sectionIds: [],
+          sectionIds: ['inside-sales-cross-summary', 'inside-sales-cross-flags', 'inside-sales-cross-insights'],
         },
       },
       assets: {
