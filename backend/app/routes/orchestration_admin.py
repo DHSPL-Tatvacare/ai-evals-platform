@@ -102,6 +102,9 @@ async def upsert_comm_cap_policy(
         before_state=before_state,
         after_state=_serialise(policy),
     )
+    # get_db does not auto-commit; without this the flushed policy is rolled
+    # back on session close and never persists.
+    await db.commit()
     return policy
 
 
