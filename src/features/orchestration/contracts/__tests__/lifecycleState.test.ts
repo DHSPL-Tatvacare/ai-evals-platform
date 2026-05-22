@@ -12,6 +12,7 @@ const baseClean = (overrides: Partial<LifecycleInputs> = {}): LifecycleInputs =>
   hasPublishedVersion: false,
   committedDataHash: 'h0',
   currentDataHash: 'h0',
+  publishedDataHash: 'h0',
   committedLayoutHash: 'l0',
   currentLayoutHash: 'l0',
   inFlight: 'idle',
@@ -33,18 +34,20 @@ describe('deriveLifecycleState', () => {
     ).toBe('dirty-draft');
   });
 
-  it('clean-published when published and snapshots match', () => {
+  it('clean-published when published and all three signals match', () => {
     expect(
       deriveLifecycleState(baseClean({ hasPublishedVersion: true })).kind,
     ).toBe('clean-published');
   });
 
-  it('dirty-published-edits when published and data hash diverges', () => {
+  it('dirty-published-edits when published and current diverges from committed (unsaved edits)', () => {
     expect(
       deriveLifecycleState(
         baseClean({
           hasPublishedVersion: true,
           currentDataHash: 'h1',
+          committedDataHash: 'h0',
+          publishedDataHash: 'h0',
         }),
       ).kind,
     ).toBe('dirty-published-edits');
@@ -59,6 +62,20 @@ describe('deriveLifecycleState', () => {
         }),
       ).kind,
     ).toBe('clean-published');
+  });
+
+  it('unpublishedChanges: saved draft diverges from live published → dirty-published-edits', () => {
+    // committed === current (no unsaved edits) but committed !== published
+    // (the saved draft has not been published). Publish must be enabled.
+    const state = deriveLifecycleState(
+      baseClean({
+        hasPublishedVersion: true,
+        committedDataHash: 'saved',
+        currentDataHash: 'saved',
+        publishedDataHash: 'live',
+      }),
+    );
+    expect(state.kind).toBe('dirty-published-edits');
   });
 
   it('saving wins over dirty status', () => {
@@ -127,9 +144,22 @@ describe('canSave / canPublish', () => {
     expect(canSave({ kind: 'dirty-draft' }, 'saving')).toBe(false);
   });
 
-  it('canPublish is false while in flight, true otherwise', () => {
+  it('canPublish is true only when there are unpublished changes (not in flight)', () => {
+    // clean-published: draft == live == committed → nothing to publish.
+    expect(canPublish({ kind: 'clean-published' }, 'idle')).toBe(false);
+    // dirty-published-edits: committed diverges from live → publishable.
+    expect(canPublish({ kind: 'dirty-published-edits' }, 'idle')).toBe(true);
+    // never-published draft: publishing it is the first release.
     expect(canPublish({ kind: 'clean-draft' }, 'idle')).toBe(true);
+    expect(canPublish({ kind: 'dirty-draft' }, 'idle')).toBe(true);
+    // in flight always disables.
+    expect(canPublish({ kind: 'dirty-published-edits' }, 'publishing')).toBe(false);
     expect(canPublish({ kind: 'clean-draft' }, 'publishing')).toBe(false);
+  });
+
+  it('clean-published disables BOTH save and publish', () => {
+    expect(canSave({ kind: 'clean-published' }, 'idle')).toBe(false);
+    expect(canPublish({ kind: 'clean-published' }, 'idle')).toBe(false);
   });
 });
 

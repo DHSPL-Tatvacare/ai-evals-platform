@@ -32,6 +32,13 @@ export interface LifecycleInputs {
   committedDataHash: string;
   /** Hash of the live, in-store data snapshot. */
   currentDataHash: string;
+  /** Hash of the live published version's data snapshot. Equals
+   *  `committedDataHash` immediately after a publish (draft == live == clean).
+   *  Diverges from `committedDataHash` once a saved draft has not yet been
+   *  published — that delta is what enables the Publish button. Seeded on
+   *  hydrate from the live published definition; the empty-snapshot hash when
+   *  the workflow has never been published. */
+  publishedDataHash: string;
   /** Hash of the most recently committed layout (positions). Layout changes
    *  do NOT drive `dirty-published-edits` — see snapshotHash.ts rationale. */
   committedLayoutHash: string;
@@ -73,12 +80,19 @@ export function deriveLifecycleState(input: LifecycleInputs): LifecycleState {
     return { kind: 'save-failed', error: input.lastSaveOutcome.error };
   }
 
-  const dataDirty = input.committedDataHash !== input.currentDataHash;
+  // Three independent signals drive the lifecycle:
+  //   - unsavedEdits     → the canvas diverges from the saved draft (Save).
+  //   - unpublishedChanges → the saved draft diverges from what runs (Publish).
+  const unsavedEdits = input.currentDataHash !== input.committedDataHash;
+  const unpublishedChanges = input.committedDataHash !== input.publishedDataHash;
 
   if (!input.hasPublishedVersion) {
-    return dataDirty ? { kind: 'dirty-draft' } : { kind: 'clean-draft' };
+    return unsavedEdits ? { kind: 'dirty-draft' } : { kind: 'clean-draft' };
   }
-  return dataDirty
+  // Published. `clean-published` only when the canvas, the saved draft, and
+  // the live version all agree. Either an unsaved edit OR an unpublished saved
+  // change keeps the editor "dirty" against what is currently live.
+  return unsavedEdits || unpublishedChanges
     ? { kind: 'dirty-published-edits' }
     : { kind: 'clean-published' };
 }
@@ -107,12 +121,26 @@ export function canSave(state: LifecycleState, inFlight: InFlight): boolean {
   );
 }
 
-/** Whether the Publish button should be enabled in the header. */
+/** Whether the Publish button should be enabled in the header. Publish is
+ *  enabled only when there is something to ship: a never-published draft, or
+ *  a workflow whose draft diverges from what is currently live. A
+ *  `clean-published` workflow (draft == live, no edits) has nothing to
+ *  publish, so the button is disabled. The backend validator remains the
+ *  authority on whether the content is *valid* to publish. */
 export function canPublish(state: LifecycleState, inFlight: InFlight): boolean {
   if (inFlight !== 'idle') return false;
-  // Publish is allowed from any non-in-flight state; the backend validator
-  // remains the authority on whether the content is publishable.
-  return state.kind !== 'saving' && state.kind !== 'publishing';
+  switch (state.kind) {
+    case 'clean-draft':
+    case 'dirty-draft':
+    case 'dirty-published-edits':
+    case 'publish-failed':
+      return true;
+    case 'clean-published':
+    case 'save-failed':
+    case 'saving':
+    case 'publishing':
+      return false;
+  }
 }
 
 /** Header pill copy. Centralised here so the same text reaches every

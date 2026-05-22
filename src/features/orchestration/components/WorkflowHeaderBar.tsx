@@ -18,12 +18,11 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { cn } from '@/utils/cn';
+import { fireManualRun, getWorkflow } from '@/services/api/orchestration';
 import {
-  createDraftVersion,
-  fireManualRun,
-  getWorkflow,
-  publishVersion,
-} from '@/services/api/orchestration';
+  usePublishMutation,
+  useSaveDraftMutation,
+} from '@/features/orchestration/queries/workflows';
 import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import {
@@ -82,8 +81,9 @@ export function WorkflowHeaderBar({
 }: WorkflowHeaderBarProps) {
   const navigate = useNavigate();
   const orchestrationRoutes = useOrchestrationRoutes();
+  const saveDraftMutation = useSaveDraftMutation();
+  const publishMutation = usePublishMutation();
   const workflowId = useWorkflowBuilderStore((s) => s.workflowId);
-  const versionId = useWorkflowBuilderStore((s) => s.versionId);
   const name = useWorkflowBuilderStore((s) => s.workflowName);
   const workflowType = useWorkflowBuilderStore((s) => s.workflowType);
   const inFlight = useWorkflowBuilderStore((s) => s.inFlight);
@@ -128,16 +128,23 @@ export function WorkflowHeaderBar({
     navigate(orchestrationRoutes.campaigns);
   };
 
-  /** Persist the current draft. Wraps `createDraftVersion` so callers in
-   *  this file remain ignorant of store wiring; outcome tracking happens in
-   *  the surrounding handler. Returns the new draft version id, or throws. */
-  const saveDraft = async (): Promise<string | null> => {
-    if (!workflowId || !workflowType) return null;
+  /** Persist the current draft (`PUT /draft`). Overwrites the workflow's
+   *  single mutable draft in place — no version row is minted. Re-hydrates the
+   *  canvas from the server's normalised `draftDefinition` (rebase mode keeps
+   *  the in-flight surface) so the store reflects exactly what was stored.
+   *  Returns true on success; throws on failure. */
+  const saveDraft = async (): Promise<boolean> => {
+    if (!workflowId || !workflowType) return false;
     const store = useWorkflowBuilderStore.getState();
-    const v = await createDraftVersion(workflowId, store.toDefinition());
-    store.setMetadata({ workflowId, versionId: v.id, name, workflowType });
-    store.hydrate(v.definition, { mode: 'rebase' });
-    return v.id;
+    const wf = await saveDraftMutation.mutateAsync({
+      workflowId,
+      definition: store.toDefinition(),
+    });
+    store.setMetadata({ workflowId, versionId: null, name, workflowType });
+    if (wf.draftDefinition) {
+      store.hydrate(wf.draftDefinition, { mode: 'rebase' });
+    }
+    return true;
   };
 
   const refreshPublishState = async () => {
@@ -185,23 +192,13 @@ export function WorkflowHeaderBar({
     setPublishError(null);
     store.beginInFlight('publishing');
     try {
-      let target = versionId;
-      // If the live state diverges from the committed snapshot, persist the
-      // draft before publish — this matches the prior behaviour the user
-      // expects from the Publish button (one click ships latest content).
-      if (!target || hasUnsavedChanges) {
-        target = await saveDraft();
+      // Publish always ships the current draft. If the canvas diverges from
+      // the saved draft, persist it first so one click ships the latest
+      // content; the publish call itself takes no version id.
+      if (hasUnsavedChanges) {
+        await saveDraft();
       }
-      if (!target) {
-        const body: ApiErrorBody = {
-          kind: 'message',
-          message: 'No draft version to publish',
-        };
-        store.finishPublish({ status: 'fail', at: Date.now(), error: body });
-        notificationService.error(body.message);
-        return;
-      }
-      await publishVersion(workflowId, target);
+      await publishMutation.mutateAsync({ workflowId });
       // Refresh publish state so Run Now becomes enabled and the header
       // status pill flips from Draft → Published. Without this the user
       // has to reload to see the change.

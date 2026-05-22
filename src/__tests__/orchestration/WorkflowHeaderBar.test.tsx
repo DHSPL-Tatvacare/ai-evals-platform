@@ -8,10 +8,10 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('@/services/api/orchestration', () => ({
-  createDraftVersion: vi.fn(),
+  saveDraft: vi.fn(),
   fireManualRun: vi.fn(),
   getWorkflow: vi.fn(),
-  publishVersion: vi.fn(),
+  publishDraft: vi.fn(),
 }));
 
 vi.mock('@/services/notifications', () => ({
@@ -25,9 +25,9 @@ vi.mock('@/services/notifications', () => ({
 
 import { fireManualRun } from '@/services/api/orchestration';
 import {
-  createDraftVersion,
   getWorkflow,
-  publishVersion,
+  publishDraft,
+  saveDraft,
 } from '@/services/api/orchestration';
 import { notificationService } from '@/services/notifications';
 import { useAppStore } from '@/stores/appStore';
@@ -79,17 +79,17 @@ describe('WorkflowHeaderBar', () => {
     });
 
     (
-      createDraftVersion as ReturnType<typeof vi.fn>
+      saveDraft as ReturnType<typeof vi.fn>
     ).mockImplementation(async () => ({
-      id: 'ver-2',
-      definition: useWorkflowBuilderStore.getState().toDefinition(),
+      id: 'wf-1',
+      draftDefinition: useWorkflowBuilderStore.getState().toDefinition(),
     }));
 
     let resolvePublish: () => void = () => {};
     const publishPromise = new Promise<void>((resolve) => {
       resolvePublish = resolve;
     });
-    (publishVersion as ReturnType<typeof vi.fn>).mockReturnValue(publishPromise);
+    (publishDraft as ReturnType<typeof vi.fn>).mockReturnValue(publishPromise);
     (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue({
       currentPublishedVersionId: 'ver-2',
     });
@@ -107,14 +107,14 @@ describe('WorkflowHeaderBar', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Publish$/ }));
 
     await waitFor(() =>
-      expect(createDraftVersion).toHaveBeenCalledWith(
+      expect(saveDraft).toHaveBeenCalledWith(
         'wf-1',
         expect.objectContaining({
           nodes: expect.arrayContaining([expect.objectContaining({ id: 'dirty-1' })]),
         }),
       ),
     );
-    await waitFor(() => expect(publishVersion).toHaveBeenCalledWith('wf-1', 'ver-2'));
+    await waitFor(() => expect(publishDraft).toHaveBeenCalledWith('wf-1'));
 
     // "Publishing…" surfaces twice — once in the lifecycle pill, once
     // on the primary button. The button is the one we care about: it
@@ -196,9 +196,9 @@ describe('WorkflowHeaderBar', () => {
     // beforeEach seeds currentPublishedVersionId: 'ver-1' — this is the
     // published-version-exists case. The save toast must inform the operator
     // that the published version remains live until they explicitly publish.
-    (createDraftVersion as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 'ver-2',
-      definition: useWorkflowBuilderStore.getState().toDefinition(),
+    (saveDraft as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'wf-1',
+      draftDefinition: useWorkflowBuilderStore.getState().toDefinition(),
     });
 
     render(<WorkflowHeaderBar />);
@@ -220,7 +220,7 @@ describe('WorkflowHeaderBar', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
 
-    await waitFor(() => expect(createDraftVersion).toHaveBeenCalled());
+    await waitFor(() => expect(saveDraft).toHaveBeenCalled());
 
     // Toast must communicate that the draft is saved but the PUBLISHED
     // version is still live — not just a bare "saved" confirmation.
@@ -235,9 +235,9 @@ describe('WorkflowHeaderBar', () => {
 
   it('save toast shows a plain draft-saved message when no published version exists', async () => {
     useWorkflowBuilderStore.getState().setCurrentPublishedVersionId(null);
-    (createDraftVersion as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 'ver-1',
-      definition: useWorkflowBuilderStore.getState().toDefinition(),
+    (saveDraft as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'wf-1',
+      draftDefinition: useWorkflowBuilderStore.getState().toDefinition(),
     });
 
     render(<WorkflowHeaderBar />);
@@ -258,7 +258,7 @@ describe('WorkflowHeaderBar', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
 
-    await waitFor(() => expect(createDraftVersion).toHaveBeenCalled());
+    await waitFor(() => expect(saveDraft).toHaveBeenCalled());
 
     // No published version → plain draft-saved confirmation, no publish nudge.
     expect(notificationService.success).toHaveBeenCalledWith(

@@ -84,6 +84,12 @@ interface WorkflowBuilderState {
   committedDataHash: string;
   /** Hash of the live data snapshot (recomputed by every content mutator). */
   currentDataHash: string;
+  /** Hash of the live published version's data snapshot. Seeded on hydrate
+   *  from the live published definition (the empty-snapshot hash when never
+   *  published), and advanced to `currentDataHash` on a successful publish so
+   *  draft == live == clean. Drives the Publish button via `unpublishedChanges`
+   *  (`committedDataHash !== publishedDataHash`). */
+  publishedDataHash: string;
   /** Hash of the most recently committed layout (positions only). Seeded with
    *  the empty-layout hash on `reset()`, same as `committedDataHash`. */
   committedLayoutHash: string;
@@ -126,7 +132,7 @@ interface WorkflowBuilderState {
   reset(): void;
   hydrate(
     definition: WorkflowDefinition,
-    options?: { mode?: HydrateMode },
+    options?: { mode?: HydrateMode; publishedDataHash?: string },
   ): void;
   setMetadata(meta: {
     workflowId: string;
@@ -307,6 +313,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
 
     committedDataHash: EMPTY_DATA_HASH,
     currentDataHash: EMPTY_DATA_HASH,
+    publishedDataHash: EMPTY_DATA_HASH,
     committedLayoutHash: EMPTY_LAYOUT_HASH,
     currentLayoutHash: EMPTY_LAYOUT_HASH,
 
@@ -333,6 +340,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         viewport: null,
         committedDataHash: EMPTY_DATA_HASH,
         currentDataHash: EMPTY_DATA_HASH,
+        publishedDataHash: EMPTY_DATA_HASH,
         committedLayoutHash: EMPTY_LAYOUT_HASH,
         currentLayoutHash: EMPTY_LAYOUT_HASH,
         inFlight: "idle",
@@ -371,6 +379,15 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         nodes.some((n) => n.id === previous.selectedNodeId)
           ? previous.selectedNodeId
           : null;
+      // `publishedDataHash` tracks the live published def, independent of the
+      // canvas. A rebase (post-save round-trip) does not change what is live,
+      // so it preserves the previous value. A fresh load seeds it from the
+      // caller (the page hashes the live published version); absent a published
+      // version the caller passes the empty-snapshot hash.
+      const publishedDataHash =
+        mode === "rebase"
+          ? previous.publishedDataHash
+          : options?.publishedDataHash ?? EMPTY_DATA_HASH;
       set({
         nodes,
         edges,
@@ -378,6 +395,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         selectedNodeId,
         committedDataHash: dHash,
         currentDataHash: dHash,
+        publishedDataHash,
         committedLayoutHash: lHash,
         currentLayoutHash: lHash,
         // A full load clears transient UI/write state. A server rebase after a
@@ -616,7 +634,22 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
       }),
 
     finishPublish: (outcome) =>
-      set({ inFlight: "idle", lastPublishOutcome: outcome }),
+      set((s) => {
+        if (outcome.status === "ok") {
+          // Publish leaves the draft equal to the just-published def, so the
+          // canvas, the saved draft, and the live version all agree — every
+          // signal is clean. Advancing all three hashes flips the lifecycle
+          // to `clean-published` and disables both Save and Publish.
+          return {
+            inFlight: "idle",
+            lastPublishOutcome: outcome,
+            committedDataHash: s.currentDataHash,
+            committedLayoutHash: s.currentLayoutHash,
+            publishedDataHash: s.currentDataHash,
+          };
+        }
+        return { inFlight: "idle", lastPublishOutcome: outcome };
+      }),
 
     toDefinition: () => {
       const s = get();
@@ -739,6 +772,7 @@ export function useLifecycleState(): LifecycleState {
       hasPublishedVersion: Boolean(s.currentPublishedVersionId),
       committedDataHash: s.committedDataHash,
       currentDataHash: s.currentDataHash,
+      publishedDataHash: s.publishedDataHash,
       committedLayoutHash: s.committedLayoutHash,
       currentLayoutHash: s.currentLayoutHash,
       inFlight: s.inFlight,

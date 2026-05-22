@@ -109,22 +109,19 @@ export async function listVersions(workflowId: string): Promise<WorkflowVersion[
   return apiRequest<WorkflowVersion[]>(`/api/orchestration/workflows/${workflowId}/versions`);
 }
 
-export async function createDraftVersion(
+export async function saveDraft(
   workflowId: string,
   definition: WorkflowDefinition,
-): Promise<WorkflowVersion> {
-  return apiRequest<WorkflowVersion>(`/api/orchestration/workflows/${workflowId}/versions`, {
-    method: 'POST',
+): Promise<Workflow> {
+  return apiRequest<Workflow>(`/api/orchestration/workflows/${workflowId}/draft`, {
+    method: 'PUT',
     body: JSON.stringify({ definition }),
   });
 }
 
-export async function publishVersion(
-  workflowId: string,
-  versionId: string,
-): Promise<WorkflowVersion> {
+export async function publishDraft(workflowId: string): Promise<WorkflowVersion> {
   return apiRequest<WorkflowVersion>(
-    `/api/orchestration/workflows/${workflowId}/versions/${versionId}/publish`,
+    `/api/orchestration/workflows/${workflowId}/publish`,
     { method: 'POST' },
   );
 }

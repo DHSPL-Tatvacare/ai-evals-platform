@@ -23,10 +23,10 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('@/services/api/orchestration', () => ({
-  createDraftVersion: vi.fn(),
+  saveDraft: vi.fn(),
   fireManualRun: vi.fn(),
   getWorkflow: vi.fn(),
-  publishVersion: vi.fn(),
+  publishDraft: vi.fn(),
 }));
 
 vi.mock('@/services/notifications', () => ({
@@ -39,8 +39,8 @@ vi.mock('@/services/notifications', () => ({
 }));
 
 import {
-  createDraftVersion,
-  publishVersion,
+  publishDraft,
+  saveDraft,
 } from '@/services/api/orchestration';
 import { ApiError } from '@/services/api/client';
 import { WorkflowHeaderBar } from '@/features/orchestration/components/WorkflowHeaderBar';
@@ -95,11 +95,11 @@ describe('PublishErrorSurfacing — Phase 14 / Phase E', () => {
         },
       ],
     };
-    (createDraftVersion as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 'ver-2',
-      definition: useWorkflowBuilderStore.getState().toDefinition(),
+    (saveDraft as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'wf-1',
+      draftDefinition: useWorkflowBuilderStore.getState().toDefinition(),
     });
-    (publishVersion as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (publishDraft as ReturnType<typeof vi.fn>).mockRejectedValue(
       new ApiError(400, 'Publish failed', body),
     );
 

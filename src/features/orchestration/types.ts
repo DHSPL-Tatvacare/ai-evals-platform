@@ -167,6 +167,10 @@ export interface Workflow {
   name: string;
   description: string | null;
   currentPublishedVersionId: string | null;
+  /** The single mutable draft definition. `null` when the workflow was never
+   *  edited — the canvas then opens on the live published version. */
+  draftDefinition?: WorkflowDefinition | null;
+  draftUpdatedAt?: string | null;
   createdBy: string;
   visibility: 'private' | 'shared';
   sharedBy: string | null;

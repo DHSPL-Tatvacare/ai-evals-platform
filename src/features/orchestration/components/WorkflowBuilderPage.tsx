@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -6,10 +6,13 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { usePageMetadata } from '@/config/pageMetadata';
-import { ApiError } from '@/services/api/client';
-import { getWorkflow, listVersions } from '@/services/api/orchestration';
 import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
+import { dataSnapshotHash } from '@/features/orchestration/contracts/snapshotHash';
+import {
+  useWorkflow,
+  useWorkflowVersions,
+} from '@/features/orchestration/queries/workflows';
 import { useRunStream } from '@/features/orchestration/hooks/useRunStream';
 import { useRunStatusToasts } from '@/features/orchestration/hooks/useRunStatusToasts';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
@@ -85,42 +88,60 @@ export function WorkflowBuilderPage() {
     s.nodes.find((n) => n.id === s.pendingDeleteNodeId) ?? null,
   );
 
+  // Server data flows through TanStack Query. The workflow row carries the
+  // single mutable `draftDefinition` + `currentPublishedVersionId`; the
+  // versions query carries the published history (data only). No
+  // `find(draft)` picker — drafts no longer live in the versions list.
+  const workflowQuery = useWorkflow(workflowId);
+  const versionsQuery = useWorkflowVersions(workflowId);
+  const workflow = workflowQuery.data;
+  const versions = versionsQuery.data;
+  const loadError = workflowQuery.error ?? versionsQuery.error;
+
+  // Reset the canvas on workflow switch so a stale graph never bleeds across.
+  // `hydratedFor` gates the hydrate effect to fire once per workflow load —
+  // a publish/save refetch must not clobber the canvas or kick the operator
+  // out of edit mode.
+  const hydratedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!workflowId) return;
-    let alive = true;
-    (async () => {
-      reset();
-      try {
-        const wf = await getWorkflow(workflowId);
-        const versions = await listVersions(workflowId);
-        const draft = versions.find((v) => v.status === 'draft');
-        const targetVersion = draft ?? versions[0] ?? null;
-        if (!alive) return;
-        setMetadata({
-          workflowId: wf.id,
-          versionId: targetVersion?.id ?? null,
-          name: wf.name,
-          workflowType: wf.workflowType,
-          currentPublishedVersionId: wf.currentPublishedVersionId,
-        });
-        if (targetVersion) {
-          hydrate(targetVersion.definition);
-        }
-      } catch (e) {
-        if (!alive) return;
-        const msg =
-          e instanceof ApiError
-            ? e.message
-            : e instanceof Error
-              ? e.message
-              : 'Failed to load workflow';
-        notificationService.error(msg);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [workflowId, reset, setMetadata, hydrate]);
+    reset();
+    hydratedFor.current = null;
+  }, [workflowId, reset]);
+
+  // Surface a load failure once.
+  useEffect(() => {
+    if (!loadError) return;
+    const msg = loadError instanceof Error ? loadError.message : 'Failed to load workflow';
+    notificationService.error(msg);
+  }, [loadError]);
+
+  // Hydrate the canvas once both queries have settled. The canvas opens on the
+  // draft when present, else the live published def. `publishedDataHash` is the
+  // hash of the live published version (the one `currentPublishedVersionId`
+  // points at, else the newest) — the empty-snapshot hash when never published.
+  useEffect(() => {
+    if (!workflow || !versions) return;
+    if (hydratedFor.current === workflow.id) return;
+    hydratedFor.current = workflow.id;
+    const livePublished =
+      versions.find((v) => v.id === workflow.currentPublishedVersionId) ??
+      versions[0] ??
+      null;
+    const canvasDefinition = workflow.draftDefinition ?? livePublished?.definition ?? null;
+    const publishedDataHash = livePublished
+      ? dataSnapshotHash(livePublished.definition.nodes, livePublished.definition.edges)
+      : undefined;
+    setMetadata({
+      workflowId: workflow.id,
+      versionId: null,
+      name: workflow.name,
+      workflowType: workflow.workflowType,
+      currentPublishedVersionId: workflow.currentPublishedVersionId,
+    });
+    if (canvasDefinition) {
+      hydrate(canvasDefinition, { mode: 'load', publishedDataHash });
+    }
+  }, [workflow, versions, setMetadata, hydrate]);
 
   // ESC clears selection so the inspector unmounts. The pane click handler
   // covers the canvas-click case (see Canvas.tsx).
