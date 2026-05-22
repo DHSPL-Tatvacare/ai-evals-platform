@@ -354,5 +354,166 @@ class KairaCrossRunCanonicalAdapterTests(unittest.TestCase):
         self.assertGreaterEqual(len(rebuilt_insights.data), 1)
 
 
+class VoiceRxCrossRunAggregatorTests(unittest.TestCase):
+    """build_voice_rx_cross_run_payload emits trend_chart + insight_panels."""
+
+    def _voice_rx_analytics_config(self):
+        from app.schemas.app_config import AppConfig
+        from app.services.seed_defaults import APP_SEEDS
+
+        for seed in APP_SEEDS:
+            if seed['slug'] == 'voice-rx':
+                return AppConfig.model_validate(seed['config']).analytics
+        raise KeyError('voice-rx')
+
+    def _run_payload(self, run_name: str, accuracy: float) -> dict:
+        # Minimal canonical per-run payload carrying sections the cross-run
+        # aggregator reads: voice-rx-summary (accuracy cards) and voice-rx-severity.
+        return {
+            'schemaVersion': 'v1',
+            'metadata': {
+                'appId': 'voice-rx',
+                'runId': run_name,
+                'runName': run_name,
+                'evalType': 'batch',
+                'createdAt': '2026-04-01T00:00:00+00:00',
+                'computedAt': '2026-04-01T00:05:00+00:00',
+            },
+            'sections': [
+                {
+                    'id': 'voice-rx-summary',
+                    'type': 'summary_cards',
+                    'title': 'Accuracy Summary',
+                    'data': [
+                        {'key': 'overall-accuracy', 'label': 'Overall Accuracy', 'value': f'{accuracy:.1f}%', 'tone': 'positive'},
+                        {'key': 'total-items', 'label': 'Total Items', 'value': '20', 'tone': 'neutral'},
+                        {'key': 'critical-errors', 'label': 'Critical Errors', 'value': '1', 'tone': 'negative'},
+                    ],
+                },
+                {
+                    'id': 'voice-rx-severity',
+                    'type': 'distribution_chart',
+                    'title': 'Severity Distribution',
+                    'data': [
+                        {
+                            'label': 'Severity',
+                            'values': [3.0, 5.0, 12.0],
+                            'categories': ['CRITICAL', 'HIGH', 'LOW'],
+                        }
+                    ],
+                },
+                {
+                    'id': 'voice-rx-issues',
+                    'type': 'issues_recommendations',
+                    'title': 'Issues',
+                    'data': {
+                        'issues': [
+                            {'title': 'Dosage transcription error', 'area': 'Accuracy', 'priority': 'P0', 'summary': 'Wrong dose captured.'},
+                        ],
+                        'recommendations': [],
+                    },
+                },
+            ],
+            'exportDocument': {
+                'schemaVersion': 'v1',
+                'title': run_name,
+                'theme': {
+                    'accent': '#0f766e',
+                    'accentMuted': '#99f6e4',
+                    'border': '#d1d5db',
+                    'textPrimary': '#0f172a',
+                    'textSecondary': '#475569',
+                    'background': '#ffffff',
+                },
+                'blocks': [{'id': 'cover', 'type': 'cover', 'title': run_name}],
+            },
+        }
+
+    def _runs_data(self):
+        return [
+            ({'id': 'run-1', 'created_at': '2026-04-01T00:00:00+00:00'}, self._run_payload('Run 1', 88.5)),
+            ({'id': 'run-2', 'created_at': '2026-04-02T00:00:00+00:00'}, self._run_payload('Run 2', 92.0)),
+        ]
+
+    def test_emits_trend_chart_and_insight_panels(self):
+        from app.services.reports.voice_rx_cross_run import build_voice_rx_cross_run_payload
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = build_voice_rx_cross_run_payload(
+            runs, self._voice_rx_analytics_config(), app_id='voice-rx', total_runs_available=2
+        )
+        by_id = {section.id: section for section in report.sections}
+
+        trend = by_id['voice-rx-cross-metrics']
+        self.assertIsInstance(trend, TrendChartSection)
+        self.assertEqual(len(trend.data.points), len(runs))
+        for point in trend.data.points:
+            self.assertTrue(point.bucket)
+            self.assertIsInstance(point.primary, float)
+            self.assertIsInstance(point.breakdown, dict)
+        self.assertEqual(trend.data.primary_label, 'Overall Accuracy')
+        self.assertEqual(trend.data.y_domain, (0.0, 100.0))
+        self.assertIsNotNone(trend.data.reference_value)
+        self.assertEqual(trend.data.reference_label, 'Average')
+
+        insights = by_id['voice-rx-cross-insights']
+        self.assertIsInstance(insights, InsightPanelsSection)
+        self.assertGreaterEqual(len(insights.data), 1)
+        for panel in insights.data:
+            self.assertTrue(panel.area)
+            self.assertTrue(panel.priority)
+            self.assertGreaterEqual(panel.run_count, 1)
+            self.assertTrue(panel.items)
+
+        self.assertNotIn('voice-rx-cross-issues', by_id)
+
+    def test_payload_dicts_validate_as_section_models(self):
+        from app.services.reports.voice_rx_cross_run import build_voice_rx_cross_run_payload
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = build_voice_rx_cross_run_payload(
+            runs, self._voice_rx_analytics_config(), app_id='voice-rx', total_runs_available=2
+        )
+        types = {section.type for section in report.sections}
+        self.assertIn('trend_chart', types)
+        self.assertIn('insight_panels', types)
+        self.assertNotIn('issues_recommendations', types)
+        self.assertNotIn(
+            'metric_breakdown',
+            {s.type for s in report.sections if s.id == 'voice-rx-cross-metrics'},
+        )
+
+        trend = next(s for s in report.sections if s.id == 'voice-rx-cross-metrics')
+        rebuilt_trend = TrendChartSection.model_validate(trend.model_dump(by_alias=True))
+        self.assertEqual(len(rebuilt_trend.data.points), len(runs))
+
+        insights = next(s for s in report.sections if s.id == 'voice-rx-cross-insights')
+        rebuilt_insights = InsightPanelsSection.model_validate(insights.model_dump(by_alias=True))
+        self.assertGreaterEqual(len(rebuilt_insights.data), 1)
+
+    def test_no_severity_data_produces_empty_breakdown(self):
+        """Runs with no severity section emit zero-breakdown trend points without error."""
+        from app.services.reports.voice_rx_cross_run import build_voice_rx_cross_run_payload
+
+        payload = self._run_payload('Run X', 85.0)
+        payload['sections'] = [s for s in payload['sections'] if s['id'] != 'voice-rx-severity']
+        runs = [({'id': 'run-x', 'created_at': '2026-04-01T00:00:00+00:00'}, payload)]
+        report = build_voice_rx_cross_run_payload(
+            runs, self._voice_rx_analytics_config(), app_id='voice-rx', total_runs_available=1
+        )
+        by_id = {section.id: section for section in report.sections}
+        trend = by_id['voice-rx-cross-metrics']
+        self.assertEqual(len(trend.data.points), 1)
+        self.assertEqual(trend.data.points[0].breakdown, {})
+
+
 if __name__ == '__main__':
     unittest.main()

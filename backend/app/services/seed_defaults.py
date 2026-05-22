@@ -2045,9 +2045,9 @@ APP_SEEDS = [
                     "sections": [
                         {"id": "voice-rx-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "voice_rx_cross_run"},
                         {"id": "voice-rx-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
-                        {"id": "voice-rx-cross-metrics", "type": "metric_breakdown", "title": "Accuracy Trends", "variant": "voice_rx_trends"},
+                        {"id": "voice-rx-cross-metrics", "type": "trend_chart", "title": "Accuracy Trends", "variant": "voice_rx_trends"},
                         {"id": "voice-rx-cross-severity", "type": "heatmap", "title": "Severity Heatmap", "variant": "voice_rx_heatmap"},
-                        {"id": "voice-rx-cross-issues", "type": "issues_recommendations", "title": "Recurring Issues", "variant": "voice_rx_recurring"},
+                        {"id": "voice-rx-cross-insights", "type": "insight_panels", "title": "Recurring Insights", "variant": "cross_run"},
                     ],
                     "export": {"enabled": False, "format": "pdf", "documentVariant": "voice-rx-cross-run-v1", "sectionIds": []},
                     "aiSummary": {
@@ -2055,7 +2055,7 @@ APP_SEEDS = [
                         "sectionIds": [
                             "voice-rx-cross-summary",
                             "voice-rx-cross-severity",
-                            "voice-rx-cross-issues",
+                            "voice-rx-cross-insights",
                         ],
                     },
                 },

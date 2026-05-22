@@ -341,6 +341,21 @@ class CrossRunNarrativeSectionTests(unittest.TestCase):
     def test_inside_sales_cross_run_has_narrative_section(self):
         self._assert_app("inside-sales", self._EXPECTED["inside-sales"])
 
+    def test_voice_rx_cross_run_uses_trend_chart_and_insight_panels(self):
+        """voice-rx cross_run emits trend_chart + insight_panels, keeps the
+        narrative, and drops the flat issues_recommendations section.
+        outputInsertionPoints must resolve to the narrative only."""
+        cross, assets = self._cross_run_config("voice-rx")
+        types_by_id = {s.id: s.type for s in cross.sections}
+        self.assertEqual(types_by_id.get("voice-rx-cross-metrics"), "trend_chart")
+        self.assertEqual(types_by_id.get("voice-rx-cross-insights"), "insight_panels")
+        self.assertIn("voice-rx-cross-narrative", types_by_id)
+        self.assertNotIn("issues_recommendations", set(types_by_id.values()))
+        self.assertNotIn("voice-rx-cross-issues", types_by_id)
+
+        nc = _build_narrative_config("cross_run", cross, assets)
+        self.assertEqual(nc["outputInsertionPoints"], ["voice-rx-cross-narrative"])
+
     def test_kaira_cross_run_uses_trend_chart_and_insight_panels(self):
         """Kaira cross_run emits the richer trend_chart + insight_panels sections,
         keeps the dedicated narrative, and drops the flat issues_recommendations.

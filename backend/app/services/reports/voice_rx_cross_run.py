@@ -59,6 +59,7 @@ def build_voice_rx_cross_run_payload(
                 issue_counts[issue.title] = issue_counts.get(issue.title, 0) + 1
 
     avg_accuracy = sum(overall_accuracies) / len(overall_accuracies) if overall_accuracies else 0
+    severity_categories = list(severity_rows.keys())
     section_payloads = {
         'voice-rx-cross-summary': [
             {
@@ -86,19 +87,34 @@ def build_voice_rx_cross_run_payload(
                 'tone': 'negative' if critical_errors else 'positive',
             },
         ],
-        'voice-rx-cross-metrics': [
-            {
-                'key': 'avg-overall-accuracy',
-                'label': 'Average Overall Accuracy',
-                'value': avg_accuracy,
-                'maxValue': 100,
-                'tone': 'positive' if avg_accuracy >= 90 else 'warning' if avg_accuracy >= 75 else 'negative',
-            }
-        ],
+        'voice-rx-cross-metrics': {
+            'points': [
+                {
+                    'bucket': run_labels[index],
+                    'hoverLabel': run_labels[index],
+                    'primary': overall_accuracies[index] if index < len(overall_accuracies) else 0.0,
+                    'breakdown': {
+                        cat: severity_rows[cat][index]
+                        for cat in severity_categories
+                        if index < len(severity_rows[cat]) and severity_rows[cat][index] is not None
+                    },
+                }
+                for index in range(len(run_labels))
+            ],
+            'primaryLabel': 'Overall Accuracy',
+            'breakdowns': [
+                {'key': cat, 'label': cat.replace('_', ' ').title()}
+                for cat in severity_categories
+            ],
+            'yDomain': [0.0, 100.0],
+            'referenceValue': round(avg_accuracy, 1) if overall_accuracies else None,
+            'referenceLabel': 'Average',
+        },
         'voice-rx-cross-severity': {
             'columns': run_labels,
             'rows': [
                 {
+                    'key': category,
                     'label': category,
                     'cells': [
                         {
@@ -112,24 +128,17 @@ def build_voice_rx_cross_run_payload(
                 for category, values in severity_rows.items()
             ],
         },
-        'voice-rx-cross-issues': {
-            'issues': [
-                {
-                    'title': title,
-                    'area': 'Accuracy',
-                    'priority': 'P0' if title == 'Critical error volume' else 'P1',
-                    'summary': f'Observed in {count} runs.',
-                }
-                for title, count in issue_counts.items()
-            ],
-            'recommendations': [
-                {
-                    'priority': 'P0' if avg_accuracy < 85 else 'P1',
-                    'title': 'Focus transcription QA on repeated discrepancy types',
-                    'action': 'Use the run-level discrepancy examples to tighten prompts and reviewer checks for the recurring error classes.',
-                }
-            ],
-        },
+        'voice-rx-cross-insights': [
+            {
+                'area': 'Recurring Issues',
+                'priority': 'P0' if title == 'Critical error volume' else 'P1',
+                'runCount': count,
+                'items': [{'text': title, 'impacts': []}],
+                'stats': [],
+                'footerImpacts': [],
+            }
+            for title, count in issue_counts.items()
+        ],
     }
 
     metadata = PlatformCrossRunMetadata(
