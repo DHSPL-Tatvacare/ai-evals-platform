@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
+import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { routes } from '@/config/routes';
 import {
   listConnections,
@@ -99,6 +100,7 @@ export function ConnectionPicker(props: ConnectionPickerProps) {
     return rows.map((c) => ({
       value: c.id,
       label: c.name,
+      leading: <ConnectionProviderLogo provider={c.provider} size={18} />,
       meta: getConnectionProviderLabel(c.provider),
       searchText: `${c.provider} ${getConnectionProviderLabel(c.provider)} ${c.name}`,
     }));

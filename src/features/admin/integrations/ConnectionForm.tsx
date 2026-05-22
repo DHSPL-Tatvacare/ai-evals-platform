@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
+import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { VisibilityToggle } from '@/components/ui/VisibilityToggle';
@@ -74,6 +75,14 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         .filter((id): id is AppId => (APP_IDS as string[]).includes(id))
         .map((id) => ({ value: id, label: APPS[id].name })),
     [user?.appAccess],
+  );
+  const providerOptions = useMemo(
+    () =>
+      CONNECTION_PROVIDER_OPTIONS.map((option) => ({
+        ...option,
+        leading: <ConnectionProviderLogo provider={option.value} size={18} />,
+      })),
+    [],
   );
   // `appId` prop wins (deep-linked `?app=`); otherwise let the admin pick.
   const [selectedAppId, setSelectedAppId] = useState<string>(
@@ -223,7 +232,7 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
         <Select
           value={provider}
           onChange={(next) => setProvider(next)}
-          options={CONNECTION_PROVIDER_OPTIONS}
+          options={providerOptions}
           placeholder="Select provider"
           disabled={isEdit}
         />
