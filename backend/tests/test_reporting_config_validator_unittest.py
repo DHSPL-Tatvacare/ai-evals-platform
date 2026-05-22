@@ -11,8 +11,9 @@ import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from app.schemas.app_config import AppConfig
 from app.services.reports.config_validator import validate_reporting_config
-from app.services.seed_defaults import APP_SEEDS
+from app.services.seed_defaults import APP_SEEDS, _build_narrative_config
 
 
 # Default cascade behavior for Phase 4 check 8 — returns a non-empty prompt for
@@ -289,6 +290,71 @@ class ReportingConfigValidatorTests(unittest.IsolatedAsyncioTestCase):
         self._cascade_patch = _patch_cascade_resolved()
         self._cascade_patch.start()
         self.addCleanup(self._cascade_patch.stop)
+
+
+class CrossRunNarrativeSectionTests(unittest.TestCase):
+    """Each app's cross_run composition must have a dedicated narrative section
+    so the narrative executor inserts the full PlatformCrossRunNarrative payload
+    (not just the flattened issues table).  The section id must contain
+    'narrative' (narrative_executor.py substring routing) and the id must
+    appear in _build_narrative_config outputInsertionPoints."""
+
+    _EXPECTED = {
+        "voice-rx": "voice-rx-cross-narrative",
+        "kaira-bot": "kaira-cross-narrative",
+        "inside-sales": "inside-sales-cross-narrative",
+    }
+
+    def _cross_run_config(self, slug: str):
+        for seed in APP_SEEDS:
+            if seed["slug"] == slug:
+                cfg = AppConfig.model_validate(seed["config"])
+                return cfg.analytics.cross_run, cfg.analytics.assets
+        raise KeyError(slug)
+
+    def _assert_app(self, slug: str, expected_id: str) -> None:
+        cross, assets = self._cross_run_config(slug)
+        narrative_sections = [s for s in cross.sections if s.type == "narrative"]
+        self.assertTrue(
+            narrative_sections,
+            f"{slug}: cross_run.sections has no type='narrative' entry",
+        )
+        ids = [s.id for s in narrative_sections]
+        self.assertIn(
+            expected_id,
+            ids,
+            f"{slug}: expected narrative section id '{expected_id}' not found in {ids}",
+        )
+        nc = _build_narrative_config("cross_run", cross, assets)
+        self.assertIn(
+            expected_id,
+            nc["outputInsertionPoints"],
+            f"{slug}: '{expected_id}' missing from outputInsertionPoints {nc['outputInsertionPoints']}",
+        )
+
+    def test_voice_rx_cross_run_has_narrative_section(self):
+        self._assert_app("voice-rx", self._EXPECTED["voice-rx"])
+
+    def test_kaira_bot_cross_run_has_narrative_section(self):
+        self._assert_app("kaira-bot", self._EXPECTED["kaira-bot"])
+
+    def test_inside_sales_cross_run_has_narrative_section(self):
+        self._assert_app("inside-sales", self._EXPECTED["inside-sales"])
+
+    def test_narrative_section_placed_after_summary_cards(self):
+        """Narrative section must immediately follow the summary_cards entry."""
+        for slug, narrative_id in self._EXPECTED.items():
+            cross, _ = self._cross_run_config(slug)
+            ids = [s.id for s in cross.sections]
+            summary_idx = next(
+                (i for i, s in enumerate(cross.sections) if s.type == "summary_cards"), None
+            )
+            self.assertIsNotNone(summary_idx, f"{slug}: no summary_cards section found")
+            self.assertEqual(
+                ids[summary_idx + 1],
+                narrative_id,
+                f"{slug}: narrative section must be at index {summary_idx + 1}, got {ids}",
+            )
 
 
 if __name__ == "__main__":

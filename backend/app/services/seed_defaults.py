@@ -2044,6 +2044,7 @@ APP_SEEDS = [
                 "crossRun": {
                     "sections": [
                         {"id": "voice-rx-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "voice_rx_cross_run"},
+                        {"id": "voice-rx-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
                         {"id": "voice-rx-cross-metrics", "type": "metric_breakdown", "title": "Accuracy Trends", "variant": "voice_rx_trends"},
                         {"id": "voice-rx-cross-severity", "type": "heatmap", "title": "Severity Heatmap", "variant": "voice_rx_heatmap"},
                         {"id": "voice-rx-cross-issues", "type": "issues_recommendations", "title": "Recurring Issues", "variant": "voice_rx_recurring"},
@@ -2209,6 +2210,7 @@ APP_SEEDS = [
                 "crossRun": {
                     "sections": [
                         {"id": "kaira-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "kaira_cross_run"},
+                        {"id": "kaira-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
                         {"id": "kaira-cross-trend", "type": "metric_breakdown", "title": "Health Trends", "variant": "trend_line"},
                         {"id": "kaira-cross-compliance", "type": "heatmap", "title": "Rule Compliance Heatmap", "variant": "rule_compliance"},
                         {"id": "kaira-cross-adversarial", "type": "heatmap", "title": "Adversarial Heatmap", "variant": "adversarial_goals"},
@@ -2407,6 +2409,7 @@ APP_SEEDS = [
                 "crossRun": {
                     "sections": [
                         {"id": "inside-sales-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "inside_sales_cross_run"},
+                        {"id": "inside-sales-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
                         {"id": "inside-sales-cross-dimensions", "type": "heatmap", "title": "Dimension Heatmap", "variant": "dimensions"},
                         {"id": "inside-sales-cross-compliance", "type": "heatmap", "title": "Compliance Heatmap", "variant": "compliance"},
                         {"id": "inside-sales-cross-flags", "type": "flags", "title": "Flag Rollups", "variant": "behavioral_outcomes"},
