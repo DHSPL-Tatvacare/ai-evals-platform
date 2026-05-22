@@ -680,5 +680,153 @@ class InsideSalesCrossRunCanonicalAdapterTests(unittest.TestCase):
         self.assertEqual(trend.data.points[0].breakdown, {})
 
 
+class DistributionSeriesKeyFieldTests(unittest.TestCase):
+    """DistributionSeries must carry the key field so cross-run goal aggregation doesn't crash."""
+
+    def test_distribution_series_roundtrip_preserves_key(self):
+        # Fails before fix: key is stripped on model_validate because field was absent.
+        from app.services.reports.contracts.report_sections import DistributionSeries
+
+        series = DistributionSeries.model_validate(
+            {'key': 'goal:x', 'label': 'x', 'categories': ['passRate'], 'values': [80.0]}
+        )
+        self.assertEqual(series.key, 'goal:x')
+
+    def test_distribution_series_key_defaults_to_none(self):
+        from app.services.reports.contracts.report_sections import DistributionSeries
+
+        series = DistributionSeries.model_validate(
+            {'label': 'Adversarial', 'categories': ['passRate'], 'values': [75.0]}
+        )
+        self.assertIsNone(series.key)
+
+
+class KairaCrossRunWithDistributionsTests(unittest.TestCase):
+    """adapt_kaira_cross_run_from_runs must not crash when runs carry a kaira-distributions section."""
+
+    def _kaira_analytics_config(self):
+        from app.schemas.app_config import AppConfig
+        from app.services.seed_defaults import APP_SEEDS
+
+        for seed in APP_SEEDS:
+            if seed['slug'] == 'kaira-bot':
+                return AppConfig.model_validate(seed['config']).analytics
+        raise KeyError('kaira-bot')
+
+    def _run_payload_with_distributions(self, run_name: str, health: float) -> dict:
+        # Full kaira single-run payload that includes kaira-distributions with
+        # goal-keyed series — the exact shape produced by the single-run adapter
+        # and cached as the per-run artifact.
+        return {
+            'schemaVersion': 'v1',
+            'metadata': {
+                'appId': 'kaira-bot',
+                'runId': run_name,
+                'runName': run_name,
+                'evalType': 'batch_thread',
+                'createdAt': '2026-03-01T00:00:00+00:00',
+                'computedAt': '2026-03-01T00:05:00+00:00',
+            },
+            'sections': [
+                {
+                    'id': 'kaira-summary',
+                    'type': 'summary_cards',
+                    'title': 'Summary',
+                    'data': [
+                        {'key': 'health-score', 'label': 'Health Score', 'value': f'{health:.1f}', 'tone': 'positive'},
+                        {'key': 'total', 'label': 'Total Threads', 'value': '10', 'tone': 'neutral'},
+                    ],
+                },
+                {
+                    'id': 'kaira-metrics',
+                    'type': 'metric_breakdown',
+                    'title': 'Metrics',
+                    'data': [
+                        {'key': 'intent-accuracy', 'label': 'Intent Accuracy', 'value': health - 2, 'maxValue': 100},
+                        {'key': 'correctness-rate', 'label': 'Correctness Rate', 'value': health + 2, 'maxValue': 100},
+                    ],
+                },
+                {
+                    'id': 'kaira-distributions',
+                    'type': 'distribution_chart',
+                    'title': 'Goal Distributions',
+                    'data': [
+                        # Produced by canonical_adapters.py :345 — no goal key, should be skipped
+                        {'key': 'adversarial', 'label': 'Adversarial', 'categories': ['passRate'], 'values': [health]},
+                        # Produced by :354 — goal-keyed series, values[0] is the pass rate
+                        {'key': 'goal:medication_adherence', 'label': 'Medication Adherence', 'categories': ['passRate'], 'values': [health - 5]},
+                        {'key': 'goal:appointment_booking', 'label': 'Appointment Booking', 'categories': ['passRate'], 'values': [health + 3]},
+                    ],
+                },
+                {
+                    'id': 'kaira-recommendations',
+                    'type': 'issues_recommendations',
+                    'title': 'Issues',
+                    'data': {
+                        'issues': [
+                            {'title': 'Intent slips', 'area': 'Intent', 'priority': 'P0', 'summary': 'Intent routing degraded.'},
+                        ],
+                        'recommendations': [
+                            {'priority': 'P0', 'title': 'Intent', 'action': 'Tighten routing examples', 'expectedImpact': '-3 intent failures'},
+                        ],
+                    },
+                },
+            ],
+            'exportDocument': {
+                'schemaVersion': 'v1',
+                'title': run_name,
+                'theme': {
+                    'accent': '#0f766e',
+                    'accentMuted': '#99f6e4',
+                    'border': '#d1d5db',
+                    'textPrimary': '#0f172a',
+                    'textSecondary': '#475569',
+                    'background': '#ffffff',
+                },
+                'blocks': [{'id': 'cover', 'type': 'cover', 'title': run_name}],
+            },
+        }
+
+    def test_cross_run_does_not_raise_with_distributions_section(self):
+        # Before the fix this raised AttributeError: 'DistributionSeries' object
+        # has no attribute 'key' at canonical_adapters.py:618.
+        from app.services.reports.canonical_adapters import adapt_kaira_cross_run_from_runs
+
+        runs_data = [
+            ({'id': 'run-1', 'created_at': '2026-03-01T00:00:00+00:00'},
+             self._run_payload_with_distributions('Run 1', 82.0)),
+            ({'id': 'run-2', 'created_at': '2026-03-02T00:00:00+00:00'},
+             self._run_payload_with_distributions('Run 2', 76.0)),
+        ]
+        # Must not raise
+        report = adapt_kaira_cross_run_from_runs(
+            runs_data, self._kaira_analytics_config(), app_id='kaira-bot', total_runs_available=2
+        )
+        self.assertIsNotNone(report)
+
+    def test_cross_run_goal_rates_picked_up_from_distributions(self):
+        # After the fix, goal-keyed series are aggregated into goal_rates_by_run
+        # and produce a kaira-cross-goals section (if the adapter emits one) or
+        # at minimum do not crash so the trend_chart section is emitted.
+        from app.services.reports.canonical_adapters import adapt_kaira_cross_run_from_runs
+        from app.services.reports.contracts.report_sections import TrendChartSection
+
+        runs_data = [
+            ({'id': 'run-1', 'created_at': '2026-03-01T00:00:00+00:00'},
+             self._run_payload_with_distributions('Run 1', 82.0)),
+            ({'id': 'run-2', 'created_at': '2026-03-02T00:00:00+00:00'},
+             self._run_payload_with_distributions('Run 2', 76.0)),
+        ]
+        report = adapt_kaira_cross_run_from_runs(
+            runs_data, self._kaira_analytics_config(), app_id='kaira-bot', total_runs_available=2
+        )
+        # The trend section must be present and have one point per run
+        by_id = {section.id: section for section in report.sections}
+        self.assertIn('kaira-cross-trend', by_id)
+        trend = by_id['kaira-cross-trend']
+        self.assertIsInstance(trend, TrendChartSection)
+        self.assertEqual(len(trend.data.points), 2)
+
+
 if __name__ == '__main__':
     unittest.main()

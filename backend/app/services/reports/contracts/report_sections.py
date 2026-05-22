@@ -52,6 +52,7 @@ class MetricBreakdownSection(ReportSectionBase):
 
 
 class DistributionSeries(CamelModel):
+    key: str | None = None
     label: str
     values: list[float]
     categories: list[str]

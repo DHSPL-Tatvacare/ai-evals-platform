@@ -216,6 +216,7 @@ export interface MetricBreakdownSection extends PlatformReportSectionBase {
 }
 
 export interface DistributionSeries {
+  key?: string | null;
   label: string;
   values: number[];
   categories: string[];
