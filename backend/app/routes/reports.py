@@ -594,8 +594,9 @@ async def export_report_run_pdf(
         log_message=f'Report artifact invalid for report run {report_run_id} during PDF export',
     )
 
-    # Cross-run PDF is gated off by _ensure_pdf_export_enabled above; assert narrows the union.
-    assert isinstance(payload, PlatformRunReportPayload)
+    # Cross-run PDF is gated off by _ensure_pdf_export_enabled above.
+    if not isinstance(payload, PlatformRunReportPayload):
+        raise HTTPException(status_code=422, detail="PDF export is not available for cross-run reports.")
     pdf_bytes = await _render_pdf_via_print_route(
         print_path=f"/print/report-runs/{report_run_id}",
         auth=auth,
@@ -653,8 +654,9 @@ async def export_report_pdf(
         detail='Cached report artifact is outdated. Regenerate the report before exporting.',
         log_message=f'Report artifact invalid for run {run_id} during PDF export',
     )
-    # Cross-run PDF is gated off by _ensure_pdf_export_enabled above; assert narrows the union.
-    assert isinstance(payload, PlatformRunReportPayload)
+    # Cross-run PDF is gated off by _ensure_pdf_export_enabled above.
+    if not isinstance(payload, PlatformRunReportPayload):
+        raise HTTPException(status_code=422, detail="PDF export is not available for cross-run reports.")
     report_run_id = payload.metadata.report_run_id
     report_run = None
     if report_run_id:
