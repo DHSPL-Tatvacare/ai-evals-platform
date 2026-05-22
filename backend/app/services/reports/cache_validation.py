@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import logging
+from typing import TypeVar
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -12,14 +13,16 @@ from app.schemas.base import CamelModel
 
 logger = logging.getLogger(__name__)
 
+M = TypeVar("M", bound=CamelModel)
+
 
 def load_cached_payload_or_raise(
-    loader: Callable[[dict], CamelModel],
+    loader: Callable[[dict], M],
     cached_data: dict,
     *,
     detail: str,
     log_message: str,
-) -> CamelModel:
+) -> M:
     try:
         return loader(cached_data)
     except (ValidationError, ValueError) as exc:

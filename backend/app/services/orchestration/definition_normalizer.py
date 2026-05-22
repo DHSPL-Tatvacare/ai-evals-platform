@@ -37,7 +37,7 @@ Idempotent: running ``normalize_definition`` on an already-canonical
 definition is a no-op (modulo dict ordering).
 
 Used by:
-  - ``versions.publish_version`` — pre-publish normalization
+  - ``versions.publish_draft`` — pre-publish normalization
   - ``traversal.RunExecutor`` — at-runtime read of older saved definitions
   - the seed loader — rewrites system seed JSON to canonical on load
 """

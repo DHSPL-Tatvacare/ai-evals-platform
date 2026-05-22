@@ -12,11 +12,15 @@ from app.routes.reports import (
     _resolve_pdf_render_base_url,
     build_pdf_running_meta,
 )
+from app.schemas.base import CamelModel
 from app.services.reports.cache_validation import (
     load_cached_payload_or_raise,
     partition_valid_single_run_payloads,
 )
-from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
+from app.services.reports.contracts.cross_run_report import (
+    PlatformCrossRunMetadata,
+    PlatformCrossRunPayload,
+)
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
 
 
@@ -182,7 +186,7 @@ class PdfRunningMetaTests(unittest.TestCase):
         self.assertIn('eval · today', footer)
 
     def test_load_cached_payload_or_raise_converts_value_error_to_conflict(self):
-        def _broken_loader(_payload: dict):
+        def _broken_loader(data: dict):
             raise ValueError('badly formed hexadecimal UUID string')
 
         with self.assertRaises(HTTPException) as ctx:
@@ -211,9 +215,9 @@ class PdfRunningMetaTests(unittest.TestCase):
         self.assertIn('computedAt', valid_rows[0][1]['metadata'])
 
     def test_partition_valid_single_run_payloads_skips_value_error_rows(self):
-        class BrokenPayloadModel:
+        class BrokenPayloadModel(CamelModel):
             @classmethod
-            def model_validate(cls, _payload: dict):
+            def model_validate(cls, data: dict, **kwargs):  # type: ignore[override]
                 raise ValueError('badly formed hexadecimal UUID string')
 
         valid_rows, invalid_count = partition_valid_single_run_payloads(
@@ -229,12 +233,12 @@ class PdfRunningMetaTests(unittest.TestCase):
 
 def _valid_cross_run_payload() -> dict:
     return PlatformCrossRunPayload(
-        metadata={
-            'appId': 'inside-sales',
-            'computedAt': '2026-04-01T12:00:00+00:00',
-            'sourceRunCount': 3,
-            'totalRunsAvailable': 5,
-        },
+        metadata=PlatformCrossRunMetadata(
+            app_id='inside-sales',
+            computed_at='2026-04-01T12:00:00+00:00',
+            source_run_count=3,
+            total_runs_available=5,
+        ),
         sections=[],
     ).model_dump(by_alias=True)
 

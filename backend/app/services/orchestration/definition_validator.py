@@ -46,7 +46,7 @@ from app.services.orchestration.nodes.logic_wait import expected_output_ids_for_
 #   - publish: every rule fires (current behavior)
 #   - draft:   structural rules fire; cross-field completeness and
 #              "must have outgoing edges yet" rules are deferred. Used by
-#              the authoring agent's apply_patch and by create_draft_version
+#              the authoring agent's apply_patch and by save_draft
 #              so partial in-progress workflows can save without flipping
 #              every required field on. The per-node Pydantic schema is
 #              still invoked, but ``context={'mode': 'draft'}`` lets node
@@ -142,7 +142,7 @@ def validate_dispatch_required_fields(
 ) -> list[dict[str, str]]:
     """Return the structured list of missing dispatch fields, empty when valid.
 
-    Caller is the publish path (``api/versions.publish_version``); raise
+    Caller is the publish path (``api/versions.publish_draft``); raise
     ``DispatchRequiredFieldsError`` from there on a non-empty result. Drafts
     stay saveable.
     """
