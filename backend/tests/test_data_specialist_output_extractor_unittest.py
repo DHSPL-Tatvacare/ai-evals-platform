@@ -60,13 +60,13 @@ class ExtractorPullsLastSubmitSqlOutputTests(unittest.IsolatedAsyncioTestCase):
     async def test_returns_last_submit_sql_output_string(self) -> None:
         first_payload = json.dumps({
             'kind': 'data', 'status': 'error', 'summary': 'first try failed',
-            'evidence': [], 'artifacts': [], 'state_delta': {}, 'meta': {},
+            'evidence': [], 'artifacts': [], 'meta': {},
         })
         second_payload = json.dumps({
             'kind': 'data', 'status': 'ok', 'summary': '16 rows',
             'evidence': [{'ref_id': 'ev1'}],
             'artifacts': [{'kind': 'chart', 'payload': {'kind': 'chart'}}],
-            'state_delta': {}, 'meta': {'latency_ms': 56},
+            'meta': {'latency_ms': 56},
         })
         run = _RunResultStub(new_items=[
             _MessageItem(),

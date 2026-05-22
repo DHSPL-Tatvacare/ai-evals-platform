@@ -165,7 +165,6 @@ def _result_json(
         'summary': summary,
         'evidence': [],
         'artifacts': artifacts,
-        'state_delta': {},
         'meta': meta,
     }, default=str)
 
@@ -732,7 +731,6 @@ def _lookup_result_json(
         'summary': summary,
         'evidence': [],
         'artifacts': [],
-        'state_delta': {},
         'meta': meta,
         'payload': payload,
     }, default=str)

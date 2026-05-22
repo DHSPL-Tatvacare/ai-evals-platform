@@ -52,7 +52,6 @@ from app.models.sherlock_runtime import (
     SherlockConversationTurn,
     SherlockEvidence,
     SherlockPart,
-    SherlockState,
 )
 from app.models.sherlock_ontology import (
     SherlockOntologyClass,
@@ -112,7 +111,7 @@ __all__ = [
     "SignalDefinition",
     "AnalyticsChart", "AnalyticsDashboard",
     "SherlockAgentSession", "SherlockPart", "SherlockConversationTurn",
-    "SherlockState", "SherlockEvidence",
+    "SherlockEvidence",
     "SherlockOntologyClass", "SherlockOntologyEntityType", "SherlockEntityResolver",
     "FactLlmGeneration", "RefLlmModelPricing", "RefLlmModelAlias", "AggLlmUsageDaily",
     "RefLlmModelsCatalog", "SnapshotLlmModelsCatalog",
