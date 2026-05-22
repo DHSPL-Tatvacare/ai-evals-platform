@@ -138,7 +138,7 @@ async def _materialize_cohort(
 
     try:
         resolved: ResolvedSource = await resolve_source(
-            source_ref, db=ctx.db, tenant_id=ctx.tenant_id,
+            source_ref, db=ctx.db, tenant_id=ctx.tenant_id, app_id=ctx.app_id,
         )
     except SourceCatalogError as exc:
         raise CohortSourceNotFound(str(exc)) from exc

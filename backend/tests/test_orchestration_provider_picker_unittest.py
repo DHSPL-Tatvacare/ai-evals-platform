@@ -282,7 +282,6 @@ def test_messaging_config_accepts_template_name_channel_broadcast():
     cid = uuid.uuid4()
     cfg = _MsgConfig(
         connection_id=cid,
-        template_slug="prog_welcome",
         template_name="welcome_v2",
         channel_number="+911234567890",
         broadcast_name="concierge_may_2026",
@@ -295,7 +294,7 @@ def test_messaging_config_accepts_template_name_channel_broadcast():
 def test_messaging_config_template_name_defaults_empty():
     """template_name/channel_number/broadcast_name default to '' (draft-safe)."""
     cid = uuid.uuid4()
-    cfg = _MsgConfig(connection_id=cid, template_slug="prog_welcome")
+    cfg = _MsgConfig(connection_id=cid)
     assert cfg.template_name == ""
     assert cfg.channel_number == ""
     assert cfg.broadcast_name == ""
@@ -306,7 +305,6 @@ def test_messaging_config_rejects_unknown_keys():
     with pytest.raises(ValidationError) as exc_info:
         _MsgConfig(
             connection_id=uuid.uuid4(),
-            template_slug="prog_welcome",
             totally_unknown="boom",
         )
     assert any(err.get("type") == "extra_forbidden" for err in exc_info.value.errors())

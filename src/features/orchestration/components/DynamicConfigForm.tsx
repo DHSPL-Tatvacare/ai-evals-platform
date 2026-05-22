@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/Button';
+import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
@@ -286,6 +287,29 @@ function FieldRenderer({
         connectionId={connectionIdForVariables}
         value={typeof fieldValue === 'string' ? fieldValue : ''}
         onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  if (prop['x-type'] === 'recipient_field_picker') {
+    const current = typeof fieldValue === 'string' ? fieldValue : '';
+    // Operator picks the contact field from the upstream payload fields.
+    // Falls back to free text when the upstream fields aren't known yet.
+    if (payloadFieldOptions && payloadFieldOptions.length > 0) {
+      const names = Array.from(new Set([...(current ? [current] : []), ...payloadFieldOptions]));
+      return (
+        <Combobox
+          value={current}
+          onChange={(next) => onChange(fieldKey, next)}
+          options={names.map((n) => ({ value: n, label: n }))}
+          placeholder="Pick the phone number field"
+        />
+      );
+    }
+    return (
+      <Input
+        value={current}
+        onChange={(e) => onChange(fieldKey, e.target.value)}
+        placeholder="e.g. phone"
       />
     );
   }

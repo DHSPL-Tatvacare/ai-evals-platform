@@ -124,6 +124,38 @@ def _normalize_split_node(node: dict[str, Any], edges: list[dict[str, Any]]) -> 
             e["output_id"] = label_to_id[old]
 
 
+# Legacy conditional outputs: 'true' became the named branch, 'false' the implicit default.
+_CONDITIONAL_LEGACY_MATCH_LABEL = "Matched"
+_CONDITIONAL_DEFAULT_OUTPUT_ID = "default"
+
+
+def _normalize_conditional_node(node: dict[str, Any], edges: list[dict[str, Any]]) -> None:
+    """Coerce a legacy ``{predicate}`` conditional to the canonical ``{branches}`` shape.
+
+    The old node had fixed ``true`` / ``false`` outputs. The single predicate
+    becomes one named branch (the ``true`` path); the ``false`` path maps to
+    the implicit ``default`` output. Edges are rewritten in place.
+    """
+    cfg = node.setdefault("config", {})
+    if cfg.get("branches") is not None:
+        return
+    if "predicate" not in cfg:
+        return
+    predicate = cfg.pop("predicate")
+    branch_id = _slugify_branch_id(_CONDITIONAL_LEGACY_MATCH_LABEL, set())
+    cfg["branches"] = [
+        {"id": branch_id, "label": _CONDITIONAL_LEGACY_MATCH_LABEL, "predicate": predicate}
+    ]
+    for e in edges:
+        if e.get("source") != node.get("id"):
+            continue
+        oid = e.get("output_id") or e.get("label")
+        if oid == "true":
+            e["output_id"] = branch_id
+        elif oid == "false":
+            e["output_id"] = _CONDITIONAL_DEFAULT_OUTPUT_ID
+
+
 def _normalize_wait_node(node: dict[str, Any]) -> None:
     cfg = node.setdefault("config", {})
     if "mode" in cfg:
@@ -201,12 +233,15 @@ def normalize_definition(raw: dict[str, Any]) -> dict[str, Any]:
         if normalizer is not None:
             normalizer(node)
 
-    # Step 2: split nodes — assign branch ids and rewrite their outgoing
-    # edges from labels to ids. Done after step 1 so any other config
-    # tidying is already in place.
+    # Step 2: split + conditional nodes — assign branch ids and rewrite their
+    # outgoing edges (label→id for split, true/false→branch/default for the
+    # legacy conditional). Done after step 1 so other config tidying is in place.
     for node in nodes:
-        if node.get("type") == "logic.split":
+        node_type = node.get("type")
+        if node_type == "logic.split":
             _normalize_split_node(node, edges)
+        elif node_type == "logic.conditional":
+            _normalize_conditional_node(node, edges)
 
     # Step 3: edges — rewrite legacy ``label`` to ``output_id`` for any edge
     # that doesn't already carry it. (Step 2 may have set output_id on some

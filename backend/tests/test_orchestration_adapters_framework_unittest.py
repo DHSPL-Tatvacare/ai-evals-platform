@@ -144,10 +144,10 @@ def test_canonical_voice_event_requires_outcome_contact_and_correlation():
 
 def test_canonical_send_request_carries_optional_reply_context_id():
     """`reply_context_id` is the closed-loop correlation handle — must be optional, not required."""
-    req = CanonicalSendRequest(contact="+919999999999", template_slug="intake")
+    req = CanonicalSendRequest(contact="+919999999999", template_name="intake")
     assert req.reply_context_id is None
     req_with = CanonicalSendRequest(
-        contact="+919999999999", template_slug="intake",
+        contact="+919999999999", template_name="intake",
         reply_context_id="gBE-prior-wmid",
     )
     assert req_with.reply_context_id == "gBE-prior-wmid"

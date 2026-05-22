@@ -94,15 +94,6 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
           <code>timeout</code>, <code>http_5xx</code>, <code>transport</code>.
         </p>
       </Field>
-      <Field label="On exhausted (output id)">
-        <Input
-          value={v.on_exhausted_output_id}
-          onChange={(e) =>
-            update({ on_exhausted_output_id: e.target.value || 'exhausted' })
-          }
-          placeholder="exhausted"
-        />
-      </Field>
     </div>
   );
 }

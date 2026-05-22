@@ -29,6 +29,13 @@ describe('AttemptPolicyEditor', () => {
     expect(next.retry_on).toEqual(['timeout', 'http_5xx']);
   });
 
+  it('does not render an editable on-exhausted output id input', () => {
+    const onChange = vi.fn();
+    render(<AttemptPolicyEditor value={undefined} onChange={onChange} />);
+    expect(screen.queryByText('On exhausted (output id)')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('exhausted')).not.toBeInTheDocument();
+  });
+
   it('clamps max_attempts to a minimum of 1', () => {
     const onChange = vi.fn();
     render(<AttemptPolicyEditor value={undefined} onChange={onChange} />);

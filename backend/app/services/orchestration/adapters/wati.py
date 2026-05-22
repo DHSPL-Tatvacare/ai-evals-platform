@@ -302,13 +302,16 @@ class WatiAdapter:
         url = f"{endpoint}/api/v2/sendTemplateMessage"
         whatsapp_number = _strip_plus(request.contact)
         body: dict[str, Any] = {
-            "template_name": request.template_slug,
-            "broadcast_name": request.template_slug,
+            "template_name": request.template_name,
+            "broadcast_name": request.broadcast_name or request.template_name,
             "parameters": [{"name": k, "value": v} for k, v in request.variables.items()],
         }
-        channels = connection.get("channel_numbers") or []
-        if channels:
-            body["channel_number"] = channels[0]
+        # Operator-picked sender wins; fall back to the connection's first number.
+        channel = request.channel_number or next(
+            iter(connection.get("channel_numbers") or []), ""
+        )
+        if channel:
+            body["channel_number"] = channel
 
         headers = {
             "Authorization": f"Bearer {api_token}",

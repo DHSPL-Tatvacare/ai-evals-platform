@@ -74,7 +74,6 @@ describe("workflowBuilderStore", () => {
       data: { label: "Webhook", nodeType: "core.webhook_out" },
       config: {
         connection_id: "c-1",
-        template_slug: "wati_default",
         template_name: "concierge",
         channel_number: "+91x",
         broadcast_name: "b",
@@ -82,7 +81,6 @@ describe("workflowBuilderStore", () => {
     });
     s.updateNodeConfig("n1", {
       connection_id: "c-1",
-      template_slug: "wati_default",
       // Inject an unknown extra key — strict mode rejects, store keeps
       // the raw config and annotates with _parseIssues.
       surprise: "extra",

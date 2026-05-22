@@ -116,6 +116,17 @@ describe("parseNodeConfig — discriminator + strict mode", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("logic.split rejects a non-integer branch.weight (Pydantic Optional[int] parity)", () => {
+    const result = parseNodeConfig("logic.split", {
+      mode: "random",
+      branches: [
+        { id: "a", label: "A", weight: 1.5 },
+        { id: "b", label: "B", weight: 2 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it("logic.split rejects branch.predicate (fabricated FE-only field)", () => {
     const result = parseNodeConfig("logic.split", {
       mode: "by_field",

@@ -1,11 +1,14 @@
 """Live provider-listing service backing the builder inspector pickers.
 
 Fetches WATI templates and Bolna agents from the vendor APIs and caches
-results in-process for 30 seconds so a single inspector session does not
-fan out upstream calls per keystroke.
+results in-process. Approved templates change rarely, so the passive TTL is
+long and the explicit Refresh button is the manual invalidation path. A
+per-key single-flight lock coalesces the concurrent fetches one inspector-open
+fires (template picker + variable-mapping introspection) into one upstream call.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass
@@ -18,7 +21,9 @@ from app.models.provider_connection import ProviderConnection
 from app.services.orchestration.connections import crypto
 
 
-_CACHE_TTL_SECONDS = 30.0
+# Approved provider templates/agents are near-static — refresh is operator-driven,
+# not time-driven. Long passive TTL; the Refresh button forces a live fetch.
+_CACHE_TTL_SECONDS = 900.0  # 15 minutes
 
 
 @dataclass(frozen=True)
@@ -34,16 +39,30 @@ class _CacheEntry:
 
 
 _CACHE: dict[_CacheKey, _CacheEntry] = {}
+# Per-key single-flight: concurrent inspector-open fetches share one upstream call.
+_LOCKS: dict[_CacheKey, asyncio.Lock] = {}
+
+
+def _lock_for(key: _CacheKey) -> asyncio.Lock:
+    lock = _LOCKS.get(key)
+    if lock is None:
+        lock = _LOCKS.setdefault(key, asyncio.Lock())
+    return lock
 
 
 def _cached(key: _CacheKey) -> Optional[list[dict[str, Any]]]:
+    """Fresh (within TTL) payload, or None. Expired entries linger so
+    ``_last_good`` can still serve them when the upstream is rate-limiting."""
     entry = _CACHE.get(key)
-    if entry is None:
-        return None
-    if entry.expires_at < time.monotonic():
-        _CACHE.pop(key, None)
+    if entry is None or entry.expires_at < time.monotonic():
         return None
     return entry.payload
+
+
+def _last_good(key: _CacheKey) -> Optional[list[dict[str, Any]]]:
+    """Last successfully fetched payload regardless of TTL — graceful-degrade source."""
+    entry = _CACHE.get(key)
+    return entry.payload if entry else None
 
 
 def _store(key: _CacheKey, payload: list[dict[str, Any]]) -> None:
@@ -124,6 +143,66 @@ async def list_connection_bolna_agents(
     return {"provider": "bolna", "items": items, "error": None}
 
 
+def _friendly_wati_error(exc: Exception) -> str:
+    """Operator-facing copy. Rate limits are transient and self-resolve."""
+    text = str(exc)
+    if "429" in text or "rate limit" in text.lower():
+        return "WhatsApp provider is rate-limiting template lookups — try Refresh again in a minute."
+    return "Couldn't load WhatsApp templates from the provider. Try Refresh."
+
+
+async def _fetch_wati_templates_cached(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    connection_id: uuid.UUID,
+    refresh: bool = False,
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Single source for WATI templates — both the picker and variable-mapping
+    introspection call this so an inspector-open fans out one upstream call, not two.
+
+    Single-flight per connection; long TTL; on upstream failure (e.g. 429) falls
+    back to the last-known-good list instead of blanking the picker.
+    """
+    key = _CacheKey(connection_id=connection_id, bucket="wati:templates")
+    if not refresh:
+        fresh = _cached(key)
+        if fresh is not None:
+            return fresh, None
+
+    async with _lock_for(key):
+        # Re-check inside the lock: a concurrent caller may have just populated it.
+        if not refresh:
+            fresh = _cached(key)
+            if fresh is not None:
+                return fresh, None
+
+        config = await _load_connection(
+            db,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            connection_id=connection_id,
+            expected_provider="wati",
+        )
+        if config is None:
+            return [], "Connection not found, archived, or not a WATI connection."
+
+        from app.services.orchestration.adapters.wati import WatiAdapter, WatiServiceError
+
+        try:
+            items = await WatiAdapter().list_message_templates(config)
+        except (WatiServiceError, Exception) as exc:  # noqa: BLE001 — soft error contract
+            stale = _last_good(key)
+            if stale is not None:
+                # Don't punish a transient rate limit by emptying the picker.
+                return stale, _friendly_wati_error(exc)
+            return [], _friendly_wati_error(exc)
+
+        _store(key, items)
+        return items, None
+
+
 async def list_connection_wati_templates(
     db: AsyncSession,
     *,
@@ -133,39 +212,11 @@ async def list_connection_wati_templates(
     refresh: bool = False,
 ) -> dict[str, Any]:
     """Return {provider, items, error}. Soft-error: HTTP stays 200 on upstream failure."""
-    key = _CacheKey(connection_id=connection_id, bucket="wati:templates")
-    if refresh:
-        _bust(key)
-    cached = _cached(key)
-    if cached is not None:
-        return {"provider": "wati", "items": cached, "error": None}
-
-    config = await _load_connection(
-        db,
-        tenant_id=tenant_id,
-        app_id=app_id,
-        connection_id=connection_id,
-        expected_provider="wati",
+    items, error = await _fetch_wati_templates_cached(
+        db, tenant_id=tenant_id, app_id=app_id,
+        connection_id=connection_id, refresh=refresh,
     )
-    if config is None:
-        return {
-            "provider": "wati",
-            "items": [],
-            "error": "Connection not found, archived, or not a WATI connection.",
-        }
-
-    from app.services.orchestration.adapters.wati import WatiAdapter, WatiServiceError
-
-    adapter = WatiAdapter()
-    try:
-        items = await adapter.list_message_templates(config)
-    except WatiServiceError as exc:
-        return {"provider": "wati", "items": [], "error": str(exc)}
-    except Exception as exc:  # noqa: BLE001 — soft error contract
-        return {"provider": "wati", "items": [], "error": f"WATI upstream error: {exc.__class__.__name__}"}
-
-    _store(key, items)
-    return {"provider": "wati", "items": items, "error": None}
+    return {"provider": "wati", "items": items, "error": error}
 
 
 async def get_agent_variables(
@@ -205,12 +256,14 @@ async def get_agent_variables(
         return {"provider": "bolna", "variables": variables, "error": None}
 
     if provider == "wati" and template_name:
-        from app.services.orchestration.adapters.wati import WatiAdapter, WatiServiceError
-        adapter = WatiAdapter()
-        try:
-            templates = await adapter.list_message_templates(config)
-        except (WatiServiceError, Exception) as exc:  # noqa: BLE001
-            return {"provider": "wati", "variables": [], "error": str(exc)}
+        # Shares the picker's cache + single-flight — one upstream fetch per
+        # inspector-open, not two. No direct adapter call (that was the
+        # parallel, uncached path that helped trip the WATI 429).
+        templates, error = await _fetch_wati_templates_cached(
+            db, tenant_id=tenant_id, app_id=row.app_id, connection_id=connection_id,
+        )
+        if error and not templates:
+            return {"provider": "wati", "variables": [], "error": error}
         match = next((t for t in templates if t["name"] == template_name), None)
         if match is None:
             return {"provider": "wati", "variables": [], "error": f"Template {template_name!r} not found."}

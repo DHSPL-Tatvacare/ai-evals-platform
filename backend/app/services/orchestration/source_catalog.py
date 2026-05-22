@@ -31,13 +31,14 @@ in-process registry needed by the contract.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mixins.shareable import Visibility
@@ -53,8 +54,8 @@ class CohortSource(BaseModel):
     ``allowed_lookback_columns`` lists timestamp columns valid for the
     ``lookback_hours`` mechanic; if empty, lookback is not supported on
     this source.
-    ``jsonb_keys`` is populated at runtime by the API layer after live
-    introspection; the compiler uses it to route column references to
+    ``jsonb_keys`` is populated at resolution time by ``resolve_source`` after
+    live introspection; the compiler uses it to route column references to
     ``src.raw_payload->>'key'`` instead of bare ``src.key``.
     """
     source_ref: str
@@ -67,7 +68,7 @@ class CohortSource(BaseModel):
     allowed_payload_columns: list[str] = Field(default_factory=list)
     allowed_filter_columns: list[str] = Field(default_factory=list)
     allowed_lookback_columns: list[str] = Field(default_factory=list)
-    # Live-derived JSONB key set — populated by the API layer, not the static catalog.
+    # Live-derived JSONB key set — populated by resolve_source, not the static catalog.
     jsonb_keys: list[str] = Field(default_factory=list)
 
 
@@ -243,22 +244,167 @@ async def _load_dataset_source(
     return _row_to_dataset_source(version, dataset)
 
 
+# ─── Live schema introspection (shared by API layer + run path) ───────────
+#
+# ONE introspection. The builder column picker (API layer) and the cohort
+# run path (resolve_source) both read the live field set from this function
+# so they can never drift — a JSONB key the FE offers is the same key the
+# compiler routes through ``raw_payload->>'key'``.
+
+_PLAIN_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+_SCHEMA_TABLE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# Infra/mixin columns that are never authoring-visible payload or filter fields.
+_INFRA_COLUMNS: frozenset[str] = frozenset({
+    "id", "tenant_id", "app_id", "created_at", "updated_at",
+    "source_system", "source_record_hash",
+    "first_synced_at", "last_synced_at", "last_seen_in_source_at",
+    "last_synced_by_user_id",
+    "raw_payload",  # the JSONB container itself is never a filter field
+})
+
+# Map information_schema data_type strings → frontend CohortColumnType literals.
+_PG_TYPE_MAP: dict[str, str] = {
+    "character varying": "string",
+    "text": "string",
+    "uuid": "string",
+    "character": "string",
+    "smallint": "integer",
+    "integer": "integer",
+    "bigint": "integer",
+    "numeric": "number",
+    "decimal": "number",
+    "real": "number",
+    "double precision": "number",
+    "boolean": "boolean",
+}
+
+
+def _pg_type_to_cohort_type(pg_type: str) -> str:
+    if pg_type in _PG_TYPE_MAP:
+        return _PG_TYPE_MAP[pg_type]
+    if pg_type.startswith("timestamp") or pg_type == "date":
+        return "datetime"
+    return "string"
+
+
+async def introspect_static_schema_descriptor(
+    db: AsyncSession,
+    *,
+    schema_qualified_table: str,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    allowed_columns: Optional[set[str]] = None,
+) -> dict[str, Any]:
+    """Query information_schema + raw_payload JSONB keys for the given table.
+
+    Returns a schema_descriptor with all authoring-visible columns:
+      - Real columns (non-infra, non-raw_payload) from information_schema
+      - Distinct JSONB keys from raw_payload for this tenant+app
+
+    Each column entry carries: {name, type, isJsonb}.
+    ``allowed_columns`` is an optional curation filter; when None (or empty)
+    all non-infra columns are included so the live set can never drift.
+    """
+    # Guard the table identifier before any interpolation — catalog config only.
+    if not _SCHEMA_TABLE_RE.match(schema_qualified_table):
+        raise SourceCatalogError(f"invalid schema-qualified table: {schema_qualified_table!r}")
+    dot_pos = schema_qualified_table.index(".")
+    tbl_schema = schema_qualified_table[:dot_pos]
+    tbl_name = schema_qualified_table[dot_pos + 1:]
+
+    real_stmt = text(
+        "SELECT column_name, data_type"
+        " FROM information_schema.columns"
+        " WHERE table_schema = :tbl_schema AND table_name = :tbl_name"
+        " ORDER BY ordinal_position"
+    )
+    result = await db.execute(real_stmt, {"tbl_schema": tbl_schema, "tbl_name": tbl_name})
+    all_rows = result.all()
+
+    columns: list[dict] = []
+    has_raw_payload = False
+
+    for col_name, data_type in all_rows:
+        if col_name == "raw_payload":
+            has_raw_payload = True
+            continue
+        if col_name in _INFRA_COLUMNS:
+            continue
+        if allowed_columns and col_name not in allowed_columns:
+            continue
+        columns.append({"name": col_name, "type": _pg_type_to_cohort_type(data_type), "isJsonb": False})
+
+    jsonb_keys: list[str] = []
+    if has_raw_payload:
+        # schema_qualified_table is regex-validated above (``schema.table``,
+        # catalog config never user input) — safe to interpolate.
+        jsonb_stmt = text(
+            f"SELECT DISTINCT jsonb_object_keys(raw_payload)"  # noqa: S608
+            f" FROM {schema_qualified_table}"
+            " WHERE tenant_id = :tenant_id AND app_id = :app_id"
+            " LIMIT 200"
+        )
+        jresult = await db.execute(
+            jsonb_stmt, {"tenant_id": str(tenant_id), "app_id": app_id}
+        )
+        for (key,) in jresult.all():
+            if _PLAIN_IDENT_RE.match(key):
+                jsonb_keys.append(key)
+        jsonb_keys.sort()
+        for key in jsonb_keys:
+            columns.append({"name": key, "type": "string", "isJsonb": True})
+
+    return {"columns": columns, "jsonb_keys": jsonb_keys}
+
+
+async def _enrich_static_jsonb_keys(
+    db: AsyncSession,
+    source: CohortSource,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: Optional[str],
+) -> CohortSource:
+    """Populate ``jsonb_keys`` on a static source via one live introspection.
+
+    Falls back to the source's first declared app_id when the caller has no
+    app context (e.g. the dataset-only resolver path). Returns the source
+    unchanged when no app can be resolved — the compiler then emits bare
+    columns, matching pre-enrichment behaviour for real-column-only configs.
+    """
+    eff_app_id = app_id or (source.app_ids[0] if source.app_ids else None)
+    if eff_app_id is None:
+        return source
+    descriptor = await introspect_static_schema_descriptor(
+        db,
+        schema_qualified_table=source.schema_qualified_table,
+        tenant_id=tenant_id,
+        app_id=eff_app_id,
+    )
+    return source.model_copy(update={"jsonb_keys": list(descriptor.get("jsonb_keys", []))})
+
+
 async def resolve_source(
     source_ref: str,
     *,
     db: AsyncSession,
     tenant_id: uuid.UUID,
+    app_id: Optional[str] = None,
 ) -> ResolvedSource:
     """Resolve a source_ref against the static catalog or DB-backed datasets.
 
-    Static entries hit the in-process ``_CATALOG`` and return a ``CohortSource``
-    without a DB read. ``dataset.<uuid>`` entries are looked up against
+    Static entries hit the in-process ``_CATALOG`` and are enriched with their
+    live ``jsonb_keys`` via one introspection (so the run path routes JSONB
+    keys through ``raw_payload->>'key'`` exactly as the builder column picker
+    does). ``dataset.<uuid>`` entries are looked up against
     ``orchestration.cohort_dataset_versions`` filtered by ``tenant_id``.
     Cross-tenant access raises ``SourceCatalogError`` (the route layer maps
     it to 404 — never leak existence).
     """
     if source_ref in _CATALOG:
-        return _CATALOG[source_ref]
+        return await _enrich_static_jsonb_keys(
+            db, _CATALOG[source_ref], tenant_id=tenant_id, app_id=app_id,
+        )
     if source_ref.startswith(_DATASET_PREFIX):
         return await _load_dataset_source(db, tenant_id=tenant_id, source_ref=source_ref)
     raise SourceCatalogError(f"unknown source_ref: {source_ref!r}")
@@ -317,4 +463,5 @@ __all__ = [
     "list_dataset_sources",
     "resolve_source",
     "all_source_refs",
+    "introspect_static_schema_descriptor",
 ]

@@ -41,9 +41,9 @@ from app.services.orchestration.nodes.messaging_send_whatsapp_template import (
 
 def test_config_minimum_required_fields():
     cid = uuid.uuid4()
-    cfg = _Config(connection_id=cid, template_slug="welcome_v1")
+    cfg = _Config(connection_id=cid, template_name="welcome_v1")
     assert cfg.connection_id == cid
-    assert cfg.template_slug == "welcome_v1"
+    assert cfg.template_name == "welcome_v1"
     assert cfg.variable_mappings == []
     assert cfg.webhook_ttl_seconds == 259200  # 3 days
 
@@ -52,7 +52,7 @@ def test_config_rejects_unknown_keys():
     with pytest.raises(ValidationError) as exc_info:
         _Config(
             connection_id=uuid.uuid4(),
-            template_slug="welcome_v1",
+            template_name="welcome_v1",
             unknown_field="should_be_rejected",
         )
     assert any(
@@ -61,16 +61,17 @@ def test_config_rejects_unknown_keys():
     )
 
 
-def test_config_template_slug_required_non_empty():
-    with pytest.raises(ValidationError):
-        _Config(connection_id=uuid.uuid4(), template_slug="")
+def test_config_template_name_draft_safe_empty():
+    # template_name is the publish-gated picker field — empty is a valid draft.
+    cfg = _Config(connection_id=uuid.uuid4())
+    assert cfg.template_name == ""
 
 
 def test_config_webhook_ttl_seconds_min_60():
     with pytest.raises(ValidationError):
         _Config(
             connection_id=uuid.uuid4(),
-            template_slug="x",
+            template_name="x",
             webhook_ttl_seconds=30,
         )
 
@@ -241,7 +242,7 @@ async def test_send_template_happy_path(monkeypatch):
     adapter = WatiAdapter()
     request = CanonicalSendRequest(
         contact="+919999999999",
-        template_slug="welcome_v1",
+        template_name="welcome_v1",
         variables={"name": "Dhruv", "appointment": "Tuesday 3pm"},
     )
     response = await adapter.send_template(
@@ -253,13 +254,44 @@ async def test_send_template_happy_path(monkeypatch):
     assert "whatsappNumber=919999999999" in captured["url"]
     assert captured["url"].endswith("/api/v2/sendTemplateMessage?whatsappNumber=919999999999")
     assert captured["body"]["template_name"] == "welcome_v1"
+    # broadcast_name falls back to template_name when not picked.
     assert captured["body"]["broadcast_name"] == "welcome_v1"
+    # channel_number falls back to the connection's first number when not picked.
     assert captured["body"]["channel_number"] == "+919811111111"
     assert captured["body"]["parameters"] == [
         {"name": "name", "value": "Dhruv"},
         {"name": "appointment", "value": "Tuesday 3pm"},
     ]
     assert captured["headers"]["authorization"] == "Bearer test-token"
+
+
+@pytest.mark.asyncio
+async def test_send_template_uses_picked_broadcast_and_channel(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"localMessageId": "lm-pick"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.wati._make_client",
+        lambda timeout=30.0: httpx.AsyncClient(transport=transport, timeout=timeout),
+    )
+
+    request = CanonicalSendRequest(
+        contact="+919999999999",
+        template_name="document_approved_latest",
+        broadcast_name="May campaign",
+        channel_number="+918511975757",
+        variables={"name": "Pareekshith"},
+    )
+    await WatiAdapter().send_template(connection=_connection(), request=request)
+
+    # Operator-picked values win over the connection default.
+    assert captured["body"]["template_name"] == "document_approved_latest"
+    assert captured["body"]["broadcast_name"] == "May campaign"
+    assert captured["body"]["channel_number"] == "+918511975757"
 
 
 @pytest.mark.asyncio
@@ -275,7 +307,7 @@ async def test_send_template_4xx_raises_service_error(monkeypatch):
     with pytest.raises(WatiServiceError) as exc:
         await WatiAdapter().send_template(
             connection=_connection(),
-            request=CanonicalSendRequest(contact="+91999", template_slug="x"),
+            request=CanonicalSendRequest(contact="+91999", template_name="x"),
         )
     assert "400" in str(exc.value)
 
@@ -293,7 +325,7 @@ async def test_send_template_missing_local_message_id_raises(monkeypatch):
     with pytest.raises(WatiServiceError) as exc:
         await WatiAdapter().send_template(
             connection=_connection(),
-            request=CanonicalSendRequest(contact="+91999", template_slug="x"),
+            request=CanonicalSendRequest(contact="+91999", template_name="x"),
         )
     assert "localMessageId" in str(exc.value)
 
@@ -303,7 +335,7 @@ async def test_send_template_missing_connection_fields():
     with pytest.raises(WatiServiceError):
         await WatiAdapter().send_template(
             connection={"base_url": "https://x", "wati_tenant_id": "", "api_token": "t"},
-            request=CanonicalSendRequest(contact="+91999", template_slug="x"),
+            request=CanonicalSendRequest(contact="+91999", template_name="x"),
         )
 
 
@@ -359,7 +391,7 @@ async def test_aisensy_send_template_happy_path(monkeypatch):
     }
     request = CanonicalSendRequest(
         contact="919999999999",
-        template_slug="onboarding_v2",
+        template_name="onboarding_v2",
         variables={"name": "Dhruv", "slot": "Tuesday"},
     )
     response = await AiSensyAdapter().send_template(
@@ -388,8 +420,80 @@ async def test_aisensy_send_template_4xx_raises(monkeypatch):
     with pytest.raises(AiSensyServiceError):
         await AiSensyAdapter().send_template(
             connection={"api_key": "k", "base_url": "https://x"},
-            request=CanonicalSendRequest(contact="91999", template_slug="x"),
+            request=CanonicalSendRequest(contact="91999", template_name="x"),
         )
+
+
+# ─── Handler: destination resolution ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_handler_sends_operator_picked_field_not_recipient_id(monkeypatch):
+    """Regression: WhatsApp dispatch sends the operator-picked payload field
+    (normalized), never the recipient_id (the bug that sent 'P-pareekshith')."""
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    import app.services.orchestration.nodes.messaging_send_whatsapp_template as msg
+    from app.services.orchestration.adapters.canonical import CanonicalSendResponse
+
+    captured: dict = {}
+
+    class _StubAdapter:
+        async def send_template(self, *, connection, request):  # noqa: ARG002
+            captured["contact"] = request.contact
+            return CanonicalSendResponse(
+                provider_correlation_id="lm-1", contact=request.contact, raw={},
+            )
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164="+918888888888")
+
+    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+
+        return EnforcementResult(proceed=True)
+
+    monkeypatch.setattr(msg, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(msg, "enforce_comm_cap_or_skip", _ok_cap)
+    monkeypatch.setattr(msg, "resolve_adapter", lambda **_k: _StubAdapter())
+
+    class _Conns:
+        async def get_config(self, _cid):
+            return {"__provider__": "wati"}
+
+    class _Ctx:
+        run_id = _uuid.uuid4()
+        db = object()
+        connections = _Conns()
+
+        def idempotency_key(self, *parts):
+            return "|".join(str(p) for p in parts)
+
+        async def dispatch_actions(self, dispatches):
+            from app.services.orchestration.node_protocol import ActionResult
+
+            return [
+                ActionResult(recipient_id=d.recipient_id, action_id="a1", status="pending")
+                for d in dispatches
+            ]
+
+        async def update_action_result(self, *_a, **_k):
+            return None
+
+        async def stamp_webhook_ttl(self, *_a, **_k):
+            return None
+
+        async def set_recipient_state(self, *_a, **_k):
+            return None
+
+    async def _cohort():
+        # recipient_id is NOT a phone; phone lives under a dataset-style column.
+        yield "P-pareekshith", {"lead_id": "P-pareekshith", "mobile": "+918888888888"}
+
+    cfg = _Config(connection_id=uuid.uuid4(), template_name="welcome_v1", phone_field="mobile")
+    await msg._Handler().execute(_cohort(), cfg, _Ctx())
+    assert captured["contact"] == "+918888888888"
 
 
 # ─── Adapter registry — boot integration ────────────────────────────────────

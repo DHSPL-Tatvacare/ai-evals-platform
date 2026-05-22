@@ -2,7 +2,9 @@ x-backend-common: &backend-common
   build:
     context: ./backend
     dockerfile: Dockerfile.local
+  tty: true # allocate a pTTY so uvicorn detects a terminal and emits colored log levels
   environment:
+    APP_ENVIRONMENT: local
     DATABASE_URL: postgresql+asyncpg://evals_user:evals_pass@postgres:5432/ai_evals_platform
     FILE_STORAGE_TYPE: local
     FILE_STORAGE_PATH: /app/uploads

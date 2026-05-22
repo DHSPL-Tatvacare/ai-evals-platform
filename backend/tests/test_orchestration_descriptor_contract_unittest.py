@@ -110,3 +110,55 @@ def test_webhook_descriptor_exposes_connection_picker():
     connection_id = d.config_schema["properties"]["connection_id"]
     assert connection_id["x-type"] == "connection_picker"
     assert connection_id["x-provider"] == "webhook"
+
+
+# ─── dev-only field strip (generic, keyed off x-dev-only) ────────────────────
+
+
+def test_strip_dev_only_removes_field_in_prod():
+    from app.services.orchestration import node_descriptors as nd
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "keep": {"type": "string"},
+            "secret_toggle": {"type": "boolean", "x-dev-only": True},
+        },
+        "required": ["keep", "secret_toggle"],
+    }
+    out = nd._strip_dev_only_fields(schema, is_dev=False)
+    assert "secret_toggle" not in out["properties"]
+    assert "secret_toggle" not in out["required"]
+    assert "keep" in out["properties"]
+
+
+def test_strip_dev_only_keeps_field_in_dev():
+    from app.services.orchestration import node_descriptors as nd
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "keep": {"type": "string"},
+            "secret_toggle": {"type": "boolean", "x-dev-only": True},
+        },
+        "required": ["keep", "secret_toggle"],
+    }
+    out = nd._strip_dev_only_fields(schema, is_dev=True)
+    assert "secret_toggle" in out["properties"]
+    assert "secret_toggle" in out["required"]
+
+
+def test_build_descriptor_strips_dev_only_field_in_prod(monkeypatch):
+    from app.services.orchestration import node_descriptors as nd
+
+    monkeypatch.setattr(nd.settings, "APP_ENVIRONMENT", "production")
+    d = build_descriptor(node_type="voice.place_call", workflow_type="*")
+    assert "bypass_call_guardrails" not in d.config_schema["properties"]
+
+
+def test_build_descriptor_keeps_dev_only_field_in_dev(monkeypatch):
+    from app.services.orchestration import node_descriptors as nd
+
+    monkeypatch.setattr(nd.settings, "APP_ENVIRONMENT", "local")
+    d = build_descriptor(node_type="voice.place_call", workflow_type="*")
+    assert "bypass_call_guardrails" in d.config_schema["properties"]

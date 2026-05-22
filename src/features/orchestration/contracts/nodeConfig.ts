@@ -270,7 +270,7 @@ const SplitBranchSchema = z
     id: z.string().min(1),
     label: z.string(),
     match: z.string().nullable().optional(),
-    weight: z.number().nullable().optional(),
+    weight: z.number().int().nullable().optional(),
     percent: z.number().int().min(0).max(100).nullable().optional(),
   })
   .strict();
@@ -422,7 +422,7 @@ export const MessagingSendWhatsappTemplateConfigSchema = z
   .object({
     nodeType: z.literal("messaging.send_whatsapp_template"),
     connection_id: z.uuid(),
-    template_slug: z.string().min(1),
+    phone_field: z.string().default(""),
     template_name: z.string().default(""),
     channel_number: z.string().default(""),
     broadcast_name: z.string().default(""),
@@ -437,10 +437,12 @@ export const VoicePlaceCallConfigSchema = z
     nodeType: z.literal("voice.place_call"),
     connection_id: z.uuid(),
     agent_id: z.string().min(1),
+    phone_field: z.string().default(""),
     variable_mappings: z.array(VariableMappingSchema).default([]),
     from_phone: z.string().nullable().optional(),
     webhook_ttl_seconds: z.number().int().min(60).default(259200),
     mode: z.enum(["auto", "single", "batch"]).default("auto"),
+    bypass_call_guardrails: z.boolean().default(false),
   })
   .strict();
 

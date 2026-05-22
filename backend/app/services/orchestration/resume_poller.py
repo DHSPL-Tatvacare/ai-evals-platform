@@ -66,7 +66,12 @@ async def poll_and_resume(db: AsyncSession, *, batch_limit: int = 1000) -> int:
         version = versions_by_id.get(r.workflow_version_id)
         if version is None:
             continue
-        target = _wakeup_edge_target(version.definition, r.current_node_id or "")
+        # Wake reason lives in the recipient state already: an inbound event
+        # (webhook / reconciler) flips status→'ready' and clears wakeup_at;
+        # a timer elapse leaves status='waiting' with wakeup_at<=now. No
+        # parallel reason field — the state itself distinguishes the two.
+        woke_by = "event" if r.status == "ready" else "timeout"
+        target = _wakeup_edge_target(version.definition, r.current_node_id or "", woke_by=woke_by)
         new_node = target if target else r.current_node_id
         await db.execute(
             update(WorkflowRunRecipientState)
@@ -108,18 +113,51 @@ async def poll_and_resume(db: AsyncSession, *, batch_limit: int = 1000) -> int:
     return advanced
 
 
-def _wakeup_edge_target(definition: dict[str, Any], current_node_id: str) -> Optional[str]:
-    """Return the target id of the wakeup-edge from ``current_node_id`` (or success edge for non-wait nodes)."""
+def _wakeup_edge_target(
+    definition: dict[str, Any],
+    current_node_id: str,
+    *,
+    woke_by: str = "timeout",
+) -> Optional[str]:
+    """Return the resume-edge target from ``current_node_id`` for the given wake reason.
+
+    Matches outgoing edges by canonical ``output_id`` (the shape the FE
+    persists), with legacy ``label`` as a fallback. The output_id literals
+    mirror what ``logic.wait`` declares per mode:
+
+      duration / until_datetime  -> 'wakeup'   (single timer edge)
+      event_or_timeout           -> 'event' (inbound) / 'timeout' (timer)
+
+    ``woke_by`` is 'event' when an inbound event flipped the recipient to
+    'ready', 'timeout' when the wakeup timer elapsed. For non-wait nodes
+    (action rows resumed via webhook reconcile) the success edge is taken.
+    """
     if not current_node_id:
         return None
     edges = definition.get("edges", [])
     nodes = definition.get("nodes", [])
     cur_node_type = next((n.get("type") for n in nodes if n.get("id") == current_node_id), None)
-    preferred_label = "wakeup" if cur_node_type == "logic.wait" else "success"
+
+    # edge_index[output_id] -> target (mirror traversal's edge-index pattern).
+    edge_index: dict[str, str] = {}
+    first_target: Optional[str] = None
     for e in edges:
-        if e.get("source") == current_node_id and e.get("label", "default") == preferred_label:
-            return e.get("target")
-    for e in edges:
-        if e.get("source") == current_node_id:
-            return e.get("target")
-    return None
+        if e.get("source") != current_node_id:
+            continue
+        if first_target is None:
+            first_target = e.get("target")
+        output_id = e.get("output_id") or e.get("label")
+        if output_id and output_id not in edge_index:
+            edge_index[output_id] = e.get("target")
+
+    if cur_node_type == "logic.wait":
+        # event reason → 'event'; timer reason → 'timeout', then 'wakeup'
+        # (single-timer modes only ever wire 'wakeup').
+        preferred = ["event"] if woke_by == "event" else ["timeout", "wakeup"]
+    else:
+        preferred = ["success"]
+
+    for output_id in preferred:
+        if output_id in edge_index:
+            return edge_index[output_id]
+    return first_target

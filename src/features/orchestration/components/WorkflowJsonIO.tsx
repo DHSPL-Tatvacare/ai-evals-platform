@@ -39,7 +39,6 @@ const BINDING_FIELDS = [
   'connection_id',
   'agent_id',
   'from_phone',
-  'template_slug',
   'template_name',
   'channel_number',
   'broadcast_name',

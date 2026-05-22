@@ -5,6 +5,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """All config comes from env vars or .env.backend file."""
 
+    # Deployment environment. Default is the prod-safe value so a missing
+    # env var never unlocks dev-only surfaces (e.g. voice guardrail bypass).
+    APP_ENVIRONMENT: str = "production"
+
     DATABASE_URL: str = "postgresql+asyncpg://evals_user:evals_pass@localhost:5432/ai_evals_platform"
     ANALYTICS_DATABASE_URL: str = ""  # Falls back to DATABASE_URL if empty
     FILE_STORAGE_TYPE: str = "local"  # "local" or "azure_blob"
@@ -131,6 +135,10 @@ class Settings(BaseSettings):
     # Logging (used by app/logging_config.py)
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"  # "json" | "console"
+
+    @property
+    def is_dev(self) -> bool:
+        return self.APP_ENVIRONMENT.strip().lower() in {"local", "development"}
 
     class Config:
         env_file = ".env.backend"

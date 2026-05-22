@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.adapters import (
     AdapterNotRegisteredError,
@@ -25,6 +26,7 @@ from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_dict,
 )
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration.recipient_freezer import normalise_phone_e164
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
 
 
@@ -45,6 +47,12 @@ class _Config(BaseModel):
         description="Voice agent that will handle the conversation.",
         json_schema_extra={"x-type": "bolna_agent_picker"},
     )
+    phone_field: str = Field(
+        "",
+        title="Phone Number Field",
+        description="Pick the contact field that holds each recipient's phone number.",
+        json_schema_extra={"x-type": "recipient_field_picker"},
+    )
     variable_mappings: list[VariableMappingRow] = Field(
         default_factory=list,
         description="Agent call variables — each bound to a static value or a recipient field.",
@@ -62,6 +70,11 @@ class _Config(BaseModel):
     mode: Literal["auto", "single", "batch"] = Field(
         default="auto",
         description="Dispatch mode. 'auto' lets the adapter pick based on cohort size; override only if you need to force one path.",
+    )
+    bypass_call_guardrails: bool = Field(
+        default=False,
+        json_schema_extra={"x-dev-only": True},
+        description="Place calls immediately, skipping the agent's calling-hours guardrails. Dev and testing only.",
     )
 
 
@@ -90,6 +103,7 @@ class _Handler:
             ) from exc
 
         cohort: list[tuple[str, dict[str, Any]]] = []
+        frozen_phones: dict[str, str] = {}
         async for rid, payload in input_cohort:
             try:
                 recipient_row = await assert_recipient_in_manifest(
@@ -103,6 +117,14 @@ class _Handler:
             )
             if not cap_result.proceed:
                 continue
+            # Destination = the operator-picked payload field, normalized. One
+            # contract, no hardcoded field names — works for cohort and dataset
+            # payloads alike. Recipients whose picked field is missing/invalid skip.
+            phone = normalise_phone_e164(payload.get(config.phone_field))
+            if not phone:
+                await ctx.set_recipient_state(rid, status="skipped_invalid_phone")
+                continue
+            frozen_phones[rid] = phone
             cohort.append((rid, payload))
 
         success: list[RecipientOutcome] = []
@@ -112,7 +134,7 @@ class _Handler:
         )
 
         def _build_request(rid: str, payload: dict[str, Any]) -> tuple[str, CanonicalVoiceRequest, str]:
-            contact = str(payload.get("contact") or payload.get("phone") or rid)
+            contact = frozen_phones[rid]
             variables = apply_variable_mappings_dict(
                 [m.model_dump() for m in config.variable_mappings], payload,
             )
@@ -122,6 +144,7 @@ class _Handler:
                 agent_id=config.agent_id,
                 variables=variables,
                 from_phone=config.from_phone,
+                bypass_call_guardrails=config.bypass_call_guardrails and settings.is_dev,
             )
             idem = ctx.idempotency_key(rid, "voice_call", config.agent_id)
             return contact, request, idem

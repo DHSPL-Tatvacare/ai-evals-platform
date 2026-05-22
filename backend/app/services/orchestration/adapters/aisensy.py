@@ -53,9 +53,9 @@ class AiSensyAdapter:
         url = f"{base_url}/campaign/t1/api/v2"
         body: dict[str, Any] = {
             "apiKey": api_key,
-            "campaignName": request.template_slug,
+            "campaignName": request.broadcast_name or request.template_name,
             "destination": request.contact,
-            "userName": from_number,
+            "userName": request.channel_number or from_number,
             "source": "ai-evals-platform",
             "templateParams": list(request.variables.values()),
         }
@@ -74,7 +74,7 @@ class AiSensyAdapter:
         # a deterministic correlation handle so the action row has a non-null
         # provider_correlation_id. The handle has no upstream meaning — inbound
         # webhooks land in the 503 path until the field mapping is filled in.
-        synthetic_id = f"aisensy:{request.contact}:{request.template_slug}:{int(time.time() * 1000)}"
+        synthetic_id = f"aisensy:{request.contact}:{request.template_name}:{int(time.time() * 1000)}"
         return CanonicalSendResponse(
             provider_correlation_id=synthetic_id,
             contact=request.contact,

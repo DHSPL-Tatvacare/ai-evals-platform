@@ -132,3 +132,91 @@ def test_duration_timedelta_days():
     from datetime import timedelta
     from app.services.orchestration.nodes.logic_wait import _duration_timedelta
     assert _duration_timedelta(7, "days") == timedelta(days=7)
+
+
+# ── resume_poller wakeup-edge routing (BLOCKER B2) ────────────────────────────
+
+
+def _wait_definition(node_type="logic.wait"):
+    """A wait node with both event_or_timeout output edges, written the way the
+    FE persists them: ``output_id`` only, no ``label``."""
+    return {
+        "nodes": [
+            {"id": "w1", "type": node_type, "config": {}},
+            {"id": "after_event", "type": "sink.complete", "config": {}},
+            {"id": "after_timeout", "type": "sink.complete", "config": {}},
+        ],
+        "edges": [
+            {"source": "w1", "target": "after_event", "output_id": "event"},
+            {"source": "w1", "target": "after_timeout", "output_id": "timeout"},
+        ],
+    }
+
+
+def test_wakeup_edge_event_or_timeout_routes_timeout_branch():
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    target = _wakeup_edge_target(_wait_definition(), "w1", woke_by="timeout")
+    assert target == "after_timeout"
+
+
+def test_wakeup_edge_event_or_timeout_routes_event_branch():
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    target = _wakeup_edge_target(_wait_definition(), "w1", woke_by="event")
+    assert target == "after_event"
+
+
+def test_wakeup_edge_single_output_duration_routes_wakeup():
+    """A duration wait has one ``wakeup`` edge; both wake reasons resolve to it."""
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    definition = {
+        "nodes": [
+            {"id": "w1", "type": "logic.wait", "config": {}},
+            {"id": "next", "type": "sink.complete", "config": {}},
+        ],
+        "edges": [{"source": "w1", "target": "next", "output_id": "wakeup"}],
+    }
+    assert _wakeup_edge_target(definition, "w1", woke_by="timeout") == "next"
+    assert _wakeup_edge_target(definition, "w1", woke_by="event") == "next"
+
+
+def test_wakeup_edge_legacy_label_only_resolves():
+    """Pre-normalizer edges carry ``label`` and no ``output_id`` — still resolve."""
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    definition = {
+        "nodes": [
+            {"id": "w1", "type": "logic.wait", "config": {}},
+            {"id": "next", "type": "sink.complete", "config": {}},
+        ],
+        "edges": [{"source": "w1", "target": "next", "label": "wakeup"}],
+    }
+    assert _wakeup_edge_target(definition, "w1", woke_by="timeout") == "next"
+
+
+def test_wakeup_edge_non_wait_node_uses_success():
+    """Action nodes flipped to ready via webhook advance along the success edge."""
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    definition = {
+        "nodes": [
+            {"id": "a1", "type": "messaging.send_whatsapp_template", "config": {}},
+            {"id": "ok", "type": "sink.complete", "config": {}},
+            {"id": "bad", "type": "sink.complete", "config": {}},
+        ],
+        "edges": [
+            {"source": "a1", "target": "bad", "output_id": "failed"},
+            {"source": "a1", "target": "ok", "output_id": "success"},
+        ],
+    }
+    assert _wakeup_edge_target(definition, "a1", woke_by="event") == "ok"
+
+
+def test_wakeup_edge_event_or_timeout_no_output_id_match_falls_back():
+    """If neither output_id matches the reason, fall back to first outgoing edge."""
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+    definition = {
+        "nodes": [{"id": "w1", "type": "logic.wait", "config": {}}],
+        "edges": [
+            {"source": "w1", "target": "only", "output_id": "wakeup"},
+        ],
+    }
+    # event_or_timeout reason 'event' has no 'event' edge here → fall back.
+    assert _wakeup_edge_target(definition, "w1", woke_by="event") == "only"

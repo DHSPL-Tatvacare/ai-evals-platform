@@ -504,6 +504,39 @@ async def test_webhook_out_posts_per_recipient(db_session, seed_full_run, monkey
 
 
 @pytest.mark.asyncio
+async def test_webhook_out_routes_exhausted_to_exhausted_output(db_session, seed_full_run, monkeypatch):
+    """Exhausted recipients land in the default ``exhausted`` output bucket."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes import core_webhook_out as wh_mod
+    from app.services.orchestration.nodes.core_webhook_out import _Handler, _Config
+
+    def _handler_fn(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    monkeypatch.setattr(
+        wh_mod,
+        "_make_client",
+        lambda timeout_seconds: httpx.AsyncClient(
+            transport=httpx.MockTransport(_handler_fn), timeout=timeout_seconds,
+        ),
+    )
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="wh", node_type="core.webhook_out")
+    await db_session.flush()
+
+    cfg = _Config(url="https://example.com/hook", method="POST", body={})
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="wh", step_id=step_id)
+    cohort = CohortStream([("r1", {})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+
+    assert [o.recipient_id for o in result.by_output_id["exhausted"]] == ["r1"]
+    assert result.by_output_id["success"] == []
+
+
+@pytest.mark.asyncio
 async def test_webhook_out_resolves_relative_url_and_auth_from_connection(
     db_session, seed_full_run, monkeypatch,
 ):

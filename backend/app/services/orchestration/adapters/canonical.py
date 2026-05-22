@@ -13,7 +13,9 @@ from typing import Any, Optional
 @dataclass(frozen=True)
 class CanonicalSendRequest:
     contact: str
-    template_slug: str
+    template_name: str
+    broadcast_name: str = ""
+    channel_number: str = ""
     variables: dict[str, str] = field(default_factory=dict)
     reply_context_id: Optional[str] = None
 
@@ -44,6 +46,7 @@ class CanonicalVoiceRequest:
     agent_id: str
     variables: dict[str, str] = field(default_factory=dict)
     from_phone: Optional[str] = None
+    bypass_call_guardrails: bool = False
 
 
 @dataclass(frozen=True)

@@ -123,8 +123,18 @@ class DispatchRequiredFieldsError(ValueError):
 
 
 # Dispatch nodes register their UI-required fields here; publish is gated on presence.
-# Empty in P1 of the vendor-abstraction plan — populated again when messaging.* / voice.* land.
-_DISPATCH_REQUIRED_FIELDS: dict[str, list[tuple[str, str]]] = {}
+# Only fields with no safe runtime fallback are listed — channel_number falls back to
+# the connection's number, so it is not gated here.
+_DISPATCH_REQUIRED_FIELDS: dict[str, list[tuple[str, str]]] = {
+    "messaging.send_whatsapp_template": [
+        ("template_name", "pick the WhatsApp template the cohort receives"),
+        ("phone_field", "pick the contact field that holds each recipient's phone number"),
+    ],
+    "voice.place_call": [
+        ("agent_id", "pick the voice agent that places the call"),
+        ("phone_field", "pick the contact field that holds each recipient's phone number"),
+    ],
+}
 
 
 def validate_dispatch_required_fields(
@@ -453,6 +463,23 @@ def validate_definition(
                             f"split edge {e.get('id')!r} routes to unknown branch id {oid!r}",
                             node_id=nid,
                             field=f"edges.{oid}" if oid else "edges",
+                        )
+                    )
+            # Holdout recipients route to the reserved 'control' edge; if it is
+            # never wired they are silently dropped as terminal at runtime.
+            if (
+                not is_draft
+                and config_raw.get("mode") == "percentage"
+                and config_raw.get("holdout_percent")
+            ):
+                from app.services.orchestration.nodes.logic_split import CONTROL_EDGE_ID
+                if not any(e.get("output_id") == CONTROL_EDGE_ID for e in outs):
+                    errors.append(
+                        _err(
+                            "split node sets a holdout but has no outgoing "
+                            f"{CONTROL_EDGE_ID!r} edge; holdout recipients would be dropped",
+                            node_id=nid,
+                            field=f"edges.{CONTROL_EDGE_ID}",
                         )
                     )
             default_branch_id = (n.get("config") or {}).get("default_branch_id")

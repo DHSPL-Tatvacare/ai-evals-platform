@@ -11,15 +11,19 @@ import {
  * Orchestration reference-data hooks.
  *
  * Key shape: `['orchestration', 'connection', connectionId, <resource>]`.
- * `staleTime: 30_000` matches the backend cache TTL so reopening the
- * inspector within the window is served from cache without a roundtrip.
+ * Provider template / agent lists rarely change and each fetch is a live
+ * vendor roundtrip, while the inspector unmounts on close (keyed motion.div).
+ * A long `staleTime` keeps reopening the inspector instant from cache, and a
+ * long `gcTime` survives the unmount so the cache isn't evicted between opens.
  *
- * Refresh: callers invoke `refetchWith({ refresh: true })` to bypass both
- * the FE cache and the backend 30 s in-process cache. `queryClient.fetchQuery`
- * is used rather than `refetch()` so the `{refresh: true}` arg flows through.
+ * Refresh: the picker's Refresh button calls `refresh()` to bypass both the FE
+ * cache and the backend in-process cache for the "I just approved a template"
+ * case. `queryClient.fetchQuery` is used rather than `refetch()` so the
+ * `{refresh: true}` arg flows through.
  */
 
-const STALE_TIME_MS = 30_000;
+const STALE_TIME_MS = 10 * 60_000;
+const GC_TIME_MS = 30 * 60_000;
 
 function watiTemplatesKey(connectionId: string) {
   return ['orchestration', 'connection', connectionId, 'wati-templates'] as const;
@@ -68,6 +72,7 @@ export function useWatiTemplates(connectionId: string | null | undefined) {
     queryFn: watiTemplatesQueryOptions(connectionId as string).queryFn,
     enabled,
     staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
   });
 
   /** Force a network roundtrip past the backend's 30 s cache. Used by the
@@ -103,6 +108,7 @@ export function useBolnaAgents(connectionId: string | null | undefined) {
     queryFn: bolnaAgentsQueryOptions(connectionId as string).queryFn,
     enabled,
     staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
   });
 
   const refresh = async () => {

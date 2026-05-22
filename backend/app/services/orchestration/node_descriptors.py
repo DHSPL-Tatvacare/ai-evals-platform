@@ -32,6 +32,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.services.orchestration.node_registry import NODE_REGISTRY
 
 
@@ -460,7 +461,9 @@ def _legacy_descriptor(*, node_type: str, workflow_type: str, handler: Any) -> N
         display_category=category,
         description="",
         authoring_status="active",
-        config_schema=handler.config_schema.model_json_schema(),
+        config_schema=_strip_dev_only_fields(
+            handler.config_schema.model_json_schema(), is_dev=settings.is_dev,
+        ),
         editor_hints=EditorHints(),
         required_payload_fields=[],
         emitted_payload_fields=[],
@@ -506,6 +509,29 @@ def _runtime_kind_from_category(category: DisplayCategory) -> ExecutionKind:
     return "termination"
 
 
+def _strip_dev_only_fields(config_schema: dict[str, Any], *, is_dev: bool) -> dict[str, Any]:
+    """Drop properties flagged ``x-dev-only`` from a rendered JSON Schema in non-dev builds.
+
+    Generic — keys off the ``x-dev-only`` marker so any node can opt a field
+    out of the production UI. In dev the schema is returned untouched.
+    """
+    if is_dev:
+        return config_schema
+    props = config_schema.get("properties")
+    if not isinstance(props, dict):
+        return config_schema
+    dev_only = [
+        name for name, spec in props.items()
+        if isinstance(spec, dict) and spec.get("x-dev-only")
+    ]
+    for name in dev_only:
+        props.pop(name, None)
+    required = config_schema.get("required")
+    if isinstance(required, list) and dev_only:
+        config_schema["required"] = [r for r in required if r not in dev_only]
+    return config_schema
+
+
 def build_descriptor(*, node_type: str, workflow_type: str) -> NodeDescriptor:
     """Resolve a handler from the registry and wrap it in a NodeDescriptor.
 
@@ -528,7 +554,9 @@ def build_descriptor(*, node_type: str, workflow_type: str) -> NodeDescriptor:
         display_category=meta["display_category"],
         description=meta["description"],
         authoring_status=meta.get("authoring_status", "active"),
-        config_schema=handler.config_schema.model_json_schema(),
+        config_schema=_strip_dev_only_fields(
+            handler.config_schema.model_json_schema(), is_dev=settings.is_dev,
+        ),
         editor_hints=EditorHints(**meta.get("editor_hints", {})),
         required_payload_fields=list(meta.get("required_payload_fields", [])),
         emitted_payload_fields=list(meta.get("emitted_payload_fields", [])),

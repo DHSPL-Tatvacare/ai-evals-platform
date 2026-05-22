@@ -29,6 +29,7 @@ from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_dict,
 )
 from app.services.orchestration.node_registry import register_node
+from app.services.orchestration.recipient_freezer import normalise_phone_e164
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
 
 
@@ -43,16 +44,17 @@ class _Config(BaseModel):
             "x-providers": ["wati", "aisensy"],
         },
     )
-    template_slug: str = Field(
-        ...,
-        min_length=1,
-        description="Approved template name registered with your WhatsApp provider.",
+    # Picker fields — required at publish time; empty string is draft-safe.
+    phone_field: str = Field(
+        "",
+        title="Phone Number Field",
+        description="Pick the contact field that holds each recipient's phone number.",
+        json_schema_extra={"x-type": "recipient_field_picker"},
     )
-    # WATI picker fields — required at publish time; empty string is draft-safe.
     template_name: str = Field(
         "",
-        title="WATI Template",
-        description="Pick the live WATI template the cohort receives.",
+        title="WhatsApp Template",
+        description="Pick the live template the cohort receives.",
         json_schema_extra={"x-type": "wati_template_picker"},
     )
     channel_number: str = Field(
@@ -120,22 +122,30 @@ class _Handler:
             )
             if not cap_result.proceed:
                 continue
-            contact = str(payload.get("contact") or rid)
+            # Destination = the operator-picked payload field, normalized. One
+            # contract, no hardcoded field names — works for cohort and dataset
+            # payloads alike. Recipients whose picked field is missing/invalid skip.
+            contact = normalise_phone_e164(payload.get(config.phone_field))
+            if not contact:
+                await ctx.set_recipient_state(rid, status="skipped_invalid_phone")
+                continue
             request = CanonicalSendRequest(
                 contact=contact,
-                template_slug=config.template_slug,
+                template_name=config.template_name,
+                broadcast_name=config.broadcast_name,
+                channel_number=config.channel_number,
                 variables=apply_variable_mappings_dict(
                     [m.model_dump() for m in config.variable_mappings], payload,
                 ),
             )
-            idem = ctx.idempotency_key(rid, "whatsapp_template", config.template_slug)
+            idem = ctx.idempotency_key(rid, "whatsapp_template", config.template_name)
             dispatch = await ctx.dispatch_actions([
                 ActionDispatch(
                     recipient_id=rid,
                     channel="whatsapp",
                     action_type="wa_dispatched",
                     idempotency_key=idem,
-                    payload={"contact": contact, "template_slug": config.template_slug},
+                    payload={"contact": contact, "template_name": config.template_name},
                 )
             ])
             action_id = dispatch[0].action_id

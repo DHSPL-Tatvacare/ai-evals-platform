@@ -97,6 +97,23 @@ def test_config_mode_rejects_unknown_values():
         _Config(connection_id=uuid.uuid4(), agent_id="a", mode="parallel")
 
 
+def test_config_bypass_call_guardrails_defaults_false():
+    cfg = _Config(connection_id=uuid.uuid4(), agent_id="a")
+    assert cfg.bypass_call_guardrails is False
+
+
+def test_config_bypass_call_guardrails_accepted():
+    cfg = _Config(
+        connection_id=uuid.uuid4(), agent_id="a", bypass_call_guardrails=True,
+    )
+    assert cfg.bypass_call_guardrails is True
+
+
+def test_config_bypass_field_is_dev_only_in_schema():
+    schema = _Config.model_json_schema()
+    assert schema["properties"]["bypass_call_guardrails"].get("x-dev-only") is True
+
+
 # ─── classify_outcome (lifted, pure function) ───────────────────────────────
 
 
@@ -378,6 +395,112 @@ async def test_place_call_no_from_phone_anywhere_omits_field(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_place_call_bypass_true_emits_top_level_flag(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        captured["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={"execution_id": "exec_x"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(transport),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call(
+        connection={"api_key": "k"},
+        request=CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=True,
+        ),
+    )
+    assert captured["body"]["bypass_call_guardrails"] is True
+
+
+@pytest.mark.asyncio
+async def test_place_call_bypass_false_omits_flag(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        captured["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={"execution_id": "exec_x"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(transport),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call(
+        connection={"api_key": "k"},
+        request=CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=False,
+        ),
+    )
+    assert "bypass_call_guardrails" not in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_bypass_true_emits_form_field(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content"] = request.content
+        return httpx.Response(200, json={"batch_id": "batch_xyz"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(transport),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=True,
+        )],
+        recipient_ids=["r1"],
+    )
+    body = captured["content"].decode(errors="ignore")
+    assert "bypass_call_guardrails" in body
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_bypass_false_omits_field(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content"] = request.content
+        return httpx.Response(200, json={"batch_id": "batch_xyz"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(transport),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=False,
+        )],
+        recipient_ids=["r1"],
+    )
+    body = captured["content"].decode(errors="ignore")
+    assert "bypass_call_guardrails" not in body
+
+
+@pytest.mark.asyncio
 async def test_place_call_4xx_raises_bolna_error(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"detail": "bad agent"})
@@ -526,6 +649,154 @@ async def test_place_call_batch_mismatched_lengths_raises():
             requests=[CanonicalVoiceRequest(contact="+91", agent_id="a", variables={})],
             recipient_ids=["r1", "r2"],
         )
+
+
+# ─── Handler enforcement: bypass gated on settings.is_dev ───────────────────
+
+
+class _StubConnections:
+    async def get_config(self, _connection_id):
+        return {"__provider__": "bolna", "api_key": "k"}
+
+
+class _StubCtx:
+    def __init__(self):
+        self.connections = _StubConnections()
+        self.run_id = uuid.uuid4()
+        self.db = object()
+        self._action_seq = 0
+
+    def idempotency_key(self, *parts):
+        return "|".join(str(p) for p in parts)
+
+    async def set_recipient_state(self, *_a, **_k):
+        return None
+
+    async def dispatch_actions(self, dispatches):
+        from app.services.orchestration.node_protocol import ActionResult
+
+        out = []
+        for d in dispatches:
+            self._action_seq += 1
+            out.append(ActionResult(
+                recipient_id=d.recipient_id,
+                action_id=str(uuid.uuid4()),
+                status="pending",
+            ))
+        return out
+
+    async def update_action_result(self, *_a, **_k):
+        return None
+
+    async def stamp_webhook_ttl(self, *_a, **_k):
+        return None
+
+
+async def _single_recipient_cohort():
+    yield "rid-1", {"contact": "+919999999999"}
+
+
+async def _run_handler_capture_request(monkeypatch, *, app_env: str, config_flag: bool):
+    import app.services.orchestration.nodes.voice_place_call as vpc
+
+    monkeypatch.setattr(vpc.settings, "APP_ENVIRONMENT", app_env)
+
+    async def _ok_manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        from types import SimpleNamespace
+
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164="+919999999999")
+
+    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+
+        return EnforcementResult(proceed=True)
+
+    monkeypatch.setattr(vpc, "assert_recipient_in_manifest", _ok_manifest)
+    monkeypatch.setattr(vpc, "enforce_comm_cap_or_skip", _ok_cap)
+
+    captured: dict = {}
+
+    def http_handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={"execution_id": "exec_x"})
+
+    transport = httpx.MockTransport(http_handler)
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(transport),
+    )
+
+    handler = vpc._Handler()
+    cfg = vpc._Config(
+        connection_id=uuid.uuid4(),
+        agent_id="agent_xyz",
+        phone_field="contact",
+        mode="single",
+        bypass_call_guardrails=config_flag,
+    )
+    await handler.execute(_single_recipient_cohort(), cfg, _StubCtx())
+    return captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_handler_prod_ignores_stored_bypass_true(monkeypatch):
+    body = await _run_handler_capture_request(
+        monkeypatch, app_env="production", config_flag=True,
+    )
+    assert "bypass_call_guardrails" not in body
+
+
+@pytest.mark.asyncio
+async def test_handler_dev_honors_bypass_true(monkeypatch):
+    body = await _run_handler_capture_request(
+        monkeypatch, app_env="local", config_flag=True,
+    )
+    assert body["bypass_call_guardrails"] is True
+
+
+@pytest.mark.asyncio
+async def test_handler_dials_operator_picked_field_not_recipient_id(monkeypatch):
+    """Regression: the destination is the operator-picked payload field
+    (normalized), never the recipient_id (the bug that dialed 'P-pareekshith')."""
+    import app.services.orchestration.nodes.voice_place_call as vpc
+    from types import SimpleNamespace
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164=None)
+
+    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+
+        return EnforcementResult(proceed=True)
+
+    monkeypatch.setattr(vpc, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(vpc, "enforce_comm_cap_or_skip", _ok_cap)
+
+    captured: dict = {}
+
+    def http_handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={"execution_id": "exec_x"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(httpx.MockTransport(http_handler)),
+    )
+
+    async def _cohort():
+        # recipient_id is NOT a phone; phone lives under a dataset-style column.
+        yield "P-pareekshith", {"lead_id": "P-pareekshith", "mobile": "+918888888888"}
+
+    cfg = vpc._Config(
+        connection_id=uuid.uuid4(), agent_id="agent_xyz",
+        phone_field="mobile", mode="single",
+    )
+    await vpc._Handler().execute(_cohort(), cfg, _StubCtx())
+    assert captured["body"]["recipient_phone_number"] == "+918888888888"
 
 
 # ─── Registry integration ──────────────────────────────────────────────────

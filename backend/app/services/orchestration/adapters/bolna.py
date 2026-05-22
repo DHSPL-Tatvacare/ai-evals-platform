@@ -187,6 +187,8 @@ class BolnaAdapter:
         }
         if from_phone:
             body["from_phone_number"] = from_phone
+        if request.bypass_call_guardrails:
+            body["bypass_call_guardrails"] = True
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -244,6 +246,8 @@ class BolnaAdapter:
         data: dict[str, Any] = {"agent_id": agent_id}
         if from_phone:
             data["from_phone_numbers"] = from_phone
+        if first.bypass_call_guardrails:
+            data["bypass_call_guardrails"] = "true"
 
         headers = {"Authorization": f"Bearer {api_key}"}
         files = {"file": ("cohort.csv", _io.BytesIO(csv_bytes), "text/csv")}

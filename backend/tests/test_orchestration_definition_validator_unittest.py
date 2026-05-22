@@ -11,6 +11,7 @@ import app.services.orchestration.nodes  # noqa: F401 — register handlers
 from app.services.orchestration.definition_validator import (
     DefinitionValidationError,
     validate_definition,
+    validate_dispatch_required_fields,
 )
 
 
@@ -314,6 +315,66 @@ def test_split_routes_unknown_branch_fails():
     assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
 
 
+def _holdout_split_node():
+    return {
+        "id": "split",
+        "type": "logic.split",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {
+            "mode": "percentage",
+            "branches": [
+                {"id": "treat", "label": "Treatment", "percent": 40},
+                {"id": "treat_b", "label": "Treatment B", "percent": 40},
+            ],
+            "holdout_percent": 20,
+        },
+    }
+
+
+def test_holdout_split_without_control_edge_fails_publish():
+    split_node = _holdout_split_node()
+    defn = _wf(
+        [_VALID_SOURCE_NODE, split_node, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "split", "output_id": "default"},
+            {"id": "e_t", "source": "split", "target": "done", "output_id": "treat"},
+        ],
+    )
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(defn, workflow_type="crm")
+    assert any(
+        it["node_id"] == "split" and "control" in it["message"]
+        for it in exc_info.value.errors
+    )
+
+
+def test_holdout_split_with_control_edge_passes():
+    split_node = _holdout_split_node()
+    sink2 = {**_VALID_SINK_NODE, "id": "sink2"}
+    defn = _wf(
+        [_VALID_SOURCE_NODE, split_node, _VALID_SINK_NODE, sink2],
+        [
+            {"id": "e_in", "source": "src", "target": "split", "output_id": "default"},
+            {"id": "e_t", "source": "split", "target": "done", "output_id": "treat"},
+            {"id": "e_c", "source": "split", "target": "sink2", "output_id": "control"},
+        ],
+    )
+    validate_definition(defn, workflow_type="crm")
+
+
+def test_holdout_split_without_control_edge_passes_draft():
+    split_node = _holdout_split_node()
+    defn = _wf(
+        [_VALID_SOURCE_NODE, split_node, _VALID_SINK_NODE],
+        [
+            {"id": "e_in", "source": "src", "target": "split", "output_id": "default"},
+            {"id": "e_t", "source": "split", "target": "done", "output_id": "treat"},
+        ],
+    )
+    validate_definition(defn, workflow_type="crm", mode="draft")
+
+
 def _conditional_node(branches):
     return {
         "id": "cond",
@@ -577,3 +638,39 @@ def test_draft_rejects_partial_core_webhook_out_with_fabricated_key():
     }]
     with pytest.raises(DefinitionValidationError):
         validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
+
+
+def test_voice_place_call_missing_agent_id_flagged():
+    nodes = [{
+        "id": "vc1",
+        "type": "voice.place_call",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"agent_id": ""},
+    }]
+    errors = validate_dispatch_required_fields(_wf(nodes, []))
+    assert any(e["node_id"] == "vc1" and e["field"] == "agent_id" for e in errors)
+
+
+def test_voice_place_call_missing_phone_field_flagged():
+    nodes = [{
+        "id": "vc1",
+        "type": "voice.place_call",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"agent_id": "agent_xyz"},
+    }]
+    errors = validate_dispatch_required_fields(_wf(nodes, []))
+    assert any(e["node_id"] == "vc1" and e["field"] == "phone_field" for e in errors)
+
+
+def test_voice_place_call_with_agent_id_and_phone_field_passes_dispatch_gate():
+    nodes = [{
+        "id": "vc1",
+        "type": "voice.place_call",
+        "position": {"x": 0, "y": 0},
+        "data": {},
+        "config": {"agent_id": "agent_xyz", "phone_field": "phone"},
+    }]
+    errors = validate_dispatch_required_fields(_wf(nodes, []))
+    assert not any(e["node_id"] == "vc1" for e in errors)

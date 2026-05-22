@@ -97,7 +97,6 @@ class UuidAllowlistEnforcementTests(unittest.IsolatedAsyncioTestCase):
                 'node_type': 'core.webhook_out',
                 'config': {
                     'connection_id': str(uuid.uuid4()),
-                    'template_slug': 'welcome_v1',
                     'template_name': 'welcome_v1',
                     'channel_number': '+919999999999',
                     'broadcast_name': 'demo',
