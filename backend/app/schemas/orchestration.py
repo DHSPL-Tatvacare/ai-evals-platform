@@ -107,6 +107,10 @@ class WorkflowResponse(CamelORMModel):
     name: str
     description: Optional[str]
     current_published_version_id: Optional[uuid.UUID]
+    # The single mutable draft. NULL means the workflow was never edited (no
+    # draft yet); the canvas opens on the live published definition instead.
+    draft_definition: Optional[dict[str, Any]] = None
+    draft_updated_at: Optional[datetime] = None
     created_by: uuid.UUID
     visibility: Visibility
     shared_by: Optional[uuid.UUID] = None
@@ -132,7 +136,12 @@ class WorkflowResponse(CamelORMModel):
 # ─── Workflow Versions ───────────────────────────────────────────────────────
 
 
-class WorkflowVersionCreateRequest(CamelModel):
+class WorkflowDraftSaveRequest(CamelModel):
+    """Body for ``PUT /api/orchestration/workflows/{id}/draft``.
+
+    Carries the full canvas definition. Save overwrites the workflow's single
+    mutable draft in place — it never mints a version row.
+    """
     definition: WorkflowDefinition
 
     @field_validator("definition", mode="before")
@@ -538,7 +547,7 @@ __all__ = [
     "WorkflowDefinition", "WorkflowDefinitionNode", "WorkflowDefinitionEdge",
     "WorkflowCreateRequest", "WorkflowUpdateRequest", "WorkflowResponse",
     "CloneSystemWorkflowRequest",
-    "WorkflowVersionCreateRequest", "WorkflowVersionResponse",
+    "WorkflowDraftSaveRequest", "WorkflowVersionResponse",
     "WorkflowValidateRequest", "WorkflowValidateResponse", "WorkflowValidateIssue",
     "TriggerCreateRequest", "TriggerUpdateRequest", "TriggerResponse",
     "ActionTemplateUpsertRequest", "ActionTemplateResponse",

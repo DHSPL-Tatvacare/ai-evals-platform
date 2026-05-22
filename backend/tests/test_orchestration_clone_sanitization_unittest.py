@@ -112,16 +112,17 @@ async def test_clone_strips_system_connection_id_and_returns_draft(
         created_by=user_id,
     )
     assert cloned is not None
-    # Rebind required → draft, no current_published_version_id.
+    # Rebind required → draft-only on the workflow row, no version row, no live pointer.
     assert cloned.current_published_version_id is None
 
-    cloned_v = await db_session.scalar(
+    rows = (await db_session.execute(
         select(WorkflowVersion).where(WorkflowVersion.workflow_id == cloned.id)
-    )
-    assert cloned_v is not None
-    assert cloned_v.status == "draft"
+    )).scalars().all()
+    assert rows == []
+
+    assert cloned.draft_definition is not None
     wh_node = next(
-        n for n in cloned_v.definition["nodes"] if n["type"] == "core.webhook_out"
+        n for n in cloned.draft_definition["nodes"] if n["type"] == "core.webhook_out"
     )
     assert "connection_id" not in wh_node["config"]
 

@@ -8,7 +8,7 @@ from app.schemas.orchestration import (
     OverrideRequest,
     TriggerCreateRequest,
     WorkflowCreateRequest,
-    WorkflowVersionCreateRequest,
+    WorkflowDraftSaveRequest,
 )
 
 
@@ -47,6 +47,6 @@ def test_override_pause_no_target_required():
     assert o.action == "pause"
 
 
-def test_workflow_version_create_validates_definition_shape():
+def test_workflow_draft_save_validates_definition_shape():
     with pytest.raises(ValidationError):
-        WorkflowVersionCreateRequest(definition={"foo": "bar"})  # type: ignore[arg-type]
+        WorkflowDraftSaveRequest(definition={"foo": "bar"})  # type: ignore[arg-type]

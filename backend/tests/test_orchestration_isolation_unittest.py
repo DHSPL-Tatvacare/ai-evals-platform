@@ -100,6 +100,20 @@ _MIN_VALID_DEFINITION = {
 }
 
 
+async def _publish(client, workflow_id: str, definition: dict = _MIN_VALID_DEFINITION):
+    """Save a draft then publish it — the two-step new lifecycle."""
+    saved = await client.put(
+        f"/api/orchestration/workflows/{workflow_id}/draft",
+        json={"definition": definition},
+    )
+    assert saved.status_code == 200, saved.text
+    published = await client.post(
+        f"/api/orchestration/workflows/{workflow_id}/publish"
+    )
+    assert published.status_code == 200, published.text
+    return published.json()
+
+
 @pytest_asyncio.fixture
 async def seed_other_tenant(db_session):
     """Seed a second tenant + system user for cross-tenant assertions.
@@ -197,7 +211,7 @@ async def test_cross_tenant_delete_returns_404(client, seed_owning_tenant, seed_
 
 
 @pytest.mark.asyncio
-async def test_cross_tenant_create_version_returns_404(client, seed_owning_tenant, seed_other_tenant):
+async def test_cross_tenant_save_draft_returns_404(client, seed_owning_tenant, seed_other_tenant):
     _set_auth(_make_auth(tenant_id=seed_owning_tenant,
                          app_access=frozenset({"inside-sales"})))
     wf = (await client.post(
@@ -207,8 +221,8 @@ async def test_cross_tenant_create_version_returns_404(client, seed_owning_tenan
 
     _set_auth(_make_auth(tenant_id=seed_other_tenant,
                          app_access=frozenset({"inside-sales"})))
-    r = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
+    r = await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
         json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
     )
     assert r.status_code == 404
@@ -243,11 +257,7 @@ async def test_cross_tenant_run_endpoints_return_404(client, seed_owning_tenant,
         "/api/orchestration/workflows",
         json=_wf_body(f"x-run-{uuid.uuid4().hex[:8]}"),
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
@@ -334,11 +344,7 @@ async def test_no_app_access_run_endpoints_return_403(client, seed_owning_tenant
         "/api/orchestration/workflows",
         json=_wf_body(f"run-iso-{uuid.uuid4().hex[:8]}"),
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
@@ -391,11 +397,7 @@ async def test_no_app_access_list_runs_filters_unreachable_apps(client, seed_own
         "/api/orchestration/workflows",
         json=_wf_body(f"is-run-{uuid.uuid4().hex[:8]}"),
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
@@ -420,13 +422,7 @@ async def test_explicit_app_id_scopes_runs_to_current_logs_app(client, seed_owni
         "/api/orchestration/workflows",
         json=_wf_body(f"is-run-app-{uuid.uuid4().hex[:8]}"),
     )).json()
-    v_inside = (await client.post(
-        f"/api/orchestration/workflows/{wf_inside['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(
-        f"/api/orchestration/workflows/{wf_inside['id']}/versions/{v_inside['id']}/publish"
-    )
+    await _publish(client, wf_inside["id"])
     run_inside = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf_inside["id"], "params": {}}
     )).json()
@@ -438,13 +434,7 @@ async def test_explicit_app_id_scopes_runs_to_current_logs_app(client, seed_owni
             "appId": "kaira-bot",
         },
     )).json()
-    v_kaira = (await client.post(
-        f"/api/orchestration/workflows/{wf_kaira['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(
-        f"/api/orchestration/workflows/{wf_kaira['id']}/versions/{v_kaira['id']}/publish"
-    )
+    await _publish(client, wf_kaira["id"])
     await client.post(
         "/api/orchestration/runs", json={"workflowId": wf_kaira["id"], "params": {}}
     )

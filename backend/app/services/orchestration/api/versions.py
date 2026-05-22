@@ -1,6 +1,8 @@
-"""Workflow version create / list / publish.
+"""Workflow draft save / publish / version listing.
 
-Publish runs the Phase 11 contract pipeline:
+Save overwrites the workflow's single mutable draft in place. Publish mints
+one immutable ``workflow_versions`` row from that draft and repoints the live
+pointer. Publish runs the Phase 11 contract pipeline:
 
   1. ``definition_normalizer.normalize_definition`` — rewrites pre-Phase-11
      edge labels, source ``next_node_id`` pointers, split branch labels,
@@ -72,23 +74,26 @@ class DraftValidationError(ValueError):
         super().__init__(message)
 
 
-async def create_draft_version(
+async def save_draft(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
     workflow_id: uuid.UUID,
     definition: dict[str, Any],
-) -> Optional[WorkflowVersion]:
+) -> Optional[Workflow]:
+    """Overwrite the workflow's single mutable draft in place. No version row.
+
+    Normalizes first so the stored draft carries the canonical shape; then
+    validates in draft mode. Draft tolerates missing required runtime fields
+    but blocks fabricated keys, wrong types, malformed predicates, bad edges,
+    and unknown node types. Returns the updated ``Workflow`` (``None`` if missing).
+    """
     wf = (await db.execute(
         select(Workflow).where(Workflow.id == workflow_id, Workflow.tenant_id == tenant_id)
     )).scalar_one_or_none()
     if wf is None:
         return None
 
-    # Normalize first so the stored row carries the canonical shape; then
-    # validate in draft mode. Draft tolerates missing required runtime
-    # fields but blocks fabricated keys, wrong types, malformed predicates,
-    # bad edges, and unknown node types.
     canonical = normalize_definition(definition)
     try:
         validate_definition(
@@ -97,32 +102,23 @@ async def create_draft_version(
     except DefinitionValidationError as exc:
         raise DraftValidationError(str(exc), errors=exc.errors) from exc
 
-    next_version = (await db.execute(
-        select(func.coalesce(func.max(WorkflowVersion.version), 0))
-        .where(WorkflowVersion.workflow_id == workflow_id)
-    )).scalar_one() + 1
-    v = WorkflowVersion(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        app_id=wf.app_id,
-        workflow_id=workflow_id,
-        version=next_version,
-        definition=canonical,
-        status="draft",
-    )
-    db.add(v)
+    wf.draft_definition = canonical
+    wf.draft_updated_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(v)
-    return v
+    await db.refresh(wf)
+    return wf
 
 
 async def list_versions(
     db: AsyncSession, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID,
 ) -> list[WorkflowVersion]:
+    """Published release history, newest first. Drafts live on the workflow
+    row now; archived rows are dead history — neither is returned here."""
     return list((await db.execute(
         select(WorkflowVersion).where(
             WorkflowVersion.workflow_id == workflow_id,
             WorkflowVersion.tenant_id == tenant_id,
+            WorkflowVersion.status == "published",
         ).order_by(WorkflowVersion.version.desc())
     )).scalars().all())
 
@@ -138,24 +134,30 @@ async def get_version(
     )).scalar_one_or_none()
 
 
-async def publish_version(
+async def publish_draft(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
     workflow_id: uuid.UUID,
-    version_id: uuid.UUID,
     published_by: uuid.UUID,
 ) -> Optional[WorkflowVersion]:
-    v = await get_version(db, tenant_id=tenant_id, version_id=version_id)
-    if v is None or v.workflow_id != workflow_id:
-        return None
+    """Mint one immutable published version from the workflow's current draft.
+
+    Reads ``workflows.draft_definition``, normalizes, runs the dispatch-field
+    gate then the structural validator (publish mode), inserts a new
+    ``WorkflowVersion`` (``version=max+1``, ``status='published'``), repoints
+    ``current_published_version_id``, and resets the draft to the just-published
+    canonical definition (clean state). Returns ``None`` if the workflow is missing.
+    """
     wf = (await db.execute(
         select(Workflow).where(Workflow.id == workflow_id, Workflow.tenant_id == tenant_id)
     )).scalar_one_or_none()
     if wf is None:
         return None
+    if wf.draft_definition is None:
+        raise VersionPublishError("workflow has no draft to publish")
 
-    canonical = normalize_definition(v.definition)
+    canonical = normalize_definition(wf.draft_definition)
     # Phase 13 publish-gate: dispatch nodes must carry UI-supplied
     # provider identifiers before the workflow can publish. Runs before
     # the structural validator so authors get a clean per-field message
@@ -172,11 +174,26 @@ async def publish_version(
         # the shared ``PublishErrorPanel``.
         raise VersionPublishError(str(exc), errors=exc.errors) from exc
 
-    v.definition = canonical
-    v.status = "published"
-    v.published_by = published_by
-    v.published_at = datetime.now(timezone.utc)
+    next_version = (await db.execute(
+        select(func.coalesce(func.max(WorkflowVersion.version), 0))
+        .where(WorkflowVersion.workflow_id == workflow_id)
+    )).scalar_one() + 1
+    v = WorkflowVersion(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        app_id=wf.app_id,
+        workflow_id=workflow_id,
+        version=next_version,
+        definition=canonical,
+        status="published",
+        published_by=published_by,
+        published_at=datetime.now(timezone.utc),
+    )
+    db.add(v)
+    await db.flush()
     wf.current_published_version_id = v.id
+    wf.draft_definition = canonical
+    wf.draft_updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(v)
     return v
@@ -196,7 +213,7 @@ async def validate_workflow_payload(
     """Run normalize + publish-mode validate + dispatch-field gate without writing.
 
     Used by ``POST /api/orchestration/workflows/validate`` and the JSON
-    import preview. Mirrors :func:`publish_version`'s pipeline so a payload
+    import preview. Mirrors :func:`publish_draft`'s pipeline so a payload
     that validates here is guaranteed to publish (modulo unknown
     ``connection_id`` references, which are softened to warnings — the
     caller may still need to rebind credentials post-import).

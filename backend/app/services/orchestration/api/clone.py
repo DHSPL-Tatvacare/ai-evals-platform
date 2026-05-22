@@ -2,9 +2,10 @@
 
 Tenants opt into seeded workflows ("Default MQL Concierge", "DM2 Adherence
 Watch") by cloning. Cloning creates a fresh Workflow lineage in the tenant's
-namespace + a v1 WorkflowVersion that copies the system workflow's
-definition. Tenants can then edit the cloned workflow visually without
-affecting the system seed.
+namespace, seeding the mutable draft from the system workflow's definition.
+When nothing needs rebinding it also mints a v1 published version and points
+live at it. Tenants edit the cloned workflow visually without affecting the
+system seed.
 
 The system seed is identified by ``tenant_id == SYSTEM_TENANT_ID``; any
 non-system workflow rejected here.
@@ -13,9 +14,8 @@ Phase 10 commit 1 adds **clone sanitization**: any node ``connection_id`` in
 the cloned definition that does not point at a connection visible to
 ``(target_tenant_id, target_app_id)`` is cleared, so tenant clones never
 inherit system-owned credential bindings. If anything was cleared, the
-cloned workflow is created as a **draft** (``status='draft'``,
-``current_published_version_id=NULL``) and the builder requires operator
-rebind before publish/run.
+cloned workflow lands draft-only (``current_published_version_id=NULL``, no
+version row) and the builder requires operator rebind before publish/run.
 """
 from __future__ import annotations
 
@@ -132,6 +132,9 @@ async def clone_system_workflow(
     )
     rebind_required = cleared > 0
 
+    # Seed the single mutable draft from the sanitized definition either way.
+    # When nothing needed rebinding we also mint v1 published and point live
+    # at it; otherwise the operator rebinds in the builder and publishes.
     cloned_wf = Workflow(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -142,6 +145,8 @@ async def clone_system_workflow(
         description=f"Cloned from system workflow {src.slug}",
         created_by=created_by,
         visibility=Visibility.PRIVATE,
+        draft_definition=sanitized_definition,
+        draft_updated_at=datetime.now(timezone.utc),
     )
     db.add(cloned_wf)
     try:
@@ -152,20 +157,20 @@ async def clone_system_workflow(
             f"workflow with slug={new_slug!r} already exists for this tenant + app"
         )
 
-    cloned_v = WorkflowVersion(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        app_id=target_app_id,
-        workflow_id=cloned_wf.id,
-        version=1,
-        definition=sanitized_definition,
-        status="draft" if rebind_required else "published",
-        published_by=None if rebind_required else created_by,
-        published_at=None if rebind_required else datetime.now(timezone.utc),
-    )
-    db.add(cloned_v)
-    await db.flush()
     if not rebind_required:
+        cloned_v = WorkflowVersion(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            app_id=target_app_id,
+            workflow_id=cloned_wf.id,
+            version=1,
+            definition=sanitized_definition,
+            status="published",
+            published_by=created_by,
+            published_at=datetime.now(timezone.utc),
+        )
+        db.add(cloned_v)
+        await db.flush()
         cloned_wf.current_published_version_id = cloned_v.id
     await db.commit()
     await db.refresh(cloned_wf)

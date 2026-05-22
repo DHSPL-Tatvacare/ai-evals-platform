@@ -51,11 +51,11 @@ from app.schemas.orchestration import (
     WorkflowActionGlobalRow,
     WorkflowActionListResponse,
     WorkflowCreateRequest,
+    WorkflowDraftSaveRequest,
     WorkflowResponse,
     WorkflowUpdateRequest,
     WorkflowValidateRequest,
     WorkflowValidateResponse,
-    WorkflowVersionCreateRequest,
     WorkflowVersionResponse,
 )
 from app.services.orchestration.api import (
@@ -361,20 +361,19 @@ async def clone_system_workflow(
 # ─── Workflow versions ──────────────────────────────────────────────────────
 
 
-@router.post(
-    "/workflows/{workflow_id}/versions",
-    response_model=WorkflowVersionResponse,
-    status_code=201,
+@router.put(
+    "/workflows/{workflow_id}/draft",
+    response_model=WorkflowResponse,
 )
-async def create_version(
+async def save_draft(
     workflow_id: uuid.UUID,
-    body: WorkflowVersionCreateRequest,
+    body: WorkflowDraftSaveRequest,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_workflow(db, auth, workflow_id, action="edit")
     try:
-        v = await ver_service.create_draft_version(
+        wf = await ver_service.save_draft(
             db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
             definition=body.definition.model_dump(),
         )
@@ -387,9 +386,9 @@ async def create_version(
         if exc.errors:
             raise HTTPException(status_code=400, detail=exc.errors)
         raise HTTPException(status_code=400, detail=str(exc))
-    if v is None:
+    if wf is None:
         raise HTTPException(status_code=404, detail="workflow not found")
-    return v
+    return _to_workflow_response(wf)
 
 
 @router.get(
@@ -425,20 +424,19 @@ async def get_version(
 
 
 @router.post(
-    "/workflows/{workflow_id}/versions/{version_id}/publish",
+    "/workflows/{workflow_id}/publish",
     response_model=WorkflowVersionResponse,
 )
-async def publish_version(
+async def publish_draft(
     workflow_id: uuid.UUID,
-    version_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     await _load_and_gate_workflow(db, auth, workflow_id, action="edit")
     try:
-        v = await ver_service.publish_version(
+        v = await ver_service.publish_draft(
             db, tenant_id=auth.tenant_id, workflow_id=workflow_id,
-            version_id=version_id, published_by=auth.user_id,
+            published_by=auth.user_id,
         )
     except DispatchRequiredFieldsError as exc:
         raise HTTPException(status_code=422, detail=exc.errors)
@@ -452,7 +450,7 @@ async def publish_version(
             raise HTTPException(status_code=400, detail=exc.errors)
         raise HTTPException(status_code=400, detail=str(exc))
     if v is None:
-        raise HTTPException(status_code=404, detail="version not found")
+        raise HTTPException(status_code=404, detail="workflow not found")
     return v
 
 

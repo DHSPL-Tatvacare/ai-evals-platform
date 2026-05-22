@@ -117,6 +117,20 @@ _MIN_VALID_DEFINITION = {
 }
 
 
+async def _publish(client, workflow_id: str, definition: dict = _MIN_VALID_DEFINITION):
+    """Save a draft then publish it — the two-step new lifecycle."""
+    saved = await client.put(
+        f"/api/orchestration/workflows/{workflow_id}/draft",
+        json={"definition": definition},
+    )
+    assert saved.status_code == 200, saved.text
+    published = await client.post(
+        f"/api/orchestration/workflows/{workflow_id}/publish"
+    )
+    assert published.status_code == 200, published.text
+    return published.json()
+
+
 # ─── Workflows ───────────────────────────────────────────────────────────────
 
 
@@ -199,14 +213,7 @@ async def test_archive_workflow_soft_deletes_and_hides_from_listing(client, db_s
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(slug, name="Archive Me")
     )).json()
-    version = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    published = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions/{version['id']}/publish"
-    )
-    assert published.status_code == 200, published.text
+    await _publish(client, wf["id"])
 
     fired = await client.post(
         "/api/orchestration/runs",
@@ -266,57 +273,110 @@ async def test_archive_workflow_deactivates_triggers_and_schedules(client, db_se
     assert sched.enabled is False
 
 
-# ─── Versions ───────────────────────────────────────────────────────────────
+# ─── Draft + publish lifecycle ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_create_draft_version_increments_version(client):
+async def test_save_draft_upserts_in_place_no_version_row(client, db_session):
+    """PUT /draft overwrites the inline draft; it never mints a version row."""
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"v-{uuid.uuid4().hex[:8]}")
     )).json()
-    a = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
+    a = await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
         json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
     )
-    assert a.status_code == 201, a.text
-    assert a.json()["version"] == 1
-    b = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": {"nodes": [], "edges": [], "canvas": {}}},
+    assert a.status_code == 200, a.text
+    assert a.json()["draftDefinition"]["nodes"] == []
+    assert a.json()["draftUpdatedAt"] is not None
+
+    # A second save overwrites in place — still zero version rows.
+    b = await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
+        json={"definition": _MIN_VALID_DEFINITION},
     )
-    assert b.status_code == 201
-    assert b.json()["version"] == 2
+    assert b.status_code == 200, b.text
+
+    rows = (await db_session.execute(
+        select(WorkflowVersion).where(
+            WorkflowVersion.workflow_id == uuid.UUID(wf["id"])
+        )
+    )).scalars().all()
+    assert rows == []
 
 
 @pytest.mark.asyncio
-async def test_publish_sets_current_published_version_id(client):
+async def test_publish_mints_one_row_repoints_and_resets_draft(client, db_session):
+    """POST /publish inserts exactly one published row, repoints live, and
+    leaves the draft equal to the just-published definition."""
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"p-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
+    await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
         json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    r = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
+    r = await client.post(f"/api/orchestration/workflows/{wf['id']}/publish")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "published"
+    assert r.json()["version"] == 1
+    version_id = r.json()["id"]
+
+    rows = (await db_session.execute(
+        select(WorkflowVersion).where(
+            WorkflowVersion.workflow_id == uuid.UUID(wf["id"])
+        )
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].status == "published"
+
     wf2 = (await client.get(f"/api/orchestration/workflows/{wf['id']}")).json()
-    assert wf2["currentPublishedVersionId"] == v["id"]
+    assert wf2["currentPublishedVersionId"] == version_id
+    # Draft is reset to the canonical published def — clean state.
+    assert wf2["draftDefinition"]["nodes"]
+
+    # Publishing again with no further edits mints version 2.
+    r2 = await client.post(f"/api/orchestration/workflows/{wf['id']}/publish")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["version"] == 2
 
 
 @pytest.mark.asyncio
-async def test_draft_create_rejects_unknown_node_type(client):
-    """Draft-mode validation now blocks unknown node types at create time
-    (a half-broken draft can't poison subsequent publish attempts). The
-    publish-stage rejection is therefore unreachable for unknown types —
-    the assertion moves up to the create call."""
+async def test_publish_without_draft_returns_400(client):
+    wf = (await client.post(
+        "/api/orchestration/workflows", json=_wf_body(f"nd-{uuid.uuid4().hex[:8]}")
+    )).json()
+    r = await client.post(f"/api/orchestration/workflows/{wf['id']}/publish")
+    assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_list_versions_returns_published_only(client):
+    wf = (await client.post(
+        "/api/orchestration/workflows", json=_wf_body(f"lv-{uuid.uuid4().hex[:8]}")
+    )).json()
+    # Save (no version) then publish (one version) — twice.
+    await _publish(client, wf["id"])
+    await _publish(client, wf["id"])
+    r = await client.get(f"/api/orchestration/workflows/{wf['id']}/versions")
+    assert r.status_code == 200, r.text
+    versions = r.json()
+    assert len(versions) == 2
+    assert all(v["status"] == "published" for v in versions)
+    # Newest first.
+    assert versions[0]["version"] == 2
+    assert versions[1]["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_save_draft_rejects_unknown_node_type(client):
+    """Draft-mode validation blocks unknown node types on save (a half-broken
+    draft can't poison subsequent publish attempts)."""
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"val-{uuid.uuid4().hex[:8]}")
     )).json()
-    r = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
+    r = await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
         json={"definition": {
             "nodes": [{"id": "n1", "type": "fake.unknown_node", "config": {}}],
             "edges": [],
@@ -330,21 +390,38 @@ async def test_draft_create_rejects_unknown_node_type(client):
 
 @pytest.mark.asyncio
 async def test_publish_rejects_invalid_node_config(client):
-    """``core.webhook_out`` with empty config fails publish on schema-required ``url``."""
+    """``core.webhook_out`` saves as a lenient draft but fails publish on the
+    schema-required ``url`` field."""
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"cfg-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
+    saved = await client.put(
+        f"/api/orchestration/workflows/{wf['id']}/draft",
         json={"definition": {
             "nodes": [{"id": "n1", "type": "core.webhook_out", "config": {}}],
             "edges": [],
         }},
-    )).json()
-    r = await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish"
     )
-    assert r.status_code == 422
+    assert saved.status_code == 200, saved.text
+    r = await client.post(f"/api/orchestration/workflows/{wf['id']}/publish")
+    assert r.status_code in (400, 422), r.text
+
+
+@pytest.mark.asyncio
+async def test_old_version_endpoints_are_removed(client):
+    """The version-row churn endpoints are gone — no alias, no compat."""
+    wf = (await client.post(
+        "/api/orchestration/workflows", json=_wf_body(f"old-{uuid.uuid4().hex[:8]}")
+    )).json()
+    create = await client.post(
+        f"/api/orchestration/workflows/{wf['id']}/versions",
+        json={"definition": _MIN_VALID_DEFINITION},
+    )
+    assert create.status_code == 405
+    publish = await client.post(
+        f"/api/orchestration/workflows/{wf['id']}/versions/{uuid.uuid4()}/publish"
+    )
+    assert publish.status_code == 404
 
 
 # ─── Triggers + cron sync ───────────────────────────────────────────────────
@@ -507,11 +584,7 @@ async def test_manual_fire_creates_run_and_job(client, db_session):
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"fire2-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     r = await client.post("/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}})
     assert r.status_code == 201, r.text
     rid = r.json()["id"]
@@ -529,11 +602,7 @@ async def test_list_and_get_run(client):
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"list-r-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
@@ -555,11 +624,7 @@ async def test_cancel_run(client, db_session):
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"cn-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
@@ -582,11 +647,7 @@ async def test_override_creates_row(client, db_session):
     wf = (await client.post(
         "/api/orchestration/workflows", json=_wf_body(f"ov-{uuid.uuid4().hex[:8]}")
     )).json()
-    v = (await client.post(
-        f"/api/orchestration/workflows/{wf['id']}/versions",
-        json={"definition": _MIN_VALID_DEFINITION},
-    )).json()
-    await client.post(f"/api/orchestration/workflows/{wf['id']}/versions/{v['id']}/publish")
+    await _publish(client, wf["id"])
     run = (await client.post(
         "/api/orchestration/runs", json={"workflowId": wf["id"], "params": {}}
     )).json()
