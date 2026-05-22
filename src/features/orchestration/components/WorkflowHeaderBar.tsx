@@ -168,7 +168,7 @@ export function WorkflowHeaderBar({
       const isPublishedAtSaveTime = Boolean(currentPublishedVersionId);
       notificationService.success(
         isPublishedAtSaveTime
-          ? 'Saved (published version still live)'
+          ? 'Draft saved — publish to make it live.'
           : 'Draft saved',
       );
     } catch (e) {

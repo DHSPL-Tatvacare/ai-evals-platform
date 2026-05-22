@@ -29,6 +29,7 @@ import {
   getWorkflow,
   publishVersion,
 } from '@/services/api/orchestration';
+import { notificationService } from '@/services/notifications';
 import { useAppStore } from '@/stores/appStore';
 import { WorkflowHeaderBar } from '@/features/orchestration/components/WorkflowHeaderBar';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
@@ -189,5 +190,82 @@ describe('WorkflowHeaderBar', () => {
       name: /Test Run/i,
     });
     expect(testRunEdit).toBeDisabled();
+  });
+
+  it('save toast mentions publish-required copy when a published version already exists', async () => {
+    // beforeEach seeds currentPublishedVersionId: 'ver-1' — this is the
+    // published-version-exists case. The save toast must inform the operator
+    // that the published version remains live until they explicitly publish.
+    (createDraftVersion as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'ver-2',
+      definition: useWorkflowBuilderStore.getState().toDefinition(),
+    });
+
+    render(<WorkflowHeaderBar />);
+    fireEvent.click(screen.getByRole('button', { name: /Edit workflow/i }));
+
+    // Make canvas dirty so Save Draft becomes the primary button.
+    useWorkflowBuilderStore.getState().addNode({
+      id: 'node-dirty',
+      type: 'sink.complete',
+      position: { x: 0, y: 0 },
+      data: { label: 'End', nodeType: 'sink.complete' },
+      config: {},
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /Save Draft/i }),
+      ).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+
+    await waitFor(() => expect(createDraftVersion).toHaveBeenCalled());
+
+    // Toast must communicate that the draft is saved but the PUBLISHED
+    // version is still live — not just a bare "saved" confirmation.
+    expect(notificationService.success).toHaveBeenCalledWith(
+      expect.stringMatching(/publish/i),
+    );
+    // Must NOT use the old error-sounding copy.
+    expect(notificationService.success).not.toHaveBeenCalledWith(
+      'Saved (published version still live)',
+    );
+  });
+
+  it('save toast shows a plain draft-saved message when no published version exists', async () => {
+    useWorkflowBuilderStore.getState().setCurrentPublishedVersionId(null);
+    (createDraftVersion as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'ver-1',
+      definition: useWorkflowBuilderStore.getState().toDefinition(),
+    });
+
+    render(<WorkflowHeaderBar />);
+    fireEvent.click(screen.getByRole('button', { name: /Edit workflow/i }));
+
+    useWorkflowBuilderStore.getState().addNode({
+      id: 'node-new',
+      type: 'sink.complete',
+      position: { x: 0, y: 0 },
+      data: { label: 'End', nodeType: 'sink.complete' },
+      config: {},
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /Save Draft/i }),
+      ).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Save Draft/i }));
+
+    await waitFor(() => expect(createDraftVersion).toHaveBeenCalled());
+
+    // No published version → plain draft-saved confirmation, no publish nudge.
+    expect(notificationService.success).toHaveBeenCalledWith(
+      expect.stringMatching(/draft saved/i),
+    );
+    expect(notificationService.success).not.toHaveBeenCalledWith(
+      expect.stringMatching(/publish/i),
+    );
   });
 });
