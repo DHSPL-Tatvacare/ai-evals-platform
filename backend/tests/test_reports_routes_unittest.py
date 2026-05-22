@@ -7,6 +7,7 @@ from app.config import settings
 from app.routes.reports import (
     _compose_pdf_footer_template,
     _compose_pdf_header_template,
+    _load_report_payload,
     _pdf_export_failure_detail,
     _resolve_pdf_render_base_url,
     build_pdf_running_meta,
@@ -15,6 +16,7 @@ from app.services.reports.cache_validation import (
     load_cached_payload_or_raise,
     partition_valid_single_run_payloads,
 )
+from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
 
 
@@ -223,3 +225,75 @@ class PdfRunningMetaTests(unittest.TestCase):
 
         self.assertEqual(invalid_count, 1)
         self.assertEqual(valid_rows, [])
+
+
+def _valid_cross_run_payload() -> dict:
+    return PlatformCrossRunPayload(
+        metadata={
+            'appId': 'inside-sales',
+            'computedAt': '2026-04-01T12:00:00+00:00',
+            'sourceRunCount': 3,
+            'totalRunsAvailable': 5,
+        },
+        sections=[],
+    ).model_dump(by_alias=True)
+
+
+class ScopeAwarePayloadLoadTests(unittest.TestCase):
+    """Tests for scope-discriminated _load_report_payload."""
+
+    def test_cross_run_scope_returns_platform_cross_run_payload(self):
+        payload = _load_report_payload(
+            _valid_cross_run_payload(),
+            scope='cross_run',
+            detail='should not raise',
+            log_message='test',
+        )
+
+        self.assertIsInstance(payload, PlatformCrossRunPayload)
+        self.assertEqual(payload.metadata.report_kind, 'cross_run')
+
+    def test_cross_run_scope_serializes_report_kind_camelcase(self):
+        payload = _load_report_payload(
+            _valid_cross_run_payload(),
+            scope='cross_run',
+            detail='should not raise',
+            log_message='test',
+        )
+
+        dumped = payload.model_dump(by_alias=True, mode='json')
+        self.assertEqual(dumped['metadata']['reportKind'], 'cross_run')
+
+    def test_single_run_scope_returns_platform_run_report_payload(self):
+        payload = _load_report_payload(
+            _valid_run_payload(),
+            scope='single_run',
+            detail='should not raise',
+            log_message='test',
+        )
+
+        self.assertIsInstance(payload, PlatformRunReportPayload)
+        self.assertEqual(payload.metadata.report_kind, 'single_run')
+
+    def test_single_run_scope_serializes_report_kind_camelcase(self):
+        payload = _load_report_payload(
+            _valid_run_payload(),
+            scope='single_run',
+            detail='should not raise',
+            log_message='test',
+        )
+
+        dumped = payload.model_dump(by_alias=True, mode='json')
+        self.assertEqual(dumped['metadata']['reportKind'], 'single_run')
+
+    def test_cross_run_artifact_with_single_run_scope_raises_409(self):
+        # Guard: passing a cross-run artifact with the wrong scope still 409s.
+        with self.assertRaises(HTTPException) as ctx:
+            _load_report_payload(
+                _valid_cross_run_payload(),
+                scope='single_run',
+                detail='Cached report artifact is outdated. Regenerate the report.',
+                log_message='test',
+            )
+
+        self.assertEqual(ctx.exception.status_code, 409)

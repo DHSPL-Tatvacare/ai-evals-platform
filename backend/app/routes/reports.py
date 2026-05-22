@@ -7,7 +7,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from app.models.report_run import ReportGenerationRun
 from app.schemas.base import CamelModel
 from app.schemas.reporting import ReportConfigResponse, ReportRunResponse
 from app.services.access_control import readable_scope_clause
+from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
 from app.services.reports.cache_validation import load_cached_payload_or_raise
 from app.services.reports.config_models import ExportConfig
@@ -89,13 +90,19 @@ async def _get_visible_report_run(
     return report_run
 
 
-def _load_report_payload(artifact_data: dict, *, detail: str, log_message: str) -> PlatformRunReportPayload:
-    return load_cached_payload_or_raise(
-        PlatformRunReportPayload.model_validate,
-        artifact_data,
-        detail=detail,
-        log_message=log_message,
+def _load_report_payload(
+    artifact_data: dict,
+    *,
+    scope: str,
+    detail: str,
+    log_message: str,
+) -> PlatformRunReportPayload | PlatformCrossRunPayload:
+    loader = (
+        PlatformCrossRunPayload.model_validate
+        if scope == 'cross_run'
+        else PlatformRunReportPayload.model_validate
     )
+    return load_cached_payload_or_raise(loader, artifact_data, detail=detail, log_message=log_message)
 
 
 def _ensure_pdf_export_enabled(report_config: ReportConfiguration) -> None:
@@ -513,7 +520,7 @@ async def list_report_runs(
     return result.scalars().all()
 
 
-@router.get("/report-runs/{report_run_id}/artifact", response_model=PlatformRunReportPayload)
+@router.get("/report-runs/{report_run_id}/artifact", response_model=None)
 async def get_report_run_artifact(
     report_run_id: UUID,
     auth: AuthContext = require_permission('insights:view'),
@@ -537,11 +544,13 @@ async def get_report_run_artifact(
     )
     if report_run.status != 'completed':
         raise HTTPException(status_code=409, detail="Report run is not completed yet")
-    return _load_report_payload(
+    payload = _load_report_payload(
         artifact.artifact_data,
+        scope=report_run.scope,
         detail='Cached report artifact is outdated. Regenerate the report.',
         log_message=f'Report artifact invalid for report run {report_run_id} during fetch',
     )
+    return JSONResponse(content=payload.model_dump(by_alias=True, mode='json'))
 
 
 @router.get("/report-runs/{report_run_id}/export-pdf")
@@ -580,6 +589,7 @@ async def export_report_run_pdf(
 
     payload = _load_report_payload(
         artifact.artifact_data,
+        scope=report_run.scope,
         detail='Cached report artifact is outdated. Regenerate the report before exporting.',
         log_message=f'Report artifact invalid for report run {report_run_id} during PDF export',
     )
@@ -637,6 +647,7 @@ async def export_report_pdf(
         )
     payload = _load_report_payload(
         artifact_data,
+        scope='single_run',
         detail='Cached report artifact is outdated. Regenerate the report before exporting.',
         log_message=f'Report artifact invalid for run {run_id} during PDF export',
     )
@@ -721,6 +732,7 @@ async def get_report(
 
     return _load_report_payload(
         artifact_data,
+        scope='single_run',
         detail='Cached report artifact is outdated. Regenerate the report.',
         log_message=f'Report artifact invalid for run {run_id} during fetch',
     )
