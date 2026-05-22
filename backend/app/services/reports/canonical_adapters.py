@@ -1117,6 +1117,39 @@ def adapt_inside_sales_cross_run(
     )
 
 
+def _build_inside_sales_cross_insights(
+    issue_groups: dict[str, dict[str, Any]],
+    recommendation_groups: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    recs_by_group: dict[tuple[str, str], list[str]] = {}
+    for rec in (recommendation_groups or {}).values():
+        action = rec.get('action')
+        if action:
+            recs_by_group.setdefault((rec.get('title', ''), rec['priority']), []).append(action)
+
+    panels: dict[tuple[str, str], dict[str, Any]] = {}
+    for issue in issue_groups.values():
+        group_key = (issue['area'], issue['priority'])
+        panel = panels.setdefault(
+            group_key,
+            {'area': issue['area'], 'priority': issue['priority'], 'run_count': 0, 'items': []},
+        )
+        panel['run_count'] += issue.get('count', 1)
+        panel['items'].append({'text': issue['summary'] or issue['title'], 'impacts': []})
+
+    return [
+        {
+            'area': panel['area'],
+            'priority': panel['priority'],
+            'runCount': panel['run_count'],
+            'items': panel['items'],
+            'stats': [],
+            'footerImpacts': recs_by_group.get((panel['area'], panel['priority']), []),
+        }
+        for panel in sorted(panels.values(), key=lambda item: (item['priority'], item['area']))
+    ]
+
+
 def adapt_inside_sales_cross_run_from_runs(
     runs_data: list[tuple[dict, dict]],
     analytics_config: AppAnalyticsConfig,
@@ -1197,13 +1230,14 @@ def adapt_inside_sales_cross_run_from_runs(
                 )
                 bucket['count'] += 1
 
+    avg_qa = sum(avg_qa_scores) / len(avg_qa_scores) if avg_qa_scores else 0.0
     section_payloads: dict[str, Any] = {
         'inside-sales-cross-summary': [
             {
                 'key': 'avg-qa-score',
                 'label': 'Average QA Score',
-                'value': f'{(sum(avg_qa_scores) / len(avg_qa_scores)) if avg_qa_scores else 0:.1f}',
-                'tone': _rate_tone((sum(avg_qa_scores) / len(avg_qa_scores)) if avg_qa_scores else 0),
+                'value': f'{avg_qa:.1f}',
+                'tone': _rate_tone(avg_qa),
             },
             {
                 'key': 'avg-compliance-rate',
@@ -1224,6 +1258,29 @@ def adapt_inside_sales_cross_run_from_runs(
                 'tone': 'neutral',
             },
         ],
+        'inside-sales-cross-trend': {
+            'points': [
+                {
+                    'bucket': run_labels[index],
+                    'hoverLabel': run_labels[index],
+                    'primary': avg_qa_scores[index] if index < len(avg_qa_scores) else 0.0,
+                    'breakdown': {
+                        label: values[index]
+                        for label, values in dimension_values.items()
+                        if index < len(values) and values[index] is not None
+                    },
+                }
+                for index in range(len(run_labels))
+            ],
+            'primaryLabel': 'QA Score',
+            'breakdowns': [
+                {'key': label, 'label': label}
+                for label in sorted(dimension_values.keys())
+            ],
+            'yDomain': [0.0, 100.0],
+            'referenceValue': round(avg_qa, 1) if avg_qa_scores else None,
+            'referenceLabel': 'Average',
+        },
         'inside-sales-cross-dimensions': {
             'columns': run_labels,
             'rows': [
@@ -1278,25 +1335,9 @@ def adapt_inside_sales_cross_run_from_runs(
             }
             for label, values in sorted(flag_totals.items())
         ],
-        'inside-sales-cross-issues': {
-            'issues': [
-                {
-                    'title': value['title'],
-                    'area': value['area'],
-                    'priority': value['priority'],
-                    'summary': value['summary'],
-                }
-                for value in issue_groups.values()
-            ],
-            'recommendations': [
-                {
-                    'priority': value['priority'],
-                    'title': value['title'],
-                    'action': value['action'],
-                }
-                for value in recommendation_groups.values()
-            ],
-        },
+        'inside-sales-cross-insights': _build_inside_sales_cross_insights(
+            issue_groups, recommendation_groups
+        ),
     }
 
     metadata = PlatformCrossRunMetadata(

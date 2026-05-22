@@ -372,6 +372,21 @@ class CrossRunNarrativeSectionTests(unittest.TestCase):
         nc = _build_narrative_config("cross_run", cross, assets)
         self.assertEqual(nc["outputInsertionPoints"], ["kaira-cross-narrative"])
 
+    def test_inside_sales_cross_run_uses_trend_chart_and_insight_panels(self):
+        """inside-sales cross_run emits trend_chart + insight_panels, keeps the
+        narrative, and drops the flat issues_recommendations section.
+        outputInsertionPoints must resolve to the narrative only."""
+        cross, assets = self._cross_run_config("inside-sales")
+        types_by_id = {s.id: s.type for s in cross.sections}
+        self.assertEqual(types_by_id.get("inside-sales-cross-trend"), "trend_chart")
+        self.assertEqual(types_by_id.get("inside-sales-cross-insights"), "insight_panels")
+        self.assertIn("inside-sales-cross-narrative", types_by_id)
+        self.assertNotIn("issues_recommendations", set(types_by_id.values()))
+        self.assertNotIn("inside-sales-cross-issues", types_by_id)
+
+        nc = _build_narrative_config("cross_run", cross, assets)
+        self.assertEqual(nc["outputInsertionPoints"], ["inside-sales-cross-narrative"])
+
     def test_narrative_section_placed_after_summary_cards(self):
         """Narrative section must immediately follow the summary_cards entry."""
         for slug, narrative_id in self._EXPECTED.items():

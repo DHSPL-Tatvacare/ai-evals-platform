@@ -2410,10 +2410,11 @@ APP_SEEDS = [
                     "sections": [
                         {"id": "inside-sales-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "inside_sales_cross_run"},
                         {"id": "inside-sales-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
+                        {"id": "inside-sales-cross-trend", "type": "trend_chart", "title": "QA Score Trend", "variant": "qa_trend"},
                         {"id": "inside-sales-cross-dimensions", "type": "heatmap", "title": "Dimension Heatmap", "variant": "dimensions"},
                         {"id": "inside-sales-cross-compliance", "type": "heatmap", "title": "Compliance Heatmap", "variant": "compliance"},
                         {"id": "inside-sales-cross-flags", "type": "flags", "title": "Flag Rollups", "variant": "behavioral_outcomes"},
-                        {"id": "inside-sales-cross-issues", "type": "issues_recommendations", "title": "Recurring Themes", "variant": "cross_run_narrative"},
+                        {"id": "inside-sales-cross-insights", "type": "insight_panels", "title": "Recurring Insights", "variant": "cross_run"},
                     ],
                     "export": {
                         "enabled": False,
@@ -2426,7 +2427,7 @@ APP_SEEDS = [
                         "sectionIds": [
                             "inside-sales-cross-summary",
                             "inside-sales-cross-flags",
-                            "inside-sales-cross-issues",
+                            "inside-sales-cross-insights",
                         ],
                     },
                 },

@@ -515,5 +515,170 @@ class VoiceRxCrossRunAggregatorTests(unittest.TestCase):
         self.assertEqual(trend.data.points[0].breakdown, {})
 
 
+class InsideSalesCrossRunCanonicalAdapterTests(unittest.TestCase):
+    """adapt_inside_sales_cross_run_from_runs emits trend_chart + insight_panels."""
+
+    def _inside_sales_analytics_config(self):
+        from app.schemas.app_config import AppConfig
+        from app.services.seed_defaults import APP_SEEDS
+
+        for seed in APP_SEEDS:
+            if seed['slug'] == 'inside-sales':
+                return AppConfig.model_validate(seed['config']).analytics
+        raise KeyError('inside-sales')
+
+    def _run_payload(self, run_name: str, qa_score: float) -> dict:
+        # Minimal canonical per-run payload for the inside-sales cross-run adapter.
+        # Carries inside-sales-summary (qa/compliance cards) and
+        # inside-sales-recommendations (issues + recs).
+        return {
+            'schemaVersion': 'v1',
+            'metadata': {
+                'appId': 'inside-sales',
+                'runId': run_name,
+                'runName': run_name,
+                'evalType': 'batch',
+                'createdAt': '2026-04-01T00:00:00+00:00',
+                'computedAt': '2026-04-01T00:05:00+00:00',
+            },
+            'sections': [
+                {
+                    'id': 'inside-sales-summary',
+                    'type': 'summary_cards',
+                    'title': 'Run Summary',
+                    'data': [
+                        {'key': 'avg-qa-score', 'label': 'Avg QA Score', 'value': f'{qa_score:.1f}', 'tone': 'positive'},
+                        {'key': 'evaluated-calls', 'label': 'Evaluated Calls', 'value': '10', 'tone': 'neutral'},
+                        {'key': 'total-calls', 'label': 'Total Calls', 'value': '12', 'tone': 'neutral'},
+                        {'key': 'compliance-pass-rate', 'label': 'Compliance Pass Rate', 'value': '85.0%', 'tone': 'positive'},
+                    ],
+                },
+                {
+                    'id': 'inside-sales-dimensions',
+                    'type': 'metric_breakdown',
+                    'title': 'Dimensions',
+                    'data': [
+                        {'key': 'discovery', 'label': 'Discovery', 'value': qa_score - 5, 'maxValue': 100},
+                        {'key': 'objection_handling', 'label': 'Objection Handling', 'value': qa_score + 2, 'maxValue': 100},
+                    ],
+                },
+                {
+                    'id': 'inside-sales-recommendations',
+                    'type': 'issues_recommendations',
+                    'title': 'Issues & Recs',
+                    'data': {
+                        'issues': [
+                            {'title': 'Discovery weakness', 'area': 'Discovery', 'priority': 'P1', 'summary': 'Discovery scores are below target.'},
+                        ],
+                        'recommendations': [
+                            {'priority': 'P1', 'title': 'Coaching Recommendation', 'action': 'Coach agents on discovery questions.'},
+                        ],
+                    },
+                },
+            ],
+            'exportDocument': {
+                'schemaVersion': 'v1',
+                'title': run_name,
+                'theme': {
+                    'accent': '#0f766e',
+                    'accentMuted': '#99f6e4',
+                    'border': '#d1d5db',
+                    'textPrimary': '#0f172a',
+                    'textSecondary': '#475569',
+                    'background': '#ffffff',
+                },
+                'blocks': [{'id': 'cover', 'type': 'cover', 'title': run_name}],
+            },
+        }
+
+    def _runs_data(self):
+        return [
+            ({'id': 'run-1', 'created_at': '2026-04-01T00:00:00+00:00'}, self._run_payload('Run 1', 78.0)),
+            ({'id': 'run-2', 'created_at': '2026-04-02T00:00:00+00:00'}, self._run_payload('Run 2', 84.0)),
+        ]
+
+    def test_from_runs_emits_trend_chart_and_insight_panels(self):
+        from app.services.reports.canonical_adapters import (
+            adapt_inside_sales_cross_run_from_runs,
+        )
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = adapt_inside_sales_cross_run_from_runs(
+            runs, self._inside_sales_analytics_config(), app_id='inside-sales', total_runs_available=2
+        )
+        by_id = {section.id: section for section in report.sections}
+
+        trend = by_id['inside-sales-cross-trend']
+        self.assertIsInstance(trend, TrendChartSection)
+        self.assertEqual(len(trend.data.points), len(runs))
+        for point in trend.data.points:
+            self.assertTrue(point.bucket)
+            self.assertIsInstance(point.primary, float)
+            self.assertIsInstance(point.breakdown, dict)
+        self.assertEqual(trend.data.primary_label, 'QA Score')
+        self.assertEqual(trend.data.y_domain, (0.0, 100.0))
+        self.assertIsNotNone(trend.data.reference_value)
+        self.assertEqual(trend.data.reference_label, 'Average')
+        self.assertTrue(trend.data.breakdowns)
+
+        insights = by_id['inside-sales-cross-insights']
+        self.assertIsInstance(insights, InsightPanelsSection)
+        self.assertGreaterEqual(len(insights.data), 1)
+        for panel in insights.data:
+            self.assertTrue(panel.area)
+            self.assertTrue(panel.priority)
+            self.assertGreaterEqual(panel.run_count, 1)
+            self.assertTrue(panel.items)
+
+        self.assertNotIn('inside-sales-cross-issues', by_id)
+
+    def test_payload_dicts_validate_as_section_models(self):
+        from app.services.reports.canonical_adapters import (
+            adapt_inside_sales_cross_run_from_runs,
+        )
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = adapt_inside_sales_cross_run_from_runs(
+            runs, self._inside_sales_analytics_config(), app_id='inside-sales', total_runs_available=2
+        )
+        types = {section.type for section in report.sections}
+        self.assertIn('trend_chart', types)
+        self.assertIn('insight_panels', types)
+        self.assertNotIn('issues_recommendations', types)
+
+        trend = next(s for s in report.sections if s.id == 'inside-sales-cross-trend')
+        rebuilt_trend = TrendChartSection.model_validate(trend.model_dump(by_alias=True))
+        self.assertEqual(len(rebuilt_trend.data.points), len(runs))
+
+        insights = next(s for s in report.sections if s.id == 'inside-sales-cross-insights')
+        rebuilt_insights = InsightPanelsSection.model_validate(insights.model_dump(by_alias=True))
+        self.assertGreaterEqual(len(rebuilt_insights.data), 1)
+
+    def test_missing_dimensions_produce_empty_breakdown(self):
+        """Runs with no dimensions section emit zero-breakdown trend points without error."""
+        from app.services.reports.canonical_adapters import (
+            adapt_inside_sales_cross_run_from_runs,
+        )
+
+        payload = self._run_payload('Run X', 80.0)
+        payload['sections'] = [s for s in payload['sections'] if s['id'] != 'inside-sales-dimensions']
+        runs = [({'id': 'run-x', 'created_at': '2026-04-01T00:00:00+00:00'}, payload)]
+        report = adapt_inside_sales_cross_run_from_runs(
+            runs, self._inside_sales_analytics_config(), app_id='inside-sales', total_runs_available=1
+        )
+        by_id = {section.id: section for section in report.sections}
+        trend = by_id['inside-sales-cross-trend']
+        self.assertEqual(len(trend.data.points), 1)
+        self.assertEqual(trend.data.points[0].breakdown, {})
+
+
 if __name__ == '__main__':
     unittest.main()
