@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Mock hooks and queries before importing the page
-vi.mock('@/hooks', () => ({
-  useCurrentAppId: () => 'kaira-bot',
-}));
+vi.mock('@/hooks', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useCurrentAppId: () => 'kaira-bot',
+  };
+});
 
 vi.mock('@/features/reports/queries/reportsQueries', () => ({
   useReportRuns: vi.fn(),
   useReportRunArtifact: vi.fn(),
+  useReportConfigs: vi.fn(),
+  invalidateReportRuns: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/features/analytics/components/RunReportSurface', () => ({
@@ -29,13 +36,71 @@ vi.mock('@/config/routes', () => ({
   analyticsCrossRunReportForApp: (appId: string) => `/${appId}/analytics/cross-run-report`,
 }));
 
-import { useReportRuns, useReportRunArtifact } from '@/features/reports/queries/reportsQueries';
+vi.mock('@/services/api/jobPolling', () => ({
+  submitAndPollJob: vi.fn(),
+}));
+
+vi.mock('@/services/notifications', () => ({
+  notificationService: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
+vi.mock('@/utils/permissions', () => ({
+  usePermission: vi.fn().mockReturnValue(true),
+}));
+
+// Stub LegacyLlmConfigCompat so we don't need to mock the full credential stack.
+vi.mock('@/components/ui', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    LegacyLlmConfigCompat: ({
+      onProviderChange,
+      onModelChange,
+    }: {
+      onProviderChange: (p: string) => void;
+      onModelChange: (m: string) => void;
+    }) => (
+      <button
+        data-testid="llm-config-stub"
+        onClick={() => {
+          onProviderChange('gemini');
+          onModelChange('gemini-1.5-pro');
+        }}
+      >
+        Select model
+      </button>
+    ),
+  };
+});
+
+// TanStack Query QueryClient mock — just enough for useQueryClient() to work.
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
+  };
+});
+
+import { useReportRuns, useReportRunArtifact, useReportConfigs } from '@/features/reports/queries/reportsQueries';
+import { submitAndPollJob } from '@/services/api/jobPolling';
+import { notificationService } from '@/services/notifications';
 import { CrossRunReportPage } from './CrossRunReportPage';
-import type { ReportRunSummary } from '@/types';
+import type { ReportRunSummary, ReportConfigSummary } from '@/types';
 import type { PlatformCrossRunPayload } from '@/types/platformReports';
+import type { Job } from '@/services/api/jobsApi';
 
 const mockUseReportRuns = vi.mocked(useReportRuns);
 const mockUseReportRunArtifact = vi.mocked(useReportRunArtifact);
+const mockUseReportConfigs = vi.mocked(useReportConfigs);
+const mockSubmitAndPollJob = vi.mocked(submitAndPollJob);
+const mockNotificationSuccess = vi.mocked(notificationService.success);
+const mockNotificationError = vi.mocked(notificationService.error);
 
 function makeRunSummary(overrides: Partial<ReportRunSummary> = {}): ReportRunSummary {
   return {
@@ -46,6 +111,30 @@ function makeRunSummary(overrides: Partial<ReportRunSummary> = {}): ReportRunSum
     status: 'completed',
     tenantId: 'tenant-1',
     userId: 'user-1',
+    createdAt: '2026-05-01T00:00:00Z',
+    updatedAt: '2026-05-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function makeConfigSummary(overrides: Partial<ReportConfigSummary> = {}): ReportConfigSummary {
+  return {
+    id: 'cfg-1',
+    reportId: 'cross-run-v1',
+    name: 'Cross-Run Report',
+    description: '',
+    status: 'active',
+    isDefault: true,
+    scope: 'cross_run',
+    appId: 'kaira-bot',
+    tenantId: 'tenant-1',
+    userId: 'user-1',
+    visibility: 'private',
+    presentationConfig: {},
+    narrativeConfig: {},
+    exportConfig: {},
+    defaultReportRunVisibility: 'private',
+    version: 1,
     createdAt: '2026-05-01T00:00:00Z',
     updatedAt: '2026-05-01T00:00:00Z',
     ...overrides,
@@ -75,6 +164,47 @@ function makeCrossRunArtifact(): PlatformCrossRunPayload {
   };
 }
 
+function makeCompletedJob(overrides: Partial<Job> = {}): Job {
+  return {
+    id: 'job-1',
+    jobType: 'generate-cross-run-report',
+    status: 'completed',
+    params: {},
+    result: { report_run_id: 'new-run-1' },
+    errorMessage: null,
+    createdAt: '2026-05-01T00:00:00Z',
+    updatedAt: '2026-05-01T00:00:00Z',
+    ...overrides,
+  } as Job;
+}
+
+function stubQueriesEmpty() {
+  mockUseReportRuns.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
+  } as unknown as ReturnType<typeof useReportRuns>);
+
+  mockUseReportRunArtifact.mockReturnValue({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
+  } as unknown as ReturnType<typeof useReportRunArtifact>);
+
+  mockUseReportConfigs.mockReturnValue({
+    data: [makeConfigSummary()],
+    isLoading: false,
+    isError: false,
+    error: null,
+  } as unknown as ReturnType<typeof useReportConfigs>);
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -84,21 +214,12 @@ function renderPage() {
 }
 
 describe('CrossRunReportPage', () => {
-  it('shows empty state when no cross-run runs exist', () => {
-    // stub both queries — no runs, no artifact
-    mockUseReportRuns.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof useReportRuns>);
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    mockUseReportRunArtifact.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    } as unknown as ReturnType<typeof useReportRunArtifact>);
+  it('shows empty state when no cross-run runs exist', () => {
+    stubQueriesEmpty();
 
     renderPage();
 
@@ -111,6 +232,8 @@ describe('CrossRunReportPage', () => {
       isLoading: false,
       isError: false,
       error: null,
+      refetch: vi.fn(),
+      isFetching: false,
     } as unknown as ReturnType<typeof useReportRuns>);
 
     mockUseReportRunArtifact.mockReturnValue({
@@ -118,10 +241,128 @@ describe('CrossRunReportPage', () => {
       isLoading: false,
       isError: false,
       error: null,
+      refetch: vi.fn(),
+      isFetching: false,
     } as unknown as ReturnType<typeof useReportRunArtifact>);
+
+    mockUseReportConfigs.mockReturnValue({
+      data: [makeConfigSummary()],
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReportConfigs>);
 
     renderPage();
 
     expect(screen.getByTestId('run-report-surface')).toBeInTheDocument();
+  });
+
+  it('opens the generate overlay when "Generate report" is clicked in the empty state', async () => {
+    stubQueriesEmpty();
+    const user = userEvent.setup();
+    renderPage();
+
+    const btn = screen.getByRole('button', { name: /generate report/i });
+    await user.click(btn);
+
+    // Overlay should now be visible (title rendered in the slide-over)
+    expect(screen.getByText(/generate cross-run report/i)).toBeInTheDocument();
+  });
+
+  it('calls submitAndPollJob with correct params when Generate is confirmed', async () => {
+    stubQueriesEmpty();
+    mockSubmitAndPollJob.mockResolvedValue(makeCompletedJob());
+
+    const user = userEvent.setup();
+    renderPage();
+
+    // Open the overlay
+    await user.click(screen.getByRole('button', { name: /generate report/i }));
+
+    // Trigger model selection via the stubbed LegacyLlmConfigCompat
+    await user.click(screen.getByTestId('llm-config-stub'));
+
+    // Confirm generation
+    await user.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => {
+      expect(mockSubmitAndPollJob).toHaveBeenCalledWith(
+        'generate-cross-run-report',
+        expect.objectContaining({
+          app_id: 'kaira-bot',
+          report_id: 'cross-run-v1',
+        }),
+        expect.objectContaining({ pollIntervalMs: 2000 }),
+      );
+    });
+  });
+
+  it('shows success notification after a successful generation', async () => {
+    stubQueriesEmpty();
+    mockSubmitAndPollJob.mockResolvedValue(makeCompletedJob());
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /generate report/i }));
+    await user.click(screen.getByTestId('llm-config-stub'));
+    await user.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => {
+      expect(mockNotificationSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it('surfaces the job errorMessage when the job fails with "No completed runs" message', async () => {
+    stubQueriesEmpty();
+    const errorMsg = 'No completed runs with generated reports found.';
+    mockSubmitAndPollJob.mockResolvedValue(
+      makeCompletedJob({ status: 'failed', errorMessage: errorMsg }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /generate report/i }));
+    await user.click(screen.getByTestId('llm-config-stub'));
+    await user.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => {
+      expect(mockNotificationError).toHaveBeenCalledWith(errorMsg);
+    });
+
+    // Error message must also appear in the UI, not be swallowed
+    expect(screen.getByText(errorMsg)).toBeInTheDocument();
+  });
+
+  it('shows Regenerate button in page header when a report already exists', () => {
+    mockUseReportRuns.mockReturnValue({
+      data: [makeRunSummary()],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRuns>);
+
+    mockUseReportRunArtifact.mockReturnValue({
+      data: makeCrossRunArtifact(),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRunArtifact>);
+
+    mockUseReportConfigs.mockReturnValue({
+      data: [makeConfigSummary()],
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReportConfigs>);
+
+    renderPage();
+
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument();
   });
 });
