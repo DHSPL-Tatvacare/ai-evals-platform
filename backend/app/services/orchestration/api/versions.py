@@ -130,6 +130,7 @@ async def get_version(
         select(WorkflowVersion).where(
             WorkflowVersion.id == version_id,
             WorkflowVersion.tenant_id == tenant_id,
+            WorkflowVersion.status == "published",
         )
     )).scalar_one_or_none()
 

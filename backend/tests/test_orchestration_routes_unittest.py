@@ -794,6 +794,40 @@ async def test_cancel_run_returns_termination_receipt(client, db_session, route_
 
 
 @pytest.mark.asyncio
+async def test_get_version_excludes_archived(db_session, route_tenant_id):
+    from app.services.orchestration.api import versions as ver_service
+
+    wf = Workflow(
+        id=uuid.uuid4(), tenant_id=route_tenant_id, app_id="inside-sales",
+        workflow_type="crm", slug=f"getver-{uuid.uuid4().hex[:8]}",
+        name="GetVer", created_by=SYSTEM_USER_ID,
+    )
+    db_session.add(wf)
+    await db_session.flush()
+    published = WorkflowVersion(
+        id=uuid.uuid4(), tenant_id=route_tenant_id, app_id="inside-sales",
+        workflow_id=wf.id, version=2,
+        definition={"nodes": [], "edges": []}, status="published",
+    )
+    archived = WorkflowVersion(
+        id=uuid.uuid4(), tenant_id=route_tenant_id, app_id="inside-sales",
+        workflow_id=wf.id, version=1,
+        definition={"nodes": [], "edges": []}, status="archived",
+    )
+    db_session.add_all([published, archived])
+    await db_session.flush()
+
+    # Archived rows are dead history — never served by id.
+    assert await ver_service.get_version(
+        db_session, tenant_id=route_tenant_id, version_id=archived.id,
+    ) is None
+    got = await ver_service.get_version(
+        db_session, tenant_id=route_tenant_id, version_id=published.id,
+    )
+    assert got is not None and got.id == published.id
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_defaults_reason_when_body_omitted(client, db_session, route_tenant_id):
     run = await _seed_running_run(db_session, route_tenant_id)
     r = await client.post(f"/api/orchestration/runs/{run.id}/cancel")
