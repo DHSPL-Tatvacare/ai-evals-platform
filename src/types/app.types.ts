@@ -164,7 +164,7 @@ export interface AppCollectionFilterConfig {
   description?: string;
   optionSource?: 'agents';
   /** For `async-multi-select`: which suggestion field on the backend. */
-  suggestionField?: 'lead_id' | 'phone' | 'rep_name' | 'city' | 'stage' | 'plan_name';
+  suggestionField?: 'lead_id' | 'phone' | 'rep_name' | 'city' | 'stage' | 'condition' | 'plan_name';
   /**
    * Manifest column this filter's value semantically represents. Used to
    * resolve the column's `unit` and `description` from `useCrmSchema` so the
@@ -944,29 +944,12 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
               placeholder: 'Type to search stages...',
             },
             {
-              key: 'mqlMin',
-              label: 'MQL Score',
-              pillLabel: 'MQL',
-              control: 'segmented',
-              fields: ['mqlMin'],
-              options: [
-                { value: '', label: 'Any' },
-                { value: '3', label: '>= 3' },
-                { value: '5', label: '= 5 (MQL)' },
-              ],
-            },
-            {
               key: 'condition',
               label: 'Condition',
-              control: 'multi-select',
+              control: 'async-multi-select',
               fields: ['condition'],
-              options: [
-                { value: 'Diabetes', label: 'Diabetes' },
-                { value: 'PCOS', label: 'PCOS' },
-                { value: 'Fatty Liver', label: 'Fatty Liver' },
-                { value: 'Obesity', label: 'Obesity' },
-                { value: 'Hypertension', label: 'Hypertension' },
-              ],
+              suggestionField: 'condition',
+              placeholder: 'Type to search conditions...',
             },
             {
               key: 'city',
@@ -993,6 +976,18 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
               fields: ['planName'],
               suggestionField: 'plan_name',
               placeholder: 'Type to search plans...',
+            },
+            {
+              key: 'mqlMin',
+              label: 'MQL Score',
+              pillLabel: 'MQL',
+              control: 'segmented',
+              fields: ['mqlMin'],
+              options: [
+                { value: '', label: 'Any' },
+                { value: '3', label: '>= 3' },
+                { value: '5', label: '= 5 (MQL)' },
+              ],
             },
           ],
           emptyState: {

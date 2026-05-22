@@ -476,3 +476,14 @@ def test_lead_created_date_range_builds_half_open_lsq_created_on_clauses():
     sql = _compile(statement)
     assert "analytics.dim_lead.lsq_created_on >= '2026-04-01 00:00:00+00:00'" in sql
     assert "analytics.dim_lead.lsq_created_on < '2026-05-01 00:00:00+00:00'" in sql
+
+
+def test_condition_suggestion_field_reads_first_seen_condition_attribute():
+    from app.services.inside_sales_queries import _SUGGESTION_FIELDS
+
+    column = _SUGGESTION_FIELDS[("leads", "condition")]
+    sql = str(
+        column.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    )
+    assert "attributes_at_first_seen" in sql
+    assert "condition" in sql

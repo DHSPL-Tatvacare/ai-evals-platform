@@ -758,6 +758,7 @@ _SUGGESTION_FIELDS: dict[tuple[str, str], Any] = {
     ("leads", "rep_name"): DimLead.assigned_rep_label,
     ("leads", "city"): DimLead.city,
     ("leads", "stage"): DimLead.latest_stage_observed,
+    ("leads", "condition"): DimLead.attributes_at_first_seen.op("->>")("condition"),
     ("leads", "plan_name"): DimLead.attributes.op("->>")("plan_name"),
     ("calls", "lead_id"): FactLeadActivity.lead_id,
     ("calls", "rep_name"): FactLeadActivity.actor_label,

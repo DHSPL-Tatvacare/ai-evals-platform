@@ -71,12 +71,17 @@ export function DateRangeField({
   inputClassName,
 }: DateRangeFieldProps) {
   const triggerClass = cn(TRIGGER_BASE, inputClassName);
+  // A created-date range can't extend into the future — cap both ends at today.
+  const today = new Date();
+  const fromValue = toDate(from);
+  const toValue = toDate(to);
+  const fromMax = toValue && toValue.getTime() < today.getTime() ? toValue : today;
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <DateEndpoint
         value={from}
         placeholder="From"
-        max={toDate(to)}
+        max={fromMax}
         onChange={onFromChange}
         triggerClass={triggerClass}
       />
@@ -84,7 +89,8 @@ export function DateRangeField({
       <DateEndpoint
         value={to}
         placeholder="To"
-        min={toDate(from)}
+        min={fromValue}
+        max={today}
         onChange={onToChange}
         triggerClass={triggerClass}
       />

@@ -161,6 +161,7 @@ function renderFilterControl(
       return (
         <Combobox
           multi
+          size="sm"
           value={Array.isArray(values[fields[0] as keyof typeof values]) ? values[fields[0] as keyof typeof values] as string[] : []}
           onChange={(nextValue) => setPatch({ [fields[0]]: nextValue })}
           options={filter.options ?? []}

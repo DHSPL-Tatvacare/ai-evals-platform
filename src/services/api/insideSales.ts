@@ -217,6 +217,7 @@ export type SuggestionField =
   | 'rep_name'
   | 'city'
   | 'stage'
+  | 'condition'
   | 'plan_name';
 
 export async function fetchCollectionSuggestions(

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DateRangeField } from './DateRangeField';
+import { Calendar } from './Calendar';
 
 describe('DateRangeField', () => {
   it('emits a YYYY-MM-DD string when a day is picked (the wire contract)', () => {
@@ -29,5 +30,16 @@ describe('DateRangeField', () => {
       />,
     );
     expect(screen.getByText('7 May 2026')).toBeInTheDocument();
+  });
+
+  it('disables days after max (the "To" cannot exceed today)', () => {
+    const onSelect = vi.fn();
+    const mid = new Date(2026, 4, 15);
+    render(<Calendar value={mid} max={mid} onSelect={onSelect} />);
+
+    const future = screen.getByRole('button', { name: '20' });
+    expect(future).toBeDisabled();
+    fireEvent.click(future);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });
