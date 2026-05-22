@@ -73,6 +73,8 @@ class Workflow(ShareableMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("orchestration.workflow_versions.id", deferrable=True, initially="DEFERRED"),
     )
+    draft_definition: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    draft_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("platform.users.id"), nullable=False
     )
