@@ -56,8 +56,8 @@ export const reportsApi = {
     return apiRequest<ReportRunSummary[]>(`/api/reports/report-runs?${query.toString()}`);
   },
 
-  fetchReportRunArtifact: (reportRunId: string): Promise<PlatformRunReportPayload> =>
-    apiRequest<PlatformRunReportPayload>(`/api/reports/report-runs/${reportRunId}/artifact`),
+  fetchReportRunArtifact: <TReport = PlatformRunReportPayload>(reportRunId: string): Promise<TReport> =>
+    apiRequest<TReport>(`/api/reports/report-runs/${reportRunId}/artifact`),
 
   /**
    * Fetch the full report for a completed eval run.

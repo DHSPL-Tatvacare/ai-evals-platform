@@ -46,6 +46,7 @@ const PrintReportRun = lazyWithRetry(() => import("@/features/evalRuns/pages/Pri
 const AnalyticsLibraryPage = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsLibraryPage').then(m => ({ default: m.AnalyticsLibraryPage })));
 const AnalyticsChartDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsChartDetail').then(m => ({ default: m.AnalyticsChartDetail })));
 const AnalyticsDashboardDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
+const CrossRunReportPage = lazyWithRetry(() => import('@/features/analytics/pages/CrossRunReportPage').then(m => ({ default: m.CrossRunReportPage })));
 const CostPage = lazyWithRetry(() => import('@/features/cost/pages/CostPage').then(m => ({ default: m.CostPage })));
 const ScheduledJobsListPage = lazyWithRetry(() => import('@/features/admin/scheduledJobs/pages/ScheduledJobsListPage').then(m => ({ default: m.ScheduledJobsListPage })));
 const AnalyticsMappingsPage = lazyWithRetry(() => import('@/features/admin/analyticsMappings/AnalyticsMappingsPage').then(m => ({ default: m.AnalyticsMappingsPage })));
@@ -131,6 +132,7 @@ export function Router() {
             <Route path={`${routes.voiceRx.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
             <Route path={`${routes.voiceRx.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
             <Route path={routes.voiceRx.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path={routes.voiceRx.analyticsCrossRunReport} element={<Suspense fallback={ROUTE_FALLBACK}><CrossRunReportPage /></Suspense>} />
             <Route path="/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
             <Route
@@ -176,6 +178,7 @@ export function Router() {
             <Route path={`${routes.kaira.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
             <Route path={`${routes.kaira.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
             <Route path={routes.kaira.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path={routes.kaira.analyticsCrossRunReport} element={<Suspense fallback={ROUTE_FALLBACK}><CrossRunReportPage /></Suspense>} />
             <Route path="/kaira/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/kaira/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
           </Route>
@@ -196,6 +199,7 @@ export function Router() {
             <Route path={`${routes.insideSales.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
             <Route path={routes.insideSales.settings} element={<InsideSalesSettings />} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
+            <Route path={routes.insideSales.analyticsCrossRunReport} element={<Suspense fallback={ROUTE_FALLBACK}><CrossRunReportPage /></Suspense>} />
             <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
             <Route path={routes.insideSales.campaigns} element={<Suspense fallback={ROUTE_FALLBACK}><CampaignsPage /></Suspense>} />

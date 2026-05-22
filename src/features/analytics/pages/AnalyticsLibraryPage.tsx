@@ -149,6 +149,9 @@ export function AnalyticsLibraryPage() {
   const handleRowClick = useCallback((row: AnalyticsRow) => {
     if (row.itemType === 'chart') {
       navigate(`charts/${row.id}`);
+    } else if (row.isPlatform) {
+      // Platform dashboards are the cross-run report launcher (seeded by _build_platform_dashboard_seeds).
+      navigate('cross-run-report');
     } else {
       navigate(`dashboards/${row.id}`);
     }

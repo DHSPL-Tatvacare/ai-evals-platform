@@ -81,7 +81,8 @@ export function useReportRuns(filters: {
   reportId?: string | null;
   limit?: number;
 }) {
-  const enabled = Boolean(filters.reportId);
+  // single_run scope requires a reportId to avoid a wildcard list fetch; cross_run does not.
+  const enabled = filters.scope === 'cross_run' ? true : Boolean(filters.reportId);
   return useQuery<ReportRunSummary[]>({
     queryKey: reportKeys.runs({
       appId: filters.appId,
@@ -108,13 +109,13 @@ export function useReportRuns(filters: {
  * Report artifacts are immutable once generated — `staleTime: Infinity` keeps
  * the cache warm for the whole session.
  */
-export function useReportRunArtifact(reportRunId: string | null) {
+export function useReportRunArtifact<TReport = PlatformRunReportPayload>(reportRunId: string | null) {
   const enabled = Boolean(reportRunId);
-  return useQuery<PlatformRunReportPayload>({
+  return useQuery<TReport>({
     queryKey: enabled
       ? reportKeys.artifact(reportRunId as string)
       : ['reports', 'artifact', '__disabled__'],
-    queryFn: () => reportsApi.fetchReportRunArtifact(reportRunId as string),
+    queryFn: () => reportsApi.fetchReportRunArtifact<TReport>(reportRunId as string),
     enabled,
     staleTime: Infinity,
   });

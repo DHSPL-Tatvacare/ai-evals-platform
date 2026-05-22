@@ -39,6 +39,7 @@ export const routes = {
     logs: "/logs",
     settings: "/settings",
     analytics: "/analytics",
+    analyticsCrossRunReport: "/analytics/cross-run-report",
     analyticsChart: (chartId: string) => `/analytics/charts/${chartId}`,
     analyticsDashboard: (dashboardId: string) => `/analytics/dashboards/${dashboardId}`,
   },
@@ -57,6 +58,7 @@ export const routes = {
     settings: "/kaira/settings",
     settingsTags: "/kaira/settings/tags",
     analytics: "/kaira/analytics",
+    analyticsCrossRunReport: "/kaira/analytics/cross-run-report",
     analyticsChart: (chartId: string) => `/kaira/analytics/charts/${chartId}`,
     analyticsDashboard: (dashboardId: string) => `/kaira/analytics/dashboards/${dashboardId}`,
   },
@@ -77,6 +79,7 @@ export const routes = {
     logs: '/inside-sales/logs',
     settings: '/inside-sales/settings',
     analytics: '/inside-sales/analytics',
+    analyticsCrossRunReport: '/inside-sales/analytics/cross-run-report',
     analyticsChart: (chartId: string) => `/inside-sales/analytics/charts/${chartId}`,
     analyticsDashboard: (dashboardId: string) => `/inside-sales/analytics/dashboards/${dashboardId}`,
     campaigns: '/inside-sales/orchestration',
@@ -266,6 +269,12 @@ export function analyticsLibraryForApp(appId: string): string {
     stripTemplateSuffix(fallbackNavigation().analyticsDashboardPath, '/dashboards/:dashboardId') ??
     routes.voiceRx.analytics
   );
+}
+
+/** Resolve the cross-run report path for a given appId. */
+export function analyticsCrossRunReportForApp(appId: string): string {
+  const base = analyticsLibraryForApp(appId);
+  return `${base}/cross-run-report`;
 }
 
 export function reportWizardForApp(appId: string, blueprintId: string): string {
