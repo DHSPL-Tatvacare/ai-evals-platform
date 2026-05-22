@@ -218,6 +218,7 @@ export function NodeConfigPanel() {
         <LlmExtractEditor
           value={config}
           onChange={(next) => setConfig({ ...config, ...next })}
+          workflowType={_wfType}
         />
       );
       break;

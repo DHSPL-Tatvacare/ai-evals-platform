@@ -1,5 +1,6 @@
 import type { DragEvent } from 'react';
 
+import { NODE_TYPE_ICONS } from '@/features/orchestration/config/categories';
 import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 
 import { NodeCard } from './NodeCard';
@@ -24,6 +25,7 @@ export function PaletteItem({ desc }: Props) {
       label={desc.displayLabel}
       description={desc.description}
       category={desc.displayCategory}
+      icon={NODE_TYPE_ICONS[desc.nodeType]}
       draggable
       onDragStart={onDragStart}
     />

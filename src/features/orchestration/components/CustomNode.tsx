@@ -9,7 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { getCategoryDef } from '@/features/orchestration/config/categories';
+import { getCategoryDef, NODE_TYPE_ICONS } from '@/features/orchestration/config/categories';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import { cn } from '@/utils/cn';
 import { NodeCard } from './NodeCard';
@@ -292,6 +292,7 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
       description={data.description}
       fallbackSubtitle={data.nodeType}
       category={data.displayCategory ?? data.category}
+      icon={NODE_TYPE_ICONS[data.nodeType]}
       selected={Boolean(selected)}
       barTrailing={barTrailing}
       footer={footer}

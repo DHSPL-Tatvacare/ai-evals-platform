@@ -10,6 +10,7 @@ import {
   Merge,
   Edit3,
   Inbox,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -156,6 +157,14 @@ export const NODE_CATEGORIES: Record<NodeCategory, NodeCategoryDef> = {
     iconBgVar: 'var(--text-muted)',
     accentVar: 'var(--text-secondary)',
   },
+};
+
+/** Per-node-type icon overrides. A node type listed here renders this icon
+ *  on the palette tile and canvas card instead of its category default
+ *  (`getCategoryDef(category).icon`). Keep this sparse — only nodes whose
+ *  category icon is too generic to distinguish them. */
+export const NODE_TYPE_ICONS: Record<string, LucideIcon> = {
+  'llm.extract': Sparkles,
 };
 
 /** Look up a node-card definition for either a Phase 11 ``displayCategory``

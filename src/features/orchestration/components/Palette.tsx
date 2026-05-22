@@ -6,6 +6,7 @@ import {
   DISPLAY_CATEGORIES,
   DISPLAY_CATEGORY_ORDER,
   getCategoryDef,
+  NODE_TYPE_ICONS,
 } from '@/features/orchestration/config/categories';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type {
@@ -160,7 +161,7 @@ function CollapsedGroup({ group }: { group: CategoryGroup }) {
 
 function CollapsedTile({ desc }: { desc: NodeTypeDescriptor }) {
   const cat = getCategoryDef(desc.displayCategory);
-  const Icon = cat.icon;
+  const Icon = NODE_TYPE_ICONS[desc.nodeType] ?? cat.icon;
   const onDragStart = (event: DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('application/orchestration-node', JSON.stringify(desc));
     event.dataTransfer.effectAllowed = 'move';
