@@ -11,7 +11,7 @@ from app.models.orchestration import (
     CohortDefinitionVersion,
 )
 from app.services.orchestration.errors import RecipientNotInManifestError
-from app.services.orchestration.recipient_freezer import freeze_recipients
+from app.services.orchestration.recipient_freezer import register_run_recipients
 from app.services.orchestration.recipient_manifest import (
     assert_recipient_in_manifest,
 )
@@ -44,9 +44,10 @@ async def frozen_run(db_session, seed_full_run, seed_tenant_user_app):
     )
     db_session.add(version)
     await db_session.flush()
-    await freeze_recipients(
+    await register_run_recipients(
         db_session,
         run=run,
+        ingress_kind="cohort",
         cohort_version=version,
         resolved_rows=[("L1", "9876543210"), ("L2", "9876500000")],
     )

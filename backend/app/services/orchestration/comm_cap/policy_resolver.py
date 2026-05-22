@@ -41,6 +41,7 @@ async def count_recent_comms(
     app_id: str,
     phone_e164: str,
     window_seconds: int,
+    channel: str | None = None,
 ) -> int:
     cutoff = func.now() - func.make_interval(0, 0, 0, 0, 0, 0, window_seconds)
     stmt = (
@@ -53,11 +54,18 @@ async def count_recent_comms(
             WorkflowRunRecipientAction.created_at >= cutoff,
         )
     )
+    if channel is not None:
+        stmt = stmt.where(WorkflowRunRecipientAction.channel == channel)
     return int((await db.execute(stmt)).scalar_one())
 
 
 async def is_capped(
-    db: AsyncSession, *, tenant_id: UUID, app_id: str, phone_e164: str
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    app_id: str,
+    phone_e164: str,
+    channel: str | None = None,
 ) -> bool:
     policy = await get_active_policy(db, tenant_id=tenant_id, app_id=app_id)
     if policy is None:
@@ -68,5 +76,6 @@ async def is_capped(
         app_id=app_id,
         phone_e164=phone_e164,
         window_seconds=policy.window_seconds,
+        channel=channel,
     )
     return used >= policy.max_count

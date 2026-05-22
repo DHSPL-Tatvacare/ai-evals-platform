@@ -10,8 +10,9 @@ from __future__ import annotations
 import uuid
 
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.models.orchestration import WorkflowRun, WorkflowRunRecipientState
 from app.services.orchestration._config_strictness import strict_node_config_dict
 from app.services.orchestration.node_protocol import NodeResult
 from app.services.orchestration.node_registry import register_node
@@ -19,12 +20,19 @@ from app.services.orchestration.nodes._cohort_query_compiler import (
     CohortQueryConfig,
     compile_cohort_query,
 )
+from app.services.orchestration.recipient_freezer import register_run_recipients
 from app.services.orchestration.source_catalog import (
     DatasetSource,
     SourceCatalogError,
     _DATASET_PREFIX,
     resolve_source,
 )
+
+
+def _extract_phone(payload) -> str | None:
+    if not payload:
+        return None
+    return payload.get("contact") or payload.get("phone")
 
 
 class SourceDatasetConfig(BaseModel):
@@ -83,6 +91,7 @@ class _Handler:
         result = await ctx.db.execute(text(sql), params)
         cohort_size = len(result.all())
 
+        provenance = {"enrolled_dataset_version_id": str(config.dataset_version_id)}
         await ctx.db.execute(
             text(
                 "UPDATE orchestration.workflow_runs "
@@ -97,5 +106,32 @@ class _Handler:
                 "run_id": ctx.run_id,
             },
         )
+
+        # Register membership into the single choke table so dispatch nodes'
+        # manifest guard passes for dataset recipients.
+        run_row = (
+            await ctx.db.execute(
+                select(WorkflowRun).where(WorkflowRun.id == ctx.run_id)
+            )
+        ).scalar_one()
+        state_rows = (
+            await ctx.db.execute(
+                select(
+                    WorkflowRunRecipientState.recipient_id,
+                    WorkflowRunRecipientState.payload,
+                ).where(WorkflowRunRecipientState.run_id == ctx.run_id)
+            )
+        ).all()
+        receipt = await register_run_recipients(
+            ctx.db,
+            run=run_row,
+            ingress_kind="dataset",
+            resolved_rows=[
+                (row.recipient_id, _extract_phone(row.payload)) for row in state_rows
+            ],
+            provenance=provenance,
+        )
         await ctx.db.flush()
-        return NodeResult(summary={"cohort_size": cohort_size})
+        return NodeResult(
+            summary={"cohort_size": cohort_size, "registered": receipt.registered_count}
+        )

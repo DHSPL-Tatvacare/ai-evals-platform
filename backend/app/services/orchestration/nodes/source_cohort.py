@@ -21,7 +21,7 @@ from app.services.orchestration.nodes._cohort_query_compiler import (
     CohortQueryFilter,
     compile_cohort_query,
 )
-from app.services.orchestration.recipient_freezer import freeze_recipients
+from app.services.orchestration.recipient_freezer import register_run_recipients
 from app.services.orchestration.run_preview import run_cap_preview
 from app.services.orchestration.source_catalog import (
     ResolvedSource,
@@ -127,10 +127,10 @@ async def _materialize_cohort(
     cohort_version: Optional[CohortDefinitionVersion],
     provenance: dict[str, str],
 ) -> NodeResult:
-    """Shared tail: resolve → compile → insert → stamp → freeze → cap preview.
+    """Shared tail: resolve → compile → insert → stamp → register → cap preview.
 
-    ``cohort_version`` is passed to the freezer for saved mode and is None for
-    inline mode (the freezer hashes the resolved query shape instead).
+    ``cohort_version`` is passed to the writer for saved mode and is None for
+    inline mode (the writer hashes the resolved query shape instead).
     ``provenance`` is merged into ``workflow_runs.params`` so logs and
     reporting can join back to the cohort that produced this recipient set.
     """
@@ -170,8 +170,8 @@ async def _materialize_cohort(
         },
     )
 
-    # Freeze the (recipient_id, phone) manifest from the just-written rows in
-    # the same transaction so the snapshot is immune to source mutations after T0.
+    # Register membership from the just-written state rows in the same
+    # transaction so the choke table is immune to source mutations after T0.
     run_row = (
         await ctx.db.execute(select(WorkflowRun).where(WorkflowRun.id == ctx.run_id))
     ).scalar_one()
@@ -186,16 +186,18 @@ async def _materialize_cohort(
     resolved_rows = [
         (row.recipient_id, _extract_phone(row.payload)) for row in state_rows
     ]
-    freeze_receipt = await freeze_recipients(
+    receipt = await register_run_recipients(
         ctx.db,
         run=run_row,
-        cohort_version=cohort_version,
+        ingress_kind="cohort",
         resolved_rows=resolved_rows,
+        cohort_version=cohort_version,
         inline_predicate=query_config.model_dump(mode="json") if cohort_version is None else None,
+        provenance=provenance,
     )
 
-    # T0 cap preview: walk the frozen manifest and pre-flip any recipient
-    # already over the active (tenant, app) comm cap.
+    # Read-only cap preview for operator display — the cut is the dispatch
+    # enforcer, so no recipient state is flipped here.
     capped_count = await run_cap_preview(ctx.db, run=run_row)
     await ctx.db.execute(
         text(
@@ -208,7 +210,7 @@ async def _materialize_cohort(
         ),
         {
             "capped": capped_count,
-            "invalid": freeze_receipt.invalid_phone_count,
+            "invalid": receipt.unresolved_phone_count,
             "run_id": ctx.run_id,
         },
     )
@@ -217,8 +219,8 @@ async def _materialize_cohort(
     return NodeResult(
         summary={
             "cohort_size": cohort_size,
-            "frozen": freeze_receipt.frozen_count,
-            "invalid_phone": freeze_receipt.invalid_phone_count,
+            "registered": receipt.registered_count,
+            "invalid_phone": receipt.unresolved_phone_count,
             "capped": capped_count,
         }
     )

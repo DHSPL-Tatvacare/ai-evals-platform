@@ -1,17 +1,10 @@
-"""Freeze a run's recipient set at T0 into ``orchestration.workflow_run_recipients``.
-
-The freezer is invoked once per run, right after the cohort source node
-materialises ``workflow_run_recipient_states``. It captures the canonical
-``(recipient_id, phone_e164)`` set with a hash of the resolving predicate so
-downstream dispatch nodes can hard-reject any recipient that mutated into the
-cohort source after T0.
-"""
+"""Single writer of the ingress choke table ``orchestration.workflow_run_recipients``."""
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Optional
 
 import phonenumbers
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -25,17 +18,16 @@ from app.models.orchestration import (
 
 
 @dataclass(frozen=True)
-class FreezeReceipt:
-    frozen_count: int
-    invalid_phone_count: int
-    predicate_hash: str
+class RegisterReceipt:
+    registered_count: int
+    unresolved_phone_count: int
+    predicate_hash: Optional[str]
 
 
 def normalise_phone_e164(raw: str | None, default_region: str = "IN") -> str | None:
     """Return the E.164 form of ``raw`` or ``None`` if it cannot be validated.
 
-    Empty strings, ``None``, and unparseable inputs all return ``None`` so the
-    caller drops them with an audit count rather than dispatching to garbage.
+    Empty strings, ``None``, and unparseable inputs all return ``None``.
     """
     if not raw:
         return None
@@ -67,43 +59,47 @@ def _hash_predicate(version: CohortDefinitionVersion) -> str:
     )
 
 
-async def freeze_recipients(
+async def register_run_recipients(
     db: AsyncSession,
     *,
     run: WorkflowRun,
-    cohort_version: CohortDefinitionVersion | None,
+    ingress_kind: str,
     resolved_rows: Iterable[tuple[str, str | None]],
+    cohort_version: CohortDefinitionVersion | None = None,
     inline_predicate: dict | None = None,
-) -> FreezeReceipt:
-    """Persist the frozen manifest.
+    provenance: dict | None = None,
+) -> RegisterReceipt:
+    """Register the run's recipient membership into the single choke table.
 
-    ``resolved_rows`` yields ``(recipient_id, raw_phone)`` tuples — typically
-    sourced from ``workflow_run_recipient_states`` rows just written by the
-    cohort source node. Invalid phones are dropped with an audit count; the
-    write is idempotent against the ``(run_id, recipient_id)`` unique
-    constraint so re-firing the freezer for the same run is safe.
+    Cohort, dataset, and event ingress all call this after materializing their
+    recipient set. Membership is unconditional: ``resolved_rows`` yields
+    ``(recipient_id, raw_phone)`` and every recipient_id becomes a member.
+    ``phone_e164`` is best-effort provenance — an unresolvable phone leaves it
+    NULL (counted in ``unresolved_phone_count``) but the row is still written
+    so ``assert_recipient_in_manifest`` passes for all ingress. The write is
+    idempotent against the ``(run_id, recipient_id)`` unique constraint.
 
-    Saved-mode sources pass a ``cohort_version`` row; inline-mode sources pass
-    ``inline_predicate`` (the resolved query shape) and leave
-    ``cohort_version`` None — the manifest still carries a stable predicate
-    hash, with ``source_cohort_version_id`` left NULL.
+    ``predicate_hash`` and ``source_cohort_version_id`` are populated for
+    cohort ingress (saved-mode hashes the version; inline-mode hashes the
+    resolved query shape); they stay NULL for dataset / event ingress.
     """
     if cohort_version is not None:
-        predicate_hash = _hash_predicate(cohort_version)
+        predicate_hash: Optional[str] = _hash_predicate(cohort_version)
         source_cohort_version_id = cohort_version.id
-    else:
-        if not inline_predicate:
-            raise ValueError("inline freeze requires a non-empty inline_predicate")
+    elif inline_predicate:
         predicate_hash = _hash_predicate_payload(inline_predicate)
         source_cohort_version_id = None
-    frozen = 0
-    invalid = 0
+    else:
+        predicate_hash = None
+        source_cohort_version_id = None
+
+    registered = 0
+    unresolved = 0
     rows_to_insert: list[dict] = []
     for recipient_id, raw_phone in resolved_rows:
         e164 = normalise_phone_e164(raw_phone)
         if e164 is None:
-            invalid += 1
-            continue
+            unresolved += 1
         rows_to_insert.append(
             {
                 "run_id": run.id,
@@ -113,9 +109,11 @@ async def freeze_recipients(
                 "phone_e164": e164,
                 "source_cohort_version_id": source_cohort_version_id,
                 "predicate_hash": predicate_hash,
+                "ingress_kind": ingress_kind,
+                "provenance": provenance,
             }
         )
-        frozen += 1
+        registered += 1
     if rows_to_insert:
         stmt = pg_insert(WorkflowRunRecipient).values(rows_to_insert)
         stmt = stmt.on_conflict_do_nothing(
@@ -123,8 +121,8 @@ async def freeze_recipients(
         )
         await db.execute(stmt)
         await db.flush()
-    return FreezeReceipt(
-        frozen_count=frozen,
-        invalid_phone_count=invalid,
+    return RegisterReceipt(
+        registered_count=registered,
+        unresolved_phone_count=unresolved,
         predicate_hash=predicate_hash,
     )

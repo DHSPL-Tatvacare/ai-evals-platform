@@ -437,13 +437,13 @@ class WorkflowRunRecipientState(Base):
 
 
 class WorkflowRunRecipient(Base):
-    """Frozen-at-T0 manifest of recipients enrolled in a workflow run.
+    """Single ingress choke table: membership of a workflow run at T0.
 
-    Immutable companion to ``WorkflowRunRecipientState``. The state row
-    mutates through the run; this row records the canonical
-    ``(run_id, recipient_id, phone_e164)`` set captured at T0, so dispatch
-    nodes can hard-reject any recipient that mutated into the cohort source
-    after the run started.
+    Written only by ``register_run_recipients`` for cohort, dataset, and event
+    ingress. Records "is this recipient real for this run" so dispatch nodes
+    can hard-reject any recipient that mutated into the source after T0.
+    ``phone_e164`` is best-effort provenance (nullable), NOT the dispatch
+    destination and NOT the reach-count key.
     """
 
     __tablename__ = "workflow_run_recipients"
@@ -474,11 +474,13 @@ class WorkflowRunRecipient(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     app_id: Mapped[str] = mapped_column(String(64), nullable=False)
     recipient_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    phone_e164: Mapped[str] = mapped_column(String(32), nullable=False)
+    phone_e164: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     source_cohort_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
-    predicate_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    predicate_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ingress_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    provenance: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     frozen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

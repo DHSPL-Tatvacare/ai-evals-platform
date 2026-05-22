@@ -1,4 +1,9 @@
-"""run_cap_preview: walks the frozen manifest, pre-flips capped state rows."""
+"""run_cap_preview: read-only over-cap count; never flips recipient state.
+
+The cut moved to the dispatch enforcer. Preview now only reports how many
+manifest rows *would* be over the active cap for operator display — it must
+not mutate any ``workflow_run_recipient_states`` row.
+"""
 from __future__ import annotations
 
 import uuid
@@ -109,7 +114,7 @@ async def test_empty_manifest_returns_zero(db_session, seeded_run):
 
 
 @pytest.mark.asyncio
-async def test_mixed_manifest_flips_only_over_cap_rows(db_session, seeded_run):
+async def test_counts_over_cap_rows_without_flipping_state(db_session, seeded_run):
     run, node_step, tenant_id, app_id = seeded_run
     db_session.add(
         CommCapPolicy(
@@ -147,8 +152,10 @@ async def test_mixed_manifest_flips_only_over_cap_rows(db_session, seeded_run):
     )
     await db_session.flush()
 
+    # Preview reports one over-cap row for display.
     assert await run_cap_preview(db_session, run=run) == 1
 
+    # …but it must NOT flip any state row — the cut is the dispatch enforcer.
     states = {
         s.recipient_id: s.status
         for s in (
@@ -159,5 +166,5 @@ async def test_mixed_manifest_flips_only_over_cap_rows(db_session, seeded_run):
             )
         ).scalars().all()
     }
-    assert states["R1"] == "skipped_capped"
+    assert states["R1"] == "pending"
     assert states["R2"] == "pending"

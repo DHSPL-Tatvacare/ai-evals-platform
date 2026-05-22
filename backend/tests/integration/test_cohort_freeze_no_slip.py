@@ -20,7 +20,7 @@ from app.models.orchestration import (
     WorkflowRunRecipientState,
 )
 from app.services.orchestration.errors import RecipientNotInManifestError
-from app.services.orchestration.recipient_freezer import freeze_recipients
+from app.services.orchestration.recipient_freezer import register_run_recipients
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
 
 
@@ -67,10 +67,11 @@ async def slip_scenario(db_session, seed_full_run, seed_tenant_user_app):
     )
     db_session.add(state_l1)
     await db_session.flush()
-    # …and the freezer captures the (recipient_id, phone) snapshot.
-    await freeze_recipients(
+    # …and register_run_recipients captures the (recipient_id, phone) membership.
+    await register_run_recipients(
         db_session,
         run=run,
+        ingress_kind="cohort",
         cohort_version=cohort_version,
         resolved_rows=[("L1", "+919876543210")],
     )
