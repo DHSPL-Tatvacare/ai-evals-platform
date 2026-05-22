@@ -32,6 +32,7 @@ export { Combobox, type ComboboxOption } from './Combobox';
 export { ProviderToggle } from './ProviderToggle';
 export { SegmentedControl } from './SegmentedControl';
 export { LLMProviderLogo } from './LLMProviderLogo';
+export { ConnectionProviderLogo } from './ConnectionProviderLogo';
 export { SherlockIcon } from './SherlockIcon';
 export { Switch } from './Switch';
 export { LlmModelSelect, type LlmModelSelectValue } from './LlmModelSelect';

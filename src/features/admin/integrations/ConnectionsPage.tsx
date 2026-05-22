@@ -4,6 +4,7 @@ import { Archive, Copy, Lock, Pencil, PlugZap, RefreshCw, Share2, X } from 'luci
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { FilterPills } from '@/components/ui/FilterPills';
@@ -185,9 +186,12 @@ export function ConnectionsPage() {
       key: 'provider',
       header: 'Provider',
       render: (c) => (
-        <Badge variant="neutral" size="sm">
-          {getConnectionProviderLabel(c.provider)}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <ConnectionProviderLogo provider={c.provider} size={18} />
+          <Badge variant="neutral" size="sm">
+            {getConnectionProviderLabel(c.provider)}
+          </Badge>
+        </div>
       ),
     },
     {
@@ -392,12 +396,17 @@ export function ConnectionsPage() {
         labelledBy={editTitleId}
       >
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
-          <h2
-            id={editTitleId}
-            className="text-[16px] font-semibold text-[var(--text-primary)]"
-          >
-            {editing ? `Edit ${editing.name}` : ''}
-          </h2>
+          <div className="flex items-center gap-2 min-w-0">
+            {editing ? (
+              <ConnectionProviderLogo provider={editing.provider} size={24} />
+            ) : null}
+            <h2
+              id={editTitleId}
+              className="truncate text-[16px] font-semibold text-[var(--text-primary)]"
+            >
+              {editing ? `Edit ${editing.name}` : ''}
+            </h2>
+          </div>
           <button
             onClick={() => setEditing(null)}
             className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
