@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from app.schemas.base import CamelModel
 from app.services.reports.contracts.print_document import PlatformReportDocument
 from app.services.reports.contracts.report_sections import PlatformReportSection
+from app.services.reports.contracts.run_report import PlatformReportPresentation
 
 
 class PlatformCrossRunMetadata(CamelModel):
@@ -21,5 +24,7 @@ class PlatformCrossRunMetadata(CamelModel):
 class PlatformCrossRunPayload(CamelModel):
     schema_version: Literal["v1"] = "v1"
     metadata: PlatformCrossRunMetadata
+    # Defaulted so existing cached artifacts round-trip without requiring callers to pass it.
+    presentation: PlatformReportPresentation = Field(default_factory=PlatformReportPresentation)
     sections: list[PlatformReportSection]
     export_document: PlatformReportDocument | None = None

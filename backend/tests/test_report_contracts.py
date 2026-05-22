@@ -140,6 +140,26 @@ def test_cross_run_contract_supports_heatmaps_and_optional_export_document():
     assert payload.export_document is None
 
 
+def test_cross_run_compose_carries_presentation_field():
+    from app.services.reports.contracts.run_report import PlatformReportPresentation
+    from app.services.reports.report_composer import compose_cross_run_report
+    from app.services.reports.contracts.cross_run_report import PlatformCrossRunMetadata
+
+    metadata = PlatformCrossRunMetadata(
+        app_id="kaira-bot",
+        computed_at="2026-05-23T00:00:00+00:00",
+        source_run_count=2,
+        total_runs_available=5,
+    )
+    payload = compose_cross_run_report(metadata=metadata, section_configs=[], section_payloads={})
+
+    assert payload.presentation is not None
+    assert isinstance(payload.presentation, PlatformReportPresentation)
+    assert payload.presentation.sections == []
+    dumped = payload.model_dump(by_alias=True)
+    assert "presentation" in dumped
+
+
 def test_print_document_contract_accepts_supported_block_types():
     document = PlatformReportDocument.model_validate({
         "schemaVersion": "v1",

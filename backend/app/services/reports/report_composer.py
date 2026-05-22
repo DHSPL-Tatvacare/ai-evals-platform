@@ -134,9 +134,11 @@ def compose_cross_run_report(
     section_configs: list[AnalyticsSectionConfig | PresentationSectionConfig],
     section_payloads: Mapping[str, Any],
     export_document: PlatformReportDocument | None = None,
+    presentation: PlatformReportPresentation | None = None,
 ) -> PlatformCrossRunPayload:
     return PlatformCrossRunPayload(
         metadata=metadata,
+        presentation=presentation or PlatformReportPresentation(),
         sections=compose_sections(section_configs, section_payloads),
         export_document=export_document,
     )
