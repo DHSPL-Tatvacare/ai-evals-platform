@@ -66,10 +66,6 @@ from app.services.sherlock_v3.query_synthesis_specialist import (
     build_query_synthesis_specialist,
     make_synthesis_output_extractor,
 )
-from app.services.sherlock_v3.state_store import (
-    SherlockStateSnapshot,
-    render_state_block,
-)
 
 
 _SUPERVISOR_PROMPT = """\
@@ -193,8 +189,6 @@ mirror — same call universe."
 # AVAILABLE_TOOLS this turn
 {available_tools_block}
 
-{state_block}
-
 # Output
 - Markdown. Tables for tabular data. Bold key numbers.
 - NEVER draw ASCII charts (no `█`/`▓`/`●`/`*` bar lines). The UI renders
@@ -260,7 +254,6 @@ def build_supervisor(
     grounding: Any | None = None,
     builder_context: BuilderSnapshot | None = None,
     auth: AuthContext | None = None,
-    state_snapshot: SherlockStateSnapshot | None = None,
 ) -> Agent:
     """Build the supervisor agent for one turn.
 
@@ -363,19 +356,11 @@ def build_supervisor(
             )
         )
 
-    # Cross-turn state — DORMANT plumbing. ``state_store`` is loaded each
-    # turn but has no producer yet, so ``state_block`` is empty for every
-    # session today. Slot stays wired so a future structured-output PR can
-    # light it up without re-threading the prompt.
-    state_block = (
-        render_state_block(state_snapshot) if state_snapshot is not None else ''
-    )
     return Agent(
         name=f'sherlock-supervisor-{app_id}',
         instructions=_SUPERVISOR_PROMPT.format(
             app_id=app_id,
             available_tools_block=_format_available_tools(available_targets),
-            state_block=state_block,
         ),
         model=OpenAIResponsesModel(supervisor_model, client),
         # gpt-5.4 reasoning models reject ``temperature`` and ``top_p``.

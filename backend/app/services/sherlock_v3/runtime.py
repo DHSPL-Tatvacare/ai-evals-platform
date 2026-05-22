@@ -38,10 +38,6 @@ from app.services.sherlock_v3.grounding import (
     GroundingContext,
     VerifiedExampleRef,
 )
-from app.services.sherlock_v3.state_store import (
-    SherlockStateSnapshot,
-    load_state,
-)
 from app.services.sherlock_v3.supervisor import build_supervisor
 from app.services.sherlock_v3.compaction import CONTEXT_COMPACT_THRESHOLD_TOKENS
 
@@ -130,19 +126,6 @@ async def _compute_grounding(
         return GroundingContext(app_id=app_id, user_message=user_message)
 
 
-async def _load_turn_state(chat_session_id: uuid.UUID) -> SherlockStateSnapshot:
-    try:
-        from app.database import async_session
-        async with async_session() as db:
-            return await load_state(db, chat_session_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            'sherlock_v3 state load failed for chat_session=%s: %s',
-            chat_session_id, exc,
-        )
-        return SherlockStateSnapshot(resolved_entities={}, active_filters={})
-
-
 def _wrap_user_message_as_brief(
     *,
     user_message: str,
@@ -173,7 +156,6 @@ async def run_turn(
     grounding = await _compute_grounding(
         ctx.app_id, user_message, tenant_id=ctx.tenant_id,
     )
-    state_snapshot = await _load_turn_state(ctx.chat_session_id)
     supervisor = build_supervisor(
         ctx.app_id,
         client,
@@ -182,7 +164,6 @@ async def run_turn(
         grounding=grounding,
         builder_context=ctx.builder_context,
         auth=ctx.auth,
-        state_snapshot=state_snapshot,
     )
 
     await ctx.emitter.emit(StepStartPart(

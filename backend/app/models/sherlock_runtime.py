@@ -8,8 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantUserMixin, TimestampMixin
 
-# v3 — sherlock_state and sherlock_evidence are added by Alembic
-# 0035_sherlock_v3_state_evidence. Models below mirror the migration shape.
+# v3 — sherlock_evidence is added by Alembic 0035_sherlock_v3_state_evidence.
+# Models below mirror the migration shape.
 
 
 class SherlockAgentSession(Base, TenantUserMixin, TimestampMixin):
@@ -114,59 +114,6 @@ class SherlockPart(Base, TenantUserMixin):
         Index(
             'idx_sherlock_parts_tenant_created',
             'tenant_id', 'created_at',
-        ),
-        {"schema": "platform"},
-    )
-
-
-class SherlockState(Base):
-    """v3 — small structured cross-turn state, one row per chat_session.
-
-    DORMANT today. Replaced the legacy 17-key scratchpad on
-    ``SherlockAgentSession``; supervisor reads at the start of each
-    turn via ``state_store.load_state``. No producer wires writes today,
-    so the table stays empty for every session; awaiting a future
-    structured-output PR.
-    """
-
-    __tablename__ = 'sherlock_state'
-
-    chat_session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey('platform.chat_sessions.id', ondelete='CASCADE'),
-        primary_key=True,
-    )
-    tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey('platform.tenants.id', ondelete='CASCADE'),
-        nullable=False,
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey('platform.users.id', ondelete='CASCADE'),
-        nullable=False,
-    )
-    app_id: Mapped[str] = mapped_column(Text, nullable=False)
-    resolved_entities: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
-    )
-    active_filters: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
-    )
-    last_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True,
-    )
-    last_specialist_call_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(),
-    )
-
-    __table_args__ = (
-        Index(
-            'idx_sherlock_state_tenant_user_app',
-            'tenant_id', 'user_id', 'app_id',
         ),
         {"schema": "platform"},
     )

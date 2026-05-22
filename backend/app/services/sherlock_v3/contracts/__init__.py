@@ -58,7 +58,6 @@ from app.services.sherlock_v3.contracts.result import (
     ResultStatus,
     SpecialistMeta,
     SpecialistResult,
-    StateDelta,
 )
 from app.services.sherlock_v3.contracts.synthesis import (
     SYNTHESIS_BRIEF_JSON_SCHEMA,
@@ -81,7 +80,6 @@ __all__ = [
     'Attempt', 'AttemptStatus', 'SpecialistBrief', 'SpecialistScope',
     # result
     'ResultKind', 'ResultStatus', 'SpecialistMeta', 'SpecialistResult',
-    'StateDelta',
     # synthesis
     'SYNTHESIS_BRIEF_JSON_SCHEMA', 'SubQuestion', 'SynthesisBrief',
     'SynthesisClassification', 'SynthesisTarget',

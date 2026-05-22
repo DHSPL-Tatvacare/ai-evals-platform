@@ -48,7 +48,7 @@ class AuthoringSpecialistExtractorTests(unittest.IsolatedAsyncioTestCase):
                 *_pair('apply_patch', 'c2', json.dumps({
                     'kind': 'action', 'status': 'ok',
                     'summary': 'patched', 'artifacts': [], 'evidence': [],
-                    'state_delta': {}, 'meta': {},
+                    'meta': {},
                 })),
             ],
             final_output='ignored prose',
