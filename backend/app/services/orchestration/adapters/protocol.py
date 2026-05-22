@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.orchestration.adapters.canonical import (
     CancelDispatchResult,
+    CanonicalEventBatch,
     CanonicalMessagingEvent,
     CanonicalSendRequest,
     CanonicalSendResponse,
@@ -44,6 +45,24 @@ class MessagingAdapter(Protocol):
     async def cancel_run_actions(
         self, *, connection: Any, actions: list[Any],
     ) -> list[CancelDispatchResult]: ...
+
+
+class EventSourceAdapter(Protocol):
+    """Maps a native CRM/clinical webhook payload to canonical event(s).
+
+    ``EVENT_MAP`` is a declarative dict (native key -> canonical event name);
+    ``normalize_event`` is the coded payload reshape into recipients.
+    """
+    capability: ClassVar[str]
+    vendor: ClassVar[str]
+    workflow_type: ClassVar[str]
+    EVENT_MAP: ClassVar[Mapping[str, str]]
+
+    def map_event_name(self, raw: dict[str, Any]) -> Optional[str]: ...
+
+    def normalize_event(self, raw: dict[str, Any]) -> CanonicalEventBatch: ...
+
+    def verify_signature(self, raw: bytes, headers: Mapping[str, str]) -> bool: ...
 
 
 class VoiceAdapter(Protocol):

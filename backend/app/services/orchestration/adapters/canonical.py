@@ -75,6 +75,25 @@ class CanonicalVoiceEvent:
     vendor_raw: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class CanonicalEventRecipient:
+    recipient_id: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CanonicalEventBatch:
+    """Vendor-agnostic inbound event — one canonical event name, one or more recipients.
+
+    ``ingest_id`` is the vendor-stable dedupe key (vendor event id, doctype+doc,
+    activity id, …). The route combines it with the trigger id to form the
+    replay-dedupe idempotency key, so a CRM retry never creates a second run.
+    """
+    event_name: str
+    recipients: list[CanonicalEventRecipient] = field(default_factory=list)
+    ingest_id: Optional[str] = None
+
+
 class CancelDispatchOutcome(StrEnum):
     stopped = "stopped"
     cancelled = "cancelled"

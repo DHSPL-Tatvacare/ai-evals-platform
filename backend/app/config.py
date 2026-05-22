@@ -68,9 +68,7 @@ class Settings(BaseSettings):
 
     # Orchestration webhooks — public routes guarded by URL-segment secret
     LSQ_WEBHOOK_SECRET: str = ""
-    ORCHESTRATION_EVENT_WEBHOOK_SECRET: str = ""
-    # v1 single tenant + app per provider; multi-tenant secret→tenant lookup is v2.
-    ORCHESTRATION_DEFAULT_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
+    # Seed-bootstrap default app for the orchestration starter workflow.
     ORCHESTRATION_DEFAULT_APP_ID: str = "inside-sales"
 
     # Process-level Fernet key encrypting orchestration.provider_connections

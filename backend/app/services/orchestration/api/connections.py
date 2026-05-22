@@ -16,7 +16,6 @@ Tenant + app scoping is enforced on every read and write. The unique index
 """
 from __future__ import annotations
 
-import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
@@ -29,6 +28,7 @@ from app.config import settings
 from app.models.mixins.shareable import Visibility
 from app.models.provider_connection import ProviderConnection
 from app.utils.secret_masking import mask_secret_value
+from app.utils.webhook_token import generate_webhook_token
 from app.services.orchestration.connections import crypto, health, provider_specs
 
 
@@ -53,14 +53,8 @@ class ConnectionInvalid(ConnectionError_):
     """Config payload fails provider-spec validation."""
 
 
-def _generate_webhook_token() -> str:
-    """32-byte urlsafe token. Trimmed to fit the VARCHAR(64) column.
-
-    ``secrets.token_urlsafe(32)`` returns ~43 chars of base64url → safely
-    inside the 64-char column. ~256 bits of entropy keeps collision
-    probability astronomically below the unique index's enforcement bar.
-    """
-    return secrets.token_urlsafe(32)
+# Both webhook families (connections + triggers) share one generator.
+_generate_webhook_token = generate_webhook_token
 
 
 def resolve_base_url(origin_header: Optional[str]) -> str:
