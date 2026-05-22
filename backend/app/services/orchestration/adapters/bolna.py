@@ -37,6 +37,7 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset({
     "failed", "canceled", "cancelled",
     "no-answer", "rnr", "busy",
     "error", "stopped", "balance-low",
+    "call-disconnected",
 })
 _RNR_TOKENS = ("no-answer", "rnr", "busy")
 _COST_DIVISOR = Decimal("100")
@@ -422,13 +423,21 @@ class BolnaAdapter:
         action_type = classify_outcome(status, status_reason)
         outcome = _canonical_outcome(action_type)
         capture = _extract_capture(raw)
+        telephony = raw.get("telephony_data")
+        telephony = telephony if isinstance(telephony, dict) else {}
+        ctx = raw.get("context_details")
+        ctx = ctx if isinstance(ctx, dict) else {}
         contact = str(
             raw.get("recipient_phone_number")
             or raw.get("recipient_phone")
             or raw.get("to")
+            or telephony.get("to_number")
+            or ctx.get("recipient_phone_number")
             or "",
         )
-        execution_id = str(raw.get("execution_id") or raw.get("batch_id") or "")
+        execution_id = str(
+            raw.get("id") or raw.get("execution_id") or raw.get("batch_id") or ""
+        )
         duration = capture.get("duration_sec")
         try:
             duration_int = int(duration) if duration is not None else None
@@ -448,6 +457,76 @@ class BolnaAdapter:
         # Bolna ships no HMAC; the per-connection URL token gates the route.
         return True
 
+    async def fetch_execution(
+        self, *, connection: dict[str, Any], execution_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Poll GET /executions/{id} — the PRIMARY reconciliation pull. None on 404."""
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with _make_client() as client:
+            resp = await client.get(f"{base_url}/executions/{execution_id}", headers=headers)
+        if resp.status_code == 200:
+            return resp.json() if resp.content else {}
+        if resp.status_code == 404:
+            return None
+        raise BolnaServiceError(f"Bolna {resp.status_code}: {_safe_message(resp)}")
+
+    async def reconcile_execution(
+        self,
+        db: AsyncSession,
+        *,
+        action: Any,
+        node_id: Optional[str],
+        execution: dict[str, Any],
+    ) -> bool:
+        """Shared terminal-event core — both the webhook and the poller call this.
+
+        The outcome idempotency key is derived here from the per-execution id so
+        both ingress paths produce byte-identical keys and can never duplicate a child.
+        """
+        status = execution.get("status")
+        # Single terminality gate for both paths — the poller calls this on every
+        # fetched execution, so a still-in-flight call must no-op without writing.
+        if not is_terminal(status):
+            return False
+        action_type = classify_outcome(status, execution.get("status_reason"))
+        canonical = _canonical_outcome(action_type)
+        capture = {k: v for k, v in _extract_capture(execution).items() if v is not None}
+        exec_id = str(execution.get("id") or execution.get("execution_id") or "unknown")
+        child_idem = f"voice-outcome|{exec_id}|{action_type}"
+
+        recipient_payload_patch: dict[str, Any] = {"voice_outcome": canonical}
+        if capture.get("transcript") is not None:
+            recipient_payload_patch["voice_transcript"] = capture["transcript"]
+        if capture.get("duration_sec") is not None:
+            try:
+                recipient_payload_patch["voice_duration_sec"] = int(capture["duration_sec"])
+            except (TypeError, ValueError):
+                recipient_payload_patch["voice_duration_sec"] = capture["duration_sec"]
+        if capture.get("recording_url") is not None:
+            recipient_payload_patch["voice_recording_url"] = capture["recording_url"]
+
+        response_patch: dict[str, Any] = {
+            "provider_status": str(status).lower(),
+            "provider_terminal": True,
+            "voice_outcome": canonical,
+            **capture,
+            "last_event": execution,
+        }
+        return await apply_terminal_event(
+            db,
+            action=action,
+            response_patch=response_patch,
+            recipient_payload_patch=recipient_payload_patch,
+            node_id=node_id,
+            provider_status=str(status).lower(),
+            child_action_type=action_type,
+            child_idempotency_key=child_idem,
+        )
+
     async def handle_webhook(
         self,
         db: AsyncSession,
@@ -460,10 +539,18 @@ class BolnaAdapter:
         if not is_terminal(status):
             return
 
-        execution_id = payload.get("execution_id")
+        # The webhook (and GET /executions/{id}) key the execution under "id" and
+        # the recipient under context_details.recipient_data.recipient_id; only the
+        # /call dispatch response uses execution_id/user_data — keep them as fallbacks.
+        execution_id = payload.get("execution_id") or payload.get("id")
         batch_id = payload.get("batch_id")
-        user_data = payload.get("user_data") if isinstance(payload.get("user_data"), dict) else {}
-        recipient_id_hint = (user_data or {}).get("recipient_id")
+        ctx = payload.get("context_details")
+        ctx = ctx if isinstance(ctx, dict) else {}
+        rdata = ctx.get("recipient_data")
+        rdata = rdata if isinstance(rdata, dict) else {}
+        user_data = payload.get("user_data")
+        user_data = user_data if isinstance(user_data, dict) else {}
+        recipient_id_hint = rdata.get("recipient_id") or user_data.get("recipient_id")
 
         parent, node_id = await self._find_parent(
             db, tenant_id=tenant_id,
@@ -472,43 +559,14 @@ class BolnaAdapter:
             recipient_id_hint=str(recipient_id_hint) if recipient_id_hint else None,
         )
         if parent is None:
+            _log.warning(
+                "bolna.webhook.no_match execution_id=%s batch_id=%s status=%s",
+                execution_id, batch_id, status,
+            )
             return
 
-        capture = _extract_capture(payload)
-        capture_clean = {k: v for k, v in capture.items() if v is not None}
-        action_type = classify_outcome(status, payload.get("status_reason"))
-        canonical = _canonical_outcome(action_type)
-
-        recipient_payload_patch: dict[str, Any] = {"voice_outcome": canonical}
-        if capture_clean.get("transcript") is not None:
-            recipient_payload_patch["voice_transcript"] = capture_clean["transcript"]
-        if capture_clean.get("duration_sec") is not None:
-            try:
-                recipient_payload_patch["voice_duration_sec"] = int(capture_clean["duration_sec"])
-            except (TypeError, ValueError):
-                recipient_payload_patch["voice_duration_sec"] = capture_clean["duration_sec"]
-        if capture_clean.get("recording_url") is not None:
-            recipient_payload_patch["voice_recording_url"] = capture_clean["recording_url"]
-
-        response_patch: dict[str, Any] = {
-            "provider_status": str(status).lower(),
-            "provider_terminal": True,
-            "voice_outcome": canonical,
-            **capture_clean,
-            "last_event": payload,
-        }
-        correlation = str(execution_id or batch_id or "unknown")
-        child_idem = f"webhook|bolna|{correlation}|{action_type}"
-
-        await apply_terminal_event(
-            db,
-            action=parent,
-            response_patch=response_patch,
-            recipient_payload_patch=recipient_payload_patch,
-            node_id=node_id,
-            provider_status=str(status).lower(),
-            child_action_type=action_type,
-            child_idempotency_key=child_idem,
+        await self.reconcile_execution(
+            db, action=parent, node_id=node_id, execution=payload,
         )
 
     async def _find_parent(

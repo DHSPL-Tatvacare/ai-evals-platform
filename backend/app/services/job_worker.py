@@ -1878,6 +1878,36 @@ async def handle_waiting_tail_sweep(
 
 
 @register_job_handler(
+    "reconcile-voice-dispatch",
+    queue_class="standard",
+    priority=10,
+    retry_safe=True,
+    # Platform-wide poller across all tenants (app_id=""). platform_managed so the
+    # user-facing registry doesn't advertise it (ScheduledJobCreate enforces
+    # app_id min_length=1); the seed writes the system-tenant row directly.
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Voice dispatch reconciliation",
+    schedule_description=(
+        "Polls the provider for terminal status of open voice dispatch actions and "
+        "reconciles them. Seed creates a per-minute schedule under the system tenant."
+    ),
+    schedule_default_params={},
+    schedule_platform_managed=True,
+)
+async def handle_reconcile_voice_dispatch(
+    job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+) -> dict:
+    """Pull terminal status for open voice dispatch actions and reconcile them."""
+    from app.services.orchestration.reconcile_dispatch import reconcile_dispatch
+
+    async with async_session() as db:
+        reconciled = await reconcile_dispatch(db, capability="voice")
+        await db.commit()
+        return {"reconciled": reconciled}
+
+
+@register_job_handler(
     "fire-orchestration-trigger",
     queue_class="standard",
     priority=5,

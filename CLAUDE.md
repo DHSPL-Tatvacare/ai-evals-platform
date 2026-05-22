@@ -67,6 +67,7 @@ Backend:
 - Job submission → injects `tenant_id` + `user_id`; runners read from params.
 - Sherlock chart payload → `report_builder/chat_handler._build_chart_payload` (typer → gate → picker → emitter).
 - Provider integrations (WhatsApp / Voice / SMS / LSQ / clinical) → adapters in `orchestration/integrations/`; never instantiate provider SDKs in route handlers.
+- Dispatch reconciliation (two-path) → every capability adapter ships both a **poll** method (`fetch_execution`, PRIMARY — wherever the provider exposes a status API) and a **webhook** handler (SECONDARY/real-time, and the *sole* path for providers with no status API, e.g. WATI). Scheduling is one capability-parameterized poller per pollable capability (generic `reconcile_dispatch(capability=...)`, capability-**named** registration `reconcile-voice-dispatch` — never per-vendor). Both paths converge on the idempotent `apply_terminal_event`; the outcome idempotency key is built in the single shared `reconcile_execution` from the provider's per-execution id, so the paths cannot diverge. Correctness must not depend on the webhook arriving.
 - Config strictness → `app.services.orchestration._config_strictness.strict_node_config_dict()` returns `ConfigDict(extra='forbid')`. All node `_Config(BaseModel)` classes use it unconditionally.
 
 Frontend:

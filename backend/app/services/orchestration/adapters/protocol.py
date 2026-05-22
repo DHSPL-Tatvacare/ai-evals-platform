@@ -70,6 +70,10 @@ class VoiceAdapter(Protocol):
 
     def verify_signature(self, raw: bytes, headers: Mapping[str, str]) -> bool: ...
 
+    async def fetch_execution(
+        self, *, connection: Any, execution_id: str,
+    ) -> Optional[dict[str, Any]]: ...
+
     async def handle_webhook(
         self,
         db: AsyncSession,

@@ -1,15 +1,17 @@
-"""Phase 13 / Phase E — provider-agnostic dispatch reconciliation.
+"""Provider-agnostic dispatch reconciliation — two paths, one idempotent funnel.
 
 Two ingress paths converge here:
 
-  1. Provider webhooks (``orchestration_webhooks`` route) deliver
-     real-time terminal events.
-  2. Pollers (``poll-bolna-executions`` job) sweep open dispatch
-     actions and reconcile any that the webhook missed (or that
-     never had a webhook configured at the provider end).
+  1. Poller (``reconcile-voice-dispatch`` job, capability-parameterized) —
+     PRIMARY. Pulls terminal status from the provider's status API on a
+     schedule; the sole correctness guarantee, independent of inbound webhooks.
+  2. Provider webhooks (``orchestration_webhooks`` route) — SECONDARY/real-time,
+     and the sole path for providers with no status API (e.g. WATI).
 
-Both paths call the same ``apply_terminal_event`` so persistence is
-identical regardless of how we found out the call ended. Idempotency
-is enforced by ``action.completed_at`` — once set, every subsequent
-event drops on the floor.
+Both call the adapter's shared ``reconcile_execution`` → ``apply_terminal_event``,
+so persistence is identical regardless of how the call's end was discovered.
+Idempotency: the parent's ``provider_terminal`` guard stops once terminal, and
+the outcome child's ``(tenant_id, recipient_id, idempotency_key)`` unique
+constraint dedupes — the key is derived from the per-execution id in one shared
+function so the two paths can never diverge.
 """
