@@ -3,11 +3,20 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import type {
+  Connection,
+} from "@xyflow/react";
+
+import type {
   NodeTypeDescriptor,
   WorkflowDefinition,
   WorkflowDefinitionEdge,
   WorkflowDefinitionNode,
 } from "@/features/orchestration/types";
+import { getEdgeOutputId } from "@/features/orchestration/types";
+import {
+  deriveOutputEdges,
+  outputAllowsFanOut,
+} from "@/features/orchestration/utils/nodeOutputs";
 import {
   dataSnapshotHash,
   layoutSnapshotHash,
@@ -146,6 +155,16 @@ interface WorkflowBuilderState {
   addEdge(edge: WorkflowDefinitionEdge): void;
   removeEdge(edgeId: string): void;
 
+  /** Phase 3 — guarded connect. Rejects a connection with no `sourceHandle`
+   *  (the silent `output_id:'default'` bug class) and a duplicate edge for
+   *  the same `(source, output_id)` unless the output descriptor allows
+   *  fan-out. On success appends an edge carrying the real `output_id`. */
+  connectEdge(connection: Connection): EdgeMutationResult;
+  /** Phase 3 — re-point an existing edge to a new source/target/handle
+   *  (ReactFlow edge reconnect). Same guards as `connectEdge`; the edge
+   *  being reconnected is excluded from the duplicate check. */
+  reconnectEdge(edgeId: string, connection: Connection): EdgeMutationResult;
+
   /** Phase 2 (sherlock-builder) — batch mutations used by the canvas-patch
    *  applier. Hash recomputation runs ONCE at the end of the batch (one
    *  React commit, one `currentDataHash` change) instead of N. Each node
@@ -185,6 +204,12 @@ interface WorkflowBuilderState {
 const EMPTY_DATA_HASH = dataSnapshotHash([], []);
 const EMPTY_LAYOUT_HASH = layoutSnapshotHash([]);
 
+/** Outcome of a guarded edge mutation. `reason` lets the canvas surface why
+ *  a connect/reconnect was rejected (no handle, duplicate single-binding). */
+export type EdgeMutationResult =
+  | { ok: true }
+  | { ok: false; reason: "no-source-handle" | "missing-endpoint" | "duplicate-binding" };
+
 /** Run a node's config through the Phase D Zod parse boundary. Returns the
  *  same node when the config parses cleanly (with `_parseIssues` cleared
  *  if it was set previously); returns a node with `_parseIssues` populated
@@ -211,6 +236,60 @@ function annotateNodesWithParse(
   nodes: readonly WorkflowDefinitionNode[],
 ): WorkflowDefinitionNode[] {
   return nodes.map(annotateNodeWithParse);
+}
+
+/** Phase 3 — the single edge-integrity gate shared by connect + reconnect.
+ *
+ *  Rejects:
+ *  - a missing source/target endpoint;
+ *  - a connection with no `sourceHandle` (the silent `output_id:'default'`
+ *    bug class — every edge MUST carry a real output id);
+ *  - a duplicate edge for the same `(source, output_id)` unless the output
+ *    descriptor declares fan-out. `excludeEdgeId` lets a reconnect re-point
+ *    its own edge without tripping the duplicate check against itself.
+ */
+function validateEdgeConnection(
+  state: { nodes: WorkflowDefinitionNode[]; edges: WorkflowDefinitionEdge[]; paletteCatalog: NodeTypeDescriptor[] },
+  connection: Connection,
+  excludeEdgeId: string | null,
+): EdgeMutationResult {
+  if (!connection.source || !connection.target) {
+    return { ok: false, reason: "missing-endpoint" };
+  }
+  if (!connection.sourceHandle) {
+    return { ok: false, reason: "no-source-handle" };
+  }
+  const outputId = connection.sourceHandle;
+  const sourceNode = state.nodes.find((n) => n.id === connection.source);
+  const desc = sourceNode
+    ? state.paletteCatalog.find((p) => p.nodeType === sourceNode.type)
+    : undefined;
+  if (!outputAllowsFanOut(outputId, desc)) {
+    const dup = state.edges.some(
+      (e) =>
+        e.id !== excludeEdgeId &&
+        e.source === connection.source &&
+        getEdgeOutputId(e) === outputId,
+    );
+    if (dup) return { ok: false, reason: "duplicate-binding" };
+  }
+  return { ok: true };
+}
+
+/** Phase 3 — prune edges whose `output_id` no longer maps to a live output
+ *  on the source node. Called after a config write that may have removed a
+ *  branch (split / conditional). A dangling edge would make the runtime
+ *  silently drop recipients and break per-run node-step lineage (Phase 5). */
+function pruneDanglingOutputEdges(
+  edges: readonly WorkflowDefinitionEdge[],
+  changedNode: WorkflowDefinitionNode,
+  palette: readonly NodeTypeDescriptor[],
+): WorkflowDefinitionEdge[] {
+  const desc = palette.find((p) => p.nodeType === changedNode.type);
+  const validOutputs = new Set(deriveOutputEdges(changedNode, desc));
+  return edges.filter(
+    (e) => e.source !== changedNode.id || validOutputs.has(getEdgeOutputId(e)),
+  );
 }
 
 export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
@@ -391,9 +470,17 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
           });
           return { ...n, config, _parseIssues: result.issues };
         });
+        // Phase 3 — a config write can remove a branch (split / conditional);
+        // prune any edge now pointing at a vanished output so the graph never
+        // carries a dangling binding (breaks runtime lineage — Phase 5).
+        const changed = nodes.find((n) => n.id === nodeId);
+        const edges = changed
+          ? pruneDanglingOutputEdges(s.edges, changed, s.paletteCatalog)
+          : s.edges;
         return {
           nodes,
-          currentDataHash: dataSnapshotHash(nodes, s.edges),
+          edges,
+          currentDataHash: dataSnapshotHash(nodes, edges),
         };
       }),
 
@@ -451,6 +538,47 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
           currentDataHash: dataSnapshotHash(s.nodes, edges),
         };
       }),
+
+    connectEdge: (connection) => {
+      const s = get();
+      const guard = validateEdgeConnection(s, connection, null);
+      if (!guard.ok) return guard;
+      // Guard already proved source/target/sourceHandle are present.
+      s.addEdge({
+        id: `e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        source: connection.source as string,
+        target: connection.target as string,
+        output_id: connection.sourceHandle as string,
+      });
+      return { ok: true };
+    },
+
+    reconnectEdge: (edgeId, connection) => {
+      const s = get();
+      const guard = validateEdgeConnection(s, connection, edgeId);
+      if (!guard.ok) return guard;
+      set((state) => {
+        const edges = state.edges.map((e) =>
+          e.id === edgeId
+            ? {
+                ...e,
+                source: connection.source as string,
+                target: connection.target as string,
+                output_id: connection.sourceHandle as string,
+                // Drop the legacy aliases so the canonical output_id is the
+                // single source of truth after a reconnect.
+                outputId: undefined,
+                label: undefined,
+              }
+            : e,
+        );
+        return {
+          edges,
+          currentDataHash: dataSnapshotHash(state.nodes, edges),
+        };
+      });
+      return { ok: true };
+    },
 
     setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
 

@@ -29,92 +29,25 @@ import {
   type WorkflowDefinitionNode,
 } from '@/features/orchestration/types';
 import { resolveColor } from '@/utils/statusColors';
+import {
+  deriveOutputEdges,
+  deriveOutputEdgeLabels,
+} from '@/features/orchestration/utils/nodeOutputs';
 import { CustomNode, type NodeOverlay } from './CustomNode';
+import { CustomEdge } from './CustomEdge';
 
 const nodeTypes = { custom: CustomNode };
+const edgeTypes = { custom: CustomEdge };
+
+// Re-export the output-derivation helpers from their shared home so existing
+// importers (deriveOutputEdges.test.ts) keep resolving them from Canvas while
+// the store reuses the same implementation without a circular import.
+export { deriveOutputEdges, deriveOutputEdgeLabels };
 
 // Stable empty fallback for the run overlay slice so ``activeOverlay``
 // keeps the same reference between renders when no run is in flight.
 // Avoids re-running the rfNodes / rfEdges memos on every keystroke.
 const EMPTY_OVERLAY: Record<string, NodeStepState> = Object.freeze({});
-
-/** Derive the runtime output-handle labels for a node.
- *
- * Most nodes carry static handles from their palette descriptor
- * (`outputEdges`). `logic.split` is special: branch labels live in
- * `config.branches[*].label`, so the canvas must recompute them per node
- * config — the static descriptor for split is empty and would otherwise
- * collapse into a single `default` handle. */
-export function deriveOutputEdges(
-  node: WorkflowDefinitionNode,
-  desc: NodeTypeDescriptor | undefined,
-): string[] {
-  if (node.type === 'logic.split') {
-    // Phase 11 §6.3: split branches carry stable ids; routing keys off
-    // ``branch.id``, never the human-editable label.
-    const branches = (node.config?.branches as Array<{ id?: string }> | undefined) ?? [];
-    const ids = branches
-      .map((b) => (typeof b?.id === 'string' ? b.id.trim() : ''))
-      .filter((s) => s.length > 0);
-    // Percentage holdout routes its share to a reserved ``control`` edge.
-    const scfg = (node.config ?? {}) as { mode?: string; holdout_percent?: number | null };
-    if (scfg.mode === 'percentage' && (scfg.holdout_percent ?? 0) > 0 && !ids.includes('control')) {
-      ids.push('control');
-    }
-    if (ids.length > 0) return ids;
-  }
-  if (node.type === 'logic.conditional') {
-    // Branch ids are the routing keys; unmatched contacts always fall to
-    // ``default``, so the canvas shows one handle per branch plus default.
-    const branches = (node.config?.branches as Array<{ id?: string }> | undefined) ?? [];
-    const ids = branches
-      .map((b) => (typeof b?.id === 'string' ? b.id.trim() : ''))
-      .filter((s) => s.length > 0);
-    return [...ids, 'default'];
-  }
-  if (node.type === 'logic.wait') {
-    // Phase 11 §6.4: only the outputs that match the configured wait mode
-    // are valid — the descriptor lists all three (wakeup / event /
-    // timeout) for the validator's benefit, but the canvas should render
-    // only the ones the operator can actually wire.
-    const cfg = (node.config ?? {}) as { mode?: string };
-    if (cfg.mode === 'duration' || cfg.mode === 'until_datetime') return ['wakeup'];
-    if (cfg.mode === 'event') return ['event'];
-    if (cfg.mode === 'event_or_timeout') return ['event', 'timeout'];
-  }
-  const fromDesc = (desc?.outputEdges ?? []).map((oe) => oe.id);
-  return fromDesc.length > 0 ? fromDesc : ['default'];
-}
-
-/** Map a node's outgoing handle ids to human-readable labels for the
- *  canvas card (e.g. ``success`` -> ``Success``). Split nodes use the
- *  branch's editable label, mirroring the ``id -> label`` shape declared
- *  on the descriptor for static outputs. */
-export function deriveOutputEdgeLabels(
-  node: WorkflowDefinitionNode,
-  desc: NodeTypeDescriptor | undefined,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (node.type === 'logic.split' || node.type === 'logic.conditional') {
-    const branches =
-      (node.config?.branches as Array<{ id?: string; label?: string }> | undefined) ?? [];
-    for (const b of branches) {
-      if (typeof b?.id === 'string' && b.id.trim().length > 0) {
-        out[b.id] = typeof b.label === 'string' && b.label.trim().length > 0 ? b.label : b.id;
-      }
-    }
-    if (node.type === 'logic.conditional') out.default = 'Default';
-    const scfg = (node.config ?? {}) as { mode?: string; holdout_percent?: number | null };
-    if (node.type === 'logic.split' && scfg.mode === 'percentage' && (scfg.holdout_percent ?? 0) > 0) {
-      out.control = 'Control';
-    }
-    return out;
-  }
-  for (const oe of desc?.outputEdges ?? []) {
-    out[oe.id] = oe.label ?? oe.id;
-  }
-  return out;
-}
 
 /** Derive the visible label for one canvas edge from the source node's
  *  descriptor (or split-branch config). Falls back to the raw output id
@@ -275,15 +208,23 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
           id: e.id,
           source: e.source,
           target: e.target,
+          // Custom edge renders the hover "×" delete affordance + label.
+          type: 'custom',
           // Phase 11: route by ``output_id`` (the stable handle id). The
           // visible edge label uses the descriptor's display label for
           // that output id when we can find it.
           sourceHandle: outputId,
-          label: descriptorEdgeLabel(palette, e.source, outputId, nodes),
+          // Reconnect is gated on edit mode at the React Flow layer so view
+          // mode can't drag an edge endpoint loose.
+          reconnectable: isEdit,
+          data: {
+            label: descriptorEdgeLabel(palette, e.source, outputId, nodes),
+            editable: isEdit,
+          },
           ...(traversal ?? {}),
         };
       }),
-    [edges, palette, nodes, activeOverlay],
+    [edges, palette, nodes, activeOverlay, isEdit],
   );
 
   // ReactFlow's ``onInit`` fires once nodes are placed in the layout.
@@ -344,17 +285,19 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   const onConnect = useCallback((conn: Connection) => {
     const s = useWorkflowBuilderStore.getState();
     if (s.viewMode !== 'edit') return;
-    if (!conn.source || !conn.target) return;
-    // Phase 11: persist the canonical snake_case ``output_id`` (matches
-    // the JSONB blob and the backend's ``WorkflowDefinitionEdge`` shape).
-    // Earlier builds wrote ``outputId``; both still hydrate via
-    // ``getEdgeOutputId``.
-    s.addEdge({
-      id: `e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      source: conn.source,
-      target: conn.target,
-      output_id: conn.sourceHandle ?? 'default',
-    });
+    // Phase 3: the store guards the connection — a missing ``sourceHandle``
+    // (the silent ``output_id:'default'`` bug class) and duplicate
+    // single-binding edges are rejected here rather than written. The
+    // persisted edge always carries the real snake_case ``output_id``.
+    s.connectEdge(conn);
+  }, []);
+
+  const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    const s = useWorkflowBuilderStore.getState();
+    if (s.viewMode !== 'edit') return;
+    // Re-route an existing edge through the same integrity guard so a
+    // reconnect can never strip the output_id or create a duplicate binding.
+    s.reconnectEdge(oldEdge.id, newConnection);
   }, []);
 
   const onMoveEnd = useCallback(
@@ -422,19 +365,30 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={onInit}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         onConnect={onConnect}
+        onReconnect={onReconnect}
         onMoveEnd={onMoveEnd}
         onPaneClick={onPaneClick}
+        // Phase 3 — Delete / Backspace removes the selected node(s) or
+        // edge(s); the change flows through onNodesChange / onEdgesChange,
+        // both of which already gate on edit mode. View mode short-circuits
+        // there, so the key is inert outside edit.
+        deleteKeyCode={['Delete', 'Backspace']}
+        // Phase 3 — generous reconnect hit radius so dragging an edge
+        // endpoint near a handle re-routes it instead of dropping the edge.
+        reconnectRadius={20}
         // Phase-14 follow-up — view mode locks every write affordance at
         // the React Flow layer so the cursor and handle highlights match
         // the disabled state. Click-to-select still works.
         nodesDraggable={isEdit}
         nodesConnectable={isEdit}
         edgesFocusable={isEdit}
+        edgesReconnectable={isEdit}
         elementsSelectable
         // ReactFlow's "powered by" badge is overlaid on the bottom-right.
         // Hidden so the canvas reads as part of the product chrome.
