@@ -514,6 +514,7 @@ export interface PlatformCrossRunMetadata {
 export interface PlatformCrossRunPayload {
   schemaVersion: 'v1';
   metadata: PlatformCrossRunMetadata;
+  presentation: PlatformReportPresentation;
   sections: PlatformReportSection[];
   exportDocument?: PlatformReportDocument | null;
 }

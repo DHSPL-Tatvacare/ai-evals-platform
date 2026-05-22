@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import { PlatformReportView } from '@/features/analytics/components/PlatformReportRenderer';
-import type { PlatformRunReportPayload } from '@/types/platformReports';
+import type { PlatformCrossRunPayload, PlatformRunReportPayload } from '@/types/platformReports';
 
 interface Props {
-  report: PlatformRunReportPayload;
+  report: PlatformRunReportPayload | PlatformCrossRunPayload;
   runId: string;
   actions: ReactNode;
 }

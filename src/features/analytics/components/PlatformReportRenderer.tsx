@@ -10,6 +10,7 @@ import type {
   PlatformDocumentBlock,
   PlatformReportDocument,
   PlatformCrossRunNarrative,
+  PlatformCrossRunPayload,
   PlatformReportSection,
   RecommendationListBlock,
   StatGridBlock,
@@ -55,6 +56,13 @@ import {
 } from './reportPrimitives';
 import { cn } from '@/utils/cn';
 
+/** Union of all report payload shapes the renderer accepts. */
+type AnyReportPayload = PlatformRunReportPayload | PlatformCrossRunPayload;
+
+function isSingleRunPayload(r: AnyReportPayload): r is PlatformRunReportPayload {
+  return r.metadata.reportKind === 'single_run';
+}
+
 /** Section types that render their own SectionHeader and layout — no outer box wrapper. */
 const RICH_COMPONENT_IDS = new Set([
   'distribution_chart',
@@ -88,11 +96,12 @@ function DataQualityBanner({
   report,
   printMode,
 }: {
-  report: PlatformRunReportPayload;
+  report: AnyReportPayload;
   printMode: boolean;
 }) {
-  const dq = normalizeDataQuality(report.dataQuality);
-  const narrativeStatus = report.metadata.narrativeStatus;
+  const singleRunReport = isSingleRunPayload(report) ? report : undefined;
+  const dq = normalizeDataQuality(singleRunReport?.dataQuality);
+  const narrativeStatus = singleRunReport?.metadata.narrativeStatus ?? null;
   const narrativeMessage =
     narrativeStatus && narrativeStatus !== 'completed'
       ? NARRATIVE_STATUS_COPY[narrativeStatus]
@@ -148,7 +157,7 @@ function normalizeTokenKey(key: string): string {
   return key.replace(/[_\s-]+/g, '').toLowerCase();
 }
 
-function buildReportPresentationStyle(report: PlatformRunReportPayload): CSSProperties {
+function buildReportPresentationStyle(report: AnyReportPayload): CSSProperties {
   const style: CSSProperties = {};
   const cssVars = style as CSSProperties & Record<string, string>;
   const themeTokens = report.presentation?.themeTokens ?? {};
@@ -205,7 +214,7 @@ function tierFromTone(tone: string | null | undefined): HeatmapTier | null {
   return BACKEND_TONE_TO_TIER[tone] ?? null;
 }
 
-function buildDocumentStyle(report: PlatformRunReportPayload): CSSProperties {
+function buildDocumentStyle(report: AnyReportPayload): CSSProperties {
   const style = buildReportPresentationStyle(report);
   const cssVars = style as CSSProperties & Record<string, string>;
   const theme = report.exportDocument?.theme;
@@ -227,11 +236,11 @@ function buildDocumentStyle(report: PlatformRunReportPayload): CSSProperties {
 
 type PresentationSection = PlatformReportPresentation['sections'][number];
 
-function getPresentationSections(report: PlatformRunReportPayload): PresentationSection[] {
+function getPresentationSections(report: AnyReportPayload): PresentationSection[] {
   return report.presentation.sections ?? [];
 }
 
-function getPresentationSectionMap(report: PlatformRunReportPayload): Map<string, PresentationSection> {
+function getPresentationSectionMap(report: AnyReportPayload): Map<string, PresentationSection> {
   return new Map(getPresentationSections(report).map((section) => [section.sectionId, section]));
 }
 
@@ -486,7 +495,7 @@ function ReportDocumentBlockView({ block }: { block: PlatformDocumentBlock }) {
   return null;
 }
 
-function ReportDocumentPreview({ document, report }: { document: PlatformReportDocument; report: PlatformRunReportPayload }) {
+function ReportDocumentPreview({ document, report }: { document: PlatformReportDocument; report: AnyReportPayload }) {
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-white/95 p-3 shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
       <div
@@ -509,13 +518,16 @@ function SectionContent({
 }: {
   section: PlatformReportSection;
   presentationSection?: PresentationSection;
-  report?: PlatformRunReportPayload;
+  report?: AnyReportPayload;
   /** Forwarded to children that have a collapsed-by-default state — currently
    *  ExemplarThreads transcripts. Static-artifact targets (PDF) need every
    *  click-to-reveal panel pre-expanded. */
   printMode?: boolean;
 }) {
   const componentId = getSectionComponentId(section, presentationSection);
+  // Narrow to single-run payload for sections that need run-specific metadata.
+  const singleRunReport: PlatformRunReportPayload | undefined =
+    report && isSingleRunPayload(report) ? report : undefined;
 
   if (componentId === 'summary_cards') {
     const summarySection = section as SummaryCardsSection;
@@ -635,7 +647,7 @@ function SectionContent({
   if (componentId === 'distribution_chart') {
     const distSection = section as DistributionChartSection;
     const distributions = transformDistributions(distSection);
-    const isAdversarial = report?.metadata.evalType === 'batch_adversarial';
+    const isAdversarial = singleRunReport?.metadata.evalType === 'batch_adversarial';
     const adversarialBreakdown = transformAdversarialBreakdown(distSection);
     return (
       <VerdictDistributions
@@ -742,34 +754,34 @@ function SectionContent({
   }
 
   if (componentId === 'issues_recommendations') {
-    const narrative = report ? transformNarrative(report) : null;
+    const narrative = singleRunReport ? transformNarrative(singleRunReport) : null;
     return <Recommendations narrative={narrative} />;
   }
 
   if (componentId === 'exemplars') {
     const exemplarsSection = section as ExemplarsSection;
     const exemplars = transformExemplars(exemplarsSection);
-    const narrative = report ? transformNarrative(report) : null;
-    const isAdversarial = report?.metadata.evalType === 'batch_adversarial';
+    const narrative = singleRunReport ? transformNarrative(singleRunReport) : null;
+    const isAdversarial = singleRunReport?.metadata.evalType === 'batch_adversarial';
     return (
       <ExemplarThreads
         exemplars={exemplars}
         narrative={narrative}
         isAdversarial={isAdversarial}
-        runId={report?.metadata.runId}
+        runId={singleRunReport?.metadata.runId}
         printMode={printMode}
       />
     );
   }
 
   if (componentId === 'prompt_gap_analysis') {
-    const narrative = report ? transformNarrative(report) : null;
+    const narrative = singleRunReport ? transformNarrative(singleRunReport) : null;
     return <PromptGapAnalysis narrative={narrative} />;
   }
 
   if (componentId === 'friction_analysis') {
     const friction = (section as FrictionAnalysisSection).data;
-    return <FrictionAnalysisView friction={friction} runId={report?.metadata.runId} />;
+    return <FrictionAnalysisView friction={friction} runId={singleRunReport?.metadata.runId} />;
   }
 
   if (componentId === 'callout') {
@@ -839,7 +851,7 @@ const LEGACY_SUMMARY_COMPONENT_IDS = new Set([
   'issues_recommendations',
 ]);
 
-function getLayoutGroupSectionIds(report: PlatformRunReportPayload, tab: string): string[] {
+function getLayoutGroupSectionIds(report: AnyReportPayload, tab: string): string[] {
   const ids: string[] = [];
   for (const group of report.presentation.layoutGroups ?? []) {
     if (!group || typeof group !== 'object') continue;
@@ -864,7 +876,7 @@ function getLayoutGroupSectionIds(report: PlatformRunReportPayload, tab: string)
   return ids;
 }
 
-function getSectionsForTab(report: PlatformRunReportPayload, tab: 'summary' | 'detailed'): PlatformReportSection[] {
+function getSectionsForTab(report: AnyReportPayload, tab: 'summary' | 'detailed'): PlatformReportSection[] {
   const sectionById = new Map(report.sections.map((section) => [section.id, section]));
   const configuredSectionIds = getLayoutGroupSectionIds(report, tab);
   if (configuredSectionIds.length > 0) {
@@ -901,9 +913,11 @@ function SummarySectionContent({
 }: {
   section: PlatformReportSection;
   presentationSection?: PresentationSection;
-  report?: PlatformRunReportPayload;
+  report?: AnyReportPayload;
 }) {
   const componentId = getSectionComponentId(section, presentationSection);
+  const singleRunReport: PlatformRunReportPayload | undefined =
+    report && isSingleRunPayload(report) ? report : undefined;
 
   if (componentId === 'summary_cards') {
     return null;
@@ -945,7 +959,7 @@ function SummarySectionContent({
   }
 
   if (componentId === 'issues_recommendations') {
-    const narrative = report ? transformNarrative(report) : null;
+    const narrative = singleRunReport ? transformNarrative(singleRunReport) : null;
     const topIssues = narrative?.topIssues ?? [];
     return (
       <div className="space-y-5">
@@ -1008,7 +1022,7 @@ function SummarySectionContent({
 }
 
 interface PlatformReportViewProps {
-  report: PlatformRunReportPayload;
+  report: AnyReportPayload;
   /** Live UI passes the export/refresh button cluster; print mode passes nothing. */
   actions?: ReactNode;
   /**
@@ -1026,9 +1040,13 @@ interface PlatformReportViewProps {
 
 export function PlatformReportView({ report, actions, printMode = false }: PlatformReportViewProps) {
   const [activeTab, setActiveTab] = useState('summary');
-  const reportTitle = report.metadata.runName || report.metadata.reportName || 'Evaluation Report';
-  const modelLabel = report.metadata.llmProvider && report.metadata.llmModel
-    ? `${report.metadata.llmProvider} · ${report.metadata.llmModel}`
+  // Narrow to single-run payload for metadata fields not present on cross-run.
+  const singleRunMeta = isSingleRunPayload(report) ? report.metadata : null;
+  const reportTitle = singleRunMeta
+    ? (singleRunMeta.runName || singleRunMeta.reportName || 'Evaluation Report')
+    : 'Evaluation Report';
+  const modelLabel = singleRunMeta?.llmProvider && singleRunMeta?.llmModel
+    ? `${singleRunMeta.llmProvider} · ${singleRunMeta.llmModel}`
     : null;
   const hasRenderableSections = report.sections.length > 0;
   const summaryCardsSection = report.sections.find((section) => section.type === 'summary_cards') as SummaryCardsSection | undefined;
@@ -1064,7 +1082,7 @@ export function PlatformReportView({ report, actions, printMode = false }: Platf
           {secondaryCards.map((card) => (
             <span key={card.key}>{card.value} {card.label.toLowerCase()}</span>
           ))}
-          {report.metadata.evalType ? <><span>·</span><span>{report.metadata.evalType}</span></> : null}
+          {singleRunMeta?.evalType ? <><span>·</span><span>{singleRunMeta.evalType}</span></> : null}
           {modelLabel ? <><span>·</span><span>{modelLabel}</span></> : null}
           <span>·</span>
           <span>{new Date(report.metadata.computedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
