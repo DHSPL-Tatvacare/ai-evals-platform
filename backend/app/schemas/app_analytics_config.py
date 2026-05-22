@@ -23,6 +23,8 @@ AnalyticsSectionType = Literal[
     "exemplars",
     "prompt_gap_analysis",
     "callout",
+    "trend_chart",
+    "insight_panels",
 ]
 
 

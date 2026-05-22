@@ -533,6 +533,39 @@ def adapt_kaira_cross_run(
     )
 
 
+def _build_kaira_cross_insights(
+    aggregated_issues: dict[str, dict[str, Any]],
+    aggregated_recommendations: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    recs_by_group: dict[tuple[str, str], list[str]] = {}
+    for rec in (aggregated_recommendations or {}).values():
+        action = rec.get('action')
+        if action:
+            recs_by_group.setdefault((rec.get('title', ''), rec['priority']), []).append(action)
+
+    panels: dict[tuple[str, str], dict[str, Any]] = {}
+    for issue in aggregated_issues.values():
+        group_key = (issue['area'], issue['priority'])
+        panel = panels.setdefault(
+            group_key,
+            {'area': issue['area'], 'priority': issue['priority'], 'run_count': 0, 'items': []},
+        )
+        panel['run_count'] += issue.get('count', 1)
+        panel['items'].append({'text': issue['summary'] or issue['title'], 'impacts': []})
+
+    return [
+        {
+            'area': panel['area'],
+            'priority': panel['priority'],
+            'runCount': panel['run_count'],
+            'items': panel['items'],
+            'stats': [],
+            'footerImpacts': recs_by_group.get((panel['area'], panel['priority']), []),
+        }
+        for panel in sorted(panels.values(), key=lambda item: (item['priority'], item['area']))
+    ]
+
+
 def adapt_kaira_cross_run_from_runs(
     runs_data: list[tuple[dict, dict]],
     analytics_config: AppAnalyticsConfig,
@@ -625,46 +658,36 @@ def adapt_kaira_cross_run_from_runs(
                 'tone': 'neutral',
             },
         ],
-        'kaira-cross-trend': [
-            {
-                'key': key,
-                'label': key.replace('-', ' ').replace('_', ' ').title(),
-                'value': round(sum(values) / len(values), 1),
-                'maxValue': 100,
-                'tone': _rate_tone(round(sum(values) / len(values), 1)),
-            }
-            for key, values in breakdown_values.items()
-            if values
-        ],
+        'kaira-cross-trend': {
+            'points': [
+                {
+                    'bucket': run_labels[index],
+                    'hoverLabel': run_labels[index],
+                    'primary': health_scores[index] if index < len(health_scores) else 0.0,
+                    'breakdown': {
+                        key: values[index]
+                        for key, values in breakdown_values.items()
+                        if index < len(values)
+                    },
+                }
+                for index in range(len(run_labels))
+            ],
+            'primaryLabel': 'Health Score',
+            'breakdowns': [
+                {'key': key, 'label': key.replace('-', ' ').replace('_', ' ').title()}
+                for key in breakdown_values
+            ],
+            'yDomain': [0.0, 100.0],
+            'referenceValue': round(avg_health, 1) if health_scores else None,
+            'referenceLabel': 'Average',
+        },
         'kaira-cross-compliance': {
             'columns': run_labels,
             'rows': [],
         },
-        'kaira-cross-issues': {
-            'issues': sorted(
-                [
-                    {
-                        'title': value['title'],
-                        'area': value['area'],
-                        'priority': value['priority'],
-                        'summary': value['summary'],
-                    }
-                    for value in aggregated_issues.values()
-                ],
-                key=lambda item: (item['priority'], item['title']),
-            ),
-            'recommendations': sorted(
-                [
-                    {
-                        'priority': value['priority'],
-                        'title': value['title'],
-                        'action': value['action'],
-                    }
-                    for value in aggregated_recommendations.values()
-                ],
-                key=lambda item: (item['priority'], item['title']),
-            ),
-        },
+        'kaira-cross-insights': _build_kaira_cross_insights(
+            aggregated_issues, aggregated_recommendations
+        ),
     }
 
     all_rule_ids = sorted({rule_id for mapping in rule_rows_by_run for rule_id in mapping.keys()})

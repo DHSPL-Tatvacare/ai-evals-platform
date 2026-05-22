@@ -202,5 +202,157 @@ class InsideSalesCrossRunAggregatorTests(unittest.TestCase):
         self.assertGreaterEqual(len(analytics.issues_and_recommendations.recommendations), 1)
 
 
+class KairaCrossRunCanonicalAdapterTests(unittest.TestCase):
+    """The live cross-run path emits a trend_chart + insight_panels payload."""
+
+    def _kaira_analytics_config(self):
+        from app.schemas.app_config import AppConfig
+        from app.services.seed_defaults import APP_SEEDS
+
+        for seed in APP_SEEDS:
+            if seed['slug'] == 'kaira-bot':
+                return AppConfig.model_validate(seed['config']).analytics
+        raise KeyError('kaira-bot')
+
+    def _run_payload(self, run_name: str, health: float) -> dict:
+        # Minimal canonical per-run payload carrying only the sections the
+        # cross-run adapter reads for trend + insights. Distributions are
+        # omitted deliberately — they exercise an unrelated goal-rate path.
+        return {
+            'schemaVersion': 'v1',
+            'metadata': {
+                'appId': 'kaira-bot',
+                'runId': run_name,
+                'runName': run_name,
+                'evalType': 'batch_thread',
+                'createdAt': '2026-03-01T00:00:00+00:00',
+                'computedAt': '2026-03-01T00:05:00+00:00',
+            },
+            'sections': [
+                {
+                    'id': 'kaira-summary',
+                    'type': 'summary_cards',
+                    'title': 'Summary',
+                    'data': [
+                        {'key': 'health-score', 'label': 'Health Score', 'value': f'{health:.1f}', 'tone': 'positive'},
+                        {'key': 'total', 'label': 'Total Threads', 'value': '10', 'tone': 'neutral'},
+                    ],
+                },
+                {
+                    'id': 'kaira-metrics',
+                    'type': 'metric_breakdown',
+                    'title': 'Metrics',
+                    'data': [
+                        {'key': 'intent-accuracy', 'label': 'Intent Accuracy', 'value': health - 2, 'maxValue': 100},
+                        {'key': 'correctness-rate', 'label': 'Correctness Rate', 'value': health + 2, 'maxValue': 100},
+                    ],
+                },
+                {
+                    'id': 'kaira-recommendations',
+                    'type': 'issues_recommendations',
+                    'title': 'Issues',
+                    'data': {
+                        'issues': [
+                            {'title': 'Intent slips', 'area': 'Intent', 'priority': 'P0', 'summary': 'Intent routing degraded on pricing.'},
+                        ],
+                        'recommendations': [
+                            {'priority': 'P0', 'title': 'Intent', 'action': 'Tighten routing examples', 'expectedImpact': '-3 intent failures'},
+                        ],
+                    },
+                },
+            ],
+            'exportDocument': {
+                'schemaVersion': 'v1',
+                'title': run_name,
+                'theme': {
+                    'accent': '#0f766e',
+                    'accentMuted': '#99f6e4',
+                    'border': '#d1d5db',
+                    'textPrimary': '#0f172a',
+                    'textSecondary': '#475569',
+                    'background': '#ffffff',
+                },
+                'blocks': [
+                    {'id': 'cover', 'type': 'cover', 'title': run_name},
+                ],
+            },
+        }
+
+    def _runs_data(self):
+        return [
+            ({'id': 'run-1', 'created_at': '2026-03-01T00:00:00+00:00'}, self._run_payload('Run 1', 82.0)),
+            ({'id': 'run-2', 'created_at': '2026-03-02T00:00:00+00:00'}, self._run_payload('Run 2', 76.0)),
+        ]
+
+    def test_from_runs_emits_trend_chart_and_insight_panels(self):
+        from app.services.reports.canonical_adapters import (
+            adapt_kaira_cross_run_from_runs,
+        )
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = adapt_kaira_cross_run_from_runs(
+            runs, self._kaira_analytics_config(), app_id='kaira-bot', total_runs_available=2
+        )
+        by_id = {section.id: section for section in report.sections}
+
+        trend = by_id['kaira-cross-trend']
+        self.assertIsInstance(trend, TrendChartSection)
+        self.assertEqual(len(trend.data.points), len(runs))
+        for point in trend.data.points:
+            self.assertTrue(point.bucket)
+            self.assertIsInstance(point.primary, float)
+            self.assertIsInstance(point.breakdown, dict)
+        self.assertEqual(trend.data.primary_label, 'Health Score')
+        self.assertEqual(trend.data.y_domain, (0.0, 100.0))
+        self.assertIsNotNone(trend.data.reference_value)
+        self.assertEqual(trend.data.reference_label, 'Average')
+        self.assertTrue(trend.data.breakdowns)
+
+        insights = by_id['kaira-cross-insights']
+        self.assertIsInstance(insights, InsightPanelsSection)
+        self.assertGreaterEqual(len(insights.data), 1)
+        for panel in insights.data:
+            self.assertTrue(panel.area)
+            self.assertTrue(panel.priority)
+            self.assertGreaterEqual(panel.run_count, 1)
+            self.assertTrue(panel.items)
+
+        self.assertNotIn('kaira-cross-issues', by_id)
+
+    def test_payload_dicts_validate_as_section_models(self):
+        from app.services.reports.canonical_adapters import (
+            adapt_kaira_cross_run_from_runs,
+        )
+        from app.services.reports.contracts.report_sections import (
+            InsightPanelsSection,
+            TrendChartSection,
+        )
+
+        runs = self._runs_data()
+        report = adapt_kaira_cross_run_from_runs(
+            runs, self._kaira_analytics_config(), app_id='kaira-bot', total_runs_available=2
+        )
+        types = {section.type for section in report.sections}
+        self.assertIn('trend_chart', types)
+        self.assertIn('insight_panels', types)
+        self.assertNotIn('issues_recommendations', types)
+        self.assertNotIn(
+            'metric_breakdown',
+            {s.type for s in report.sections if s.id == 'kaira-cross-trend'},
+        )
+
+        trend = next(s for s in report.sections if s.id == 'kaira-cross-trend')
+        rebuilt_trend = TrendChartSection.model_validate(trend.model_dump(by_alias=True))
+        self.assertEqual(len(rebuilt_trend.data.points), len(runs))
+
+        insights = next(s for s in report.sections if s.id == 'kaira-cross-insights')
+        rebuilt_insights = InsightPanelsSection.model_validate(insights.model_dump(by_alias=True))
+        self.assertGreaterEqual(len(rebuilt_insights.data), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

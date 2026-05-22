@@ -2211,10 +2211,10 @@ APP_SEEDS = [
                     "sections": [
                         {"id": "kaira-cross-summary", "type": "summary_cards", "title": "Cross-Run Summary", "variant": "kaira_cross_run"},
                         {"id": "kaira-cross-narrative", "type": "narrative", "title": "AI Narrative", "variant": "executive_summary"},
-                        {"id": "kaira-cross-trend", "type": "metric_breakdown", "title": "Health Trends", "variant": "trend_line"},
+                        {"id": "kaira-cross-trend", "type": "trend_chart", "title": "Health Trends", "variant": "trend_line"},
                         {"id": "kaira-cross-compliance", "type": "heatmap", "title": "Rule Compliance Heatmap", "variant": "rule_compliance"},
                         {"id": "kaira-cross-adversarial", "type": "heatmap", "title": "Adversarial Heatmap", "variant": "adversarial_goals"},
-                        {"id": "kaira-cross-issues", "type": "issues_recommendations", "title": "Recurring Issues", "variant": "cross_run_narrative"},
+                        {"id": "kaira-cross-insights", "type": "insight_panels", "title": "Recurring Insights", "variant": "cross_run"},
                     ],
                     "export": {
                         "enabled": False,
@@ -2227,7 +2227,7 @@ APP_SEEDS = [
                         "sectionIds": [
                             "kaira-cross-summary",
                             "kaira-cross-trend",
-                            "kaira-cross-issues",
+                            "kaira-cross-insights",
                         ],
                     },
                 },
