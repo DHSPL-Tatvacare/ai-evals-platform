@@ -421,12 +421,11 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
         "runtime_contract": {"execution_kind": "dispatch"},
     },
     # ─── Mutation ───────────────────────────────────────────────────────────
-    # Scaffold seam for Track T1 — handler + tests + final copy land in T1.
     "llm.extract": {
-        "display_label": "LLM Extract",
+        "display_label": "Extract with AI",
         "display_category": "mutation",
-        "description": "Run a prompt over each contact's payload and write structured fields back for downstream nodes.",
-        "authoring_status": "hidden",
+        "description": "Run a prompt over each contact and save structured fields back to their record for later steps.",
+        "authoring_status": "active",
         "editor_hints": {"preferred_editor": "LlmExtractEditor"},
         "required_payload_fields": [],
         "emitted_payload_fields": [],

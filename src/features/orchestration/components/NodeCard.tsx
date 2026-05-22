@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { X, type LucideIcon } from 'lucide-react';
 
 import { getCategoryDef } from '@/features/orchestration/config/categories';
 import { cn } from '@/utils';
@@ -20,6 +20,8 @@ interface NodeCardProps {
    *  builder's left rail. Both share the same category tokens — see
    *  `categories.ts`. */
   variant?: NodeCardVariant;
+  /** Override the category default icon (e.g. a per-node-type icon). */
+  icon?: LucideIcon;
   selected?: boolean;
   /** Right-aligned slot inside the canvas-variant category bar. Used by
    *  the run canvas to render an inline status pill. */
@@ -51,6 +53,7 @@ export function NodeCard({
   fallbackSubtitle,
   category,
   variant = 'canvas',
+  icon,
   selected = false,
   barTrailing,
   footer,
@@ -63,7 +66,7 @@ export function NodeCard({
   className,
 }: NodeCardProps) {
   const cat = getCategoryDef(category);
-  const Icon = cat.icon;
+  const Icon = icon ?? cat.icon;
 
   if (variant === 'palette') {
     // Soft category-surface fill + small icon square + two-line stack

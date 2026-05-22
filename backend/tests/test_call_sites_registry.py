@@ -2,7 +2,7 @@
 import pytest
 
 
-def test_registry_has_all_eleven_sites():
+def test_registry_has_expected_sites():
     from app.services.llm_credentials.call_sites import CALL_SITES
     assert set(CALL_SITES.keys()) == {
         "chat_text",
@@ -16,6 +16,7 @@ def test_registry_has_all_eleven_sites():
         "analytics_supervisor",
         "analytics_specialist",
         "assist_prompt_or_schema",
+        "workflow_llm_extract",
     }
 
 
@@ -100,6 +101,7 @@ def test_required_capabilities_per_site_match_plan_table():
         "analytics_supervisor": {"text_input", "text_output", "tool_call"},
         "analytics_specialist": {"text_input", "text_output", "structured_output"},
         "assist_prompt_or_schema": {"text_input", "text_output", "structured_output"},
+        "workflow_llm_extract": {"text_input", "text_output", "structured_output"},
     }
     for site_id, req in expected.items():
         assert set(CALL_SITES[site_id].required_capabilities) == req, (

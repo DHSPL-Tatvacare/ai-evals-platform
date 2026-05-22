@@ -136,6 +136,13 @@ CALL_SITES: dict[str, CallSiteSpec] = {
         description="Sherlock specialist agents (data / authoring / query-synthesis).",
         reference="Analytics chat — specialist subtasks.",
     ),
+    "workflow_llm_extract": CallSiteSpec(
+        id="workflow_llm_extract",
+        required_capabilities=frozenset({"text_input", "text_output", "structured_output"}),
+        optional_capabilities=frozenset({"reasoning"}),
+        description="Structured field extraction over a contact's payload inside a workflow.",
+        reference="orchestration llm.extract node.",
+    ),
     "assist_prompt_or_schema": CallSiteSpec(
         id="assist_prompt_or_schema",
         required_capabilities=frozenset({"text_input", "text_output", "structured_output"}),

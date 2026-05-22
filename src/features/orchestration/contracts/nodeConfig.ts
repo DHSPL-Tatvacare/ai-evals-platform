@@ -454,6 +454,51 @@ export const SinkCompleteConfigSchema = z
   })
   .strict();
 
+// One structured output field. Mirrors the shared SchemaTable's
+// `EvaluatorOutputField`; display-only keys (displayMode/role/isMainMetric/
+// thresholds) round-trip from the editor and are ignored by extraction.
+const LlmExtractOutputFieldSchema = z
+  .object({
+    key: z.string(),
+    type: z.enum(["number", "text", "boolean", "array", "enum"]).default("text"),
+    description: z.string().default(""),
+    enumValues: z.array(z.string()).optional(),
+    arrayItemSchema: z
+      .object({
+        itemType: z.enum(["string", "number", "boolean", "object"]).default("string"),
+        properties: z
+          .array(
+            z.object({
+              key: z.string(),
+              type: z.enum(["string", "number", "boolean"]).default("string"),
+              description: z.string().default(""),
+            }),
+          )
+          .optional(),
+      })
+      .nullish(),
+    displayMode: z.string().optional(),
+    role: z.string().optional(),
+    isMainMetric: z.boolean().optional(),
+    thresholds: z.record(z.string(), z.number()).optional(),
+  })
+  .strict();
+
+// TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
+export const LlmExtractConfigSchema = z
+  .object({
+    nodeType: z.literal("llm.extract"),
+    prompt: z.string().default(""),
+    output_schema: z.array(LlmExtractOutputFieldSchema).default([]),
+    input_template: z.string().nullish(),
+    output_namespace: z.string().default(""),
+    provider_override: z.string().nullish(),
+    model_override: z.string().nullish(),
+    concurrency: z.number().int().min(1).max(20).default(1),
+    inter_call_delay: z.number().min(0).default(0),
+  })
+  .strict();
+
 // ─── Discriminated union over the registry ──────────────────────────────
 
 // TODO: replace with codegen from Pydantic in Phase 16 (openapi-zod-client)
@@ -470,6 +515,7 @@ export const NodeConfigSchema = z.discriminatedUnion("nodeType", [
   CoreWebhookOutConfigSchema,
   MessagingSendWhatsappTemplateConfigSchema,
   VoicePlaceCallConfigSchema,
+  LlmExtractConfigSchema,
   SinkCompleteConfigSchema,
 ]);
 
@@ -487,6 +533,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   | typeof CoreWebhookOutConfigSchema
   | typeof MessagingSendWhatsappTemplateConfigSchema
   | typeof VoicePlaceCallConfigSchema
+  | typeof LlmExtractConfigSchema
   | typeof SinkCompleteConfigSchema
 > = {
   "source.cohort": SourceCohortConfigSchema,
@@ -501,6 +548,7 @@ const NODE_TYPE_TO_SCHEMA: Record<
   "core.webhook_out": CoreWebhookOutConfigSchema,
   "messaging.send_whatsapp_template": MessagingSendWhatsappTemplateConfigSchema,
   "voice.place_call": VoicePlaceCallConfigSchema,
+  "llm.extract": LlmExtractConfigSchema,
   "sink.complete": SinkCompleteConfigSchema,
 };
 
