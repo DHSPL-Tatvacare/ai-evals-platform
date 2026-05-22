@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,26 +107,96 @@ async def reconcile_dispatch(
         # Webhook-only providers (no status API) expose no poll method — skip.
         if not hasattr(adapter, "fetch_execution"):
             continue
-        for action in conn_actions:
-            if (action.payload or {}).get("mode") == "batch":
-                # Batch polling is a documented follow-up; the webhook covers batch today.
-                _log.info(
-                    "reconcile_dispatch.batch_skip action_id=%s correlation_id=%s",
-                    action.id, action.provider_correlation_id,
-                )
-                continue
+        single = [a for a in conn_actions if (a.payload or {}).get("mode") != "batch"]
+        batch = [a for a in conn_actions if (a.payload or {}).get("mode") == "batch"]
+
+        for action in single:
             execution = await adapter.fetch_execution(
                 connection=config, execution_id=action.provider_correlation_id,
             )
             if not execution:
                 continue
-            applied = await adapter.reconcile_execution(
+            if await adapter.reconcile_execution(
                 db, action=action, node_id=action_node[action.id], execution=execution,
-            )
-            if applied:
+            ):
                 reconciled += 1
 
+        batch_by_id: dict[str, list[WorkflowRunRecipientAction]] = {}
+        for action in batch:
+            batch_by_id.setdefault(str(action.provider_correlation_id), []).append(action)
+        for batch_id, batch_actions in batch_by_id.items():
+            reconciled += await _reconcile_batch(
+                db, adapter=adapter, config=config, batch_id=batch_id,
+                actions=batch_actions, action_node=action_node,
+            )
+
     await db.commit()
+    return reconciled
+
+
+def _phone_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+async def _reconcile_batch(
+    db: AsyncSession,
+    *,
+    adapter: Any,
+    config: dict[str, Any],
+    batch_id: str,
+    actions: list[WorkflowRunRecipientAction],
+    action_node: dict[uuid.UUID, str],
+) -> int:
+    """Summary-gated batch reconcile: skip the list until calls have completed, then page + match."""
+    # Batch listing is optional on the adapter — webhook covers batch where it's absent.
+    if not hasattr(adapter, "fetch_batch_executions"):
+        return 0
+
+    # GATE — one cheap summary call; skip the (paged) list while the whole batch is still in-flight.
+    summary = await adapter.fetch_batch_summary(connection=config, batch_id=batch_id)
+    if summary is None:
+        _log.warning("reconcile_dispatch.batch_summary_missing batch_id=%s", batch_id)
+        return 0
+    status_counts = summary.get("execution_status") or {}
+    terminal_ready = sum(
+        int(n or 0) for status, n in status_counts.items() if adapter.is_terminal(status)
+    )
+    if terminal_ready <= 0:
+        return 0
+
+    # Match rows to still-open actions by recipient_id, then by phone; reconcile_execution's
+    # own terminality guard decides each row, so a still-ringing row stays pending.
+    by_recipient = {a.recipient_id: a for a in actions}
+    by_phone = {_phone_key((a.payload or {}).get("contact")): a for a in actions}
+    pending: set[uuid.UUID] = {a.id for a in actions}
+
+    reconciled = 0
+    page_number = 1
+    while pending:
+        page = await adapter.fetch_batch_executions(
+            connection=config, batch_id=batch_id, page_number=page_number,
+        )
+        for row in (page.get("data") or []):
+            ctx = row.get("context_details")
+            ctx = ctx if isinstance(ctx, dict) else {}
+            rdata = ctx.get("recipient_data")
+            rdata = rdata if isinstance(rdata, dict) else {}
+            tele = row.get("telephony_data")
+            tele = tele if isinstance(tele, dict) else {}
+            rid = rdata.get("recipient_id")
+            action = (by_recipient.get(rid) if rid else None) or by_phone.get(
+                _phone_key(tele.get("to_number"))
+            )
+            if action is None or action.id not in pending:
+                continue
+            if await adapter.reconcile_execution(
+                db, action=action, node_id=action_node[action.id], execution=row,
+            ):
+                reconciled += 1
+                pending.discard(action.id)
+        if not page.get("has_more"):
+            break
+        page_number += 1
     return reconciled
 
 

@@ -70,9 +70,20 @@ class VoiceAdapter(Protocol):
 
     def verify_signature(self, raw: bytes, headers: Mapping[str, str]) -> bool: ...
 
+    def is_terminal(self, status: Optional[str]) -> bool: ...
+
     async def fetch_execution(
         self, *, connection: Any, execution_id: str,
     ) -> Optional[dict[str, Any]]: ...
+
+    async def fetch_batch_summary(
+        self, *, connection: Any, batch_id: str,
+    ) -> Optional[dict[str, Any]]: ...
+
+    async def fetch_batch_executions(
+        self, *, connection: Any, batch_id: str,
+        page_number: int = 1, page_size: int = 50,
+    ) -> dict[str, Any]: ...
 
     async def handle_webhook(
         self,

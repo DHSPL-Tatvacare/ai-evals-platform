@@ -457,6 +457,9 @@ class BolnaAdapter:
         # Bolna ships no HMAC; the per-connection URL token gates the route.
         return True
 
+    def is_terminal(self, status: Optional[str]) -> bool:
+        return is_terminal(status)
+
     async def fetch_execution(
         self, *, connection: dict[str, Any], execution_id: str,
     ) -> Optional[dict[str, Any]]:
@@ -472,6 +475,46 @@ class BolnaAdapter:
             return resp.json() if resp.content else {}
         if resp.status_code == 404:
             return None
+        raise BolnaServiceError(f"Bolna {resp.status_code}: {_safe_message(resp)}")
+
+    async def fetch_batch_summary(
+        self, *, connection: dict[str, Any], batch_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Cheap batch gate — GET /batches/{id}; carries execution_status counts. None on 404."""
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with _make_client() as client:
+            resp = await client.get(f"{base_url}/batches/{batch_id}", headers=headers)
+        if resp.status_code == 200:
+            return resp.json() if resp.content else {}
+        if resp.status_code == 404:
+            return None
+        raise BolnaServiceError(f"Bolna {resp.status_code}: {_safe_message(resp)}")
+
+    async def fetch_batch_executions(
+        self, *, connection: dict[str, Any], batch_id: str,
+        page_number: int = 1, page_size: int = 50,
+    ) -> dict[str, Any]:
+        """One page of GET /batches/{id}/executions — each row carries a per-call id + status."""
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        params = {"page_number": page_number, "page_size": page_size}
+        async with _make_client() as client:
+            resp = await client.get(
+                f"{base_url}/batches/{batch_id}/executions", params=params, headers=headers,
+            )
+        if resp.status_code == 200:
+            body = resp.json() if resp.content else {}
+            rows = body.get("data") or body.get("executions") or []
+            return {"data": rows, "has_more": bool(body.get("has_more", False))}
+        if resp.status_code == 404:
+            return {"data": [], "has_more": False}
         raise BolnaServiceError(f"Bolna {resp.status_code}: {_safe_message(resp)}")
 
     async def reconcile_execution(
