@@ -519,6 +519,12 @@ class WorkflowRunRecipientAction(Base):
             "provider_correlation_id",
             postgresql_where=text("provider_correlation_id IS NOT NULL"),
         ),
+        # Reply lookup: inbound replies quote a prior message id (WhatsApp WAMID).
+        Index(
+            "idx_orch_actions_provider_reply_ref",
+            "provider_reply_ref",
+            postgresql_where=text("provider_reply_ref IS NOT NULL"),
+        ),
         {"schema": "orchestration"},
     )
 
@@ -550,17 +556,13 @@ class WorkflowRunRecipientAction(Base):
     parent_action_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("orchestration.workflow_run_recipient_actions.id")
     )
-    # Phase 13 / E.2 — provider correlation ids and status hints. Populated
-    # by the dispatch nodes when the row is created and by the reconciler
-    # when a terminal event arrives. Indexed via a partial index restricted
-    # to open rows so the 30s poller's scan stays cheap.
-    bolna_execution_id: Mapped[Optional[str]] = mapped_column(String(128))
-    bolna_batch_id: Mapped[Optional[str]] = mapped_column(String(128))
-    # Channel-agnostic upstream id stamped at dispatch time (migration 0027).
-    # Bolna single → execution_id, Bolna batch → batch_id, WATI → localMessageId,
-    # SMS / generic → provider-returned id. Lets cross-channel reporting
-    # queries read one column instead of COALESCE'ing over JSONB.
+    # Generic correlation contract — no vendor names. ``provider_correlation_id``
+    # is the send-time id (Bolna execution_id/batch_id, WATI localMessageId, SMS
+    # provider id) used for status/outcome reconciliation across all providers.
+    # ``provider_reply_ref`` is the id an inbound reply quotes (WhatsApp WAMID);
+    # null for voice. Stamped at dispatch / when first seen.
     provider_correlation_id: Mapped[Optional[str]] = mapped_column(String(128))
+    provider_reply_ref: Mapped[Optional[str]] = mapped_column(String(128))
     provider_status: Mapped[Optional[str]] = mapped_column(String(64))
     provider_terminal: Mapped[bool] = mapped_column(default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

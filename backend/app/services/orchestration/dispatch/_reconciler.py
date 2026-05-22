@@ -106,12 +106,8 @@ async def apply_terminal_event(
                 payload=inherited_payload,
                 response=child_response_payload,
                 parent_action_id=action.id,
-                # Channel-specific correlation columns (Phase 13/E.2)
-                # AND channel-agnostic ``provider_correlation_id`` (0027)
-                # all inherit from the parent so the child row is fully
+                # Inherit the generic send-time id so the child outcome row stays
                 # joinable to the upstream provider event.
-                bolna_execution_id=action.bolna_execution_id,
-                bolna_batch_id=action.bolna_batch_id,
                 provider_correlation_id=action.provider_correlation_id,
                 provider_terminal=True,
                 completed_at=now,

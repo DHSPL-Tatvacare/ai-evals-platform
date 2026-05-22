@@ -55,6 +55,11 @@ def _safe_message(resp: httpx.Response) -> Optional[str]:
         return None
 
 
+def _is_batch_action(action: Any) -> bool:
+    """Batch vs single is carried on the action payload, not a vendor column."""
+    return (getattr(action, "payload", None) or {}).get("mode") == "batch"
+
+
 def classify_outcome(status: Optional[str], status_reason: Optional[str]) -> str:
     # Returns bolna_answered/rnr/failed — outcome action_types preserved per
     # the "Logs page action_type breakdown" carve-out in CLAUDE.md.
@@ -337,7 +342,7 @@ class BolnaAdapter:
     async def cancel_dispatch(
         self, *, connection: dict[str, Any], action: Any,
     ) -> CancelDispatchResult:
-        execution_id = getattr(action, "bolna_execution_id", None)
+        execution_id = getattr(action, "provider_correlation_id", None)
         if not execution_id:
             return CancelDispatchResult(
                 outcome=CancelDispatchOutcome.noop_already_terminal,
@@ -394,17 +399,18 @@ class BolnaAdapter:
         self, *, connection: dict[str, Any], actions: list[Any],
     ) -> list[CancelDispatchResult]:
         # Batch dispatch is cancelled once at the batch level; only standalone
-        # single-call executions get a per-call stop.
+        # single-call executions get a per-call stop. Batch vs single comes from
+        # payload.mode; the batch_id is the action's provider_correlation_id.
         results: list[CancelDispatchResult] = []
         batch_ids = {
-            getattr(a, "bolna_batch_id", None)
+            a.provider_correlation_id
             for a in actions
-            if getattr(a, "bolna_batch_id", None)
+            if _is_batch_action(a) and getattr(a, "provider_correlation_id", None)
         }
         for bid in batch_ids:
             results.append(await self.cancel_batch(connection=connection, batch_id=str(bid)))
         for action in actions:
-            if getattr(action, "bolna_batch_id", None):
+            if _is_batch_action(action):
                 continue
             results.append(await self.cancel_dispatch(connection=connection, action=action))
         return results

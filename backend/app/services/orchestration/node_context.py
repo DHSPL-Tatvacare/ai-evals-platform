@@ -156,24 +156,14 @@ class NodeContext:
         status: str,
         response: Optional[dict[str, Any]] = None,
         error: Optional[str] = None,
-        bolna_execution_id: Optional[str] = None,
-        bolna_batch_id: Optional[str] = None,
         provider_correlation_id: Optional[str] = None,
         provider_status: Optional[str] = None,
     ) -> None:
-        """Used by handlers after the provider call completes to mark the
-        action success/failed.
+        """Mark the action success/failed after the provider call completes.
 
-        Phase 13/E.2: handlers may pass ``bolna_execution_id`` /
-        ``bolna_batch_id`` so the poller can correlate this row against
-        Bolna's executions surface. ``provider_status`` captures the
-        upstream-side queue status (e.g. ``queued`` for /call,
-        ``queued`` / ``in-progress`` for /batches).
-
-        Migration 0027: ``provider_correlation_id`` is the channel-agnostic
-        upstream id (Bolna execution_id / batch_id, WATI localMessageId,
-        SMS provider id). Cross-channel reporting queries read this one
-        column instead of COALESCE'ing across JSONB keys.
+        ``provider_correlation_id`` is the generic send-time id (Bolna
+        execution_id/batch_id, WATI localMessageId) all providers correlate
+        status on; ``provider_status`` is the upstream queue status hint.
         """
         values: dict[str, Any] = {
             "status": status,
@@ -181,10 +171,6 @@ class NodeContext:
             "error": error,
             "completed_at": datetime.now(timezone.utc),
         }
-        if bolna_execution_id is not None:
-            values["bolna_execution_id"] = bolna_execution_id
-        if bolna_batch_id is not None:
-            values["bolna_batch_id"] = bolna_batch_id
         if provider_correlation_id is not None:
             values["provider_correlation_id"] = provider_correlation_id
         if provider_status is not None:
