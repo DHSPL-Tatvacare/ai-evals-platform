@@ -111,16 +111,11 @@ class _Handler:
 
         async for rid, payload in input_cohort:
             try:
-                recipient_row = await assert_recipient_in_manifest(
+                await assert_recipient_in_manifest(
                     ctx.db, run_id=ctx.run_id, recipient_id=rid,
                 )
             except RecipientNotInManifestError:
                 await ctx.set_recipient_state(rid, status="skipped")
-                continue
-            cap_result = await enforce_comm_cap_or_skip(
-                ctx.db, recipient=recipient_row, stage="cap_runtime",
-            )
-            if not cap_result.proceed:
                 continue
             # Destination = the operator-picked payload field, normalized. One
             # contract, no hardcoded field names — works for cohort and dataset
@@ -128,6 +123,15 @@ class _Handler:
             contact = normalise_phone_e164(payload.get(config.phone_field))
             if not contact:
                 await ctx.set_recipient_state(rid, status="skipped_invalid_phone")
+                continue
+            # The cut keys on the resolved contact — the same value written to
+            # payload.contact, which the reach count counts on.
+            cap_result = await enforce_comm_cap_or_skip(
+                ctx.db, tenant_id=ctx.tenant_id, app_id=ctx.app_id,
+                contact=contact, channel="whatsapp", stage="cap_runtime",
+            )
+            if not cap_result.proceed:
+                await ctx.set_recipient_state(rid, status="skipped_capped")
                 continue
             request = CanonicalSendRequest(
                 contact=contact,
@@ -165,6 +169,23 @@ class _Handler:
                 failed.append(RecipientOutcome(recipient_id=rid))
                 continue
 
+            # A provider 200 is not delivery: a non-accepted send (invalid number,
+            # receiver errors) is recorded failed with the reason, never success.
+            if not response.accepted:
+                await ctx.update_action_result(
+                    action_id,
+                    status="failed",
+                    error=response.reason,
+                    response={
+                        "raw": response.raw,
+                        "provider_correlation_id": response.provider_correlation_id,
+                    },
+                    provider_correlation_id=response.provider_correlation_id,
+                    provider_status="rejected",
+                )
+                failed.append(RecipientOutcome(recipient_id=rid))
+                continue
+
             await ctx.update_action_result(
                 action_id,
                 status="success",
@@ -173,6 +194,7 @@ class _Handler:
                     "provider_correlation_id": response.provider_correlation_id,
                 },
                 provider_correlation_id=response.provider_correlation_id,
+                provider_status="sent",
             )
             await ctx.stamp_webhook_ttl(rid, deadline=ttl_deadline)
             success.append(RecipientOutcome(recipient_id=rid))

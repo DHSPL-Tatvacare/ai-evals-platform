@@ -663,6 +663,8 @@ class _StubCtx:
     def __init__(self):
         self.connections = _StubConnections()
         self.run_id = uuid.uuid4()
+        self.tenant_id = uuid.uuid4()
+        self.app_id = "test-orchestration"
         self.db = object()
         self._action_seq = 0
 
@@ -706,7 +708,7 @@ async def _run_handler_capture_request(monkeypatch, *, app_env: str, config_flag
 
         return SimpleNamespace(recipient_id=recipient_id, phone_e164="+919999999999")
 
-    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+    async def _ok_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):  # noqa: ARG001
         from app.services.orchestration.comm_cap.enforcement import EnforcementResult
 
         return EnforcementResult(proceed=True)
@@ -766,7 +768,7 @@ async def test_handler_dials_operator_picked_field_not_recipient_id(monkeypatch)
     async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
         return SimpleNamespace(recipient_id=recipient_id, phone_e164=None)
 
-    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+    async def _ok_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):  # noqa: ARG001
         from app.services.orchestration.comm_cap.enforcement import EnforcementResult
 
         return EnforcementResult(proceed=True)
@@ -797,6 +799,102 @@ async def test_handler_dials_operator_picked_field_not_recipient_id(monkeypatch)
     )
     await vpc._Handler().execute(_cohort(), cfg, _StubCtx())
     assert captured["body"]["recipient_phone_number"] == "+918888888888"
+
+
+@pytest.mark.asyncio
+async def test_handler_calls_enforcer_with_resolved_contact_and_voice_channel(monkeypatch):
+    """Seam: voice dispatch calls enforce_comm_cap_or_skip with the resolved
+    phone (== payload.contact) and channel='voice'."""
+    import app.services.orchestration.nodes.voice_place_call as vpc
+    from types import SimpleNamespace
+
+    seen: dict = {}
+
+    async def _capture_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+        seen.update(tenant_id=tenant_id, app_id=app_id, contact=contact, channel=channel)
+        return EnforcementResult(proceed=True)
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164=None)
+
+    monkeypatch.setattr(vpc, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(vpc, "enforce_comm_cap_or_skip", _capture_cap)
+
+    def http_handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        seen["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={"execution_id": "exec_x"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(httpx.MockTransport(http_handler)),
+    )
+
+    async def _cohort():
+        yield "rid-1", {"mobile": "0 88888 88888"}
+
+    ctx = _StubCtx()
+    cfg = vpc._Config(
+        connection_id=uuid.uuid4(), agent_id="agent_xyz",
+        phone_field="mobile", mode="single",
+    )
+    await vpc._Handler().execute(_cohort(), cfg, ctx)
+    assert seen["channel"] == "voice"
+    assert seen["tenant_id"] == ctx.tenant_id
+    assert seen["app_id"] == ctx.app_id
+    # Enforcer contact == the normalized phone dialed (== payload.contact).
+    assert seen["contact"] == seen["body"]["recipient_phone_number"] == "+918888888888"
+
+
+@pytest.mark.asyncio
+async def test_handler_records_failed_when_place_call_not_accepted(monkeypatch):
+    """A voice response with accepted=False is recorded failed with the reason."""
+    import app.services.orchestration.nodes.voice_place_call as vpc
+    from types import SimpleNamespace
+
+    from app.services.orchestration.adapters.canonical import CanonicalVoiceResponse
+
+    updates: dict = {}
+
+    class _StubAdapter:
+        async def place_call(self, *, connection, request):  # noqa: ARG002
+            return CanonicalVoiceResponse(
+                provider_correlation_id="exec_x", contact=request.contact, mode="single",
+                accepted=False, reason="agent unavailable", raw={},
+            )
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164=None)
+
+    async def _ok_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):  # noqa: ARG001
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+        return EnforcementResult(proceed=True)
+
+    monkeypatch.setattr(vpc, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(vpc, "enforce_comm_cap_or_skip", _ok_cap)
+    monkeypatch.setattr(vpc, "resolve_adapter", lambda **_k: _StubAdapter())
+
+    ctx = _StubCtx()
+
+    async def _capture_update(action_id, **kwargs):
+        updates[action_id] = kwargs
+
+    ctx.update_action_result = _capture_update  # type: ignore[assignment]
+
+    async def _cohort():
+        yield "rid-1", {"mobile": "+918888888888"}
+
+    cfg = vpc._Config(
+        connection_id=uuid.uuid4(), agent_id="agent_xyz",
+        phone_field="mobile", mode="single",
+    )
+    result = await vpc._Handler().execute(_cohort(), cfg, ctx)
+    assert result.by_output_id["failed"] and not result.by_output_id["success"]
+    settled = next(iter(updates.values()))
+    assert settled["status"] == "failed"
+    assert settled["error"] == "agent unavailable"
+    assert settled["provider_correlation_id"] == "exec_x"
 
 
 # ─── Registry integration ──────────────────────────────────────────────────

@@ -265,6 +265,124 @@ async def test_send_template_happy_path(monkeypatch):
     assert captured["headers"]["authorization"] == "Bearer test-token"
 
 
+# I1 send-truth: a WATI 200 is only a real send when result==true AND every
+# receiver isValidWhatsAppNumber AND no receiver errors. Verbatim v2 body shape
+# from support.wati.io sendTemplateMessage docs.
+
+
+_WATI_V2_VALID = {
+    "result": True,
+    "error": None,
+    "templateName": "welcome_v1",
+    "receivers": [
+        {
+            "localMessageId": "lm-valid",
+            "waId": "919999999999",
+            "isValidWhatsAppNumber": True,
+            "errors": [],
+        }
+    ],
+    "parameters": [],
+}
+
+_WATI_V2_INVALID_NUMBER = {
+    "result": True,
+    "error": None,
+    "templateName": "welcome_v1",
+    "receivers": [
+        {
+            "localMessageId": "lm-invalid",
+            "waId": "919999999999",
+            "isValidWhatsAppNumber": False,
+            "errors": [],
+        }
+    ],
+    "parameters": [],
+}
+
+_WATI_V2_RESULT_FALSE = {
+    "result": False,
+    "error": "Template not approved",
+    "templateName": "welcome_v1",
+    "receivers": [],
+    "parameters": [],
+}
+
+_WATI_V2_RECEIVER_ERRORS = {
+    "result": True,
+    "error": None,
+    "templateName": "welcome_v1",
+    "receivers": [
+        {
+            "localMessageId": "lm-err",
+            "waId": "919999999999",
+            "isValidWhatsAppNumber": True,
+            "errors": ["rate_limited"],
+        }
+    ],
+    "parameters": [],
+}
+
+
+def _transport_returning(monkeypatch, body):
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=body))
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.wati._make_client",
+        lambda timeout=30.0: httpx.AsyncClient(transport=transport, timeout=timeout),
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_template_valid_number_is_accepted(monkeypatch):
+    _transport_returning(monkeypatch, _WATI_V2_VALID)
+    resp = await WatiAdapter().send_template(
+        connection=_connection(),
+        request=CanonicalSendRequest(contact="+919999999999", template_name="welcome_v1"),
+    )
+    assert resp.accepted is True
+    assert resp.reason is None
+    assert resp.provider_correlation_id == "lm-valid"
+
+
+@pytest.mark.asyncio
+async def test_send_template_invalid_number_is_rejected(monkeypatch):
+    _transport_returning(monkeypatch, _WATI_V2_INVALID_NUMBER)
+    resp = await WatiAdapter().send_template(
+        connection=_connection(),
+        request=CanonicalSendRequest(contact="+919999999999", template_name="welcome_v1"),
+    )
+    assert resp.accepted is False
+    assert resp.reason is not None
+    assert "valid" in resp.reason.lower() or "number" in resp.reason.lower()
+    # localMessageId still captured for correlation even on a rejected send.
+    assert resp.provider_correlation_id == "lm-invalid"
+
+
+@pytest.mark.asyncio
+async def test_send_template_result_false_raises(monkeypatch):
+    # result=false carries no receivers and thus no localMessageId — there is
+    # nothing to correlate, so this is a hard WatiServiceError (the handler still
+    # records the action as failed). accepted=False is reserved for a 200 that
+    # DID return a message id but is a silent non-send (invalid number / errors).
+    _transport_returning(monkeypatch, _WATI_V2_RESULT_FALSE)
+    with pytest.raises(WatiServiceError):
+        await WatiAdapter().send_template(
+            connection=_connection(),
+            request=CanonicalSendRequest(contact="+919999999999", template_name="welcome_v1"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_template_receiver_errors_is_rejected(monkeypatch):
+    _transport_returning(monkeypatch, _WATI_V2_RECEIVER_ERRORS)
+    resp = await WatiAdapter().send_template(
+        connection=_connection(),
+        request=CanonicalSendRequest(contact="+919999999999", template_name="welcome_v1"),
+    )
+    assert resp.accepted is False
+    assert "rate_limited" in resp.reason
+
+
 @pytest.mark.asyncio
 async def test_send_template_uses_picked_broadcast_and_channel(monkeypatch):
     captured: dict = {}
@@ -449,7 +567,7 @@ async def test_handler_sends_operator_picked_field_not_recipient_id(monkeypatch)
     async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
         return SimpleNamespace(recipient_id=recipient_id, phone_e164="+918888888888")
 
-    async def _ok_cap(_db, *, recipient, stage):  # noqa: ARG001
+    async def _ok_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):  # noqa: ARG001
         from app.services.orchestration.comm_cap.enforcement import EnforcementResult
 
         return EnforcementResult(proceed=True)
@@ -464,6 +582,8 @@ async def test_handler_sends_operator_picked_field_not_recipient_id(monkeypatch)
 
     class _Ctx:
         run_id = _uuid.uuid4()
+        tenant_id = _uuid.uuid4()
+        app_id = "test-orchestration"
         db = object()
         connections = _Conns()
 
@@ -494,6 +614,158 @@ async def test_handler_sends_operator_picked_field_not_recipient_id(monkeypatch)
     cfg = _Config(connection_id=uuid.uuid4(), template_name="welcome_v1", phone_field="mobile")
     await msg._Handler().execute(_cohort(), cfg, _Ctx())
     assert captured["contact"] == "+918888888888"
+
+
+@pytest.mark.asyncio
+async def test_handler_calls_enforcer_with_resolved_contact_and_channel(monkeypatch):
+    """Seam: the dispatch handler calls enforce_comm_cap_or_skip with the new
+    signature — the RESOLVED, normalized phone (same value written to
+    payload.contact) and channel='whatsapp'. Phase 2's reach count keys on it."""
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    import app.services.orchestration.nodes.messaging_send_whatsapp_template as msg
+    from app.services.orchestration.adapters.canonical import CanonicalSendResponse
+
+    seen: dict = {}
+
+    async def _capture_cap(_db, *, tenant_id, app_id, contact, channel, stage="cap_runtime"):
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+        seen.update(tenant_id=tenant_id, app_id=app_id, contact=contact, channel=channel, stage=stage)
+        return EnforcementResult(proceed=True)
+
+    class _StubAdapter:
+        async def send_template(self, *, connection, request):  # noqa: ARG002
+            seen["payload_contact"] = request.contact
+            return CanonicalSendResponse(
+                provider_correlation_id="lm-1", contact=request.contact, raw={},
+            )
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164="+918888888888")
+
+    monkeypatch.setattr(msg, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(msg, "enforce_comm_cap_or_skip", _capture_cap)
+    monkeypatch.setattr(msg, "resolve_adapter", lambda **_k: _StubAdapter())
+
+    tid = _uuid.uuid4()
+
+    class _Conns:
+        async def get_config(self, _cid):
+            return {"__provider__": "wati"}
+
+    class _Ctx:
+        run_id = _uuid.uuid4()
+        tenant_id = tid
+        app_id = "inside-sales"
+        db = object()
+        connections = _Conns()
+
+        def idempotency_key(self, *parts):
+            return "|".join(str(p) for p in parts)
+
+        async def dispatch_actions(self, dispatches):
+            from app.services.orchestration.node_protocol import ActionResult
+            seen["dispatch_payload"] = dispatches[0].payload
+            return [ActionResult(recipient_id=d.recipient_id, action_id="a1", status="pending") for d in dispatches]
+
+        async def update_action_result(self, *_a, **_k):
+            return None
+
+        async def stamp_webhook_ttl(self, *_a, **_k):
+            return None
+
+        async def set_recipient_state(self, *_a, **_k):
+            return None
+
+    async def _cohort():
+        yield "rid-1", {"mobile": "0 88888 88888"}
+
+    cfg = _Config(connection_id=uuid.uuid4(), template_name="welcome_v1", phone_field="mobile")
+    await msg._Handler().execute(_cohort(), cfg, _Ctx())
+
+    assert seen["tenant_id"] == tid
+    assert seen["app_id"] == "inside-sales"
+    assert seen["channel"] == "whatsapp"
+    # Enforcer contact == payload.contact == the normalized phone we dialed.
+    assert seen["contact"] == seen["payload_contact"]
+    assert seen["contact"] == seen["dispatch_payload"]["contact"]
+    assert seen["contact"].startswith("+91")
+
+
+@pytest.mark.asyncio
+async def test_handler_records_failed_when_send_not_accepted(monkeypatch):
+    """I1: a 200 that the adapter judged a non-send (accepted=False) is recorded
+    as a failed action with the reason, and the recipient lands in 'failed' —
+    not 'success'. The provider_correlation_id is still stamped for correlation."""
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    import app.services.orchestration.nodes.messaging_send_whatsapp_template as msg
+    from app.services.orchestration.adapters.canonical import CanonicalSendResponse
+
+    updates: dict = {}
+
+    class _StubAdapter:
+        async def send_template(self, *, connection, request):  # noqa: ARG002
+            return CanonicalSendResponse(
+                provider_correlation_id="lm-invalid", contact=request.contact,
+                accepted=False, reason="not a valid WhatsApp number (waId=919999999999)",
+                raw={},
+            )
+
+    async def _manifest(_db, *, run_id, recipient_id):  # noqa: ARG001
+        return SimpleNamespace(recipient_id=recipient_id, phone_e164="+918888888888")
+
+    async def _ok_cap(_db, **_k):  # noqa: ARG001
+        from app.services.orchestration.comm_cap.enforcement import EnforcementResult
+        return EnforcementResult(proceed=True)
+
+    monkeypatch.setattr(msg, "assert_recipient_in_manifest", _manifest)
+    monkeypatch.setattr(msg, "enforce_comm_cap_or_skip", _ok_cap)
+    monkeypatch.setattr(msg, "resolve_adapter", lambda **_k: _StubAdapter())
+
+    class _Conns:
+        async def get_config(self, _cid):
+            return {"__provider__": "wati"}
+
+    class _Ctx:
+        run_id = _uuid.uuid4()
+        tenant_id = _uuid.uuid4()
+        app_id = "test-orchestration"
+        db = object()
+        connections = _Conns()
+
+        def idempotency_key(self, *parts):
+            return "|".join(str(p) for p in parts)
+
+        async def dispatch_actions(self, dispatches):
+            from app.services.orchestration.node_protocol import ActionResult
+            return [
+                ActionResult(recipient_id=d.recipient_id, action_id="a1", status="pending")
+                for d in dispatches
+            ]
+
+        async def update_action_result(self, action_id, **kwargs):
+            updates[action_id] = kwargs
+
+        async def stamp_webhook_ttl(self, *_a, **_k):
+            return None
+
+        async def set_recipient_state(self, *_a, **_k):
+            return None
+
+    async def _cohort():
+        yield "rid-1", {"mobile": "+918888888888"}
+
+    cfg = _Config(connection_id=uuid.uuid4(), template_name="welcome_v1", phone_field="mobile")
+    result = await msg._Handler().execute(_cohort(), cfg, _Ctx())
+
+    assert result.by_output_id["failed"] and not result.by_output_id["success"]
+    assert updates["a1"]["status"] == "failed"
+    assert "valid" in (updates["a1"].get("error") or "")
+    # Correlation id still stamped on the failed action.
+    assert updates["a1"].get("provider_correlation_id") == "lm-invalid"
 
 
 # ─── Adapter registry — boot integration ────────────────────────────────────

@@ -24,6 +24,10 @@ class CanonicalSendRequest:
 class CanonicalSendResponse:
     provider_correlation_id: str
     contact: str
+    # Send-truth: a provider HTTP 200 is not delivery. ``accepted`` is the parsed
+    # body verdict (all vendors); ``reason`` carries why a 200 was a non-send.
+    accepted: bool = True
+    reason: Optional[str] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -54,6 +58,9 @@ class CanonicalVoiceResponse:
     provider_correlation_id: str
     contact: str
     mode: str
+    # Same send-truth verdict as messaging (one shape, all vendors).
+    accepted: bool = True
+    reason: Optional[str] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

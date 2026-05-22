@@ -106,16 +106,11 @@ class _Handler:
         frozen_phones: dict[str, str] = {}
         async for rid, payload in input_cohort:
             try:
-                recipient_row = await assert_recipient_in_manifest(
+                await assert_recipient_in_manifest(
                     ctx.db, run_id=ctx.run_id, recipient_id=rid,
                 )
             except RecipientNotInManifestError:
                 await ctx.set_recipient_state(rid, status="skipped")
-                continue
-            cap_result = await enforce_comm_cap_or_skip(
-                ctx.db, recipient=recipient_row, stage="cap_runtime",
-            )
-            if not cap_result.proceed:
                 continue
             # Destination = the operator-picked payload field, normalized. One
             # contract, no hardcoded field names — works for cohort and dataset
@@ -123,6 +118,15 @@ class _Handler:
             phone = normalise_phone_e164(payload.get(config.phone_field))
             if not phone:
                 await ctx.set_recipient_state(rid, status="skipped_invalid_phone")
+                continue
+            # The cut keys on the resolved contact — the same value written to
+            # payload.contact, which the reach count counts on.
+            cap_result = await enforce_comm_cap_or_skip(
+                ctx.db, tenant_id=ctx.tenant_id, app_id=ctx.app_id,
+                contact=phone, channel="voice", stage="cap_runtime",
+            )
+            if not cap_result.proceed:
+                await ctx.set_recipient_state(rid, status="skipped_capped")
                 continue
             frozen_phones[rid] = phone
             cohort.append((rid, payload))
@@ -201,6 +205,20 @@ class _Handler:
             except Exception as exc:  # noqa: BLE001 — vendor error surfaced verbatim
                 await ctx.update_action_result(
                     action_id, status="failed", error=str(exc),
+                )
+                failed.append(RecipientOutcome(recipient_id=rid))
+                continue
+
+            if not response.accepted:
+                await ctx.update_action_result(
+                    action_id, status="failed", error=response.reason,
+                    response={
+                        "raw": response.raw,
+                        "provider_correlation_id": response.provider_correlation_id,
+                        "mode": response.mode,
+                    },
+                    provider_correlation_id=response.provider_correlation_id,
+                    provider_status="rejected",
                 )
                 failed.append(RecipientOutcome(recipient_id=rid))
                 continue
@@ -307,6 +325,19 @@ class _Handler:
             )
 
         for (rid, _req, action_id), response in zip(pending, responses):
+            if not response.accepted:
+                await ctx.update_action_result(
+                    action_id, status="failed", error=response.reason,
+                    response={
+                        "raw": response.raw,
+                        "provider_correlation_id": response.provider_correlation_id,
+                        "mode": response.mode,
+                    },
+                    provider_correlation_id=response.provider_correlation_id,
+                    provider_status="rejected",
+                )
+                failed.append(RecipientOutcome(recipient_id=rid))
+                continue
             await ctx.update_action_result(
                 action_id,
                 status="success",

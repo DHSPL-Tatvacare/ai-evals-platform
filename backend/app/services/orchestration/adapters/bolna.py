@@ -55,8 +55,8 @@ def _safe_message(resp: httpx.Response) -> Optional[str]:
         return None
 
 
-def _is_batch_action(action: Any) -> bool:
-    """Batch vs single is carried on the action payload, not a vendor column."""
+def _is_batch(action: Any) -> bool:
+    # Dispatch mode rides on payload, not a vendor column.
     return (getattr(action, "payload", None) or {}).get("mode") == "batch"
 
 
@@ -342,6 +342,7 @@ class BolnaAdapter:
     async def cancel_dispatch(
         self, *, connection: dict[str, Any], action: Any,
     ) -> CancelDispatchResult:
+        # Single-call execution_id lives in the generic correlation column.
         execution_id = getattr(action, "provider_correlation_id", None)
         if not execution_id:
             return CancelDispatchResult(
@@ -399,18 +400,18 @@ class BolnaAdapter:
         self, *, connection: dict[str, Any], actions: list[Any],
     ) -> list[CancelDispatchResult]:
         # Batch dispatch is cancelled once at the batch level; only standalone
-        # single-call executions get a per-call stop. Batch vs single comes from
-        # payload.mode; the batch_id is the action's provider_correlation_id.
+        # single-call executions get a per-call stop. ``payload.mode`` — not a
+        # vendor column — distinguishes batch; batch_id is provider_correlation_id.
         results: list[CancelDispatchResult] = []
         batch_ids = {
-            a.provider_correlation_id
+            getattr(a, "provider_correlation_id", None)
             for a in actions
-            if _is_batch_action(a) and getattr(a, "provider_correlation_id", None)
+            if _is_batch(a) and getattr(a, "provider_correlation_id", None)
         }
         for bid in batch_ids:
             results.append(await self.cancel_batch(connection=connection, batch_id=str(bid)))
         for action in actions:
-            if _is_batch_action(action):
+            if _is_batch(action):
                 continue
             results.append(await self.cancel_dispatch(connection=connection, action=action))
         return results

@@ -50,6 +50,14 @@ _EVENT_MAP: dict[str, tuple[str, Optional[str], bool]] = {
 
 _INBOUND_REPLY_EVENTS = frozenset({"messageReceived", "sentMessageREPLIED_v2"})
 
+# Events whose whatsappMessageId is the OUTBOUND message's WAMID (the id an
+# inbound reply later quotes). messageReceived carries the INBOUND message's own
+# WAMID instead, so it is excluded — its replyContextId is the quote we match on.
+_OUTBOUND_WAMID_EVENTS = frozenset({
+    "templateMessageSent_v2", "sentMessageDELIVERED_v2",
+    "sentMessageREAD_v2", "sentMessageREPLIED_v2",
+})
+
 
 def _make_client(timeout: float = 30.0) -> httpx.AsyncClient:
     """Hook for tests — monkeypatch to inject httpx.MockTransport."""
@@ -94,6 +102,25 @@ def _extract_local_message_id(resp: dict[str, Any]) -> Optional[str]:
 def _strip_plus(e164: str) -> str:
     """WATI accepts digits-only (no leading '+')."""
     return e164.lstrip("+").strip()
+
+
+def _evaluate_send_truth(resp: dict[str, Any]) -> tuple[bool, Optional[str]]:
+    """A WATI 200 is a real send only if result==true AND every receiver is a
+    valid WhatsApp number with no errors. Returns (accepted, reason)."""
+    if "result" in resp and not resp.get("result"):
+        err = resp.get("error")
+        return False, f"WATI rejected the send: {err}" if err else "WATI result=false"
+    receivers = resp.get("receivers")
+    if isinstance(receivers, list):
+        for entry in receivers:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("isValidWhatsAppNumber") is False:
+                return False, f"not a valid WhatsApp number (waId={entry.get('waId')})"
+            errs = entry.get("errors")
+            if isinstance(errs, list) and errs:
+                return False, f"receiver errors: {errs}"
+    return True, None
 
 
 def _extract_button_id(raw: dict[str, Any]) -> Optional[str]:
@@ -336,9 +363,12 @@ class WatiAdapter:
             raise WatiServiceError(
                 "WATI send_template response missing localMessageId — cannot correlate inbound webhooks"
             )
+        accepted, reason = _evaluate_send_truth(raw)
         return CanonicalSendResponse(
             provider_correlation_id=local_msg_id,
             contact=request.contact,
+            accepted=accepted,
+            reason=reason,
             raw=raw,
         )
 
@@ -387,6 +417,18 @@ class WatiAdapter:
         )
         if parent is None:
             return
+
+        # Capture the outbound WAMID into provider_reply_ref the first time a
+        # status event surfaces it, so a later reply can match its replyContextId.
+        if event_type in _OUTBOUND_WAMID_EVENTS and not parent.provider_reply_ref:
+            wamid = payload.get("whatsappMessageId")
+            if wamid:
+                await db.execute(
+                    update(WorkflowRunRecipientAction)
+                    .where(WorkflowRunRecipientAction.id == parent.id)
+                    .values(provider_reply_ref=str(wamid))
+                )
+                parent.provider_reply_ref = str(wamid)
 
         _status, child_action_type, resumes = _EVENT_MAP[event_type]
         if child_action_type is None:
@@ -507,9 +549,12 @@ class WatiAdapter:
             )
         )
 
+        # Replies quote the outbound WAMID — match it on the generic
+        # provider_reply_ref column (captured at the first status event),
+        # never a response JSONB path.
         if reply_ctx:
             q = base.where(
-                WorkflowRunRecipientAction.response["whatsappMessageId"].astext == str(reply_ctx)
+                WorkflowRunRecipientAction.provider_reply_ref == str(reply_ctx)
             )
             rows = (await db.execute(q)).all()
             if len(rows) == 1:
@@ -521,9 +566,11 @@ class WatiAdapter:
                     reply_ctx, len(rows),
                 )
                 return None, None
+        # Status events carry the send-time localMessageId — match it on the
+        # provider_correlation_id column stamped at dispatch.
         if local_msg:
             q = base.where(
-                WorkflowRunRecipientAction.response["localMessageId"].astext == str(local_msg)
+                WorkflowRunRecipientAction.provider_correlation_id == str(local_msg)
             ).order_by(WorkflowRunRecipientAction.created_at.desc()).limit(1)
             row = (await db.execute(q)).first()
             if row is not None:

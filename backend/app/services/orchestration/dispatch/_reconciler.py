@@ -106,9 +106,10 @@ async def apply_terminal_event(
                 payload=inherited_payload,
                 response=child_response_payload,
                 parent_action_id=action.id,
-                # Inherit the generic send-time id so the child outcome row stays
-                # joinable to the upstream provider event.
+                # Inherit both correlation handles so an outcome-filtered child
+                # row stays joinable to the upstream send and any reply quote.
                 provider_correlation_id=action.provider_correlation_id,
+                provider_reply_ref=action.provider_reply_ref,
                 provider_terminal=True,
                 completed_at=now,
             )

@@ -95,7 +95,7 @@ async def run_finalize_run_cancel(
                     provider_connection_id=conn_id,
                     action_id=action.id if action else None,
                     batch_correlation_id=(
-                        action.provider_correlation_id
+                        getattr(action, "provider_correlation_id", None)
                         if action and (action.payload or {}).get("mode") == "batch"
                         else None
                     ),

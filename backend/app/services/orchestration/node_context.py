@@ -83,8 +83,11 @@ class NodeContext:
         return targets[0]
 
     def idempotency_key(self, recipient_id: str, *parts: str) -> str:
+        # Scoped to run_id, not workflow_version_id: two Run Nows of one version
+        # get two run ids → two keys → each sends; a retry inside one run keeps
+        # the run id → same key → the unique constraint still blocks a double-send.
         return _gen_idempotency_key(
-            self.workflow_version_id, self.current_node_id, recipient_id, *parts
+            self.run_id, self.current_node_id, recipient_id, *parts
         )
 
     async def dispatch_actions(self, actions: list[ActionDispatch]) -> list[ActionResult]:
@@ -157,13 +160,16 @@ class NodeContext:
         response: Optional[dict[str, Any]] = None,
         error: Optional[str] = None,
         provider_correlation_id: Optional[str] = None,
+        provider_reply_ref: Optional[str] = None,
         provider_status: Optional[str] = None,
     ) -> None:
         """Mark the action success/failed after the provider call completes.
 
-        ``provider_correlation_id`` is the generic send-time id (Bolna
-        execution_id/batch_id, WATI localMessageId) all providers correlate
-        status on; ``provider_status`` is the upstream queue status hint.
+        ``provider_correlation_id`` is the channel-agnostic send-time id
+        (Bolna execution_id/batch_id, WATI localMessageId, SMS provider id);
+        ``provider_reply_ref`` is the id an inbound reply quotes (WhatsApp
+        WAMID, null for voice); ``provider_status`` is the upstream queue
+        status (e.g. ``queued``).
         """
         values: dict[str, Any] = {
             "status": status,
@@ -173,6 +179,8 @@ class NodeContext:
         }
         if provider_correlation_id is not None:
             values["provider_correlation_id"] = provider_correlation_id
+        if provider_reply_ref is not None:
+            values["provider_reply_ref"] = provider_reply_ref
         if provider_status is not None:
             values["provider_status"] = provider_status
         await self.db.execute(
