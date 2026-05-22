@@ -14,6 +14,7 @@ from app.services.orchestration.nodes import (  # noqa: F401
     core_webhook_out,
     messaging_send_whatsapp_template,
     voice_place_call,
+    llm_extract,
     sink_complete,
 )
 

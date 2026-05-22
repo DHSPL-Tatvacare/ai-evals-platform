@@ -210,7 +210,10 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
         "display_category": "ingress",
         "description": "Trigger a workflow run when an external event fires (e.g. a new CRM lead).",
         "authoring_status": "active",
-        "editor_hints": {"empty_state_message": "Event payload is supplied by the trigger / webhook."},
+        "editor_hints": {
+            "preferred_editor": "EventTriggerInspector",
+            "empty_state_message": "Event payload is supplied by the trigger / webhook.",
+        },
         "required_payload_fields": [],
         "emitted_payload_fields": [],
         "output_edges": [{"id": "default", "label": "Cohort", "cardinality": "one", "dynamic": False}],
@@ -417,6 +420,30 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
         },
         "runtime_contract": {"execution_kind": "dispatch"},
     },
+    # ─── Mutation ───────────────────────────────────────────────────────────
+    # Scaffold seam for Track T1 — handler + tests + final copy land in T1.
+    "llm.extract": {
+        "display_label": "LLM Extract",
+        "display_category": "mutation",
+        "description": "Run a prompt over each contact's payload and write structured fields back for downstream nodes.",
+        "authoring_status": "hidden",
+        "editor_hints": {"preferred_editor": "LlmExtractEditor"},
+        "required_payload_fields": [],
+        "emitted_payload_fields": [],
+        "output_edges": [
+            {"id": "success", "label": "Success", "cardinality": "one", "dynamic": False},
+            {"id": "error", "label": "Error", "cardinality": "one", "dynamic": False},
+        ],
+        "graph_rules": {
+            "requires_incoming_edges": True,
+            "requires_outgoing_edges": True,
+            "required_output_ids": [],
+            "allows_multiple_outgoing_per_output": False,
+            "terminal": False,
+        },
+        "runtime_contract": {"execution_kind": "mutation"},
+    },
+
     # ─── Termination ────────────────────────────────────────────────────────
     "sink.complete": {
         "display_label": "Workflow Complete",

@@ -22,6 +22,7 @@ _FINALIZED_NODE_TYPES = {
     "logic.wait",
     "logic.merge",
     "core.webhook_out",
+    "llm.extract",
     "sink.complete",
 }
 
@@ -35,6 +36,8 @@ _SUPPORTED_PREFERRED_EDITORS = {
     "WaitConditionEditor",
     "MergePolicyEditor",
     "StructuredRequestBodyEditor",
+    "LlmExtractEditor",
+    "EventTriggerInspector",
 }
 
 

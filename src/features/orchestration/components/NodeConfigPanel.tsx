@@ -17,6 +17,8 @@ import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
 import { InspectorSection } from './inspector/InspectorPrimitives';
 import { ConditionalBranchesEditor } from './editors/ConditionalBranchesEditor';
 import { DatasetPicker } from './editors/DatasetPicker';
+import { EventTriggerInspector } from './EventTriggerInspector';
+import { LlmExtractEditor } from './editors/LlmExtractEditor';
 import { MergePolicyEditor } from './editors/MergePolicyEditor';
 import { RuleSetBuilder } from './editors/RuleSetBuilder';
 import { SourceCohortPicker } from './editors/SourceCohortPicker';
@@ -208,6 +210,20 @@ export function NodeConfigPanel() {
           appId={appId}
         />
       );
+      break;
+    }
+    // ── scaffold seam: parallel-build editors (T1 llm.extract, T3 event_trigger) ──
+    case 'LlmExtractEditor': {
+      body = (
+        <LlmExtractEditor
+          value={config}
+          onChange={(next) => setConfig({ ...config, ...next })}
+        />
+      );
+      break;
+    }
+    case 'EventTriggerInspector': {
+      body = <EventTriggerInspector />;
       break;
     }
     default: {
