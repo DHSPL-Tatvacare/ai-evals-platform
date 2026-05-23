@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.notification_subscription import NotificationSubscription
 from app.models.scheduled_job import ScheduledJobDefinition
 from app.services.mail.call_sites import CallSite
 
 logger = logging.getLogger(__name__)
+
+_IST = ZoneInfo("Asia/Kolkata")
+_ERROR_SUMMARY_MAX = 500
 
 
 class EventType(StrEnum):
@@ -194,3 +200,49 @@ async def emit_event(
         )
         enqueued += 1
     return enqueued
+
+
+def _ist_display(when: datetime) -> str:
+    return when.astimezone(_IST).strftime("%d %b %Y, %H:%M IST")
+
+
+def _truncate_error(raw: str | None) -> str:
+    text = raw or ""
+    return f"{text[:_ERROR_SUMMARY_MAX]}…" if len(text) > _ERROR_SUMMARY_MAX else text
+
+
+async def emit_workflow_run_event(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    workflow_name: str,
+    run_id: uuid.UUID,
+    event_type: EventType,
+    occurred_at: datetime | None = None,
+    error: str | None = None,
+) -> int:
+    """Build the workflow-run payload and fan it out via the tenant-scoped resolver."""
+    when = occurred_at or datetime.now(timezone.utc)
+    app_base = (settings.APP_BASE_URL or "").rstrip("/")
+    # URL derives from the run's own app_id — never a hardcoded app name.
+    run_url = f"{app_base}/{app_id}/orchestration/runs/{run_id}"
+
+    payload: dict[str, Any] = {
+        "workflow_name": workflow_name,
+        "run_id": str(run_id),
+        "run_url": run_url,
+    }
+    if event_type is EventType.WORKFLOW_RUN_FAILED:
+        payload["failed_at_display"] = _ist_display(when)
+        payload["error_summary"] = _truncate_error(error)
+    else:
+        payload["completed_at_display"] = _ist_display(when)
+
+    return await emit_event(
+        db,
+        tenant_id=tenant_id,
+        event_type=event_type,
+        payload=payload,
+        correlation_id=str(run_id),
+    )

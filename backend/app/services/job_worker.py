@@ -940,6 +940,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
         try:
             result_data = await process_job(job_id, job_type, params)
 
+            completed_emit_args: dict | None = None
             # Re-check: if job was cancelled during execution, don't overwrite
             async with async_session() as db:
                 job = await db.get(BackgroundJob, job_id)
@@ -987,6 +988,23 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                         duration_seconds=duration_seconds,
                         worker_id=WORKER_INSTANCE_ID,
                     )
+                    # Capture scalars while the session is open; fan out the
+                    # completion notification on a fresh session after close.
+                    if job.scheduled_job_id is not None:
+                        completed_emit_args = {
+                            "tenant_id": job.tenant_id,
+                            "definition_id": job.scheduled_job_id,
+                            "run_id": job.id,
+                            "completed_at": job.completed_at,
+                        }
+            if completed_emit_args is not None:
+                try:
+                    await _emit_scheduled_job_completed(**completed_emit_args)
+                except Exception as emit_err:
+                    logger.warning(
+                        "scheduled_job_completed_emit_event_error: %s",
+                        emit_err,
+                    )
             _cleanup_cancelled_job(job_id)
 
         except Exception as e:
@@ -997,6 +1015,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
             # Retry up to 3 times so a transient DB error doesn't
             # leave the job stuck in "running" forever.
             emit_args: dict | None = None
+            workflow_emit_args: dict | None = None
             for attempt in range(3):
                 try:
                     async with async_session() as db2:
@@ -1065,6 +1084,30 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                     )
                                     .values(status="failed", completed_at=j.completed_at)
                                 )
+                                # Capture the workflow-run failure (if this job
+                                # owned one) for the post-commit notification.
+                                from app.models.orchestration import (
+                                    Workflow as _WorkflowRepair,
+                                )
+                                _wf_run = await db2.scalar(
+                                    select(_WfRunRepair).where(
+                                        _WfRunRepair.job_id == job_id,
+                                        _WfRunRepair.status == "failed",
+                                    )
+                                )
+                                if _wf_run is not None:
+                                    _wf_name = await db2.scalar(
+                                        select(_WorkflowRepair.name).where(
+                                            _WorkflowRepair.id == _wf_run.workflow_id
+                                        )
+                                    )
+                                    workflow_emit_args = {
+                                        "tenant_id": _wf_run.tenant_id,
+                                        "app_id": _wf_run.app_id,
+                                        "workflow_name": _wf_name or "(workflow)",
+                                        "run_id": _wf_run.id,
+                                        "error": j.error_message,
+                                    }
                                 await cascade_dependency_failures(db=db2, commit=False)
                             await db2.commit()
                             _log_job_event(
@@ -1092,6 +1135,14 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                         except Exception as emit_err:
                             logger.warning(
                                 "scheduled_job_failed_emit_event_error: %s",
+                                emit_err,
+                            )
+                    if workflow_emit_args is not None:
+                        try:
+                            await _emit_workflow_run_failed(**workflow_emit_args)
+                        except Exception as emit_err:
+                            logger.warning(
+                                "workflow_run_failed_emit_event_error: %s",
                                 emit_err,
                             )
                     break
@@ -2086,6 +2137,84 @@ async def _emit_scheduled_job_failed(
             resource_type="scheduled_job_definition",
             resource_id=definition_id,
             correlation_id=str(run_id),
+        )
+        await db3.commit()
+
+
+async def _emit_scheduled_job_completed(
+    *,
+    tenant_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    run_id: uuid.UUID,
+    completed_at: datetime | None,
+) -> None:
+    """Fan a SCHEDULED_JOB_COMPLETED event out via the mail subsystem."""
+    from zoneinfo import ZoneInfo
+
+    from app.models.scheduled_job import ScheduledJobDefinition
+    from app.services.mail.event_pipeline import EventType, emit_event
+
+    done_at = completed_at or datetime.now(timezone.utc)
+    completed_at_display = done_at.astimezone(ZoneInfo("Asia/Kolkata")).strftime(
+        "%d %b %Y, %H:%M IST"
+    )
+
+    app_base = (settings.APP_BASE_URL or "").rstrip("/")
+    job_url = (
+        f"{app_base}/admin/scheduled-jobs"
+        f"?history={definition_id}&run={run_id}"
+    )
+
+    async with async_session() as db3:
+        # Tenant-filtered load — never resolve a definition owned by
+        # another tenant even if IDs were crossed.
+        defn = await db3.scalar(
+            select(ScheduledJobDefinition).where(
+                ScheduledJobDefinition.id == definition_id,
+                ScheduledJobDefinition.tenant_id == tenant_id,
+            )
+        )
+        job_name = defn.name if defn else "(removed schedule)"
+        await emit_event(
+            db3,
+            tenant_id=tenant_id,
+            event_type=EventType.SCHEDULED_JOB_COMPLETED,
+            payload={
+                "job_name": job_name,
+                "run_id": str(run_id),
+                "completed_at_display": completed_at_display,
+                "job_url": job_url,
+            },
+            correlation_id=str(run_id),
+        )
+        await db3.commit()
+
+
+async def _emit_workflow_run_failed(
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    workflow_name: str,
+    run_id: uuid.UUID,
+    error: str | None,
+) -> None:
+    """Fan a WORKFLOW_RUN_FAILED event out on a fresh, committed session.
+
+    The run handler's savepoint write is discarded when the worker rolls back
+    the failed run's session, so the durable failure email is enqueued here —
+    only after the repair path has committed the terminal failed status.
+    """
+    from app.services.mail.event_pipeline import EventType, emit_workflow_run_event
+
+    async with async_session() as db3:
+        await emit_workflow_run_event(
+            db3,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            run_id=run_id,
+            event_type=EventType.WORKFLOW_RUN_FAILED,
+            error=error,
         )
         await db3.commit()
 

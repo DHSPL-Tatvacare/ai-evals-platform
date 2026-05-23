@@ -2,5 +2,15 @@
 {% block content %}
 A workflow run failed
 
-A workflow run failed. Full body and CTA wired in a later phase.
+Your workflow "{{ workflow_name }}" stopped with an error at {{ failed_at_display }}. The error is shown below — open the run details for the full log.
+
+Error:
+{{ error_summary }}
+
+Open run details:
+{{ run_url }}
+
+Workflow: {{ workflow_name }}
+Run: {{ run_id }}
+Failed at: {{ failed_at_display }}
 {% endblock %}

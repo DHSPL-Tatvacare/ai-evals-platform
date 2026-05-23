@@ -2,5 +2,12 @@
 {% block content %}
 Scheduled job completed
 
-A scheduled job finished. Full body and CTA wired in a later phase.
+The scheduled job "{{ job_name }}" finished its run at {{ completed_at_display }}. Review the outcome below.
+
+Open run history:
+{{ job_url }}
+
+Job: {{ job_name }}
+Run: {{ run_id }}
+Completed at: {{ completed_at_display }}
 {% endblock %}

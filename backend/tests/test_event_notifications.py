@@ -444,5 +444,258 @@ class WorkerHookTruncationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(summary[:-1].startswith("x" * 500))
 
 
+class ScheduledJobCompletedProducerTests(unittest.IsolatedAsyncioTestCase):
+    """`_emit_scheduled_job_completed` mirrors the failed producer for the success path."""
+
+    async def test_emits_completed_call_site_and_payload(self):
+        from app.services import job_worker
+
+        captured: dict = {}
+
+        async def _fake_emit_event(_db, *, event_type, payload, **_kwargs):
+            captured["event_type"] = event_type
+            captured["payload"] = payload
+
+        fake_db = MagicMock()
+        fake_db.commit = AsyncMock()
+        fake_db.scalar = AsyncMock(return_value=_ns(name="Nightly cohort sync"))
+        fake_db.__aenter__ = AsyncMock(return_value=fake_db)
+        fake_db.__aexit__ = AsyncMock(return_value=None)
+
+        def _session_cm():
+            return fake_db
+
+        with patch.object(job_worker, "async_session", new=_session_cm), \
+             patch("app.services.mail.event_pipeline.emit_event", new=AsyncMock(side_effect=_fake_emit_event)):
+            await job_worker._emit_scheduled_job_completed(
+                tenant_id=uuid.uuid4(),
+                definition_id=uuid.uuid4(),
+                run_id=uuid.uuid4(),
+                completed_at=None,
+            )
+
+        self.assertEqual(captured["event_type"], EventType.SCHEDULED_JOB_COMPLETED)
+        self.assertEqual(captured["payload"]["job_name"], "Nightly cohort sync")
+        self.assertIn("completed_at_display", captured["payload"])
+        self.assertIn("scheduled-jobs", captured["payload"]["job_url"])
+
+
+class WorkflowRunProducerTests(unittest.IsolatedAsyncioTestCase):
+    """`emit_workflow_run_event` builds the right payload + call site, app-derived URL."""
+
+    async def test_completed_payload_and_call_site(self):
+        from app.services.mail.event_pipeline import emit_workflow_run_event
+
+        captured: dict = {}
+
+        async def _fake_emit(_db, *, tenant_id, event_type, payload, **kw):
+            captured.update(tenant_id=tenant_id, event_type=event_type, payload=payload)
+            return 1
+
+        run_id = uuid.uuid4()
+        with patch(
+            "app.services.mail.event_pipeline.emit_event",
+            new=AsyncMock(side_effect=_fake_emit),
+        ):
+            n = await emit_workflow_run_event(
+                MagicMock(),
+                tenant_id=uuid.uuid4(),
+                app_id="voice-rx",
+                workflow_name="Nightly outreach",
+                run_id=run_id,
+                event_type=EventType.WORKFLOW_RUN_COMPLETED,
+            )
+
+        self.assertEqual(n, 1)
+        self.assertEqual(captured["event_type"], EventType.WORKFLOW_RUN_COMPLETED)
+        self.assertEqual(captured["payload"]["workflow_name"], "Nightly outreach")
+        self.assertIn("completed_at_display", captured["payload"])
+        # URL is derived from the run's app_id — never a hardcoded app name.
+        self.assertIn("voice-rx", captured["payload"]["run_url"])
+        self.assertIn(str(run_id), captured["payload"]["run_url"])
+
+    async def test_failed_payload_truncates_error(self):
+        from app.services.mail.event_pipeline import emit_workflow_run_event
+
+        captured: dict = {}
+
+        async def _fake_emit(_db, *, event_type, payload, **kw):
+            captured.update(event_type=event_type, payload=payload)
+            return 0
+
+        with patch(
+            "app.services.mail.event_pipeline.emit_event",
+            new=AsyncMock(side_effect=_fake_emit),
+        ):
+            await emit_workflow_run_event(
+                MagicMock(),
+                tenant_id=uuid.uuid4(),
+                app_id="kaira-bot",
+                workflow_name="W",
+                run_id=uuid.uuid4(),
+                event_type=EventType.WORKFLOW_RUN_FAILED,
+                error="x" * 600,
+            )
+
+        self.assertEqual(captured["event_type"], EventType.WORKFLOW_RUN_FAILED)
+        summary = captured["payload"]["error_summary"]
+        self.assertEqual(len(summary), 501)
+        self.assertTrue(summary.endswith("…"))
+        self.assertIn("failed_at_display", captured["payload"])
+
+
+class RunHandlerWiringTests(unittest.IsolatedAsyncioTestCase):
+    """run_handler emits workflow events at the actual run-status transitions."""
+
+    async def test_maybe_complete_emits_only_on_completed_transition(self):
+        from app.services.orchestration import run_handler
+
+        workflow = _ns(name="W")
+
+        # Completed branch: no remaining recipients → first() is None.
+        run = _ns(id=uuid.uuid4(), tenant_id=uuid.uuid4(), app_id="voice-rx", status="running", completed_at=None)
+        db = MagicMock()
+        db.flush = AsyncMock()
+        res = MagicMock()
+        res.first = MagicMock(return_value=None)
+        db.execute = AsyncMock(return_value=res)
+        with patch.object(run_handler, "emit_workflow_run_event", new=AsyncMock()) as emit:
+            await run_handler._maybe_complete_run(db, run, workflow)
+        self.assertEqual(run.status, "completed")
+        emit.assert_awaited_once()
+        self.assertEqual(emit.await_args.kwargs["event_type"], EventType.WORKFLOW_RUN_COMPLETED)
+
+        # Waiting branch: recipients remain → no emit.
+        run2 = _ns(id=uuid.uuid4(), tenant_id=uuid.uuid4(), app_id="voice-rx", status="running", completed_at=None)
+        res2 = MagicMock()
+        res2.first = MagicMock(return_value=("pending",))
+        db.execute = AsyncMock(return_value=res2)
+        with patch.object(run_handler, "emit_workflow_run_event", new=AsyncMock()) as emit2:
+            await run_handler._maybe_complete_run(db, run2, workflow)
+        self.assertEqual(run2.status, "waiting")
+        emit2.assert_not_awaited()
+
+
+class WorkflowRunFailedHookTests(unittest.IsolatedAsyncioTestCase):
+    """The durable failure email is emitted on a fresh, committed session.
+
+    The run handler's savepoint is discarded when the worker rolls back the
+    failed run's session, so `_persist_failed_run` deliberately does NOT email;
+    the worker repair path owns the durable WORKFLOW_RUN_FAILED notification.
+    """
+
+    async def test_persist_failed_run_does_not_email(self):
+        from app.services.orchestration import run_handler
+
+        db = MagicMock()
+        nested = MagicMock()
+        nested.__aenter__ = AsyncMock(return_value=nested)
+        nested.__aexit__ = AsyncMock(return_value=None)
+        db.begin_nested = MagicMock(return_value=nested)
+        db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+
+        # No emit_workflow_run_event symbol is invoked from the savepoint path.
+        with patch.object(run_handler, "emit_workflow_run_event", new=AsyncMock()) as emit:
+            await run_handler._persist_failed_run(db, uuid.uuid4(), "boom")
+        emit.assert_not_awaited()
+
+    async def test_emit_workflow_run_failed_uses_call_site_and_truncates(self):
+        from app.services import job_worker
+
+        captured: dict = {}
+
+        async def _fake_emit(_db, *, event_type, payload, **_kw):
+            captured.update(event_type=event_type, payload=payload)
+            return 1
+
+        fake_db = MagicMock()
+        fake_db.commit = AsyncMock()
+        fake_db.__aenter__ = AsyncMock(return_value=fake_db)
+        fake_db.__aexit__ = AsyncMock(return_value=None)
+
+        def _cm():
+            return fake_db
+
+        with patch.object(job_worker, "async_session", new=_cm), \
+             patch("app.services.mail.event_pipeline.emit_event", new=AsyncMock(side_effect=_fake_emit)):
+            await job_worker._emit_workflow_run_failed(
+                tenant_id=uuid.uuid4(),
+                app_id="voice-rx",
+                workflow_name="Nightly outreach",
+                run_id=uuid.uuid4(),
+                error="x" * 600,
+            )
+
+        self.assertEqual(captured["event_type"], EventType.WORKFLOW_RUN_FAILED)
+        self.assertEqual(captured["payload"]["workflow_name"], "Nightly outreach")
+        self.assertIn("voice-rx", captured["payload"]["run_url"])
+        self.assertEqual(len(captured["payload"]["error_summary"]), 501)
+        fake_db.commit.assert_awaited_once()
+
+
+class FleshedTemplateRenderTests(unittest.IsolatedAsyncioTestCase):
+    """The three formerly-stub templates render real content on the signup chrome."""
+
+    async def _render(self, call_site, payload):
+        from app.services.mail import template_renderer
+
+        async def _fake_chrome(_db, _tid):
+            return ("Tatvacare", None)
+
+        with patch.object(template_renderer, "_load_tenant_chrome", new=_fake_chrome):
+            return await template_renderer.render(
+                db=MagicMock(), tenant_id=uuid.uuid4(), call_site=call_site, context=payload
+            )
+
+    async def test_workflow_run_completed_renders_name_cta_and_url(self):
+        rendered = await self._render(
+            CallSite.WORKFLOW_RUN_COMPLETED,
+            {
+                "workflow_name": "Nightly outreach",
+                "run_id": "RUN-xyz",
+                "completed_at_display": "23 May 2026, 04:11 IST",
+                "run_url": "https://app.example.test/voice-rx/orchestration/runs/RUN-xyz",
+            },
+        )
+        self.assertIn("Workflow run completed", rendered.subject)
+        self.assertIn("Nightly outreach", rendered.html)
+        self.assertIn("Open run details", rendered.html)
+        self.assertIn("RUN-xyz", rendered.html)
+        self.assertIn("Nightly outreach", rendered.text)
+        self.assertIn("Open run details", rendered.text)
+
+    async def test_workflow_run_failed_renders_error_and_cta(self):
+        rendered = await self._render(
+            CallSite.WORKFLOW_RUN_FAILED,
+            {
+                "workflow_name": "Nightly outreach",
+                "run_id": "RUN-xyz",
+                "failed_at_display": "23 May 2026, 04:11 IST",
+                "error_summary": "boom" + "x" * 200,
+                "run_url": "https://app.example.test/voice-rx/orchestration/runs/RUN-xyz",
+            },
+        )
+        self.assertIn("Workflow run failed", rendered.subject)
+        self.assertIn("Nightly outreach", rendered.html)
+        self.assertIn("boom", rendered.html)
+        self.assertIn("Open run details", rendered.html)
+        self.assertIn("Open run details", rendered.text)
+
+    async def test_scheduled_job_completed_renders_name_and_cta(self):
+        rendered = await self._render(
+            CallSite.SCHEDULED_JOB_COMPLETED,
+            {
+                "job_name": "Nightly cohort sync",
+                "run_id": "RUN-abc",
+                "completed_at_display": "23 May 2026, 04:11 IST",
+                "job_url": "https://app.example.test/admin/scheduled-jobs?history=D&run=R",
+            },
+        )
+        self.assertIn("Scheduled job completed", rendered.subject)
+        self.assertIn("Nightly cohort sync", rendered.html)
+        self.assertIn("Open run history", rendered.html)
+        self.assertIn("Open run history", rendered.text)
+
+
 if __name__ == "__main__":
     unittest.main()

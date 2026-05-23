@@ -30,6 +30,7 @@ from app.models.orchestration import (
     WorkflowRunRecipientState,
     WorkflowVersion,
 )
+from app.services.mail.event_pipeline import EventType, emit_workflow_run_event
 from app.services.orchestration.cohort_stream import CohortStream
 from app.services.orchestration.connections.resolver import ConnectionResolver
 from app.services.orchestration.node_context import NodeContext, ServiceRegistry
@@ -111,7 +112,7 @@ async def run_workflow_job(
             await _execute_source_nodes(executor)
 
         await executor.run_until_quiescent()
-        await _maybe_complete_run(db, run)
+        await _maybe_complete_run(db, run, workflow)
 
     except Exception as exc:
         # Persist the failed status in its own committed transaction so it
@@ -144,6 +145,9 @@ async def _persist_failed_run(
 
     Using a SAVEPOINT means the failed-status write commits even when the
     surrounding session is rolled back by the worker's outer exception path.
+    The WORKFLOW_RUN_FAILED notification is NOT emitted here — the savepoint is
+    discarded if the outer transaction rolls back, so the durable terminal-
+    failure transition (and its email) is owned by the worker repair path.
     """
     failed_at = datetime.now(timezone.utc)
     async with db.begin_nested():
@@ -281,7 +285,9 @@ async def _execute_source_nodes(executor: RunExecutor) -> None:
         await executor.db.flush()
 
 
-async def _maybe_complete_run(db: AsyncSession, run: WorkflowRun) -> None:
+async def _maybe_complete_run(
+    db: AsyncSession, run: WorkflowRun, workflow: Workflow
+) -> None:
     """If no recipients remain in pending/running/ready/waiting, mark the run complete."""
     res = await db.execute(
         select(WorkflowRunRecipientState.status)
@@ -293,9 +299,21 @@ async def _maybe_complete_run(db: AsyncSession, run: WorkflowRun) -> None:
     if res.first() is None:
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
+        await db.flush()
+        # Enqueue on the run's own session so the notification commits
+        # atomically with the completion write.
+        await emit_workflow_run_event(
+            db,
+            tenant_id=run.tenant_id,
+            app_id=run.app_id,
+            workflow_name=workflow.name,
+            run_id=run.id,
+            event_type=EventType.WORKFLOW_RUN_COMPLETED,
+            occurred_at=run.completed_at,
+        )
     else:
         run.status = "waiting"
-    await db.flush()
+        await db.flush()
 
 
 def _build_service_registry() -> ServiceRegistry:
