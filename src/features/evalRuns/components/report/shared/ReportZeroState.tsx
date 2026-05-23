@@ -10,6 +10,7 @@ interface ReportVariantTheme {
   accentMuted: string;
 }
 
+// Brand a new documentVariant by adding an entry here; unknown variants fall back to the brand default.
 const REPORT_VARIANT_THEMES: Record<string, ReportVariantTheme> = {
   'kaira-run-v1': { accent: 'var(--color-accent-teal)', accentMuted: 'var(--surface-success)' },
   'inside-sales-run-v1': { accent: 'var(--color-accent-purple)', accentMuted: 'var(--surface-brand-subtle)' },

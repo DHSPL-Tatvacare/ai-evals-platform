@@ -36,6 +36,7 @@ _DEFAULT_THEME = PrintThemeTokenSet(
     background='#ffffff',
 )
 
+# Brand a new documentVariant by adding an entry here; unknown variants use _DEFAULT_THEME.
 _THEMES_BY_VARIANT: dict[str, PrintThemeTokenSet] = {
     'kaira-run-v1': PrintThemeTokenSet(
         accent='#0f766e',
