@@ -245,8 +245,8 @@ class TriggerResponse(CamelModel):
     scheduled_job_id: Optional[uuid.UUID]
     params: dict[str, Any]
     active: bool
-    # Token is never returned in the clear on reads — only masked. The full
-    # token rides webhook_url, returned at create / on rotate.
+    # Compact display preview only; the usable webhook_url carries the full
+    # token on every read, consistent with provider-connection webhooks.
     webhook_token_masked: str
     webhook_url: Optional[str]
     created_at: datetime

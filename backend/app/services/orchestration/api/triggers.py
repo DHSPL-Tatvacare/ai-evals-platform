@@ -46,8 +46,9 @@ def _compose_event_webhook_url(
 
 
 def serialize_trigger(trigger: WorkflowTrigger, *, base_url: str = "") -> dict[str, Any]:
-    """Trigger view with the token MASKED. The full token only ever rides the
-    composed ``webhook_url`` (returned at create / on explicit rotate)."""
+    """Trigger view. ``webhook_token_masked`` is a compact display preview; the
+    usable ``webhook_url`` carries the full token on every read, consistent with
+    provider-connection webhooks (persistent inbound URL)."""
     return {
         "id": trigger.id,
         "workflow_id": trigger.workflow_id,

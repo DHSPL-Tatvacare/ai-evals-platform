@@ -43,7 +43,9 @@ class MytatvaEventSourceAdapter:
             return None
         return self.EVENT_MAP.get(str(event_type))
 
-    def normalize_event(self, raw: dict[str, Any]) -> CanonicalEventBatch:
+    def normalize_event(
+        self, raw: dict[str, Any], *, headers: Optional[Mapping[str, str]] = None,  # noqa: ARG002
+    ) -> CanonicalEventBatch:
         event_type = str(raw.get("event_type") or "")
         event_name = self.EVENT_MAP.get(event_type) or ""
         patient_id = str(raw.get("patient_id") or "")

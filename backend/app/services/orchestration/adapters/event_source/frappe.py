@@ -62,9 +62,11 @@ class FrappeEventSourceAdapter:
             return None
         return self.EVENT_MAP.get(f"{doctype}:{doc_event}")
 
-    def normalize_event(self, raw: dict[str, Any]) -> CanonicalEventBatch:
+    def normalize_event(
+        self, raw: dict[str, Any], *, headers: Optional[Mapping[str, str]] = None,
+    ) -> CanonicalEventBatch:
         doctype = str(raw.get("doctype") or "")
-        doc_event = _doc_event(raw, None) or ""
+        doc_event = _doc_event(raw, headers) or ""
         doc_name = str(raw.get("name") or "")
         event_name = self.EVENT_MAP.get(f"{doctype}:{doc_event}") or ""
         payload = {

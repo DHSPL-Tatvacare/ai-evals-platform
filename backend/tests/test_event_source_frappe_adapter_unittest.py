@@ -105,3 +105,14 @@ def test_frappe_event_name_from_header_when_no_inline_event(monkeypatch):
     # Header-driven event resolution (Frappe sets X-Frappe-Event on the POST).
     name = adapter.map_event_name({**_LEAD_DOC}, headers={"x-frappe-event": "after_insert"})
     assert name == "crm.lead.created"
+
+
+def test_frappe_normalize_resolves_event_from_header_no_inline_key():
+    adapter = _adapter()
+    # No inline _frappe_doc_event — the doc-event rides the X-Frappe-Event header.
+    raw = {**_LEAD_DOC}
+    batch = adapter.normalize_event(raw, headers={"X-Frappe-Event": "after_insert"})
+    assert batch.event_name == "crm.lead.created"
+    assert batch.ingest_id == "frappe|Lead|CRM-LEAD-2026-00001|after_insert"
+    assert len(batch.recipients) == 1
+    assert batch.recipients[0].recipient_id == "CRM-LEAD-2026-00001"

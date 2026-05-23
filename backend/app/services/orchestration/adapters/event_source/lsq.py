@@ -32,7 +32,9 @@ class LsqEventSourceAdapter:
             return None
         return self.EVENT_MAP.get(str(event))
 
-    def normalize_event(self, raw: dict[str, Any]) -> CanonicalEventBatch:
+    def normalize_event(
+        self, raw: dict[str, Any], *, headers: Optional[Mapping[str, str]] = None,  # noqa: ARG002
+    ) -> CanonicalEventBatch:
         event = str(raw.get("Event") or "")
         event_name = self.EVENT_MAP.get(event) or ""
         # Grouped activity batches reference one prospect via RelatedProspectId;

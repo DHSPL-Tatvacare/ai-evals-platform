@@ -27,7 +27,9 @@ class WebhookEventSourceAdapter:
     ) -> Optional[str]:
         return _event_name(raw)
 
-    def normalize_event(self, raw: dict[str, Any]) -> CanonicalEventBatch:
+    def normalize_event(
+        self, raw: dict[str, Any], *, headers: Optional[Mapping[str, str]] = None,  # noqa: ARG002
+    ) -> CanonicalEventBatch:
         event_name = _event_name(raw) or ""
         recipients = self._recipients(raw)
         ingest_id = raw.get("ingest_id") or raw.get("ingestId")

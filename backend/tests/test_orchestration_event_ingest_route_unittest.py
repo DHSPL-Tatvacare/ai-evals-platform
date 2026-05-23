@@ -144,6 +144,46 @@ async def test_replay_dedupe_single_run(db_session, seed_full_run):
 
 
 @pytest.mark.asyncio
+async def test_frappe_event_in_header_creates_run(db_session, seed_full_run):
+    # Real Frappe webhook: doc-event rides the X-Frappe-Event header, not the body.
+    trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="frappe")
+    _override_db_with_session(db_session)
+    try:
+        r = await _client_post(
+            f"{WEBHOOKS}/event/frappe/{token}",
+            {"doctype": "Lead", "name": "CRM-LEAD-HDR-1", "lead_name": "Hdr"},
+            headers={"X-Frappe-Event": "after_insert"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["runsCreated"] == 1, body
+        assert body["deduped"] is False
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    runs = (await db_session.execute(
+        select(WorkflowRun).where(WorkflowRun.trigger_id == trig.id)
+    )).scalars().all()
+    assert len(runs) == 1
+
+
+@pytest.mark.asyncio
+async def test_body_over_max_bytes_413(db_session, seed_full_run):
+    trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="webhook")
+    _override_db_with_session(db_session)
+    try:
+        oversized = {
+            "event_name": "crm.lead.created",
+            "recipient_id": "evt-1",
+            "blob": "x" * 1_000_001,
+        }
+        r = await _client_post(f"{WEBHOOKS}/event/webhook/{token}", oversized)
+        assert r.status_code == 413, r.text
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
 async def test_unmapped_event_name_is_accepted_noop(db_session, seed_full_run):
     # Frappe doc with an unmapped doctype → adapter maps to None → no run, 200 ack.
     trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="frappe")

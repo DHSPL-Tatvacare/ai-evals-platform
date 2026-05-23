@@ -149,7 +149,8 @@ async def fire_event(
             await db.flush()
         except IntegrityError:
             # Concurrent duplicate inbound event raced us to the unique index;
-            # roll back to the prior savepoint and resolve the winner's run.
+            # full rollback discards our loser run/job, then resolve and return
+            # the winner's run.
             await db.rollback()
             prior = (await db.execute(
                 select(EventIngestLog).where(

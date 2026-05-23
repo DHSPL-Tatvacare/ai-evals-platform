@@ -127,6 +127,10 @@ async def lifespan(app: FastAPI):
     import app.services.orchestration.adapters.aisensy as _register_aisensy_adapter  # noqa: F401
     import app.services.orchestration.adapters.bolna as _register_bolna_adapter  # noqa: F401
 
+    # Fail boot if any event_source adapter's EVENT_MAP drifts from the catalog.
+    from app.services.orchestration.event_catalog import assert_adapters_aligned_with_catalog
+    assert_adapters_aligned_with_catalog()
+
     # Schema is owned by Alembic; migrations were applied by entrypoint.sh's
     # `alembic upgrade head` before this process started. Log the alembic head
     # for diagnostics, then sync manifest-driven COMMENT ON COLUMN rows

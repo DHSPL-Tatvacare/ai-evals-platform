@@ -136,7 +136,8 @@ async def event_ingest_webhook(
     if not adapter.verify_signature(raw_body, dict(request.headers)):
         raise HTTPException(status_code=404, detail="not found")
 
-    canonical_name = adapter.map_event_name(payload)
+    headers = dict(request.headers)
+    canonical_name = adapter.map_event_name(payload, headers=headers)
     if not canonical_name:
         # Native event has no canonical mapping — acknowledge so the CRM stops
         # retrying, but create nothing.
@@ -145,7 +146,7 @@ async def event_ingest_webhook(
         )
         return {"status": "ok", "runsCreated": 0, "deduped": False, "runIds": []}
 
-    batch = adapter.normalize_event(payload)
+    batch = adapter.normalize_event(payload, headers=headers)
     if len(batch.recipients) > _MAX_EVENT_RECIPIENTS:
         raise HTTPException(status_code=413, detail="too many recipients in one event")
 
