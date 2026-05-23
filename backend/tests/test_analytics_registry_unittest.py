@@ -27,8 +27,6 @@ class AnalyticsRegistryTests(unittest.TestCase):
         self.assertIsNotNone(profile.report_service_cls)
         self.assertIsNotNone(profile.report_payload_model)
         self.assertIsNotNone(profile.cross_run_adapter)
-        self.assertIsNotNone(profile.cross_run_summary_narrator_cls)
-        self.assertIsNotNone(profile.cross_run_summary_model)
 
     def test_inside_sales_profile_exposes_expected_runtime_components(self):
         profile = get_analytics_profile('inside_sales_v1')
@@ -37,8 +35,6 @@ class AnalyticsRegistryTests(unittest.TestCase):
         self.assertIsNotNone(profile.report_service_cls)
         self.assertIsNotNone(profile.report_payload_model)
         self.assertIsNotNone(profile.cross_run_adapter)
-        self.assertIsNotNone(profile.cross_run_summary_narrator_cls)
-        self.assertIsNotNone(profile.cross_run_summary_model)
 
     def test_voice_rx_profile_is_explicit_and_runtime_enabled(self):
         profile = get_analytics_profile('voice_rx_v1')

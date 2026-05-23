@@ -33,5 +33,3 @@ class AnalyticsProfile:
     report_service_cls: type | None = None
     report_payload_model: type[CamelModel] | None = None
     cross_run_adapter: CrossRunAdapter | None = None
-    cross_run_summary_narrator_cls: type | None = None
-    cross_run_summary_model: type[CamelModel] | None = None

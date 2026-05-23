@@ -6,11 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.schemas.app_analytics_config import AppAnalyticsConfig
-from app.services.reports.contracts.cross_run_narrative import (
-    CrossRunNarrativePattern,
-    CrossRunNarrativeRecommendation,
-    PlatformCrossRunNarrative,
-)
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunMetadata, PlatformCrossRunPayload
 from app.services.reports.contracts.run_narrative import (
     PlatformRunNarrative,
@@ -23,7 +18,7 @@ from app.services.reports.contracts.run_report import PlatformReportMetadata, Pl
 from app.services.reports.document_composer import compose_document
 from app.services.reports.report_composer import compose_cross_run_report, compose_run_report
 from app.services.reports.schemas import ReportPayload
-from app.services.reports.cross_run_aggregator import CrossRunAISummary, CrossRunAnalytics
+from app.services.reports.cross_run_aggregator import CrossRunAnalytics
 from app.services.reports.inside_sales_cross_run import InsideSalesCrossRunAnalytics
 from app.services.reports.inside_sales_schemas import DimensionStats, InsideSalesReportPayload
 
@@ -746,29 +741,6 @@ def adapt_kaira_cross_run_from_runs(
         section_configs=analytics_config.cross_run.sections,
         section_payloads=section_payloads,
         export_document=None,
-    )
-
-
-def adapt_cross_run_summary(summary: CrossRunAISummary) -> PlatformCrossRunNarrative:
-    return PlatformCrossRunNarrative(
-        executive_summary=summary.executive_summary,
-        trend_analysis=summary.trend_analysis,
-        critical_patterns=[
-            CrossRunNarrativePattern(
-                title=f'Pattern {index + 1}',
-                summary=item,
-                affected_runs=0,
-            )
-            for index, item in enumerate(summary.critical_patterns)
-        ],
-        strategic_recommendations=[
-            CrossRunNarrativeRecommendation(
-                priority=f'P{min(index, 2)}',
-                action=item,
-                expected_impact='',
-            )
-            for index, item in enumerate(summary.strategic_recommendations)
-        ],
     )
 
 

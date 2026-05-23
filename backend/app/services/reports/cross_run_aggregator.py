@@ -110,13 +110,6 @@ class IssuesAndRecommendations(CamelModel):
     runs_without_narrative: int
 
 
-class CrossRunAISummary(CamelModel):
-    executive_summary: str
-    trend_analysis: str
-    critical_patterns: list[str]
-    strategic_recommendations: list[str]
-
-
 class CrossRunAnalytics(CamelModel):
     stats: CrossRunStats
     health_trend: list[HealthTrendPoint]
@@ -538,5 +531,4 @@ class CrossRunAggregator:
 RuleComplianceHeatmap.model_rebuild()
 AdversarialHeatmap.model_rebuild()
 IssuesAndRecommendations.model_rebuild()
-CrossRunAISummary.model_rebuild()
 CrossRunAnalytics.model_rebuild()

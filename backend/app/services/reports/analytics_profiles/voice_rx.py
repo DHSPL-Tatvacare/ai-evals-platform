@@ -6,8 +6,6 @@ from app.schemas.app_analytics_config import AppAnalyticsConfig
 from app.services.reports.analytics_profiles.base import AnalyticsProfile, CrossRunAdapter
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
-from app.services.reports.cross_run_aggregator import CrossRunAISummary
-from app.services.reports.cross_run_narrator import CrossRunNarrator
 from app.services.reports.voice_rx_cross_run import build_voice_rx_cross_run_payload
 from app.services.reports.voice_rx_report_service import VoiceRxReportService
 
@@ -37,6 +35,4 @@ VOICE_RX_ANALYTICS_PROFILE = AnalyticsProfile(
     report_service_cls=VoiceRxReportService,
     report_payload_model=PlatformRunReportPayload,
     cross_run_adapter=VoiceRxCrossRunAdapter(),
-    cross_run_summary_narrator_cls=CrossRunNarrator,
-    cross_run_summary_model=CrossRunAISummary,
 )

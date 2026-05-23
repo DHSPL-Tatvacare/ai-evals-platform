@@ -7,8 +7,6 @@ from app.services.reports.analytics_profiles.base import AnalyticsProfile, Cross
 from app.services.reports.canonical_adapters import adapt_inside_sales_cross_run_from_runs
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
-from app.services.reports.cross_run_aggregator import CrossRunAISummary
-from app.services.reports.cross_run_narrator import CrossRunNarrator
 from app.services.reports.inside_sales_report_service import InsideSalesReportService
 
 
@@ -37,6 +35,4 @@ INSIDE_SALES_ANALYTICS_PROFILE = AnalyticsProfile(
     report_service_cls=InsideSalesReportService,
     report_payload_model=PlatformRunReportPayload,
     cross_run_adapter=InsideSalesCrossRunAdapter(),
-    cross_run_summary_narrator_cls=CrossRunNarrator,
-    cross_run_summary_model=CrossRunAISummary,
 )

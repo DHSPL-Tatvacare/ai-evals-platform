@@ -7,8 +7,6 @@ from app.services.reports.analytics_profiles.base import AnalyticsProfile, Cross
 from app.services.reports.canonical_adapters import adapt_kaira_cross_run_from_runs
 from app.services.reports.contracts.cross_run_report import PlatformCrossRunPayload
 from app.services.reports.contracts.run_report import PlatformRunReportPayload
-from app.services.reports.cross_run_aggregator import CrossRunAISummary
-from app.services.reports.cross_run_narrator import CrossRunNarrator
 from app.services.reports.report_service import ReportService
 
 
@@ -37,6 +35,4 @@ KAIRA_ANALYTICS_PROFILE = AnalyticsProfile(
     report_service_cls=ReportService,
     report_payload_model=PlatformRunReportPayload,
     cross_run_adapter=KairaCrossRunAdapter(),
-    cross_run_summary_narrator_cls=CrossRunNarrator,
-    cross_run_summary_model=CrossRunAISummary,
 )
