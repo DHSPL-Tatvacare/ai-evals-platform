@@ -38,10 +38,7 @@ describe('queries/eventTriggers', () => {
       wrapper: wrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(getEventCatalog).toHaveBeenCalledWith({
-      workflowType: 'clinical',
-      appId: 'app-1',
-    });
+    expect(getEventCatalog).toHaveBeenCalledWith({ workflowType: 'clinical' });
   });
 
   it('disables the catalog query until both workflow_type and appId are known', () => {

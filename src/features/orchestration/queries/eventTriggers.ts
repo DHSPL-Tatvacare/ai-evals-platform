@@ -16,7 +16,7 @@ import {
   type CreateEventTriggerBody,
   type EventCatalogResponse,
   type EventTrigger,
-  type EventTriggerSecretReveal,
+  type RotateTokenResponse,
   type UpdateEventTriggerBody,
 } from '@/services/api/orchestrationTriggers';
 import type { WorkflowType } from '@/features/orchestration/types';
@@ -43,10 +43,7 @@ export function useEventCatalog(
       ? eventTriggerQueryKeys.catalog(workflowType as WorkflowType, appId as string)
       : (['orchestration', 'event-catalog', '__disabled__'] as const),
     queryFn: () =>
-      getEventCatalog({
-        workflowType: workflowType as WorkflowType,
-        appId: appId as string,
-      }),
+      getEventCatalog({ workflowType: workflowType as WorkflowType }),
     enabled,
     staleTime: CATALOG_STALE_TIME_MS,
   });
@@ -67,7 +64,7 @@ export function useEventTriggers(workflowId: string | null | undefined) {
 
 export function useCreateEventTriggerMutation(workflowId: string | null | undefined) {
   const queryClient = useQueryClient();
-  return useMutation<EventTriggerSecretReveal, unknown, CreateEventTriggerBody>({
+  return useMutation<EventTrigger, unknown, CreateEventTriggerBody>({
     mutationFn: (body) => createEventTrigger(workflowId as string, body),
     onSuccess: () => {
       if (!workflowId) return;
@@ -112,7 +109,7 @@ export function useRotateEventTriggerTokenMutation(
   workflowId: string | null | undefined,
 ) {
   const queryClient = useQueryClient();
-  return useMutation<EventTriggerSecretReveal, unknown, { triggerId: string }>({
+  return useMutation<RotateTokenResponse, unknown, { triggerId: string }>({
     mutationFn: ({ triggerId }) => rotateEventTriggerToken(triggerId),
     onSuccess: () => {
       if (!workflowId) return;

@@ -3,53 +3,40 @@ import type { WorkflowType } from '@/features/orchestration/types';
 
 /** Event-source vendor selected on an event trigger. `webhook` is the
  *  identity passthrough (payload already canonical); the others map native
- *  CRM/clinical payloads → canonical via a per-vendor adapter (T2). Mirrors
- *  the backend `EventSourceAdapter` registry. */
+ *  CRM/clinical payloads → canonical via a per-vendor adapter. Mirrors the
+ *  backend `EventSourceAdapter` registry. */
 export type EventTriggerVendor = 'webhook' | 'frappe' | 'lsq' | 'mytatva';
 
-/** One canonical event name plus its human label for the catalog combobox.
- *  Names are namespaced (`crm.*` / `clinical.*`) and gated by the workflow's
- *  `workflow_type` on the backend. */
-export interface EventCatalogEntry {
-  name: string;
-  label: string;
-}
-
+/** Catalog response — canonical event names gated by `workflow_type`
+ *  (lowercase `crm` / `clinical`) on the backend. Names are plain strings. */
 export interface EventCatalogResponse {
   workflowType: WorkflowType;
-  events: EventCatalogEntry[];
+  events: string[];
 }
 
-/** An event-mode trigger binding. The token is masked on GET (mirrors the
- *  `ProviderConnection` secret-strip lens) and returned in full ONCE on
- *  create / rotate. `webhookUrl`, `samplePayload`, and `curlSnippet` are
- *  composed by the backend so the "Connect your system" panel never
- *  hand-assembles the inbound contract. */
+/** An event-mode trigger binding. The raw token is masked on reads
+ *  (`webhookTokenMasked`); the usable inbound URL carries the token and is
+ *  composed by the backend (`webhookUrl`). Mirrors `TriggerResponse`. */
 export interface EventTrigger {
   id: string;
   workflowId: string;
-  kind: 'event';
+  kind: string;
   eventName: string | null;
   vendor: EventTriggerVendor;
-  /** Masked preview on GET (e.g. `wXyZ••••AbCd`); never the live secret. */
+  /** Masked preview (e.g. `wXyZ••••AbCd`); never the live secret. */
   webhookTokenMasked: string | null;
-  /** Origin-relative or absolute inbound URL composed by the backend. */
+  /** Inbound URL (absolute) the external system POSTs to. Carries the token. */
   webhookUrl: string | null;
-  /** Verbatim sample event body for this vendor + event. */
-  samplePayload: Record<string, unknown> | null;
-  /** Ready-to-run curl invocation (URL + headers + sample body). */
-  curlSnippet: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** Create / rotate responses reveal the plaintext token ONCE — the only time
- *  the UI ever sees it. The masked field is dropped to make "show once" a
- *  type-level guarantee. */
-export interface EventTriggerSecretReveal extends Omit<EventTrigger, 'webhookTokenMasked'> {
-  /** Plaintext token, shown exactly once. Never returned again on GET. */
-  webhookToken: string;
+/** Rotate response — the refreshed inbound URL (with the new token) plus the
+ *  masked preview. Mirrors the backend `TriggerRotateTokenResponse`. */
+export interface RotateTokenResponse {
+  webhookUrl: string | null;
+  webhookTokenMasked: string;
 }
 
 export interface CreateEventTriggerBody {
@@ -58,9 +45,8 @@ export interface CreateEventTriggerBody {
   active?: boolean;
 }
 
+/** PATCH only toggles `active` — event_name/vendor are immutable post-create. */
 export interface UpdateEventTriggerBody {
-  eventName?: string;
-  vendor?: EventTriggerVendor;
   active?: boolean;
 }
 
@@ -80,12 +66,8 @@ function normalizeTrigger<T extends { webhookUrl: string | null }>(trigger: T): 
  *  silently returns an empty list — pass the literal store value. */
 export async function getEventCatalog(params: {
   workflowType: WorkflowType;
-  appId: string;
 }): Promise<EventCatalogResponse> {
-  const q = new URLSearchParams({
-    workflowType: params.workflowType,
-    appId: params.appId,
-  });
+  const q = new URLSearchParams({ workflowType: params.workflowType });
   return apiRequest<EventCatalogResponse>(
     `/api/orchestration/event-catalog?${q.toString()}`,
   );
@@ -93,17 +75,17 @@ export async function getEventCatalog(params: {
 
 export async function listEventTriggers(workflowId: string): Promise<EventTrigger[]> {
   const rows = await apiRequest<EventTrigger[]>(
-    `/api/orchestration/workflows/${workflowId}/triggers?kind=event`,
+    `/api/orchestration/workflows/${workflowId}/triggers`,
   );
-  return rows.map(normalizeTrigger);
+  return rows.filter((t) => t.kind === 'event').map(normalizeTrigger);
 }
 
 export async function createEventTrigger(
   workflowId: string,
   body: CreateEventTriggerBody,
-): Promise<EventTriggerSecretReveal> {
+): Promise<EventTrigger> {
   return normalizeTrigger(
-    await apiRequest<EventTriggerSecretReveal>(
+    await apiRequest<EventTrigger>(
       `/api/orchestration/workflows/${workflowId}/triggers`,
       { method: 'POST', body: JSON.stringify({ kind: 'event', ...body }) },
     ),
@@ -130,11 +112,10 @@ export async function deleteEventTrigger(triggerId: string): Promise<void> {
 
 export async function rotateEventTriggerToken(
   triggerId: string,
-): Promise<EventTriggerSecretReveal> {
-  return normalizeTrigger(
-    await apiRequest<EventTriggerSecretReveal>(
-      `/api/orchestration/triggers/${triggerId}/rotate-token`,
-      { method: 'POST' },
-    ),
+): Promise<RotateTokenResponse> {
+  const res = await apiRequest<RotateTokenResponse>(
+    `/api/orchestration/triggers/${triggerId}/rotate-token`,
+    { method: 'POST' },
   );
+  return { ...res, webhookUrl: toAbsoluteUrl(res.webhookUrl) };
 }

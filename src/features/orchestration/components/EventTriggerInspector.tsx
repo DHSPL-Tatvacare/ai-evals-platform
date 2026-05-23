@@ -22,7 +22,6 @@ import {
 } from '@/features/orchestration/queries/eventTriggers';
 import type {
   EventTrigger,
-  EventTriggerSecretReveal,
   EventTriggerVendor,
 } from '@/services/api/orchestrationTriggers';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
@@ -55,14 +54,13 @@ export function EventTriggerInspector() {
 
   const createMutation = useCreateEventTriggerMutation(workflowId);
   const [showCreate, setShowCreate] = useState(false);
-  const [reveal, setReveal] = useState<EventTriggerSecretReveal | null>(null);
+  const [reveal, setReveal] = useState<string | null>(null);
 
   const catalogOptions = useMemo<ComboboxOption[]>(
     () =>
-      (catalog.data?.events ?? []).map((e) => ({
-        value: e.name,
-        label: e.label,
-        meta: e.name,
+      (catalog.data?.events ?? []).map((name) => ({
+        value: name,
+        label: name,
       })),
     [catalog.data],
   );
@@ -125,7 +123,7 @@ export function EventTriggerInspector() {
               {
                 onSuccess: (created) => {
                   setShowCreate(false);
-                  setReveal(created);
+                  setReveal(created.webhookUrl);
                   notificationService.success('Trigger created');
                 },
                 onError: (err) => {
@@ -140,7 +138,7 @@ export function EventTriggerInspector() {
       ) : null}
 
       {reveal ? (
-        <TokenRevealPanel reveal={reveal} onDismiss={() => setReveal(null)} />
+        <TokenRevealPanel webhookUrl={reveal} onDismiss={() => setReveal(null)} />
       ) : null}
     </div>
   );
@@ -238,7 +236,7 @@ function TriggerCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [reveal, setReveal] = useState<EventTriggerSecretReveal | null>(null);
+  const [reveal, setReveal] = useState<string | null>(null);
 
   const updateMutation = useUpdateEventTriggerMutation(workflowId);
   const deleteMutation = useDeleteEventTriggerMutation(workflowId);
@@ -296,11 +294,7 @@ function TriggerCard({
 
       {expanded ? (
         <div className="mt-2.5 flex flex-col gap-2.5 border-t border-[var(--border-subtle)] pt-2.5">
-          <ConnectPanel
-            webhookUrl={trigger.webhookUrl}
-            samplePayload={trigger.samplePayload}
-            curlSnippet={trigger.curlSnippet}
-          />
+          <ConnectPanel webhookUrl={trigger.webhookUrl} vendor={trigger.vendor} />
           <div className="flex items-center justify-between gap-2">
             <Button
               type="button"
@@ -313,7 +307,7 @@ function TriggerCard({
                   { triggerId: trigger.id },
                   {
                     onSuccess: (rotated) => {
-                      setReveal(rotated);
+                      setReveal(rotated.webhookUrl);
                       notificationService.success('Token rotated');
                     },
                     onError: (err) =>
@@ -337,7 +331,7 @@ function TriggerCard({
             />
           </div>
           {reveal ? (
-            <TokenRevealPanel reveal={reveal} onDismiss={() => setReveal(null)} />
+            <TokenRevealPanel webhookUrl={reveal} onDismiss={() => setReveal(null)} />
           ) : null}
         </div>
       ) : null}
@@ -372,16 +366,34 @@ function TriggerCard({
   );
 }
 
+// The backend translates each vendor's native payload to this canonical shape;
+// for the identity `webhook` vendor it IS the expected request body.
+const CANONICAL_SAMPLE = JSON.stringify(
+  {
+    recipients: [
+      { recipient_id: 'lead-123', payload: { name: 'Jane Doe', phone: '+15551234567' } },
+    ],
+  },
+  null,
+  2,
+);
+
+function buildCurl(webhookUrl: string): string {
+  return [
+    `curl -X POST '${webhookUrl}' \\`,
+    `  -H 'Content-Type: application/json' \\`,
+    `  -d '${CANONICAL_SAMPLE.replace(/\s+/g, ' ')}'`,
+  ].join('\n');
+}
+
 function ConnectPanel({
   webhookUrl,
-  samplePayload,
-  curlSnippet,
+  vendor,
 }: {
   webhookUrl: string | null;
-  samplePayload: Record<string, unknown> | null;
-  curlSnippet: string | null;
+  vendor: EventTriggerVendor;
 }) {
-  const sampleText = samplePayload ? JSON.stringify(samplePayload, null, 2) : null;
+  const curlSnippet = webhookUrl ? buildCurl(webhookUrl) : null;
   return (
     <div className="flex flex-col gap-2.5">
       <div className="text-xs font-medium text-[var(--text-secondary)]">
@@ -394,15 +406,24 @@ function ConnectPanel({
             {webhookUrl}
           </code>
         </FieldRow>
+      ) : (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Save the trigger to generate its webhook URL.
+        </p>
+      )}
+
+      {vendor !== 'webhook' ? (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          {VENDOR_LABELS[vendor]} posts its native payload — it is translated to the
+          canonical shape automatically. The sample below shows that canonical target.
+        </p>
       ) : null}
 
-      {sampleText ? (
-        <FieldRow label="Sample payload" copyText={sampleText}>
-          <pre className="max-h-40 overflow-auto rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-[11px] text-[var(--text-primary)]">
-            {sampleText}
-          </pre>
-        </FieldRow>
-      ) : null}
+      <FieldRow label="Sample payload" copyText={CANONICAL_SAMPLE}>
+        <pre className="max-h-40 overflow-auto rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-[11px] text-[var(--text-primary)]">
+          {CANONICAL_SAMPLE}
+        </pre>
+      </FieldRow>
 
       {curlSnippet ? (
         <FieldRow label="Test with curl" copyText={curlSnippet}>
@@ -438,22 +459,23 @@ function FieldRow({
 }
 
 function TokenRevealPanel({
-  reveal,
+  webhookUrl,
   onDismiss,
 }: {
-  reveal: EventTriggerSecretReveal;
+  webhookUrl: string | null;
   onDismiss: () => void;
 }) {
+  if (!webhookUrl) return null;
   return (
     <div className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-warning)] bg-[var(--surface-warning)] p-2.5">
       <div className="text-xs font-medium text-[var(--color-warning)]">
-        Copy this token now — it is shown only once.
+        Your webhook URL — copy it into your system now.
       </div>
       <div className="flex items-center justify-between gap-2">
         <code className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">
-          {reveal.webhookToken}
+          {webhookUrl}
         </code>
-        <CopyButton text={reveal.webhookToken} className="opacity-100" />
+        <CopyButton text={webhookUrl} className="opacity-100" />
       </div>
       <div className="flex items-center justify-end">
         <Button type="button" size="sm" variant="ghost" onClick={onDismiss}>

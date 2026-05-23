@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,18 +49,12 @@ function seedStore(workflowType: 'crm' | 'clinical' | null, workflowId: string |
 
 const CRM_CATALOG = {
   workflowType: 'crm' as const,
-  events: [
-    { name: 'lead.created', label: 'Lead created' },
-    { name: 'deal.stage_changed', label: 'Deal stage changed' },
-  ],
+  events: ['lead.created', 'deal.stage_changed'],
 };
 
 const CLINICAL_CATALOG = {
   workflowType: 'clinical' as const,
-  events: [
-    { name: 'program.enrolled', label: 'Program enrolled' },
-    { name: 'refill.due', label: 'Refill due' },
-  ],
+  events: ['program.enrolled', 'refill.due'],
 };
 
 describe('EventTriggerInspector', () => {
@@ -77,10 +71,7 @@ describe('EventTriggerInspector', () => {
     renderInspector();
 
     await waitFor(() =>
-      expect(getEventCatalog).toHaveBeenCalledWith({
-        workflowType: 'crm',
-        appId: 'inside-sales',
-      }),
+      expect(getEventCatalog).toHaveBeenCalledWith({ workflowType: 'crm' }),
     );
   });
 
@@ -91,10 +82,7 @@ describe('EventTriggerInspector', () => {
     renderInspector();
 
     await waitFor(() =>
-      expect(getEventCatalog).toHaveBeenCalledWith({
-        workflowType: 'clinical',
-        appId: 'inside-sales',
-      }),
+      expect(getEventCatalog).toHaveBeenCalledWith({ workflowType: 'clinical' }),
     );
   });
 
@@ -163,7 +151,7 @@ describe('EventTriggerInspector', () => {
     expect(await screen.findByText(/wXyZ••••AbCd/)).toBeInTheDocument();
   });
 
-  it('creates a new binding and reveals the plaintext token exactly once', async () => {
+  it('creates a new binding and reveals the webhook URL to copy', async () => {
     seedStore('crm', 'wf-1');
     (getEventCatalog as ReturnType<typeof vi.fn>).mockResolvedValue(CRM_CATALOG);
     (createEventTrigger as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -172,10 +160,8 @@ describe('EventTriggerInspector', () => {
       kind: 'event',
       eventName: 'lead.created',
       vendor: 'webhook',
-      webhookToken: 'PLAINTEXT-TOKEN-SHOWN-ONCE',
+      webhookTokenMasked: 'NEWt••••oken',
       webhookUrl: 'https://app.test/webhooks/event/webhook/new',
-      samplePayload: { hello: 'world' },
-      curlSnippet: 'curl ...',
       active: true,
       createdAt: '2026-05-23T00:00:00Z',
       updatedAt: '2026-05-23T00:00:00Z',
@@ -189,7 +175,7 @@ describe('EventTriggerInspector', () => {
     // Pick-or-type: open the event-name combobox and choose a catalog suggestion.
     const eventField = await screen.findByRole('button', { name: /pick or type an event/i });
     fireEvent.click(eventField);
-    fireEvent.click(await screen.findByText('Lead created'));
+    fireEvent.click(await screen.findByText('lead.created'));
 
     const saveButton = screen.getByRole('button', { name: /^create$/i });
     fireEvent.click(saveButton);
@@ -202,7 +188,9 @@ describe('EventTriggerInspector', () => {
       }),
     );
 
-    const reveal = await screen.findByText('PLAINTEXT-TOKEN-SHOWN-ONCE');
-    expect(within(reveal.closest('div') as HTMLElement).getByText(/once/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText('https://app.test/webhooks/event/webhook/new'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/copy it into your system/i)).toBeInTheDocument();
   });
 });
