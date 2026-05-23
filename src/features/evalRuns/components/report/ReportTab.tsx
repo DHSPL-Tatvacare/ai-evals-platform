@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Ban, Clock, Download, FileBarChart, Loader2, RefreshCw, Settings2, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Ban, Clock, Download, FileBarChart, Loader2, RefreshCw, Settings2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Button, EmptyState, LegacyLlmConfigCompat, Select, Tooltip, type SelectOption } from '@/components/ui';
-import { cn } from '@/utils';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
 import { ManageBlueprintsSlideOver } from './ManageBlueprintsSlideOver';
+import { ReportZeroState, type SectionPreview } from './shared/ReportZeroState';
 import { formatPdfExportError } from './pdfExportError';
 import { pollJobUntilComplete, submitAndPollJob, type JobProgress } from '@/services/api/jobPolling';
 import { jobsApi } from '@/services/api/jobsApi';
@@ -20,7 +20,7 @@ import {
   useReportRuns,
 } from '@/features/reports/queries/reportsQueries';
 import type { LLMProvider } from '@/services/api/aiSettingsApi';
-import type { AppId, ReportConfigSummary, ReportRunSummary } from '@/types';
+import type { AppId, ReportRunSummary } from '@/types';
 import { usePermission } from '@/utils/permissions';
 import { useChatWidgetStore } from '@/features/chat-widget/useChatWidget';
 
@@ -48,17 +48,6 @@ interface Props<TReport> {
 
 type Status = 'loading' | 'idle' | 'generating' | 'ready' | 'error';
 
-interface ReportVariantTheme {
-  accent: string;
-  accentMuted: string;
-}
-
-const REPORT_VARIANT_THEMES: Record<string, ReportVariantTheme> = {
-  'kaira-run-v1': { accent: 'var(--color-accent-teal)', accentMuted: 'var(--surface-success)' },
-  'inside-sales-run-v1': { accent: 'var(--color-accent-purple)', accentMuted: 'var(--surface-brand-subtle)' },
-  'voice-rx-run-v1': { accent: 'var(--color-error)', accentMuted: 'var(--surface-error)' },
-};
-
 function getReportMetadata<TReport extends ReportPayloadLike>(report: TReport | null): ReportMetadataLike | null {
   return report?.metadata ?? null;
 }
@@ -66,151 +55,6 @@ function getReportMetadata<TReport extends ReportPayloadLike>(report: TReport | 
 function formatRunLabel(run: ReportRunSummary): string {
   const timestamp = run.completedAt ?? run.createdAt;
   return new Date(timestamp).toLocaleString();
-}
-
-function getDocumentVariant(config: ReportConfigSummary | null): string | null {
-  const exportConfig = config?.exportConfig;
-  if (!exportConfig || typeof exportConfig !== 'object') return null;
-
-  const variant = (exportConfig as Record<string, unknown>).documentVariant;
-  return typeof variant === 'string' ? variant : null;
-}
-
-function getVariantTheme(config: ReportConfigSummary | null): ReportVariantTheme {
-  const variant = getDocumentVariant(config);
-  return variant ? REPORT_VARIANT_THEMES[variant] ?? {
-    accent: 'var(--color-brand-accent)',
-    accentMuted: 'rgba(255,255,255,0.16)',
-  } : {
-    accent: 'var(--color-brand-accent)',
-    accentMuted: 'rgba(255,255,255,0.16)',
-  };
-}
-
-interface SectionPreview {
-  id: string;
-  title: string;
-}
-
-// Faded, non-animated mock of a generated report so the empty state previews
-// the deliverable instead of leaving a void behind the call-to-action.
-function ReportGhostPreview() {
-  const block = 'rounded-[var(--radius-default)] bg-[var(--bg-tertiary)]';
-  const card = 'rounded-[var(--radius-lg)] border border-[var(--border-subtle)] p-4';
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0 select-none overflow-hidden p-6 md:p-8"
-      style={{
-        maskImage: 'linear-gradient(to bottom, black 25%, transparent 92%)',
-        WebkitMaskImage: 'linear-gradient(to bottom, black 25%, transparent 92%)',
-      }}
-    >
-      <div className="mx-auto max-w-4xl space-y-5">
-        <div className="space-y-2">
-          <div className={cn(block, 'h-5 w-48')} />
-          <div className={cn(block, 'h-3 w-72')} />
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className={cn(card, 'space-y-2')}>
-              <div className={cn(block, 'h-3 w-2/3')} />
-              <div className={cn(block, 'h-6 w-1/2')} />
-            </div>
-          ))}
-        </div>
-        <div className={cn(card, 'space-y-3')}>
-          <div className={cn(block, 'h-3 w-40')} />
-          <div className="flex h-32 items-end gap-2">
-            {[62, 88, 44, 73, 56, 92, 48].map((h, i) => (
-              <div key={i} className={cn(block, 'flex-1')} style={{ height: `${h}%` }} />
-            ))}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <div className={cn(block, 'h-3 w-full')} />
-          <div className={cn(block, 'h-3 w-11/12')} />
-          <div className={cn(block, 'h-3 w-3/4')} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReportZeroState({
-  config,
-  sectionsPreview,
-  canGenerate,
-  actionLabel,
-  onGenerate,
-  progressContent,
-  errorMessage,
-}: {
-  config: ReportConfigSummary | null;
-  sectionsPreview?: SectionPreview[];
-  canGenerate: boolean;
-  actionLabel: string;
-  onGenerate: () => void;
-  progressContent?: ReactNode;
-  errorMessage?: string | null;
-}) {
-  const theme = getVariantTheme(config);
-  const heroStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.accent} 0%, color-mix(in srgb, ${theme.accent} 55%, var(--color-neutral-900)) 100%)`,
-  };
-
-  // Page header already names the run; the card carries blueprint identity, the
-  // value line, the action, and section chips, floating over a ghost preview.
-  const blueprintLabel = config?.name?.trim() || 'Run report';
-  const sections = sectionsPreview ?? [];
-
-  return (
-    <div className="relative min-h-[70vh] overflow-hidden">
-      <ReportGhostPreview />
-      <div className="relative flex min-h-[70vh] items-center justify-center px-4 py-12">
-        <div
-          className="w-full max-w-lg rounded-[var(--radius-lg)] px-8 py-9 text-center text-white shadow-[var(--shadow-lg)]"
-          style={heroStyle}
-        >
-          <span className="inline-block rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">
-            {blueprintLabel}
-          </span>
-
-          {errorMessage ? (
-            <p className="mt-4 text-sm leading-6 text-white/85">{errorMessage}</p>
-          ) : !progressContent ? (
-            <p className="mt-4 text-sm leading-6 text-white/85">
-              Generate an AI-written report for this run — narrative, metrics, and recommendations.
-            </p>
-          ) : null}
-
-          <div className="mt-6 flex justify-center">
-            {progressContent ? (
-              progressContent
-            ) : canGenerate ? (
-              <Button size="md" onClick={onGenerate}>
-                <Sparkles className="h-4 w-4" />
-                {actionLabel}
-              </Button>
-            ) : null}
-          </div>
-
-          {sections.length > 0 && !progressContent ? (
-            <div className="mt-7 flex flex-wrap justify-center gap-1.5">
-              {sections.map((s) => (
-                <span
-                  key={s.id}
-                  className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white/85"
-                >
-                  {s.title}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function ReportTab<TReport extends ReportPayloadLike>({

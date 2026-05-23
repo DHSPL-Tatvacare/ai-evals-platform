@@ -3,14 +3,16 @@ import { LayoutGrid, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { analyticsLibraryForApp } from '@/config/routes';
-import { useCurrentAppId } from '@/hooks';
-import { Button, EmptyState, LegacyLlmConfigCompat, LoadingState, PageSurface, Select, type SelectOption } from '@/components/ui';
+import { useAppConfig, useCurrentAppId } from '@/hooks';
+import { EmptyState, LegacyLlmConfigCompat, LoadingState, PageSurface, Select, type SelectOption } from '@/components/ui';
 import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
 import { invalidateReportRuns, useReportConfigs, useReportRunArtifact, useReportRuns } from '@/features/reports/queries/reportsQueries';
 import { RunReportSurface } from '@/features/analytics/components/RunReportSurface';
+import { ReportZeroState, type SectionPreview } from '@/features/evalRuns/components/report/shared/ReportZeroState';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { submitAndPollJob } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
+import { usePermission } from '@/utils/permissions';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
 import type { LLMProvider } from '@/services/api/aiSettingsApi';
 import type { PlatformCrossRunPayload } from '@/types/platformReports';
@@ -108,9 +110,13 @@ export function CrossRunReportPage() {
   const back = { to: analyticsLibraryForApp(appId), label: 'Analytics' };
 
   const runsQuery = useReportRuns({ appId, scope: 'cross_run', limit: 1 });
-  const latestRun = runsQuery.data?.find((r) => r.status === 'completed') ?? runsQuery.data?.[0] ?? null;
+  // Only a completed run has a viewable artifact. A failed/pending run has none,
+  // so fetching its artifact would 404 and surface a misleading hard error.
+  const completedRun = runsQuery.data?.find((r) => r.status === 'completed') ?? null;
+  const latestRun = runsQuery.data?.[0] ?? null;
+  const lastAttemptFailed = latestRun?.status === 'failed' || latestRun?.status === 'cancelled';
 
-  const artifactQuery = useReportRunArtifact<PlatformCrossRunPayload>(latestRun?.id ?? null);
+  const artifactQuery = useReportRunArtifact<PlatformCrossRunPayload>(completedRun?.id ?? null);
 
   const configsQuery = useReportConfigs(appId, 'cross_run');
   const configs = useMemo(() => configsQuery.data ?? [], [configsQuery.data]);
@@ -128,6 +134,24 @@ export function CrossRunReportPage() {
         label: c.isDefault ? `${c.name} (Default)` : c.name,
       })),
     [configs],
+  );
+
+  const defaultConfig = useMemo(
+    () => configs.find((c) => c.reportId === defaultConfigId) ?? configs[0] ?? null,
+    [configs, defaultConfigId],
+  );
+
+  const canGenerate = usePermission('report:generate');
+
+  // Contract-driven preview of the report's sections — sourced from app config
+  // so the seed composition drives the zero-state, never a hardcoded list.
+  const appConfig = useAppConfig(appId);
+  const sectionsPreview = useMemo<SectionPreview[]>(
+    () =>
+      appConfig.analytics.crossRun.sections
+        .filter((s) => Boolean(s.title))
+        .map((s) => ({ id: s.id, title: s.title as string })),
+    [appConfig],
   );
 
   // Overlay state
@@ -189,8 +213,8 @@ export function CrossRunReportPage() {
     }
   }, [appId, overlayReportId, queryClient, reportModel, reportProvider]);
 
-  const hasReport = Boolean(latestRun && artifactQuery.data);
-  const isLoading = runsQuery.isLoading || (latestRun !== null && artifactQuery.isLoading);
+  const hasReport = Boolean(completedRun && artifactQuery.data);
+  const isLoading = runsQuery.isLoading || (completedRun !== null && artifactQuery.isLoading);
   const loadError = runsQuery.error ?? artifactQuery.error;
 
   if (isLoading) {
@@ -236,7 +260,7 @@ export function CrossRunReportPage() {
     />
   ) : null;
 
-  // In-progress banner rendered in place of the EmptyState description area
+  // In-progress banner rendered inside the neutral zero-state card.
   const progressBanner = generating ? (
     <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
       <Loader2 className="h-4 w-4 animate-spin" />
@@ -251,28 +275,23 @@ export function CrossRunReportPage() {
           icon={LayoutGrid}
           title="Cross-Run Report"
           back={back}
-          actions={refreshAction}
         >
-          <EmptyState
-            icon={LayoutGrid}
-            title="No cross-run report yet"
-            description={
-              genError
-                ? genError
-                : generating
-                  ? undefined
-                  : 'Generate a cross-run report to see analytics across runs.'
+          <ReportZeroState
+            tone="neutral"
+            config={defaultConfig}
+            sectionsPreview={sectionsPreview}
+            canGenerate={canGenerate}
+            actionLabel={lastAttemptFailed ? 'Regenerate report' : 'Generate report'}
+            onGenerate={openOverlay}
+            progressContent={progressBanner}
+            errorMessage={
+              genError ??
+              (lastAttemptFailed
+                ? 'The last cross-run report failed. Cross-run reports aggregate your existing single-run reports — generate those first, then try again.'
+                : null)
             }
-            fill
-          >
-            {progressBanner}
-            {!generating && (
-              <Button onClick={openOverlay} disabled={generating}>
-                <Sparkles className="h-4 w-4" />
-                Generate report
-              </Button>
-            )}
-          </EmptyState>
+            description="Generate an AI-written report across all runs — narrative, trends, and recurring insights."
+          />
         </PageSurface>
 
         <GenerateOverlay
@@ -306,7 +325,7 @@ export function CrossRunReportPage() {
         }
       >
         {artifactQuery.data && (
-          <RunReportSurface report={artifactQuery.data} runId={latestRun!.id} actions={null} />
+          <RunReportSurface report={artifactQuery.data} runId={completedRun!.id} actions={null} />
         )}
       </PageSurface>
 

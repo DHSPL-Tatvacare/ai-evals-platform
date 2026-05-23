@@ -218,12 +218,12 @@ describe('CrossRunReportPage', () => {
     vi.clearAllMocks();
   });
 
-  it('shows empty state when no cross-run runs exist', () => {
+  it('shows the generate zero-state when no cross-run runs exist', () => {
     stubQueriesEmpty();
 
     renderPage();
 
-    expect(screen.getByText('No cross-run report yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /generate report/i })).toBeInTheDocument();
   });
 
   it('renders RunReportSurface when a completed run and artifact are returned', () => {
@@ -333,6 +333,72 @@ describe('CrossRunReportPage', () => {
 
     // Error message must also appear in the UI, not be swallowed
     expect(screen.getByText(errorMsg)).toBeInTheDocument();
+  });
+
+  it('does not load an artifact or show a hard error when the only run failed', () => {
+    mockUseReportRuns.mockReturnValue({
+      data: [makeRunSummary({ id: 'failed-run', status: 'failed' })],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRuns>);
+
+    mockUseReportRunArtifact.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRunArtifact>);
+
+    mockUseReportConfigs.mockReturnValue({
+      data: [makeConfigSummary()],
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReportConfigs>);
+
+    renderPage();
+
+    // The failed run must NOT be fetched for an artifact (that 404s -> hard error).
+    expect(mockUseReportRunArtifact).toHaveBeenCalledWith(null);
+    // No scary "Failed to load report"; instead a retry affordance.
+    expect(screen.queryByText('Failed to load report')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /generate report/i })).toBeInTheDocument();
+  });
+
+  it('shows the hard load-error only for a completed run whose artifact errors', () => {
+    mockUseReportRuns.mockReturnValue({
+      data: [makeRunSummary({ status: 'completed' })],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRuns>);
+
+    mockUseReportRunArtifact.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('Report artifact not found'),
+      refetch: vi.fn(),
+      isFetching: false,
+    } as unknown as ReturnType<typeof useReportRunArtifact>);
+
+    mockUseReportConfigs.mockReturnValue({
+      data: [makeConfigSummary()],
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReportConfigs>);
+
+    renderPage();
+
+    expect(screen.getByText('Failed to load report')).toBeInTheDocument();
   });
 
   it('shows Regenerate button in page header when a report already exists', () => {
