@@ -113,6 +113,18 @@ class ResolveUpstreamVariablesResponse(CamelModel):
     unresolved: list[UpstreamUnresolved] = Field(default_factory=list)
 
 
+class LlmExtractDryRunRequest(CamelModel):
+    """One-sample dry-run of an llm.extract node, for the AI agent Test pane."""
+    app_id: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    sample: dict[str, Any] = Field(default_factory=dict)
+
+
+class LlmExtractDryRunResponse(CamelModel):
+    prompt: str
+    result: Any = None
+
+
 # ─── Workflow CRUD ───────────────────────────────────────────────────────────
 
 

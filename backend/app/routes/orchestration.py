@@ -36,6 +36,8 @@ from app.schemas.orchestration import (
     ConsentResponse,
     ConsentSetRequest,
     EventCatalogResponse,
+    LlmExtractDryRunRequest,
+    LlmExtractDryRunResponse,
     NodeTypeDescriptor,
     OverrideRequest,
     OverrideResponse,
@@ -76,6 +78,8 @@ from app.services.orchestration.api import (
 from app.services.orchestration.api.node_types import list_node_types
 from app.services.orchestration.api.source_catalog import fetch_column_values, list_cohort_sources
 from app.services.orchestration.cancel.run_terminator import terminate_run
+from app.services.orchestration.llm_extract_dry_run import run_llm_extract_dry_run
+from app.services.orchestration.nodes.llm_extract import _Config as LlmExtractConfig
 from app.services.orchestration.upstream_variables import (
     UpstreamSourceNotFound,
     resolve_upstream_variables,
@@ -1045,3 +1049,36 @@ async def resolve_node_upstream_variables(
         )
     except UpstreamSourceNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/nodes/llm-extract/test",
+    response_model=LlmExtractDryRunResponse,
+)
+async def run_llm_extract_test(
+    body: LlmExtractDryRunRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """One-sample dry-run of an llm.extract node (AI agent Test pane).
+
+    Runs the node's own runtime over the supplied sample, resolving the
+    ``workflow_llm_extract`` call site; cost rows carry the
+    ``workflow_llm_extract:builder_test`` purpose so builder tests roll up
+    separately."""
+    await ensure_registered_app_access(db, auth, body.app_id)
+    # ``nodeType`` is the FE discriminator, not a node-runtime config field.
+    raw_config = {k: v for k, v in body.config.items() if k != "nodeType"}
+    try:
+        config = LlmExtractConfig.model_validate(raw_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out = await run_llm_extract_dry_run(
+        db=db,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+        app_id=body.app_id,
+        config=config,
+        sample=body.sample,
+    )
+    return LlmExtractDryRunResponse(prompt=out["prompt"], result=out["result"])
