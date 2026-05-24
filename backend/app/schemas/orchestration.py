@@ -67,6 +67,52 @@ class WorkflowDefinition(CamelModel):
     canvas: dict[str, Any] = Field(default_factory=dict)
 
 
+# ─── Upstream variable resolution (AI agent input discovery) ─────────────────
+
+
+class ResolveUpstreamVariablesRequest(CamelModel):
+    """Stateless request: a posted (unsaved) graph + the node to resolve for.
+
+    ``nodes`` / ``edges`` stay permissive ``dict`` lists (mirrors
+    ``WorkflowDefinition``); the resolver parses them into the node/edge models.
+    """
+    app_id: str
+    workflow_type: WorkflowType
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    target_node_id: str
+
+
+class UpstreamField(CamelModel):
+    """One payload variable available at the target node.
+
+    ``source`` groups fields for the picker: ``cohort`` (real cohort columns),
+    ``static`` (raw_payload JSONB keys), ``dataset`` (uploaded dataset columns),
+    ``step`` (produced by an earlier node — llm.extract output / dispatch emit).
+    ``sample_value`` is present only for sources that carry real example data
+    (datasets); cohort/static/step contribute typed blanks.
+    """
+    path: str
+    type: str
+    source: str
+    source_node_id: str
+    is_jsonb: Optional[bool] = None
+    sample_value: Optional[Any] = None
+
+
+class UpstreamUnresolved(CamelModel):
+    """An upstream source whose fields cannot be enumerated yet (event triggers)."""
+    node_id: str
+    label: str
+    reason: str
+
+
+class ResolveUpstreamVariablesResponse(CamelModel):
+    fields: list[UpstreamField] = Field(default_factory=list)
+    sample: dict[str, Any] = Field(default_factory=dict)
+    unresolved: list[UpstreamUnresolved] = Field(default_factory=list)
+
+
 # ─── Workflow CRUD ───────────────────────────────────────────────────────────
 
 

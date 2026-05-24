@@ -40,6 +40,8 @@ from app.schemas.orchestration import (
     OverrideRequest,
     OverrideResponse,
     RecipientStateResponse,
+    ResolveUpstreamVariablesRequest,
+    ResolveUpstreamVariablesResponse,
     RunCreateRequest,
     RunListResponse,
     RunNodeStepResponse,
@@ -53,6 +55,8 @@ from app.schemas.orchestration import (
     WorkflowActionGlobalRow,
     WorkflowActionListResponse,
     WorkflowCreateRequest,
+    WorkflowDefinitionEdge,
+    WorkflowDefinitionNode,
     WorkflowDraftSaveRequest,
     WorkflowResponse,
     WorkflowUpdateRequest,
@@ -72,6 +76,10 @@ from app.services.orchestration.api import (
 from app.services.orchestration.api.node_types import list_node_types
 from app.services.orchestration.api.source_catalog import fetch_column_values, list_cohort_sources
 from app.services.orchestration.cancel.run_terminator import terminate_run
+from app.services.orchestration.upstream_variables import (
+    UpstreamSourceNotFound,
+    resolve_upstream_variables,
+)
 from app.services.orchestration.definition_validator import (
     DispatchRequiredFieldsError,
 )
@@ -1007,3 +1015,33 @@ async def get_source_column_values(
         limit=limit,
     )
     return ColumnValuesResponse(values=result["values"], has_more=result["has_more"])
+
+
+@router.post(
+    "/nodes/upstream-variables",
+    response_model=ResolveUpstreamVariablesResponse,
+)
+async def resolve_node_upstream_variables(
+    body: ResolveUpstreamVariablesRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only: payload variables available upstream of ``targetNodeId``.
+
+    Powers the AI agent Input pane + prompt picker. A cohort/dataset UUID owned
+    by another tenant resolves to 404 (never 403, never data)."""
+    await ensure_registered_app_access(db, auth, body.app_id)
+    nodes = [WorkflowDefinitionNode.model_validate(n) for n in body.nodes]
+    edges = [WorkflowDefinitionEdge.model_validate(e) for e in body.edges]
+    try:
+        return await resolve_upstream_variables(
+            db,
+            tenant_id=auth.tenant_id,
+            app_id=body.app_id,
+            workflow_type=body.workflow_type,
+            nodes=nodes,
+            edges=edges,
+            target_node_id=body.target_node_id,
+        )
+    except UpstreamSourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
