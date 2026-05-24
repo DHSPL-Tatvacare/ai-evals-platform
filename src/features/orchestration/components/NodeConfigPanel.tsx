@@ -18,7 +18,7 @@ import { InspectorSection } from './inspector/InspectorPrimitives';
 import { ConditionalBranchesEditor } from './editors/ConditionalBranchesEditor';
 import { DatasetPicker } from './editors/DatasetPicker';
 import { EventTriggerInspector } from './EventTriggerInspector';
-import { LlmExtractEditor } from './editors/LlmExtractEditor';
+import { LlmExtractInspector } from './LlmExtractInspector';
 import { MergePolicyEditor } from './editors/MergePolicyEditor';
 import { RuleSetBuilder } from './editors/RuleSetBuilder';
 import { SourceCohortPicker } from './editors/SourceCohortPicker';
@@ -105,7 +105,6 @@ export function NodeConfigPanel() {
     | undefined;
 
   const _wfType = (workflowType ?? 'crm') as WorkflowType;
-  void _wfType;
   const config = node.config as Record<string, unknown>;
 
   // Common helper used by every specialised editor: shallow-merge a config
@@ -113,6 +112,22 @@ export function NodeConfigPanel() {
   // canonical sub-object for their slice so we don't have to thread a
   // separate `patch` shape.
   const setConfig = (next: Record<string, unknown>) => updateConfig(node.id, next);
+
+  // The AI agent inspector owns its own wide 3-pane shell (header, panes,
+  // drag-resize), so it replaces the standard fixed-width panel entirely.
+  if (node.type === 'llm.extract') {
+    return (
+      <LlmExtractInspector
+        value={config}
+        onChange={(next) => setConfig({ ...config, ...next })}
+        workflowType={_wfType}
+        displayLabel={desc.displayLabel ?? desc.label}
+        nodeType={desc.nodeType}
+        onClose={clearSelection}
+        readOnly={readOnly}
+      />
+    );
+  }
 
   const fieldOptions = upstreamFields.length > 0 ? upstreamFields : undefined;
 
@@ -208,17 +223,6 @@ export function NodeConfigPanel() {
           value={config}
           onChange={setConfig}
           appId={appId}
-        />
-      );
-      break;
-    }
-    // ── scaffold seam: parallel-build editors (T1 llm.extract, T3 event_trigger) ──
-    case 'LlmExtractEditor': {
-      body = (
-        <LlmExtractEditor
-          value={config}
-          onChange={(next) => setConfig({ ...config, ...next })}
-          workflowType={_wfType}
         />
       );
       break;

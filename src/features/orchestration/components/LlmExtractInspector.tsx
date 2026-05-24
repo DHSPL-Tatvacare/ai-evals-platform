@@ -1,0 +1,342 @@
+import { useCallback, useRef, useState } from 'react';
+import { Braces, ChevronDown, Play, ShieldCheck, Sparkles, SquarePen, Wand2, X } from 'lucide-react';
+
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { LlmModelSelect, type LlmModelSelectValue } from '@/components/ui/LlmModelSelect';
+import {
+  InspectorEmptyState,
+  InspectorField,
+  InspectorSection,
+} from '@/features/orchestration/components/inspector/InspectorPrimitives';
+import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import type { WorkflowType } from '@/features/orchestration/types';
+import type { EvaluatorOutputField } from '@/types';
+import { cn } from '@/utils/cn';
+
+const CALL_SITE = 'workflow_llm_extract';
+const MIN_WIDTH = 480;
+const MAX_WIDTH = 1280;
+
+interface LlmExtractConfig {
+  prompt?: string;
+  output_schema?: EvaluatorOutputField[];
+  input_template?: string | null;
+  output_namespace?: string;
+  provider_override?: string | null;
+  model_override?: string | null;
+  concurrency?: number;
+  inter_call_delay?: number;
+}
+
+interface Props {
+  value: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+  /** Drives the clinical data-residency note at the model picker. */
+  workflowType?: WorkflowType;
+  displayLabel: string;
+  nodeType: string;
+  onClose: () => void;
+  readOnly?: boolean;
+}
+
+const paneLabelClass =
+  'text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]';
+
+function PaneHeader({ step, label, action }: { step: number; label: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5">
+      <span className="flex items-center gap-1.5">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand)] text-[10px] font-bold text-[var(--text-on-color)]">
+          {step}
+        </span>
+        <span className={paneLabelClass}>{label}</span>
+      </span>
+      {action}
+    </div>
+  );
+}
+
+export function LlmExtractInspector({
+  value,
+  onChange,
+  workflowType,
+  displayLabel,
+  nodeType,
+  onClose,
+  readOnly = false,
+}: Props) {
+  const config = value as LlmExtractConfig;
+  const isClinical = workflowType === 'clinical';
+  const fields = Array.isArray(config.output_schema) ? config.output_schema : [];
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const inspectorWidth = useWorkflowBuilderStore((s) => s.inspectorWidth);
+  const setInspectorWidth = useWorkflowBuilderStore((s) => s.setInspectorWidth);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const onResizePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      dragRef.current = { startX: e.clientX, startWidth: inspectorWidth };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [inspectorWidth],
+  );
+  const onResizePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      // Panel docks on the right: dragging the left edge leftward widens it.
+      const next = drag.startWidth + (drag.startX - e.clientX);
+      setInspectorWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next)));
+    },
+    [setInspectorWidth],
+  );
+  const onResizePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
+
+  const modelValue: LlmModelSelectValue | null =
+    config.provider_override && config.model_override
+      ? {
+          credentialId: '',
+          provider: config.provider_override as LlmModelSelectValue['provider'],
+          credentialName: 'default',
+          model: config.model_override,
+        }
+      : null;
+
+  const textAreaClass = cn(
+    'block w-full resize-y rounded-[var(--radius-default)] border border-[var(--border-default)]',
+    'bg-[var(--bg-base)] px-2.5 py-2 text-sm text-[var(--text-primary)]',
+    'focus:border-[var(--color-brand)] focus:outline-none',
+  );
+
+  return (
+    <div className="flex h-full shrink-0" style={{ width: inspectorWidth }}>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector"
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
+        className="group relative w-1.5 shrink-0 cursor-col-resize bg-transparent"
+      >
+        <span className="absolute left-0 top-1/2 h-10 w-0.5 -translate-y-1/2 rounded bg-[var(--border-default)] group-hover:bg-[var(--color-brand)]" />
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+        <div className="flex items-center gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-default)] bg-[var(--surface-info)] text-[var(--color-info)]">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[15px] font-semibold text-[var(--text-primary)]">
+              {displayLabel}
+            </span>
+            <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">
+              {nodeType}
+            </span>
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close inspector"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <fieldset
+          disabled={readOnly}
+          className="grid min-h-0 flex-1 grid-cols-[236px_1fr_244px]"
+        >
+          {/* INPUT — inert scaffold (wired in a later commit). */}
+          <section className="flex min-w-0 flex-col overflow-y-auto">
+            <PaneHeader step={1} label="Input" />
+            <div className="p-3">
+              <InspectorEmptyState>
+                Variables from upstream steps will appear here, ready to drop into the
+                prompt.
+              </InspectorEmptyState>
+            </div>
+          </section>
+
+          {/* CONFIGURE — the editable pane. */}
+          <section className="flex min-w-0 flex-col overflow-y-auto border-l border-[var(--border-subtle)]">
+            <PaneHeader step={2} label="Configure" />
+            <div className="flex flex-col gap-5 p-4">
+              <InspectorField
+                label="Model"
+                description="Which model runs the prompt. Leave unset to use your tenant's default for this capability. The dry-run uses this model too."
+              >
+                {isClinical ? (
+                  <div
+                    className={cn(
+                      'mb-2 flex items-start gap-2 rounded-[var(--radius-default)] border border-[var(--border-subtle)]',
+                      'bg-[var(--surface-info)] px-2 py-1.5 text-xs text-[var(--text-secondary)]',
+                    )}
+                  >
+                    <ShieldCheck
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      style={{ color: 'var(--color-info)' }}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Clinical workflow — only approved, in-region models may process
+                      patient data. Pick from your tenant's configured in-region
+                      deployments.
+                    </span>
+                  </div>
+                ) : null}
+                <LlmModelSelect
+                  callSite={CALL_SITE}
+                  value={modelValue}
+                  onChange={(next) =>
+                    onChange({
+                      provider_override: next?.provider ?? null,
+                      model_override: next?.model ?? null,
+                    })
+                  }
+                  layout="rows"
+                />
+              </InspectorField>
+
+              <InspectorField
+                label="Prompt"
+                description="Instructions sent to the model for each record. Reference fields with {{field}}."
+              >
+                <div className="mb-2 flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="secondary" icon={Braces} disabled>
+                    Insert variable
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" icon={Wand2} disabled>
+                    Generate with AI
+                  </Button>
+                </div>
+                <textarea
+                  value={config.prompt ?? ''}
+                  onChange={(e) => onChange({ prompt: e.target.value })}
+                  rows={5}
+                  spellCheck={false}
+                  placeholder="Classify the sentiment of {{last_message}} as positive, neutral, or negative."
+                  className={textAreaClass}
+                />
+              </InspectorField>
+
+              <InspectorSection
+                title="Fields to extract"
+                description="The structured fields the model must return, enforced as JSON Schema. Edit them in a roomy schema editor."
+                actions={
+                  <Button type="button" size="sm" variant="secondary" icon={SquarePen} disabled>
+                    Edit schema
+                  </Button>
+                }
+              >
+                {fields.length === 0 ? (
+                  <InspectorEmptyState>
+                    No fields yet — open the schema editor to add the fields the model
+                    should return.
+                  </InspectorEmptyState>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {fields.map((f) => (
+                      <div
+                        key={f.key}
+                        className="flex items-center gap-2 rounded-[var(--radius-default)] px-1.5 py-1 text-sm"
+                      >
+                        <span className="font-mono text-[var(--text-primary)]">{f.key}</span>
+                        <span className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                          {f.type}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </InspectorSection>
+
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] pt-3 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                >
+                  <ChevronDown
+                    className={cn('h-3.5 w-3.5 transition-transform', advancedOpen && 'rotate-180')}
+                  />
+                  Advanced
+                </button>
+                {advancedOpen ? (
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <InspectorField
+                      label="Save results as"
+                      description="The record key the extracted object is saved under. Defaults to this node's id."
+                    >
+                      <Input
+                        value={config.output_namespace ?? ''}
+                        onChange={(e) => onChange({ output_namespace: e.target.value })}
+                        placeholder="analysis"
+                      />
+                    </InspectorField>
+                    <InspectorField
+                      label="Concurrency"
+                      description="How many records to process in parallel (1–20)."
+                    >
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={config.concurrency ?? 1}
+                        onChange={(e) => onChange({ concurrency: Number(e.target.value) })}
+                      />
+                    </InspectorField>
+                    <InspectorField
+                      label="Delay (s)"
+                      description="Seconds to stagger between starting each record, for rate limiting."
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={config.inter_call_delay ?? 0}
+                        onChange={(e) => onChange({ inter_call_delay: Number(e.target.value) })}
+                      />
+                    </InspectorField>
+                    <InspectorField
+                      label="Context template"
+                      description="Per-record context rendered from {{field}} placeholders. Leave empty to pass the whole record as JSON."
+                    >
+                      <Input
+                        value={config.input_template ?? ''}
+                        onChange={(e) => onChange({ input_template: e.target.value || null })}
+                        placeholder="(optional)"
+                      />
+                    </InspectorField>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          {/* TEST — inert scaffold (wired in a later commit). */}
+          <section className="flex min-w-0 flex-col overflow-y-auto border-l border-[var(--border-subtle)]">
+            <PaneHeader step={3} label="Test" />
+            <div className="flex flex-col gap-3 p-3">
+              <Button type="button" size="sm" variant="primary" icon={Play} disabled>
+                Run
+              </Button>
+              <InspectorEmptyState>
+                Run the prompt over a sample record to preview the extracted fields.
+              </InspectorEmptyState>
+            </div>
+          </section>
+        </fieldset>
+      </div>
+    </div>
+  );
+}

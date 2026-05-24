@@ -48,6 +48,7 @@ DisplayCategory = Literal[
     "synchronization",
     "dispatch",
     "mutation",
+    "ai",
     "termination",
 ]
 
@@ -422,11 +423,11 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
     },
     # ─── Mutation ───────────────────────────────────────────────────────────
     "llm.extract": {
-        "display_label": "Extract with AI",
-        "display_category": "mutation",
+        "display_label": "AI Agent",
+        "display_category": "ai",
         "description": "Run a prompt over each contact and save structured fields back to their record for later steps.",
         "authoring_status": "active",
-        "editor_hints": {"preferred_editor": "LlmExtractEditor"},
+        "editor_hints": {"preferred_editor": "LlmExtractInspector"},
         "required_payload_fields": [],
         "emitted_payload_fields": [],
         "output_edges": [
@@ -531,6 +532,8 @@ def _runtime_kind_from_category(category: DisplayCategory) -> ExecutionKind:
     if category == "dispatch":
         return "dispatch"
     if category == "mutation":
+        return "mutation"
+    if category == "ai":
         return "mutation"
     return "termination"
 

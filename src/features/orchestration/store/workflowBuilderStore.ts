@@ -108,6 +108,10 @@ interface WorkflowBuilderState {
    *  Persists for the lifetime of the store instance so toggling the
    *  inspector or panning the canvas doesn't reset the rail. */
   paletteCollapsed: boolean;
+  /** Docked-inspector width in px for the wide AI agent inspector. Persists
+   *  for the lifetime of the store instance (a UI preference, like
+   *  `paletteCollapsed`); drag-resize writes it via `setInspectorWidth`. */
+  inspectorWidth: number;
   /** Node id queued for deletion confirmation. The builder page renders
    *  a `ConfirmDialog` against this slot so per-card delete buttons
    *  never trigger a destructive action without an explicit yes. Cleared
@@ -145,6 +149,7 @@ interface WorkflowBuilderState {
   setPaletteCatalog(catalog: NodeTypeDescriptor[]): void;
   setPaletteLoading(loading: boolean): void;
   setPaletteCollapsed(collapsed: boolean): void;
+  setInspectorWidth(width: number): void;
   requestDeleteNode(nodeId: string): void;
   cancelDeleteNode(): void;
   /** Toggle between view-only and edit modes. Edit unlocks palette,
@@ -324,6 +329,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     paletteCatalog: [],
     paletteLoading: false,
     paletteCollapsed: false,
+    inspectorWidth: 820,
     pendingDeleteNodeId: null,
     viewMode: "view",
 
@@ -430,6 +436,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     setPaletteCatalog: (catalog) => set({ paletteCatalog: catalog }),
     setPaletteLoading: (loading) => set({ paletteLoading: loading }),
     setPaletteCollapsed: (collapsed) => set({ paletteCollapsed: collapsed }),
+    setInspectorWidth: (width) => set({ inspectorWidth: width }),
     requestDeleteNode: (nodeId) => set({ pendingDeleteNodeId: nodeId }),
     cancelDeleteNode: () => set({ pendingDeleteNodeId: null }),
 

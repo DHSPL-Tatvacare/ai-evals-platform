@@ -19,6 +19,7 @@ export type DisplayCategory =
   | 'synchronization'
   | 'dispatch'
   | 'mutation'
+  | 'ai'
   | 'termination';
 
 export type AuthoringStatus = 'active' | 'hidden' | 'experimental' | 'deprecated';

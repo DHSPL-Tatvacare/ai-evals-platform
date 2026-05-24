@@ -535,7 +535,7 @@ class NodeTypeDescriptor(CamelORMModel):
     display_label: str
     display_category: Literal[
         "ingress", "qualification", "routing", "suspension",
-        "synchronization", "dispatch", "mutation", "termination",
+        "synchronization", "dispatch", "mutation", "ai", "termination",
     ]
     description: str
     authoring_status: Literal["active", "hidden", "experimental", "deprecated"] = "active"

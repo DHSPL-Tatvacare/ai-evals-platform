@@ -87,6 +87,13 @@ export const DISPLAY_CATEGORIES: Record<DisplayCategory, NodeCategoryDef> = {
     iconBgVar: 'var(--color-info)',
     accentVar: 'var(--color-info)',
   },
+  ai: {
+    label: 'AI',
+    icon: Sparkles,
+    surfaceVar: 'var(--surface-info)',
+    iconBgVar: 'var(--color-info)',
+    accentVar: 'var(--color-info)',
+  },
   termination: {
     label: 'Termination',
     icon: CheckCircle2,
@@ -106,6 +113,7 @@ export const DISPLAY_CATEGORY_ORDER: readonly DisplayCategory[] = [
   'synchronization',
   'dispatch',
   'mutation',
+  'ai',
   'termination',
 ];
 

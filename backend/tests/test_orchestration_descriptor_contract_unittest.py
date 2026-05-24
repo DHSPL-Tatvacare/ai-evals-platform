@@ -36,7 +36,7 @@ _SUPPORTED_PREFERRED_EDITORS = {
     "WaitConditionEditor",
     "MergePolicyEditor",
     "StructuredRequestBodyEditor",
-    "LlmExtractEditor",
+    "LlmExtractInspector",
     "EventTriggerInspector",
 }
 
@@ -55,7 +55,7 @@ def test_finalized_node_descriptor(node_type):
     assert d.display_label, f"empty display_label for {node_type}"
     assert d.display_category in {
         "ingress", "qualification", "routing", "suspension",
-        "synchronization", "dispatch", "mutation", "termination",
+        "synchronization", "dispatch", "mutation", "ai", "termination",
     }, d.display_category
     assert d.runtime_contract.execution_kind, f"no execution_kind for {node_type}"
     assert isinstance(d.config_schema, dict)
