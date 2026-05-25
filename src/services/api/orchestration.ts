@@ -351,3 +351,41 @@ export async function validateWorkflowPayload(body: {
     body: JSON.stringify(body),
   });
 }
+
+/** One payload variable available at the AI agent node. `source` groups it in
+ *  the Input pane; `sampleValue` is present only for sources carrying real
+ *  example data (datasets) — cohort/static/step contribute typed blanks. */
+export interface UpstreamField {
+  path: string;
+  type: string;
+  source: string;
+  sourceNodeId: string;
+  isJsonb?: boolean | null;
+  sampleValue?: unknown;
+}
+
+/** An upstream source whose fields cannot be enumerated yet (event triggers). */
+export interface UpstreamUnresolved {
+  nodeId: string;
+  label: string;
+  reason: string;
+}
+
+export interface ResolveUpstreamVariablesResponse {
+  fields: UpstreamField[];
+  sample: Record<string, unknown>;
+  unresolved: UpstreamUnresolved[];
+}
+
+export async function resolveUpstreamVariables(body: {
+  appId: string;
+  workflowType: WorkflowType;
+  nodes: WorkflowDefinition['nodes'];
+  edges: WorkflowDefinition['edges'];
+  targetNodeId: string;
+}): Promise<ResolveUpstreamVariablesResponse> {
+  return apiRequest<ResolveUpstreamVariablesResponse>(
+    '/api/orchestration/nodes/upstream-variables',
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}

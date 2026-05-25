@@ -15,6 +15,9 @@ interface VariablePickerPopoverProps {
   promptType?: PromptType;
   buttonLabel?: string;
   className?: string;
+  /** Render only `staticVariables`; skip the evaluator registry / listing
+   *  fetch. Used outside the eval domain (e.g. orchestration upstream vars). */
+  staticOnly?: boolean;
 }
 
 export function VariablePickerPopover({
@@ -24,6 +27,7 @@ export function VariablePickerPopover({
   onInsert,
   buttonLabel = 'Variables',
   className,
+  staticOnly = false,
 }: VariablePickerPopoverProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -41,6 +45,12 @@ export function VariablePickerPopover({
   // Fetch variables from backend when popover opens
   useEffect(() => {
     if (!isOpen) return;
+    if (staticOnly) {
+      setVariables(staticVariables);
+      setApiPaths([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
 
@@ -83,6 +93,7 @@ export function VariablePickerPopover({
     isOpen,
     listingId,
     sourceType,
+    staticOnly,
     staticVariables,
   ]);
 

@@ -1,17 +1,29 @@
-import { useCallback, useRef, useState } from 'react';
-import { Braces, ChevronDown, Play, ShieldCheck, Sparkles, SquarePen, Wand2, X } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronDown, Play, ShieldCheck, Sparkles, SquarePen, Wand2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { LlmModelSelect, type LlmModelSelectValue } from '@/components/ui/LlmModelSelect';
+import { VariablePickerPopover } from '@/components/ui/VariablePickerPopover';
 import {
   InspectorEmptyState,
   InspectorField,
   InspectorSection,
 } from '@/features/orchestration/components/inspector/InspectorPrimitives';
+import {
+  lintUnknownVariables,
+  parentLockStatus,
+  saveAsCollides,
+  sourceGroupLabel,
+  suggestKnownVariable,
+  toVariableInfo,
+} from '@/features/orchestration/components/inspector/upstreamVariables';
+import { useResolveUpstreamVariables } from '@/features/orchestration/queries/upstreamVariables';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import type { UpstreamField } from '@/services/api/orchestration';
 import type { WorkflowType } from '@/features/orchestration/types';
 import type { EvaluatorOutputField } from '@/types';
+import { useCurrentAppId } from '@/hooks';
 import { cn } from '@/utils/cn';
 
 const CALL_SITE = 'workflow_llm_extract';
@@ -70,6 +82,60 @@ export function LlmExtractInspector({
   const isClinical = workflowType === 'clinical';
   const fields = Array.isArray(config.output_schema) ? config.output_schema : [];
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [varFilter, setVarFilter] = useState('');
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  const appId = useCurrentAppId();
+  const nodes = useWorkflowBuilderStore((s) => s.nodes);
+  const edges = useWorkflowBuilderStore((s) => s.edges);
+  const targetNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  const { data: upstream } = useResolveUpstreamVariables({
+    appId,
+    workflowType,
+    nodes,
+    edges,
+    targetNodeId,
+  });
+  const upstreamFields = useMemo(() => upstream?.fields ?? [], [upstream]);
+  const unresolved = useMemo(() => upstream?.unresolved ?? [], [upstream]);
+  const lockStatus = parentLockStatus(upstreamFields, unresolved);
+
+  // Group resolved fields by source for the Input pane, honoring the filter.
+  const groupedFields = useMemo(() => {
+    const q = varFilter.trim().toLowerCase();
+    const groups = new Map<string, UpstreamField[]>();
+    for (const f of upstreamFields) {
+      if (q && !f.path.toLowerCase().includes(q)) continue;
+      if (!groups.has(f.source)) groups.set(f.source, []);
+      groups.get(f.source)!.push(f);
+    }
+    return [...groups.entries()];
+  }, [upstreamFields, varFilter]);
+
+  const promptText = config.prompt ?? '';
+  const unknownVars = lintUnknownVariables(promptText, upstreamFields);
+  const saveAsConflict = saveAsCollides(config.output_namespace, upstreamFields);
+
+  // Insert a token at the caret (or append) and restore focus after it.
+  const insertToken = useCallback(
+    (token: string) => {
+      const ta = promptRef.current;
+      const current = config.prompt ?? '';
+      if (!ta) {
+        onChange({ prompt: current + token });
+        return;
+      }
+      const start = ta.selectionStart ?? current.length;
+      const end = ta.selectionEnd ?? current.length;
+      onChange({ prompt: current.slice(0, start) + token + current.slice(end) });
+      requestAnimationFrame(() => {
+        ta.focus();
+        const pos = start + token.length;
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    [config.prompt, onChange],
+  );
 
   const inspectorWidth = useWorkflowBuilderStore((s) => s.inspectorWidth);
   const setInspectorWidth = useWorkflowBuilderStore((s) => s.setInspectorWidth);
@@ -156,14 +222,69 @@ export function LlmExtractInspector({
           disabled={readOnly}
           className="grid min-h-0 flex-1 grid-cols-[236px_1fr_244px]"
         >
-          {/* INPUT — inert scaffold (wired in a later commit). */}
+          {/* INPUT — variables available upstream, click to drop into the prompt. */}
           <section className="flex min-w-0 flex-col overflow-y-auto">
             <PaneHeader step={1} label="Input" />
-            <div className="p-3">
-              <InspectorEmptyState>
-                Variables from upstream steps will appear here, ready to drop into the
-                prompt.
-              </InspectorEmptyState>
+            <div className="flex flex-col gap-3 p-3">
+              {lockStatus === 'no-upstream' ? (
+                <InspectorEmptyState>
+                  Connect an upstream step — a source, dataset, or an earlier step —
+                  to pull its variables into the prompt.
+                </InspectorEmptyState>
+              ) : null}
+
+              {upstreamFields.length > 0 ? (
+                <input
+                  value={varFilter}
+                  onChange={(e) => setVarFilter(e.target.value)}
+                  placeholder="Filter variables…"
+                  className={cn(
+                    'w-full rounded-[var(--radius-default)] border border-[var(--border-default)]',
+                    'bg-[var(--bg-base)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]',
+                    'focus:border-[var(--color-brand)] focus:outline-none',
+                  )}
+                />
+              ) : null}
+
+              {groupedFields.map(([source, list]) => (
+                <div key={source} className="flex flex-col gap-0.5">
+                  <span className={cn(paneLabelClass, 'px-1 pb-0.5')}>
+                    {sourceGroupLabel(source)} · {list.length}
+                  </span>
+                  {list.map((f) => (
+                    <button
+                      key={f.path}
+                      type="button"
+                      onClick={() => insertToken(`{{${f.path}}}`)}
+                      title={`Insert {{${f.path}}}`}
+                      className={cn(
+                        'flex items-center gap-2 rounded-[var(--radius-default)] border border-transparent px-2 py-1.5 text-left',
+                        'hover:border-[var(--border-default)] hover:bg-[var(--bg-secondary)]',
+                      )}
+                    >
+                      <span className="truncate font-mono text-xs text-[var(--text-primary)]">
+                        {f.path}
+                      </span>
+                      <span className="ml-auto shrink-0 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                        {f.type}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+
+              {unresolved.map((u) => (
+                <div
+                  key={u.nodeId}
+                  className="rounded-[var(--radius-default)] border border-dashed border-[var(--border-warning)] bg-[var(--surface-warning)] p-2.5"
+                >
+                  <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--color-warning)]">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {u.label}
+                  </div>
+                  <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{u.reason}</p>
+                </div>
+              ))}
             </div>
           </section>
 
@@ -203,7 +324,8 @@ export function LlmExtractInspector({
                       model_override: next?.model ?? null,
                     })
                   }
-                  layout="rows"
+                  layout="stack"
+                  compact
                 />
               </InspectorField>
 
@@ -211,22 +333,56 @@ export function LlmExtractInspector({
                 label="Prompt"
                 description="Instructions sent to the model for each record. Reference fields with {{field}}."
               >
-                <div className="mb-2 flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="secondary" icon={Braces} disabled>
-                    Insert variable
-                  </Button>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <VariablePickerPopover
+                    appId={appId}
+                    staticOnly
+                    staticVariables={upstreamFields.map(toVariableInfo)}
+                    onInsert={insertToken}
+                    buttonLabel="Insert variable"
+                  />
                   <Button type="button" size="sm" variant="secondary" icon={Wand2} disabled>
                     Generate with AI
                   </Button>
                 </div>
                 <textarea
-                  value={config.prompt ?? ''}
+                  ref={promptRef}
+                  value={promptText}
                   onChange={(e) => onChange({ prompt: e.target.value })}
                   rows={5}
                   spellCheck={false}
                   placeholder="Classify the sentiment of {{last_message}} as positive, neutral, or negative."
                   className={textAreaClass}
                 />
+                {unknownVars.length > 0 ? (
+                  <div className="mt-2 flex flex-col gap-1">
+                    {unknownVars.map((v) => {
+                      const suggestion = suggestKnownVariable(v, upstreamFields);
+                      return (
+                        <div
+                          key={v}
+                          className="flex items-start gap-1.5 text-[11.5px] text-[var(--color-warning)]"
+                        >
+                          <AlertTriangle
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            <span className="font-mono">{`{{${v}}}`}</span> isn't a known
+                            variable
+                            {suggestion ? (
+                              <>
+                                {' '}
+                                — did you mean{' '}
+                                <b className="text-[var(--text-primary)]">{suggestion}</b>?
+                              </>
+                            ) : null}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </InspectorField>
 
               <InspectorSection
@@ -282,6 +438,18 @@ export function LlmExtractInspector({
                         onChange={(e) => onChange({ output_namespace: e.target.value })}
                         placeholder="analysis"
                       />
+                      {saveAsConflict ? (
+                        <p className="mt-1 flex items-start gap-1.5 text-[11px] text-[var(--color-warning)]">
+                          <AlertTriangle
+                            className="mt-0.5 h-3 w-3 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            An upstream variable is already named “{config.output_namespace}”.
+                            Pick another to keep downstream references unambiguous.
+                          </span>
+                        </p>
+                      ) : null}
                     </InspectorField>
                     <InspectorField
                       label="Concurrency"

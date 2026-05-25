@@ -6,6 +6,10 @@ import { LlmExtractInspector } from './LlmExtractInspector';
 
 vi.mock('@/hooks', () => ({
   useCurrentAppId: () => 'inside-sales',
+  // The Configure pane embeds VariablePickerPopover, which reads app config.
+  useAppConfig: () => ({
+    evaluator: { dynamicVariableSources: { registry: false, listingApiPaths: false } },
+  }),
 }));
 
 function renderInspector(overrides: Partial<Parameters<typeof LlmExtractInspector>[0]> = {}) {

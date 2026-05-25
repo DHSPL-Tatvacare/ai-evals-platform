@@ -23,7 +23,7 @@ import { MergePolicyEditor } from './editors/MergePolicyEditor';
 import { RuleSetBuilder } from './editors/RuleSetBuilder';
 import { SourceCohortPicker } from './editors/SourceCohortPicker';
 import { SplitBranchEditor } from './editors/SplitBranchEditor';
-import { upstreamPayloadFields } from './editors/upstreamPayloadFields';
+import { useResolveUpstreamVariables } from '@/features/orchestration/queries/upstreamVariables';
 import { WaitConditionEditor } from './editors/WaitConditionEditor';
 import { WebhookOutEditor } from './editors/WebhookOutEditor';
 
@@ -54,11 +54,19 @@ export function NodeConfigPanel() {
     [palette, node?.type],
   );
 
-  // Payload keys reachable at this node, walked upstream — feeds the field
-  // dropdown for predicate-driven editors. Empty list degrades to free-text.
+  // Payload keys reachable at this node, resolved upstream by the backend —
+  // feeds the field dropdown for predicate-driven editors. Empty list (or
+  // in-flight) degrades to free-text.
+  const { data: upstreamData } = useResolveUpstreamVariables({
+    appId,
+    workflowType,
+    nodes,
+    edges,
+    targetNodeId: node?.id,
+  });
   const upstreamFields = useMemo(
-    () => (node ? upstreamPayloadFields(node.id, nodes, edges) : []),
-    [node, nodes, edges],
+    () => (upstreamData?.fields ?? []).map((f) => f.path),
+    [upstreamData],
   );
 
   const editorHints = desc?.editorHints;
