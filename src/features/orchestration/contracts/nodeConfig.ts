@@ -184,6 +184,8 @@ export const SourceCohortConfigSchema = z
     lookback_hours: z.number().int().nullable().optional(),
     lookback_column: z.string().nullable().optional(),
     consent_gate_channel: z.string().nullable().optional(),
+    sample_limit: z.number().int().min(1).max(10000).nullable().optional(),
+    sample_strategy: z.enum(['random', 'first']).optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
@@ -210,6 +212,8 @@ export const SourceDatasetConfigSchema = z
   .object({
     nodeType: z.literal("source.dataset"),
     dataset_version_id: z.uuid(),
+    sample_limit: z.number().int().min(1).max(10000).nullable().optional(),
+    sample_strategy: z.enum(['random', 'first']).optional(),
   })
   .strict();
 

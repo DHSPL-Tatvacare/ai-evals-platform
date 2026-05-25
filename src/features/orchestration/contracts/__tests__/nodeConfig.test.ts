@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_NODE_TYPES,
   NodeConfigSchema,
+  SourceCohortConfigSchema,
   isHardParseIssue,
   parseNodeConfig,
 } from "../nodeConfig";
@@ -427,5 +428,30 @@ describe("NodeConfigSchema registry coverage", () => {
       expect(result.data.merge_policy).toBe("dedupe");
       expect(result.data.payload_policy).toBe("last_wins");
     }
+  });
+});
+
+describe('source.cohort sample fields', () => {
+  it('accepts a valid sample_limit + strategy', () => {
+    const r = SourceCohortConfigSchema.safeParse({
+      nodeType: 'source.cohort', mode: 'inline', source_ref: 'crm.lead_record',
+      sample_limit: 100, sample_strategy: 'random',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects sample_limit above 10000', () => {
+    const r = SourceCohortConfigSchema.safeParse({
+      nodeType: 'source.cohort', mode: 'inline', source_ref: 'crm.lead_record',
+      sample_limit: 10001,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('omitting sample_limit still parses', () => {
+    const r = SourceCohortConfigSchema.safeParse({
+      nodeType: 'source.cohort', mode: 'inline', source_ref: 'crm.lead_record',
+    });
+    expect(r.success).toBe(true);
   });
 });
