@@ -413,6 +413,20 @@ def _compile_static(
     )
 
 
+def _sample_clause(cfg: CohortQueryConfig) -> str:
+    """SQL fragment appended to the materialization SELECT. Empty when uncapped.
+
+    ``sample_limit`` is a Pydantic-validated int in [1, 10000], so embedding it
+    directly is safe — mirrors the lookback_hours int-embedding pattern.
+    """
+    if cfg.sample_limit is None:
+        return ""
+    n = int(cfg.sample_limit)
+    if cfg.sample_strategy == "random":
+        return f"ORDER BY random() LIMIT {n}"
+    return f"LIMIT {n}"
+
+
 def _emit_static_sql(
     cfg: CohortQueryConfig,
     *,
@@ -482,6 +496,7 @@ def _emit_static_sql(
     # Casts on every parameter — asyncpg deduces types from first use across
     # SELECT-list and WHERE; mixed varchar/text/uuid contexts trigger
     # AmbiguousParameterError. Explicit casts give the driver one answer.
+    sample_sql = _sample_clause(cfg)
     sql = f"""
         INSERT INTO orchestration.workflow_run_recipient_states
             (id, tenant_id, app_id, workflow_id, workflow_version_id,
@@ -500,6 +515,7 @@ def _emit_static_sql(
             now()
         FROM {schema_qualified_table} src
         WHERE {where_clause}
+        {sample_sql}
         ON CONFLICT (run_id, recipient_id) DO NOTHING
         RETURNING recipient_id
     """.strip()
@@ -583,6 +599,7 @@ def _compile_dataset(
     # Full-payload projection. v1 doesn't honor cfg.payload_fields for
     # datasets — the whole row payload travels with the recipient. If a
     # downstream node needs a subset, it can read it out of `payload`.
+    sample_sql = _sample_clause(cfg)
     sql = f"""
         INSERT INTO orchestration.workflow_run_recipient_states
             (id, tenant_id, app_id, workflow_id, workflow_version_id,
@@ -601,6 +618,7 @@ def _compile_dataset(
             now()
         FROM orchestration.cohort_dataset_rows src
         WHERE {where_clause}
+        {sample_sql}
         ON CONFLICT (run_id, recipient_id) DO NOTHING
         RETURNING recipient_id
     """.strip()

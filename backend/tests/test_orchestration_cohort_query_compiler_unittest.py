@@ -143,3 +143,36 @@ def test_cohort_query_config_rejects_out_of_range_limit():
     for bad in (0, -5, 10001):
         with pytest.raises(ValidationError):
             CohortQueryConfig(source_ref="crm.lead_record", sample_limit=bad)
+
+
+def _sample_crm_cfg(**kw):
+    from app.services.orchestration.nodes._cohort_query_compiler import CohortQueryConfig
+    return CohortQueryConfig(source_table="analytics.crm_lead_record", id_column="lead_id", **kw)
+
+
+def _sample_compile(cfg):
+    import uuid
+    from app.services.orchestration.nodes._cohort_query_compiler import compile_cohort_query
+    sql, _ = compile_cohort_query(
+        cfg,
+        run_id=uuid.uuid4(), workflow_id=uuid.uuid4(), workflow_version_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(), app_id="inside-sales", next_node_id="n1",
+    )
+    return sql
+
+
+def test_static_sql_random_sample_appends_order_by_random_limit():
+    sql = _sample_compile(_sample_crm_cfg(sample_limit=100, sample_strategy="random"))
+    assert "ORDER BY random() LIMIT 100" in sql
+    assert sql.index("ORDER BY random() LIMIT 100") < sql.index("ON CONFLICT")
+
+
+def test_static_sql_first_sample_appends_plain_limit():
+    sql = _sample_compile(_sample_crm_cfg(sample_limit=50, sample_strategy="first"))
+    assert "LIMIT 50" in sql
+    assert "random()" not in sql
+
+
+def test_static_sql_no_sample_has_no_limit():
+    sql = _sample_compile(_sample_crm_cfg())
+    assert "LIMIT" not in sql
