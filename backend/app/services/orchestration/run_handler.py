@@ -141,14 +141,7 @@ async def run_workflow_job(
 async def _persist_failed_run(
     db: AsyncSession, run_id: uuid.UUID, error_repr: str,
 ) -> None:
-    """Mark the run + any still-running node steps as failed in a NESTED tx.
-
-    Using a SAVEPOINT means the failed-status write commits even when the
-    surrounding session is rolled back by the worker's outer exception path.
-    The WORKFLOW_RUN_FAILED notification is NOT emitted here — the savepoint is
-    discarded if the outer transaction rolls back, so the durable terminal-
-    failure transition (and its email) is owned by the worker repair path.
-    """
+    """Mark run + running steps failed in a SAVEPOINT; no email here — the savepoint is discarded on outer rollback, so the failure email is owned by the worker repair path."""
     failed_at = datetime.now(timezone.utc)
     async with db.begin_nested():
         await db.execute(
@@ -300,17 +293,19 @@ async def _maybe_complete_run(
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
         await db.flush()
-        # Enqueue on the run's own session so the notification commits
-        # atomically with the completion write.
-        await emit_workflow_run_event(
-            db,
-            tenant_id=run.tenant_id,
-            app_id=run.app_id,
-            workflow_name=workflow.name,
-            run_id=run.id,
-            event_type=EventType.WORKFLOW_RUN_COMPLETED,
-            occurred_at=run.completed_at,
-        )
+        # Isolated: a notification-side failure must never flip a completed run to failed.
+        try:
+            await emit_workflow_run_event(
+                db,
+                tenant_id=run.tenant_id,
+                app_id=run.app_id,
+                workflow_name=workflow.name,
+                run_id=run.id,
+                event_type=EventType.WORKFLOW_RUN_COMPLETED,
+                occurred_at=run.completed_at,
+            )
+        except Exception as emit_err:
+            _log.warning("run-workflow: completed_emit_event_error: %s", emit_err)
     else:
         run.status = "waiting"
         await db.flush()

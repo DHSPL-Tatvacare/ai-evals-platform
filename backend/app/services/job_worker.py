@@ -1043,6 +1043,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                 await db2.execute(
                                     update(EvaluationRun)
                                     .where(
+                                        EvaluationRun.tenant_id == j.tenant_id,
                                         EvaluationRun.job_id == job_id,
                                         EvaluationRun.status.in_(("pending", "running")),
                                     )
@@ -1063,6 +1064,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                 await db2.execute(
                                     update(_WfRunRepair)
                                     .where(
+                                        _WfRunRepair.tenant_id == j.tenant_id,
                                         _WfRunRepair.job_id == job_id,
                                         _WfRunRepair.status.in_(("pending", "running", "waiting")),
                                     )
@@ -1077,7 +1079,8 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                     .where(
                                         _WfStepRepair.run_id.in_(
                                             select(_WfRunRepair.id).where(
-                                                _WfRunRepair.job_id == job_id
+                                                _WfRunRepair.tenant_id == j.tenant_id,
+                                                _WfRunRepair.job_id == job_id,
                                             )
                                         ),
                                         _WfStepRepair.status == "running",
@@ -1091,6 +1094,7 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                 )
                                 _wf_run = await db2.scalar(
                                     select(_WfRunRepair).where(
+                                        _WfRunRepair.tenant_id == j.tenant_id,
                                         _WfRunRepair.job_id == job_id,
                                         _WfRunRepair.status == "failed",
                                     )
@@ -1098,7 +1102,8 @@ async def _run_job(job_id: str, job_type: str, params: dict) -> None:
                                 if _wf_run is not None:
                                     _wf_name = await db2.scalar(
                                         select(_WorkflowRepair.name).where(
-                                            _WorkflowRepair.id == _wf_run.workflow_id
+                                            _WorkflowRepair.tenant_id == _wf_run.tenant_id,
+                                            _WorkflowRepair.id == _wf_run.workflow_id,
                                         )
                                     )
                                     workflow_emit_args = {
@@ -2198,12 +2203,7 @@ async def _emit_workflow_run_failed(
     run_id: uuid.UUID,
     error: str | None,
 ) -> None:
-    """Fan a WORKFLOW_RUN_FAILED event out on a fresh, committed session.
-
-    The run handler's savepoint write is discarded when the worker rolls back
-    the failed run's session, so the durable failure email is enqueued here —
-    only after the repair path has committed the terminal failed status.
-    """
+    """Fan WORKFLOW_RUN_FAILED out on a fresh committed session; the run handler's savepoint is discarded on rollback."""
     from app.services.mail.event_pipeline import EventType, emit_workflow_run_event
 
     async with async_session() as db3:

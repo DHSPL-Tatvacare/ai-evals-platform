@@ -575,6 +575,25 @@ class RunHandlerWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run2.status, "waiting")
         emit2.assert_not_awaited()
 
+    async def test_emit_failure_does_not_corrupt_completed_status(self):
+        from app.services.orchestration import run_handler
+
+        workflow = _ns(name="W")
+        run = _ns(id=uuid.uuid4(), tenant_id=uuid.uuid4(), app_id="voice-rx", status="running", completed_at=None)
+        db = MagicMock()
+        db.flush = AsyncMock()
+        res = MagicMock()
+        res.first = MagicMock(return_value=None)
+        db.execute = AsyncMock(return_value=res)
+
+        with patch.object(
+            run_handler, "emit_workflow_run_event",
+            new=AsyncMock(side_effect=RuntimeError("subscription lookup blew up")),
+        ):
+            await run_handler._maybe_complete_run(db, run, workflow)
+
+        self.assertEqual(run.status, "completed")
+
 
 class WorkflowRunFailedHookTests(unittest.IsolatedAsyncioTestCase):
     """The durable failure email is emitted on a fresh, committed session.
