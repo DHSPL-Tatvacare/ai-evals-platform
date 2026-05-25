@@ -84,11 +84,11 @@ export function NodeCard({
           'px-2.5 py-1.5 transition-colors hover:border-[var(--border-subtle)]',
           className,
         )}
-        style={{ backgroundColor: cat.surfaceVar }}
+        style={{ background: cat.surfaceGradientVar ?? cat.surfaceVar }}
       >
         <span
           className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px]"
-          style={{ backgroundColor: cat.iconBgVar }}
+          style={{ background: cat.iconBgGradientVar ?? cat.iconBgVar }}
         >
           <Icon className="h-3 w-3" style={{ color: 'var(--text-on-color)' }} />
         </span>
@@ -106,6 +106,17 @@ export function NodeCard({
     );
   }
 
+  // Gradient outline (ai only): a border can't hold a gradient, so paint a
+  // transparent 2px border over a border-box gradient layered under a
+  // padding-box card-fill. Selection keeps the solid brand-accent ring.
+  const gradientBorder = !selected && cat.borderGradientVar;
+  const canvasStyle = gradientBorder
+    ? {
+        borderColor: 'transparent',
+        background: `linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box, ${cat.borderGradientVar} border-box`,
+      }
+    : { borderColor: selected ? 'var(--color-brand-accent)' : cat.accentVar };
+
   return (
     <div
       onClick={onClick}
@@ -118,7 +129,7 @@ export function NodeCard({
         selected ? 'ring-2 ring-[var(--color-brand-accent)]/30' : 'hover:shadow-md',
         className,
       )}
-      style={{ borderColor: selected ? 'var(--color-brand-accent)' : cat.accentVar }}
+      style={canvasStyle}
     >
       {handles}
 
@@ -138,11 +149,11 @@ export function NodeCard({
 
       <div
         className="flex items-center gap-2 px-3 py-1.5"
-        style={{ backgroundColor: cat.surfaceVar }}
+        style={{ background: cat.surfaceGradientVar ?? cat.surfaceVar }}
       >
         <span
           className="flex h-5 w-5 items-center justify-center rounded"
-          style={{ backgroundColor: cat.iconBgVar }}
+          style={{ background: cat.iconBgGradientVar ?? cat.iconBgVar }}
         >
           <Icon className="h-3 w-3" style={{ color: 'var(--text-on-color)' }} />
         </span>

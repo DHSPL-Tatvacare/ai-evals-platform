@@ -304,6 +304,12 @@
   --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
   --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 
+  /* AI node accent — the only node category with a gradient fill, so it reads
+     distinctly from the solid-token categories. Composed from existing tokens
+     (they shift per-mode, so the gradient adapts automatically). */
+  --gradient-node-ai: linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-status-capped) 50%, var(--color-info) 100%);
+  --surface-node-ai: linear-gradient(135deg, color-mix(in srgb, var(--color-brand-primary) 14%, var(--bg-elevated)) 0%, color-mix(in srgb, var(--color-info) 14%, var(--bg-elevated)) 100%);
+
   /* Login / landing — atmospheric backdrop primitives (dark-only surface in v1) */
   --login-backdrop-bg: #07070d;
   --login-aurora-primary: rgba(112, 48, 160, 0.45);
@@ -452,6 +458,10 @@
   --gradient-brand-text: linear-gradient(90deg, var(--color-brand-accent) 0%, #8b5cf6 50%, var(--color-brand-accent) 100%);
   --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
   --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+  /* AI node accent — gradient fill that adapts via the per-mode color tokens. */
+  --gradient-node-ai: linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-status-capped) 50%, var(--color-info) 100%);
+  --surface-node-ai: linear-gradient(135deg, color-mix(in srgb, var(--color-brand-primary) 14%, var(--bg-elevated)) 0%, color-mix(in srgb, var(--color-info) 14%, var(--bg-elevated)) 100%);
 
   /* Login / landing — atmospheric backdrop primitives */
   --login-backdrop-bg: #07070d;

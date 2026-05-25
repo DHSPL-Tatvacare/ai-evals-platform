@@ -28,6 +28,13 @@ export interface NodeCategoryDef {
   iconBgVar: string;
   /** Foreground / accent — used for category text + node border. */
   accentVar: string;
+  /** Gradient fill for the icon square; when set it overrides `iconBgVar`. */
+  iconBgGradientVar?: string;
+  /** Gradient fill for the bar / palette-tile surface; overrides `surfaceVar`. */
+  surfaceGradientVar?: string;
+  /** Gradient outline for the canvas card; painted via the transparent-border
+   *  + border-box background technique (a border can't take a gradient). */
+  borderGradientVar?: string;
 }
 
 /** Phase 11 (Commit 2) — neutral, functional category tokens. The palette
@@ -92,7 +99,10 @@ export const DISPLAY_CATEGORIES: Record<DisplayCategory, NodeCategoryDef> = {
     icon: Sparkles,
     surfaceVar: 'var(--surface-info)',
     iconBgVar: 'var(--color-info)',
-    accentVar: 'var(--color-info)',
+    accentVar: 'var(--color-brand-primary)',
+    iconBgGradientVar: 'var(--gradient-node-ai)',
+    surfaceGradientVar: 'var(--surface-node-ai)',
+    borderGradientVar: 'var(--gradient-node-ai)',
   },
   termination: {
     label: 'Termination',
