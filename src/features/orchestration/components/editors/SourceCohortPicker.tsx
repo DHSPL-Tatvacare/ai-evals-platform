@@ -14,6 +14,7 @@ import type { CohortColumnType } from '@/features/orchestration/types';
 import { useCurrentAppId } from '@/hooks';
 import type { CohortFilter } from '@/services/api/orchestrationCohorts';
 
+import { SampleSizeField } from './SampleSizeField';
 import { SavedCohortPicker } from './SavedCohortPicker';
 import { SourceAndFieldsPicker } from './SourceAndFieldsPicker';
 
@@ -33,6 +34,8 @@ interface SourceCohortConfig {
   lookback_column?: string | null;
   consent_gate_channel?: string | null;
   cohort_definition_version_id?: string;
+  sample_limit?: number | null;
+  sample_strategy?: 'random' | 'first';
 }
 
 const MODE_OPTIONS: { value: Mode; label: string }[] = [
@@ -105,6 +108,14 @@ export function SourceCohortPicker({ value, onChange }: Props) {
       ...value,
       mode: 'inline',
       consent_gate_channel: raw.trim() || null,
+    });
+  }
+
+  function setSample(next: { limit: number | null; strategy: 'random' | 'first' }) {
+    onChange({
+      ...value,
+      sample_limit: next.limit,
+      sample_strategy: next.strategy,
     });
   }
 
@@ -188,6 +199,11 @@ export function SourceCohortPicker({ value, onChange }: Props) {
           onChange={(next) => onChange({ ...next, mode: 'saved' })}
         />
       )}
+      <SampleSizeField
+        limit={cfg.sample_limit ?? null}
+        strategy={cfg.sample_strategy ?? 'random'}
+        onChange={setSample}
+      />
     </InspectorSection>
   );
 }
