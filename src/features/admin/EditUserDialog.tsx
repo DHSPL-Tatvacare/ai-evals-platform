@@ -29,7 +29,7 @@ export function EditUserDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const canAssignRole = usePermission('role:assign');
+  const canAssignRole = usePermission('role:manage');
 
   useEffect(() => {
     rolesApi.listRoles().then((all) => {

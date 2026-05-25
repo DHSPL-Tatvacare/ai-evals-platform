@@ -28,7 +28,7 @@ interface UnmappedRowState extends UnmappedModelRow {
 }
 
 export function UnmappedTab({ active }: TabProps) {
-  const canEdit = usePermission('cost:edit');
+  const canEdit = usePermission('cost:manage');
   const pricing = useCostStore((s) => s.pricing);
   const loadPricing = useCostStore((s) => s.loadPricing);
 
@@ -332,7 +332,7 @@ export function UnmappedTab({ active }: TabProps) {
           </div>
           {!canEdit && (
             <span className="text-[11px] text-[var(--text-muted)]">
-              Requires <code className="font-mono">cost:edit</code> to map
+              Requires <code className="font-mono">cost:manage</code> to map
             </span>
           )}
         </header>

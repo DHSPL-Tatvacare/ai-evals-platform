@@ -25,7 +25,7 @@ export function EvalRunVisibilityPanel({
 }: EvalRunVisibilityPanelProps) {
   const [saving, setSaving] = useState(false);
   const currentUserId = useAuthStore((state) => state.user?.id ?? null);
-  const canShare = usePermission('asset:share');
+  const canShare = usePermission('evaluation:manage');
   const canEdit = useMemo(
     () => canShare && (!ownerId || ownerId === currentUserId),
     [canShare, currentUserId, ownerId],

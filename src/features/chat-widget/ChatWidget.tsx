@@ -224,7 +224,7 @@ export function ChatWidget() {
     () => void stopActiveTurn(currentApp),
     [currentApp, stopActiveTurn],
   );
-  const canEditConfiguration = usePermission('configuration:edit');
+  const canEditConfiguration = usePermission('configuration:manage');
 
 
 

@@ -83,7 +83,7 @@ const GROUPS: GroupSpec[] = [
 
 export function AdminLlmDefaultsPage() {
   const permissions = useAuthStore((s) => s.user?.permissions ?? []);
-  const canEditPlatform = permissions.includes('platform:edit');
+  const canEditPlatform = permissions.includes('platform:manage');
   const [scope, setScope] = useState<Scope>('tenant');
   const [selectedGroupId, setSelectedGroupId] = useState<string>(GROUPS[0].id);
 

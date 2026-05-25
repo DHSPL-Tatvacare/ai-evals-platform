@@ -63,8 +63,8 @@ export function Sidebar() {
   const canViewCost = usePermission('cost:view');
   const canManageSchedules = usePermission('schedule:manage');
   const canManageOrchestration = usePermission('orchestration:manage');
-  const canManageCommCap = usePermission('orchestration:admin:comm_cap');
-  const canEditConfiguration = usePermission('configuration:edit');
+  const canManageCommCap = usePermission('orchestration:manage');
+  const canEditConfiguration = usePermission('configuration:manage');
   const canManageNotifications = usePermission('notifications:manage');
   // User-mgmt nav entry stays tied to user-specific permissions, even though
   // the admin chrome is now reachable via `schedule:manage` alone.

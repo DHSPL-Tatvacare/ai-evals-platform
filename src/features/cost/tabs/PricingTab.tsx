@@ -24,7 +24,7 @@ export function PricingTab({ active }: TabProps) {
   const refresh = useCostStore((s) => s.refreshActive);
   const refreshFromModelsDev = useCostStore((s) => s.refreshFromModelsDev);
   const backfillUnpricedUsage = useCostStore((s) => s.backfillUnpricedUsage);
-  const canEdit = usePermission('cost:edit');
+  const canEdit = usePermission('cost:manage');
 
   const [editing, setEditing] = useState<PricingRow | 'new' | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
@@ -102,7 +102,7 @@ export function PricingTab({ active }: TabProps) {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-[12px] text-[var(--text-muted)]">
                 Active pricing rows live-override bootstrap seed. Edits require the
-                <code className="ml-1 font-mono">cost:edit</code> permission.
+                <code className="ml-1 font-mono">cost:manage</code> permission.
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -110,7 +110,7 @@ export function PricingTab({ active }: TabProps) {
                   size="sm"
                   icon={Plus}
                   disabled={!canEdit}
-                  title={canEdit ? 'Add a pricing row' : 'Requires cost:edit permission'}
+                  title={canEdit ? 'Add a pricing row' : 'Requires cost:manage permission'}
                   onClick={() => setEditing('new')}
                 >
                   New row
@@ -124,7 +124,7 @@ export function PricingTab({ active }: TabProps) {
                   title={
                     canEdit
                       ? 'Re-price historical usage rows whose original pricing was missing'
-                      : 'Requires cost:edit permission'
+                      : 'Requires cost:manage permission'
                   }
                   onClick={doBackfill}
                 >
@@ -136,7 +136,7 @@ export function PricingTab({ active }: TabProps) {
                   icon={RefreshCw}
                   disabled={!canEdit}
                   isLoading={refreshBusy}
-                  title={canEdit ? 'Refresh from models.dev' : 'Requires cost:edit permission'}
+                  title={canEdit ? 'Refresh from models.dev' : 'Requires cost:manage permission'}
                   onClick={doRefresh}
                 >
                   Refresh from models.dev
@@ -328,7 +328,7 @@ function PricingRowsTable({
         }
         onRowClick={(row) => {
           if (!canEdit) {
-            notificationService.info('Pricing edits require the cost:edit permission.');
+            notificationService.info('Pricing edits require the cost:manage permission.');
             return;
           }
           if (row.effectiveTo !== null) {

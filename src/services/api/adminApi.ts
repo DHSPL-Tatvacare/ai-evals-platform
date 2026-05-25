@@ -181,7 +181,7 @@ export const adminApi = {
     return resp.items;
   },
 
-  // Hard delete is gated by `invite_link:delete` (default-off, owner only).
+  // Hard delete is gated by `invite_link:manage` (default-off, owner only).
   // Phase 4: now on the canonical DELETE verb. Surface deliberately not
   // exposed in the standard admin UI yet.
   hardDeleteInviteLink: (linkId: string): Promise<void> =>

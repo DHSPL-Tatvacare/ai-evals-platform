@@ -206,7 +206,7 @@ export function Router() {
             <Route path="/inside-sales/orchestration/workflows/:workflowId" element={<Suspense fallback={ROUTE_FALLBACK}><WorkflowBuilderPage /></Suspense>} />
             <Route path={routes.insideSales.campaignRuns} element={<Suspense fallback={ROUTE_FALLBACK}><CampaignRunsPage /></Suspense>} />
             <Route path="/inside-sales/orchestration/runs/:runId" element={<Suspense fallback={ROUTE_FALLBACK}><LegacyRunDetailRedirect /></Suspense>} />
-            <Route path="/inside-sales/orchestration/datasets/:datasetId" element={<RequirePermission action="configuration:edit"><Suspense fallback={ROUTE_FALLBACK}><DatasetDetail /></Suspense></RequirePermission>} />
+            <Route path="/inside-sales/orchestration/datasets/:datasetId" element={<RequirePermission action="configuration:manage"><Suspense fallback={ROUTE_FALLBACK}><DatasetDetail /></Suspense></RequirePermission>} />
           </Route>
 
           {/* Admin routes */}
@@ -223,7 +223,7 @@ export function Router() {
           <Route
             path={routes.adminCommCap}
             element={
-              <RequirePermission action="orchestration:admin:comm_cap">
+              <RequirePermission action="orchestration:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <CommCapPage />
                 </Suspense>
@@ -261,7 +261,7 @@ export function Router() {
           <Route
             path={routes.adminAnalyticsMappings}
             element={
-              <RequirePermission action="analytics:admin">
+              <RequirePermission action="analytics:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <AnalyticsMappingsPage />
                 </Suspense>
@@ -271,7 +271,7 @@ export function Router() {
           <Route
             path={routes.adminAnalyticsSignals}
             element={
-              <RequirePermission action="analytics:admin">
+              <RequirePermission action="analytics:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <SignalDefinitionsPage />
                 </Suspense>
@@ -315,7 +315,7 @@ export function Router() {
           <Route
             path={routes.adminLlmProviders}
             element={
-              <RequirePermission action="configuration:edit">
+              <RequirePermission action="configuration:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <AdminAISettingsPage />
                 </Suspense>
@@ -325,7 +325,7 @@ export function Router() {
           <Route
             path={routes.adminLlmDefaults}
             element={
-              <RequirePermission action="configuration:edit">
+              <RequirePermission action="configuration:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <AdminLlmDefaultsPage />
                 </Suspense>

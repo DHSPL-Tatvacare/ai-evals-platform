@@ -207,7 +207,7 @@ function UsersTab() {
             id: 'edit',
             icon: Pencil,
             label: 'Edit user',
-            hidden: !userHasPermission(currentUser, 'user:edit'),
+            hidden: !userHasPermission(currentUser, 'user:manage'),
             onClick: () => setEditingUser(user),
           },
           {
@@ -217,7 +217,7 @@ function UsersTab() {
             hidden:
               isSelf ||
               !user.isActive ||
-              !userHasPermission(currentUser, 'user:reset_password'),
+              !userHasPermission(currentUser, 'user:manage'),
             onClick: () => setResetPasswordUser(user),
           },
           {
@@ -229,7 +229,7 @@ function UsersTab() {
               isSelf ||
               user.isOwner ||
               !user.isActive ||
-              !userHasPermission(currentUser, 'user:deactivate'),
+              !userHasPermission(currentUser, 'user:manage'),
             onClick: () => setDeactivatingUser(user),
           },
           {
@@ -240,7 +240,7 @@ function UsersTab() {
             hidden:
               isSelf ||
               user.isOwner ||
-              !userHasPermission(currentUser, 'user:delete'),
+              !userHasPermission(currentUser, 'user:manage'),
             onClick: () => setDeletingUser(user),
           },
         ];
@@ -269,7 +269,7 @@ function UsersTab() {
           label: 'Search users',
         }}
         actions={
-          <PermissionGate action="user:create">
+          <PermissionGate action="user:manage">
             <Button size="sm" onClick={() => setIsCreateOpen(true)} icon={Plus}>
               Add User
             </Button>

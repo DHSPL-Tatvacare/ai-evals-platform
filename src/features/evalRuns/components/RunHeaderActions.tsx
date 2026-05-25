@@ -115,7 +115,7 @@ export function RunHeaderActions({
           <span className="mx-0.5 h-4 w-px bg-[var(--border-subtle)]" />
 
           {isActive && (
-            <PermissionGate action="evaluation:cancel">
+            <PermissionGate action="evaluation:run">
               <ActionIconButton
                 icon={Ban}
                 label={cancelling ? 'Cancelling run' : 'Cancel run'}
@@ -128,7 +128,7 @@ export function RunHeaderActions({
             </PermissionGate>
           )}
 
-          <PermissionGate action="evaluation:delete">
+          <PermissionGate action="evaluation:manage">
             <ActionIconButton
               icon={Trash2}
               label={deleting ? 'Deleting run' : 'Delete run'}

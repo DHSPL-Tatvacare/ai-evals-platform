@@ -1,6 +1,6 @@
 /**
  * Sherlock admin API surface — verified queries CRUD + instructions
- * tenant override. Both share the same `sherlock:manage_verified_queries`
+ * tenant override. Both share the same `sherlock:manage`
  * permission gate on the backend.
  */
 import { apiRequest } from './client';

@@ -9,13 +9,9 @@ import type { User } from '@/types/auth.types';
 export const SYSTEM_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 
 export const USER_MANAGEMENT_PERMISSIONS = [
-  'user:create',
-  'user:edit',
-  'user:deactivate',
-  'user:delete',
-  'user:reset_password',
+  'user:manage',
   'invite_link:manage',
-  'role:assign',
+  'role:manage',
 ] as const;
 
 export const ADMIN_ACCESS_PERMISSIONS = [

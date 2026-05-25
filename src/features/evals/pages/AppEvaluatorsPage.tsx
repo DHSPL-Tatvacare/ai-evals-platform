@@ -31,10 +31,10 @@ export function AppEvaluatorsPage({ onOpenEvaluator }: AppEvaluatorsPageProps = 
   const { icon, title } = usePageMetadata('evaluators');
   const headerPageActions = useAppPageActions('evaluators', { displayMode: 'icon' });
   const emptyStatePageActions = useAppPageActions('evaluators');
-  const canCreate = usePermission('asset:create');
-  const canEdit = usePermission('asset:edit');
-  const canDelete = usePermission('asset:delete');
-  const canShare = usePermission('asset:share');
+  const canCreate = usePermission('asset:manage');
+  const canEdit = usePermission('asset:manage');
+  const canDelete = usePermission('asset:manage');
+  const canShare = usePermission('asset:manage');
   const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');

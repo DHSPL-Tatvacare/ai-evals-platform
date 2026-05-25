@@ -2,8 +2,8 @@
  * Analytics admin API client — Phase 3 mirror->fact mapping admin endpoints.
  *
  * Backend lives at `backend/app/routes/analytics_admin.py`. Routes are gated
- * on the `analytics:admin` permission; the hooks below are paired with a
- * <RequirePermission action="analytics:admin"> guard at the page level.
+ * on the `analytics:manage` permission; the hooks below are paired with a
+ * <RequirePermission action="analytics:manage"> guard at the page level.
  */
 import { apiRequest } from './client';
 

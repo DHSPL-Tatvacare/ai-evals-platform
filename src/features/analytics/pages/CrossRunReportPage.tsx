@@ -141,7 +141,7 @@ export function CrossRunReportPage() {
     [configs, defaultConfigId],
   );
 
-  const canGenerate = usePermission('report:generate');
+  const canGenerate = usePermission('report:run');
 
   // Contract-driven preview of the report's sections — sourced from app config
   // so the seed composition drives the zero-state, never a hardcoded list.

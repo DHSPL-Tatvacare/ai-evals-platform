@@ -5,7 +5,7 @@ import { APP_CONFIG_FALLBACKS } from '@/types';
 const specs: SettingsTabSpec[] = [
   { id: 'appearance', label: 'Appearance', content: null },
   { id: 'notifications', label: 'Notifications', content: null, feature: 'hasNotifications' },
-  { id: 'ai', label: 'AI', content: null, requires: 'configuration:edit' },
+  { id: 'ai', label: 'AI', content: null, requires: 'configuration:manage' },
 ];
 
 const insideSales = APP_CONFIG_FALLBACKS['inside-sales'].features;
@@ -20,7 +20,7 @@ describe('resolveSettingsTabs', () => {
   it('adds permission-gated tabs only when the user holds the action', () => {
     const tabs = resolveSettingsTabs(specs, {
       features: insideSales,
-      can: (a) => a === 'configuration:edit',
+      can: (a) => a === 'configuration:manage',
     });
     expect(tabs.map((t) => t.id)).toEqual(['appearance', 'notifications', 'ai']);
   });

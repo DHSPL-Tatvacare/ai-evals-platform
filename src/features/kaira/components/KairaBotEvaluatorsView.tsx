@@ -31,10 +31,10 @@ interface KairaBotEvaluatorsViewProps {
 
 export function KairaBotEvaluatorsView({ session }: KairaBotEvaluatorsViewProps) {
   const appId = 'kaira-bot';
-  const canCreate = usePermission('asset:create');
-  const canEdit = usePermission('asset:edit');
-  const canDelete = usePermission('asset:delete');
-  const canShare = usePermission('asset:share');
+  const canCreate = usePermission('asset:manage');
+  const canEdit = usePermission('asset:manage');
+  const canDelete = usePermission('asset:manage');
+  const canShare = usePermission('asset:manage');
   const canRun = usePermission('evaluation:run');
   const isOwner = useAuthStore((state) => state.user?.isOwner ?? false);
   const [filter, setFilter] = useState<EvaluatorVisibilityFilter>('all');

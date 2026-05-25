@@ -120,7 +120,7 @@ export default function ApiAuth() {
                 (CRUD), <code>/credentials/&#123;id&#125;/validate</code>,{" "}
                 <code>/credentials/&#123;id&#125;/discover-models</code>,{" "}
                 <code>/credentials/&#123;id&#125;/deployments</code> — all gated by{" "}
-                <code>configuration:edit</code>.
+                <code>configuration:manage</code>.
               </InfoRow>
             </tbody>
           </table>

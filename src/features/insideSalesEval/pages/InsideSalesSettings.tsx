@@ -70,7 +70,7 @@ export function InsideSalesSettings() {
     {
       id: 'ai',
       label: 'API Configuration',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: (
         <div className="space-y-4">
           <Alert variant="info">
@@ -92,7 +92,7 @@ export function InsideSalesSettings() {
     {
       id: 'templates',
       label: 'Templates',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: <Card><TemplatesTab /></Card>,
     },
   ];

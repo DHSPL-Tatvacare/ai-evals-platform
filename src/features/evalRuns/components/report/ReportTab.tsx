@@ -126,8 +126,9 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const [reportProvider, setReportProvider] = useState<LLMProvider | ''>('');
   const [reportModel, setReportModel] = useState('');
 
-  const canGenerate = usePermission('report:generate');
-  const canExport = usePermission('evaluation:export');
+  const canGenerate = usePermission('report:run');
+  const canInsightsView = usePermission('insights:view');
+  const canExport = canGenerate || canInsightsView;
 
   // Server-resolved BYOK: a run is ready to submit once the user has picked
   // a provider+model from the admin-configured catalogue.

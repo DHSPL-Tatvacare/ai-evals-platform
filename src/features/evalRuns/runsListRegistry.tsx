@@ -353,7 +353,7 @@ function actionsColumn(
               className="w-fit min-w-[140px] rounded-[8px] bg-[var(--bg-elevated)] py-1"
             >
               {canCancel && (
-                <PermissionGate action="evaluation:cancel">
+                <PermissionGate action="evaluation:run">
                   <button
                     type="button"
                     onClick={() => {
@@ -368,7 +368,7 @@ function actionsColumn(
                 </PermissionGate>
               )}
               {row.kind === 'run' && (
-                <PermissionGate action="evaluation:delete">
+                <PermissionGate action="evaluation:manage">
                   <button
                     type="button"
                     disabled={isActive}

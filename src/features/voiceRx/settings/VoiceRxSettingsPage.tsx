@@ -50,7 +50,7 @@ export function VoiceRxSettingsPage() {
   const features = useCurrentAppConfig().features;
   const user = useAuthStore((s) => s.user);
   const can = useCallback((action: string) => userHasPermission(user, action), [user]);
-  const canEditConfiguration = can('configuration:edit');
+  const canEditConfiguration = can('configuration:manage');
   const notifications = useNotificationsSettings(features.hasNotifications);
 
   useEffect(() => {
@@ -108,7 +108,7 @@ export function VoiceRxSettingsPage() {
     {
       id: 'ai',
       label: 'API Configuration',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: (
         <div className="space-y-4">
           <Alert variant="info">
@@ -130,7 +130,7 @@ export function VoiceRxSettingsPage() {
     {
       id: 'transcription',
       label: 'Language & Script',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: (
         <Card>
           <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
@@ -158,7 +158,7 @@ export function VoiceRxSettingsPage() {
     {
       id: 'templates',
       label: 'Templates',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: <Card><TemplatesTab /></Card>,
     },
   ];

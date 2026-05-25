@@ -287,7 +287,7 @@ export default function AdversarialDetailV2() {
     const actions = (
       <>
         {prevNextNav}
-        <PermissionGate action="configuration:edit">
+        <PermissionGate action="configuration:manage">
           <button
             type="button"
             onClick={() => { void handleSaveToLibrary(); }}

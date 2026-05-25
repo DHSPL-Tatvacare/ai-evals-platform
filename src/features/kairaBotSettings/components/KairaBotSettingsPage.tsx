@@ -44,7 +44,7 @@ export function KairaBotSettingsPage() {
   const features = useCurrentAppConfig().features;
   const user = useAuthStore((s) => s.user);
   const can = useCallback((action: string) => userHasPermission(user, action), [user]);
-  const canEditConfiguration = can('configuration:edit');
+  const canEditConfiguration = can('configuration:manage');
   const notifications = useNotificationsSettings(features.hasNotifications);
 
   useEffect(() => {
@@ -109,7 +109,7 @@ export function KairaBotSettingsPage() {
     {
       id: 'ai',
       label: 'API Configuration',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: (
         <div className="space-y-4">
           <Alert variant="info">
@@ -131,13 +131,13 @@ export function KairaBotSettingsPage() {
     {
       id: 'templates',
       label: 'Templates',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: <Card><TemplatesTab /></Card>,
     },
     {
       id: 'adversarial',
       label: 'Evaluation Contracts',
-      requires: 'configuration:edit',
+      requires: 'configuration:manage',
       content: <EvaluationContractsTab />,
     },
   ];
