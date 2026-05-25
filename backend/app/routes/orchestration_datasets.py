@@ -212,6 +212,7 @@ async def import_version_route(
     file: UploadFile = File(...),
     id_strategy: str = Form(...),
     id_column: Optional[str] = Form(None),
+    communication_column: str = Form(...),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = require_permission('orchestration:manage'),
 ):
@@ -253,8 +254,11 @@ async def import_version_route(
             source_byte_size=len(raw),
             id_strategy=id_strategy,
             id_column=id_column,
+            communication_key=communication_column,
             imported_by=auth.user_id,
         )
+    except DatasetImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except dataset_service.DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
 
@@ -308,3 +312,28 @@ async def delete_version_route(
     except dataset_service.DatasetInUse as exc:
         raise HTTPException(status_code=409, detail=_format_in_use_detail(exc))
     return Response(status_code=204)
+
+
+@router.post(
+    "/{dataset_id}/versions/{version_id}/publish",
+    response_model=DatasetVersionResponse,
+)
+async def publish_version_route(
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+):
+    await _load_and_gate_dataset(db, auth, dataset_id, action="edit")
+    try:
+        return await dataset_service.publish_version(
+            db,
+            tenant_id=auth.tenant_id,
+            dataset_id=dataset_id,
+            version_id=version_id,
+            published_by=auth.user_id,
+        )
+    except dataset_service.DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset version not found")
+    except dataset_service.DatasetVersionAlreadyPublished as exc:
+        raise HTTPException(status_code=409, detail=str(exc))

@@ -23,7 +23,12 @@ import {
   useDataset,
   useDatasetVersion,
   useDeleteDatasetVersion,
+  usePublishDatasetVersion,
 } from '@/features/orchestration/queries/datasets';
+import {
+  decodeApiError,
+  summarizeApiErrorBody,
+} from '@/features/orchestration/contracts/errorDecoder';
 import { ApiError } from '@/services/api/client';
 import {
   type DatasetSchemaColumn,
@@ -54,6 +59,18 @@ function describeStrategy(version: DatasetVersionResponse): string {
   if (version.idStrategy === 'uuid') return 'Auto-generated UUIDs';
   return version.idColumn ? `Column: ${version.idColumn}` : 'Column';
 }
+
+const STATUS_VARIANT: Record<DatasetVersionResponse['status'], BadgeVariant> = {
+  draft: 'neutral',
+  published: 'success',
+  archived: 'warning',
+};
+
+const STATUS_LABEL: Record<DatasetVersionResponse['status'], string> = {
+  draft: 'Draft',
+  published: 'Published',
+  archived: 'Archived',
+};
 
 function typeBadgeVariant(t: DatasetSchemaColumn['type']): BadgeVariant {
   switch (t) {
@@ -123,6 +140,25 @@ export function DatasetDetail() {
     useDatasetVersion(datasetId, selectedVersionId, SAMPLE_ROWS);
 
   const deleteVersion = useDeleteDatasetVersion(datasetId ?? '');
+  const publishVersion = usePublishDatasetVersion(datasetId ?? '');
+
+  async function handlePublishVersion(version: DatasetVersionResponse) {
+    if (!datasetId) return;
+    try {
+      await publishVersion.mutateAsync(version.id);
+      notificationService.success(
+        `Published v${version.versionNumber}. Workflows now bind to this version.`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        notificationService.error('This version is already published.');
+        return;
+      }
+      notificationService.error(
+        summarizeApiErrorBody(decodeApiError(err), 'Failed to publish version.'),
+      );
+    }
+  }
 
   async function handleDeleteVersion() {
     if (!datasetId || !deleteTarget) return;
@@ -256,6 +292,25 @@ export function DatasetDetail() {
                     disabled={!hasVersions}
                   />
                 </div>
+                {selectedVersion ? (
+                  <Badge variant={STATUS_VARIANT[selectedVersion.status]} size="sm">
+                    {STATUS_LABEL[selectedVersion.status]}
+                  </Badge>
+                ) : null}
+                {selectedVersion && selectedVersion.status === 'draft' ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handlePublishVersion(selectedVersion)}
+                    isLoading={
+                      publishVersion.isPending &&
+                      publishVersion.variables === selectedVersion.id
+                    }
+                    disabled={publishVersion.isPending}
+                  >
+                    Publish
+                  </Button>
+                ) : null}
                 {selectedVersion ? (
                   <RowActionsMenu
                     actions={versionActions}

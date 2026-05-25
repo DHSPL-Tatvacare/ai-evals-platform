@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import insert, or_, select
+from sqlalchemy import insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,10 @@ from app.models.orchestration import (
     Workflow,
     WorkflowVersion,
 )
-from app.services.orchestration.datasets.dataset_validator import ImportedDataset
+from app.services.orchestration.datasets.dataset_validator import (
+    ImportedDataset,
+    validate_communication_key,
+)
 
 
 class DatasetNotFound(LookupError):
@@ -48,6 +51,10 @@ class DatasetNotFound(LookupError):
 
 class DatasetConflict(ValueError):
     """Duplicate (tenant_id, app_id, name) on insert."""
+
+
+class DatasetVersionAlreadyPublished(Exception):
+    """Publish rejected because the version is not in ``draft`` state."""
 
 
 class DatasetInUse(ValueError):
@@ -96,6 +103,7 @@ def _serialize_dataset(
             _serialize_version(latest_version) if latest_version is not None else None
         ),
         "version_ids": list(version_ids or []),
+        "current_published_version_id": row.current_published_version_id,
     }
 
 
@@ -117,6 +125,10 @@ def _serialize_version(
         "schema_descriptor": row.schema_descriptor,
         "imported_by": row.imported_by,
         "imported_at": row.imported_at,
+        "status": row.status,
+        "communication_key": row.communication_key,
+        "published_by": row.published_by,
+        "published_at": row.published_at,
         "sample_rows": list(sample_rows) if sample_rows is not None else [],
     }
     return payload
@@ -413,8 +425,13 @@ async def import_version(
     source_byte_size: Optional[int],
     id_strategy: str,
     id_column: Optional[str],
+    communication_key: str,
     imported_by: uuid.UUID,
 ) -> dict[str, Any]:
+    validate_communication_key(
+        communication_key,
+        [c["name"] for c in imported.schema_descriptor.get("columns", [])],
+    )
     dataset = await _load_dataset(
         db, tenant_id=tenant_id, dataset_id=dataset_id, for_update=True,
     )
@@ -440,6 +457,7 @@ async def import_version(
         row_count=len(imported.rows),
         id_strategy=id_strategy,
         id_column=id_column,
+        communication_key=communication_key,
         schema_descriptor=imported.schema_descriptor,
         imported_by=imported_by,
     )
@@ -519,10 +537,51 @@ async def delete_version(
     await db.commit()
 
 
+async def publish_version(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    published_by: uuid.UUID,
+) -> dict[str, Any]:
+    """Flip a draft version to published AND point the dataset's
+    ``current_published_version_id`` at it inside one transaction. The
+    deferred FK on ``cohort_datasets.current_published_version_id`` fires at
+    COMMIT, so both UPDATEs share the same commit that releases it.
+    """
+    version = await _load_version(
+        db, tenant_id=tenant_id, dataset_id=dataset_id, version_id=version_id,
+    )
+    if version.status != "draft":
+        raise DatasetVersionAlreadyPublished(
+            f"version {version.version_number} is already {version.status}"
+        )
+
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(CohortDatasetVersion)
+        .where(CohortDatasetVersion.id == version_id)
+        .values(status="published", published_by=published_by, published_at=now)
+    )
+    await db.execute(
+        update(CohortDataset)
+        .where(CohortDataset.id == dataset_id)
+        .values(current_published_version_id=version_id, updated_at=now)
+    )
+    await db.commit()
+
+    refreshed = await _load_version(
+        db, tenant_id=tenant_id, dataset_id=dataset_id, version_id=version_id,
+    )
+    return _serialize_version(refreshed)
+
+
 __all__ = [
     "DatasetNotFound",
     "DatasetConflict",
     "DatasetInUse",
+    "DatasetVersionAlreadyPublished",
     "create_dataset",
     "list_datasets",
     "get_dataset",
@@ -530,4 +589,5 @@ __all__ = [
     "import_version",
     "get_version",
     "delete_version",
+    "publish_version",
 ]

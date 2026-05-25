@@ -59,6 +59,15 @@ def validate_headers(columns: list[str], *, id_strategy: str, id_column: Optiona
         )
 
 
+def validate_communication_key(communication_key: str, columns: list[str]) -> None:
+    if not communication_key:
+        raise DatasetImportError("communication_key is required")
+    if communication_key not in columns:
+        raise DatasetImportError(
+            f"communication_key {communication_key!r} not present in file header"
+        )
+
+
 def assemble(
     columns: list[str],
     rows: list[dict],

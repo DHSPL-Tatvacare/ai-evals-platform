@@ -63,6 +63,10 @@ class DatasetVersionResponse(CamelORMModel):
     schema_descriptor: DatasetSchemaDescriptor
     imported_by: uuid.UUID
     imported_at: datetime
+    status: str
+    communication_key: str
+    published_by: Optional[uuid.UUID] = None
+    published_at: Optional[datetime] = None
     # Populated only by ``get_version`` when ``sample_rows > 0`` is requested.
     # Each entry is ``{"recipient_id": str, "payload": dict}``.
     sample_rows: list[DatasetSampleRow] = Field(default_factory=list)
@@ -87,6 +91,7 @@ class DatasetResponse(CamelORMModel):
     # All version ids — lets the source.dataset picker resolve which
     # dataset owns a pinned (possibly older) version_id.
     version_ids: list[uuid.UUID] = Field(default_factory=list)
+    current_published_version_id: Optional[uuid.UUID] = None
 
 
 class DatasetDetailResponse(DatasetResponse):

@@ -100,3 +100,15 @@ export function useDeleteDatasetVersion(datasetId: string) {
     },
   });
 }
+
+export function usePublishDatasetVersion(datasetId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) =>
+      orchestrationDatasetsApi.publishVersion(datasetId, versionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: datasetQueryKeys.detail(datasetId) });
+      qc.invalidateQueries({ queryKey: ['orchestration', 'datasets', 'list'] });
+    },
+  });
+}

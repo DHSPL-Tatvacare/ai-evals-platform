@@ -26,6 +26,7 @@ from app.services.orchestration.api.datasets import (
     DatasetConflict,
     DatasetInUse,
     DatasetNotFound,
+    DatasetVersionAlreadyPublished,
     create_dataset,
     delete_dataset,
     delete_version,
@@ -33,8 +34,10 @@ from app.services.orchestration.api.datasets import (
     get_version,
     import_version,
     list_datasets,
+    publish_version,
 )
 from app.services.orchestration.datasets.csv_importer import parse_csv
+from app.services.orchestration.datasets.dataset_validator import DatasetImportError
 
 
 CSV_BASIC = "recipient_id,name,age\nr1,alice,30\nr2,bob,25\nr3,carol,40\n"
@@ -122,6 +125,7 @@ async def test_create_import_list_get_happy_path(db_session, seed_tenant_user_ap
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     assert version["row_count"] == 3
@@ -150,6 +154,71 @@ async def test_create_import_list_get_happy_path(db_session, seed_tenant_user_ap
     assert len(with_sample["sample_rows"]) == 2
     assert with_sample["sample_rows"][0]["recipient_id"] == "r1"
     assert with_sample["sample_rows"][0]["payload"]["name"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_import_persists_communication_key_and_draft_status(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    ds = await create_dataset(
+        db_session,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        name=f"comm-{uuid.uuid4().hex[:6]}",
+        description=None,
+        created_by=user_id,
+    )
+    version = await import_version(
+        db_session,
+        tenant_id=tenant_id,
+        dataset_id=ds["id"],
+        imported=_imported(CSV_BASIC, id_strategy="column", id_column="recipient_id"),
+        source_type="csv",
+        source_filename="cohort.csv",
+        source_byte_size=len(CSV_BASIC),
+        id_strategy="column",
+        id_column="recipient_id",
+        communication_key="name",
+        imported_by=user_id,
+    )
+    assert version["communication_key"] == "name"
+    assert version["status"] == "draft"
+
+    persisted = await db_session.scalar(
+        select(CohortDatasetVersion).where(CohortDatasetVersion.id == version["id"])
+    )
+    assert persisted.communication_key == "name"
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_unknown_communication_key(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    ds = await create_dataset(
+        db_session,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        name=f"badcomm-{uuid.uuid4().hex[:6]}",
+        description=None,
+        created_by=user_id,
+    )
+    with pytest.raises(DatasetImportError) as exc:
+        await import_version(
+            db_session,
+            tenant_id=tenant_id,
+            dataset_id=ds["id"],
+            imported=_imported(CSV_BASIC, id_strategy="column", id_column="recipient_id"),
+            source_type="csv",
+            source_filename="cohort.csv",
+            source_byte_size=len(CSV_BASIC),
+            id_strategy="column",
+            id_column="recipient_id",
+            communication_key="not_a_column",
+            imported_by=user_id,
+        )
+    assert "not present in file header" in str(exc.value)
 
 
 # ─── 2. UUID id strategy ───────────────────────────────────────────────────
@@ -182,6 +251,7 @@ async def test_import_with_uuid_id_strategy(db_session, seed_tenant_user_app):
         id_strategy="uuid",
 
         id_column=None,
+        communication_key="name",
         imported_by=user_id,
     )
     assert version["row_count"] == 2
@@ -233,6 +303,7 @@ async def test_import_twice_increments_version_number(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     csv_v2 = "recipient_id,name\nr10,dave\n"
@@ -251,6 +322,7 @@ async def test_import_twice_increments_version_number(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     assert v1["version_number"] == 1
@@ -293,6 +365,7 @@ async def test_delete_version_when_no_binding_succeeds(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     await delete_version(
@@ -335,6 +408,7 @@ async def test_delete_version_blocked_by_workflow_binding(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     workflow = await _seed_workflow_with_dataset_binding(
@@ -387,6 +461,7 @@ async def test_delete_dataset_cascades_when_unbound(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     await delete_dataset(
@@ -424,6 +499,7 @@ async def test_delete_dataset_blocked_by_workflow_binding(
         id_strategy="column",
 
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     await _seed_workflow_with_dataset_binding(
@@ -439,6 +515,104 @@ async def test_delete_dataset_blocked_by_workflow_binding(
             db_session, tenant_id=tenant_id, dataset_id=ds["id"],
         )
     assert "Bound DS" in exc_info.value.workflow_names
+
+
+# ─── publish_version ───────────────────────────────────────────────────────
+
+
+async def _create_dataset_with_version(db_session, *, tenant_id, user_id, app_id):
+    ds = await create_dataset(
+        db_session,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        name=f"pub-{uuid.uuid4().hex[:6]}",
+        description=None,
+        created_by=user_id,
+    )
+    version = await import_version(
+        db_session,
+        tenant_id=tenant_id,
+        dataset_id=ds["id"],
+        imported=_imported(CSV_BASIC, id_strategy="column", id_column="recipient_id"),
+        source_type="csv",
+        source_filename="x.csv",
+        source_byte_size=len(CSV_BASIC),
+        id_strategy="column",
+        id_column="recipient_id",
+        communication_key="recipient_id",
+        imported_by=user_id,
+    )
+    return ds, version
+
+
+@pytest.mark.asyncio
+async def test_publish_version_flips_status_and_repoints_parent(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    ds, version = await _create_dataset_with_version(
+        db_session, tenant_id=tenant_id, user_id=user_id, app_id=app_id,
+    )
+    assert version["status"] == "draft"
+
+    published = await publish_version(
+        db_session,
+        tenant_id=tenant_id,
+        dataset_id=ds["id"],
+        version_id=version["id"],
+        published_by=user_id,
+    )
+    assert published["status"] == "published"
+    assert published["published_by"] == user_id
+    assert published["published_at"] is not None
+
+    # The parent dataset's current_published_version_id now points at it
+    # (one transaction; the deferred FK fired at commit).
+    detail = await get_dataset(db_session, tenant_id=tenant_id, dataset_id=ds["id"])
+    assert detail["current_published_version_id"] == version["id"]
+
+
+@pytest.mark.asyncio
+async def test_publish_version_already_published_raises(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    ds, version = await _create_dataset_with_version(
+        db_session, tenant_id=tenant_id, user_id=user_id, app_id=app_id,
+    )
+    await publish_version(
+        db_session,
+        tenant_id=tenant_id,
+        dataset_id=ds["id"],
+        version_id=version["id"],
+        published_by=user_id,
+    )
+    with pytest.raises(DatasetVersionAlreadyPublished):
+        await publish_version(
+            db_session,
+            tenant_id=tenant_id,
+            dataset_id=ds["id"],
+            version_id=version["id"],
+            published_by=user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_version_missing_raises_not_found(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, app_id = seed_tenant_user_app
+    ds, _ = await _create_dataset_with_version(
+        db_session, tenant_id=tenant_id, user_id=user_id, app_id=app_id,
+    )
+    with pytest.raises(DatasetNotFound):
+        await publish_version(
+            db_session,
+            tenant_id=tenant_id,
+            dataset_id=ds["id"],
+            version_id=uuid.uuid4(),
+            published_by=user_id,
+        )
 
 
 # ─── 9. Cross-tenant isolation ─────────────────────────────────────────────
@@ -486,6 +660,7 @@ async def test_cross_tenant_isolation(db_session, seed_tenant_user_app):
             id_strategy="column",
 
             id_column="recipient_id",
+            communication_key="recipient_id",
             imported_by=user_id,
         )
 

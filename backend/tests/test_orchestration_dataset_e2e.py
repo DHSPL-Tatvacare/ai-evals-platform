@@ -157,6 +157,7 @@ async def test_e2e_csv_to_recipient_states_column_id_strategy(
         source_byte_size=len(CSV_3ROWS),
         id_strategy="column",
         id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     assert version["row_count"] == 3
@@ -243,6 +244,7 @@ async def test_e2e_csv_to_recipient_states_uuid_id_strategy(
         source_type="csv",
         source_filename="cohort.csv", source_byte_size=len(csv_no_id),
         id_strategy="uuid", id_column=None,
+        communication_key="name",
         imported_by=user_id,
     )
     source_ref = f"dataset.{version['id']}"
@@ -294,6 +296,7 @@ async def test_e2e_jsonb_filter_narrows_cohort(
         source_type="csv",
         source_filename="cohort.csv", source_byte_size=len(CSV_3ROWS),
         id_strategy="column", id_column="recipient_id",
+        communication_key="recipient_id",
         imported_by=user_id,
     )
     # Confirm the importer typed mql_score as integer — that's what makes

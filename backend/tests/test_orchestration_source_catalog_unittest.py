@@ -111,6 +111,7 @@ async def _seed_dataset_with_version(
     id_strategy: str = "uuid",
     id_column: str | None = None,
     columns: list[dict] | None = None,
+    communication_key: str = "",
 ) -> tuple[CohortDataset, CohortDatasetVersion]:
     dataset = CohortDataset(
         id=uuid.uuid4(),
@@ -137,6 +138,7 @@ async def _seed_dataset_with_version(
         row_count=1,
         id_strategy=id_strategy,
         id_column=id_column,
+        communication_key=communication_key,
         schema_descriptor=_schema_descriptor(cols),
         imported_by=user_id,
     )
@@ -179,6 +181,28 @@ async def test_resolve_source_dataset_returns_dataset_source(db_session, seed_te
     assert out.app_id == APP_ID
     assert out.workflow_types == ["*"]
     assert out.schema_descriptor["columns"][0]["name"] == "phone"
+
+
+@pytest.mark.asyncio
+async def test_resolve_source_dataset_round_trips_communication_key(
+    db_session, seed_tenant_user_app
+):
+    tenant_id, user_id, _ = seed_tenant_user_app
+    _, version = await _seed_dataset_with_version(
+        db_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=APP_ID,
+        name=f"commkey-{uuid.uuid4().hex[:8]}",
+        id_strategy="column",
+        id_column="phone",
+        communication_key="phone",
+    )
+    out = await resolve_source(
+        f"dataset.{version.id}", db=db_session, tenant_id=tenant_id,
+    )
+    assert isinstance(out, DatasetSource)
+    assert out.communication_key == "phone"
 
 
 @pytest.mark.asyncio

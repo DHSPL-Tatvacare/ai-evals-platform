@@ -187,6 +187,7 @@ class DatasetSource:
     version_number: int = 0
     row_count: int = 0
     imported_at: Optional[datetime] = None
+    communication_key: str = ""
 
 
 ResolvedSource = Union[CohortSource, DatasetSource]
@@ -209,6 +210,7 @@ def _row_to_dataset_source(
         id_strategy=version.id_strategy,
         id_column=version.id_column,
         schema_descriptor=dict(version.schema_descriptor or {}),
+        communication_key=version.communication_key,
     )
 
 

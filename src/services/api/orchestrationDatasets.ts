@@ -45,6 +45,10 @@ export interface DatasetVersionResponse {
   schemaDescriptor: DatasetSchemaDescriptor;
   importedBy: string;
   importedAt: string;
+  status: 'draft' | 'published' | 'archived';
+  communicationKey: string;
+  publishedBy: string | null;
+  publishedAt: string | null;
   sampleRows?: Array<{ recipientId: string; payload: Record<string, unknown> }>;
 }
 
@@ -61,6 +65,7 @@ export interface DatasetResponse {
   createdAt: string;
   updatedAt: string;
   latestVersion: DatasetVersionResponse | null;
+  currentPublishedVersionId: string | null;
   /** All version ids owned by this dataset. Used by the source.dataset
    *  picker to reverse-resolve which dataset owns a pinned (possibly
    *  older) version_id without an extra round-trip per row. */
@@ -169,7 +174,8 @@ export const orchestrationDatasetsApi = {
     datasetId: string,
     file: File,
     idStrategy: 'column' | 'uuid',
-    idColumn?: string,
+    idColumn: string | undefined,
+    communicationColumn: string,
   ) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -177,6 +183,7 @@ export const orchestrationDatasetsApi = {
     if (idStrategy === 'column' && idColumn) {
       fd.append('id_column', idColumn);
     }
+    fd.append('communication_column', communicationColumn);
     return uploadDatasetVersionRequest(datasetId, fd);
   },
   getVersion: (datasetId: string, versionId: string, sampleRows = 0) =>
@@ -187,5 +194,10 @@ export const orchestrationDatasetsApi = {
     apiRequest<void>(
       `/api/orchestration/datasets/${datasetId}/versions/${versionId}`,
       { method: 'DELETE' },
+    ),
+  publishVersion: (datasetId: string, versionId: string) =>
+    apiRequest<DatasetVersionResponse>(
+      `/api/orchestration/datasets/${datasetId}/versions/${versionId}/publish`,
+      { method: 'POST' },
     ),
 };

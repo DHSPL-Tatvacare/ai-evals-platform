@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -84,6 +85,18 @@ function goToConfigure() {
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 }
 
+/**
+ * Drives the required "Contact column" Select on step 2, the same way the
+ * recipient-ID column Select is driven: open the combobox, click the option.
+ * Both Selects share the "Select a column" placeholder, but the recipient-ID
+ * Select is hidden under the UUID strategy, so the combobox is unambiguous.
+ */
+async function pickContactColumn(column: string) {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('combobox', { name: 'Select a column' }));
+  await user.click(await screen.findByRole('option', { name: column }));
+}
+
 describe('DatasetUploadForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -154,6 +167,7 @@ describe('DatasetUploadForm', () => {
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
     expect(screen.queryByText('Recipient ID')).not.toBeInTheDocument();
+    await pickContactColumn('phone');
     expect(
       screen.getByRole('button', { name: 'Upload version' }),
     ).not.toBeDisabled();
@@ -181,6 +195,7 @@ describe('DatasetUploadForm', () => {
     goToConfigure();
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
+    await pickContactColumn('phone');
     fireEvent.click(screen.getByRole('button', { name: 'Upload version' }));
 
     await waitFor(() =>
@@ -189,6 +204,7 @@ describe('DatasetUploadForm', () => {
         file,
         'uuid',
         undefined,
+        'phone',
       ),
     );
     await waitFor(() => expect(onUploaded).toHaveBeenCalledTimes(1));
@@ -203,6 +219,7 @@ describe('DatasetUploadForm', () => {
     goToConfigure();
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
+    await pickContactColumn('phone');
     fireEvent.click(screen.getByRole('button', { name: 'Upload version' }));
 
     expect(

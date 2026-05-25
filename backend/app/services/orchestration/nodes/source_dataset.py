@@ -115,6 +115,20 @@ class _Handler:
             },
         )
 
+        # Make the contact deterministic: stamp the comm-key column onto each
+        # recipient-state payload (never overwriting an existing contact) so
+        # dispatch nodes resolve the same number the upload declared.
+        if resolved.communication_key:
+            await ctx.db.execute(
+                text(
+                    "UPDATE orchestration.workflow_run_recipient_states "
+                    "SET payload = payload || jsonb_build_object('contact', payload->>:comm_key) "
+                    "WHERE run_id = (:run_id)::uuid "
+                    "AND payload ? :comm_key AND NOT (payload ? 'contact')"
+                ),
+                {"comm_key": resolved.communication_key, "run_id": ctx.run_id},
+            )
+
         # Register membership into the single choke table so dispatch nodes'
         # manifest guard passes for dataset recipients.
         run_row = (
@@ -135,7 +149,12 @@ class _Handler:
             run=run_row,
             ingress_kind="dataset",
             resolved_rows=[
-                (row.recipient_id, _extract_phone(row.payload)) for row in state_rows
+                (
+                    row.recipient_id,
+                    (row.payload or {}).get(resolved.communication_key)
+                    or _extract_phone(row.payload),
+                )
+                for row in state_rows
             ],
             provenance=provenance,
         )

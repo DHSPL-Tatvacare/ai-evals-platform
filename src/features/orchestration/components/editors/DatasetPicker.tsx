@@ -90,7 +90,8 @@ export function DatasetPicker({ value, onChange }: Props) {
   function setDataset(datasetId: string) {
     setSelectedDatasetId(datasetId);
     const ds = datasets.find((d) => d.id === datasetId);
-    const versionId = ds?.latestVersion?.id ?? '';
+    const versionId =
+      ds?.currentPublishedVersionId ?? ds?.latestVersion?.id ?? '';
     onChange({
       ...value,
       dataset_version_id: versionId,

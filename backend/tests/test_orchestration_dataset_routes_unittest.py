@@ -154,6 +154,9 @@ async def test_create_dataset_returns_201_and_response_shape(client):
     assert payload["appId"] == APP_ID
     assert payload["name"].startswith("ds-")
     assert payload["latestVersion"] is None
+    # Nothing published yet -> currentPublishedVersionId surfaces as None.
+    assert "currentPublishedVersionId" in payload
+    assert payload["currentPublishedVersionId"] is None
 
 
 # ─── tenant scoping ─────────────────────────────────────────────────────────
@@ -195,7 +198,7 @@ async def test_multipart_upload_uuid_strategy(client):
 
     csv_bytes = _basic_csv_bytes(3)
     files = {"file": ("rows.csv", csv_bytes, "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files,
@@ -212,6 +215,47 @@ async def test_multipart_upload_uuid_strategy(client):
     assert isinstance(body["schemaDescriptor"], dict)
     # sampleRows not requested -> empty list.
     assert body["sampleRows"] == []
+    # New version fields surface on the wire; fresh upload is a draft.
+    assert body["communicationKey"] == "recipient_id"
+    assert body["status"] == "draft"
+    assert body["publishedBy"] is None
+    assert body["publishedAt"] is None
+
+
+@pytest.mark.asyncio
+async def test_multipart_upload_missing_communication_column_returns_422(client):
+    create = await client.post(
+        "/api/orchestration/datasets", json=_create_payload(),
+    )
+    dataset_id = create.json()["id"]
+
+    files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
+    # communication_column omitted -> FastAPI rejects the required form field.
+    data = {"id_strategy": "uuid"}
+    r = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions",
+        files=files,
+        data=data,
+    )
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_multipart_upload_unknown_communication_column_returns_400(client):
+    create = await client.post(
+        "/api/orchestration/datasets", json=_create_payload(),
+    )
+    dataset_id = create.json()["id"]
+
+    files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
+    data = {"id_strategy": "uuid", "communication_column": "not_a_column"}
+    r = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions",
+        files=files,
+        data=data,
+    )
+    assert r.status_code == 400, r.text
+    assert "not present in file header" in r.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -223,7 +267,7 @@ async def test_multipart_upload_column_strategy(client):
 
     csv_bytes = _basic_csv_bytes(2)
     files = {"file": ("rows.csv", csv_bytes, "text/csv")}
-    data = {"id_strategy": "column", "id_column": "recipient_id"}
+    data = {"id_strategy": "column", "id_column": "recipient_id", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files,
@@ -256,7 +300,7 @@ async def test_multipart_upload_exceeds_row_cap_returns_400(client, monkeypatch)
     csv_bytes = buf.getvalue().encode("utf-8")
 
     files = {"file": ("big.csv", csv_bytes, "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files,
@@ -276,7 +320,7 @@ async def test_multipart_upload_exceeds_50mb_returns_413(client):
     # 51 MB single-blob upload -> outer guard.
     big = b"x" * (51 * 1024 * 1024)
     files = {"file": ("huge.csv", big, "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files,
@@ -294,7 +338,7 @@ async def test_reupload_increments_version_number(client):
     dataset_id = create.json()["id"]
 
     files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     r1 = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -322,7 +366,7 @@ async def test_list_datasets_returns_latest_version_inlined(client):
     dataset_id = create.json()["id"]
 
     files = {"file": ("rows.csv", _basic_csv_bytes(3), "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     up = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -346,7 +390,7 @@ async def test_get_version_with_sample_rows(client):
     dataset_id = create.json()["id"]
 
     files = {"file": ("rows.csv", _basic_csv_bytes(7), "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     up = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -384,6 +428,8 @@ def test_sample_row_serializes_inner_keys_camelcase():
         schema_descriptor={},
         imported_by=SYSTEM_USER_ID,
         imported_at=__import__("datetime").datetime.now(),
+        status="draft",
+        communication_key="phone",
         sample_rows=[{"recipient_id": "abc", "payload": {"name": "alice"}}],
     )
     dumped = version.model_dump(by_alias=True)
@@ -413,7 +459,7 @@ async def test_get_version_sample_rows_clamped_and_validated(client):
     dataset_id = create.json()["id"]
 
     files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     up = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -464,7 +510,7 @@ async def test_delete_dataset_with_workflow_binding_returns_409(
     )
     dataset_id = create.json()["id"]
     files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     up = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -508,6 +554,80 @@ async def test_delete_dataset_with_workflow_binding_returns_409(
     d = await client.delete(f"/api/orchestration/datasets/{dataset_id}")
     assert d.status_code == 409, d.text
     assert workflow_name in d.json()["detail"]
+
+
+# ─── publish ──────────────────────────────────────────────────────────────
+
+
+async def _create_and_upload(client) -> tuple[str, str]:
+    create = await client.post(
+        "/api/orchestration/datasets", json=_create_payload(),
+    )
+    dataset_id = create.json()["id"]
+    files = {"file": ("rows.csv", _basic_csv_bytes(2), "text/csv")}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
+    up = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions",
+        files=files, data=data,
+    )
+    assert up.status_code == 201, up.text
+    return dataset_id, up.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_publish_version_flips_status_and_repoints_parent(client):
+    dataset_id, version_id = await _create_and_upload(client)
+
+    pub = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions/{version_id}/publish",
+    )
+    assert pub.status_code == 200, pub.text
+    body = pub.json()
+    assert body["status"] == "published"
+    assert body["publishedBy"] is not None
+    assert body["publishedAt"] is not None
+
+    # The parent dataset now points at the published version.
+    detail = await client.get(f"/api/orchestration/datasets/{dataset_id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["currentPublishedVersionId"] == version_id
+
+
+@pytest.mark.asyncio
+async def test_publish_already_published_returns_409(client):
+    dataset_id, version_id = await _create_and_upload(client)
+    first = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions/{version_id}/publish",
+    )
+    assert first.status_code == 200, first.text
+
+    again = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions/{version_id}/publish",
+    )
+    assert again.status_code == 409, again.text
+    assert "already published" in again.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_publish_missing_version_returns_404(client):
+    create = await client.post(
+        "/api/orchestration/datasets", json=_create_payload(),
+    )
+    dataset_id = create.json()["id"]
+    missing = uuid.uuid4()
+    r = await client.post(
+        f"/api/orchestration/datasets/{dataset_id}/versions/{missing}/publish",
+    )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "dataset version not found"
+
+
+@pytest.mark.asyncio
+async def test_publish_requires_auth(unauth_client):
+    r = await unauth_client.post(
+        f"/api/orchestration/datasets/{uuid.uuid4()}/versions/{uuid.uuid4()}/publish",
+    )
+    assert r.status_code in (401, 403), r.text
 
 
 # ─── formats endpoint + multi-format upload coverage ─────────────────────────
@@ -566,7 +686,7 @@ async def test_multipart_upload_xlsx_extension(client):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ),
     }
-    data = {"id_strategy": "column", "id_column": "recipient_id"}
+    data = {"id_strategy": "column", "id_column": "recipient_id", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,
@@ -587,7 +707,7 @@ async def test_multipart_upload_unsupported_format_returns_400(client):
     dataset_id = create.json()["id"]
 
     files = {"file": ("leads.pdf", b"%PDF-1.4 fake", "application/pdf")}
-    data = {"id_strategy": "uuid"}
+    data = {"id_strategy": "uuid", "communication_column": "recipient_id"}
     r = await client.post(
         f"/api/orchestration/datasets/{dataset_id}/versions",
         files=files, data=data,

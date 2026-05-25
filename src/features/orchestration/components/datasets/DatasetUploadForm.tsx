@@ -33,6 +33,7 @@ export function DatasetUploadForm({ datasetId, onClose, onUploaded }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [idStrategy, setIdStrategy] = useState<IdStrategy>('column');
   const [idColumn, setIdColumn] = useState<string>('');
+  const [communicationColumn, setCommunicationColumn] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -104,13 +105,15 @@ export function DatasetUploadForm({ datasetId, onClose, onUploaded }: Props) {
     handleReset();
     setServerError(null);
     setIdColumn('');
+    setCommunicationColumn('');
   }, [handleReset]);
 
   const canSubmit = useMemo(() => {
     if (!file || !previewClean || submitting) return false;
+    if (!communicationColumn) return false;
     if (idStrategy === 'uuid') return true;
     return Boolean(idColumn);
-  }, [file, previewClean, submitting, idStrategy, idColumn]);
+  }, [file, previewClean, submitting, communicationColumn, idStrategy, idColumn]);
 
   async function handleSubmit() {
     if (!file) return;
@@ -122,6 +125,7 @@ export function DatasetUploadForm({ datasetId, onClose, onUploaded }: Props) {
         file,
         idStrategy,
         idStrategy === 'column' ? idColumn : undefined,
+        communicationColumn,
       );
       notificationService.success(
         `Imported ${version.rowCount} rows (v${version.versionNumber}).`,
@@ -293,6 +297,28 @@ export function DatasetUploadForm({ datasetId, onClose, onUploaded }: Props) {
                 </span>
               </span>
             </label>
+
+            <div className="mt-2 flex flex-col gap-1">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                Contact column
+              </span>
+              <span className="text-xs text-[var(--text-secondary)]">
+                Pick the column that holds each recipient's phone number. Outreach
+                is sent to this column.
+              </span>
+              <Select
+                value={communicationColumn}
+                onChange={(next) => setCommunicationColumn(next)}
+                options={columnOptions}
+                placeholder="Select a column"
+                disabled={columnOptions.length === 0}
+                className={cn(
+                  'mt-1 w-full',
+                  communicationColumn ? 'border-[var(--border-success)]' : undefined,
+                )}
+                size="sm"
+              />
+            </div>
 
             {serverError ? (
               <div
