@@ -100,7 +100,7 @@ def _query_config_from_version(
     version: CohortDefinitionVersion,
     *,
     sample_limit: Optional[int] = None,
-    sample_strategy: str = "random",
+    sample_strategy: Literal["random", "first"] = "random",
 ) -> CohortQueryConfig:
     # The saved version row is the canonical source of truth for the
     # predicate; rebuild the transient config from it, not from any cached
