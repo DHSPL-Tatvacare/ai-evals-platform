@@ -30,7 +30,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, synonym
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.models.base import Base
 from app.models.mixins.shareable import ShareableMixin
@@ -715,6 +715,24 @@ class CohortDataset(ShareableMixin, Base):
         onupdate=func.now(),
         nullable=False,
     )
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    current_published_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "orchestration.cohort_dataset_versions.id",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    versions: Mapped[list["CohortDatasetVersion"]] = relationship(
+        back_populates="dataset", foreign_keys="CohortDatasetVersion.dataset_id",
+    )
+    # post_update issues a second UPDATE to break the dataset↔version FK cycle on flush.
+    current_published_version: Mapped[Optional["CohortDatasetVersion"]] = relationship(
+        foreign_keys=[current_published_version_id], uselist=False, post_update=True,
+    )
     user_id = synonym("created_by")
 
 
@@ -732,6 +750,10 @@ class CohortDatasetVersion(Base):
         CheckConstraint(
             "id_strategy <> 'column' OR id_column IS NOT NULL",
             name="ck_dataset_id_column_when_column",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_cohort_dataset_versions_status",
         ),
         Index(
             "idx_dataset_versions_tenant_dataset",
@@ -764,6 +786,20 @@ class CohortDatasetVersion(Base):
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="draft", server_default=text("'draft'")
+    )
+    communication_key: Mapped[str] = mapped_column(
+        String(200), nullable=False, server_default=text("''")
+    )
+    published_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform.users.id")
+    )
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    dataset: Mapped["CohortDataset"] = relationship(
+        back_populates="versions", foreign_keys=[dataset_id]
+    )
+    rows: Mapped[list["CohortDatasetRow"]] = relationship(back_populates="version")
 
 
 class CohortDatasetRow(Base):
@@ -792,6 +828,9 @@ class CohortDatasetRow(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     recipient_id: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    version: Mapped["CohortDatasetVersion"] = relationship(
+        back_populates="rows", foreign_keys=[dataset_version_id]
+    )
 
 
 # ─── Cohort definition tier (saved cohorts) ──────────────────────────────────
