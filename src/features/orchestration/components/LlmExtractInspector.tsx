@@ -19,6 +19,8 @@ import {
   toVariableInfo,
 } from '@/features/orchestration/components/inspector/upstreamVariables';
 import { useResolveUpstreamVariables } from '@/features/orchestration/queries/upstreamVariables';
+import { EditSchemaOverlay } from '@/features/orchestration/components/inspector/EditSchemaOverlay';
+import { GenerateWithAiOverlay } from '@/features/orchestration/components/inspector/GenerateWithAiOverlay';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type { UpstreamField } from '@/services/api/orchestration';
 import type { WorkflowType } from '@/features/orchestration/types';
@@ -83,6 +85,8 @@ export function LlmExtractInspector({
   const fields = Array.isArray(config.output_schema) ? config.output_schema : [];
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [varFilter, setVarFilter] = useState('');
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [schemaOpen, setSchemaOpen] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const appId = useCurrentAppId();
@@ -341,7 +345,13 @@ export function LlmExtractInspector({
                     onInsert={insertToken}
                     buttonLabel="Insert variable"
                   />
-                  <Button type="button" size="sm" variant="secondary" icon={Wand2} disabled>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    icon={Wand2}
+                    onClick={() => setGenerateOpen(true)}
+                  >
                     Generate with AI
                   </Button>
                 </div>
@@ -389,7 +399,13 @@ export function LlmExtractInspector({
                 title="Fields to extract"
                 description="The structured fields the model must return, enforced as JSON Schema. Edit them in a roomy schema editor."
                 actions={
-                  <Button type="button" size="sm" variant="secondary" icon={SquarePen} disabled>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    icon={SquarePen}
+                    onClick={() => setSchemaOpen(true)}
+                  >
                     Edit schema
                   </Button>
                 }
@@ -505,6 +521,26 @@ export function LlmExtractInspector({
           </section>
         </fieldset>
       </div>
+
+      <GenerateWithAiOverlay
+        isOpen={generateOpen}
+        onClose={() => setGenerateOpen(false)}
+        width={inspectorWidth}
+        workflowType={workflowType}
+        provider={config.provider_override ?? null}
+        model={config.model_override ?? null}
+        fields={upstreamFields}
+        onInsert={({ prompt, outputSchema }) =>
+          onChange(outputSchema ? { prompt, output_schema: outputSchema } : { prompt })
+        }
+      />
+      <EditSchemaOverlay
+        isOpen={schemaOpen}
+        onClose={() => setSchemaOpen(false)}
+        width={inspectorWidth}
+        fields={fields}
+        onChange={(next) => onChange({ output_schema: next })}
+      />
     </div>
   );
 }

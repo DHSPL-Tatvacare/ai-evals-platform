@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { LlmExtractInspector } from './LlmExtractInspector';
 
-vi.mock('@/hooks', () => ({
+vi.mock('@/hooks', async (importOriginal) => ({
+  // Keep real hooks (e.g. useRightOverlay used by the overlays' shell);
+  // override only the two that need router/app context.
+  ...(await importOriginal<typeof import('@/hooks')>()),
   useCurrentAppId: () => 'inside-sales',
-  // The Configure pane embeds VariablePickerPopover, which reads app config.
   useAppConfig: () => ({
     evaluator: { dynamicVariableSources: { registry: false, listingApiPaths: false } },
   }),
@@ -70,10 +72,17 @@ describe('LlmExtractInspector', () => {
     expect(screen.getByText('confidence')).toBeInTheDocument();
   });
 
-  it('disables Generate-with-AI and Edit-schema in this commit', () => {
+  it('opens the Generate-with-AI overlay from the prompt toolbar', () => {
     renderInspector();
-    expect(screen.getByRole('button', { name: /generate with ai/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /edit schema/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /generate with ai/i }));
+    expect(screen.getByText(/generate prompt with ai/i)).toBeInTheDocument();
+  });
+
+  it('opens the Edit-schema overlay hosting the schema editor', () => {
+    renderInspector();
+    fireEvent.click(screen.getByRole('button', { name: /edit schema/i }));
+    // The overlay footer Done button is unique to the schema editor surface.
+    expect(screen.getByRole('button', { name: /^done$/i })).toBeInTheDocument();
   });
 
   it('reveals the four advanced fields and edits Save results as', () => {
