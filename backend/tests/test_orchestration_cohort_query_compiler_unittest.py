@@ -120,3 +120,26 @@ def test_unsafe_column_name_rejected():
 def test_unsafe_source_table_rejected():
     with pytest.raises((CohortQueryCompileError, ValidationError)):
         _make_config(source_table="analytics.crm_lead_record; DROP TABLE x")
+
+
+def test_cohort_query_config_accepts_sample_fields():
+    from app.services.orchestration.nodes._cohort_query_compiler import CohortQueryConfig
+    cfg = CohortQueryConfig(source_ref="crm.lead_record", sample_limit=100, sample_strategy="random")
+    assert cfg.sample_limit == 100
+    assert cfg.sample_strategy == "random"
+
+
+def test_cohort_query_config_defaults_no_sample():
+    from app.services.orchestration.nodes._cohort_query_compiler import CohortQueryConfig
+    cfg = CohortQueryConfig(source_ref="crm.lead_record")
+    assert cfg.sample_limit is None
+    assert cfg.sample_strategy == "random"
+
+
+def test_cohort_query_config_rejects_out_of_range_limit():
+    import pytest
+    from pydantic import ValidationError
+    from app.services.orchestration.nodes._cohort_query_compiler import CohortQueryConfig
+    for bad in (0, -5, 10001):
+        with pytest.raises(ValidationError):
+            CohortQueryConfig(source_ref="crm.lead_record", sample_limit=bad)

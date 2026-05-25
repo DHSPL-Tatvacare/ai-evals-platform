@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -189,6 +189,11 @@ class CohortQueryConfig(BaseModel):
     lookback_hours: Optional[int] = None
     lookback_column: Optional[str] = None
     consent_gate_channel: Optional[str] = None
+
+    # Optional run-size cap. None => enrol everyone (default). The compiler
+    # appends LIMIT to the materialization SELECT when set.
+    sample_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+    sample_strategy: Literal["random", "first"] = "random"
 
     # Legacy authoring field — Phase 11 reads the successor from the
     # outgoing ``default`` edge instead. Accepted on input so pre-Phase-11

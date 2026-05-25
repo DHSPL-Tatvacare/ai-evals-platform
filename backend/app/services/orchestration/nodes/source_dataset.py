@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
 from app.models.orchestration import WorkflowRun, WorkflowRunRecipientState
@@ -38,6 +40,8 @@ def _extract_phone(payload) -> str | None:
 class SourceDatasetConfig(BaseModel):
     model_config = strict_node_config_dict()
     dataset_version_id: uuid.UUID
+    sample_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+    sample_strategy: Literal["random", "first"] = "random"
 
 
 _Config = SourceDatasetConfig

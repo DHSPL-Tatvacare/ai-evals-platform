@@ -54,6 +54,8 @@ class SourceCohortConfig(BaseModel):
     lookback_hours: Optional[int] = None
     lookback_column: Optional[str] = None
     consent_gate_channel: Optional[str] = None
+    sample_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+    sample_strategy: Literal["random", "first"] = "random"
 
     @model_validator(mode="after")
     def _check_mode_fields(self, info: ValidationInfo) -> "SourceCohortConfig":
