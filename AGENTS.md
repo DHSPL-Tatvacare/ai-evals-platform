@@ -49,6 +49,13 @@ Mirror invariant: any edit to `CLAUDE.md` MUST land in `AGENTS.md` in the same c
 - System library data lives under `SYSTEM_TENANT_ID` + `SYSTEM_USER_ID`.
 - LLM settings are global per tenant + user at `app_id=""`. Do not pass an `app_id` for LLM settings lookup.
 
+## Permission vocabulary + scoping invariants
+
+- The access/permission rule: **app access governs looking; permissions govern doing; a selection follows the action that uses it; admin screens stay admin.** A read or selection that is a step inside an action follows that action's permission — never a separate gate. Managing providers/settings is admin; *selecting* from them inside a task is part of the task.
+- Verb vocabulary is fixed to four: **`view` · `manage` · `run` · `export`.** Every id is `<capability>:<verb>`. No `create`/`edit`/`delete`/`cancel`/`share`/`assign`/`admin` verbs — they fold into `manage` (`cancel` folds into `run`). Sharing folds into the owning capability's `manage`; there is no separate `share` verb.
+- Cut principle: never gate a sub-step on a borrowed permission. If holding the parent action's permission logically requires the sub-step (picking an LLM model to run an eval, selecting saved cases, reading your own report output), gate it on the parent via `require_any_permission(...)`. The frontend gate MUST mirror the backend gate on the exact endpoint a control triggers.
+- Canonical set: the 20 ids in `backend/app/auth/permission_catalog.py` (`VALID_PERMISSIONS`, import-validated); the frontend uses the same strings. Changing the set is a hard cutover — catalog + Alembic migration + every call site + FE refs land together.
+
 ## Naming invariants (permanent — new code only)
 
 - No app-specific or tenant-specific names in files, folders, classes, functions, variables, columns, routes, tables, job types, or string constants. `inside_sales_*`, `voice_rx_*`, `kaira_*`, `tatva_*`, `INSIDE_SALES_APP_ID`, `evaluate-inside-sales`, etc. are existing contamination — grandfathered, do not extend.
