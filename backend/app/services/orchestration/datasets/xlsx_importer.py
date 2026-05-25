@@ -11,8 +11,9 @@ from openpyxl.utils.exceptions import InvalidFileException
 from app.services.orchestration.datasets.dataset_validator import (
     DatasetImportError,
     ImportedDataset,
-    MAX_ROWS,
     assemble,
+    normalize_columns,
+    resolve_max_rows,
     validate_headers,
     validate_id_strategy,
 )
@@ -23,8 +24,10 @@ def parse_xlsx(
     *,
     id_strategy: str,
     id_column: Optional[str],
+    max_rows: int | None = None,
 ) -> ImportedDataset:
     validate_id_strategy(id_strategy, id_column)
+    cap = resolve_max_rows(max_rows)
 
     try:
         workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
@@ -50,25 +53,25 @@ def parse_xlsx(
     except StopIteration:
         raise DatasetImportError("file has no header row")
 
-    columns = [_stringify(c).strip() for c in header_row]
-    if any(c == "" for c in columns):
-        raise DatasetImportError("file header has a blank column name")
+    columns = normalize_columns([_stringify(c) for c in header_row])
     validate_headers(columns, id_strategy=id_strategy, id_column=id_column)
 
     rows: list[dict] = []
     for raw_row in rows_iter:
         if all(cell is None or _stringify(cell).strip() == "" for cell in raw_row):
             continue
-        if len(rows) >= MAX_ROWS:
+        if len(rows) >= cap:
             raise DatasetImportError(
-                f"row cap exceeded: dataset versions are capped at {MAX_ROWS} rows"
+                f"row cap exceeded: dataset versions are capped at {cap} rows"
             )
         rows.append({
             columns[i]: _stringify(raw_row[i] if i < len(raw_row) else None).strip()
             for i in range(len(columns))
         })
 
-    return assemble(columns, rows, id_strategy=id_strategy, id_column=id_column)
+    return assemble(
+        columns, rows, id_strategy=id_strategy, id_column=id_column, max_rows=cap,
+    )
 
 
 def _stringify(value: Any) -> str:

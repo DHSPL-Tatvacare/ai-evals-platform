@@ -48,10 +48,25 @@ def test_unknown_id_column_rejected():
         parse_xlsx(raw, id_strategy="column", id_column="missing")
 
 
-def test_blank_header_cell_rejected():
-    raw = _xlsx_bytes([["phone", None], ["+91111", "x"]])
-    with pytest.raises(DatasetImportError, match="header"):
+def test_interior_blank_header_cell_rejected():
+    raw = _xlsx_bytes([["a", None, "b"], ["1", "x", "2"]])
+    with pytest.raises(DatasetImportError, match="blank column name"):
         parse_xlsx(raw, id_strategy="uuid", id_column=None)
+
+
+def test_trailing_blank_header_empty_string_trimmed():
+    raw = _xlsx_bytes([["a", "b", ""], ["1", "2", "3"]])
+    out = parse_xlsx(raw, id_strategy="uuid", id_column=None)
+    assert [c["name"] for c in out.schema_descriptor["columns"]] == ["a", "b"]
+    assert set(out.rows[0].keys()) == {"a", "b"}
+    assert out.rows[0] == {"a": "1", "b": "2"}
+
+
+def test_trailing_blank_header_none_trimmed():
+    raw = _xlsx_bytes([["a", "b", None], ["1", "2", "3"]])
+    out = parse_xlsx(raw, id_strategy="uuid", id_column=None)
+    assert [c["name"] for c in out.schema_descriptor["columns"]] == ["a", "b"]
+    assert set(out.rows[0].keys()) == {"a", "b"}
 
 
 def test_numeric_cell_stringified():
@@ -63,3 +78,15 @@ def test_numeric_cell_stringified():
 def test_corrupt_file_rejected():
     with pytest.raises(DatasetImportError, match="not a valid"):
         parse_xlsx(b"not-an-xlsx", id_strategy="uuid", id_column=None)
+
+
+def test_row_cap_enforced():
+    raw = _xlsx_bytes([["phone"], ["+91111"], ["+91222"], ["+91333"]])
+    with pytest.raises(DatasetImportError, match="capped at 2 rows"):
+        parse_xlsx(raw, id_strategy="column", id_column="phone", max_rows=2)
+
+
+def test_row_cap_uses_settings_default_when_unset():
+    raw = _xlsx_bytes([["phone"], ["+91111"], ["+91222"], ["+91333"]])
+    out = parse_xlsx(raw, id_strategy="column", id_column="phone")
+    assert out.schema_descriptor["row_count"] == 3

@@ -1,19 +1,20 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import type { ColumnMapping, CsvFieldDef, CsvPreviewResult, HeaderValidation } from './types';
-import { parseCsvPreview, remapCsvContent, validateCsvHeaders } from './utils';
+import { parseCsvPreview, parseXlsxPreview, remapCsvContent, validateCsvHeaders } from './utils';
 
 interface UseCsvImportWorkflowArgs<TData> {
-  schema: CsvFieldDef[];
+  schema?: CsvFieldDef[];
   file: File | null;
   data: TData | null;
   columnMapping: ColumnMapping;
   onFileChange: (file: File | null) => void;
   onDataChange: (data: TData | null) => void;
   onColumnMappingChange: (mapping: ColumnMapping) => void;
-  analyzeCsv: (args: { file: File; csvText: string }) => Promise<TData>;
+  analyzeCsv?: (args: { file: File; csvText: string }) => Promise<TData>;
   previewRows?: number;
   maxFileSizeMb?: number;
+  acceptExtensions?: string[];
 }
 
 export function useCsvImportWorkflow<TData>({
@@ -27,6 +28,7 @@ export function useCsvImportWorkflow<TData>({
   analyzeCsv,
   previewRows = 10,
   maxFileSizeMb = 50,
+  acceptExtensions = ['.csv'],
 }: UseCsvImportWorkflowArgs<TData>) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,9 @@ export function useCsvImportWorkflow<TData>({
   );
 
   const runAnalysis = useCallback(async (selectedFile: File, csvText: string) => {
+    if (!analyzeCsv) {
+      return;
+    }
     setIsProcessing(true);
     setError(null);
     try {
@@ -62,8 +67,13 @@ export function useCsvImportWorkflow<TData>({
     onColumnMappingChange(new Map());
     onDataChange(null);
 
-    if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
-      setError('Please upload a CSV file.');
+    const lowerName = selectedFile.name.toLowerCase();
+    const matchedExtension = acceptExtensions.find((ext) =>
+      lowerName.endsWith(ext.toLowerCase()),
+    );
+    if (!matchedExtension) {
+      const allowed = acceptExtensions.join(', ');
+      setError(`Unsupported file type. Allowed: ${allowed}.`);
       return;
     }
 
@@ -72,22 +82,31 @@ export function useCsvImportWorkflow<TData>({
       return;
     }
 
-    const text = await selectedFile.text();
-    const preview = parseCsvPreview(text, previewRows);
-    const validation = validateCsvHeaders(preview.headers, schema);
+    let text: string | null = null;
+    let preview: CsvPreviewResult;
+    if (matchedExtension.toLowerCase() === '.xlsx') {
+      preview = await parseXlsxPreview(selectedFile, previewRows);
+    } else {
+      text = await selectedFile.text();
+      preview = parseCsvPreview(text, previewRows);
+    }
+
+    const validation = schema
+      ? validateCsvHeaders(preview.headers, schema)
+      : { matched: preview.headers, missing: [], extra: [], isValid: true };
 
     setRawCsvText(text);
     setCsvPreview(preview);
     setHeaderValidation(validation);
     onFileChange(selectedFile);
 
-    if (validation.isValid) {
+    if (validation.isValid && analyzeCsv && text !== null) {
       await runAnalysis(selectedFile, text);
     }
-  }, [maxFileSizeMb, onColumnMappingChange, onDataChange, onFileChange, previewRows, runAnalysis, schema]);
+  }, [acceptExtensions, analyzeCsv, maxFileSizeMb, onColumnMappingChange, onDataChange, onFileChange, previewRows, runAnalysis, schema]);
 
   const handleApplyMapping = useCallback(async () => {
-    if (!rawCsvText || !file) {
+    if (!rawCsvText || !file || !schema) {
       return;
     }
 

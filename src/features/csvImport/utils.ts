@@ -102,6 +102,82 @@ export function validateCsvHeaders(headers: string[], schema: CsvFieldDef[]): He
   };
 }
 
+export async function parseXlsxPreview(file: File, maxRows = 10): Promise<CsvPreviewResult> {
+  const xlsx = await import('xlsx');
+  const buf = await file.arrayBuffer();
+  const wb = xlsx.read(buf, { type: 'array' });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) {
+    return { headers: [], rows: [], totalRowCount: 0 };
+  }
+  const sheet = wb.Sheets[sheetName];
+  const matrix = xlsx.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    blankrows: false,
+    defval: null,
+    raw: false,
+  });
+  if (matrix.length === 0) {
+    return { headers: [], rows: [], totalRowCount: 0 };
+  }
+
+  const headerRow = matrix[0] ?? [];
+  const headers = headerRow.map((cell) => String(cell ?? '').trim());
+  const dataMatrix = matrix.slice(1);
+  const rows = dataMatrix.slice(0, maxRows).map((cells) => {
+    const out = headers.map((_, idx) => {
+      const value = cells?.[idx];
+      return value === null || value === undefined ? '' : String(value).trim();
+    });
+    return out;
+  });
+
+  return { headers, rows, totalRowCount: dataMatrix.length };
+}
+
+/**
+ * Dataset header hygiene matching the backend `normalize_columns` rule:
+ * trailing blanks are dropped, an interior blank (before the last non-blank)
+ * is an error, and case-sensitive repeated names are flagged as duplicates.
+ */
+export function analyzeDatasetHeaders(headers: string[]): {
+  columns: string[];
+  interiorBlankPositions: number[];
+  duplicates: string[];
+} {
+  const trimmed = headers.map((header) => header.trim());
+
+  let lastNonBlank = -1;
+  trimmed.forEach((header, idx) => {
+    if (header.length > 0) {
+      lastNonBlank = idx;
+    }
+  });
+
+  const interiorBlankPositions: number[] = [];
+  for (let i = 0; i < lastNonBlank; i += 1) {
+    if (trimmed[i].length === 0) {
+      interiorBlankPositions.push(i + 1);
+    }
+  }
+
+  const columns = lastNonBlank < 0 ? [] : trimmed.slice(0, lastNonBlank + 1);
+
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const name of columns) {
+    if (name.length === 0) {
+      continue;
+    }
+    if (seen.has(name) && !duplicates.includes(name)) {
+      duplicates.push(name);
+    }
+    seen.add(name);
+  }
+
+  return { columns, interiorBlankPositions, duplicates };
+}
+
 export function remapCsvContent(text: string, mapping: ColumnMapping): string {
   const lines = text.split(/\r?\n/);
   if (lines.length === 0) {

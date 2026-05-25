@@ -7,11 +7,11 @@ import type { ColumnMapping, CsvFieldDef, CsvPreviewResult } from '../types';
 
 interface CsvDataPreviewProps {
   preview: CsvPreviewResult;
-  schema: CsvFieldDef[];
+  schema?: CsvFieldDef[];
   columnMapping?: ColumnMapping;
 }
 
-export function CsvDataPreview({ preview, schema, columnMapping }: CsvDataPreviewProps) {
+export function CsvDataPreview({ preview, schema = [], columnMapping }: CsvDataPreviewProps) {
   const { headers, rows, totalRowCount } = preview;
 
   const mappedTargets = useMemo(() => {

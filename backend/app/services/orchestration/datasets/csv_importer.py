@@ -8,8 +8,9 @@ from typing import Optional
 from app.services.orchestration.datasets.dataset_validator import (
     DatasetImportError,
     ImportedDataset,
-    MAX_ROWS,
     assemble,
+    normalize_columns,
+    resolve_max_rows,
     validate_headers,
     validate_id_strategy,
 )
@@ -20,8 +21,10 @@ def parse_csv(
     *,
     id_strategy: str,
     id_column: Optional[str],
+    max_rows: int | None = None,
 ) -> ImportedDataset:
     validate_id_strategy(id_strategy, id_column)
+    cap = resolve_max_rows(max_rows)
 
     try:
         text = raw.decode("utf-8-sig")
@@ -31,15 +34,21 @@ def parse_csv(
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None:
         raise DatasetImportError("file has no header row")
-    columns = [c.strip() for c in reader.fieldnames]
+    raw_fieldnames = list(reader.fieldnames)
+    columns = normalize_columns(raw_fieldnames)
     validate_headers(columns, id_strategy=id_strategy, id_column=id_column)
 
     rows: list[dict] = []
     for raw_row in reader:
-        if len(rows) >= MAX_ROWS:
+        if len(rows) >= cap:
             raise DatasetImportError(
-                f"row cap exceeded: dataset versions are capped at {MAX_ROWS} rows"
+                f"row cap exceeded: dataset versions are capped at {cap} rows"
             )
-        rows.append({c: (raw_row.get(c) or "").strip() for c in columns})
+        rows.append({
+            columns[i]: (raw_row.get(raw_fieldnames[i]) or "").strip()
+            for i in range(len(columns))
+        })
 
-    return assemble(columns, rows, id_strategy=id_strategy, id_column=id_column)
+    return assemble(
+        columns, rows, id_strategy=id_strategy, id_column=id_column, max_rows=cap,
+    )

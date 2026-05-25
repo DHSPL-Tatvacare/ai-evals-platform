@@ -1,18 +1,21 @@
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Eye, Inbox, Trash2, X } from 'lucide-react';
+import { Inbox, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { MetricChip } from '@/components/ui/MetricChip';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import {
   RowActionsMenu,
   type RowAction,
 } from '@/components/ui/RowActionsMenu';
+import { Select } from '@/components/ui/Select';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { useOrchestrationRoutes } from '@/features/orchestration/hooks/useOrchestrationRoutes';
 import {
@@ -22,10 +25,16 @@ import {
   useDeleteDatasetVersion,
 } from '@/features/orchestration/queries/datasets';
 import { ApiError } from '@/services/api/client';
-import { type DatasetVersionResponse } from '@/services/api/orchestrationDatasets';
+import {
+  type DatasetSchemaColumn,
+  type DatasetVersionResponse,
+} from '@/services/api/orchestrationDatasets';
 import { notificationService } from '@/services/notifications';
 
 import { DatasetUploadForm } from './DatasetUploadForm';
+
+// Preview size to request; the server clamps to DATASET_SAMPLE_ROW_LIMIT.
+const SAMPLE_ROWS = 100;
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -34,9 +43,30 @@ function fmtDate(s: string | null): string {
   return d.toLocaleString();
 }
 
+function formatBytes(n: number | null): string {
+  if (n == null) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function describeStrategy(version: DatasetVersionResponse): string {
   if (version.idStrategy === 'uuid') return 'Auto-generated UUIDs';
   return version.idColumn ? `Column: ${version.idColumn}` : 'Column';
+}
+
+function typeBadgeVariant(t: DatasetSchemaColumn['type']): BadgeVariant {
+  switch (t) {
+    case 'integer':
+    case 'number':
+      return 'info';
+    case 'boolean':
+      return 'warning';
+    case 'datetime':
+      return 'primary';
+    default:
+      return 'neutral';
+  }
 }
 
 function renderCell(value: unknown): string {
@@ -49,6 +79,11 @@ function renderCell(value: unknown): string {
     }
   }
   return String(value);
+}
+
+interface SampleRow {
+  recipientId: string;
+  payload: Record<string, unknown>;
 }
 
 export function DatasetDetail() {
@@ -66,7 +101,7 @@ export function DatasetDetail() {
   const [userSelectedVersionId, setUserSelectedVersionId] =
     useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DatasetVersionResponse | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const selectedVersionId = useMemo(() => {
     if (!hasVersions) return null;
@@ -79,8 +114,13 @@ export function DatasetDetail() {
     return latestVersionId;
   }, [hasVersions, userSelectedVersionId, versions, latestVersionId]);
 
+  const selectedVersion = useMemo(
+    () => versions.find((v) => v.id === selectedVersionId) ?? null,
+    [versions, selectedVersionId],
+  );
+
   const { data: versionDetail, isLoading: versionDetailLoading } =
-    useDatasetVersion(datasetId, selectedVersionId, 20);
+    useDatasetVersion(datasetId, selectedVersionId, SAMPLE_ROWS);
 
   const deleteVersion = useDeleteDatasetVersion(datasetId ?? '');
 
@@ -106,107 +146,31 @@ export function DatasetDetail() {
     }
   }
 
-  const versionColumns: ColumnDef<DatasetVersionResponse>[] = [
-    {
-      key: 'versionNumber',
-      header: 'Version',
-      width: 'w-[90px]',
-      render: (v) => (
-        <span className="font-mono text-[var(--text-primary)]">
-          v{v.versionNumber}
-        </span>
-      ),
-    },
-    {
-      key: 'rowCount',
-      header: 'Rows',
-      width: 'w-[100px]',
-      render: (v) => (
-        <span className="tabular-nums text-[var(--text-primary)]">
-          {v.rowCount.toLocaleString()}
-        </span>
-      ),
-    },
-    {
-      key: 'idStrategy',
-      header: 'ID strategy',
-      width: 'min-w-[180px]',
-      render: (v) => (
-        <span className="text-[var(--text-secondary)]">
-          {describeStrategy(v)}
-        </span>
-      ),
-    },
-    {
-      key: 'sourceFilename',
-      header: 'Source',
-      width: 'min-w-[200px]',
-      render: (v) => (
-        <span className="truncate font-mono text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
-          {v.sourceFilename ?? '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'importedAt',
-      header: 'Imported',
-      width: 'min-w-[160px]',
-      textBehavior: 'nowrap',
-      render: (v) => (
-        <span className="text-[var(--text-secondary)]">
-          {fmtDate(v.importedAt)}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      width: 'w-[80px]',
-      headerClassName: 'text-right',
-      cellClassName: 'text-right',
-      render: (v) => {
-        const actions: RowAction[] = [
-          {
-            id: 'inspect',
-            icon: Eye,
-            label: selectedVersionId === v.id ? 'Selected' : 'Inspect',
-            disabled: selectedVersionId === v.id,
-            onClick: () => setUserSelectedVersionId(v.id),
-          },
-          {
-            id: 'delete',
-            icon: Trash2,
-            label: 'Delete',
-            danger: true,
-            onClick: () => setDeleteTarget(v),
-          },
-        ];
-        return (
-          <div className="flex items-center justify-end">
-            <RowActionsMenu
-              actions={actions}
-              open={openMenuId === v.id}
-              onOpenChange={(open) => setOpenMenuId(open ? v.id : null)}
-            />
-          </div>
-        );
-      },
-    },
-  ];
+  const versionOptions = useMemo(
+    () =>
+      versions.map((v) => ({
+        value: v.id,
+        label: `v${v.versionNumber} · ${v.rowCount.toLocaleString()} rows`,
+        description: `${describeStrategy(v)} · ${v.sourceFilename ?? '—'} · ${fmtDate(v.importedAt)}`,
+      })),
+    [versions],
+  );
 
-  const sampleColumns = useMemo<
-    ColumnDef<{ recipientId: string; payload: Record<string, unknown> }>[]
-  >(() => {
+  const schemaColumns = versionDetail?.schemaDescriptor.columns ?? [];
+
+  const sampleColumns = useMemo<ColumnDef<SampleRow>[]>(() => {
     const cols = versionDetail?.schemaDescriptor.columns ?? [];
-    const result: ColumnDef<{
-      recipientId: string;
-      payload: Record<string, unknown>;
-    }>[] = [
+    const result: ColumnDef<SampleRow>[] = [
       {
         key: '__recipientId',
         header: 'Recipient ID',
+        width: 'w-[150px]',
+        textBehavior: 'truncate',
         render: (row) => (
-          <span className="font-mono text-[length:var(--text-table-header)] text-[var(--text-secondary)]">
+          <span
+            title={row.recipientId}
+            className="font-mono text-[length:var(--text-table-header)] text-[var(--text-secondary)]"
+          >
             {row.recipientId}
           </span>
         ),
@@ -215,18 +179,45 @@ export function DatasetDetail() {
     cols.forEach((c) => {
       result.push({
         key: c.name,
-        header: c.name,
-        render: (row) => (
-          <span className="text-[var(--text-primary)]">
-            {renderCell(row.payload[c.name])}
+        width: 'w-[180px]',
+        textBehavior: 'truncate',
+        header: (
+          <span className="flex flex-col leading-tight">
+            <span className="truncate">{c.name}</span>
+            <span className="text-[10px] font-normal normal-case text-[var(--text-muted)]">
+              {c.type}
+            </span>
           </span>
         ),
+        render: (row) => {
+          const s = renderCell(row.payload[c.name]);
+          return s ? (
+            <span title={s} className="text-[var(--text-primary)]">
+              {s}
+            </span>
+          ) : (
+            <span className="text-[var(--text-tertiary)]">—</span>
+          );
+        },
       });
     });
     return result;
   }, [versionDetail]);
 
-  const sampleRows = versionDetail?.sampleRows ?? [];
+  const sampleMinWidth = `${Math.max(980, sampleColumns.length * 175)}px`;
+  const sampleRows: SampleRow[] = versionDetail?.sampleRows ?? [];
+
+  const versionActions: RowAction[] = [
+    {
+      id: 'delete',
+      icon: Trash2,
+      label: 'Delete this version',
+      danger: true,
+      onClick: () => {
+        if (selectedVersion) setDeleteTarget(selectedVersion);
+      },
+    },
+  ];
 
   return (
     <>
@@ -241,45 +232,120 @@ export function DatasetDetail() {
           </Button>
         }
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-6 p-6">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 p-6">
           {!loading && dataset && !hasVersions ? (
             <EmptyState
               fill
               icon={Inbox}
               title="No versions yet"
-              description="Upload a CSV to create the first version of this dataset."
+              description="Upload a CSV or Excel file to create the first version of this dataset."
               action={{
-                label: 'Upload CSV',
+                label: 'Upload file',
                 onClick: () => setUploading(true),
               }}
             />
           ) : (
             <>
-              <section className="flex min-h-0 flex-col gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  Versions
-                </h3>
-                <DataTable<DatasetVersionResponse>
-                  data={versions}
-                  columns={versionColumns}
-                  keyExtractor={(v) => v.id}
-                  loading={loading}
-                  emptyTitle="No versions yet"
-                  emptyDescription="Upload a CSV to create the first version of this dataset."
+              <div className="flex items-center gap-2">
+                <div className="min-w-[320px] max-w-[460px] flex-1">
+                  <Select
+                    value={selectedVersionId ?? ''}
+                    onChange={(id) => setUserSelectedVersionId(id)}
+                    options={versionOptions}
+                    placeholder="Select a version"
+                    disabled={!hasVersions}
+                  />
+                </div>
+                {selectedVersion ? (
+                  <RowActionsMenu
+                    actions={versionActions}
+                    open={menuOpen}
+                    onOpenChange={setMenuOpen}
+                  />
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                <MetricChip
+                  label="Rows"
+                  value={(
+                    versionDetail?.rowCount ??
+                    selectedVersion?.rowCount ??
+                    0
+                  ).toLocaleString()}
                 />
+                <MetricChip
+                  label="Columns"
+                  value={versionDetail ? schemaColumns.length : '—'}
+                />
+                <MetricChip
+                  label="ID strategy"
+                  value={selectedVersion ? describeStrategy(selectedVersion) : '—'}
+                />
+                <MetricChip
+                  label="Source"
+                  value={formatBytes(selectedVersion?.sourceByteSize ?? null)}
+                  sub={selectedVersion?.sourceFilename ?? undefined}
+                />
+                <MetricChip
+                  label="Imported"
+                  value={fmtDate(selectedVersion?.importedAt ?? null)}
+                />
+              </div>
+
+              <section className="flex flex-col gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Schema{versionDetail ? ` · ${schemaColumns.length} columns` : ''}
+                </h3>
+                <div className="max-h-[220px] overflow-auto rounded-[10px] border border-[var(--border-default)]">
+                  {schemaColumns.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-[var(--text-muted)]">
+                      {versionDetailLoading ? 'Reading schema…' : 'No columns detected.'}
+                    </p>
+                  ) : (
+                    schemaColumns.map((c) => (
+                      <div
+                        key={c.name}
+                        className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2 last:border-b-0"
+                      >
+                        <span
+                          className="w-48 shrink-0 truncate text-[13px] font-medium text-[var(--text-primary)]"
+                          title={c.name}
+                        >
+                          {c.name}
+                        </span>
+                        <Badge variant={typeBadgeVariant(c.type)} size="sm">
+                          {c.type}
+                        </Badge>
+                        <span className="w-28 shrink-0 text-right tabular-nums text-[11px] text-[var(--text-muted)]">
+                          {(c.distinctCount ?? 0).toLocaleString()} distinct
+                        </span>
+                        <span
+                          className="flex-1 truncate text-[11px] text-[var(--text-secondary)]"
+                          title={(c.sampleValues ?? []).join(', ')}
+                        >
+                          {(c.sampleValues ?? []).join(', ') || '—'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </section>
 
               {hasVersions && selectedVersionId ? (
-                <section className="flex min-h-0 flex-col gap-2">
+                <section className="flex min-h-0 flex-1 flex-col gap-2">
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                     Sample rows
-                    {versionDetail ? ` · v${versionDetail.versionNumber}` : ''}
+                    {versionDetail
+                      ? ` · showing ${sampleRows.length.toLocaleString()} of ${versionDetail.rowCount.toLocaleString()}`
+                      : ''}
                   </h3>
-                  <DataTable<{ recipientId: string; payload: Record<string, unknown> }>
+                  <DataTable<SampleRow>
                     data={sampleRows}
                     columns={sampleColumns}
                     keyExtractor={(r) => r.recipientId}
                     loading={versionDetailLoading}
+                    minWidth={sampleMinWidth}
                     emptyTitle="No sample rows"
                     emptyDescription="The selected version has no rows to preview."
                   />
@@ -291,39 +357,24 @@ export function DatasetDetail() {
       </PageSurface>
 
       <RightSlideOverShell isOpen={uploading} onClose={() => setUploading(false)}>
-        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-5 py-4">
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">
-            Upload new version
-          </h2>
-          <button
-            type="button"
-            onClick={() => setUploading(false)}
-            aria-label="Close"
-            className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {uploading && datasetId ? (
-            <DatasetUploadForm
-              datasetId={datasetId}
-              onClose={() => setUploading(false)}
-              onUploaded={(version) => {
-                setUploading(false);
-                setUserSelectedVersionId(version.id);
-                if (datasetId) {
-                  qc.invalidateQueries({
-                    queryKey: datasetQueryKeys.detail(datasetId),
-                  });
-                  qc.invalidateQueries({
-                    queryKey: ['orchestration', 'datasets', 'list'],
-                  });
-                }
-              }}
-            />
-          ) : null}
-        </div>
+        {uploading && datasetId ? (
+          <DatasetUploadForm
+            datasetId={datasetId}
+            onClose={() => setUploading(false)}
+            onUploaded={(version) => {
+              setUploading(false);
+              setUserSelectedVersionId(version.id);
+              if (datasetId) {
+                qc.invalidateQueries({
+                  queryKey: datasetQueryKeys.detail(datasetId),
+                });
+                qc.invalidateQueries({
+                  queryKey: ['orchestration', 'datasets', 'list'],
+                });
+              }
+            }}
+          />
+        ) : null}
       </RightSlideOverShell>
 
       <ConfirmDialog

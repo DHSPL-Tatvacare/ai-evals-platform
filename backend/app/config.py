@@ -84,6 +84,8 @@ class Settings(BaseSettings):
 
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 100  # enforced in file upload route
+    DATASET_IMPORT_MAX_ROWS: int = 50_000  # dataset import row cap (env-overridable)
+    DATASET_SAMPLE_ROW_LIMIT: int = 100  # max version-preview sample rows (env-overridable)
     ALLOWED_UPLOAD_MIMES: str = (
         "audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/x-wav,audio/x-m4a,"
         "audio/m4a,audio/mp4,audio/ogg,"

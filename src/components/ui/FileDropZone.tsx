@@ -9,15 +9,17 @@ interface FileDropZoneProps {
   multiple?: boolean;
   disabled?: boolean;
   acceptLabel?: string;
+  inputAriaLabel?: string;
   children?: React.ReactNode;
 }
 
-export function FileDropZone({ 
-  onFilesSelected, 
+export function FileDropZone({
+  onFilesSelected,
   accept = '.wav,.mp3,.webm,.json,.txt',
   multiple = false,
   disabled = false,
   acceptLabel,
+  inputAriaLabel,
   children
 }: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -76,6 +78,7 @@ export function FileDropZone({
             accept={accept}
             onChange={handleFileInput}
             disabled={disabled}
+            aria-label={inputAriaLabel}
             className="absolute inset-0 cursor-pointer opacity-0"
           />
           

@@ -6,13 +6,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional
 
-MAX_ROWS = 20_000
+from app.config import settings
+
 SAMPLE_LIMIT = 50
 COLUMN_TYPES = ("integer", "number", "boolean", "datetime", "string")
 
 
 class DatasetImportError(ValueError):
     """Raised on any structural problem the user can fix."""
+
+
+def resolve_max_rows(max_rows: int | None) -> int:
+    return max_rows if max_rows is not None else settings.DATASET_IMPORT_MAX_ROWS
 
 
 @dataclass(frozen=True)
@@ -29,6 +34,18 @@ def validate_id_strategy(id_strategy: str, id_column: Optional[str]) -> None:
         )
     if id_strategy == "column" and not id_column:
         raise DatasetImportError("id_column is required when id_strategy='column'")
+
+
+def normalize_columns(raw: list[str]) -> list[str]:
+    stripped = [c.strip() for c in raw]
+    while stripped and stripped[-1] == "":
+        stripped.pop()
+    for i, c in enumerate(stripped, start=1):
+        if c == "":
+            raise DatasetImportError(
+                f"file header has a blank column name in position {i}"
+            )
+    return stripped
 
 
 def validate_headers(columns: list[str], *, id_strategy: str, id_column: Optional[str]) -> None:
@@ -48,10 +65,12 @@ def assemble(
     *,
     id_strategy: str,
     id_column: Optional[str],
+    max_rows: int | None = None,
 ) -> ImportedDataset:
-    if len(rows) > MAX_ROWS:
+    cap = resolve_max_rows(max_rows)
+    if len(rows) > cap:
         raise DatasetImportError(
-            f"row cap exceeded: dataset versions are capped at {MAX_ROWS} rows"
+            f"row cap exceeded: dataset versions are capped at {cap} rows"
         )
     recipient_ids = resolve_recipient_ids(
         rows, id_strategy=id_strategy, id_column=id_column,

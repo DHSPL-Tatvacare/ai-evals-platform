@@ -29,6 +29,10 @@ from app.database import get_db
 from app.main import app as fastapi_app
 from app.models.orchestration import Workflow, WorkflowVersion
 from app.models.tenant import Tenant
+from app.schemas.orchestration_dataset import (
+    DatasetSampleRow,
+    DatasetVersionResponse,
+)
 
 
 APP_ID = "inside-sales"
@@ -232,17 +236,22 @@ async def test_multipart_upload_column_strategy(client):
 
 
 @pytest.mark.asyncio
-async def test_multipart_upload_exceeds_row_cap_returns_400(client):
+async def test_multipart_upload_exceeds_row_cap_returns_400(client, monkeypatch):
+    from app.config import settings
+
+    # Cap is config-driven (settings.DATASET_IMPORT_MAX_ROWS). Pin it low so the
+    # test trips the guard with a few rows instead of a 50k-row fixture.
+    monkeypatch.setattr(settings, "DATASET_IMPORT_MAX_ROWS", 2)
+
     create = await client.post(
         "/api/orchestration/datasets", json=_create_payload(),
     )
     dataset_id = create.json()["id"]
 
-    # Build 20_001 rows via csv module — well under the 50 MB outer guard.
     buf = io.StringIO()
     writer = _csv.writer(buf)
     writer.writerow(["recipient_id", "name"])
-    for i in range(20_001):
+    for i in range(3):
         writer.writerow([f"r{i}", f"n{i}"])
     csv_bytes = buf.getvalue().encode("utf-8")
 
@@ -351,14 +360,53 @@ async def test_get_version_with_sample_rows(client):
     assert g.status_code == 200, g.text
     payload = g.json()
     assert len(payload["sampleRows"]) == 5
-    # Each sample row has recipient_id + payload.
+    # Inner sample-row keys MUST be camelCase on the wire.
     for r in payload["sampleRows"]:
-        assert "recipientId" in r or "recipient_id" in r
+        assert "recipientId" in r
+        assert "recipient_id" not in r
         assert "payload" in r
 
 
+# ─── sample-row schema camelization (offline) ────────────────────────────────
+
+
+def test_sample_row_serializes_inner_keys_camelcase():
+    version = DatasetVersionResponse(
+        id=uuid.uuid4(),
+        dataset_id=uuid.uuid4(),
+        version_number=1,
+        source_type="csv",
+        source_filename="rows.csv",
+        source_byte_size=10,
+        row_count=1,
+        id_strategy="uuid",
+        id_column=None,
+        schema_descriptor={},
+        imported_by=SYSTEM_USER_ID,
+        imported_at=__import__("datetime").datetime.now(),
+        sample_rows=[{"recipient_id": "abc", "payload": {"name": "alice"}}],
+    )
+    dumped = version.model_dump(by_alias=True)
+    row = dumped["sampleRows"][0]
+    assert row["recipientId"] == "abc"
+    assert "recipient_id" not in row
+    assert row["payload"] == {"name": "alice"}
+
+
+def test_sample_row_model_camelizes():
+    dumped = DatasetSampleRow(recipient_id="x", payload={}).model_dump(by_alias=True)
+    assert "recipientId" in dumped
+    assert "recipient_id" not in dumped
+
+
+def test_sample_row_limit_default_is_100():
+    from app.config import settings
+
+    assert settings.DATASET_SAMPLE_ROW_LIMIT == 100
+
+
 @pytest.mark.asyncio
-async def test_get_version_sample_rows_out_of_range(client):
+async def test_get_version_sample_rows_clamped_and_validated(client):
     create = await client.post(
         "/api/orchestration/datasets", json=_create_payload(),
     )
@@ -372,12 +420,21 @@ async def test_get_version_sample_rows_out_of_range(client):
     )
     version_id = up.json()["id"]
 
-    r = await client.get(
+    # Over-large requests are clamped to the configured ceiling, not rejected.
+    over = await client.get(
         f"/api/orchestration/datasets/{dataset_id}/versions/{version_id}"
-        f"?sampleRows=999",
+        f"?sampleRows=100000",
     )
-    assert r.status_code == 400, r.text
-    assert "sampleRows" in r.json()["detail"]
+    assert over.status_code == 200, over.text
+    assert len(over.json()["sampleRows"]) == 2
+
+    # Negative is still rejected.
+    neg = await client.get(
+        f"/api/orchestration/datasets/{dataset_id}/versions/{version_id}"
+        f"?sampleRows=-1",
+    )
+    assert neg.status_code == 400, neg.text
+    assert "negative" in neg.json()["detail"]
 
 
 # ─── delete ─────────────────────────────────────────────────────────────────

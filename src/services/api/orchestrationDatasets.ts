@@ -36,7 +36,7 @@ export interface DatasetVersionResponse {
   id: string;
   datasetId: string;
   versionNumber: number;
-  sourceType: 'csv' | 'gsheet' | 'api';
+  sourceType: 'csv' | 'xlsx' | 'gsheet' | 'api';
   sourceFilename: string | null;
   sourceByteSize: number | null;
   rowCount: number;

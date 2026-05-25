@@ -30,6 +30,7 @@ from sqlalchemy import insert, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.mixins.shareable import Visibility
 from app.models.orchestration import (
     CohortDataset,
@@ -476,9 +477,8 @@ async def get_version(
     )
     sample: Optional[list[dict[str, Any]]] = None
     if sample_rows > 0:
-        # Clamp at 50; the importer caps datasets at 20k rows but the API
-        # surface should still keep response payloads bounded.
-        limit = min(sample_rows, 50)
+        # Clamp at the configured response ceiling so payloads stay bounded.
+        limit = min(sample_rows, settings.DATASET_SAMPLE_ROW_LIMIT)
         rows = (
             await db.execute(
                 select(CohortDatasetRow)

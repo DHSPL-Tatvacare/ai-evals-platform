@@ -269,10 +269,12 @@ async def get_version_route(
     db: AsyncSession = Depends(get_db),
     sample_rows: int = Query(0, alias="sampleRows"),
 ):
-    if sample_rows < 0 or sample_rows > 50:
+    if sample_rows < 0:
         raise HTTPException(
-            status_code=400, detail="sampleRows must be between 0 and 50",
+            status_code=400, detail="sampleRows must not be negative",
         )
+    # Over-large requests are clamped to the configured ceiling in get_version,
+    # not rejected — a read-only preview count should never 400 for asking high.
     await _load_and_gate_dataset(db, auth, dataset_id)
     try:
         return await dataset_service.get_version(

@@ -63,19 +63,25 @@ function csvFile(content: string, name = 'cohort.csv'): File {
   return new File([content], name, { type: 'text/csv' });
 }
 
-async function waitForFormats() {
+async function waitForDropZone() {
   await waitFor(() =>
-    expect(screen.getByText(/Supported:/)).toBeInTheDocument(),
+    expect(screen.getByLabelText('Data file')).toBeInTheDocument(),
   );
 }
 
+/** Selects a file in step 1 and waits for the data preview to appear. */
 async function pickFile(file: File) {
-  await waitForFormats();
+  await waitForDropZone();
   const input = screen.getByLabelText('Data file') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [file] } });
   await waitFor(() =>
-    expect(screen.getByText(/Detected columns/)).toBeInTheDocument(),
+    expect(screen.getByText('Data Preview')).toBeInTheDocument(),
   );
+}
+
+/** Advances from step 1 (upload) to step 2 (configure recipients). */
+function goToConfigure() {
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 }
 
 describe('DatasetUploadForm', () => {
@@ -83,41 +89,74 @@ describe('DatasetUploadForm', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the file picker initially', async () => {
+  it('renders the drop zone and step-1 footer initially', async () => {
     renderForm();
-    await waitForFormats();
-    expect(screen.getByLabelText('Data file')).toBeInTheDocument();
-    expect(screen.getByText('Upload version')).toBeInTheDocument();
-    expect(screen.getByText(/CSV.*Excel/)).toBeInTheDocument();
+    await waitForDropZone();
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByText(/Supported: .csv, .xlsx/)).toBeInTheDocument();
   });
 
-  it('extracts headers from a selected CSV', async () => {
+  it('shows a data preview for a selected CSV and enables Next', async () => {
     renderForm();
+    const next = screen.getByRole('button', { name: 'Next' });
+    expect(next).toBeDisabled();
+
     await pickFile(csvFile('phone,name\n+91111,Alice\n+91222,Bob\n'));
 
     expect(screen.getByText('phone')).toBeInTheDocument();
     expect(screen.getByText('name')).toBeInTheDocument();
-    expect(screen.getByText('Detected columns (2)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).not.toBeDisabled();
   });
 
-  it('disables submit until a column is chosen for column-strategy', async () => {
+  it('blocks Next on an interior blank header', async () => {
     renderForm();
-    const submit = screen.getByRole('button', { name: /Upload version/ });
-    expect(submit).toBeDisabled();
+    await waitForDropZone();
+    const input = screen.getByLabelText('Data file') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [csvFile('phone,,name\n+91111,x,Alice\n')] },
+    });
 
-    await pickFile(csvFile('phone,name\n+91111,Alice\n'));
-    expect(submit).toBeDisabled();
+    expect(
+      await screen.findByText(/Blank column header/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('switching to UUID strategy hides the column dropdown and enables submit', async () => {
+  it('blocks Next on a duplicate header', async () => {
+    renderForm();
+    await waitForDropZone();
+    const input = screen.getByLabelText('Data file') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [csvFile('phone,phone\n+91111,+91222\n')] },
+    });
+
+    expect(
+      await screen.findByText(/Duplicate column header/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('on step 2, disables upload until a column is chosen for column-strategy', async () => {
     renderForm();
     await pickFile(csvFile('phone,name\n+91111,Alice\n'));
+    goToConfigure();
+
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload version' })).toBeDisabled();
+  });
+
+  it('switching to UUID strategy hides the column dropdown and enables upload', async () => {
+    renderForm();
+    await pickFile(csvFile('phone,name\n+91111,Alice\n'));
+    goToConfigure();
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
-    expect(screen.queryByText('ID column')).not.toBeInTheDocument();
-
-    const submit = screen.getByRole('button', { name: /Upload version/ });
-    expect(submit).not.toBeDisabled();
+    expect(screen.queryByText('Recipient ID')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Upload version' }),
+    ).not.toBeDisabled();
   });
 
   it('calls uploadVersion with the right args on submit (uuid strategy)', async () => {
@@ -139,9 +178,10 @@ describe('DatasetUploadForm', () => {
     renderForm({ onUploaded });
     const file = csvFile('phone,name\n+91111,Alice\n');
     await pickFile(file);
+    goToConfigure();
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
-    fireEvent.click(screen.getByRole('button', { name: /Upload version/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload version' }));
 
     await waitFor(() =>
       expect(orchestrationDatasetsApi.uploadVersion).toHaveBeenCalledWith(
@@ -154,31 +194,32 @@ describe('DatasetUploadForm', () => {
     await waitFor(() => expect(onUploaded).toHaveBeenCalledTimes(1));
   });
 
-  it('renders server-side 400 errors without clearing form state', async () => {
+  it('renders server-side 400 errors without leaving step 2', async () => {
     (orchestrationDatasetsApi.uploadVersion as ReturnType<typeof vi.fn>).mockRejectedValue(
       new ApiError(400, 'Invalid id_column "foo": not present in header row'),
     );
     renderForm();
     await pickFile(csvFile('phone,name\n+91111,Alice\n'));
+    goToConfigure();
 
     fireEvent.click(screen.getByLabelText(/Auto-generate IDs/));
-    fireEvent.click(screen.getByRole('button', { name: /Upload version/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload version' }));
 
     expect(
       await screen.findByText(/Invalid id_column "foo"/),
     ).toBeInTheDocument();
-    expect(screen.getByText('Detected columns (2)')).toBeInTheDocument();
-    expect(screen.getByText(/cohort\.cs/)).toBeInTheDocument();
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
   });
 
-  it('rejects an unsupported file extension', async () => {
+  it('rejects an unsupported file extension in step 1', async () => {
     renderForm();
-    await waitForFormats();
+    await waitForDropZone();
     const input = screen.getByLabelText('Data file') as HTMLInputElement;
     const pdf = new File(['x'], 'leads.pdf', { type: 'application/pdf' });
     fireEvent.change(input, { target: { files: [pdf] } });
     expect(
       await screen.findByText(/Unsupported file type/),
     ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 });

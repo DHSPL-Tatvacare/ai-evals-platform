@@ -33,6 +33,23 @@ class DatasetUpdate(CamelModel):
     visibility: Optional[Visibility] = None
 
 
+class DatasetSampleRow(CamelModel):
+    recipient_id: str
+    payload: dict[str, Any]
+
+
+class DatasetSchemaColumn(CamelModel):
+    name: str
+    type: str
+    sample_values: list[str] = Field(default_factory=list)
+    distinct_count: int = 0
+
+
+class DatasetSchemaDescriptor(CamelModel):
+    columns: list[DatasetSchemaColumn] = Field(default_factory=list)
+    row_count: int = 0
+
+
 class DatasetVersionResponse(CamelORMModel):
     id: uuid.UUID
     dataset_id: uuid.UUID
@@ -43,12 +60,12 @@ class DatasetVersionResponse(CamelORMModel):
     row_count: int
     id_strategy: str
     id_column: Optional[str]
-    schema_descriptor: dict[str, Any]
+    schema_descriptor: DatasetSchemaDescriptor
     imported_by: uuid.UUID
     imported_at: datetime
     # Populated only by ``get_version`` when ``sample_rows > 0`` is requested.
     # Each entry is ``{"recipient_id": str, "payload": dict}``.
-    sample_rows: list[dict[str, Any]] = Field(default_factory=list)
+    sample_rows: list[DatasetSampleRow] = Field(default_factory=list)
 
 
 class DatasetResponse(CamelORMModel):

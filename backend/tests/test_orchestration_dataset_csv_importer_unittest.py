@@ -57,14 +57,37 @@ def test_duplicate_headers_rejected():
 
 
 def test_row_cap_enforced():
-    body = "phone\n" + "\n".join(f"+91{i:06d}" for i in range(20_001)) + "\n"
-    with pytest.raises(DatasetImportError, match="row cap"):
-        parse_csv(_csv(body), id_strategy="column", id_column="phone")
+    body = "phone\n+91000001\n+91000002\n+91000003\n"
+    with pytest.raises(DatasetImportError, match="capped at 2 rows"):
+        parse_csv(_csv(body), id_strategy="column", id_column="phone", max_rows=2)
+
+
+def test_row_cap_uses_settings_default_when_unset():
+    out = parse_csv(
+        _csv("phone\n+91000001\n+91000002\n+91000003\n"),
+        id_strategy="column", id_column="phone",
+    )
+    assert out.schema_descriptor["row_count"] == 3
 
 
 def test_non_utf8_rejected():
     with pytest.raises(DatasetImportError, match="UTF-8"):
         parse_csv(b"\xff\xfephone\n", id_strategy="uuid", id_column=None)
+
+
+def test_trailing_blank_header_trimmed():
+    out = parse_csv(
+        _csv("a,b,\n1,2,3\n"),
+        id_strategy="uuid", id_column=None,
+    )
+    assert [c["name"] for c in out.schema_descriptor["columns"]] == ["a", "b"]
+    assert set(out.rows[0].keys()) == {"a", "b"}
+    assert out.rows[0] == {"a": "1", "b": "2"}
+
+
+def test_interior_blank_header_rejected():
+    with pytest.raises(DatasetImportError, match="blank column name"):
+        parse_csv(_csv("a,,b\n1,2,3\n"), id_strategy="uuid", id_column=None)
 
 
 def test_type_inference():
