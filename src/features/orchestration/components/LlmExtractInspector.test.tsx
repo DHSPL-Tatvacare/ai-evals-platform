@@ -98,8 +98,13 @@ describe('LlmExtractInspector', () => {
     expect(screen.getByText(/concurrency/i)).toBeInTheDocument();
   });
 
-  it('renders the Test pane Run control as disabled (inert scaffold)', () => {
+  it('enables the Test pane Run control when a prompt is set', () => {
     renderInspector();
+    expect(screen.getByRole('button', { name: /^run/i })).toBeEnabled();
+  });
+
+  it('disables the Test pane Run control when the prompt is empty', () => {
+    renderInspector({ value: { prompt: '', output_schema: [] } });
     expect(screen.getByRole('button', { name: /^run/i })).toBeDisabled();
   });
 

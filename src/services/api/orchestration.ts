@@ -389,3 +389,22 @@ export async function resolveUpstreamVariables(body: {
     { method: 'POST', body: JSON.stringify(body) },
   );
 }
+
+export interface LlmExtractDryRunResponse {
+  prompt: string;
+  result: unknown;
+}
+
+/** One-sample dry-run of an llm.extract node for the AI agent Test pane.
+ *  Runs the node's own runtime via the `workflow_llm_extract` call site; the
+ *  cost row is tagged `workflow_llm_extract:builder_test`. */
+export async function runLlmExtractTest(body: {
+  appId: string;
+  config: Record<string, unknown>;
+  sample: Record<string, unknown>;
+}): Promise<LlmExtractDryRunResponse> {
+  return apiRequest<LlmExtractDryRunResponse>(
+    '/api/orchestration/nodes/llm-extract/test',
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}

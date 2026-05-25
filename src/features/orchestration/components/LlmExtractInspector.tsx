@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, Play, ShieldCheck, Sparkles, SquarePen, Wand2, X } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
+import { AlertTriangle, ChevronDown, Play, RefreshCw, ShieldCheck, Sparkles, SquarePen, Wand2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -21,8 +22,17 @@ import {
 import { useResolveUpstreamVariables } from '@/features/orchestration/queries/upstreamVariables';
 import { EditSchemaOverlay } from '@/features/orchestration/components/inspector/EditSchemaOverlay';
 import { GenerateWithAiOverlay } from '@/features/orchestration/components/inspector/GenerateWithAiOverlay';
+import { downstreamKeys, resultSignature } from '@/features/orchestration/components/inspector/testPane';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
-import type { UpstreamField } from '@/services/api/orchestration';
+import {
+  runLlmExtractTest,
+  type LlmExtractDryRunResponse,
+  type UpstreamField,
+} from '@/services/api/orchestration';
+import {
+  decodeApiError,
+  summarizeApiErrorBody,
+} from '@/features/orchestration/contracts/errorDecoder';
 import type { WorkflowType } from '@/features/orchestration/types';
 import type { EvaluatorOutputField } from '@/types';
 import { useCurrentAppId } from '@/hooks';
@@ -140,6 +150,57 @@ export function LlmExtractInspector({
     },
     [config.prompt, onChange],
   );
+
+  // ── Test pane: editable sample → dry-run → result + downstream keys ──────
+  const [sampleText, setSampleText] = useState('');
+  const [sampleEdited, setSampleEdited] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [result, setResult] = useState<LlmExtractDryRunResponse | null>(null);
+  const [ranSignature, setRanSignature] = useState<string | null>(null);
+  const pendingSignature = useRef('');
+
+  const sampleFromResolver = useMemo(
+    () => JSON.stringify(upstream?.sample ?? {}, null, 2),
+    [upstream],
+  );
+  // Show the resolver sample until the user edits it — derived, not an effect.
+  const sampleValue = sampleEdited ? sampleText : sampleFromResolver;
+
+  const namespace = config.output_namespace || targetNodeId || 'output';
+  const downstream = downstreamKeys(namespace, fields);
+  const currentSignature = resultSignature({
+    provider: config.provider_override,
+    model: config.model_override,
+    prompt: config.prompt,
+    outputSchema: fields,
+    sampleText: sampleValue,
+  });
+  const resultIsStale = result != null && currentSignature !== ranSignature;
+
+  const testMutation = useMutation({
+    mutationFn: (sample: Record<string, unknown>) =>
+      runLlmExtractTest({ appId, config: value, sample }),
+    onSuccess: (data) => {
+      setResult(data);
+      setRanSignature(pendingSignature.current);
+      setRunError(null);
+    },
+    onError: (err) =>
+      setRunError(summarizeApiErrorBody(decodeApiError(err), 'Dry-run failed.')),
+  });
+
+  const handleRun = () => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = sampleValue.trim() ? (JSON.parse(sampleValue) as Record<string, unknown>) : {};
+    } catch {
+      setRunError('Sample must be valid JSON.');
+      return;
+    }
+    setRunError(null);
+    pendingSignature.current = currentSignature;
+    testMutation.mutate(parsed);
+  };
 
   const inspectorWidth = useWorkflowBuilderStore((s) => s.inspectorWidth);
   const setInspectorWidth = useWorkflowBuilderStore((s) => s.setInspectorWidth);
@@ -507,16 +568,76 @@ export function LlmExtractInspector({
             </div>
           </section>
 
-          {/* TEST — inert scaffold (wired in a later commit). */}
+          {/* TEST — editable sample → dry-run → result + downstream keys. */}
           <section className="flex min-w-0 flex-col overflow-y-auto border-l border-[var(--border-subtle)]">
             <PaneHeader step={3} label="Test" />
             <div className="flex flex-col gap-3 p-3">
-              <Button type="button" size="sm" variant="primary" icon={Play} disabled>
+              <div className="flex flex-col gap-1">
+                <span className={paneLabelClass}>Sample record</span>
+                <textarea
+                  value={sampleValue}
+                  onChange={(e) => {
+                    setSampleEdited(true);
+                    setSampleText(e.target.value);
+                  }}
+                  rows={6}
+                  spellCheck={false}
+                  placeholder="{ }"
+                  className={cn(textAreaClass, 'font-mono text-xs')}
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                icon={Play}
+                onClick={handleRun}
+                isLoading={testMutation.isPending}
+                disabled={!config.prompt || testMutation.isPending}
+              >
                 Run
               </Button>
-              <InspectorEmptyState>
-                Run the prompt over a sample record to preview the extracted fields.
-              </InspectorEmptyState>
+
+              {runError ? (
+                <p className="flex items-start gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-warning)] bg-[var(--surface-warning)] p-2 text-[11.5px] text-[var(--color-warning)]">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{runError}</span>
+                </p>
+              ) : null}
+
+              {result ? (
+                <div className={cn('flex flex-col gap-2', resultIsStale && 'opacity-50')}>
+                  {resultIsStale ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                      <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                      Inputs changed — re-run to refresh.
+                    </span>
+                  ) : null}
+                  <span className={paneLabelClass}>Result</span>
+                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-base)] p-2.5 font-mono text-[11px] text-[var(--text-primary)]">
+                    {JSON.stringify(result.result, null, 2)}
+                  </pre>
+                  {downstream.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      <span className={paneLabelClass}>Downstream keys</span>
+                      <div className="flex flex-wrap gap-1">
+                        {downstream.map((k) => (
+                          <code
+                            key={k}
+                            className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10.5px] text-[var(--color-info)]"
+                          >
+                            {k}
+                          </code>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <InspectorEmptyState>
+                  Run the prompt over a sample record to preview the extracted fields.
+                </InspectorEmptyState>
+              )}
             </div>
           </section>
         </fieldset>
