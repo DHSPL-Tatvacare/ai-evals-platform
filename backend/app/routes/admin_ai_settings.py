@@ -25,7 +25,7 @@ through the per-credential surface below.
 - PATCH  ``/api/admin/ai-settings/deployments/{id}``
 - DELETE ``/api/admin/ai-settings/deployments/{id}``
 
-Gated by ``configuration:edit``, tenant-scoped via ``auth.tenant_id``.
+Gated by ``configuration:manage``, tenant-scoped via ``auth.tenant_id``.
 
 Responses NEVER carry plaintext secrets — only ``secretPreview`` /
 ``apiKeyPreview``. Blank ``secret`` values on PATCH preserve the stored
@@ -41,7 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import AuthContext, require_permission
+from app.auth import AuthContext, require_permission, require_any_permission
 from app.database import get_db
 from app.models.cost import RefLlmModelsCatalog
 from app.models.tenant_curated_model import TenantCuratedModel
@@ -228,7 +228,7 @@ async def _provider_summary(
 
 @router.get("/providers", response_model=list[ProviderConfigResponse])
 async def list_providers(
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     rows_by_provider: dict[str, list[TenantLlmCredential]] = {p: [] for p in SUPPORTED_PROVIDERS}
@@ -255,7 +255,7 @@ async def list_providers(
 )
 async def list_credentials(
     provider: str = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_any_permission("evaluation:run", "orchestration:manage", "configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_provider(provider)
@@ -271,7 +271,7 @@ async def list_credentials(
 async def create_credential(
     body: CredentialCreate,
     provider: str = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_provider(provider)
@@ -327,7 +327,7 @@ async def update_credential(
     body: CredentialUpdate,
     provider: str = Path(...),
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_provider(provider)
@@ -371,7 +371,7 @@ async def update_credential(
 async def delete_credential(
     provider: str = Path(...),
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_provider(provider)
@@ -395,7 +395,7 @@ async def delete_credential(
 )
 async def validate_credential(
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     row = await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -419,7 +419,7 @@ async def validate_credential(
 async def discover_credential_models(
     body: ModelSearchRequest,
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     row = await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -442,7 +442,7 @@ async def discover_credential_models(
 )
 async def list_deployments(
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     row = await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -473,7 +473,7 @@ async def list_deployments(
 async def create_deployment(
     body: DeploymentCreate,
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     row = await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -535,7 +535,7 @@ async def create_deployment(
 async def update_deployment(
     body: DeploymentUpdate,
     deployment_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     dep, _credential = await _get_deployment_or_404(db, auth.tenant_id, deployment_id)
@@ -572,7 +572,7 @@ async def update_deployment(
 @router.delete("/deployments/{deployment_id}", status_code=204)
 async def delete_deployment(
     deployment_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     dep, _credential = await _get_deployment_or_404(db, auth.tenant_id, deployment_id)
@@ -603,7 +603,7 @@ def _curated_to_response(
 )
 async def list_curated_models(
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -629,7 +629,7 @@ async def list_curated_models(
 async def add_curated_model(
     body: CuratedModelCreate,
     credential_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     cred = await _get_credential_or_404(db, auth.tenant_id, credential_id)
@@ -679,7 +679,7 @@ async def add_curated_model(
 @router.delete("/curated-models/{curated_model_id}", status_code=204)
 async def delete_curated_model(
     curated_model_id: uuid.UUID = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     row = (

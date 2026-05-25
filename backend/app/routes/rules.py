@@ -34,10 +34,10 @@ async def update_rules(
     body: RuleCatalogResponse,
     app_id: str = Query(...),
     catalog_key: str = Query(DEFAULT_RULES_KEY),
-    auth: AuthContext = require_permission('configuration:edit'),
+    auth: AuthContext = require_permission('configuration:manage'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Replace the published rule catalog for an app. Requires configuration:edit."""
+    """Replace the published rule catalog for an app. Requires configuration:manage."""
     if catalog_key != DEFAULT_RULES_KEY:
         raise HTTPException(status_code=400, detail="Unsupported catalog_key for update")
     await save_rules(

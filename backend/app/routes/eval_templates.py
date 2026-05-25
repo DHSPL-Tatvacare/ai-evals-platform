@@ -147,7 +147,7 @@ async def get_eval_template(
 @router.post("", response_model=EvalTemplateResponse, status_code=201)
 async def create_eval_template(
     body: EvalTemplateCreate,
-    auth: AuthContext = require_permission('asset:create'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -178,7 +178,7 @@ async def create_eval_template(
 async def new_version_eval_template(
     template_id: str,
     body: EvalTemplateNewVersion,
-    auth: AuthContext = require_permission('asset:edit'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -245,7 +245,7 @@ async def new_version_eval_template(
 async def fork_eval_template(
     template_id: str,
     app_id: str = Query(...),
-    auth: AuthContext = require_permission('asset:create'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -294,7 +294,7 @@ async def fork_eval_template(
 async def update_eval_template(
     template_id: str,
     body: EvalTemplateUpdate,
-    auth: AuthContext = require_permission('asset:edit'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -328,7 +328,7 @@ async def update_eval_template(
 async def patch_eval_template_visibility(
     template_id: str,
     body: dict,
-    auth: AuthContext = require_permission('asset:share'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -389,7 +389,7 @@ async def patch_eval_template_visibility(
 @router.delete("/{template_id}")
 async def delete_eval_template(
     template_id: str,
-    auth: AuthContext = require_permission('asset:delete'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

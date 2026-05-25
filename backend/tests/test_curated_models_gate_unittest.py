@@ -51,7 +51,7 @@ async def setup(db_session):
     fastapi_app.dependency_overrides[get_auth_context] = lambda: AuthContext(
         user_id=SYSTEM_USER_ID, tenant_id=tid, email="a@t.local",
         role_id=uuid.uuid4(), is_owner=True,
-        permissions=frozenset({"configuration:edit"}),
+        permissions=frozenset({"configuration:manage"}),
         app_access=frozenset(),
     )
     yield db_session, cred, cat

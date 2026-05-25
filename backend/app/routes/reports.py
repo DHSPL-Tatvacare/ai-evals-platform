@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.app_scope import ensure_registered_app_access
 from app.auth.context import AuthContext
-from app.auth.permissions import require_permission, require_app_access
+from app.auth.permissions import require_permission, require_any_permission, require_app_access
 from app.auth.utils import create_access_token
 from app.config import settings
 from app.database import get_db
@@ -292,7 +292,7 @@ async def _render_pdf_via_print_route(
 async def list_report_configs(
     app_id: str = Query(...),
     scope: str = Query(...),
-    auth: AuthContext = require_permission('insights:view'),
+    auth: AuthContext = require_any_permission('insights:view', 'report:run'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -327,7 +327,7 @@ class BlueprintSaveRequest(CamelModel):
 @router.post("/report-configs", response_model=ReportConfigResponse, status_code=201)
 async def create_report_config_from_blueprint(
     payload: BlueprintSaveRequest,
-    auth: AuthContext = require_permission('report:generate'),
+    auth: AuthContext = require_permission('report:run'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -425,7 +425,7 @@ async def _load_owned_report_config(
 async def update_report_config(
     config_id: UUID,
     payload: BlueprintUpdateRequest,
-    auth: AuthContext = require_permission('report:generate'),
+    auth: AuthContext = require_permission('report:run'),
     db: AsyncSession = Depends(get_db),
 ):
     """Rename / re-describe / promote a user-owned blueprint.
@@ -474,7 +474,7 @@ async def update_report_config(
 @router.delete("/report-configs/{config_id}", status_code=204)
 async def archive_report_config(
     config_id: UUID,
-    auth: AuthContext = require_permission('report:generate'),
+    auth: AuthContext = require_permission('report:run'),
     db: AsyncSession = Depends(get_db),
 ):
     """Soft-delete (archive) a user-owned blueprint so it stops appearing in pickers."""
@@ -491,7 +491,7 @@ async def list_report_runs(
     source_eval_run_id: UUID | None = Query(None),
     report_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    auth: AuthContext = require_permission('insights:view'),
+    auth: AuthContext = require_any_permission('insights:view', 'report:run'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -523,7 +523,7 @@ async def list_report_runs(
 @router.get("/report-runs/{report_run_id}/artifact", response_model=None)
 async def get_report_run_artifact(
     report_run_id: UUID,
-    auth: AuthContext = require_permission('insights:view'),
+    auth: AuthContext = require_any_permission('insights:view', 'report:run'),
     db: AsyncSession = Depends(get_db),
 ):
     report_run, artifact = (await fetch_report_run_artifact(
@@ -556,7 +556,7 @@ async def get_report_run_artifact(
 @router.get("/report-runs/{report_run_id}/export-pdf")
 async def export_report_run_pdf(
     report_run_id: UUID,
-    auth: AuthContext = require_permission('evaluation:export'),
+    auth: AuthContext = require_any_permission('report:run', 'insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     report_run, artifact = (await fetch_report_run_artifact(
@@ -618,7 +618,7 @@ async def export_report_run_pdf(
 async def export_report_pdf(
     run_id: str,
     report_id: str | None = Query(None),
-    auth: AuthContext = require_permission('evaluation:export'),
+    auth: AuthContext = require_any_permission('report:run', 'insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
     """Export the latest single-run report as PDF by rendering the React print route."""
@@ -704,7 +704,7 @@ async def get_report(
     cache_only: bool = Query(False, description="Only return cached report; 404 if not cached"),
     provider: str | None = Query(None, description="LLM provider for narrative generation"),
     model: str | None = Query(None, description="LLM model for narrative generation"),
-    auth: AuthContext = require_permission('insights:view'),
+    auth: AuthContext = require_any_permission('insights:view', 'report:run'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the latest generated report artifact for a completed run."""

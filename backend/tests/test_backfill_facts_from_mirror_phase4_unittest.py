@@ -172,7 +172,7 @@ class AdminBackfillEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
         response = await submit_backfill_facts(
-            body=body, auth=_auth("analytics:admin"), db=db
+            body=body, auth=_auth("analytics:manage"), db=db
         )
 
         self.assertEqual(len(added), 1)
@@ -206,7 +206,7 @@ class AdminBackfillEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(HTTPException) as cm:
             await submit_backfill_facts(
-                body=body, auth=_auth("analytics:admin"), db=db
+                body=body, auth=_auth("analytics:manage"), db=db
             )
         self.assertEqual(cm.exception.status_code, 400)
         self.assertIn("no mirror->fact mapping", cm.exception.detail)
@@ -227,7 +227,7 @@ class AdminBackfillEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(HTTPException) as cm:
             await submit_backfill_facts(
-                body=body, auth=_auth("analytics:admin"), db=db
+                body=body, auth=_auth("analytics:manage"), db=db
             )
         # Mapping is registered but the seed migration hasn't run — a
         # genuine internal misconfiguration that operators need to see.
@@ -260,7 +260,7 @@ class AdminBackfillEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_endpoint_is_permission_gated(self) -> None:
-        """The route declares ``require_permission('analytics:admin')``."""
+        """The route declares ``require_permission('analytics:manage')``."""
         from fastapi import HTTPException
         from app.routes.analytics_admin import submit_backfill_facts
 
@@ -277,7 +277,7 @@ class AdminBackfillEndpointTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as cm:
             await checker(auth=_auth("cost:view"))
         self.assertEqual(cm.exception.status_code, 403)
-        self.assertIn("analytics:admin", cm.exception.detail)
+        self.assertIn("analytics:manage", cm.exception.detail)
 
 
 # ── job registry --------------------------------------------------------

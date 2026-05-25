@@ -62,13 +62,13 @@ class SuperAdminHelperTests(unittest.IsolatedAsyncioTestCase):
 
 class CostPermissionCatalogTests(unittest.TestCase):
     def test_cost_permissions_are_grantable(self):
-        """`cost:view` + `cost:edit` are ordinary grantable permissions; the
+        """`cost:view` + `cost:manage` are ordinary grantable permissions; the
         previous `cost:*` owner-only surfaces were removed when the surface
         moved off `require_owner` / `require_super_admin` gating."""
         from app.auth.permission_catalog import VALID_PERMISSIONS
 
         self.assertIn('cost:view', VALID_PERMISSIONS)
-        self.assertIn('cost:edit', VALID_PERMISSIONS)
+        self.assertIn('cost:manage', VALID_PERMISSIONS)
 
         owner_only_ids = {entry['id'] for entry in OWNER_ONLY_SURFACES}
         self.assertNotIn('cost:access', owner_only_ids)

@@ -31,10 +31,10 @@ _PLATFORM_GROUP = PermissionGroup(
     ),
     permissions=(
         PermissionCatalogEntry(
-            id='platform:edit',
-            label='Edit platform-wide configuration',
+            id='platform:manage',
+            label='Manage platform-wide configuration',
             description=(
-                'Edit platform-default settings that apply across every tenant '
+                'Manage platform-default settings that apply across every tenant '
                 '(e.g. LLM call-site defaults seeded for tenants without their own).'
             ),
             group_id='platform',
@@ -51,16 +51,9 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Create and remove listing records.',
         permissions=(
             PermissionCatalogEntry(
-                id='listing:create',
-                label='Create listings',
-                description='Create new listings for the apps a role can access.',
-                group_id='listings',
-                group_label='Listings',
-            ),
-            PermissionCatalogEntry(
-                id='listing:delete',
-                label='Delete listings',
-                description='Delete existing listings in accessible apps.',
+                id='listing:manage',
+                label='Manage listings',
+                description='Create and delete listings for the apps a role can access.',
                 group_id='listings',
                 group_label='Listings',
             ),
@@ -74,28 +67,21 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
             PermissionCatalogEntry(
                 id='evaluation:run',
                 label='Run evaluations',
-                description='Submit evaluation jobs and start evaluation workflows.',
+                description='Submit evaluation jobs, start workflows, and cancel in-flight runs.',
                 group_id='evaluations',
                 group_label='Evaluations',
             ),
             PermissionCatalogEntry(
-                id='evaluation:cancel',
-                label='Cancel evaluations',
-                description='Cancel in-flight evaluation work without deleting completed records.',
-                group_id='evaluations',
-                group_label='Evaluations',
-            ),
-            PermissionCatalogEntry(
-                id='evaluation:delete',
-                label='Delete evaluations',
-                description='Delete evaluation records and related destructive evaluation artifacts.',
+                id='evaluation:manage',
+                label='Manage evaluations',
+                description='Delete evaluation records and change visibility on owned runs.',
                 group_id='evaluations',
                 group_label='Evaluations',
             ),
             PermissionCatalogEntry(
                 id='evaluation:export',
                 label='Export evaluation results',
-                description='Download evaluation and reporting outputs.',
+                description='Download evaluation outputs.',
                 group_id='evaluations',
                 group_label='Evaluations',
             ),
@@ -107,30 +93,9 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Manage shareable prompts, schemas, evaluators, chat artifacts, and tags.',
         permissions=(
             PermissionCatalogEntry(
-                id='asset:create',
-                label='Create assets',
-                description='Create prompts, schemas, evaluators, tags, and related assets.',
-                group_id='assets',
-                group_label='Assets',
-            ),
-            PermissionCatalogEntry(
-                id='asset:edit',
-                label='Edit assets',
-                description='Edit prompts, schemas, evaluators, tags, and related assets.',
-                group_id='assets',
-                group_label='Assets',
-            ),
-            PermissionCatalogEntry(
-                id='asset:delete',
-                label='Delete assets',
-                description='Delete prompts, schemas, evaluators, tags, and related assets.',
-                group_id='assets',
-                group_label='Assets',
-            ),
-            PermissionCatalogEntry(
-                id='asset:share',
-                label='Share assets',
-                description='Change visibility on owned shareable assets.',
+                id='asset:manage',
+                label='Manage assets',
+                description='Create, edit, delete, and change visibility on prompts, schemas, evaluators, tags, and related assets.',
                 group_id='assets',
                 group_label='Assets',
             ),
@@ -144,14 +109,7 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
             PermissionCatalogEntry(
                 id='orchestration:manage',
                 label='Manage orchestration',
-                description='Create, edit, publish, run, archive, and otherwise mutate orchestration assets and runtime actions.',
-                group_id='orchestration',
-                group_label='Orchestration',
-            ),
-            PermissionCatalogEntry(
-                id='orchestration:admin:comm_cap',
-                label='Manage communication-cap policy',
-                description='Create or update the per-app rolling-window communication cap that gates outbound dispatch nodes.',
+                description='Create, edit, publish, run, archive, set communication-cap policy, and otherwise mutate orchestration assets and runtime actions.',
                 group_id='orchestration',
                 group_label='Orchestration',
             ),
@@ -177,8 +135,8 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Generate reports and view analytics surfaces.',
         permissions=(
             PermissionCatalogEntry(
-                id='report:generate',
-                label='Generate reports',
+                id='report:run',
+                label='Run reports',
                 description='Create report runs and derived report artifacts.',
                 group_id='insights',
                 group_label='Reports and insights',
@@ -198,14 +156,14 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Manage tenant-scoped settings, rules, and app configuration assets.',
         permissions=(
             PermissionCatalogEntry(
-                id='configuration:edit',
-                label='Edit configuration',
+                id='configuration:manage',
+                label='Manage configuration',
                 description='Edit app settings, rule catalogs, and other configuration assets.',
                 group_id='configuration',
                 group_label='Configuration',
             ),
             PermissionCatalogEntry(
-                id='sherlock:manage_verified_queries',
+                id='sherlock:manage',
                 label='Manage Sherlock verified queries',
                 description=(
                     'Create, edit, enable/disable tenant-scoped verified '
@@ -231,8 +189,8 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_label='Cost & usage',
             ),
             PermissionCatalogEntry(
-                id='cost:edit',
-                label='Edit pricing & refresh catalog',
+                id='cost:manage',
+                label='Manage pricing & refresh catalog',
                 description=(
                     'Create/edit pricing rows, refresh pricing from models.dev, '
                     'and run the cost rollup backfill.'
@@ -241,7 +199,7 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
                 group_label='Cost & usage',
             ),
             PermissionCatalogEntry(
-                id='analytics:admin',
+                id='analytics:manage',
                 label='Administer analytics population',
                 description=(
                     'Disable or re-enable mirror->fact mappings, trigger '
@@ -293,61 +251,21 @@ PERMISSION_GROUPS: tuple[PermissionGroup, ...] = (
         description='Manage users, invite links, and role assignment.',
         permissions=(
             PermissionCatalogEntry(
-                id='user:create',
-                label='Create users',
-                description='Create users inside the current tenant.',
+                id='user:manage',
+                label='Manage users',
+                description='Create, edit, deactivate, delete, and reset passwords for tenant users.',
                 group_id='users',
                 group_label='User management',
             ),
             PermissionCatalogEntry(
                 id='invite_link:manage',
                 label='Manage invite links',
-                description='Create, deactivate, and inspect invite links.',
+                description='Create, deactivate, and inspect invite links. Permanent hard-delete remains owner-only.',
                 group_id='users',
                 group_label='User management',
             ),
             PermissionCatalogEntry(
-                id='invite_link:delete',
-                label='Hard-delete invite links',
-                description=(
-                    'Hard-deletes a terminal invite link row. Use with care — this also '
-                    'deletes its redemption audit rows. The audit log retains the action.'
-                ),
-                group_id='users',
-                group_label='User management',
-                grantable=False,
-                owner_only=True,
-            ),
-            PermissionCatalogEntry(
-                id='user:edit',
-                label='Edit users',
-                description='Edit mutable user profile and assignment details.',
-                group_id='users',
-                group_label='User management',
-            ),
-            PermissionCatalogEntry(
-                id='user:deactivate',
-                label='Deactivate users',
-                description='Disable or re-enable tenant users.',
-                group_id='users',
-                group_label='User management',
-            ),
-            PermissionCatalogEntry(
-                id='user:delete',
-                label='Delete users',
-                description='Permanently delete a tenant user and their refresh tokens.',
-                group_id='users',
-                group_label='User management',
-            ),
-            PermissionCatalogEntry(
-                id='user:reset_password',
-                label='Reset passwords',
-                description='Trigger password resets for tenant users.',
-                group_id='users',
-                group_label='User management',
-            ),
-            PermissionCatalogEntry(
-                id='role:assign',
+                id='role:manage',
                 label='Assign roles',
                 description='Assign existing roles to users.',
                 group_id='users',

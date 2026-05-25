@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import AuthContext
-from app.auth.permissions import require_permission
+from app.auth.permissions import require_permission, require_any_permission
 from app.database import get_db
 from app.schemas.adversarial_test_case import (
     AdversarialSavedTestCaseCreate,
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/adversarial-test-cases", tags=["adversarial-test
 @router.get("", response_model=list[AdversarialSavedTestCaseResponse])
 async def list_cases(
     pinned_only: bool = Query(False),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_any_permission("evaluation:run", "configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     return await list_saved_test_cases(
@@ -40,7 +40,7 @@ async def list_cases(
 @router.post("", response_model=AdversarialSavedTestCaseResponse, status_code=201)
 async def create_case(
     body: AdversarialSavedTestCaseCreate,
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     return await create_saved_test_case(
@@ -55,7 +55,7 @@ async def create_case(
 async def update_case(
     case_id: UUID,
     body: AdversarialSavedTestCaseUpdate,
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     record = await get_saved_test_case(
@@ -72,7 +72,7 @@ async def update_case(
 @router.delete("/{case_id}")
 async def delete_case(
     case_id: UUID,
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     record = await get_saved_test_case(

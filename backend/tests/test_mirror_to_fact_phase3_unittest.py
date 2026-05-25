@@ -362,7 +362,7 @@ class AdminRouteTests(unittest.IsolatedAsyncioTestCase):
         response = await disable_mapping(
             mapping_id=row.id,
             body=DisableMappingRequest(reason="dev observation halted"),
-            auth=self._auth("analytics:admin"),
+            auth=self._auth("analytics:manage"),
             db=db,
         )
         self.assertFalse(row.enabled)
@@ -395,7 +395,7 @@ class AdminRouteTests(unittest.IsolatedAsyncioTestCase):
         await disable_mapping(
             mapping_id=row.id,
             body=DisableMappingRequest(reason="again"),
-            auth=self._auth("analytics:admin"),
+            auth=self._auth("analytics:manage"),
             db=db,
         )
         # No commit (no state mutation); idempotent.
@@ -422,7 +422,7 @@ class AdminRouteTests(unittest.IsolatedAsyncioTestCase):
 
         await enable_mapping(
             mapping_id=row.id,
-            auth=self._auth("analytics:admin"),
+            auth=self._auth("analytics:manage"),
             db=db,
         )
         self.assertTrue(row.enabled)
@@ -450,7 +450,7 @@ class AdminRouteTests(unittest.IsolatedAsyncioTestCase):
             await disable_mapping(
                 mapping_id=uuid.uuid4(),
                 body=DisableMappingRequest(reason="unknown id test"),
-                auth=self._auth("analytics:admin"),
+                auth=self._auth("analytics:manage"),
                 db=db,
             )
         self.assertEqual(cm.exception.status_code, 404)
@@ -459,11 +459,11 @@ class AdminRouteTests(unittest.IsolatedAsyncioTestCase):
 class PermissionRegisteredTests(unittest.TestCase):
     def test_analytics_admin_in_catalog(self) -> None:
         from app.auth.permission_catalog import VALID_PERMISSIONS
-        self.assertIn("analytics:admin", VALID_PERMISSIONS)
+        self.assertIn("analytics:manage", VALID_PERMISSIONS)
 
 
 class PermissionGateTests(unittest.IsolatedAsyncioTestCase):
-    """Verify the routes actually enforce ``analytics:admin``.
+    """Verify the routes actually enforce ``analytics:manage``.
 
     These exercise ``require_permission`` directly (the dependency-injection
     layer), matching the style in test_admin_rbac_unittest.py. A future
@@ -476,7 +476,7 @@ class PermissionGateTests(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
         from app.auth.permissions import ensure_permissions
 
-        # The route declares ``auth=require_permission('analytics:admin')``.
+        # The route declares ``auth=require_permission('analytics:manage')``.
         # ``require_permission`` is a FastAPI Dependency; under the hood it
         # calls ``ensure_permissions``, which raises HTTPException 403 when
         # the caller's permission set is missing the required entries. We
@@ -491,9 +491,9 @@ class PermissionGateTests(unittest.IsolatedAsyncioTestCase):
             user_id=uuid.uuid4(),
         )
         with self.assertRaises(HTTPException) as cm:
-            ensure_permissions(auth, "analytics:admin")
+            ensure_permissions(auth, "analytics:manage")
         self.assertEqual(cm.exception.status_code, 403)
-        self.assertIn("analytics:admin", cm.exception.detail)
+        self.assertIn("analytics:manage", cm.exception.detail)
 
     async def test_with_permission_passes_gate(self) -> None:
         from types import SimpleNamespace
@@ -501,19 +501,19 @@ class PermissionGateTests(unittest.IsolatedAsyncioTestCase):
 
         auth = SimpleNamespace(
             is_owner=False,
-            permissions=frozenset({"analytics:admin"}),
+            permissions=frozenset({"analytics:manage"}),
             tenant_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
         )
         # Should not raise.
-        ensure_permissions(auth, "analytics:admin")
+        ensure_permissions(auth, "analytics:manage")
 
     async def test_route_signatures_declare_permission(self) -> None:
         """Defensive: the handlers must keep ``require_permission`` wired.
 
         Removing the decorator is the silent-regression class this section
         protects against. Each handler declares
-        ``auth=require_permission('analytics:admin')``; we extract the
+        ``auth=require_permission('analytics:manage')``; we extract the
         inner ``_checker`` from the ``Depends`` wrapper and invoke it with
         an auth context that LACKS the perm. If the handler accidentally
         dropped the gate, the dependency wouldn't exist and the
@@ -548,7 +548,7 @@ class PermissionGateTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as cm:
                 await checker(auth=bad_auth)
             self.assertEqual(cm.exception.status_code, 403, f"{name}")
-            self.assertIn("analytics:admin", cm.exception.detail, f"{name}")
+            self.assertIn("analytics:manage", cm.exception.detail, f"{name}")
 
 
 class CounterResetOnAdminActionTests(unittest.IsolatedAsyncioTestCase):
@@ -580,7 +580,7 @@ class CounterResetOnAdminActionTests(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
         return SimpleNamespace(
             is_owner=False,
-            permissions=frozenset({"analytics:admin"}),
+            permissions=frozenset({"analytics:manage"}),
             tenant_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
         )

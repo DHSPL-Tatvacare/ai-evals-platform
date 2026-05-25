@@ -367,7 +367,7 @@ async def get_evaluator(
 @router.post("", response_model=EvaluatorResponse, status_code=201)
 async def create_evaluator(
     body: EvaluatorCreate,
-    auth: AuthContext = require_permission('asset:create'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -397,7 +397,7 @@ async def update_evaluator(
         evaluator_id=evaluator_id,
         tenant_id=auth.tenant_id,
     )
-    _ensure_mutation_access(auth, evaluator, owned_permission='asset:edit')
+    _ensure_mutation_access(auth, evaluator, owned_permission='asset:manage')
 
     update_data = body.model_dump(exclude_unset=True)
     if _is_tenant_managed_seeded_default(evaluator):
@@ -424,7 +424,7 @@ async def delete_evaluator(
         evaluator_id=evaluator_id,
         tenant_id=auth.tenant_id,
     )
-    _ensure_mutation_access(auth, evaluator, owned_permission='asset:delete')
+    _ensure_mutation_access(auth, evaluator, owned_permission='asset:manage')
 
     await db.delete(evaluator)
     await db.commit()
@@ -435,7 +435,7 @@ async def delete_evaluator(
 async def fork_evaluator(
     evaluator_id: UUID,
     listing_id: str = Query(None),
-    auth: AuthContext = require_permission('asset:create'),
+    auth: AuthContext = require_permission('asset:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -489,7 +489,7 @@ async def patch_evaluator_visibility(
         if not auth.is_owner:
             raise HTTPException(status_code=403, detail='Owner access required')
         raise HTTPException(status_code=400, detail='Seeded defaults must remain shared')
-    ensure_permissions(auth, 'asset:share')
+    ensure_permissions(auth, 'asset:manage')
     if evaluator.user_id != auth.user_id:
         raise HTTPException(status_code=404, detail='Evaluator not found or not owned by you')
 

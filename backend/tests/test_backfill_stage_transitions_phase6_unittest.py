@@ -300,7 +300,7 @@ class AdminEndpointTests(unittest.IsolatedAsyncioTestCase):
             response = await submit_backfill_stage_transitions(
                 body=body,
                 response=response_obj,
-                auth=_auth("analytics:admin"),
+                auth=_auth("analytics:manage"),
                 db=db,
             )
 
@@ -333,7 +333,7 @@ class AdminEndpointTests(unittest.IsolatedAsyncioTestCase):
             response = await submit_backfill_stage_transitions(
                 body=body,
                 response=response_obj,
-                auth=_auth("analytics:admin"),
+                auth=_auth("analytics:manage"),
                 db=db,
             )
 
@@ -363,7 +363,7 @@ class AdminEndpointTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as cm:
             await checker(auth=_auth("cost:view"))
         self.assertEqual(cm.exception.status_code, 403)
-        self.assertIn("analytics:admin", cm.exception.detail)
+        self.assertIn("analytics:manage", cm.exception.detail)
 
 
 # ── job registry ────────────────────────────────────────────────────────

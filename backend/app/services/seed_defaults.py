@@ -2451,7 +2451,7 @@ APP_SEEDS = [
             "pageTitles": {},
             "pageActions": {
                 "evaluators": [
-                    {"id": "csv-import", "kind": "csvImport", "requires": "asset:create"},
+                    {"id": "csv-import", "kind": "csvImport", "requires": "asset:manage"},
                 ],
             },
             "quickActions": [

@@ -23,7 +23,7 @@ def _auth(*permissions: str):
 
 
 class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
-    async def test_display_name_update_requires_user_edit_permission(self):
+    async def test_display_name_update_requires_user_manage_permission(self):
         db = AsyncMock()
 
         with self.assertRaises(HTTPException) as ctx:
@@ -36,10 +36,10 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail, 'Missing permission: user:edit')
+        self.assertEqual(ctx.exception.detail, 'Missing permission: user:manage')
         db.scalar.assert_not_awaited()
 
-    async def test_display_name_update_does_not_require_user_deactivate_permission(self):
+    async def test_display_name_update_passes_gate_with_user_manage(self):
         db = AsyncMock()
         db.scalar.return_value = None
 
@@ -48,7 +48,7 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
                 user_id=uuid.uuid4(),
                 body=UpdateUserRequest(displayName='Renamed User'),
                 request=object(),
-                auth=_auth('user:edit'),
+                auth=_auth('user:manage'),
                 db=db,
             )
 
@@ -56,7 +56,7 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.detail, 'User not found')
         db.scalar.assert_awaited_once()
 
-    async def test_is_active_update_requires_user_deactivate_permission(self):
+    async def test_is_active_update_requires_user_manage_permission(self):
         db = AsyncMock()
 
         with self.assertRaises(HTTPException) as ctx:
@@ -64,15 +64,15 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
                 user_id=uuid.uuid4(),
                 body=UpdateUserRequest(isActive=False),
                 request=object(),
-                auth=_auth('user:edit'),
+                auth=_auth(),
                 db=db,
             )
 
         self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail, 'Missing permission: user:deactivate')
+        self.assertEqual(ctx.exception.detail, 'Missing permission: user:manage')
         db.scalar.assert_not_awaited()
 
-    async def test_role_assignment_update_requires_role_assign_permission(self):
+    async def test_role_assignment_update_requires_role_manage_permission(self):
         db = AsyncMock()
 
         with self.assertRaises(HTTPException) as ctx:
@@ -80,15 +80,15 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
                 user_id=uuid.uuid4(),
                 body=UpdateUserRequest(roleId=str(uuid.uuid4())),
                 request=object(),
-                auth=_auth('user:edit', 'user:deactivate'),
+                auth=_auth('user:manage'),
                 db=db,
             )
 
         self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail, 'Missing permission: role:assign')
+        self.assertEqual(ctx.exception.detail, 'Missing permission: role:manage')
         db.scalar.assert_not_awaited()
 
-    async def test_role_assignment_update_does_not_require_user_edit_permission(self):
+    async def test_role_assignment_update_does_not_require_user_manage_permission(self):
         db = AsyncMock()
         db.scalar.return_value = None
 
@@ -97,7 +97,7 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
                 user_id=uuid.uuid4(),
                 body=UpdateUserRequest(roleId=str(uuid.uuid4())),
                 request=object(),
-                auth=_auth('role:assign'),
+                auth=_auth('role:manage'),
                 db=db,
             )
 
@@ -113,7 +113,7 @@ class AdminUserPermissionSplitTests(unittest.IsolatedAsyncioTestCase):
                 user_id=uuid.uuid4(),
                 body=UpdateUserRequest(),
                 request=object(),
-                auth=_auth('user:edit', 'user:deactivate', 'role:assign'),
+                auth=_auth('user:manage', 'role:manage'),
                 db=db,
             )
 

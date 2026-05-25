@@ -34,7 +34,7 @@ def _set_super_admin():
         email="super@platform.local",
         role_id=uuid.uuid4(),
         is_owner=True,
-        permissions=frozenset({"orchestration:admin:comm_cap"}),
+        permissions=frozenset({"orchestration:manage"}),
         app_access=frozenset({"test-orchestration"}),
     )
     fastapi_app.dependency_overrides[get_auth_context] = lambda: auth
@@ -223,7 +223,7 @@ async def test_list_returns_only_admins_tenant_for_non_super_admin(
         email="tenant-admin@local",
         role_id=uuid.uuid4(),
         is_owner=False,  # not super-admin
-        permissions=frozenset({"orchestration:admin:comm_cap"}),
+        permissions=frozenset({"orchestration:manage"}),
         app_access=frozenset({"my-app"}),
     )
     fastapi_app.dependency_overrides[get_auth_context] = lambda: auth
@@ -289,7 +289,7 @@ async def test_put_cross_tenant_returns_403(db_session):
         email="tenant-admin@local",
         role_id=uuid.uuid4(),
         is_owner=False,
-        permissions=frozenset({"orchestration:admin:comm_cap"}),
+        permissions=frozenset({"orchestration:manage"}),
         app_access=frozenset(),
     )
     fastapi_app.dependency_overrides[get_auth_context] = lambda: auth

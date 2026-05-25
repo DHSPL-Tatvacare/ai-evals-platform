@@ -4,7 +4,7 @@ Two grantable permissions gate this surface:
 
     cost:view   — read cost/usage data (dashboard, chips, pricing rows,
                   refresh-history drill-downs).
-    cost:edit   — mutate global pricing rows, trigger models.dev refresh,
+    cost:manage — mutate global pricing rows, trigger models.dev refresh,
                   run the rollup backfill.
 
 Reads are tenant-scoped for every caller (no cross-tenant peeking via a
@@ -23,11 +23,11 @@ Endpoint bundle shapes mirror §9.3 of the hardened spec:
     GET   /api/cost/calls/{id}                      — single call drawer
     GET   /api/cost/efficiency                      — cache / error / unpriced bundle
     GET   /api/cost/pricing/bundle                  — pricing rows + refresh history
-    POST  /api/cost/pricing                         — new pricing row (cost:edit)
-    PATCH /api/cost/pricing/{id}                    — close current + insert new (cost:edit)
-    POST  /api/cost/pricing/refresh                 — models.dev refresh (cost:edit + 1/hour)
+    POST  /api/cost/pricing                         — new pricing row (cost:manage)
+    PATCH /api/cost/pricing/{id}                    — close current + insert new (cost:manage)
+    POST  /api/cost/pricing/refresh                 — models.dev refresh (cost:manage + 1/hour)
     GET   /api/cost/pricing/refresh/{snapshot_id}   — snapshot drill
-    POST  /api/admin/cost-rollup/backfill           — ops (cost:edit)
+    POST  /api/admin/cost-rollup/backfill           — ops (cost:manage)
 """
 from __future__ import annotations
 
@@ -1561,7 +1561,7 @@ async def pricing_bundle(
 async def pricing_create(
     body: PricingCreateRequest,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingRowOut:
     now = datetime.now(timezone.utc)
@@ -1624,7 +1624,7 @@ async def pricing_patch(
     pricing_id: uuid.UUID,
     body: PricingPatchRequest,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> PricingRowOut:
     existing = (await db.execute(select(RefLlmModelPricing).where(RefLlmModelPricing.id == pricing_id))).scalars().first()
@@ -1705,12 +1705,12 @@ async def pricing_patch(
 )
 async def pricing_refresh(
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> RefreshDiff:
     """Pull the latest pricing from models.dev.
 
-    Requires ``cost:edit`` and is rate-limited per authenticated actor.
+    Requires ``cost:manage`` and is rate-limited per authenticated actor.
     """
     from app.services.cost_tracking.models_dev_client import (
         ModelsDevFetchError,
@@ -1791,13 +1791,13 @@ async def pricing_refresh(
 async def pricing_backfill_unpriced(
     body: UnpricedBackfillRequest,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> UnpricedBackfillResponse:
     """Re-price every ``analytics.fact_llm_generation`` row with ``pricing_fallback=true``.
 
     Scoped to the caller's tenant unless ``all_tenants=true`` is requested
-    (still gated by ``cost:edit``). Rollups for affected days are re-run
+    (still gated by ``cost:manage``). Rollups for affected days are re-run
     automatically. Safe to re-run — rows that remain unpriced stay unpriced.
     """
     from app.services.cost_tracking.backfill import backfill_unpriced
@@ -1949,14 +1949,14 @@ async def list_unmapped_models(
 async def upsert_alias(
     body: AliasUpsertRequest,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> AliasRowOut:
     """Create or update an alias row, then re-price affected historical usage.
 
     ``tenant_scope='tenant'`` → scoped to the caller's tenant (default).
     ``tenant_scope='system'`` → ``tenant_id=NULL`` (platform-wide default; still
-    gated by ``cost:edit``; individual tenants can override with their own row).
+    gated by ``cost:manage``; individual tenants can override with their own row).
     """
     if not body.provider or not body.observed or not body.canonical:
         raise HTTPException(status_code=400, detail='provider/observed/canonical required')
@@ -2018,7 +2018,7 @@ async def upsert_alias(
 async def delete_alias(
     alias_id: uuid.UUID,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
     row = (await db.execute(select(RefLlmModelAlias).where(RefLlmModelAlias.id == alias_id))).scalars().first()
@@ -2054,13 +2054,13 @@ async def delete_alias(
 async def reprice_alias(
     alias_id: uuid.UUID,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> AliasRepriceResponse:
     """Re-price historical ``analytics.fact_llm_generation`` rows that now resolve via this alias.
 
     Backfill is tenant-scoped (or platform-wide for system aliases, still gated
-    by the caller's ``cost:edit`` permission). Safe to re-run.
+    by the caller's ``cost:manage`` permission). Safe to re-run.
     """
     row = (await db.execute(select(RefLlmModelAlias).where(RefLlmModelAlias.id == alias_id))).scalars().first()
     if row is None:
@@ -2100,7 +2100,7 @@ async def reprice_alias(
 async def rollup_backfill(
     body: BackfillRequest,
     request: Request,
-    auth: AuthContext = require_permission('cost:edit'),
+    auth: AuthContext = require_permission('cost:manage'),
     db: AsyncSession = Depends(get_db),
 ) -> BackfillResponse:
     from app.services.cost_tracking.rollup import populate_rollup_range

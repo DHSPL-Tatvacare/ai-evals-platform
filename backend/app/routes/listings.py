@@ -79,7 +79,7 @@ async def get_listing(
 @router.post("", response_model=ListingResponse, status_code=201)
 async def create_listing(
     body: ListingCreate,
-    auth: AuthContext = require_permission('listing:create'),
+    auth: AuthContext = require_permission('listing:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -99,7 +99,7 @@ async def create_listing(
 async def update_listing(
     listing_id: UUID,
     body: ListingUpdate,
-    auth: AuthContext = require_permission('listing:create'),
+    auth: AuthContext = require_permission('listing:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -141,7 +141,7 @@ async def update_listing(
 async def delete_listing(
     listing_id: UUID,
     app_id: str = Query(...),
-    auth: AuthContext = require_permission('listing:delete'),
+    auth: AuthContext = require_permission('listing:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):

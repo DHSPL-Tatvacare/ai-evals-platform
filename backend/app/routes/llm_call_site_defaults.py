@@ -2,7 +2,7 @@
 
 Two surfaces:
 
-**Admin (tenant-scoped)** — gated by ``configuration:edit``. Edits the row
+**Admin (tenant-scoped)** — gated by ``configuration:manage``. Edits the row
 where ``tenant_id = auth.tenant_id``.
 
 - ``GET    /api/admin/llm/defaults``
@@ -10,7 +10,7 @@ where ``tenant_id = auth.tenant_id``.
 - ``DELETE /api/admin/llm/defaults/{call_site}``  (drops tenant row → falls
   back to platform default)
 
-**Platform staff** — gated by the new ``platform:edit`` permission. Edits
+**Platform staff** — gated by the new ``platform:manage`` permission. Edits
 the platform-wide row (``tenant_id IS NULL``).
 
 - ``GET /api/platform/llm/defaults``
@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import AuthContext, require_permission
+from app.auth import AuthContext, require_permission, require_any_permission
 from app.database import get_db
 from app.models.cost import RefLlmModelsCatalog
 from app.models.tenant_call_site_default import TenantCallSiteDefault
@@ -318,7 +318,7 @@ async def _upsert_default(
 
 @admin_router.get("/defaults", response_model=list[CallSiteDefaultResponse])
 async def list_tenant_defaults(
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_any_permission("evaluation:run", "orchestration:manage", "configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     """Return every tenant-scoped row for this tenant. Empty list means
@@ -337,7 +337,7 @@ async def list_tenant_defaults(
 async def upsert_tenant_default(
     body: CallSiteDefaultUpsert,
     call_site: str = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_call_site(call_site)
@@ -357,7 +357,7 @@ async def upsert_tenant_default(
 @admin_router.delete("/defaults/{call_site}", status_code=204)
 async def delete_tenant_default(
     call_site: str = Path(...),
-    auth: AuthContext = require_permission("configuration:edit"),
+    auth: AuthContext = require_permission("configuration:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     """Drop the tenant row → tenant now resolves via the platform default."""
@@ -388,7 +388,7 @@ async def delete_tenant_default(
 
 @platform_router.get("/defaults", response_model=list[CallSiteDefaultResponse])
 async def list_platform_defaults(
-    auth: AuthContext = require_permission("platform:edit"),
+    auth: AuthContext = require_permission("platform:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _ = auth  # gated by permission only — read is global
@@ -406,7 +406,7 @@ async def list_platform_defaults(
 async def upsert_platform_default(
     body: CallSiteDefaultUpsert,
     call_site: str = Path(...),
-    auth: AuthContext = require_permission("platform:edit"),
+    auth: AuthContext = require_permission("platform:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     _check_call_site(call_site)

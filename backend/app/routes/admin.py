@@ -47,13 +47,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 ADMIN_SHELL_PERMISSIONS = (
-    'user:create',
-    'user:edit',
-    'user:deactivate',
-    'user:delete',
-    'user:reset_password',
+    'user:manage',
     'invite_link:manage',
-    'role:assign',
+    'role:manage',
 )
 
 # ── Request schemas ───────────────────────────────────────────────────────────
@@ -237,7 +233,7 @@ async def get_analytics_consistency(
 async def backfill_missing_analytics(
     app_id: Optional[str] = None,
     limit: int = 100,
-    auth: AuthContext = require_permission('configuration:edit'),
+    auth: AuthContext = require_permission('analytics:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Queue populate-analytics jobs for runs missing analytics facts."""
@@ -606,7 +602,7 @@ async def list_users(
 async def create_user(
     body: CreateUserRequest,
     request: Request,
-    auth: AuthContext = require_permission('user:create'),
+    auth: AuthContext = require_permission('user:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user in the tenant."""
@@ -685,13 +681,13 @@ async def update_user(
         # Check what fields are being changed
         permitted_change_requested = False
         if body.role_id is not None:
-            ensure_permissions(auth, 'role:assign')
+            ensure_permissions(auth, 'role:manage')
             permitted_change_requested = True
         if body.display_name is not None:
-            ensure_permissions(auth, 'user:edit')
+            ensure_permissions(auth, 'user:manage')
             permitted_change_requested = True
         if body.is_active is not None:
-            ensure_permissions(auth, 'user:deactivate')
+            ensure_permissions(auth, 'user:manage')
             permitted_change_requested = True
         if not permitted_change_requested:
             raise HTTPException(403, "No permitted changes in request")
@@ -746,7 +742,7 @@ async def admin_reset_password(
     user_id: _uuid.UUID,
     body: AdminResetPasswordRequest,
     request: Request,
-    auth: AuthContext = require_permission('user:reset_password'),
+    auth: AuthContext = require_permission('user:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Reset a user's password (admin+). Revokes all their refresh tokens."""
@@ -796,7 +792,7 @@ async def admin_reset_password(
 async def deactivate_user(
     user_id: _uuid.UUID,
     request: Request,
-    auth: AuthContext = require_permission('user:deactivate'),
+    auth: AuthContext = require_permission('user:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Deactivate a user. Does not delete data."""
@@ -830,7 +826,7 @@ async def deactivate_user(
 async def delete_user_permanently(
     user_id: _uuid.UUID,
     request: Request,
-    auth: AuthContext = require_permission('user:delete'),
+    auth: AuthContext = require_permission('user:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a user and their refresh tokens."""
@@ -1265,7 +1261,7 @@ async def revoke_invite_link_v2(
 async def hard_delete_invite_link(
     link_id: _uuid.UUID,
     request: Request,
-    auth: AuthContext = require_permission('invite_link:delete'),
+    auth: AuthContext = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ):
     """Hard-delete a terminal invite. Cascades the redemption audit rows.

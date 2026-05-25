@@ -2,7 +2,7 @@
 
 Communication-cap policy management. Every PUT writes a
 ``platform.audit_event_logs`` row capturing the before/after policy state.
-Access is gated by ``orchestration:admin:comm_cap``; cross-tenant operations
+Access is gated by ``orchestration:manage``; cross-tenant operations
 require platform-staff (``is_super_admin``).
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ async def get_comm_cap_policy(
     tenant_id: UUID = Query(..., alias="tenantId"),
     app_id: str = Query(..., alias="appId"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:admin:comm_cap"),
+    auth: AuthContext = require_permission("orchestration:manage"),
 ) -> CommCapPolicy | None:
     _ensure_tenant_visible(auth, tenant_id)
     stmt = select(CommCapPolicy).where(
@@ -66,7 +66,7 @@ async def get_comm_cap_policy(
 async def upsert_comm_cap_policy(
     body: CommCapPolicyWrite,
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:admin:comm_cap"),
+    auth: AuthContext = require_permission("orchestration:manage"),
 ) -> CommCapPolicy:
     _ensure_tenant_visible(auth, body.tenant_id)
     stmt = select(CommCapPolicy).where(
@@ -111,7 +111,7 @@ async def upsert_comm_cap_policy(
 @router.get("/comm-cap/list", response_model=list[CommCapPolicyRead])
 async def list_comm_cap_policies(
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:admin:comm_cap"),
+    auth: AuthContext = require_permission("orchestration:manage"),
 ) -> list[CommCapPolicy]:
     stmt = select(CommCapPolicy).order_by(CommCapPolicy.tenant_id, CommCapPolicy.app_id)
     if not is_super_admin(auth):

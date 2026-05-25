@@ -289,7 +289,7 @@ async def test_assist_allows_non_owner_with_asset_create_permission(
     from app.services import llm_assist_service
 
     _override_db(db_session)
-    _override_non_owner_auth(route_tenant_id, permissions=frozenset({"asset:create"}))
+    _override_non_owner_auth(route_tenant_id, permissions=frozenset({"asset:manage"}))
     monkeypatch.setattr(
         llm_assist_service,
         "run_generate_prompt",

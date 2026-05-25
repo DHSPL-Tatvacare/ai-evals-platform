@@ -5,7 +5,7 @@ read-only via this surface — they are managed by deploy. Tenant-owned
 rows can be created, edited, and enabled/disabled live; the retriever
 in ``sherlock_v3.verified_queries`` UNIONs system + tenant on every turn.
 
-Permission gate: ``sherlock:manage_verified_queries``. SQL safety is the
+Permission gate: ``sherlock:manage``. SQL safety is the
 data_specialist's concern — the route only validates that the candidate
 SQL starts with SELECT or WITH and has no statement separators.
 """
@@ -85,7 +85,7 @@ async def list_verified_queries(
     app_id: Optional[str] = Query(None, alias='appId'),
     include_system: bool = Query(True, alias='includeSystem'),
     only_enabled: bool = Query(False, alias='onlyEnabled'),
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """List verified queries visible to the caller's tenant.
@@ -129,7 +129,7 @@ async def list_verified_queries(
 @router.post('', response_model=VerifiedQueryRow, status_code=201)
 async def create_verified_query(
     body: VerifiedQueryCreateRequest,
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a tenant-scoped verified query (``source='admin'``).
@@ -168,7 +168,7 @@ async def create_verified_query(
 async def update_verified_query(
     verified_query_id: uuid.UUID,
     body: VerifiedQueryUpdateRequest,
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Edit/enable/disable a tenant-owned verified query.
@@ -212,7 +212,7 @@ async def update_verified_query(
 @router.delete('/{verified_query_id}', status_code=204)
 async def delete_verified_query(
     verified_query_id: uuid.UUID,
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Hard-delete a tenant-owned verified query.
@@ -259,7 +259,7 @@ def _load_app_defaults() -> dict[str, str]:
     # naturally — the admin page covers both surfaces.
 )
 async def get_instructions(
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the tenant override + every app-default markdown for
@@ -278,7 +278,7 @@ async def get_instructions(
 @router.put('/instructions', response_model=SherlockInstructionsResponse)
 async def put_instructions(
     body: SherlockInstructionsUpdateRequest,
-    auth: AuthContext = require_permission('sherlock:manage_verified_queries'),
+    auth: AuthContext = require_permission('sherlock:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Set/clear the tenant override (single TEXT column).

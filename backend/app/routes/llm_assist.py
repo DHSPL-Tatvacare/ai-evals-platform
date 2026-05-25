@@ -58,7 +58,7 @@ async def _resolve_or_409(
 @router.post("/generate-prompt", response_model=GeneratePromptResponse)
 async def generate_prompt(
     body: GeneratePromptRequest,
-    auth: AuthContext = require_permission("asset:create"),
+    auth: AuthContext = require_permission("asset:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)
@@ -78,7 +78,7 @@ async def generate_prompt(
 @router.post("/generate-schema", response_model=GenerateSchemaResponse)
 async def generate_schema(
     body: GenerateSchemaRequest,
-    auth: AuthContext = require_permission("asset:create"),
+    auth: AuthContext = require_permission("asset:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)
@@ -98,7 +98,7 @@ async def generate_schema(
 @router.post("/extract-structured", response_model=ExtractStructuredResponse)
 async def extract_structured(
     body: ExtractStructuredRequest,
-    auth: AuthContext = require_permission("asset:create"),
+    auth: AuthContext = require_permission("asset:manage"),
     db: AsyncSession = Depends(get_db),
 ):
     resolved = await _resolve_or_409(db, auth, provider=body.provider, model=body.model)

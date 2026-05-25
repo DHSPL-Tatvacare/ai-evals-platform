@@ -232,7 +232,7 @@ async def get_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: UUID,
-    auth: AuthContext = require_permission('evaluation:cancel'),
+    auth: AuthContext = require_permission('evaluation:run'),
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued or running job."""

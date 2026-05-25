@@ -1,11 +1,11 @@
 """Admin endpoints for mirror->fact mapping operator-disable plumbing.
 
 Phase 3 of docs/plans/2026-05-12-analytics-facts-canonical-manifest-thinning.md.
-Mounted under ``/api/admin/analytics``. Gated on the ``analytics:admin``
+Mounted under ``/api/admin/analytics``. Gated on the ``analytics:manage``
 permission (added in the same commit). Mutations write breadcrumb rows into
 ``analytics.log_fact_population_run`` so operator actions are auditable.
 
-No new permission tier; ``analytics:admin`` lives in the existing ``cost``
+No new permission tier; ``analytics:manage`` lives in the existing ``cost``
 permission group because mapping-state ops are analytics-pipeline admin work
 adjacent to cost-rollup admin (closest existing precedent).
 """
@@ -360,7 +360,7 @@ def _log_tenant_id() -> uuid.UUID:
 
 @router.get("/mappings", response_model=MappingStateListResponse)
 async def list_mappings(
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> MappingStateListResponse:
     _ = auth
@@ -386,7 +386,7 @@ async def list_mappings(
 async def disable_mapping(
     mapping_id: uuid.UUID,
     body: DisableMappingRequest,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> MappingStateRow:
     row = await _load_or_404(db, mapping_id)
@@ -418,7 +418,7 @@ async def disable_mapping(
 @router.post("/mappings/{mapping_id}/enable", response_model=MappingStateRow)
 async def enable_mapping(
     mapping_id: uuid.UUID,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> MappingStateRow:
     row = await _load_or_404(db, mapping_id)
@@ -464,7 +464,7 @@ def _reset_counter_for_row(row: MappingState) -> None:
 )
 async def submit_backfill_facts(
     body: BackfillFactsRequest,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> BackfillFactsResponse:
     """Submit a ``backfill-facts-from-mirror`` job for one mapping.
@@ -596,7 +596,7 @@ async def submit_backfill_facts(
 async def submit_backfill_lead_signals(
     body: BackfillLeadSignalsRequest,
     response: Response,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Submit a ``backfill-lead-signals`` job for one ``(tenant, app_id)``.
@@ -709,7 +709,7 @@ async def submit_backfill_lead_signals(
 async def submit_backfill_stage_transitions(
     body: BackfillStageTransitionsRequest,
     response: Response,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Submit a ``backfill-stage-transitions`` job for one ``(tenant, app_id)``.
@@ -941,7 +941,7 @@ async def _load_own_signal_definition(
 
 @router.get("/signal-definitions", response_model=SignalDefinitionListResponse)
 async def list_signal_definitions(
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDefinitionListResponse:
     """The operator's own-tenant definitions plus the SYSTEM_TENANT_ID
@@ -971,7 +971,7 @@ async def list_signal_definitions(
 )
 async def create_signal_definition(
     body: CreateSignalDefinitionRequest,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDefinitionRow:
     """Create a signal definition under the operator's tenant. The same
@@ -1022,7 +1022,7 @@ async def create_signal_definition(
 async def update_signal_definition(
     definition_id: uuid.UUID,
     body: UpdateSignalDefinitionRequest,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDefinitionRow:
     row = await _load_own_signal_definition(db, definition_id, auth.tenant_id)
@@ -1049,7 +1049,7 @@ async def update_signal_definition(
 @router.delete("/signal-definitions/{definition_id}", status_code=204)
 async def delete_signal_definition(
     definition_id: uuid.UUID,
-    auth: AuthContext = require_permission("analytics:admin"),
+    auth: AuthContext = require_permission("analytics:manage"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     row = await _load_own_signal_definition(db, definition_id, auth.tenant_id)

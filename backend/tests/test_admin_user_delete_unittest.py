@@ -16,7 +16,7 @@ from app.routes.admin import delete_user_permanently
 def _auth():
     return SimpleNamespace(
         is_owner=True,
-        permissions=frozenset({'user:delete'}),
+        permissions=frozenset({'user:manage'}),
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
     )

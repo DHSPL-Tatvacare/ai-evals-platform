@@ -27,8 +27,7 @@ router = APIRouter(prefix='/api/sherlock', tags=['sherlock'])
 # Mirrors the frontend ADMIN_ACCESS_PERMISSIONS gate on /admin — these tenant-wide
 # trace surfaces expose every user's tool calls, so they must be admin-only.
 _ADMIN_VIEW_PERMS = (
-    'user:create', 'user:delete', 'user:deactivate', 'user:reset_password',
-    'invite_link:manage', 'schedule:manage',
+    'user:manage', 'invite_link:manage', 'schedule:manage',
 )
 
 

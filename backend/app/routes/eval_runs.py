@@ -518,7 +518,7 @@ async def list_all_logs(
 async def delete_logs(
     run_id: Optional[str] = Query(None),
     app_id: Optional[str] = Query(None),
-    auth: AuthContext = require_permission('evaluation:delete'),
+    auth: AuthContext = require_permission('evaluation:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete API logs scoped to runs owned by the current user."""
@@ -557,7 +557,7 @@ async def get_eval_run(
 async def patch_eval_run_visibility(
     run_id: UUID,
     req: EvalRunVisibilityUpdate,
-    auth: AuthContext = require_permission('asset:share'),
+    auth: AuthContext = require_permission('evaluation:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     run = await _get_owned_run(db, run_id=run_id, auth=auth)
@@ -588,7 +588,7 @@ async def patch_eval_run_visibility(
 @router.delete("/{run_id}")
 async def delete_eval_run(
     run_id: UUID,
-    auth: AuthContext = require_permission('evaluation:delete'),
+    auth: AuthContext = require_permission('evaluation:manage'),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an eval run and all its cascaded data."""
