@@ -80,7 +80,11 @@ class _Handler:
                 f"to a dataset source"
             )
 
-        query_config = CohortQueryConfig(source_ref=source_ref)
+        query_config = CohortQueryConfig(
+            source_ref=source_ref,
+            sample_limit=config.sample_limit,
+            sample_strategy=config.sample_strategy,
+        )
 
         sql, params = compile_cohort_query(
             query_config,

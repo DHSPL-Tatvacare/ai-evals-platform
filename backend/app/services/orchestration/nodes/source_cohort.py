@@ -96,7 +96,12 @@ async def _load_version(ctx, version_id: uuid.UUID) -> CohortDefinitionVersion:
     return version
 
 
-def _query_config_from_version(version: CohortDefinitionVersion) -> CohortQueryConfig:
+def _query_config_from_version(
+    version: CohortDefinitionVersion,
+    *,
+    sample_limit: Optional[int] = None,
+    sample_strategy: str = "random",
+) -> CohortQueryConfig:
     # The saved version row is the canonical source of truth for the
     # predicate; rebuild the transient config from it, not from any cached
     # copy on the node.
@@ -107,6 +112,8 @@ def _query_config_from_version(version: CohortDefinitionVersion) -> CohortQueryC
         lookback_hours=version.lookback_hours,
         lookback_column=version.lookback_column,
         consent_gate_channel=version.consent_gate_channel,
+        sample_limit=sample_limit,
+        sample_strategy=sample_strategy,
     )
 
 
@@ -118,6 +125,8 @@ def _query_config_from_inline(config: SourceCohortConfig) -> CohortQueryConfig:
         lookback_hours=config.lookback_hours,
         lookback_column=config.lookback_column,
         consent_gate_channel=config.consent_gate_channel,
+        sample_limit=config.sample_limit,
+        sample_strategy=config.sample_strategy,
     )
 
 
@@ -241,7 +250,11 @@ class _Handler:
             version = await _load_version(ctx, config.cohort_definition_version_id)
             return await _materialize_cohort(
                 ctx,
-                query_config=_query_config_from_version(version),
+                query_config=_query_config_from_version(
+                    version,
+                    sample_limit=config.sample_limit,
+                    sample_strategy=config.sample_strategy,
+                ),
                 source_ref=version.source_ref,
                 cohort_version=version,
                 provenance={

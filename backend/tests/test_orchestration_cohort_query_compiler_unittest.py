@@ -176,3 +176,16 @@ def test_static_sql_first_sample_appends_plain_limit():
 def test_static_sql_no_sample_has_no_limit():
     sql = _sample_compile(_sample_crm_cfg())
     assert "LIMIT" not in sql
+
+
+def test_inline_query_config_carries_sample():
+    from app.services.orchestration.nodes.source_cohort import (
+        SourceCohortConfig, _query_config_from_inline,
+    )
+    cfg = SourceCohortConfig(
+        mode="inline", source_ref="crm.lead_record",
+        sample_limit=100, sample_strategy="first",
+    )
+    qc = _query_config_from_inline(cfg)
+    assert qc.sample_limit == 100
+    assert qc.sample_strategy == "first"
