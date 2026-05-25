@@ -13,6 +13,7 @@ import {
   type DatasetDetailResponse,
   type DatasetResponse,
 } from '@/services/api/orchestrationDatasets';
+import { SampleSizeField } from './SampleSizeField';
 
 interface Props {
   value: Record<string, unknown>;
@@ -21,6 +22,8 @@ interface Props {
 
 interface DatasetConfig {
   dataset_version_id?: string;
+  sample_limit?: number | null;
+  sample_strategy?: 'random' | 'first';
 }
 
 export function DatasetPicker({ value, onChange }: Props) {
@@ -101,6 +104,14 @@ export function DatasetPicker({ value, onChange }: Props) {
     });
   }
 
+  function setSample(next: { limit: number | null; strategy: 'random' | 'first' }) {
+    onChange({
+      ...value,
+      sample_limit: next.limit,
+      sample_strategy: next.strategy,
+    });
+  }
+
   if (datasets.length === 0) {
     return (
       <InspectorSection title="Dataset">
@@ -134,6 +145,13 @@ export function DatasetPicker({ value, onChange }: Props) {
             side="top"
           />
         </InspectorField>
+      ) : null}
+      {cfg.dataset_version_id ? (
+        <SampleSizeField
+          limit={cfg.sample_limit ?? null}
+          strategy={cfg.sample_strategy ?? 'random'}
+          onChange={setSample}
+        />
       ) : null}
     </InspectorSection>
   );
