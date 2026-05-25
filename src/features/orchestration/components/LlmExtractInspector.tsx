@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown, Play, RefreshCw, ShieldCheck, Sparkles, Squ
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { LlmModelSelect, type LlmModelSelectValue } from '@/components/ui/LlmModelSelect';
+import { useAllTenantCredentials } from '@/services/api/llmCredentialsQueries';
 import { VariablePickerPopover } from '@/components/ui/VariablePickerPopover';
 import {
   InspectorEmptyState,
@@ -130,6 +131,23 @@ export function LlmExtractInspector({
   const unknownVars = lintUnknownVariables(promptText, upstreamFields);
   const saveAsConflict = saveAsCollides(config.output_namespace, upstreamFields);
 
+  // The node persists only provider + model; resolve the credentialId the
+  // shared LlmModelSelect needs from the tenant's enabled credentials.
+  const { credentials } = useAllTenantCredentials();
+  const modelValue = useMemo<LlmModelSelectValue | null>(() => {
+    const provider = config.provider_override;
+    if (!provider) return null;
+    const matches = credentials.filter((c) => c.provider === provider && c.isEnabled);
+    const cred = matches.find((c) => c.name === 'default') ?? matches[0];
+    if (!cred) return null;
+    return {
+      credentialId: cred.id,
+      provider: cred.provider,
+      credentialName: cred.name,
+      model: config.model_override ?? '',
+    };
+  }, [credentials, config.provider_override, config.model_override]);
+
   // Insert a token at the caret (or append) and restore focus after it.
   const insertToken = useCallback(
     (token: string) => {
@@ -229,15 +247,6 @@ export function LlmExtractInspector({
     e.currentTarget.releasePointerCapture(e.pointerId);
   }, []);
 
-  const modelValue: LlmModelSelectValue | null =
-    config.provider_override && config.model_override
-      ? {
-          credentialId: '',
-          provider: config.provider_override as LlmModelSelectValue['provider'],
-          credentialName: 'default',
-          model: config.model_override,
-        }
-      : null;
 
   const textAreaClass = cn(
     'block w-full resize-y rounded-[var(--radius-default)] border border-[var(--border-default)]',
@@ -259,7 +268,7 @@ export function LlmExtractInspector({
         <span className="absolute left-0 top-1/2 h-10 w-0.5 -translate-y-1/2 rounded bg-[var(--border-default)] group-hover:bg-[var(--color-brand)]" />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+      <div className="relative flex min-w-0 flex-1 flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-primary)]">
         <div className="flex items-center gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
           <span className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-default)] bg-[var(--surface-info)] text-[var(--color-info)]">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -389,7 +398,6 @@ export function LlmExtractInspector({
                       model_override: next?.model ?? null,
                     })
                   }
-                  layout="stack"
                   compact
                 />
               </InspectorField>
@@ -641,27 +649,27 @@ export function LlmExtractInspector({
             </div>
           </section>
         </fieldset>
-      </div>
 
-      <GenerateWithAiOverlay
-        isOpen={generateOpen}
-        onClose={() => setGenerateOpen(false)}
-        width={inspectorWidth}
-        workflowType={workflowType}
-        provider={config.provider_override ?? null}
-        model={config.model_override ?? null}
-        fields={upstreamFields}
-        onInsert={({ prompt, outputSchema }) =>
-          onChange(outputSchema ? { prompt, output_schema: outputSchema } : { prompt })
-        }
-      />
-      <EditSchemaOverlay
-        isOpen={schemaOpen}
-        onClose={() => setSchemaOpen(false)}
-        width={inspectorWidth}
-        fields={fields}
-        onChange={(next) => onChange({ output_schema: next })}
-      />
+        {/* Secondary overlays render at the inspector's own level — an
+         *  absolute layer over these panes, not a page-level slide-over. */}
+        <GenerateWithAiOverlay
+          isOpen={generateOpen}
+          onClose={() => setGenerateOpen(false)}
+          workflowType={workflowType}
+          provider={config.provider_override ?? null}
+          model={config.model_override ?? null}
+          fields={upstreamFields}
+          onInsert={({ prompt, outputSchema }) =>
+            onChange(outputSchema ? { prompt, output_schema: outputSchema } : { prompt })
+          }
+        />
+        <EditSchemaOverlay
+          isOpen={schemaOpen}
+          onClose={() => setSchemaOpen(false)}
+          fields={fields}
+          onChange={(next) => onChange({ output_schema: next })}
+        />
+      </div>
     </div>
   );
 }

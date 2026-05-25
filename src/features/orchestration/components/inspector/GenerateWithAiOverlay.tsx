@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { RefreshCw, Sparkles, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
-import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { llmAssistApi } from '@/services/api/llmAssistApi';
 import type { LLMProvider } from '@/services/api/aiSettingsApi';
 import { LLM_PROVIDER_LABELS } from '@/constants/llmProviders';
@@ -24,8 +23,6 @@ import {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Match the primary inspector width. */
-  width: number;
   workflowType?: WorkflowType;
   provider: string | null;
   model: string | null;
@@ -38,7 +35,6 @@ const sectionLabel = 'flex items-center gap-1.5 text-[13px] font-semibold text-[
 export function GenerateWithAiOverlay({
   isOpen,
   onClose,
-  width,
   workflowType,
   provider,
   model,
@@ -121,14 +117,10 @@ export function GenerateWithAiOverlay({
     'focus:border-[var(--color-brand)] focus:outline-none',
   );
 
+  if (!isOpen) return null;
+
   return (
-    <RightSlideOverShell
-      isOpen={isOpen}
-      onClose={onClose}
-      panelStyle={{ width }}
-      widthClassName="max-w-[92vw]"
-    >
-      <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="absolute inset-0 z-[var(--z-overlay)] flex flex-col bg-[var(--bg-primary)]">
         <div className="flex items-center gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
           <span className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-default)] bg-[var(--surface-info)] text-[var(--color-info)]">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -292,6 +284,5 @@ export function GenerateWithAiOverlay({
           )}
         </div>
       </div>
-    </RightSlideOverShell>
   );
 }

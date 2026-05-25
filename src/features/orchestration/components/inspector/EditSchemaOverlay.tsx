@@ -1,28 +1,22 @@
 import { Braces, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
-import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { SchemaTable } from '@/features/evals/components/SchemaTable';
 import type { EvaluatorOutputField } from '@/types';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Match the primary inspector width. */
-  width: number;
   fields: EvaluatorOutputField[];
   onChange: (fields: EvaluatorOutputField[]) => void;
 }
 
-export function EditSchemaOverlay({ isOpen, onClose, width, fields, onChange }: Props) {
+/** Inspector-level overlay: fills the AI agent inspector column (the parent
+ *  container is relatively positioned), not a page-level slide-over. */
+export function EditSchemaOverlay({ isOpen, onClose, fields, onChange }: Props) {
+  if (!isOpen) return null;
   return (
-    <RightSlideOverShell
-      isOpen={isOpen}
-      onClose={onClose}
-      panelStyle={{ width }}
-      widthClassName="max-w-[92vw]"
-    >
-      <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="absolute inset-0 z-[var(--z-overlay)] flex flex-col bg-[var(--bg-primary)]">
         <div className="flex items-center gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
           <span className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-default)] bg-[var(--surface-info)] text-[var(--color-info)]">
             <Braces className="h-4 w-4" aria-hidden="true" />
@@ -54,7 +48,6 @@ export function EditSchemaOverlay({ isOpen, onClose, width, fields, onChange }: 
             Done
           </Button>
         </div>
-      </div>
-    </RightSlideOverShell>
+    </div>
   );
 }
