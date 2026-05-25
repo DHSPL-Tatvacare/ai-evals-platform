@@ -728,6 +728,7 @@ class CohortDataset(ShareableMixin, Base):
     )
     versions: Mapped[list["CohortDatasetVersion"]] = relationship(
         back_populates="dataset", foreign_keys="CohortDatasetVersion.dataset_id",
+        passive_deletes=True,
     )
     # post_update issues a second UPDATE to break the dataset↔version FK cycle on flush.
     current_published_version: Mapped[Optional["CohortDatasetVersion"]] = relationship(
@@ -799,7 +800,11 @@ class CohortDatasetVersion(Base):
     dataset: Mapped["CohortDataset"] = relationship(
         back_populates="versions", foreign_keys=[dataset_id]
     )
-    rows: Mapped[list["CohortDatasetRow"]] = relationship(back_populates="version")
+    # passive_deletes defers child removal to the DB ON DELETE CASCADE; without it
+    # the ORM tries to NULL rows.dataset_version_id, which is part of the PK.
+    rows: Mapped[list["CohortDatasetRow"]] = relationship(
+        back_populates="version", passive_deletes=True,
+    )
 
 
 class CohortDatasetRow(Base):
