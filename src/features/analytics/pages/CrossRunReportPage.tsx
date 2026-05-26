@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LayoutGrid, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -11,7 +11,7 @@ import { invalidateReportRuns, useReportConfigs, useReportRunArtifact, useReport
 import { RunReportSurface } from '@/features/analytics/components/RunReportSurface';
 import { ReportZeroState, type SectionPreview } from '@/features/evalRuns/components/report/shared/ReportZeroState';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
-import { submitAndPollJob } from '@/services/api/jobPolling';
+import { submitAndPollJob, pollJobUntilComplete } from '@/services/api/jobPolling';
 import { notificationService } from '@/services/notifications';
 import { usePermission } from '@/utils/permissions';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
@@ -116,6 +116,12 @@ export function CrossRunReportPage() {
   const completedRun = runsQuery.data?.find((r) => r.status === 'completed') ?? null;
   const latestRun = runsQuery.data?.[0] ?? null;
   const lastAttemptFailed = latestRun?.status === 'failed' || latestRun?.status === 'cancelled';
+
+  const runningRun =
+    latestRun && (latestRun.status === 'queued' || latestRun.status === 'running')
+      ? latestRun
+      : null;
+  const runningJobId = runningRun?.jobId ?? null;
 
   const artifactQuery = useReportRunArtifact<PlatformCrossRunPayload>(completedRun?.id ?? null);
 
@@ -229,6 +235,27 @@ export function CrossRunReportPage() {
       if (trackedJobId) useJobTrackerStore.getState().untrackJob(trackedJobId);
     }
   }, [appId, overlayReportId, queryClient, reportModel, reportProvider]);
+
+  // Resume the in-progress view after a refresh: poll the in-flight job and
+  // refresh the runs list on terminal (mirrors ReportTab.pollExistingJob).
+  useEffect(() => {
+    if (!runningJobId) return;
+    const controller = new AbortController();
+    setGenerating(true);
+    setProgressMsg('Generating cross-run report…');
+    void pollJobUntilComplete(runningJobId, {
+      pollIntervalMs: 2000,
+      signal: controller.signal,
+      onProgress: (p) => setProgressMsg(p.message || 'Generating cross-run report…'),
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        setGenerating(false);
+        setProgressMsg('');
+        void invalidateReportRuns(queryClient, { appId, scope: 'cross_run' });
+      });
+    return () => controller.abort();
+  }, [runningJobId, appId, queryClient]);
 
   const hasReport = Boolean(completedRun && artifactQuery.data);
   const isLoading = runsQuery.isLoading || (completedRun !== null && artifactQuery.isLoading);

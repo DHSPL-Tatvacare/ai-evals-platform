@@ -38,6 +38,7 @@ vi.mock('@/config/routes', () => ({
 
 vi.mock('@/services/api/jobPolling', () => ({
   submitAndPollJob: vi.fn(),
+  pollJobUntilComplete: vi.fn().mockReturnValue(new Promise(() => {})),
 }));
 
 vi.mock('@/services/notifications', () => ({
@@ -437,6 +438,23 @@ describe('CrossRunReportPage', () => {
     renderPage();
 
     expect(screen.getByText('Failed to load report')).toBeInTheDocument();
+  });
+
+  it('shows the in-progress banner when the latest run is still running', () => {
+    mockUseReportRuns.mockReturnValue({
+      data: [makeRunSummary({ id: 'running-1', status: 'running', jobId: 'job-r1' })],
+      isLoading: false, isError: false, error: null, refetch: vi.fn(), isFetching: false,
+    } as unknown as ReturnType<typeof useReportRuns>);
+    mockUseReportRunArtifact.mockReturnValue({
+      data: undefined, isLoading: false, isError: false, error: null, refetch: vi.fn(), isFetching: false,
+    } as unknown as ReturnType<typeof useReportRunArtifact>);
+    mockUseReportConfigs.mockReturnValue({
+      data: [makeConfigSummary()], isLoading: false, isError: false, error: null,
+    } as unknown as ReturnType<typeof useReportConfigs>);
+
+    renderPage();
+
+    expect(screen.getByText(/generating cross-run report/i)).toBeInTheDocument();
   });
 
   it('shows Regenerate button in page header when a report already exists', () => {
