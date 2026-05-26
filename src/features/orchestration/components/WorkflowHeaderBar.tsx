@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  CircleStop,
   Download,
   FlaskConical,
   MoreHorizontal,
@@ -12,7 +13,7 @@ import {
   Timeline,
   Upload,
 } from 'lucide-react';
-import { useWorkflowRuns } from '@/features/orchestration/queries/runs';
+import { useCancelRun, useWorkflowRuns } from '@/features/orchestration/queries/runs';
 
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -23,7 +24,7 @@ import {
   usePublishMutation,
   useSaveDraftMutation,
 } from '@/features/orchestration/queries/workflows';
-import type { WorkflowRun } from '@/features/orchestration/types';
+import { isRunActive, type WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import {
   useHardParseIssues,
@@ -273,6 +274,29 @@ export function WorkflowHeaderBar({
     onOpenRuns(runs[0]?.id ?? null);
   };
 
+  // Latest still-running run is the Stop target (runs come back newest-first).
+  const activeRun = runs.find((r) => isRunActive(r.status)) ?? null;
+  const cancelRunMutation = useCancelRun();
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const handleStopRun = () => {
+    if (!activeRun) return;
+    cancelRunMutation.mutate(
+      { runId: activeRun.id, reason: 'operator' },
+      {
+        onSuccess: () => {
+          setStopConfirmOpen(false);
+          notificationService.success(
+            'Run stopped. Cancelling in-flight calls where supported.',
+          );
+        },
+        onError: (err) => {
+          const message = summarizeApiErrorBody(decodeApiError(err), 'please try again');
+          notificationService.error(`Could not stop run: ${message}`);
+        },
+      },
+    );
+  };
+
   return (
     <>
     <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2">
@@ -326,6 +350,9 @@ export function WorkflowHeaderBar({
             onSave={handleSave}
             onPublish={handlePublish}
             onRun={handleRun}
+            onStopRun={() => setStopConfirmOpen(true)}
+            stopDisabled={!activeRun || cancelRunMutation.isPending}
+            stopTitle={activeRun ? undefined : 'No active run to stop'}
             onExportJson={() => jsonIORef.current?.openExport()}
             onImportJson={() => jsonIORef.current?.openImport()}
           />
@@ -341,6 +368,18 @@ export function WorkflowHeaderBar({
       </div>
     ) : null}
     <WorkflowJsonIO ref={jsonIORef} workflowId={workflowId} />
+    <ConfirmDialog
+      isOpen={stopConfirmOpen}
+      onClose={() => setStopConfirmOpen(false)}
+      onConfirm={handleStopRun}
+      title="Stop this run?"
+      description="In-flight calls will be cancelled where supported. Sent messages cannot be recalled."
+      confirmLabel="Stop run"
+      cancelLabel="Keep running"
+      variant="danger"
+      isLoading={cancelRunMutation.isPending}
+      icon={CircleStop}
+    />
     <ConfirmDialog
       isOpen={showLeaveConfirm}
       onClose={() => setShowLeaveConfirm(false)}
@@ -435,6 +474,9 @@ interface EditModeActionsProps {
   onSave(): void;
   onPublish(): void;
   onRun(): void;
+  onStopRun(): void;
+  stopDisabled: boolean;
+  stopTitle?: string;
   onExportJson(): void;
   onImportJson(): void;
 }
@@ -485,6 +527,9 @@ function EditModeActions({
   onSave,
   onPublish,
   onRun,
+  onStopRun,
+  stopDisabled,
+  stopTitle,
   onExportJson,
   onImportJson,
 }: EditModeActionsProps) {
@@ -508,6 +553,7 @@ function EditModeActions({
     onClick?: () => void;
     disabled: boolean;
     title?: string;
+    danger?: boolean;
   }> = [
     primaryKind === 'save'
       ? {
@@ -534,6 +580,15 @@ function EditModeActions({
         runDisabled && !isPublished
           ? 'Publish a version before running'
           : undefined,
+    },
+    {
+      key: 'stop-run',
+      icon: <CircleStop className="h-3.5 w-3.5" />,
+      label: 'Stop run',
+      onClick: onStopRun,
+      disabled: stopDisabled,
+      title: stopTitle,
+      danger: true,
     },
     {
       key: 'test-run',
@@ -592,7 +647,9 @@ function EditModeActions({
                     'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm',
                     it.disabled
                       ? 'cursor-not-allowed text-[var(--text-muted)]'
-                      : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]',
+                      : it.danger
+                        ? 'text-[var(--color-error)] hover:bg-[var(--color-error)]/10'
+                        : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]',
                   )}
                 >
                   {it.icon}
