@@ -1,6 +1,6 @@
 import type { CallSelectionConfig } from './SelectCallsStep';
 
-export interface InsideSalesSelection {
+export interface CallQualitySelection {
   agents: string[];
   lead_ids: string[];
   direction: 'inbound' | 'outbound' | null;
@@ -26,7 +26,7 @@ function parseDuration(v: string): number | null {
 /** Builds the EvaluationSelectionSpec the backend expects (Pydantic
  *  extra='forbid'). Empty strings → null; date inputs already emit
  *  YYYY-MM-DD so they pass through unchanged. */
-export function buildInsideSalesSelection(config: CallSelectionConfig): InsideSalesSelection {
+export function buildCallQualitySelection(config: CallSelectionConfig): CallQualitySelection {
   const eventCodesList = config.eventCodes
     .split(',')
     .map((s) => parseInt(s.trim(), 10))

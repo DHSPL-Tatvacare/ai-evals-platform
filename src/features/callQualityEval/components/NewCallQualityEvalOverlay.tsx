@@ -1,5 +1,5 @@
 /**
- * NewInsideSalesEvalOverlay — 6-step wizard for inside-sales call evaluation.
+ * NewCallQualityEvalOverlay — 6-step wizard for call-quality evaluation.
  * Follows the same pattern as NewBatchEvalOverlay.
  */
 
@@ -10,7 +10,7 @@ import { LLMConfigStep, type LLMConfig } from '@/features/evalRuns/components/LL
 import { ParallelConfigSection } from '@/features/evalRuns/components/ParallelConfigSection';
 import { ReviewStep, type ReviewSummary, type ReviewSection } from '@/features/evalRuns/components/ReviewStep';
 import { SelectCallsStep, type CallSelectionConfig } from './SelectCallsStep';
-import { buildInsideSalesSelection } from './buildInsideSalesSelection';
+import { buildCallQualitySelection } from './buildCallQualitySelection';
 import { TranscriptionConfigStep, type TranscriptionConfig } from './TranscriptionConfigStep';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
@@ -46,7 +46,7 @@ const STEPS: WizardStep[] = [
   { key: 'review', label: 'Review' },
 ];
 
-interface NewInsideSalesEvalOverlayProps {
+export interface NewCallQualityEvalOverlayProps {
   onClose: () => void;
   /** Pre-selected call IDs. When non-empty the overlay starts in 'specific' mode. */
   preSelectedCallIds?: string[];
@@ -61,13 +61,13 @@ interface NewInsideSalesEvalOverlayProps {
   prefillContext?: PrefillContext;
 }
 
-export function NewInsideSalesEvalOverlay({
+export function NewCallQualityEvalOverlay({
   onClose,
   preSelectedCallIds,
   preSelectedCalls,
   preSelectedFilters,
   prefillContext,
-}: NewInsideSalesEvalOverlayProps) {
+}: NewCallQualityEvalOverlayProps) {
   const isPrefilled = Boolean(prefillContext);
   const [currentStep, setCurrentStep] = useState(isPrefilled ? 1 : 0);
 
@@ -230,7 +230,7 @@ export function NewInsideSalesEvalOverlay({
   ], [callConfig, callCount, transcriptionConfig, selectedEvaluatorIds, availableEvaluators, llmConfig, parallelEnabled, parallelWorkers]);
 
   const handleSubmit = useCallback(async () => {
-    const selection = buildInsideSalesSelection(callConfig);
+    const selection = buildCallQualitySelection(callConfig);
 
     await submitJob('evaluate-inside-sales', {
       app_id: 'inside-sales',

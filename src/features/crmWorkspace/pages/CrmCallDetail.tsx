@@ -17,7 +17,7 @@ import { Button, LoadingState, PageSurface, Tabs, Tooltip, EmptyState } from '@/
 import { PAGE_METADATA } from '@/config/pageMetadata';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { useCurrentAppId } from '@/hooks';
-import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
+import { NewCallQualityEvalOverlay } from '@/features/callQualityEval';
 import { CallResultPanel } from '../components/CallResultPanel';
 import { AttributesPanel } from '../components/AttributesPanel';
 import { useCrmSchema } from '../queries/crmSchema';
@@ -340,7 +340,7 @@ export function CrmCallDetail() {
         )}
 
         {evalOpen && (
-          <NewInsideSalesEvalOverlay
+          <NewCallQualityEvalOverlay
             onClose={() => setEvalOpen(false)}
             preSelectedCallIds={[call.activityId]}
             preSelectedCalls={[call]}

@@ -32,7 +32,7 @@ import { scoreColor } from '@/utils/scoreUtils';
 import { routes } from '@/config/routes';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { CallFilterPanel } from '../components/CallFilterPanel';
-import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
+import { NewCallQualityEvalOverlay } from '@/features/callQualityEval';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { StageBadge } from '../components/StageBadge';
 import { buildCollectionFilterPills, countActiveCollectionFilters } from '../utils/collectionFilters';
@@ -898,7 +898,7 @@ export function CrmListing() {
       />
 
       {evalOverlayOpen && (
-        <NewInsideSalesEvalOverlay
+        <NewCallQualityEvalOverlay
           onClose={() => setEvalOverlayOpen(false)}
           preSelectedCallIds={[...selectedCallIds]}
           preSelectedCalls={calls.filter((c) => selectedCallIds.has(c.activityId))}

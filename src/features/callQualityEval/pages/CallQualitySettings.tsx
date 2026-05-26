@@ -21,11 +21,11 @@ import type { NotificationsFormValue } from '@/features/accountSettings/email/no
 import type { LLMTimeoutSettings } from '@/types';
 import type { BaseFormValues } from '@/features/settings/hooks/useSettingsForm';
 
-interface InsideSalesFormValues extends BaseFormValues {
+interface CallQualitySettingsFormValues extends BaseFormValues {
   notifications: NotificationsFormValue;
 }
 
-export function InsideSalesSettings() {
+export function CallQualitySettings() {
   const { icon, title } = usePageMetadata('settings');
   const theme = useGlobalSettingsStore((s) => s.theme);
   const timeouts = useGlobalSettingsStore((s) => s.timeouts);
@@ -35,7 +35,7 @@ export function InsideSalesSettings() {
   const notifications = useNotificationsSettings(features.hasNotifications);
 
   const onSaveApp = useCallback(
-    async (form: InsideSalesFormValues, store: InsideSalesFormValues) => {
+    async (form: CallQualitySettingsFormValues, store: CallQualitySettingsFormValues) => {
       if (notifications.enabled) {
         await notifications.save(form.notifications, store.notifications);
       }
@@ -44,7 +44,7 @@ export function InsideSalesSettings() {
   );
 
   const { formValues, isDirty, isSaving, handleChange, handleSave, handleDiscard } =
-    useSettingsForm<InsideSalesFormValues>({
+    useSettingsForm<CallQualitySettingsFormValues>({
       buildStoreValues: () => ({
         theme,
         timeouts: { ...timeouts } as LLMTimeoutSettings,

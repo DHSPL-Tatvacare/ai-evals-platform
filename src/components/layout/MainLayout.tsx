@@ -12,7 +12,7 @@ import { cn } from '@/utils';
 import { firstAccessibleAppId, inferAppIdFromPath, isAdminPath } from '@/config/routes';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
-import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
+import { NewCallQualityEvalOverlay } from '@/features/callQualityEval';
 import { useFileUpload } from '@/features/upload';
 import { ACCEPTED_AUDIO_EXTENSIONS, validateAudioFiles } from '@/features/upload/utils/fileValidation';
 import { APP_IDS } from '@/types';
@@ -133,10 +133,10 @@ export function MainLayout({ children }: MainLayoutProps) {
       <AnimatePresence>
         {activeModal === 'batchEval' && <NewBatchEvalOverlay key="batchEval" onClose={closeModal} />}
         {activeModal === 'adversarialTest' && <NewAdversarialOverlay key="adversarialTest" onClose={closeModal} />}
-        {/* Vanilla inside-sales eval entry (Sidebar "Batch Evaluation" action). Prefilled flows
+        {/* Vanilla call-quality eval entry (Sidebar "Batch Evaluation" action). Prefilled flows
             mount the overlay locally on the page that owns the context — see CrmListing,
             CrmLeadDetail, CrmCallDetail. */}
-        {activeModal === 'insideSalesEval' && <NewInsideSalesEvalOverlay key="insideSalesEval" onClose={closeModal} />}
+        {activeModal === 'callQualityEval' && <NewCallQualityEvalOverlay key="callQualityEval" onClose={closeModal} />}
       </AnimatePresence>
       <input
         ref={audioInputRef}

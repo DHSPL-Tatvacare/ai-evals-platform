@@ -29,12 +29,12 @@ import {
   CrmCallDetail,
   CrmLeadDetail,
 } from "@/features/crmWorkspace";
-// Phase 10 separated the inside-sales eval wizard into a sibling feature
+// Phase 10 separated the call-quality eval wizard into a sibling feature
 // folder; the CRM workspace pages stay app-agnostic, the eval wizard
 // stays LSQ-shaped.
 import {
-  InsideSalesSettings,
-} from "@/features/insideSalesEval";
+  CallQualitySettings,
+} from "@/features/callQualityEval";
 import { ListingPage } from "./pages/ListingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { KairaBotHomePage } from "./pages/kaira";
@@ -197,7 +197,7 @@ export function Router() {
             <Route path={`${routes.insideSales.logs}/runs/:runId`} element={<LogsEvaluationRunPage />} />
             <Route path={`${routes.insideSales.logs}/workflow-runs/:runId`} element={<LogsWorkflowRunPage />} />
             <Route path={`${routes.insideSales.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
-            <Route path={routes.insideSales.settings} element={<InsideSalesSettings />} />
+            <Route path={routes.insideSales.settings} element={<CallQualitySettings />} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
             <Route path={routes.insideSales.analyticsCrossRunReport} element={<Suspense fallback={ROUTE_FALLBACK}><CrossRunReportPage /></Suspense>} />
             <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />

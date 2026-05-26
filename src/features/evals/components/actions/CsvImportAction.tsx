@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Upload } from 'lucide-react';
 
 import { Button } from '@/components/ui';
-import { EvaluatorCSVImport } from '@/features/insideSalesEval';
+import { EvaluatorCSVImport } from '@/features/callQualityEval';
 import type { PageActionComponentProps } from '@/features/pageActions/registry';
 
 export function CsvImportAction({ displayMode = 'button' }: PageActionComponentProps) {

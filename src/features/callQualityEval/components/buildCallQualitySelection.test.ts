@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { buildInsideSalesSelection } from './buildInsideSalesSelection';
+import { buildCallQualitySelection } from './buildCallQualitySelection';
 import type { CallSelectionConfig } from './SelectCallsStep';
 
 const BASE_CONFIG: CallSelectionConfig = {
@@ -21,7 +21,7 @@ const BASE_CONFIG: CallSelectionConfig = {
 };
 
 test('maps callConfig dates into selection.call_date_from / call_date_to', () => {
-  const selection = buildInsideSalesSelection({
+  const selection = buildCallQualitySelection({
     ...BASE_CONFIG,
     callDateFrom: '2026-03-01',
     callDateTo: '2026-03-31',
@@ -31,7 +31,7 @@ test('maps callConfig dates into selection.call_date_from / call_date_to', () =>
 });
 
 test('emits null for unset call dates', () => {
-  const selection = buildInsideSalesSelection(BASE_CONFIG);
+  const selection = buildCallQualitySelection(BASE_CONFIG);
   expect(selection.call_date_from).toBeNull();
   expect(selection.call_date_to).toBeNull();
 });

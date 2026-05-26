@@ -34,7 +34,7 @@ import { PAGE_METADATA } from '@/config/pageMetadata';
 import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { CallResultPanel } from '../components/CallResultPanel';
-import { NewInsideSalesEvalOverlay } from '@/features/insideSalesEval';
+import { NewCallQualityEvalOverlay } from '@/features/callQualityEval';
 import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { LeadCallTimeline } from '../components/LeadCallTimeline';
 import { fetchLeadDetail } from '@/services/api/insideSales';
@@ -824,7 +824,7 @@ export function CrmLeadDetail() {
       />
 
       {evalOpen && evaluatableCalls.length > 0 && (
-        <NewInsideSalesEvalOverlay
+        <NewCallQualityEvalOverlay
           onClose={() => { setEvalOpen(false); load(); }}
           preSelectedCallIds={evaluatableCalls.map((c) => c.activityId)}
           prefillContext={{
