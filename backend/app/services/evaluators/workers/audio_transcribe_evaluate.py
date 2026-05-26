@@ -139,54 +139,59 @@ def merge_signals(eval_outputs: list[EvaluatorOutput]) -> list[dict]:
 # ── Transcription prompt ─────────────────────────────────────────────
 
 
-_LANG_INSTRUCTION = {
-    "hi": "The call is in Hindi. Transcribe in Hindi.",
-    "en": "The call is in English. Transcribe in English.",
-    "hi-en": "The call is in Hindi-English (code-mixed). Transcribe in the original mix as spoken.",
-    "auto": (
-        "Detect the language(s) spoken and transcribe faithfully in the original "
-        "language(s) — do not guess or default to any specific language."
-    ),
-}
-
-_SYS_LANG = {
-    "hi": "Hindi",
-    "en": "English",
-    "hi-en": "Hindi-English code-mixed",
-    "auto": "multilingual (language auto-detected from audio)",
+# Structured transcription contract — no free-form string extraction.
+_TRANSCRIPTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "transcript": {
+            "type": "string",
+            "description": "Full verbatim transcript, with [Agent]:/[Lead]: labels when diarization is requested.",
+        },
+        "detected_script": {
+            "type": "string",
+            "description": "Lowercase id of the script the transcript is written in (e.g. latin, devanagari, tamil, arabic, cjk).",
+        },
+    },
+    "required": ["transcript", "detected_script"],
 }
 
 
 def _build_transcription_prompt(config: dict[str, Any]) -> tuple[str, str]:
-    lang = config.get("language", "auto")
+    """Generic transcription prompt. `language` is a display name from the shared
+    registry (e.g. "Hindi", "Tamil", "Auto-detect") — there is no per-language map;
+    the name is interpolated directly, and the script registry resolves the script."""
+    language = (config.get("language") or "auto").strip()
+    script_id = config.get("script", "auto")
     diarize = config.get("speaker_diarization", config.get("speakerDiarization", True))
     preserve_cs = config.get(
         "preserve_code_switching", config.get("preserveCodeSwitching", True)
     )
+    script_display = resolve_script_name(script_id)  # "" for auto
+    auto_lang = language.lower() in ("", "auto", "auto-detect")
 
-    lang_instruction = _LANG_INSTRUCTION.get(
-        lang, f"The call is in {lang}. Transcribe in {lang}."
-    )
-    sys_lang = _SYS_LANG.get(lang, lang)
-
-    parts = ["Transcribe this sales call recording.", lang_instruction]
-    if diarize:
+    parts = ["Transcribe this sales call recording verbatim, including greetings and small talk."]
+    if auto_lang:
         parts.append(
-            "Identify two speakers: the sales agent and the customer/lead. "
-            "Use the format [Agent]: ... and [Lead]: ... for each turn."
+            "Detect the spoken language(s) and transcribe faithfully in the original "
+            "language(s) — do not guess or default to any specific language."
         )
-    parts.append(
-        "Include all dialogue, including small talk and greetings. "
-        "Do not translate — preserve the original language exactly."
-    )
+    else:
+        parts.append(f"The call is in {language}. Transcribe it in {language}.")
+    if script_display:
+        parts.append(f"Write the transcript in {script_display} script.")
+    if diarize:
+        parts.append("Identify the two speakers and label each turn as [Agent]: or [Lead]:.")
     if preserve_cs:
         parts.append("Preserve code-switching between languages exactly as spoken.")
+    parts.append("Never translate — keep the spoken language exactly.")
+    parts.append(
+        'Also report the script you wrote the transcript in via "detected_script" '
+        "as a lowercase id such as latin, devanagari, tamil, arabic, or cjk."
+    )
 
     sys_prompt = (
-        f"You are an expert multilingual transcriptionist specializing in "
-        f"sales calls. Language: {sys_lang}. Transcribe accurately"
-        f"{', with speaker diarization (mark [Agent] and [Lead] turns)' if diarize else ''}. "
-        f"Never translate — output the spoken language verbatim."
+        "You are an expert multilingual transcriptionist for sales calls. "
+        "Transcribe verbatim, never translate, and return only the requested JSON object."
     )
     return " ".join(parts), sys_prompt
 
@@ -199,21 +204,27 @@ def _mime_for_url(url: str) -> str:
 
 
 async def _maybe_transliterate(
-    ctx: WorkerContext, transcript: str
+    ctx: WorkerContext, transcript: str, detected_script: str
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Optional stage: transliterate the transcript into the target script.
 
     Same language, script conversion only (Devanagari → Roman). Reuses voice-rx's
     plain-text normalization prompt/schema. Runs on the evaluation LLM (text->text).
-    Returns (transliterated_text, meta) or (None, None) when disabled/empty.
+    Returns (transliterated_text, meta) or (None, None) when disabled/skipped/empty.
     """
     cfg = ctx.transcription_config
     if not cfg.get("transliterate"):
         return None, None
 
     target_script = cfg.get("target_script", "latin")
+    # Smart gate: the transcription model reports the script it produced. If the
+    # transcript is already in the target script there is nothing to convert, so
+    # skip the LLM call instead of round-tripping for an unchanged result.
+    if detected_script and detected_script == target_script.strip().lower():
+        return None, None
+
     target_display = resolve_script_name(target_script) or target_script
-    source_script = cfg.get("script", "auto")
+    source_script = detected_script or cfg.get("script", "auto")
     source_display = resolve_script_name(source_script)
     language = cfg.get("language", "auto")
 
@@ -266,17 +277,27 @@ async def audio_transcribe_evaluate(ctx: WorkerContext) -> WorkerOutput:
         audio_bytes = audio_resp.content
 
     set_usage_call_purpose(ctx.transcription_llm, "transcription", stage_index=0)
-    transcript = await ctx.transcription_llm.generate_with_audio(
+    raw_transcription = await ctx.transcription_llm.generate_with_audio(
         prompt=transcription_prompt,
         audio_bytes=audio_bytes,
         mime_type=_mime_for_url(record.recording_url),
         system_prompt=transcription_sys,
+        json_schema=_TRANSCRIPTION_SCHEMA,
     )
-    if not transcript or not transcript.strip():
+    parsed_transcription = (
+        _safe_parse_json(raw_transcription)[0]
+        if isinstance(raw_transcription, str)
+        else raw_transcription
+    ) or {}
+    transcript = (parsed_transcription.get("transcript") or "").strip()
+    detected_script = (parsed_transcription.get("detected_script") or "").strip().lower()
+    if not transcript:
         transcript = "[Transcription returned empty result]"
 
-    # ── Step 1.5: Optional transliteration (additive; eval still uses original) ──
-    transcript_transliterated, transliteration_meta = await _maybe_transliterate(ctx, transcript)
+    # ── Step 1.5: Optional transliteration (gated by the detected script) ──
+    transcript_transliterated, transliteration_meta = await _maybe_transliterate(
+        ctx, transcript, detected_script
+    )
 
     # ── Step 2: Evaluate against each rubric ─────────────────────
     eval_outputs: list[EvaluatorOutput] = []
