@@ -23,6 +23,8 @@ import type { LLMProvider } from '@/services/api/aiSettingsApi';
 import type { AppId, ReportRunSummary } from '@/types';
 import { usePermission } from '@/utils/permissions';
 import { useChatWidgetStore } from '@/features/chat-widget/useChatWidget';
+import { useJobTrackerStore } from '@/stores';
+import { runDetailForApp } from '@/config/routes';
 
 interface ReportMetadataLike {
   llmProvider?: string | null;
@@ -94,13 +96,18 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   });
   const reportRuns = useMemo(() => runsQuery.data ?? [], [runsQuery.data]);
 
-  // Default selectedReportRunId when reportRuns change — prefer the most recent
-  // completed run, fall back to whatever's first in the list.
+  // Default selectedReportRunId when reportRuns change — prefer an in-flight run
+  // so the resume poll fires after a refresh, then the most recent completed run,
+  // then whatever's first in the list.
   useEffect(() => {
     setSelectedReportRunId((current) => {
       if (current && reportRuns.some((r) => r.id === current)) return current;
+      const inflight = reportRuns.find((r) => r.status === 'queued' || r.status === 'running');
       return (
-        reportRuns.find((r) => r.status === 'completed')?.id ?? reportRuns[0]?.id ?? null
+        inflight?.id ??
+        reportRuns.find((r) => r.status === 'completed')?.id ??
+        reportRuns[0]?.id ??
+        null
       );
     });
   }, [reportRuns]);
@@ -317,6 +324,9 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
   const handleGenerate = useCallback(async () => {
     if (!overlayConfig) return;
     const targetReportId = overlayConfig.reportId;
+    // Captured in the closure so the finally untrack uses the real job id —
+    // generatingJobId state is stale inside this callback.
+    let trackedJobId: string | null = null;
 
     setShowGenerateOverlay(false);
     setSelectedReportId(targetReportId);
@@ -340,7 +350,17 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
             handleJobProgress(progress);
           },
           onJobCreated: (jobId) => {
+            trackedJobId = jobId;
             setGeneratingJobId(jobId);
+            useJobTrackerStore.getState().trackJob({
+              jobId,
+              appId,
+              jobType: 'generate-report',
+              label: 'Report generation',
+              runId,
+              viewPath: runDetailForApp(appId, runId),
+              trackedAt: Date.now(),
+            });
           },
         },
       );
@@ -377,6 +397,7 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
       setProgressMsg('');
       setQueuePosition(null);
       setJobPhase(null);
+      if (trackedJobId) useJobTrackerStore.getState().untrackJob(trackedJobId);
       setGeneratingJobId(null);
       setCancellingGeneration(false);
     }
