@@ -15,6 +15,10 @@ export interface TrackedJob {
   label: string;
   trackedAt: number;
   listingId?: string;
+  /** Optional deep-link for the completion toast + on-page suppression.
+   *  Jobs without an eval runId (e.g. cross-run reports) supply this so the
+   *  watcher can route + suppress generically without knowing the job type. */
+  viewPath?: string;
 }
 
 interface JobTrackerState {

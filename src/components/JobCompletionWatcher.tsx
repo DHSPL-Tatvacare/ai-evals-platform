@@ -83,10 +83,14 @@ export function JobCompletionWatcher() {
               | undefined);
 
           const currentPath = window.location.pathname;
-          const isOnRunDetail =
-            runId != null && isRunDetailPath(currentPath, runId);
+          const viewTarget =
+            tracked.viewPath ??
+            (runId != null ? runDetailForApp(tracked.appId, runId) : null);
+          const onTargetPage =
+            (runId != null && isRunDetailPath(currentPath, runId)) ||
+            (tracked.viewPath != null && currentPath === tracked.viewPath);
 
-          if (!isOnRunDetail) {
+          if (!onTargetPage) {
             if (job.status === 'completed') {
               notificationService.notify({
                 type: 'success',
@@ -94,12 +98,11 @@ export function JobCompletionWatcher() {
                 title: 'Job Complete',
                 dismissible: true,
                 priority: 'normal',
-                ...(runId
+                ...(viewTarget
                   ? {
                       action: {
-                        label: 'View Run',
-                        onClick: () =>
-                          navigate(runDetailForApp(tracked.appId, runId)),
+                        label: runId != null ? 'View Run' : 'View',
+                        onClick: () => navigate(viewTarget),
                       },
                     }
                   : {}),
