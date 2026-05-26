@@ -557,6 +557,18 @@ def compute_drilldown_metrics(
     }
 
 
+def _clean_label(value: Any) -> str | None:
+    """Trim + collapse internal whitespace on a free-text label; preserve case.
+
+    Filter-facing LSQ labels (rep / city / stage / condition / plan) carry stray
+    trailing/double spaces that split one real value into duplicate filter
+    entries. Ids / phone / enums / numerics are intentionally not routed here."""
+    if value is None:
+        return None
+    cleaned = " ".join(str(value).split())
+    return cleaned or None
+
+
 def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize a raw Leads.Get record into a clean field dict."""
     return {
@@ -565,10 +577,10 @@ def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
         "lastName": raw.get("LastName"),
         "phone": raw.get("Phone", ""),
         "email": raw.get("EmailAddress"),
-        "prospectStage": raw.get("ProspectStage", ""),
-        "city": raw.get("mx_City"),
+        "prospectStage": _clean_label(raw.get("ProspectStage")) or "",
+        "city": _clean_label(raw.get("mx_City")),
         "ageGroup": raw.get("mx_Age_Group"),
-        "condition": raw.get("mx_utm_disease"),
+        "condition": _clean_label(raw.get("mx_utm_disease")),
         "hba1cBand": raw.get("mx_Do_you_remember_your_HbA1c_levels"),
         "bloodSugarBand": raw.get("mx_Do_you_know_your_recent_blood_sugar_level"),
         "intentToPay": raw.get("mx_Are_you_open_to_investing_in_this_paid_program_of"),
@@ -579,7 +591,7 @@ def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
         "preferredCallTime": raw.get("mx_Preferred_Time_for_Call_with_Health_Counsellor"),
         "rnrCount": int(raw.get("mx_RNR_Count") or 0),
         "answeredCount": int(raw.get("mx_Answered_Call_Count") or 0),
-        "agentName": " ".join((raw.get("OwnerIdName") or "").split()) or None,
+        "agentName": _clean_label(raw.get("OwnerIdName")),
         "createdOn": (raw.get("CreatedOn") or "").split(".")[0],
         "firstActivityOn": (raw.get("ProspectActivityDate_Min") or "").split(".")[0] or None,
         "lastActivityOn": (raw.get("ProspectActivityDate_Max") or "").split(".")[0] or None,
@@ -588,7 +600,7 @@ def normalize_lead(raw: dict[str, Any]) -> dict[str, Any]:
         # Plan-purchase surface. ``planName`` lands in its own indexed
         # column; the rest of the plan object is derived from raw_payload
         # via ``extract_lead_plan_fields`` at API-response time.
-        "planName": raw.get("mx_Plan_Name"),
+        "planName": _clean_label(raw.get("mx_Plan_Name")),
         # MQL input fields — normalized into dim_lead by inside_sales_sync
         # and scored by the `mql` rule signal definition (Phase 11A).
         "mx_Age_Group": raw.get("mx_Age_Group"),
@@ -630,7 +642,7 @@ def normalize_activity(raw: dict[str, Any]) -> dict[str, Any]:
         "agentId": raw.get("CreatedBy", ""),
         # Trim + collapse whitespace at the ingestion chokepoint; preserve case
         # for display. LSQ rep names carry trailing spaces that broke filtering.
-        "agentName": " ".join((raw.get("CreatedByName") or "").split()),
+        "agentName": _clean_label(raw.get("CreatedByName")) or "",
         "agentEmail": raw.get("CreatedByEmailAddress", ""),
         "eventCode": event_code,
         "direction": "inbound" if event_code == 21 else "outbound",
