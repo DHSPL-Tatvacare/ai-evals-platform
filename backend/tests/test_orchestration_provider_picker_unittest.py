@@ -217,6 +217,42 @@ def test_template_body_and_body_original_surfaced_from_top_level():
     assert norm["parameters"] == ["first_name", "programme_name"]
 
 
+def test_template_body_prefers_body_component_over_header():
+    from app.services.orchestration.adapters.wati import _normalize_template_candidate
+
+    # HEADER precedes BODY: the BODY text must win, not the first text seen.
+    candidate = {
+        "template_name": "promo_v3",
+        "language": "en",
+        "status": "APPROVED",
+        "components": [
+            {"text": "Your order", "type": "HEADER"},
+            {"text": "Hi {{1}}, your order {{2}} is ready.", "type": "BODY"},
+            {"text": "Reply STOP to opt out", "type": "FOOTER"},
+        ],
+    }
+    norm = _normalize_template_candidate(candidate)
+    assert norm["body"] == "Hi {{1}}, your order {{2}} is ready."
+
+
+def test_template_components_without_body_falls_back_to_first_text():
+    from app.services.orchestration.adapters.wati import _normalize_template_candidate
+
+    # No BODY-typed component: surface the first available text for preview
+    # rather than empty — still never a fabricated sentence.
+    candidate = {
+        "template_name": "header_only",
+        "language": "en",
+        "status": "APPROVED",
+        "components": [
+            {"text": "Account alert", "type": "HEADER"},
+        ],
+    }
+    norm = _normalize_template_candidate(candidate)
+    assert norm["body"] == "Account alert"
+    assert norm["body_original"] is None
+
+
 def test_template_without_body_yields_empty_string_no_fabrication():
     from app.services.orchestration.adapters.wati import _normalize_template_candidate
 

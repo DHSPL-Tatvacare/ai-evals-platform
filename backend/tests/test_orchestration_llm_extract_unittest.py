@@ -312,6 +312,29 @@ async def test_skips_recipient_already_carrying_namespace(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resume_skip_requires_dot_boundary_not_substring(monkeypatch):
+    # namespace="extract" must NOT skip a recipient whose only key is the
+    # unrelated "extraction.foo": the prefix guard is dot-bounded, so a bare
+    # substring match would be a re-call regression.
+    provider = _FakeProvider([{"sentiment": "positive"}])
+    _patch_llm(monkeypatch, provider)
+
+    cfg = _Config(
+        prompt="{{message}}",
+        output_schema=[_schema_field()],
+        input_template="{{message}}",
+        output_namespace="extract",
+    )
+    cohort = CohortStream([("r1", {"message": "a", "extraction.foo": "x"})])
+    result = await _Handler().execute(cohort, cfg, _Ctx())
+
+    # The model IS called and the recipient is written under "extract.sentiment".
+    assert len(provider.calls) == 1
+    succ = result.by_output_id["success"]
+    assert succ[0].payload_delta == {"extract.sentiment": "positive"}
+
+
+@pytest.mark.asyncio
 async def test_job_id_none_does_not_crash(monkeypatch):
     # Test/None mode: run_parallel cancellation checks must tolerate job_id=None.
     provider = _FakeProvider([{"sentiment": "positive"}])
