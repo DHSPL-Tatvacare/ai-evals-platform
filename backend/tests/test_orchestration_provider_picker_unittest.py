@@ -469,3 +469,135 @@ def test_voice_config_rejects_unknown_keys():
             bad_field="no",
         )
     assert any(err.get("type") == "extra_forbidden" for err in exc_info.value.errors())
+
+
+# ─── Bolna introspect_agent helper ────────────────────────────────────────────
+
+
+def test_introspect_agent_extracts_tokens_from_prompt_and_welcome():
+    """Variables are {token} placeholders from system_prompt + welcome_message, sorted+deduped."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    agent = {
+        "agent_prompts": {
+            "task_1": {"system_prompt": "Hi {name}, your {plan} is ready"},
+        },
+        "agent_config": {"agent_welcome_message": "Hello {name}"},
+    }
+    result = introspect_agent(agent)
+    assert result["variables"] == ["name", "plan"]
+    assert "Hi {name}, your {plan} is ready" in result["prompt"]
+    assert result["welcome_message"] == "Hello {name}"
+
+
+def test_introspect_agent_no_prompts_no_welcome_returns_empty():
+    """Agent with no prompts/welcome yields variables==[], prompt=='', welcome_message==''."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    result = introspect_agent({})
+    assert result["variables"] == []
+    assert result["prompt"] == ""
+    assert result["welcome_message"] == ""
+
+
+def test_introspect_agent_union_with_explicit_variables_list():
+    """Variables list from agent_config.variables is unioned with token matches, sorted+deduped."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    agent = {
+        "agent_prompts": {
+            "task_1": {"system_prompt": "Hello {name}, welcome."},
+        },
+        "agent_config": {
+            "agent_welcome_message": "",
+            "variables": ["explicit_one"],
+        },
+    }
+    result = introspect_agent(agent)
+    assert result["variables"] == ["explicit_one", "name"]
+
+
+def test_introspect_agent_multi_task_collects_all_prompts():
+    """All task_N system_prompts are collected; prompt joins them with double newline."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    agent = {
+        "agent_prompts": {
+            "task_1": {"system_prompt": "Task one: {alpha}"},
+            "task_2": {"system_prompt": "Task two: {beta}"},
+        },
+        "agent_config": {"agent_welcome_message": ""},
+    }
+    result = introspect_agent(agent)
+    assert "alpha" in result["variables"]
+    assert "beta" in result["variables"]
+    assert "Task one: {alpha}" in result["prompt"]
+    assert "Task two: {beta}" in result["prompt"]
+
+
+def test_introspect_agent_deduplicates_tokens():
+    """Same token appearing in multiple prompts is counted once."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    agent = {
+        "agent_prompts": {
+            "task_1": {"system_prompt": "{name} again {name}"},
+        },
+        "agent_config": {"agent_welcome_message": "Hi {name}"},
+    }
+    result = introspect_agent(agent)
+    assert result["variables"].count("name") == 1
+
+
+def test_introspect_agent_existing_detail_fixture_stays_green():
+    """_BOLNA_AGENT_DETAIL (agent_config.variables list only) variables are still returned."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    result = introspect_agent(_BOLNA_AGENT_DETAIL)
+    # existing fixture has agent_config.variables=["patient_name","appointment_date"], no prompts
+    assert "patient_name" in result["variables"]
+    assert "appointment_date" in result["variables"]
+    assert result["prompt"] == ""
+    assert result["welcome_message"] == ""
+
+
+def test_introspect_agent_defensive_against_wrong_types():
+    """introspect_agent never raises on malformed/missing keys."""
+    from app.services.orchestration.adapters.bolna import introspect_agent
+
+    # agent_prompts is not a dict, agent_config.variables is not a list
+    agent = {
+        "agent_prompts": "not-a-dict",
+        "agent_config": {"variables": "also-not-a-list"},
+    }
+    result = introspect_agent(agent)
+    assert isinstance(result["variables"], list)
+    assert isinstance(result["prompt"], str)
+    assert isinstance(result["welcome_message"], str)
+
+
+# ─── AgentVariablesResponse schema: prompt + welcome_message fields ───────────
+
+
+def test_agent_variables_response_carries_prompt_and_welcome_message():
+    """AgentVariablesResponse must expose prompt and welcomeMessage (camelCase alias)."""
+    from app.schemas.orchestration_connection import AgentVariablesResponse
+
+    resp = AgentVariablesResponse(
+        provider="bolna",
+        variables=["name", "plan"],
+        prompt="Hi {name}",
+        welcome_message="Hello {name}",
+    )
+    dumped = resp.model_dump(by_alias=True)
+    assert dumped["prompt"] == "Hi {name}"
+    assert dumped["welcomeMessage"] == "Hello {name}"
+
+
+def test_agent_variables_response_prompt_defaults_empty():
+    """Backward compatibility: omitting prompt/welcome_message yields empty strings."""
+    from app.schemas.orchestration_connection import AgentVariablesResponse
+
+    resp = AgentVariablesResponse(provider="wati", variables=[])
+    assert resp.prompt == ""
+    assert resp.welcome_message == ""

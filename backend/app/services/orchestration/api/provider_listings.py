@@ -241,19 +241,20 @@ async def get_agent_variables(
     config = crypto.decrypt(row.config_encrypted)
 
     if provider == "bolna" and agent_id:
-        from app.services.orchestration.adapters.bolna import BolnaAdapter, BolnaServiceError
+        from app.services.orchestration.adapters.bolna import BolnaAdapter, BolnaServiceError, introspect_agent
         adapter = BolnaAdapter()
         try:
             agent = await adapter.get_agent(config, agent_id=agent_id)
         except (BolnaServiceError, Exception) as exc:  # noqa: BLE001
-            return {"provider": "bolna", "variables": [], "error": str(exc)}
-        agent_cfg = agent.get("agent_config") or {}
-        variables = agent_cfg.get("variables") or []
-        if isinstance(variables, list):
-            variables = [str(v) for v in variables if v]
-        else:
-            variables = []
-        return {"provider": "bolna", "variables": variables, "error": None}
+            return {"provider": "bolna", "variables": [], "prompt": "", "welcome_message": "", "error": str(exc)}
+        info = introspect_agent(agent)
+        return {
+            "provider": "bolna",
+            "variables": info["variables"],
+            "prompt": info["prompt"],
+            "welcome_message": info["welcome_message"],
+            "error": None,
+        }
 
     if provider == "wati" and template_name:
         # Shares the picker's cache + single-flight — one upstream fetch per
@@ -263,10 +264,10 @@ async def get_agent_variables(
             db, tenant_id=tenant_id, app_id=row.app_id, connection_id=connection_id,
         )
         if error and not templates:
-            return {"provider": "wati", "variables": [], "error": error}
+            return {"provider": "wati", "variables": [], "prompt": "", "welcome_message": "", "error": error}
         match = next((t for t in templates if t["name"] == template_name), None)
         if match is None:
-            return {"provider": "wati", "variables": [], "error": f"Template {template_name!r} not found."}
-        return {"provider": "wati", "variables": match.get("parameters") or [], "error": None}
+            return {"provider": "wati", "variables": [], "prompt": "", "welcome_message": "", "error": f"Template {template_name!r} not found."}
+        return {"provider": "wati", "variables": match.get("parameters") or [], "prompt": "", "welcome_message": "", "error": None}
 
-    return {"provider": provider, "variables": [], "error": None}
+    return {"provider": provider, "variables": [], "prompt": "", "welcome_message": "", "error": None}

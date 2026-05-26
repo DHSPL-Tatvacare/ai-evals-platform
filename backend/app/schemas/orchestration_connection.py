@@ -111,6 +111,8 @@ class AgentVariablesResponse(CamelModel):
     """Variable-introspection envelope."""
     provider: str
     variables: list[str]
+    prompt: str = ""
+    welcome_message: str = ""
     error: Optional[str] = None
 
 
