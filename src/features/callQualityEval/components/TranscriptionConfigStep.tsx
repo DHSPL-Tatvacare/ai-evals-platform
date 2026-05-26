@@ -15,12 +15,19 @@ const SCRIPT_OPTIONS: SelectOption[] = [
   { value: 'latin', label: 'Latin (Romanized)' },
 ];
 
+const TARGET_SCRIPT_OPTIONS: SelectOption[] = [
+  { value: 'latin', label: 'Latin (Romanized)' },
+  { value: 'devanagari', label: 'Devanagari' },
+];
+
 export interface TranscriptionConfig {
   language: string;
   script: string;
   forceRetranscribe: boolean;
   preserveCodeSwitching: boolean;
   speakerDiarization: boolean;
+  transliterate: boolean;
+  targetScript: string;
 }
 
 interface TranscriptionConfigStepProps {
@@ -94,7 +101,22 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
           checked={config.forceRetranscribe}
           onChange={(v) => onChange({ forceRetranscribe: v })}
         />
+        <ToggleRow
+          label="Transliterate transcript"
+          description="Also produce the transcript in another script (same language) — handy for romanizing Devanagari. Runs on the evaluation model."
+          checked={config.transliterate}
+          onChange={(v) => onChange({ transliterate: v })}
+        />
       </div>
+
+      {/* Target script — only when transliteration is on */}
+      {config.transliterate && (
+        <div>
+          <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Target script</label>
+          <Select value={config.targetScript} onChange={(targetScript) => onChange({ targetScript })} options={TARGET_SCRIPT_OPTIONS} />
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">Text already in this script is returned unchanged.</p>
+        </div>
+      )}
 
       {/* Stats summary — bottom, mirrors Select Calls */}
       <div className="flex gap-4 text-xs">

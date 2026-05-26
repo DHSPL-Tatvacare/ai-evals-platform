@@ -111,6 +111,8 @@ export function NewCallQualityEvalOverlay({
     forceRetranscribe: false,
     preserveCodeSwitching: true,
     speakerDiarization: true,
+    transliterate: false,
+    targetScript: 'latin',
   });
 
   // Step 5: Evaluators
@@ -215,7 +217,7 @@ export function NewCallQualityEvalOverlay({
         { key: 'Language', value: transcriptionConfig.language },
         { key: 'Script', value: transcriptionConfig.script },
         { key: 'Diarization', value: transcriptionConfig.speakerDiarization ? 'Yes' : 'No' },
-        { key: 'Transliterate', value: transcriptionConfig.language !== 'en' ? 'Yes → Latin (non-English)' : 'No' },
+        { key: 'Transliterate', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
       ],
     },
     {
@@ -264,8 +266,8 @@ export function NewCallQualityEvalOverlay({
         speaker_diarization: transcriptionConfig.speakerDiarization,
         preserve_code_switching: transcriptionConfig.preserveCodeSwitching,
         force_retranscribe: transcriptionConfig.forceRetranscribe,
-        transliterate: transcriptionConfig.language !== 'en',
-        target_script: 'latin',
+        transliterate: transcriptionConfig.transliterate,
+        target_script: transcriptionConfig.targetScript,
       },
       parallel_workers: parallelEnabled ? parallelWorkers : 1,
       preview_records: previewCalls,
