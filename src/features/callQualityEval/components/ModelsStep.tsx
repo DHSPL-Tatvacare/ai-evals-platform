@@ -6,7 +6,6 @@ import type { LLMProvider } from '@/services/api/aiSettingsApi';
 interface ModelsStepProps {
   transcription: LLMConfig;
   evaluation: LLMConfig;
-  transliterateEnabled: boolean;
   onTranscriptionChange: (c: LLMConfig) => void;
   onEvaluationChange: (c: LLMConfig) => void;
 }
@@ -14,7 +13,6 @@ interface ModelsStepProps {
 export function ModelsStep({
   transcription,
   evaluation,
-  transliterateEnabled,
   onTranscriptionChange,
   onEvaluationChange,
 }: ModelsStepProps) {
@@ -24,7 +22,7 @@ export function ModelsStep({
       title="Choose transcription and evaluation models"
       description="Transcription turns the recording into text and needs an audio-capable model. Evaluation scores the transcript and can be any text model."
     >
-      <WizardSection title="Transcription model" description="Only audio-capable models are listed. Used to transcribe the call recording.">
+      <WizardSection title="Transcription Model" description="Only audio-capable models are listed. Used to transcribe the call recording.">
         <LegacyLlmConfigCompat
           callSite="audio_transcription"
           provider={(transcription.provider || '') as LLMProvider | ''}
@@ -34,13 +32,12 @@ export function ModelsStep({
           layout="rows"
         />
       </WizardSection>
-      {/* Evaluation model reuses LLMConfigStep so temperature + thinking are preserved. */}
-      <LLMConfigStep config={evaluation} onChange={onEvaluationChange} />
-      {transliterateEnabled && (
-        <WizardSection title="Transliteration model" description="The transliteration pass is text-only and reuses the evaluation model above.">
-          <p className="text-xs text-[var(--text-muted)]">Transliteration runs on the evaluation model — no separate model needed.</p>
-        </WizardSection>
-      )}
+      <LLMConfigStep
+        config={evaluation}
+        onChange={onEvaluationChange}
+        modelSectionTitle="Evaluation Model (LLM as a Judge)"
+        modelSectionDescription="The model that scores each call against your rubrics. For non-English calls it also transliterates the transcript to Latin script, so supporting quotes stay easy to read and match."
+      />
     </WizardStepLayout>
   );
 }

@@ -12,7 +12,6 @@ import { ReviewStep, type ReviewSummary, type ReviewSection } from '@/features/e
 import { SelectCallsStep, type CallSelectionConfig } from './SelectCallsStep';
 import { buildCallQualitySelection } from './buildCallQualitySelection';
 import { TranscriptionConfigStep, type TranscriptionConfig } from './TranscriptionConfigStep';
-import { TransliterationStep } from './TransliterationStep';
 import { ModelsStep } from './ModelsStep';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
@@ -43,7 +42,6 @@ const STEPS: WizardStep[] = [
   { key: 'info', label: 'Run Info' },
   { key: 'calls', label: 'Select Calls' },
   { key: 'transcription', label: 'Transcription' },
-  { key: 'transliteration', label: 'Transliteration' },
   { key: 'evaluators', label: 'Evaluators' },
   { key: 'models', label: 'Models' },
   { key: 'review', label: 'Review' },
@@ -106,15 +104,13 @@ export function NewCallQualityEvalOverlay({
   const [previewCalls, setPreviewCalls] = useState<CallRecord[]>([]);
   const [matchingCount, setMatchingCount] = useState(0);
 
-  // Step 3: Transcription + Step 4: Transliteration (share the same config object)
+  // Step 3: Transcription (language, script, toggles + transliteration line items)
   const [transcriptionConfig, setTranscriptionConfig] = useState<TranscriptionConfig>({
     language: 'auto',
     script: 'auto',
     forceRetranscribe: false,
     preserveCodeSwitching: true,
     speakerDiarization: true,
-    transliterate: false,
-    targetScript: 'latin',
   });
 
   // Step 5: Evaluators
@@ -169,17 +165,16 @@ export function NewCallQualityEvalOverlay({
       ? Math.min(callConfig.sampleSize, matchingCount)
       : matchingCount;
 
-  // Validation — step indices: 0=info, 1=calls, 2=transcription, 3=transliteration, 4=evaluators, 5=models, 6=review
+  // Validation — step indices: 0=info, 1=calls, 2=transcription, 3=evaluators, 4=models, 5=review
   const canGoNext = useMemo(() => {
     switch (currentStep) {
       case 0: return runName.trim().length > 0;
       case 1: return resolvedCallCount > 0;
       case 2: return true; // transcription config always valid
-      case 3: return true; // transliteration config always valid
-      case 4: return selectedEvaluatorIds.length > 0;
-      case 5: return Boolean(transcriptionLlmConfig.provider) && Boolean(transcriptionLlmConfig.model)
+      case 3: return selectedEvaluatorIds.length > 0;
+      case 4: return Boolean(transcriptionLlmConfig.provider) && Boolean(transcriptionLlmConfig.model)
                   && Boolean(evaluationLlmConfig.provider) && Boolean(evaluationLlmConfig.model);
-      case 6: return resolvedCallCount > 0; // final submit must still resolve to ≥1 call
+      case 5: return resolvedCallCount > 0; // final submit must still resolve to ≥1 call
       default: return false;
     }
   }, [currentStep, runName, resolvedCallCount, selectedEvaluatorIds, transcriptionLlmConfig.provider, transcriptionLlmConfig.model, evaluationLlmConfig.provider, evaluationLlmConfig.model]);
@@ -220,7 +215,7 @@ export function NewCallQualityEvalOverlay({
         { key: 'Language', value: transcriptionConfig.language },
         { key: 'Script', value: transcriptionConfig.script },
         { key: 'Diarization', value: transcriptionConfig.speakerDiarization ? 'Yes' : 'No' },
-        { key: 'Transliterate', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
+        { key: 'Transliterate', value: transcriptionConfig.language !== 'en' ? 'Yes → Latin (non-English)' : 'No' },
       ],
     },
     {
@@ -269,15 +264,15 @@ export function NewCallQualityEvalOverlay({
         speaker_diarization: transcriptionConfig.speakerDiarization,
         preserve_code_switching: transcriptionConfig.preserveCodeSwitching,
         force_retranscribe: transcriptionConfig.forceRetranscribe,
-        transliterate: transcriptionConfig.transliterate,
-        target_script: transcriptionConfig.targetScript,
+        transliterate: transcriptionConfig.language !== 'en',
+        target_script: 'latin',
       },
       parallel_workers: parallelEnabled ? parallelWorkers : 1,
       preview_records: previewCalls,
     });
   }, [runName, runDescription, callConfig, transcriptionConfig, selectedEvaluatorIds, transcriptionLlmConfig, evaluationLlmConfig, parallelEnabled, parallelWorkers, previewCalls, submitJob]);
 
-  // Step content — indices: 0=info, 1=calls, 2=transcription, 3=transliteration, 4=evaluators, 5=models, 6=review
+  // Step content — indices: 0=info, 1=calls, 2=transcription, 3=evaluators, 4=models, 5=review
   const stepContent = (() => {
     switch (currentStep) {
       case 0:
@@ -311,26 +306,18 @@ export function NewCallQualityEvalOverlay({
         );
       case 3:
         return (
-          <TransliterationStep
-            config={transcriptionConfig}
-            onChange={(updates) => setTranscriptionConfig((prev) => ({ ...prev, ...updates }))}
-          />
-        );
-      case 4:
-        return (
           <EvaluatorPickerStep
             available={availableEvaluators}
             selectedIds={selectedEvaluatorIds}
             onSelectionChange={setSelectedEvaluatorIds}
           />
         );
-      case 5:
+      case 4:
         return (
           <div className="space-y-4">
             <ModelsStep
               transcription={transcriptionLlmConfig}
               evaluation={evaluationLlmConfig}
-              transliterateEnabled={transcriptionConfig.transliterate}
               onTranscriptionChange={setTranscriptionLlmConfig}
               onEvaluationChange={setEvaluationLlmConfig}
             />
@@ -344,7 +331,7 @@ export function NewCallQualityEvalOverlay({
             />
           </div>
         );
-      case 6:
+      case 5:
         return <ReviewStep summary={reviewSummary} sections={reviewSections} />;
       default:
         return null;
@@ -353,7 +340,7 @@ export function NewCallQualityEvalOverlay({
 
   return (
     <WizardOverlay
-      title="New Call Quality Evaluation"
+      title="Call Quality Evaluation"
       steps={STEPS}
       currentStep={currentStep}
       onClose={onClose}

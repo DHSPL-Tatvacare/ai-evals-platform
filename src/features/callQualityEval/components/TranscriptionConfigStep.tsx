@@ -1,11 +1,6 @@
+import { Info } from 'lucide-react';
 import { Select, Switch } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
-import {
-  WizardStepLayout,
-  WizardSection,
-  WizardFieldRow,
-  WizardMetric,
-} from '@/features/evalRuns/components/WizardStepLayout';
 
 const LANGUAGE_OPTIONS: SelectOption[] = [
   { value: 'hi', label: 'Hindi' },
@@ -26,8 +21,6 @@ export interface TranscriptionConfig {
   forceRetranscribe: boolean;
   preserveCodeSwitching: boolean;
   speakerDiarization: boolean;
-  transliterate: boolean;
-  targetScript: string;
 }
 
 interface TranscriptionConfigStepProps {
@@ -36,47 +29,84 @@ interface TranscriptionConfigStepProps {
   totalCalls: number;
 }
 
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <span className="text-[13px] font-medium text-[var(--text-primary)]">{label}</span>
+        <p className="text-[11px] text-[var(--text-muted)]">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} size="sm" className="mt-0.5 shrink-0" />
+    </div>
+  );
+}
+
 export function TranscriptionConfigStep({ config, onChange, totalCalls }: TranscriptionConfigStepProps) {
   return (
-    <WizardStepLayout
-      eyebrow="Transcription"
-      title="Configure transcription"
-      description="Calls without a transcript are transcribed before evaluation."
-    >
-      <WizardSection
-        aside={
-          <div className="flex gap-2">
-            <WizardMetric label="Total calls" value={totalCalls} />
-            <WizardMetric label="Need transcription" value={totalCalls} />
-          </div>
-        }
-      >
-        <WizardFieldRow
-          title="Language"
-          description="Spoken language of the calls. Auto-detect inspects each recording."
-          control={<Select value={config.language} onChange={(language) => onChange({ language })} options={LANGUAGE_OPTIONS} size="sm" />}
-        />
-        <WizardFieldRow
-          title="Source script"
-          description="Script the call is spoken in. Used when transliterating."
-          control={<Select value={config.script} onChange={(script) => onChange({ script })} options={SCRIPT_OPTIONS} size="sm" />}
-        />
-        <WizardFieldRow
-          title="Speaker diarization"
+    <div className="space-y-4">
+      {/* Info callout */}
+      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5">
+        <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
+        <p className="text-[12px] text-[var(--text-secondary)]">
+          Speech in each recording is converted to text before evaluation. Choose the spoken language and script; calls that already have a transcript are reused unless you force re-transcription.
+        </p>
+      </div>
+
+      {/* Language */}
+      <div>
+        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Language</label>
+        <Select value={config.language} onChange={(language) => onChange({ language })} options={LANGUAGE_OPTIONS} />
+      </div>
+
+      {/* Source script */}
+      <div>
+        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Source script</label>
+        <Select value={config.script} onChange={(script) => onChange({ script })} options={SCRIPT_OPTIONS} />
+      </div>
+
+      {/* Toggles */}
+      <div className="border-t border-[var(--border-subtle)] pt-3 mt-1 space-y-3">
+        <ToggleRow
+          label="Speaker diarization"
           description="Label each turn as agent or lead."
-          control={<Switch checked={config.speakerDiarization} onCheckedChange={(v) => onChange({ speakerDiarization: v })} size="sm" />}
+          checked={config.speakerDiarization}
+          onChange={(v) => onChange({ speakerDiarization: v })}
         />
-        <WizardFieldRow
-          title="Preserve code-switching"
+        <ToggleRow
+          label="Preserve code-switching"
           description="Keep Hindi ↔ English mixing exactly as spoken."
-          control={<Switch checked={config.preserveCodeSwitching} onCheckedChange={(v) => onChange({ preserveCodeSwitching: v })} size="sm" />}
+          checked={config.preserveCodeSwitching}
+          onChange={(v) => onChange({ preserveCodeSwitching: v })}
         />
-        <WizardFieldRow
-          title="Force re-transcription"
+        <ToggleRow
+          label="Force re-transcription"
           description="Re-transcribe even when a transcript already exists."
-          control={<Switch checked={config.forceRetranscribe} onCheckedChange={(v) => onChange({ forceRetranscribe: v })} size="sm" />}
+          checked={config.forceRetranscribe}
+          onChange={(v) => onChange({ forceRetranscribe: v })}
         />
-      </WizardSection>
-    </WizardStepLayout>
+      </div>
+
+      {/* Stats summary — bottom, mirrors Select Calls */}
+      <div className="flex gap-4 text-xs">
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+          <div className="text-[10px] font-medium text-[var(--text-muted)] uppercase">Total calls</div>
+          <div className="text-sm font-semibold text-[var(--text-primary)]">{totalCalls}</div>
+        </div>
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+          <div className="text-[10px] font-medium text-[var(--text-muted)] uppercase">Need transcription</div>
+          <div className="text-sm font-semibold text-[var(--text-primary)]">{totalCalls}</div>
+        </div>
+      </div>
+    </div>
   );
 }

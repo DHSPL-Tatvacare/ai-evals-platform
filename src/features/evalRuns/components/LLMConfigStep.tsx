@@ -18,6 +18,8 @@ export interface LLMConfig {
 interface LLMConfigStepProps {
   config: LLMConfig;
   onChange: (config: LLMConfig) => void;
+  modelSectionTitle?: string;
+  modelSectionDescription?: string;
   parallelCases?: boolean;
   caseWorkers?: number;
   maxTurns?: number;
@@ -34,6 +36,8 @@ interface LLMConfigStepProps {
 export function LLMConfigStep({
   config,
   onChange,
+  modelSectionTitle = 'Model Selection',
+  modelSectionDescription = 'Choose the provider, model, and Gemini thinking level for this run.',
   parallelCases = false,
   caseWorkers = 3,
   maxTurns = 10,
@@ -67,7 +71,7 @@ export function LLMConfigStep({
       title="Tune scoring and pacing"
       description="Keep model selection, evaluation temperature, and run-time throttling in one place so the execution profile is easy to reason about."
     >
-      <WizardSection title="Model Selection" description="Choose the provider, model, and Gemini thinking level for this run.">
+      <WizardSection title={modelSectionTitle} description={modelSectionDescription}>
         <LegacyLlmConfigCompat
           callSite="chat_text"
           provider={selectedProvider}
