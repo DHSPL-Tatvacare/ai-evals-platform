@@ -303,7 +303,7 @@ export function NodeConfigPanel() {
             {desc.nodeType}
           </div>
         </div>
-        {closeButton}
+        {!preview && closeButton}
       </div>
       {readOnly ? (
         <div className="flex items-center justify-between gap-2 rounded-[var(--radius-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
@@ -358,9 +358,10 @@ export function NodeConfigPanel() {
   // border so the docked panel reads as one unit.
   return (
     <div
-      className="flex h-full shrink-0 border-l border-[var(--border-subtle)]"
+      className="relative flex h-full shrink-0 border-l border-[var(--border-subtle)]"
       style={{ width: resize.width }}
     >
+      <div className="absolute right-2 top-2 z-[var(--z-dropdown)]">{closeButton}</div>
       {panel}
       <div
         role="separator"

@@ -76,31 +76,33 @@ export function AgentPromptPreview({ config }: Props) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-4 gap-4">
-      <span className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+    <div className="flex h-full min-h-0 flex-col p-4 gap-3">
+      <span className="shrink-0 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
         Agent prompt
       </span>
 
-      {prompt.trim().length > 0 && (
-        <div className="whitespace-pre-wrap break-words rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--text-primary)]">
-          {renderPrompt(prompt)}
-        </div>
-      )}
-
-      {welcomeMessage.trim().length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-            Welcome message
-          </span>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+        {prompt.trim().length > 0 && (
           <div className="whitespace-pre-wrap break-words rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--text-primary)]">
-            {renderPrompt(welcomeMessage)}
+            {renderPrompt(prompt)}
           </div>
-        </div>
-      )}
+        )}
 
-      {softError && (
-        <p className="text-xs text-[var(--color-error)]">{softError}</p>
-      )}
+        {welcomeMessage.trim().length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              Welcome message
+            </span>
+            <div className="whitespace-pre-wrap break-words rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--text-primary)]">
+              {renderPrompt(welcomeMessage)}
+            </div>
+          </div>
+        )}
+
+        {softError && (
+          <p className="text-xs text-[var(--color-error)]">{softError}</p>
+        )}
+      </div>
     </div>
   );
 }

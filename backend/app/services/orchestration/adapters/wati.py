@@ -395,7 +395,8 @@ class WatiAdapter:
                     break
             if not phone:
                 continue
-            out.append({"phone_number": phone, "label": ""})
+            label = str(item.get("channelName") or item.get("displayName") or item.get("name") or "")
+            out.append({"phone_number": phone, "label": label})
         return out
 
     async def send_template(

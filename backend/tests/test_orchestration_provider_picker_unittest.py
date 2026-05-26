@@ -835,6 +835,54 @@ async def test_wati_list_phone_numbers_4xx_raises():
             await adapter.list_phone_numbers(_WATI_CONN)
 
 
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_channelname_populates_label():
+    """channelName from the WATI response is surfaced as label on each item."""
+    fixture: dict[str, Any] = {
+        "result": True,
+        "phoneNumbers": [
+            {"phoneNumber": "+911234567890", "channelName": "Support Line"},
+            {"phoneNumber": "+911234567891", "channelName": "Sales Line"},
+            {"phoneNumber": "+911234567892"},
+        ],
+    }
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert len(result) == 3
+    assert result[0] == {"phone_number": "+911234567890", "label": "Support Line"}
+    assert result[1] == {"phone_number": "+911234567891", "label": "Sales Line"}
+    # Item without channelName/displayName/name falls back to empty label.
+    assert result[2] == {"phone_number": "+911234567892", "label": ""}
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_displayname_fallback_label():
+    """displayName is used as label when channelName is absent."""
+    fixture: dict[str, Any] = {
+        "result": True,
+        "phoneNumbers": [
+            {"phoneNumber": "+911234567890", "displayName": "Main Channel"},
+        ],
+    }
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert result == [{"phone_number": "+911234567890", "label": "Main Channel"}]
+
+
 # ─── provider_listings.list_connection_phone_numbers (service layer) ──────────
 
 
