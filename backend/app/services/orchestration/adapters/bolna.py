@@ -39,7 +39,10 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset({
     "error", "stopped", "balance-low",
     "call-disconnected",
 })
-_RNR_TOKENS = ("no-answer", "rnr", "busy")
+# "Didn't reach the person" outcomes — retry-worthy, routed like RNR. Includes
+# call-disconnected (connected then dropped) so a non-conversation isn't treated
+# as a hard failure. A normal-end call reports 'completed', not 'call-disconnected'.
+_NO_REACH_TOKENS = ("no-answer", "rnr", "busy", "call-disconnected")
 _COST_DIVISOR = Decimal("100")
 _COST_PRECISION = Decimal("0.0001")
 
@@ -71,7 +74,7 @@ def classify_outcome(status: Optional[str], status_reason: Optional[str]) -> str
         and "no-answer" not in r and "rnr" not in r and "busy" not in r
     ):
         return "bolna_answered"
-    if any(tok in s or tok in r for tok in _RNR_TOKENS):
+    if any(tok in s or tok in r for tok in _NO_REACH_TOKENS):
         return "bolna_rnr"
     return "bolna_failed"
 

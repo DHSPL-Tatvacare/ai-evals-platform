@@ -14,11 +14,31 @@ from app.models.orchestration import (
     WorkflowRunRecipientAction,
     WorkflowRunRecipientState,
 )
-from app.services.orchestration.adapters.bolna import BolnaAdapter, is_terminal
+from app.services.orchestration.adapters.bolna import (
+    BolnaAdapter,
+    _canonical_outcome,
+    classify_outcome,
+    is_terminal,
+)
 
 
 def test_call_disconnected_is_terminal():
     assert is_terminal("call-disconnected") is True
+
+
+def test_call_disconnected_maps_to_no_answer():
+    """A connect-then-drop is a no-reach outcome, not a failure — it must route
+    down the same branch as RNR/busy so the recovery path fires."""
+    assert classify_outcome("call-disconnected", None) == "bolna_rnr"
+    assert _canonical_outcome("bolna_rnr") == "no_answer"
+
+
+def test_outcome_buckets_unchanged_for_other_statuses():
+    assert classify_outcome("completed", None) == "bolna_answered"
+    assert classify_outcome("no-answer", None) == "bolna_rnr"
+    assert classify_outcome("busy", None) == "bolna_rnr"
+    assert classify_outcome("error", None) == "bolna_failed"
+    assert classify_outcome("balance-low", None) == "bolna_failed"
 
 
 def test_normalize_webhook_reads_nested_id_and_contact():
