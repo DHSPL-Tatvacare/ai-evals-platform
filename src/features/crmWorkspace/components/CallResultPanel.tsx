@@ -38,6 +38,11 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
     ? parseReasoningString(reasoningRaw)
     : [];
   const transcript = result?.transcript as string | undefined;
+  const transcriptTransliterated = result?.transcript_transliterated as string | undefined;
+  const transliterationMeta = result?.transliteration_meta as { target_script?: string } | undefined;
+  const hasTransliteration = Boolean(transcriptTransliterated && transcriptTransliterated !== transcript);
+  const [showTransliterated, setShowTransliterated] = useState(false);
+  const displayedTranscript = showTransliterated && transcriptTransliterated ? transcriptTransliterated : transcript;
 
   let overallScore: number | null = null;
   if (evalOutput && typeof evalOutput.overall_score === 'number') {
@@ -64,20 +69,20 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
     if (activeQuote && highlightRef.current) {
       highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [activeQuote, transcript]);
+  }, [activeQuote, displayedTranscript]);
 
-  // Build the transcript renderer once per (transcript, activeQuote) pair.
+  // Build the transcript renderer once per (displayedTranscript, activeQuote) pair.
   // Reuses findBestMatch from the voice-rx semantic comparison pane.
   const transcriptContent = useMemo(() => {
-    if (!transcript) return null;
-    if (!activeQuote) return <span>{transcript}</span>;
+    if (!displayedTranscript) return null;
+    if (!activeQuote) return <span>{displayedTranscript}</span>;
 
-    const match = findBestMatch([activeQuote], transcript);
-    if (!match) return <span>{transcript}</span>;
+    const match = findBestMatch([activeQuote], displayedTranscript);
+    if (!match) return <span>{displayedTranscript}</span>;
 
-    const before = transcript.slice(0, match.index);
-    const highlighted = transcript.slice(match.index, match.index + match.length);
-    const after = transcript.slice(match.index + match.length);
+    const before = displayedTranscript.slice(0, match.index);
+    const highlighted = displayedTranscript.slice(match.index, match.index + match.length);
+    const after = displayedTranscript.slice(match.index + match.length);
     return (
       <>
         <span>{before}</span>
@@ -90,7 +95,17 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
         <span>{after}</span>
       </>
     );
-  }, [transcript, activeQuote]);
+  }, [displayedTranscript, activeQuote]);
+
+  // Quote is in the version we're NOT showing → prompt a toggle (voice-rx cross-version pattern).
+  const quoteInOtherVersion = useMemo(() => {
+    if (!activeQuote || !hasTransliteration) return false;
+    const other = showTransliterated ? transcript : transcriptTransliterated;
+    return Boolean(
+      displayedTranscript && !findBestMatch([activeQuote], displayedTranscript)
+      && other && findBestMatch([activeQuote], other)
+    );
+  }, [activeQuote, hasTransliteration, showTransliterated, transcript, transcriptTransliterated, displayedTranscript]);
 
   const handleQuoteClick = (quote: string) => {
     setActiveQuote((prev) => (prev === quote ? null : quote));
@@ -100,8 +115,19 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
     <>
       <div className="hidden md:flex flex-1 min-h-0">
         <div className="w-[35%] min-w-[280px] max-w-[420px] flex flex-col min-h-0 border-r border-[var(--border-subtle)]">
-          <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-muted)] uppercase">
-            Transcript
+          <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-[var(--text-muted)] uppercase">Transcript</span>
+            {hasTransliteration && (
+              <button
+                type="button"
+                onClick={() => setShowTransliterated((v) => !v)}
+                className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
+              >
+                {showTransliterated
+                  ? 'Show original'
+                  : `Show ${transliterationMeta?.target_script ?? 'transliterated'}`}
+              </button>
+            )}
           </div>
           {recordingUrl && appId && (
             <div className="shrink-0 px-3 py-2 border-b border-[var(--border-subtle)]">
@@ -109,8 +135,17 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
             </div>
           )}
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
-            {transcript ? (
+            {displayedTranscript ? (
               <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed font-mono">
+                {quoteInOtherVersion && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTransliterated((v) => !v)}
+                    className="mb-2 block w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-left text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    This quote was found in the {showTransliterated ? 'original' : 'transliterated'} transcript — switch to view.
+                  </button>
+                )}
                 {transcriptContent}
               </div>
             ) : (
@@ -172,14 +207,27 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
             <AudioPlayer audioUrl={recordingUrl} appId={appId} />
           </div>
         )}
-        {transcript && (
+        {displayedTranscript && (
           <details className="shrink-0">
             <summary className="text-xs text-[var(--text-muted)] font-medium cursor-pointer py-1.5 px-1">
               Transcript
             </summary>
+            {hasTransliteration && (
+              <div className="px-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowTransliterated((v) => !v)}
+                  className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
+                >
+                  {showTransliterated
+                    ? 'Show original'
+                    : `Show ${transliterationMeta?.target_script ?? 'transliterated'}`}
+                </button>
+              </div>
+            )}
             <div className="max-h-[300px] overflow-y-auto px-2 py-1">
               <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed font-mono">
-                {transcript}
+                {displayedTranscript}
               </div>
             </div>
           </details>
