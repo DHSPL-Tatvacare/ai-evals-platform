@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -6,7 +6,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { usePageMetadata } from '@/config/pageMetadata';
-import type { WorkflowRun } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 import { dataSnapshotHash } from '@/features/orchestration/contracts/snapshotHash';
 import {
@@ -15,8 +14,10 @@ import {
 } from '@/features/orchestration/queries/workflows';
 import { useRunStream } from '@/features/orchestration/hooks/useRunStream';
 import { useRunStatusToasts } from '@/features/orchestration/hooks/useRunStatusToasts';
+import { useLiveWorkflowRun } from '@/features/orchestration/hooks/useLiveWorkflowRun';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import { Canvas } from './Canvas';
+import { CanvasRunIndicator } from './CanvasRunIndicator';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { NodeParseIssuesBanner } from './NodeParseIssuesBanner';
 import { Palette, usePaletteCatalogLoader } from './Palette';
@@ -26,7 +27,9 @@ import { RunInspectorOverlay } from './runs/RunInspectorOverlay';
 export function WorkflowBuilderPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const { icon, title } = usePageMetadata('campaigns');
-  const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
+  // Run identity is server truth from the polling runs query, so a live
+  // run survives navigation away/back and inspector close (no local state).
+  const { liveRun, runsQuery } = useLiveWorkflowRun(workflowId);
 
   // Phase-14 follow-up — run inspector overlay state lives in the URL so
   // deep links from the campaign listing (and shared bookmarks) work. The
@@ -158,9 +161,9 @@ export function WorkflowBuilderPage() {
   // Live run state renders directly on the builder canvas (node status
   // pills + edge traversal highlights via ``Canvas``'s ``activeRunId``
   // prop). The session hooks below own the SSE stream and toast surface
-  // — no panel, no split, no second canvas. Phase-13 UX rule.
-  const liveRunId =
-    activeRun && activeRun.workflowId === workflowId ? activeRun.id : undefined;
+  // — no panel, no split, no second canvas. Phase-13 UX rule. Workflow
+  // scoping is inherent — ``useWorkflowRuns`` is per-workflow.
+  const liveRunId = liveRun?.id;
   // Phase-14 follow-up — when the inspector overlay is open with a past
   // run via `?run=<id>`, the canvas must paint THAT run's per-node
   // statuses, not the live one. The inspector hydrates `runOverlayStore`
@@ -176,7 +179,11 @@ export function WorkflowBuilderPage() {
     <>
     <PageSurface icon={icon} title={title} showHeader={false} bleed>
       <WorkflowHeaderBar
-        onRunStarted={setActiveRun}
+        onRunStarted={() => {
+          // The new run surfaces via the runs query (server truth); refetch
+          // so it appears immediately instead of waiting for the next poll.
+          void runsQuery.refetch();
+        }}
         onOpenRuns={(runId: string | null) => {
           // `null` opens the inspector with no run pre-selected so the
           // picker drives selection; a string deep-links to that run.
@@ -191,7 +198,13 @@ export function WorkflowBuilderPage() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {viewMode === 'edit' ? <Palette /> : null}
-          <div className="min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1">
+            <CanvasRunIndicator
+              liveRun={liveRun}
+              onOpen={() =>
+                updateSearchParams({ run: liveRun?.id ?? '__open__', action: null })
+              }
+            />
             <Canvas activeRunId={canvasActiveRunId} />
           </div>
           <AnimatePresence initial={false}>

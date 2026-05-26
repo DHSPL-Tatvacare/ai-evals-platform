@@ -240,19 +240,6 @@ export function WorkflowHeaderBar({
   const isPublished = Boolean(currentPublishedVersionId);
   const saveDisabled = !canSave(lifecycle, inFlight);
   const publishDisabled = !canPublish(lifecycle, inFlight);
-  // Disable Run Now until the workflow has a published version. Backend will
-  // reject otherwise with `workflow has no published version`; failing in the
-  // UI gives a clearer affordance.
-  const runDisabled = inFlight !== 'idle' || !isPublished;
-  // Phase-14 follow-up — Test Run is a placeholder. Tooltip explains the
-  // upcoming behaviour; flipping `testRunReady` to `true` enables the
-  // button when the backend `dry_run` flag ships in a later phase.
-  const testRunReady = false;
-  const testRunDisabled = !testRunReady;
-  const testRunTooltip =
-    'Coming soon — runs without dispatching to real providers';
-
-  const onEnterEdit = () => setViewMode('edit');
 
   // Phase-14 follow-up — Runs icon stays leftmost in both modes. The
   // button is disabled with a tooltip when zero runs exist; the TQ
@@ -276,6 +263,24 @@ export function WorkflowHeaderBar({
 
   // Latest still-running run is the Stop target (runs come back newest-first).
   const activeRun = runs.find((r) => isRunActive(r.status)) ?? null;
+  // A live run locks every write/run action down to "only Stop" — derived
+  // once here, threaded into both action regions so it can't drift.
+  const runActive = Boolean(activeRun);
+
+  // Disable Run Now until the workflow has a published version. Backend will
+  // reject otherwise with `workflow has no published version`; failing in the
+  // UI gives a clearer affordance. A live run also locks it (Stop first).
+  const runDisabled = inFlight !== 'idle' || !isPublished || runActive;
+  // Phase-14 follow-up — Test Run is a placeholder. Tooltip explains the
+  // upcoming behaviour; flipping `testRunReady` to `true` enables the
+  // button when the backend `dry_run` flag ships in a later phase.
+  const testRunReady = false;
+  const testRunDisabled = !testRunReady;
+  const testRunTooltip =
+    'Coming soon — runs without dispatching to real providers';
+  const runActiveTooltip = 'A run is in progress — stop it first';
+
+  const onEnterEdit = () => setViewMode('edit');
   const cancelRunMutation = useCancelRun();
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const handleStopRun = () => {
@@ -336,6 +341,8 @@ export function WorkflowHeaderBar({
             isPublished={isPublished}
             testRunDisabled={testRunDisabled}
             testRunTooltip={testRunTooltip}
+            runActive={runActive}
+            runActiveTooltip={runActiveTooltip}
           />
         ) : (
           <EditModeActions
@@ -346,6 +353,8 @@ export function WorkflowHeaderBar({
             isPublished={isPublished}
             testRunDisabled={testRunDisabled}
             testRunTooltip={testRunTooltip}
+            runActive={runActive}
+            runActiveTooltip={runActiveTooltip}
             canImport={canImport}
             onSave={handleSave}
             onPublish={handlePublish}
@@ -411,6 +420,9 @@ interface ViewModeActionsProps {
   isPublished: boolean;
   testRunDisabled: boolean;
   testRunTooltip: string;
+  /** A live run is in flight — every action here locks down ("only Stop"). */
+  runActive: boolean;
+  runActiveTooltip: string;
 }
 
 function ViewModeActions({
@@ -420,6 +432,8 @@ function ViewModeActions({
   isPublished,
   testRunDisabled,
   testRunTooltip,
+  runActive,
+  runActiveTooltip,
 }: ViewModeActionsProps) {
   // Order (per product call): Edit, Test Run, Run Now. Edit + Test Run
   // are icon-only — the tooltip carries the label so the operator's eye
@@ -429,15 +443,16 @@ function ViewModeActions({
       <Button
         variant="secondary"
         onClick={onEnterEdit}
-        title="Edit workflow"
+        disabled={runActive}
+        title={runActive ? runActiveTooltip : 'Edit workflow'}
         aria-label="Edit workflow"
       >
         <Pencil className="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="secondary"
-        disabled={testRunDisabled}
-        title={`Test Run · ${testRunTooltip}`}
+        disabled={testRunDisabled || runActive}
+        title={runActive ? runActiveTooltip : `Test Run · ${testRunTooltip}`}
         aria-label="Test Run (coming soon)"
       >
         <FlaskConical className="h-3.5 w-3.5" />
@@ -447,9 +462,11 @@ function ViewModeActions({
         onClick={onRun}
         disabled={runDisabled}
         title={
-          runDisabled && !isPublished
-            ? 'Publish a version before running'
-            : 'Run Now'
+          runActive
+            ? runActiveTooltip
+            : runDisabled && !isPublished
+              ? 'Publish a version before running'
+              : 'Run Now'
         }
       >
         <Play className="mr-1 h-3.5 w-3.5" />
@@ -467,6 +484,9 @@ interface EditModeActionsProps {
   isPublished: boolean;
   testRunDisabled: boolean;
   testRunTooltip: string;
+  /** A live run is in flight — every item except Stop run locks down. */
+  runActive: boolean;
+  runActiveTooltip: string;
   /** True only on an empty new-workflow canvas. Controls whether the
    *  "Import JSON" menu item is shown — once a node exists, importing
    *  would silently nuke the operator's work. */
@@ -523,6 +543,8 @@ function EditModeActions({
   isPublished,
   testRunDisabled,
   testRunTooltip,
+  runActive,
+  runActiveTooltip,
   canImport,
   onSave,
   onPublish,
@@ -536,9 +558,10 @@ function EditModeActions({
   const primaryKind = pickPrimary(lifecycle);
   const primaryClick = primaryKind === 'save' ? onSave : onPublish;
   const primaryDisabled =
-    primaryKind === 'save' ? saveDisabled : publishDisabled;
-  const primaryTooltip =
-    primaryKind === 'save' && lifecycle.kind === 'clean-published'
+    (primaryKind === 'save' ? saveDisabled : publishDisabled) || runActive;
+  const primaryTooltip = runActive
+    ? runActiveTooltip
+    : primaryKind === 'save' && lifecycle.kind === 'clean-published'
       ? 'No changes to save — edit a node first'
       : undefined;
   const PrimaryIcon = primaryKind === 'save' ? Save : Send;
@@ -618,6 +641,14 @@ function EditModeActions({
     },
   ];
 
+  // A live run locks every menu item except Stop run — OR it into each
+  // item's disabled and surface the "stop it first" tooltip as the cause.
+  const gatedItems = items.map((it) =>
+    runActive && it.key !== 'stop-run'
+      ? { ...it, disabled: true, title: runActiveTooltip }
+      : it,
+  );
+
   return (
     <>
       <Popover>
@@ -636,7 +667,7 @@ function EditModeActions({
           className="z-[var(--z-popover,150)] min-w-[180px] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 shadow-lg"
         >
           <ul className="flex flex-col">
-            {items.map((it) => (
+            {gatedItems.map((it) => (
               <li key={it.key}>
                 <button
                   type="button"

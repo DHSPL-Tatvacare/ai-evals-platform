@@ -123,6 +123,31 @@ describe('useRunStatusToasts', () => {
     expect(notificationService.error).toHaveBeenCalledTimes(1);
   });
 
+  it('does not toast when the first observed status is already terminal', () => {
+    // Inspector-open hydration: store settles on a terminal status BEFORE the
+    // hook mounts, so the hook's first observation is terminal (no transition).
+    useRunOverlayStore.getState().activateRun('run-hydrated');
+    useRunOverlayStore.getState().applyEvent('run-hydrated', { type: 'run.completed' });
+
+    renderHook(() => useRunStatusToasts('run-hydrated'));
+
+    expect(notificationService.success).not.toHaveBeenCalled();
+  });
+
+  it('toasts once on a running -> completed transition', () => {
+    useRunOverlayStore.getState().activateRun('run-trans');
+    useRunOverlayStore.getState().applyEvent('run-trans', { type: 'run.started' });
+
+    const { rerender } = renderHook(() => useRunStatusToasts('run-trans'));
+
+    act(() => {
+      useRunOverlayStore.getState().applyEvent('run-trans', { type: 'run.completed' });
+    });
+    rerender();
+
+    expect(notificationService.success).toHaveBeenCalledTimes(1);
+  });
+
   it('does NOT fire for cancelled runs', () => {
     useRunOverlayStore.getState().activateRun('run-can');
     useRunOverlayStore.getState().applyEvent('run-can', { type: 'run.started' });

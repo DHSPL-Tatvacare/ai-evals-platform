@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useRunOverlayStore } from '@/features/orchestration/store/runOverlayStore';
+import { isRunActive, type RunStatus } from '@/features/orchestration/types';
 import { notificationService } from '@/services/notifications';
 
 /**
@@ -27,9 +28,19 @@ export function _resetToastedForTest(): void {
 export function useRunStatusToasts(runId: string | undefined): void {
   const runStatus = useRunOverlayStore((s) => s.runStatus);
   const runError = useRunOverlayStore((s) => s.runError);
+  const prevStatusRef = useRef<{ runId: string; status: RunStatus } | null>(null);
 
   useEffect(() => {
     if (!runId) return;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = { runId, status: runStatus };
+    // Only a genuine active->terminal transition for THIS run toasts. A first
+    // observation (no prev for this run) or a hydrated terminal snapshot (prev
+    // already terminal / different run) stays silent — that is the
+    // false-toast-on-inspector-open bug.
+    const isTransition =
+      prev !== null && prev.runId === runId && isRunActive(prev.status);
+    if (!isTransition) return;
     if (runStatus !== 'completed' && runStatus !== 'failed') return;
     if (toastedRunIds.has(runId)) return;
 
