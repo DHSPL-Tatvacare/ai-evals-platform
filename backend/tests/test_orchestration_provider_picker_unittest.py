@@ -883,6 +883,55 @@ async def test_wati_list_phone_numbers_displayname_fallback_label():
     assert result == [{"phone_number": "+911234567890", "label": "Main Channel"}]
 
 
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_no_plus_prefix_normalized_to_e164():
+    """phoneNumber without leading + must be returned with + so stored E.164 values match."""
+    fixture: dict[str, Any] = {
+        "result": True,
+        "phoneNumbers": [
+            {"phoneNumber": "918511975757", "channelName": "GoodFlip Support"},
+            {"phoneNumber": "919876543210", "channelName": "Sales"},
+        ],
+    }
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert len(result) == 2
+    assert result[0]["phone_number"] == "+918511975757"
+    assert result[0]["label"] == "GoodFlip Support"
+    assert result[1]["phone_number"] == "+919876543210"
+    assert result[1]["label"] == "Sales"
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_already_plus_prefixed_not_double_prefixed():
+    """phoneNumber already starting with + must not get an extra + prepended."""
+    fixture: dict[str, Any] = {
+        "result": True,
+        "phoneNumbers": [
+            {"phoneNumber": "+918511975757", "channelName": "GoodFlip Support"},
+        ],
+    }
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert len(result) == 1
+    assert result[0]["phone_number"] == "+918511975757"
+    assert not result[0]["phone_number"].startswith("++")
+
+
 # ─── provider_listings.list_connection_phone_numbers (service layer) ──────────
 
 

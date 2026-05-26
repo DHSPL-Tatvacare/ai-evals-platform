@@ -395,6 +395,10 @@ class WatiAdapter:
                     break
             if not phone:
                 continue
+            # WATI returns bare numbers (no leading +); normalize to E.164 so stored values match.
+            phone = phone.strip()
+            if phone and not phone.startswith("+"):
+                phone = f"+{phone}"
             label = str(item.get("channelName") or item.get("displayName") or item.get("name") or "")
             out.append({"phone_number": phone, "label": label})
         return out
