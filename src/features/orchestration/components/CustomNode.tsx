@@ -50,6 +50,10 @@ export interface CustomNodeData extends Record<string, unknown> {
    *  hides. Defaults to true if not provided to keep older callers
    *  (run-canvas overlay, fixture data) rendering as before. */
   editable?: boolean;
+  /** Hover-driven canvas spotlight: `'on'` focuses this node, `'dim'` fades
+   *  it, undefined when no spotlight is active. Mirrored from the store by
+   *  the Canvas (see `spotlightNodeId`). */
+  spotlight?: 'on' | 'dim';
 }
 
 function asOverlay(value: unknown): NodeOverlay | undefined {
@@ -122,6 +126,7 @@ function asCustomData(value: unknown): CustomNodeData {
     overlay: asOverlay(v.overlay),
     publishErrors: asPublishErrors(v.publishErrors),
     editable: typeof v.editable === 'boolean' ? v.editable : true,
+    spotlight: v.spotlight === 'on' || v.spotlight === 'dim' ? v.spotlight : undefined,
   };
 }
 
@@ -294,6 +299,7 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
       category={data.displayCategory ?? data.category}
       icon={NODE_TYPE_ICONS[data.nodeType]}
       selected={Boolean(selected)}
+      spotlight={data.spotlight}
       barTrailing={barTrailing}
       footer={footer}
       handles={handles}

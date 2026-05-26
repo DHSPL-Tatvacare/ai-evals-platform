@@ -23,6 +23,10 @@ interface NodeCardProps {
   /** Override the category default icon (e.g. a per-node-type icon). */
   icon?: LucideIcon;
   selected?: boolean;
+  /** Canvas spotlight (canvas variant only): `'on'` focuses this card with a
+   *  bright ring + raised shadow; `'dim'` fades + slightly blurs it so the
+   *  focused node stands out. Undefined = no spotlight active. */
+  spotlight?: 'on' | 'dim';
   /** Right-aligned slot inside the canvas-variant category bar. Used by
    *  the run canvas to render an inline status pill. */
   barTrailing?: ReactNode;
@@ -55,6 +59,7 @@ export function NodeCard({
   variant = 'canvas',
   icon,
   selected = false,
+  spotlight,
   barTrailing,
   footer,
   handles,
@@ -125,8 +130,10 @@ export function NodeCard({
       title={title}
       className={cn(
         'group relative min-w-[220px] max-w-[280px] overflow-visible rounded-[var(--radius-default)] border-2',
-        'bg-[var(--bg-elevated)] shadow-sm transition-shadow',
+        'bg-[var(--bg-elevated)] shadow-sm transition-all',
         selected ? 'ring-2 ring-[var(--color-brand-accent)]/30' : 'hover:shadow-md',
+        spotlight === 'dim' && 'opacity-30 blur-[1px] grayscale',
+        spotlight === 'on' && 'ring-2 ring-[var(--color-brand-accent)] shadow-lg',
         className,
       )}
       style={canvasStyle}

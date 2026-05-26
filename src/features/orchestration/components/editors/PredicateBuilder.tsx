@@ -4,6 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
+import { useFieldSpotlight } from '@/features/orchestration/components/inspector/fieldSpotlight';
 import {
   InspectorCard,
   InspectorEmptyState,
@@ -146,6 +147,7 @@ function LeafEditor({
   onChange(next: LeafPredicate): void;
   fieldOptions?: string[];
 }) {
+  const spotlight = useFieldSpotlight();
   return (
     <div className="grid grid-cols-3 gap-2">
       <InspectorField label="Field" className="gap-1">
@@ -156,6 +158,7 @@ function LeafEditor({
             onChange={(next) => onChange({ ...value, field: next })}
             options={fieldOptions.map((f) => ({ value: f, label: f }))}
             placeholder="payload field"
+            {...spotlight}
           />
         ) : (
           <Input

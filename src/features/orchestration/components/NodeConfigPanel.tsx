@@ -14,6 +14,7 @@ import type {
 } from '@/features/orchestration/types';
 
 import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
+import { FieldSpotlightProvider } from './inspector/FieldSpotlightProvider';
 import { InspectorSection } from './inspector/InspectorPrimitives';
 import { ConditionalBranchesEditor } from './editors/ConditionalBranchesEditor';
 import { DatasetPicker } from './editors/DatasetPicker';
@@ -89,14 +90,14 @@ export function NodeConfigPanel() {
 
   if (!node) {
     return (
-      <div className="flex h-full w-80 items-center justify-center border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+      <div className="flex h-full w-[var(--inspector-width-node)] items-center justify-center border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
         Select a node to edit its config.
       </div>
     );
   }
   if (!desc) {
     return (
-      <div className="flex h-full w-80 flex-col border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+      <div className="flex h-full w-[var(--inspector-width-node)] flex-col border-l border-[var(--border-subtle)] p-4 text-sm text-[var(--text-secondary)]">
         <div className="mb-2 flex items-start justify-between gap-2">
           <span>Unknown node type: {node.type}</span>
           {closeButton}
@@ -275,7 +276,7 @@ export function NodeConfigPanel() {
   const emptyState = desc.editorHints?.emptyStateMessage as string | undefined;
 
   return (
-    <div className="flex h-full w-80 flex-col gap-3 overflow-y-auto border-l border-[var(--border-subtle)] p-4">
+    <div className="flex h-full w-[var(--inspector-width-node)] flex-col gap-3 overflow-y-auto border-l border-[var(--border-subtle)] p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate font-medium text-[var(--text-primary)]">
@@ -314,7 +315,9 @@ export function NodeConfigPanel() {
        *  becomes non-interactive when `disabled` is set. Cheaper than
        *  threading a `readOnly` prop through every specialised editor. */}
       <fieldset disabled={readOnly} className="contents">
-        {body}
+        <FieldSpotlightProvider fields={upstreamData?.fields ?? []}>
+          {body}
+        </FieldSpotlightProvider>
         {desc.requiredPayloadFields && desc.requiredPayloadFields.length > 0 ? (
           <FieldHint
             label="Requires payload fields"

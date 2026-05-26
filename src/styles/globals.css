@@ -160,6 +160,10 @@
   --overlay-width-md: 700px;
   --overlay-width-lg: 900px;
 
+  /* Orchestration node inspector (every node except the wide AI-agent
+     inspector, which owns its own resizable shell). */
+  --inspector-width-node: 416px;
+
   /* Z-index scale */
   --z-base: 1;
   --z-sticky: 10;
@@ -638,6 +642,16 @@ body .react-flow__minimap {
 }
 body .react-flow__attribution {
   display: none;
+}
+
+/* Canvas spotlight: while an upstream-field option is hovered in the
+   inspector, the wrapper carries `orch-canvas-spotlight` and every edge dims
+   so the focused node (styled crisp by NodeCard) stands out. Nodes dim
+   themselves via NodeCard's spotlight prop; edges have no per-node prop, so
+   they fade here. */
+body .orch-canvas-spotlight .react-flow__edge {
+  opacity: 0.12;
+  transition: opacity 150ms ease;
 }
 
 /* Subtle scrollbar for in-page scroll containers (chat panes, detail panels)

@@ -4,6 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
+import { useFieldSpotlight } from '@/features/orchestration/components/inspector/fieldSpotlight';
 import { InspectorField } from '@/features/orchestration/components/inspector/InspectorPrimitives';
 import {
   formatStringListInputValue,
@@ -184,6 +185,7 @@ function LeafRow({
   onChange(next: LeafPredicate): void;
   fieldOptions?: string[];
 }) {
+  const spotlight = useFieldSpotlight();
   // Always offer the current field as an option so a hand-typed key isn't
   // dropped when upstream suggestions don't include it.
   const options = useMemo(() => {
@@ -202,6 +204,7 @@ function LeafRow({
             onChange={(next) => onChange({ ...value, field: next })}
             options={options.map((f) => ({ value: f, label: f }))}
             placeholder="payload field"
+            {...spotlight}
           />
         ) : (
           <Input

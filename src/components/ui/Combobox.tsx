@@ -31,6 +31,12 @@ interface ComboboxBaseProps {
   onSearchChange?: (query: string) => void;
   /** Show a loading row inside the dropdown. Intended for async sources. */
   loading?: boolean;
+  /** Fires with an option's value when the pointer enters that row. Pairs
+   *  with `onOptionHoverLeave`. Lets a consumer react to which option the
+   *  user is considering (e.g. spotlight the matching canvas node). */
+  onOptionHover?: (value: string) => void;
+  /** Fires when the pointer leaves the option list or the dropdown closes. */
+  onOptionHoverLeave?: () => void;
 }
 
 interface SingleComboboxProps extends ComboboxBaseProps {
@@ -57,6 +63,8 @@ export function Combobox(props: ComboboxProps) {
     multi = false,
     onSearchChange,
     loading = false,
+    onOptionHover,
+    onOptionHoverLeave,
   } = props;
   const isAsync = typeof onSearchChange === 'function';
 
@@ -136,6 +144,12 @@ export function Combobox(props: ComboboxProps) {
   useEffect(() => {
     setHighlightIndex(0);
   }, [filtered.length]);
+
+  // A closed dropdown can have no hovered option — clear any lingering
+  // hover state (select, escape, outside-click, or first mount all land here).
+  useEffect(() => {
+    if (!isOpen) onOptionHoverLeave?.();
+  }, [isOpen, onOptionHoverLeave]);
 
   const updatePosition = useCallback(() => {
     const trigger = containerRef.current;
@@ -346,6 +360,7 @@ export function Combobox(props: ComboboxProps) {
               ref={listRef}
               className="overflow-y-auto py-1"
               style={{ maxHeight: Math.min(position.maxHeight, 280) }}
+              onMouseLeave={() => onOptionHoverLeave?.()}
             >
               {loading ? (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Loading…</div>
@@ -362,6 +377,7 @@ export function Combobox(props: ComboboxProps) {
                       type="button"
                       data-option
                       onClick={() => handleSelect(opt.value)}
+                      onMouseEnter={() => onOptionHover?.(opt.value)}
                       title={opt.meta ? `${opt.label} — ${opt.meta}` : opt.label}
                       className={cn(
                         'w-full px-3 py-1.5 text-left text-[13px] flex items-center gap-2 transition-colors',

@@ -28,6 +28,7 @@ import {
   type NodeTypeDescriptor,
   type WorkflowDefinitionNode,
 } from '@/features/orchestration/types';
+import { cn } from '@/utils/cn';
 import { resolveColor } from '@/utils/statusColors';
 import {
   deriveOutputEdges,
@@ -131,6 +132,9 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   const edges = useWorkflowBuilderStore((s) => s.edges);
   const palette = useWorkflowBuilderStore((s) => s.paletteCatalog);
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  // Hover-driven canvas spotlight. When set, the focused node renders crisp
+  // and every other node + edge dims (see NodeCard + globals.css).
+  const spotlightNodeId = useWorkflowBuilderStore((s) => s.spotlightNodeId);
   // Phase-14 follow-up — view mode disables every write affordance on
   // the canvas (drop, connect, edge-remove, per-node delete). Click-to-
   // select still works so the inspector can render the node read-only.
@@ -189,6 +193,15 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
             // Empty for nodes without errors; CustomNode treats `[]` and
             // `undefined` the same.
             publishErrors: publishErrorsByNode[n.id],
+            // Spotlight state mirrored per node (like `selected`): 'on' for
+            // the focused node, 'dim' for the rest while a spotlight is
+            // active, undefined when no spotlight.
+            spotlight:
+              spotlightNodeId == null
+                ? undefined
+                : n.id === spotlightNodeId
+                  ? 'on'
+                  : 'dim',
             // Phase-14 follow-up — when false, the per-node delete affordance
             // hides and the card stays read-only. Click-to-select still
             // works so the inspector can show the config.
@@ -196,7 +209,7 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
           },
         };
       }),
-    [nodes, palette, selectedNodeId, activeOverlay, publishErrorsByNode, isEdit],
+    [nodes, palette, selectedNodeId, spotlightNodeId, activeOverlay, publishErrorsByNode, isEdit],
   );
 
   const rfEdges: Edge[] = useMemo(
@@ -360,7 +373,12 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   }, []);
 
   return (
-    <div ref={wrapperRef} className="h-full w-full" onDrop={onDrop} onDragOver={onDragOver}>
+    <div
+      ref={wrapperRef}
+      className={cn('h-full w-full', spotlightNodeId && 'orch-canvas-spotlight')}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+    >
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}

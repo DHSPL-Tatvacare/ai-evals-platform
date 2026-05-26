@@ -1,5 +1,6 @@
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
+import { useFieldSpotlight } from '@/features/orchestration/components/inspector/fieldSpotlight';
 
 interface Props {
   value: string;
@@ -24,6 +25,7 @@ export function PayloadFieldPicker({
   fieldOptions,
   placeholder,
 }: Props) {
+  const spotlight = useFieldSpotlight();
   if (fieldOptions && fieldOptions.length > 0) {
     return (
       <div className="flex flex-col gap-0.5">
@@ -32,6 +34,7 @@ export function PayloadFieldPicker({
           onChange={onChange}
           options={fieldOptions.map((f) => ({ value: f, label: f }))}
           placeholder={placeholder ?? 'payload field'}
+          {...spotlight}
         />
         {value && !fieldOptions.includes(value) ? (
           <span className="text-[11px] text-[var(--color-warning)]">

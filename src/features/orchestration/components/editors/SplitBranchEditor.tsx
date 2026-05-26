@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { useFieldSpotlight } from '@/features/orchestration/components/inspector/fieldSpotlight';
 import { cn } from '@/utils/cn';
 import type {
   SplitBranch,
@@ -41,6 +42,7 @@ function makeBranchId(label: string): string {
 }
 
 export function SplitBranchEditor({ value, onChange, fieldOptions }: Props) {
+  const spotlight = useFieldSpotlight();
   const mode: SplitMode = value.mode ?? 'by_field';
   const branches = useMemo(() => value.branches ?? [], [value.branches]);
 
@@ -106,6 +108,7 @@ export function SplitBranchEditor({ value, onChange, fieldOptions }: Props) {
               onChange={(next) => onChange({ ...value, field: next })}
               options={fieldOptions.map((f) => ({ value: f, label: f }))}
               placeholder="payload field"
+              {...spotlight}
             />
           ) : (
             <Input

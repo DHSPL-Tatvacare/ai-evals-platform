@@ -75,6 +75,11 @@ interface WorkflowBuilderState {
   nodes: WorkflowDefinitionNode[];
   edges: WorkflowDefinitionEdge[];
   selectedNodeId: string | null;
+  /** Node spotlighted on the canvas (dim everything else, focus this one).
+   *  Hover-driven and transient: set while the pointer is over an
+   *  upstream-field option in the inspector, cleared on leave. Never
+   *  hashed — it's presentation-only, like `viewport`. */
+  spotlightNodeId: string | null;
   /** Persisted React Flow viewport — null until first load/move-end. */
   viewport: ViewportState | null;
 
@@ -189,6 +194,10 @@ interface WorkflowBuilderState {
    *  expressed as its own action so callers (Canvas pane click, ESC handler,
    *  inspector close button) read intent at the call site. */
   clearSelection(): void;
+  /** Spotlight a node on the canvas (or clear with `null`). Hover-driven
+   *  from the inspector's upstream-field pickers — the canvas dims every
+   *  other node + edge and focuses this one. */
+  setSpotlightNode(nodeId: string | null): void;
   setViewport(viewport: ViewportState | null): void;
 
   /** Mark that a save/publish is in flight. Lifecycle derivation routes
@@ -314,6 +323,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     nodes: [],
     edges: [],
     selectedNodeId: null,
+    spotlightNodeId: null,
     viewport: null,
 
     committedDataHash: EMPTY_DATA_HASH,
@@ -343,6 +353,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         nodes: [],
         edges: [],
         selectedNodeId: null,
+        spotlightNodeId: null,
         viewport: null,
         committedDataHash: EMPTY_DATA_HASH,
         currentDataHash: EMPTY_DATA_HASH,
@@ -519,6 +530,8 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
           nodes,
           edges,
           selectedNodeId: s.selectedNodeId === nodeId ? null : s.selectedNodeId,
+          spotlightNodeId:
+            s.spotlightNodeId === nodeId ? null : s.spotlightNodeId,
           currentDataHash: dataSnapshotHash(nodes, edges),
           currentLayoutHash: layoutSnapshotHash(nodes),
         };
@@ -608,6 +621,8 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
 
     clearSelection: () => set({ selectedNodeId: null }),
+
+    setSpotlightNode: (nodeId) => set({ spotlightNodeId: nodeId }),
 
     setViewport: (viewport) => {
       // Updating the viewport must NOT flip dirty; pan/zoom are presentation-
