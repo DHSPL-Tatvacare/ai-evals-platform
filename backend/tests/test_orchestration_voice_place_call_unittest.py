@@ -206,6 +206,9 @@ _BOLNA_COMPLETED_FIXTURE = {
     "transcript": "Agent: Hi. User: Hello.",
     "recording_url": "https://bolna.s3/abc.mp3",
     "total_cost": 27.04,
+    "cost_breakdown": {"llm": 10.0, "synthesizer": {"tts": 5.0}, "transcriber": 2.0},
+    "extracted_data": {"intent": "interested", "callback_at": "evening"},
+    "telephony_provider": "twilio",
     "user_data": {"recipient_id": "rid-1", "lead_name": "Aman"},
 }
 
@@ -234,6 +237,18 @@ def test_extract_capture_pulls_top_level_fields():
     assert out["duration_sec"] == 42
     assert out["total_cost"] == 0.2704
     assert out["hangup_reason"] == "user-hangup"
+
+
+def test_extract_capture_includes_cost_breakdown_extracted_data_provider():
+    out = _extract_capture(_BOLNA_COMPLETED_FIXTURE)
+    # cost_breakdown is recursively subunit-normalized (÷100), nesting preserved
+    assert out["cost_breakdown"] == {
+        "llm": 0.1,
+        "synthesizer": {"tts": 0.05},
+        "transcriber": 0.02,
+    }
+    assert out["extracted_data"] == {"intent": "interested", "callback_at": "evening"}
+    assert out["telephony_provider"] == "twilio"
 
 
 def test_extract_capture_handles_telephony_data_nesting():

@@ -106,6 +106,15 @@ def _normalize_cost_scalar(value: Any) -> Any:
     return float(normalized)
 
 
+def _normalize_cost_tree(value: Any) -> Any:
+    # Bolna nests per-component costs; normalize every scalar leaf, keep shape.
+    if isinstance(value, dict):
+        return {k: _normalize_cost_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_cost_tree(item) for item in value]
+    return _normalize_cost_scalar(value)
+
+
 def _extract_capture(event: dict[str, Any]) -> dict[str, Any]:
     # Bolna splits some fields between the top level and a telephony_data nest.
     telephony = event.get("telephony_data") if isinstance(event.get("telephony_data"), dict) else {}
@@ -128,8 +137,11 @@ def _extract_capture(event: dict[str, Any]) -> dict[str, Any]:
         "recording_url": pick("recording_url", "recordingUrl"),
         "duration_sec": pick("duration", "duration_seconds"),
         "total_cost": _normalize_cost_scalar(pick("total_cost", "cost")),
+        "cost_breakdown": _normalize_cost_tree(pick("cost_breakdown")),
+        "extracted_data": pick("extracted_data"),
         "error_message": pick("error_message", "error"),
         "hangup_reason": pick("hangup_reason", "status_reason"),
+        "telephony_provider": pick("telephony_provider"),
     }
 
 
