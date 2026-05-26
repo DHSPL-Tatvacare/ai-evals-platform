@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { X } from 'lucide-react';
 
+import { cn } from '@/utils/cn';
 import { useCurrentAppId } from '@/hooks';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type {
@@ -16,6 +17,8 @@ import type {
 import { DynamicConfigForm, type JsonSchema } from './DynamicConfigForm';
 import { FieldSpotlightProvider } from './inspector/FieldSpotlightProvider';
 import { InspectorSection } from './inspector/InspectorPrimitives';
+import { useResizableInspectorWidth } from './inspector/useResizableInspectorWidth';
+import { getPreviewForNode } from './preview/previewRegistry';
 import { ConditionalBranchesEditor } from './editors/ConditionalBranchesEditor';
 import { DatasetPicker } from './editors/DatasetPicker';
 import { EventTriggerInspector } from './EventTriggerInspector';
@@ -47,6 +50,10 @@ export function NodeConfigPanel() {
   const viewMode = useWorkflowBuilderStore((s) => s.viewMode);
   const setViewMode = useWorkflowBuilderStore((s) => s.setViewMode);
   const readOnly = viewMode === 'view';
+
+  // Resizable 2-pane shell: width + drag handlers live here so any node type
+  // with a registered preview docks into the same wide, resizable inspector.
+  const resize = useResizableInspectorWidth();
 
   // Descriptor lookup must come before any conditional rendering so the
   // hooks below see a stable input identity regardless of node selection.
@@ -275,8 +282,18 @@ export function NodeConfigPanel() {
 
   const emptyState = desc.editorHints?.emptyStateMessage as string | undefined;
 
-  return (
-    <div className="flex h-full w-[var(--inspector-width-node)] flex-col gap-3 overflow-y-auto border-l border-[var(--border-subtle)] p-4">
+  const preview = getPreviewForNode(node.type);
+
+  // The standard inspector form keeps its fixed width. When a preview exists
+  // it loses its own left border (the 2-pane wrapper owns that) so the seam
+  // sits between the form and the preview, not before the form.
+  const panel = (
+    <div
+      className={cn(
+        'flex h-full w-[var(--inspector-width-node)] flex-col gap-3 overflow-y-auto p-4',
+        !preview && 'border-l border-[var(--border-subtle)]',
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate font-medium text-[var(--text-primary)]">
@@ -331,6 +348,32 @@ export function NodeConfigPanel() {
           />
         ) : null}
       </fieldset>
+    </div>
+  );
+
+  if (!preview) return panel;
+
+  // 2-pane shell: form (fixed width) + drag handle + preview (remaining
+  // space). The outer row owns the total `inspectorWidth` and the left
+  // border so the docked panel reads as one unit.
+  return (
+    <div
+      className="flex h-full shrink-0 border-l border-[var(--border-subtle)]"
+      style={{ width: resize.width }}
+    >
+      {panel}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector"
+        onPointerDown={resize.onResizePointerDown}
+        onPointerMove={resize.onResizePointerMove}
+        onPointerUp={resize.onResizePointerUp}
+        className="group relative w-1.5 shrink-0 cursor-col-resize border-l border-[var(--border-subtle)] bg-transparent"
+      >
+        <span className="absolute left-0 top-1/2 h-10 w-0.5 -translate-y-1/2 rounded bg-[var(--border-default)] group-hover:bg-[var(--color-brand)]" />
+      </div>
+      <div className="min-w-0 flex-1 bg-[var(--bg-primary)]">{preview(config)}</div>
     </div>
   );
 }
