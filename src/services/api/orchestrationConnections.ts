@@ -90,6 +90,18 @@ export interface AgentVariablesParams {
   templateName?: string;
 }
 
+export interface ProviderPhoneNumberSummary {
+  phoneNumber: string;
+  label: string;
+}
+
+export interface ProviderPhoneNumbersListResponse {
+  provider: string;
+  items: ProviderPhoneNumberSummary[];
+  /** Soft error: HTTP stays 200; picker keeps working with manual entry. */
+  error: string | null;
+}
+
 export interface ProviderAgentSummary {
   id: string;
   name: string;
@@ -241,6 +253,18 @@ export async function getAgentVariables(
   const qs = q.toString();
   return apiRequest<AgentVariablesResponse>(
     `/api/orchestration/connections/${connectionId}/agent-variables${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function listConnectionPhoneNumbers(
+  connectionId: string,
+  params?: { refresh?: boolean },
+): Promise<ProviderPhoneNumbersListResponse> {
+  const q = new URLSearchParams();
+  if (params?.refresh) q.set('refresh', 'true');
+  const qs = q.toString();
+  return apiQueryFn<ProviderPhoneNumbersListResponse>(
+    `/api/orchestration/connections/${connectionId}/phone-numbers${qs ? `?${qs}` : ''}`,
   );
 }
 

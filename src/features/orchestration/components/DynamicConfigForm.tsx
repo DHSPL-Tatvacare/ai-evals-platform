@@ -19,6 +19,7 @@ import {
 import { ActionTemplatePicker } from '@/features/admin/integrations/ActionTemplatePicker';
 import { BolnaAgentPicker } from '@/features/admin/integrations/BolnaAgentPicker';
 import { ConnectionPicker } from '@/features/admin/integrations/ConnectionPicker';
+import { ProviderPhoneNumberPicker } from '@/features/admin/integrations/ProviderPhoneNumberPicker';
 import { WatiChannelPicker } from '@/features/admin/integrations/WatiChannelPicker';
 import { WatiTemplatePicker } from '@/features/admin/integrations/WatiTemplatePicker';
 import { AttemptPolicyEditor } from './editors/AttemptPolicyEditor';
@@ -284,6 +285,15 @@ function FieldRenderer({
   if (prop['x-type'] === 'wati_channel_picker') {
     return (
       <WatiChannelPicker
+        connectionId={connectionIdForVariables}
+        value={typeof fieldValue === 'string' ? fieldValue : ''}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  if (prop['x-type'] === 'phone_number_picker') {
+    return (
+      <ProviderPhoneNumberPicker
         connectionId={connectionIdForVariables}
         value={typeof fieldValue === 'string' ? fieldValue : ''}
         onChange={(next) => onChange(fieldKey, next)}

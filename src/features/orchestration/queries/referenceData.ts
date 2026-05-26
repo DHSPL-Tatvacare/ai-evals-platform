@@ -2,8 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   listConnectionAgents,
+  listConnectionPhoneNumbers,
   listConnectionTemplates,
   type ProviderAgentsListResponse,
+  type ProviderPhoneNumbersListResponse,
   type ProviderTemplatesListResponse,
 } from '@/services/api/orchestrationConnections';
 
@@ -33,6 +35,24 @@ function bolnaAgentsKey(connectionId: string) {
   return ['orchestration', 'connection', connectionId, 'bolna-agents'] as const;
 }
 
+function providerPhoneNumbersKey(connectionId: string) {
+  return ['orchestration', 'connection', connectionId, 'phone-numbers'] as const;
+}
+
+function providerPhoneNumbersQueryOptions(
+  connectionId: string,
+  params?: { refresh?: boolean },
+  staleTime = STALE_TIME_MS,
+) {
+  return {
+    queryKey: providerPhoneNumbersKey(connectionId),
+    queryFn: params
+      ? () => listConnectionPhoneNumbers(connectionId, params)
+      : () => listConnectionPhoneNumbers(connectionId),
+    staleTime,
+  };
+}
+
 function watiTemplatesQueryOptions(
   connectionId: string,
   params?: { refresh?: boolean },
@@ -59,6 +79,36 @@ function bolnaAgentsQueryOptions(
       : () => listConnectionAgents(connectionId),
     staleTime,
   };
+}
+
+export function useProviderPhoneNumbers(connectionId: string | null | undefined) {
+  const queryClient = useQueryClient();
+  const enabled = Boolean(connectionId);
+
+  const query = useQuery<ProviderPhoneNumbersListResponse>({
+    queryKey: enabled
+      ? providerPhoneNumbersKey(connectionId as string)
+      : ['orchestration', 'connection', '__disabled__', 'phone-numbers'],
+    queryFn: providerPhoneNumbersQueryOptions(connectionId as string).queryFn,
+    enabled,
+    staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
+  });
+
+  const refresh = async () => {
+    if (!connectionId) return query.data ?? null;
+    try {
+      return await queryClient.fetchQuery(
+        providerPhoneNumbersQueryOptions(connectionId, { refresh: true }, 0),
+      );
+    } catch {
+      return queryClient.getQueryData<ProviderPhoneNumbersListResponse>(
+        providerPhoneNumbersKey(connectionId),
+      ) ?? null;
+    }
+  };
+
+  return { ...query, refresh };
 }
 
 export function useWatiTemplates(connectionId: string | null | undefined) {
