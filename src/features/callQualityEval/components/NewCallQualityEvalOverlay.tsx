@@ -18,6 +18,7 @@ import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { routes } from '@/config/routes';
 import { cn } from '@/utils';
 import type { CallFilters, CallRecord } from '@/services/api/insideSales';
+import { findLanguage } from '@/constants/languages';
 import type { EvaluatorDefinition } from '@/types';
 
 /** Auto-name templates for prefilled flows. Returns empty string for vanilla open. */
@@ -214,7 +215,7 @@ export function NewCallQualityEvalOverlay({
     {
       label: 'Transcription',
       items: [
-        { key: 'Language', value: transcriptionConfig.language },
+        { key: 'Language', value: findLanguage(transcriptionConfig.language)?.name || transcriptionConfig.language },
         { key: 'Script', value: transcriptionConfig.script },
         { key: 'Diarization', value: transcriptionConfig.speakerDiarization ? 'Yes' : 'No' },
         { key: 'Transliterate', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
@@ -261,7 +262,9 @@ export function NewCallQualityEvalOverlay({
         thinking: evaluationLlmConfig.thinking,
       },
       transcription_config: {
-        language: transcriptionConfig.language,
+        // Submit the resolved language name (registry is the single source) so the
+        // backend prompt reads "Tamil", not "ta" — no backend language map needed.
+        language: findLanguage(transcriptionConfig.language)?.name || transcriptionConfig.language,
         script: transcriptionConfig.script,
         speaker_diarization: transcriptionConfig.speakerDiarization,
         preserve_code_switching: transcriptionConfig.preserveCodeSwitching,
