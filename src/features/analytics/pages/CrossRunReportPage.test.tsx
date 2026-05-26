@@ -53,6 +53,18 @@ vi.mock('@/utils/permissions', () => ({
   usePermission: vi.fn().mockReturnValue(true),
 }));
 
+const trackJob = vi.fn();
+const untrackJob = vi.fn();
+// Partial mock: keep real stores (SettingsSlideOver needs useUIStore) and only
+// stub the job tracker so we can assert track/untrack calls.
+vi.mock('@/stores', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useJobTrackerStore: { getState: () => ({ trackJob, untrackJob }) },
+  };
+});
+
 // Stub LegacyLlmConfigCompat so we don't need to mock the full credential stack.
 vi.mock('@/components/ui', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -293,6 +305,32 @@ describe('CrossRunReportPage', () => {
           report_id: 'cross-run-v1',
         }),
         expect.objectContaining({ pollIntervalMs: 2000 }),
+      );
+    });
+  });
+
+  it('tracks the cross-run job in the global tracker with a viewPath', async () => {
+    stubQueriesEmpty();
+    mockSubmitAndPollJob.mockImplementation(async (_type: string, _params: unknown, opts?: { onJobCreated?: (id: string) => void }) => {
+      opts?.onJobCreated?.('job-xyz');
+      return makeCompletedJob();
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /generate report/i }));
+    await user.click(screen.getByTestId('llm-config-stub'));
+    await user.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => {
+      expect(trackJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobId: 'job-xyz',
+          appId: 'kaira-bot',
+          jobType: 'generate-cross-run-report',
+          viewPath: '/kaira-bot/analytics/cross-run-report',
+        }),
       );
     });
   });

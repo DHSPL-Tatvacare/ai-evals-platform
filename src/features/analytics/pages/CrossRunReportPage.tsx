@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { LayoutGrid, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { analyticsLibraryForApp } from '@/config/routes';
+import { analyticsLibraryForApp, analyticsCrossRunReportForApp } from '@/config/routes';
+import { useJobTrackerStore } from '@/stores';
 import { useAppConfig, useCurrentAppId } from '@/hooks';
 import { EmptyState, LegacyLlmConfigCompat, LoadingState, PageSurface, Select, type SelectOption } from '@/components/ui';
 import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderActions';
@@ -173,6 +174,8 @@ export function CrossRunReportPage() {
   const handleGenerate = useCallback(async () => {
     if (!overlayReportId) return;
 
+    let trackedJobId: string | null = null;
+
     setShowOverlay(false);
     setGenerating(true);
     setGenError(null);
@@ -190,6 +193,17 @@ export function CrossRunReportPage() {
         },
         {
           pollIntervalMs: 2000,
+          onJobCreated: (jobId) => {
+            trackedJobId = jobId;
+            useJobTrackerStore.getState().trackJob({
+              jobId,
+              appId,
+              jobType: 'generate-cross-run-report',
+              label: 'Cross-run report',
+              viewPath: analyticsCrossRunReportForApp(appId),
+              trackedAt: Date.now(),
+            });
+          },
           onProgress: (progress) => {
             setProgressMsg(progress.message || 'Generating cross-run report…');
           },
@@ -210,6 +224,9 @@ export function CrossRunReportPage() {
       notificationService.error(message);
     } finally {
       setProgressMsg('');
+      // Untrack so the global watcher won't fire a stale toast after this
+      // in-session handler already surfaced the outcome.
+      if (trackedJobId) useJobTrackerStore.getState().untrackJob(trackedJobId);
     }
   }, [appId, overlayReportId, queryClient, reportModel, reportProvider]);
 
