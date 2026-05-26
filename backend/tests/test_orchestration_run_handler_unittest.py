@@ -122,3 +122,47 @@ async def test_source_step_is_parent_of_first_traversal_step(db_session, seed_fu
     _term_id, term_parent = by_node["n_term"]
     assert entry_parent is None
     assert term_parent == entry_id
+
+
+@pytest.mark.asyncio
+async def test_resume_advances_recipient_past_wait(db_session, seed_full_run):
+    """A recipient parked at a logic.wait must advance to the wakeup target on
+    resume, not re-execute the wait and re-suspend (the resume-loop bug)."""
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    version.definition = {
+        "nodes": [
+            {"id": "n_entry", "type": "test.entry_seeder", "config": {}},
+            {"id": "n_wait", "type": "logic.wait",
+             "config": {"mode": "duration", "duration_value": 5, "duration_unit": "minutes"}},
+            {"id": "n_term", "type": "test.term", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "n_entry", "target": "n_wait", "output_id": "default"},
+            {"id": "e2", "source": "n_wait", "target": "n_term", "output_id": "wakeup"},
+        ],
+        "canvas": {},
+    }
+    # Park a recipient at the wait node exactly as logic.wait leaves it:
+    # status='waiting' with a (now-due) wakeup_at, as the constraint requires.
+    db_session.add(WorkflowRunRecipientState(
+        id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+        workflow_id=workflow.id, workflow_version_id=version.id,
+        run_id=run.id, recipient_id="parked", current_node_id="n_wait",
+        status="waiting", wakeup_at=datetime.now(timezone.utc), payload={},
+    ))
+    run.status = "waiting"
+    await db_session.flush()
+
+    from app.services.orchestration.run_handler import run_workflow_job
+    await run_workflow_job(
+        run.id, db_session, params={"resume_recipient_ids": ["parked"]},
+    )
+
+    status = (await db_session.execute(
+        select(WorkflowRunRecipientState.status).where(
+            WorkflowRunRecipientState.run_id == run.id,
+            WorkflowRunRecipientState.recipient_id == "parked",
+        )
+    )).scalar()
+    # Before the fix the recipient re-suspends and stays 'waiting' at n_wait.
+    assert status == "completed"

@@ -107,7 +107,7 @@ async def run_workflow_job(
     try:
         if params.get("resume_recipient_ids"):
             ids = params["resume_recipient_ids"]
-            await _mark_resume_ready(db, run.id, ids)
+            await _mark_resume_ready(db, run.id, ids, definition=version.definition)
         else:
             await _execute_source_nodes(executor)
 
@@ -208,17 +208,43 @@ async def _load_version(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _mark_resume_ready(db: AsyncSession, run_id: uuid.UUID, recipient_ids: list[str]) -> None:
-    """Flip the named recipients from 'waiting' to 'ready' so traversal picks them up."""
-    await db.execute(
-        update(WorkflowRunRecipientState)
-        .where(
-            WorkflowRunRecipientState.run_id == run_id,
-            WorkflowRunRecipientState.recipient_id.in_(recipient_ids),
-            WorkflowRunRecipientState.status.in_(("waiting", "ready")),
+async def _mark_resume_ready(
+    db: AsyncSession,
+    run_id: uuid.UUID,
+    recipient_ids: list[str],
+    *,
+    definition: dict[str, Any],
+) -> None:
+    """Flip resumed recipients to 'ready' AND advance them onto the wait's exit node.
+
+    Flipping status alone leaves ``current_node_id`` on the wait, so traversal
+    re-executes the wait and re-suspends forever. We resolve the exit edge the
+    same way the legacy poller does (status before flip distinguishes the wake
+    reason: 'ready' = an event already flipped it, 'waiting' = the timer fired).
+    """
+    from app.services.orchestration.resume_poller import _wakeup_edge_target
+
+    rows = (
+        await db.execute(
+            select(WorkflowRunRecipientState).where(
+                WorkflowRunRecipientState.run_id == run_id,
+                WorkflowRunRecipientState.recipient_id.in_(recipient_ids),
+                WorkflowRunRecipientState.status.in_(("waiting", "ready")),
+            )
         )
-        .values(status="ready", wakeup_at=None)
-    )
+    ).scalars().all()
+    for r in rows:
+        woke_by = "event" if r.status == "ready" else "timeout"
+        target = _wakeup_edge_target(definition, r.current_node_id or "", woke_by=woke_by)
+        await db.execute(
+            update(WorkflowRunRecipientState)
+            .where(WorkflowRunRecipientState.id == r.id)
+            .values(
+                status="ready",
+                wakeup_at=None,
+                current_node_id=target or r.current_node_id,
+            )
+        )
     await db.flush()
 
 
