@@ -197,12 +197,12 @@ class _Handler:
         namespace = config.output_namespace or ctx.current_node_id
         json_schema = generate_json_schema([f.model_dump() for f in config.output_schema])
 
-        # Resume idempotency: a recipient already carrying the namespace was
-        # extracted in a prior partial run — keep it, never re-call the model.
+        # Resume idempotency: a recipient already carrying a namespace-prefixed
+        # flat key was extracted in a prior partial run — keep it, never re-call.
         recipients: list[tuple[str, dict[str, Any]]] = []
         skipped = 0
         async for rid, payload in input_cohort:
-            if namespace in payload:
+            if any(k.startswith(f"{namespace}.") for k in payload):
                 skipped += 1
                 continue
             recipients.append((rid, payload))
@@ -222,7 +222,12 @@ class _Handler:
                 prompt, system_prompt=None, json_schema=json_schema,
             )
             jsonschema.validate(instance=extracted, schema=json_schema)
-            return RecipientOutcome(recipient_id=rid, payload_delta={namespace: extracted})
+            # Flat dotted keys mirror the authoring path so the existing flat
+            # readers resolve them; list/dict values are stored whole.
+            return RecipientOutcome(
+                recipient_id=rid,
+                payload_delta={f"{namespace}.{k}": v for k, v in extracted.items()},
+            )
 
         if ctx.job_id is None:
             # Test/None mode: no job to cancel against — bypass the cancellation

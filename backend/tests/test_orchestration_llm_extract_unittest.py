@@ -121,8 +121,8 @@ async def test_one_recipient_one_call_namespaced_output(monkeypatch):
     succ = result.by_output_id["success"]
     assert len(succ) == 1
     assert succ[0].recipient_id == "r1"
-    # Output is written under the configured namespace.
-    assert succ[0].payload_delta == {"extracted": {"sentiment": "positive"}}
+    # Output is written as flat dotted keys so the existing flat readers resolve it.
+    assert succ[0].payload_delta == {"extracted.sentiment": "positive"}
     assert not result.by_output_id["error"]
 
 
@@ -137,7 +137,60 @@ async def test_namespace_defaults_to_node_id(monkeypatch):
 
     result = await _Handler().execute(cohort, cfg, ctx)
     succ = result.by_output_id["success"]
-    assert succ[0].payload_delta == {ctx.current_node_id: {"sentiment": "neutral"}}
+    assert succ[0].payload_delta == {f"{ctx.current_node_id}.sentiment": "neutral"}
+
+
+@pytest.mark.asyncio
+async def test_n_output_fields_become_n_flat_keys(monkeypatch):
+    provider = _FakeProvider([{"intent": "refill", "sentiment": "positive"}])
+    _patch_llm(monkeypatch, provider)
+
+    cfg = _Config(
+        prompt="{{message}}",
+        output_schema=[_schema_field("intent"), _schema_field("sentiment")],
+        input_template="{{message}}",
+        output_namespace="enrich",
+    )
+    cohort = CohortStream([("r1", {"message": "need a refill"})])
+    result = await _Handler().execute(cohort, cfg, _Ctx())
+
+    delta = result.by_output_id["success"][0].payload_delta
+    assert delta == {"enrich.intent": "refill", "enrich.sentiment": "positive"}
+
+
+@pytest.mark.asyncio
+async def test_array_value_stored_whole_under_flat_key(monkeypatch):
+    # An array output field's list value is stored whole under the flat key;
+    # deeper item access is out of scope.
+    provider = _FakeProvider([{"tags": ["a", "b"]}])
+    _patch_llm(monkeypatch, provider)
+
+    cfg = _Config(
+        prompt="{{message}}",
+        output_schema=[{"key": "tags", "type": "array", "description": "labels"}],
+        input_template="{{message}}",
+        output_namespace="enrich",
+    )
+    cohort = CohortStream([("r1", {"message": "x"})])
+    result = await _Handler().execute(cohort, cfg, _Ctx())
+
+    delta = result.by_output_id["success"][0].payload_delta
+    assert delta == {"enrich.tags": ["a", "b"]}
+
+
+def test_flat_key_resolves_through_all_three_readers():
+    # Regression: the flat write makes {{enrich.intent}} resolve with ZERO reader
+    # changes — template render, predicate leaf, and request-body $payload ref.
+    from app.services.orchestration.nodes import _template
+    from app.services.orchestration import predicate_contract, request_body_contract
+
+    payload = {"enrich.intent": "refill"}
+
+    assert _template.render("{{enrich.intent}}", payload) == "refill"
+    assert predicate_contract.evaluate(
+        {"field": "enrich.intent", "op": "eq", "value": "refill"}, payload
+    ) is True
+    assert request_body_contract.resolve({"$payload": "enrich.intent"}, payload) == "refill"
 
 
 @pytest.mark.asyncio
@@ -247,9 +300,9 @@ async def test_skips_recipient_already_carrying_namespace(monkeypatch):
         input_template="{{message}}",
         output_namespace="extracted",
     )
-    # r1 already has the namespace key (a prior partial run) → skip, no call.
+    # r1 already carries a flat namespace-prefixed key (a prior partial run) → skip, no call.
     cohort = CohortStream([
-        ("r1", {"message": "a", "extracted": {"sentiment": "old"}}),
+        ("r1", {"message": "a", "extracted.sentiment": "old"}),
         ("r2", {"message": "b"}),
     ])
     result = await _Handler().execute(cohort, cfg, _Ctx())
