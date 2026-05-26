@@ -1,11 +1,10 @@
+import { AgentPromptPreview } from './AgentPromptPreview';
 import { TemplateMessagePreview } from './TemplateMessagePreview';
 
 /** Config shape a preview reads — the inspector's node config, loosely typed. */
 type NodeConfig = Record<string, unknown>;
 
-/** A preview renders to the right of the inspector form for a given node type.
- *  Voice (agent-prompt preview) registers here later — keyed by node type so
- *  the inspector shell stays channel-agnostic. */
+/** A preview renders to the right of the inspector form for a given node type. */
 export type NodePreview = (config: NodeConfig) => React.ReactNode;
 
 function asString(value: unknown): string | undefined {
@@ -26,6 +25,7 @@ const PREVIEW_BY_NODE_TYPE: Record<string, NodePreview> = {
       variableMappings={asVariableMappings(config.variable_mappings)}
     />
   ),
+  'voice.place_call': (config) => <AgentPromptPreview config={config} />,
 };
 
 export function getPreviewForNode(nodeType: string): NodePreview | null {

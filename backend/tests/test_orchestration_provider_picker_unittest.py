@@ -471,6 +471,14 @@ def test_voice_config_rejects_unknown_keys():
     assert any(err.get("type") == "extra_forbidden" for err in exc_info.value.errors())
 
 
+def test_voice_config_from_phone_x_type_hint():
+    """from_phone field must carry x-type phone_number_picker in JSON schema."""
+    schema = _VoiceConfig.model_json_schema()
+    props = schema.get("properties", {})
+    assert "from_phone" in props
+    assert props["from_phone"].get("x-type") == "phone_number_picker"
+
+
 # ─── Bolna introspect_agent helper ────────────────────────────────────────────
 
 

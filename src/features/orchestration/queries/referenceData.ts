@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  getAgentVariables,
   listConnectionAgents,
   listConnectionPhoneNumbers,
   listConnectionTemplates,
+  type AgentVariablesResponse,
   type ProviderAgentsListResponse,
   type ProviderPhoneNumbersListResponse,
   type ProviderTemplatesListResponse,
@@ -175,4 +177,26 @@ export function useBolnaAgents(connectionId: string | null | undefined) {
   };
 
   return { ...query, refresh };
+}
+
+function agentIntrospectionKey(connectionId: string, agentId: string) {
+  return ['orchestration', 'connection', connectionId, 'agent-introspection', agentId] as const;
+}
+
+/** Fetches the selected agent's prompt and variable list via agent-variables endpoint. */
+export function useAgentIntrospection(
+  connectionId: string | null | undefined,
+  agentId: string | null | undefined,
+) {
+  const enabled = Boolean(connectionId) && Boolean(agentId);
+  return useQuery<AgentVariablesResponse>({
+    queryKey: enabled
+      ? agentIntrospectionKey(connectionId as string, agentId as string)
+      : ['orchestration', 'connection', '__disabled__', 'agent-introspection', ''],
+    queryFn: () =>
+      getAgentVariables(connectionId as string, { agentId: agentId as string }),
+    enabled,
+    staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
+  });
 }

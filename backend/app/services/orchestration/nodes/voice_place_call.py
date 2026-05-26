@@ -61,6 +61,7 @@ class _Config(BaseModel):
     from_phone: Optional[str] = Field(
         default=None,
         description="Optional caller-id override. Falls back to the connection default, then the agent default.",
+        json_schema_extra={"x-type": "phone_number_picker"},
     )
     webhook_ttl_seconds: int = Field(
         default=259200,

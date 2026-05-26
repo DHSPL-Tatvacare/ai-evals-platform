@@ -78,6 +78,10 @@ export interface ConnectionTestResponse {
 export interface AgentVariablesResponse {
   provider: string;
   variables: string[];
+  /** Agent system prompt text; empty string when unavailable. */
+  prompt: string;
+  /** Agent welcome message; empty string when unavailable. */
+  welcomeMessage: string;
   /** Soft, user-facing message when the upstream provider couldn't be
    *  queried (e.g. agent id unknown, transient transport error). The
    *  endpoint stays at HTTP 200 in that case so the picker keeps working;
