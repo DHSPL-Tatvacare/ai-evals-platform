@@ -299,7 +299,7 @@ export function useSingleEvaluationRunDetail(
           </span>
         </div>
         <div>
-          <span className="text-[var(--text-muted)]">Rep </span>
+          <span className="text-[var(--text-muted)]">Sales Representative </span>
           {rep}
         </div>
         {typeof callMeta?.duration_seconds === 'number' && (

@@ -727,7 +727,7 @@ export function CrmListing() {
     },
     {
       key: 'repName',
-      header: 'Rep Name',
+      header: 'Sales Representative',
       headerTooltip: columnTooltip(callSchema, 'actor_label'),
       width: 'min-w-[150px]',
       render: (call) => <span className="text-[var(--text-primary)]">{call.repName || '—'}</span>,
