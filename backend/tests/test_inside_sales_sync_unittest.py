@@ -380,6 +380,15 @@ class InsideSalesSourceRowBuilderTests(unittest.TestCase):
         self.assertIsNone(row)
         self.assertTrue(any('lead_skipped_missing_timestamp' in message for message in captured.output))
 
+    def test_build_dim_lead_attributes_lifts_plan_name(self):
+        attrs = sync_service._build_dim_lead_attributes({"plan_name": "Smart CGM Program"})
+        self.assertEqual(attrs, {"plan_name": "Smart CGM Program"})
+
+    def test_build_dim_lead_attributes_omits_blank_or_absent_plan_name(self):
+        self.assertEqual(sync_service._build_dim_lead_attributes({}), {})
+        self.assertEqual(sync_service._build_dim_lead_attributes({"plan_name": None}), {})
+        self.assertEqual(sync_service._build_dim_lead_attributes({"plan_name": "  "}), {})
+
 
 class PruneRowsUnitTests(unittest.IsolatedAsyncioTestCase):
     """Prune helper tenant/app/source-family scoping + delete emission."""

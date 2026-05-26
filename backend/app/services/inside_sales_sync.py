@@ -628,6 +628,15 @@ def _activity_subtype_for_event_code(event_code: int | None) -> str | None:
     return None
 
 
+def _build_dim_lead_attributes(rp: dict[str, Any]) -> dict[str, Any]:
+    """Mutable current-state bag for dim_lead (manifest _default schema)."""
+    attrs: dict[str, Any] = {}
+    plan_name = (rp.get("plan_name") or "").strip() or None
+    if plan_name:
+        attrs["plan_name"] = plan_name
+    return attrs
+
+
 async def _upsert_dim_lead_rows(
     db: AsyncSession,
     *,
