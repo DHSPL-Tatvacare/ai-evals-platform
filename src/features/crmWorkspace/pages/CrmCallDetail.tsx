@@ -89,6 +89,7 @@ export function CrmCallDetail() {
   const [evalIdx, setEvalIdx] = useState(0);
   const [evalLoading, setEvalLoading] = useState(false);
   const canReview = usePermission('review:manage');
+  const canEvaluate = usePermission('evaluation:run');
   const activeRunId = evalHistory[evalIdx]?.run_id ?? '';
 
   const fetchLead = useCallback(async (leadId: string) => {
@@ -247,11 +248,13 @@ export function CrmCallDetail() {
         </span>
       )}
       {activeRunId && <StartReviewButton runId={activeRunId} />}
-      <span title={disabledReason} className={disabledReason ? 'cursor-not-allowed' : undefined}>
-        <Button size="sm" disabled={!!disabledReason} onClick={() => setEvalOpen(true)}>
-          Evaluate
-        </Button>
-      </span>
+      {canEvaluate && (
+        <span title={disabledReason} className={disabledReason ? 'cursor-not-allowed' : undefined}>
+          <Button size="sm" disabled={!!disabledReason} onClick={() => setEvalOpen(true)}>
+            Evaluate
+          </Button>
+        </span>
+      )}
     </>
   );
 

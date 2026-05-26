@@ -10,6 +10,7 @@ import {
 import { cn, jsonSchemaToOutputFields } from '@/utils';
 import { useAppConfig } from '@/hooks';
 import { useAuthStore } from '@/stores';
+import { usePermission } from '@/utils/permissions';
 import { useProviderConfigs } from '@/services/api/aiSettingsQueries';
 import { useEvalTemplatesStore } from '@/stores/evalTemplatesStore';
 import { submitAndPollJob } from '@/services/api/jobPolling';
@@ -109,6 +110,7 @@ export function CreateEvaluatorWizard({
 }: CreateEvaluatorWizardProps) {
   const appConfig = useAppConfig(context.appId);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const canGenerateDraft = usePermission('evaluation:manage');
   // BYOK: provider is no longer per-user. Find the first enabled+validated
   // provider whose curated_models contain the picked `modelId`; the
   // generate-evaluator-draft job needs both provider + model in params.
@@ -603,7 +605,7 @@ export function CreateEvaluatorWizard({
               </div>
 
               {sourceMode === 'custom' && (
-                <Button variant="secondary" onClick={handleGenerateDraft} isLoading={isDrafting} icon={Sparkles}>
+                <Button variant="secondary" onClick={handleGenerateDraft} isLoading={isDrafting} icon={Sparkles} disabled={!canGenerateDraft}>
                   Generate Draft
                 </Button>
               )}

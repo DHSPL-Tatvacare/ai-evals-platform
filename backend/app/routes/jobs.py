@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from app.auth.app_scope import ensure_registered_app_access
 from app.auth.context import AuthContext, get_auth_context
-from app.auth.permissions import require_permission
+from app.auth.permissions import ensure_any_permission
 from app.database import get_db
 from app.models.job import BackgroundJob
 from app.models.eval_run import EvaluationRun
@@ -41,7 +41,7 @@ def _normalize_idempotency_key(raw: str | None) -> str | None:
 async def submit_job(
     body: JobCreate,
     response: Response,
-    auth: AuthContext = require_permission('evaluation:run'),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
     idempotency_key_header: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -61,7 +61,7 @@ async def submit_job(
        is user-filtered — returning another user's job here would be a
        cross-user read and also unusable (404 on next fetch).
     """
-    from app.services.job_worker import JOB_HANDLERS, get_job_submission_metadata
+    from app.services.job_worker import JOB_HANDLERS, get_job_submission_metadata, required_permissions_for_job
 
     if body.job_type not in JOB_HANDLERS:
         # 422 because the payload is semantically invalid (unknown type),
@@ -70,6 +70,9 @@ async def submit_job(
             status_code=422,
             detail=f"Unknown job_type: {body.job_type!r}",
         )
+
+    # Permission gate fires before any DB access.
+    ensure_any_permission(auth, *required_permissions_for_job(body.job_type))
 
     idempotency_key = _normalize_idempotency_key(idempotency_key_header)
     if idempotency_key is not None:
@@ -232,10 +235,11 @@ async def get_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: UUID,
-    auth: AuthContext = require_permission('evaluation:run'),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued or running job."""
+    from app.services.job_worker import required_permissions_for_job
     job = await db.scalar(
         select(BackgroundJob).where(
             BackgroundJob.id == job_id,
@@ -245,6 +249,7 @@ async def cancel_job(
     )
     if not job:
         raise HTTPException(404, "BackgroundJob not found")
+    ensure_any_permission(auth, *required_permissions_for_job(job.job_type))
     await ensure_registered_app_access(
         db,
         auth,

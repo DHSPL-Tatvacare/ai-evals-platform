@@ -50,6 +50,7 @@ import { formatFrt } from '@/utils/formatters';
 import { routes } from '@/config/routes';
 import { StageBadge } from '../components/StageBadge';
 import { useCrmSchema, type CrmSchema } from '../queries/crmSchema';
+import { usePermission } from '@/utils/permissions';
 
 /* ── Formatting helpers ───────────────────────────────────────── */
 
@@ -652,6 +653,8 @@ export function CrmLeadDetail() {
     ? () => navigate(routes.insideSales.leadDetail(listNav.next as string))
     : undefined;
 
+  const canEvaluatePermission = usePermission('evaluation:run');
+
   const [lead, setLead] = useState<LeadDetailFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -796,11 +799,13 @@ export function CrmLeadDetail() {
           disableShortcuts={evalOpen}
         />
       )}
-      <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
-        <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
-          Evaluate
-        </Button>
-      </span>
+      {canEvaluatePermission && (
+        <span title={canEvaluate ? undefined : 'No unevaluated recordings'}>
+          <Button size="sm" disabled={!canEvaluate} onClick={() => setEvalOpen(true)}>
+            Evaluate
+          </Button>
+        </span>
+      )}
     </>
   );
 

@@ -228,7 +228,7 @@ export function CrossRunReportPage() {
   if (loadError) {
     const decoded = decodeApiError(loadError);
     return (
-      <PageSurface icon={LayoutGrid} title="Cross-Run Report" back={back}>
+      <PageSurface icon={LayoutGrid} title="Cross-Run Report" subtitle="Covers the evaluation runs you own or that teammates have shared with you." back={back}>
         <EmptyState
           icon={LayoutGrid}
           title="Failed to load report"
@@ -274,6 +274,7 @@ export function CrossRunReportPage() {
         <PageSurface
           icon={LayoutGrid}
           title="Cross-Run Report"
+          subtitle="Covers the evaluation runs you own or that teammates have shared with you."
           back={back}
         >
           <ReportZeroState
@@ -316,6 +317,7 @@ export function CrossRunReportPage() {
       <PageSurface
         icon={LayoutGrid}
         title="Cross-Run Report"
+        subtitle="Covers the evaluation runs you own or that teammates have shared with you."
         back={back}
         actions={
           <div className="flex items-center gap-2">

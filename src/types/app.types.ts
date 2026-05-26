@@ -836,6 +836,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         description: 'Evaluate threads from CSV data',
         icon: 'FileSpreadsheet',
         config: { modalId: 'batchEval' },
+        requires: 'evaluation:run',
       },
       {
         id: 'kaira-adversarial',
@@ -844,6 +845,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         description: 'Run adversarial inputs against Kaira',
         icon: 'ShieldAlert',
         config: { modalId: 'adversarialTest' },
+        requires: 'evaluation:run',
       },
     ],
     evaluatorDetail: { interpretationBands: [] },
@@ -1179,6 +1181,7 @@ export const APP_CONFIG_FALLBACKS: Record<AppId, AppConfig> = {
         description: 'Evaluate a selected set of calls',
         icon: 'FileSpreadsheet',
         config: { modalId: 'insideSalesEval' },
+        requires: 'evaluation:run',
       },
     ],
     evaluatorDetail: {

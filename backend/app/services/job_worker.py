@@ -608,6 +608,13 @@ from typing import Any, Awaitable, Callable, Optional
 JobHandler = Callable[..., Awaitable[Any]]
 JOB_HANDLERS: dict[str, JobHandler] = {}
 
+# Per-job-type permission requirements. Populated alongside JOB_HANDLERS.
+JOB_REQUIRED_PERMISSIONS: dict[str, tuple[str, ...]] = {}
+
+
+def required_permissions_for_job(job_type: str) -> tuple[str, ...]:
+    return JOB_REQUIRED_PERMISSIONS.get(job_type, ())
+
 
 def register_job_handler(
     job_type: str,
@@ -624,6 +631,7 @@ def register_job_handler(
     schedule_source_list_endpoint: str | None = None,
     schedule_default_params: dict | None = None,
     schedule_platform_managed: bool = False,
+    required_permissions: tuple[str, ...] = (),
 ):
     """Decorator: register a job handler + its queue / retry / schedule policy.
 
@@ -668,9 +676,20 @@ def register_job_handler(
         raise ValueError(
             f"register_job_handler({job_type!r}): schedulable=True requires schedule_label"
         )
+    if not required_permissions:
+        raise ValueError(
+            f"register_job_handler({job_type!r}): required_permissions must not be empty"
+        )
+    from app.auth.permission_catalog import VALID_PERMISSIONS as _VALID_PERMS
+    _bad = sorted(set(required_permissions) - _VALID_PERMS)
+    if _bad:
+        raise ValueError(
+            f"register_job_handler({job_type!r}): unknown permission ids: {_bad}"
+        )
 
     def decorator(func):
         JOB_HANDLERS[job_type] = func
+        JOB_REQUIRED_PERMISSIONS[job_type] = tuple(required_permissions)
         JOB_QUEUE_DEFAULTS[job_type] = {"queue_class": queue_class, "priority": priority}
         if app_id_default:
             JOB_APP_DEFAULTS[job_type] = app_id_default
@@ -1344,6 +1363,7 @@ async def get_queue_position(job_id: str) -> int:
     priority=200,
     app_id_default="kaira-bot",
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run batch evaluation on threads from a data file."""
@@ -1388,6 +1408,7 @@ async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
     priority=220,
     app_id_default="kaira-bot",
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run adversarial stress test against live Kaira API."""
@@ -1441,6 +1462,7 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
     priority=100,
     app_id_default="voice-rx",
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx two-call evaluation (transcription + critique)."""
@@ -1454,6 +1476,7 @@ async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID
     queue_class="standard",
     priority=100,
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run a custom evaluator on a voice-rx listing."""
@@ -1467,6 +1490,7 @@ async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, 
     queue_class="standard",
     priority=110,
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run multiple custom evaluators on a single entity."""
@@ -1481,6 +1505,7 @@ async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.
     priority=110,
     app_id_default="inside-sales",
     retry_safe=True,
+    required_permissions=("evaluation:run",),
 )
 async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run an inside-sales evaluation via the generic shell.
@@ -1520,6 +1545,7 @@ async def handle_evaluate_inside_sales(job_id, params: dict, *, tenant_id: uuid.
         "source_system": "lsq",
         "sync_mode": "incremental",
     },
+    required_permissions=("listing:manage",),
 )
 async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Sync an external source into local source tables."""
@@ -1533,6 +1559,7 @@ async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.U
     queue_class="interactive",
     priority=10,
     retry_safe=True,
+    required_permissions=("report:run",),
 )
 async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate and persist a single-run report artifact through the generic composer."""
@@ -1561,6 +1588,7 @@ async def handle_generate_report(job_id, params: dict, *, tenant_id: uuid.UUID, 
     queue_class="interactive",
     priority=20,
     retry_safe=True,
+    required_permissions=("evaluation:manage",),
 )
 async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate evaluator output-field draft from a prompt via LLM."""
@@ -1617,6 +1645,7 @@ async def handle_generate_evaluator_draft(job_id, params: dict, *, tenant_id: uu
     queue_class="interactive",
     priority=10,
     retry_safe=True,
+    required_permissions=("report:run",),
 )
 async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Generate and persist a cross-run report artifact through the generic composer."""
@@ -1641,6 +1670,7 @@ async def handle_generate_cross_run_report(job_id, params: dict, *, tenant_id: u
     queue_class="bulk",
     priority=500,
     retry_safe=True,
+    required_permissions=("analytics:manage",),
 )
 async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Populate analytics fact tables for a completed eval run."""
@@ -1679,6 +1709,7 @@ async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUI
     ),
     schedule_default_params={},
     schedule_platform_managed=True,
+    required_permissions=("cost:manage",),
 )
 async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Rebuild ``analytics.agg_llm_usage_daily`` for a date range.
@@ -1735,6 +1766,7 @@ async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.U
     ),
     schedule_default_params={},
     schedule_platform_managed=True,
+    required_permissions=("analytics:manage",),
 )
 async def handle_derive_signals(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run the signal-derivation Transform pass.
@@ -1767,6 +1799,7 @@ async def handle_derive_signals(job_id, params: dict, *, tenant_id: uuid.UUID, u
     # safe to re-queue. Replays re-project from the current mirror state
     # per plan §5.2 "Backfill replay safety".
     retry_safe=True,
+    required_permissions=("analytics:manage",),
 )
 async def handle_backfill_facts_from_mirror(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1790,6 +1823,7 @@ async def handle_backfill_facts_from_mirror(
     # 0040). Replays produce the same rows; transient DB errors are safe to
     # re-queue. LLM cost on replay is the caller's tradeoff to make.
     retry_safe=True,
+    required_permissions=("analytics:manage",),
 )
 async def handle_backfill_lead_signals(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1819,6 +1853,7 @@ async def handle_backfill_lead_signals(
     # first_synced_at snapshot, so replays over unchanged mirror state
     # upsert into the same row.
     retry_safe=True,
+    required_permissions=("analytics:manage",),
 )
 async def handle_backfill_stage_transitions(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1843,6 +1878,7 @@ async def handle_backfill_stage_transitions(
     queue_class="standard",
     priority=5,
     retry_safe=True,
+    required_permissions=("orchestration:manage",),
 )
 async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Execute one orchestration.workflow_runs row to quiescence (or until suspended).
@@ -1876,6 +1912,7 @@ async def handle_run_workflow(job_id, params: dict, *, tenant_id: uuid.UUID, use
     queue_class="standard",
     priority=5,
     retry_safe=True,
+    required_permissions=("platform:manage",),
 )
 async def handle_finalize_run_cancel(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1918,6 +1955,7 @@ async def handle_finalize_run_cancel(
     ),
     schedule_default_params={},
     schedule_platform_managed=True,
+    required_permissions=("platform:manage",),
 )
 async def handle_waiting_tail_sweep(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1950,6 +1988,7 @@ async def handle_waiting_tail_sweep(
     ),
     schedule_default_params={},
     schedule_platform_managed=True,
+    required_permissions=("platform:manage",),
 )
 async def handle_reconcile_voice_dispatch(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -1968,6 +2007,7 @@ async def handle_reconcile_voice_dispatch(
     queue_class="standard",
     priority=5,
     retry_safe=True,
+    required_permissions=("platform:manage",),
 )
 async def handle_fire_orchestration_trigger(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
@@ -2069,6 +2109,7 @@ async def handle_fire_orchestration_trigger(
     queue_class="standard",
     priority=4,
     retry_safe=True,
+    required_permissions=("orchestration:manage",),
 )
 async def handle_resume_waiting_cohorts(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID
@@ -2224,6 +2265,7 @@ async def _emit_workflow_run_failed(
     queue_class="standard",
     priority=20,
     retry_safe=False,
+    required_permissions=("platform:manage",),
 )
 async def handle_send_mail(
     job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
