@@ -346,6 +346,58 @@ class WatiAdapter:
 
         return sorted(out_by_name.values(), key=lambda item: item["name"].lower())
 
+    async def list_phone_numbers(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
+        """Fetch WhatsApp channel phone numbers from GET /api/v2/whatsapp/phoneNumbers.
+
+        Defensively handles: top-level array, or dict with list under
+        phoneNumbers / items / result keys. Phone field tried in order:
+        phoneNumber, phone_number, displayPhoneNumber, number.
+        """
+        base_url = connection.get("base_url") or ""
+        tenant_id = connection.get("wati_tenant_id") or ""
+        api_token = connection.get("api_token") or ""
+        if not (base_url and tenant_id and api_token):
+            raise WatiServiceError("WATI connection missing base_url / wati_tenant_id / api_token")
+        endpoint = resolve_wati_api_endpoint(base_url, tenant_id)
+        url = f"{endpoint}/api/v2/whatsapp/phoneNumbers"
+        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+        async with _make_client() as client:
+            resp = await client.get(url, headers=headers)
+            if 400 <= resp.status_code < 500:
+                try:
+                    err_body = resp.json()
+                except Exception:
+                    err_body = {"text": resp.text[:200]}
+                raise WatiServiceError(f"WATI {resp.status_code}: {err_body}")
+            resp.raise_for_status()
+            payload = resp.json()
+
+        # Defensive extraction: accept top-level list or dict with list value.
+        if isinstance(payload, list):
+            candidates = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            candidates = []
+            for key in ("phoneNumbers", "items", "result", "data"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    candidates = [item for item in value if isinstance(item, dict)]
+                    break
+        else:
+            candidates = []
+
+        out: list[dict[str, Any]] = []
+        for item in candidates:
+            phone = ""
+            for field in ("phoneNumber", "phone_number", "displayPhoneNumber", "number"):
+                v = item.get(field)
+                if isinstance(v, str) and v:
+                    phone = v
+                    break
+            if not phone:
+                continue
+            out.append({"phone_number": phone, "label": ""})
+        return out
+
     async def send_template(
         self, *, connection: dict[str, Any], request: CanonicalSendRequest,
     ) -> CanonicalSendResponse:

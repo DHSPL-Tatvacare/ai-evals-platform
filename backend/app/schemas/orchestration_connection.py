@@ -145,3 +145,15 @@ class ProviderTemplatesListResponse(CamelModel):
     provider: str
     items: list[ProviderTemplateSummary]
     error: Optional[str] = None
+
+
+class ProviderPhoneNumberSummary(CamelModel):
+    phone_number: str
+    label: str = ""
+
+
+class ProviderPhoneNumbersListResponse(CamelModel):
+    """Live phone-number list from the bound provider. Soft-error contract: HTTP 200 even on upstream failure."""
+    provider: str
+    items: list[ProviderPhoneNumberSummary]
+    error: Optional[str] = None

@@ -601,3 +601,351 @@ def test_agent_variables_response_prompt_defaults_empty():
     resp = AgentVariablesResponse(provider="wati", variables=[])
     assert resp.prompt == ""
     assert resp.welcome_message == ""
+
+
+# ─── ProviderPhoneNumbersListResponse schema ──────────────────────────────────
+
+
+def test_provider_phone_numbers_list_response_schema():
+    """ProviderPhoneNumbersListResponse must expose provider, items, error (camelCase)."""
+    from app.schemas.orchestration_connection import (
+        ProviderPhoneNumberSummary,
+        ProviderPhoneNumbersListResponse,
+    )
+
+    item = ProviderPhoneNumberSummary(phone_number="+19876543210", label="twilio")
+    resp = ProviderPhoneNumbersListResponse(provider="bolna", items=[item], error=None)
+    dumped = resp.model_dump(by_alias=True)
+    assert dumped["provider"] == "bolna"
+    assert dumped["items"][0]["phoneNumber"] == "+19876543210"
+    assert dumped["items"][0]["label"] == "twilio"
+    assert dumped["error"] is None
+
+
+def test_provider_phone_number_summary_label_defaults_empty():
+    """label defaults to '' when not supplied."""
+    from app.schemas.orchestration_connection import ProviderPhoneNumberSummary
+
+    item = ProviderPhoneNumberSummary(phone_number="+919999900000")
+    assert item.label == ""
+
+
+def test_provider_phone_numbers_list_response_error_field():
+    """ProviderPhoneNumbersListResponse carries the soft-error string."""
+    from app.schemas.orchestration_connection import ProviderPhoneNumbersListResponse
+
+    resp = ProviderPhoneNumbersListResponse(
+        provider="wati", items=[], error="upstream exploded"
+    )
+    assert resp.error == "upstream exploded"
+    assert resp.items == []
+
+
+# ─── Bolna adapter list_phone_numbers ─────────────────────────────────────────
+
+# Verbatim fixture matching Bolna GET /phone-numbers/all response shape
+_BOLNA_PHONE_NUMBERS_LIST: list[dict[str, Any]] = [
+    {
+        "id": "pn_001",
+        "phone_number": "+19876543210",
+        "telephony_provider": "twilio",
+        "active": True,
+    },
+    {
+        "id": "pn_002",
+        "phone_number": "+19876543211",
+        "telephony_provider": "plivo",
+        "active": True,
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_bolna_list_phone_numbers_calls_correct_endpoint():
+    """list_phone_numbers must call GET /phone-numbers/all with Bearer auth."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(_BOLNA_PHONE_NUMBERS_LIST).encode(),
+        )
+
+    transport = httpx.MockTransport(handler)
+    adapter = BolnaAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.bolna._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport),
+    ):
+        result = await adapter.list_phone_numbers(_BOLNA_CONN)
+
+    assert len(captured) == 1
+    req = captured[0]
+    assert "/phone-numbers/all" in str(req.url)
+    assert req.headers.get("Authorization") == "Bearer bolna_key_xyz"
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert result[0] == {"phone_number": "+19876543210", "label": "twilio"}
+    assert result[1] == {"phone_number": "+19876543211", "label": "plivo"}
+
+
+@pytest.mark.asyncio
+async def test_bolna_list_phone_numbers_empty_label_when_no_telephony_provider():
+    """list_phone_numbers uses '' as label when telephony_provider is absent."""
+    fixture = [{"id": "pn_003", "phone_number": "+12223334444"}]
+    transport = _make_bolna_transport(200, fixture)
+    adapter = BolnaAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.bolna._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport),
+    ):
+        result = await adapter.list_phone_numbers(_BOLNA_CONN)
+
+    assert result == [{"phone_number": "+12223334444", "label": ""}]
+
+
+@pytest.mark.asyncio
+async def test_bolna_list_phone_numbers_4xx_raises():
+    """list_phone_numbers raises BolnaServiceError on 4xx."""
+    transport = _make_bolna_transport(403, {"detail": "Forbidden"})
+    adapter = BolnaAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.bolna._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport),
+    ):
+        with pytest.raises(BolnaServiceError):
+            await adapter.list_phone_numbers(_BOLNA_CONN)
+
+
+@pytest.mark.asyncio
+async def test_bolna_list_phone_numbers_missing_api_key_raises():
+    """list_phone_numbers raises BolnaServiceError when api_key is empty."""
+    adapter = BolnaAdapter()
+    with pytest.raises(BolnaServiceError, match="api_key"):
+        await adapter.list_phone_numbers({"api_key": "", "base_url": "https://api.bolna.ai"})
+
+
+# ─── WATI adapter list_phone_numbers ─────────────────────────────────────────
+
+# Verbatim fixture for WATI GET /api/v2/whatsapp/phoneNumbers.
+# Shape: top-level dict with a "phoneNumbers" list of objects.
+_WATI_PHONE_NUMBERS_PAYLOAD: dict[str, Any] = {
+    "result": True,
+    "phoneNumbers": [
+        {"phoneNumber": "+911234567890", "displayName": "Main Channel"},
+        {"phoneNumber": "+911234567891", "displayName": "Support Channel"},
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_calls_correct_endpoint():
+    """list_phone_numbers must call GET /api/v2/whatsapp/phoneNumbers with Bearer auth."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(_WATI_PHONE_NUMBERS_PAYLOAD).encode(),
+        )
+
+    transport = httpx.MockTransport(handler)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert len(captured) == 1
+    req = captured[0]
+    assert "/api/v2/whatsapp/phoneNumbers" in str(req.url)
+    assert req.headers.get("Authorization") == "Bearer tok_abc"
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert result[0]["phone_number"] == "+911234567890"
+    assert result[1]["phone_number"] == "+911234567891"
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_top_level_array():
+    """list_phone_numbers handles a top-level JSON array (alternative WATI shape)."""
+    fixture = [
+        {"phone_number": "+919999900001"},
+        {"phoneNumber": "+919999900002"},
+    ]
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert len(result) == 2
+    numbers = {r["phone_number"] for r in result}
+    assert "+919999900001" in numbers
+    assert "+919999900002" in numbers
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_empty_on_unmappable_items():
+    """Items with no recognisable phone field are skipped; result is empty, not an error."""
+    fixture = {"phoneNumbers": [{"id": "abc", "status": "active"}]}
+    transport = _make_wati_transport(200, fixture)
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        result = await adapter.list_phone_numbers(_WATI_CONN)
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_wati_list_phone_numbers_4xx_raises():
+    """list_phone_numbers raises WatiServiceError on 4xx."""
+    transport = _make_wati_transport(401, {"error": "Unauthorized"})
+    adapter = WatiAdapter()
+
+    with patch(
+        "app.services.orchestration.adapters.wati._make_client",
+        side_effect=lambda *a, **kw: httpx.AsyncClient(transport=transport, **({"timeout": kw["timeout"]} if "timeout" in kw else {})),
+    ):
+        with pytest.raises(WatiServiceError):
+            await adapter.list_phone_numbers(_WATI_CONN)
+
+
+# ─── provider_listings.list_connection_phone_numbers (service layer) ──────────
+
+
+@pytest.mark.asyncio
+async def test_list_connection_phone_numbers_bolna_soft_error_on_connection_not_found():
+    """Soft-error: missing/wrong-provider connection returns {items:[], error:...} not 500."""
+    from app.services.orchestration.api.provider_listings import list_connection_phone_numbers
+
+    mock_db = AsyncMock()
+    mock_db.scalar = AsyncMock(return_value=None)
+
+    result = await list_connection_phone_numbers(
+        mock_db,
+        tenant_id=uuid.uuid4(),
+        app_id="test-app",
+        connection_id=uuid.uuid4(),
+        provider="bolna",
+    )
+
+    assert result["items"] == []
+    assert result["error"] is not None
+    assert result["provider"] == "bolna"
+
+
+@pytest.mark.asyncio
+async def test_list_connection_phone_numbers_bolna_upstream_error_is_soft():
+    """Upstream BolnaServiceError is caught and returned as soft error, not 500."""
+    from app.services.orchestration.api.provider_listings import list_connection_phone_numbers
+    from app.models.provider_connection import ProviderConnection
+    from unittest.mock import MagicMock
+    import json as _json
+
+    conn_mock = MagicMock(spec=ProviderConnection)
+    conn_mock.provider = "bolna"
+    conn_mock.app_id = "test-app"
+    conn_mock.config_encrypted = b"encrypted"
+
+    mock_db = AsyncMock()
+    mock_db.scalar = AsyncMock(return_value=conn_mock)
+
+    with (
+        patch(
+            "app.services.orchestration.api.provider_listings._load_connection",
+            return_value={"api_key": "k", "base_url": "https://api.bolna.ai"},
+        ),
+        patch(
+            "app.services.orchestration.adapters.bolna.BolnaAdapter.list_phone_numbers",
+            side_effect=BolnaServiceError("upstream error"),
+        ),
+    ):
+        result = await list_connection_phone_numbers(
+            mock_db,
+            tenant_id=uuid.uuid4(),
+            app_id="test-app",
+            connection_id=uuid.uuid4(),
+            provider="bolna",
+        )
+
+    assert result["items"] == []
+    assert "upstream error" in (result["error"] or "")
+
+
+@pytest.mark.asyncio
+async def test_list_connection_phone_numbers_wati_soft_error_on_connection_not_found():
+    """Soft-error for WATI: missing/wrong-provider connection."""
+    from app.services.orchestration.api.provider_listings import list_connection_phone_numbers
+
+    mock_db = AsyncMock()
+    mock_db.scalar = AsyncMock(return_value=None)
+
+    result = await list_connection_phone_numbers(
+        mock_db,
+        tenant_id=uuid.uuid4(),
+        app_id="test-app",
+        connection_id=uuid.uuid4(),
+        provider="wati",
+    )
+
+    assert result["items"] == []
+    assert result["error"] is not None
+    assert result["provider"] == "wati"
+
+
+# ─── route: wrong provider → 400 ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_route_phone_numbers_wrong_provider_raises_http400():
+    """list_connection_phone_numbers route raises HTTPException(400) for unsupported providers."""
+    from fastapi import HTTPException
+    from unittest.mock import MagicMock, AsyncMock, patch as _patch
+    from app.models.provider_connection import ProviderConnection
+    import uuid as _uuid
+
+    conn_id = _uuid.uuid4()
+    conn_mock = MagicMock(spec=ProviderConnection)
+    conn_mock.provider = "twilio"
+    conn_mock.app_id = "test-app"
+    conn_mock.tenant_id = _uuid.uuid4()
+    conn_mock.active = True
+
+    from app.routes.orchestration_connections import list_connection_phone_numbers
+    from app.auth import AuthContext
+
+    auth_mock = MagicMock(spec=AuthContext)
+    auth_mock.tenant_id = _uuid.uuid4()
+    db_mock = AsyncMock()
+
+    with _patch(
+        "app.routes.orchestration_connections._load_and_gate_connection",
+        return_value=conn_mock,
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await list_connection_phone_numbers(
+                connection_id=conn_id,
+                auth=auth_mock,
+                db=db_mock,
+                refresh=False,
+            )
+
+    assert exc_info.value.status_code == 400
+    assert "twilio" in exc_info.value.detail

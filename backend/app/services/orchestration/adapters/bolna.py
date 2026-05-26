@@ -384,6 +384,38 @@ class BolnaAdapter:
             })
         return out
 
+    async def list_phone_numbers(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
+        """Fetch all phone numbers from GET /phone-numbers/all, return [{phone_number, label}]."""
+        api_key = connection.get("api_key") or ""
+        base_url = (connection.get("base_url") or "https://api.bolna.ai").rstrip("/")
+        if not api_key:
+            raise BolnaServiceError("Bolna connection missing api_key")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        async with _make_client() as client:
+            resp = await client.get(f"{base_url}/phone-numbers/all", headers=headers)
+            if 400 <= resp.status_code < 500:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = {"text": resp.text[:200]}
+                raise BolnaServiceError(f"Bolna {resp.status_code}: {err}")
+            resp.raise_for_status()
+            payload = resp.json()
+        if not isinstance(payload, list):
+            raise BolnaServiceError(
+                f"Bolna /phone-numbers/all returned unexpected shape: {type(payload).__name__}"
+            )
+        out: list[dict[str, Any]] = []
+        for raw in payload:
+            if not isinstance(raw, dict):
+                continue
+            phone = str(raw.get("phone_number") or "")
+            if not phone:
+                continue
+            label = str(raw.get("telephony_provider") or "")
+            out.append({"phone_number": phone, "label": label})
+        return out
+
     async def get_agent(self, connection: dict[str, Any], *, agent_id: str) -> dict[str, Any]:
         """Fetch a single agent from GET /v2/agent/{agent_id}."""
         if not agent_id:

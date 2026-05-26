@@ -219,6 +219,60 @@ async def list_connection_wati_templates(
     return {"provider": "wati", "items": items, "error": error}
 
 
+async def list_connection_phone_numbers(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    connection_id: uuid.UUID,
+    provider: str,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Return {provider, items, error}. Soft-error: HTTP stays 200 on upstream failure."""
+    bucket = f"{provider}:phones"
+    key = _CacheKey(connection_id=connection_id, bucket=bucket)
+    if refresh:
+        _bust(key)
+    cached = _cached(key)
+    if cached is not None:
+        return {"provider": provider, "items": cached, "error": None}
+
+    config = await _load_connection(
+        db,
+        tenant_id=tenant_id,
+        app_id=app_id,
+        connection_id=connection_id,
+        expected_provider=provider,
+    )
+    if config is None:
+        return {
+            "provider": provider,
+            "items": [],
+            "error": f"Connection not found, archived, or not a {provider} connection.",
+        }
+
+    if provider == "bolna":
+        from app.services.orchestration.adapters.bolna import BolnaAdapter, BolnaServiceError
+        adapter: Any = BolnaAdapter()
+        error_class: Any = BolnaServiceError
+    elif provider == "wati":
+        from app.services.orchestration.adapters.wati import WatiAdapter, WatiServiceError
+        adapter = WatiAdapter()
+        error_class = WatiServiceError
+    else:
+        return {"provider": provider, "items": [], "error": f"Provider {provider!r} does not support phone-number listing."}
+
+    try:
+        items = await adapter.list_phone_numbers(config)
+    except error_class as exc:
+        return {"provider": provider, "items": [], "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — soft error contract
+        return {"provider": provider, "items": [], "error": f"{provider} upstream error: {exc.__class__.__name__}"}
+
+    _store(key, items)
+    return {"provider": provider, "items": items, "error": None}
+
+
 async def get_agent_variables(
     db: AsyncSession,
     *,

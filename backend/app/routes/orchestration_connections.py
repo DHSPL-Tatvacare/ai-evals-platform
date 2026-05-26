@@ -31,6 +31,7 @@ from app.schemas.orchestration_connection import (
     ConnectionTestResponse,
     ConnectionUpdateRequest,
     ProviderAgentsListResponse,
+    ProviderPhoneNumbersListResponse,
     ProviderTemplatesListResponse,
     ProviderSpecResponse,
 )
@@ -291,6 +292,34 @@ async def list_connection_templates(
         tenant_id=auth.tenant_id,
         app_id=row.app_id,
         connection_id=connection_id,
+        refresh=refresh,
+    )
+
+
+@router.get("/{connection_id}/phone-numbers", response_model=ProviderPhoneNumbersListResponse)
+async def list_connection_phone_numbers(
+    connection_id: uuid.UUID,
+    auth: AuthContext = require_permission('orchestration:manage'),
+    db: AsyncSession = Depends(get_db),
+    refresh: bool = Query(False, description="Bypass the cache and re-fetch from the provider."),
+):
+    """Live phone-number listing for bolna (voice from-phone) and wati (channel-number) pickers.
+
+    Dispatches by connection provider; returns soft-error envelope (HTTP 200) on upstream failure.
+    Unsupported providers return 400.
+    """
+    row = await _load_and_gate_connection(db, auth, connection_id)
+    if row.provider not in ("bolna", "wati"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"connection {connection_id} is provider={row.provider!r}; phone-number listing supports bolna and wati only",
+        )
+    return await listings_service.list_connection_phone_numbers(
+        db,
+        tenant_id=auth.tenant_id,
+        app_id=row.app_id,
+        connection_id=connection_id,
+        provider=row.provider,
         refresh=refresh,
     )
 
