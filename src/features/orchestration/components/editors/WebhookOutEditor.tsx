@@ -7,7 +7,6 @@ import type { AttemptPolicy, StructuredRequestBody } from '@/features/orchestrat
 import { ConnectionPicker } from '@/features/admin/integrations/ConnectionPicker';
 
 import {
-  InspectorCard,
   InspectorEmptyState,
   InspectorField,
   InspectorSection,
@@ -111,7 +110,10 @@ export function WebhookOutEditor({ value, onChange, appId }: Props) {
           <InspectorEmptyState>No headers — click Add to insert one.</InspectorEmptyState>
         ) : null}
         {headerEntries.map(([key, val]) => (
-          <InspectorCard key={key} className="flex flex-col gap-2">
+          <div
+            key={key}
+            className="flex flex-col gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5"
+          >
             <div className="flex items-center gap-2">
               <Input
                 value={key}
@@ -122,7 +124,7 @@ export function WebhookOutEditor({ value, onChange, appId }: Props) {
               <button
                 type="button"
                 onClick={() => removeHeader(key)}
-                className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
+                className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
                 aria-label={`Remove ${key} header`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -133,7 +135,7 @@ export function WebhookOutEditor({ value, onChange, appId }: Props) {
               onChange={(e) => setHeader(key, key, e.target.value)}
               placeholder="Value"
             />
-          </InspectorCard>
+          </div>
         ))}
         <Button variant="secondary" size="sm" onClick={addHeader}>
           <Plus className="mr-1 h-3.5 w-3.5" />

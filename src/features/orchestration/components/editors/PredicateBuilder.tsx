@@ -277,15 +277,18 @@ function CompoundEditor({
         <InspectorEmptyState>No clauses yet — click Add clause.</InspectorEmptyState>
       ) : null}
       {children.map((child, idx) => (
-        <InspectorCard key={idx}>
-          <div className="mb-1 flex items-center justify-between">
+        <div
+          key={idx}
+          className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2"
+        >
+          <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
               {kind === 'and' ? `Clause ${idx + 1} (AND)` : `Clause ${idx + 1} (OR)`}
             </span>
             <button
               type="button"
               onClick={() => removeChild(idx)}
-              className="text-[var(--text-muted)] hover:text-[var(--color-error)]"
+              className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
               aria-label={`Remove clause ${idx + 1}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -296,7 +299,7 @@ function CompoundEditor({
             onChange={(next) => updateChild(idx, next)}
             fieldOptions={fieldOptions}
           />
-        </InspectorCard>
+        </div>
       ))}
       <Button variant="secondary" size="sm" onClick={addChild}>
         <Plus className="mr-1 h-3.5 w-3.5" />

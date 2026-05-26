@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
@@ -6,9 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { getAgentVariables } from '@/services/api/orchestrationConnections';
 import { cn } from '@/utils';
 import {
-  InspectorCard,
   InspectorEmptyState,
-  InspectorField,
 } from './inspector/InspectorPrimitives';
 import {
   normalizeSourceKindMappingRow,
@@ -46,6 +45,18 @@ const SOURCE_OPTIONS = [
   { value: 'payload', label: 'Recipient field' },
   { value: 'static', label: 'Static value' },
 ];
+
+/** Compact label + field stack matching the AttemptPolicyEditor Field pattern. */
+function CompactField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
 
 // Keep an already-saved field selectable even if it isn't in the upstream set.
 function payloadFieldSelectOptions(options: string[], current?: string) {
@@ -151,102 +162,104 @@ export function VariableMappingField({
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+    <div className="flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2">
       {rows.length === 0 ? (
         <InspectorEmptyState>
           No variable mappings — click Add to bind an agent variable.
         </InspectorEmptyState>
       ) : null}
       {rows.map((row, idx) => (
-        <InspectorCard key={idx}>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <InspectorField label="Variable" className={cn('gap-1')}>
-                  {agentVars && agentVars.length > 0 ? (
-                    <Combobox
-                      size="sm"
-                      value={row.agent_variable}
-                      onChange={(next) => updateRow(idx, { agent_variable: next })}
-                      options={agentVars.map((v) => ({ value: v, label: v }))}
-                      placeholder="Pick variable"
-                    />
-                  ) : (
-                    <Input
-                      value={row.agent_variable}
-                      onChange={(e) =>
-                        updateRow(idx, { agent_variable: e.target.value })
-                      }
-                      placeholder="agent_variable"
-                    />
-                  )}
-                </InspectorField>
-              </div>
-              <Button
-                variant="danger-outline"
-                size="sm"
-                onClick={() => removeRow(idx)}
-                aria-label={`Remove mapping ${idx + 1}`}
-              >
-                Remove
-              </Button>
-            </div>
-            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
-              <InspectorField label="Source" className="gap-1">
-                <Combobox
-                  size="sm"
-                  value={row.source_kind}
-                  onChange={(next) =>
-                    replaceRow(
-                      idx,
-                      normalizeSourceKindMappingRow(
-                        row,
-                        next === 'static' ? 'static' : 'payload',
-                      ),
-                    )
-                  }
-                  options={SOURCE_OPTIONS}
-                  placeholder="Source"
-                />
-              </InspectorField>
-              <InspectorField
-                label={row.source_kind === 'payload' ? 'Field' : 'Value'}
-                className="gap-1"
-              >
-                {row.source_kind === 'payload' ? (
-                  payloadFieldOptions && payloadFieldOptions.length > 0 ? (
-                    <Combobox
-                      size="sm"
-                      value={row.payload_field ?? ''}
-                      onChange={(next) => updateRow(idx, { payload_field: next })}
-                      options={payloadFieldSelectOptions(payloadFieldOptions, row.payload_field)}
-                      placeholder="Pick a recipient field"
-                    />
-                  ) : (
-                    <Input
-                      value={row.payload_field ?? ''}
-                      onChange={(e) =>
-                        updateRow(idx, { payload_field: e.target.value })
-                      }
-                      placeholder="recipient.payload field"
-                    />
-                  )
+        <div
+          key={idx}
+          className={cn(
+            'flex flex-col gap-2 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2',
+            idx > 0 && 'border-t-[var(--border-default)]',
+          )}
+        >
+          {/* Variable row with compact label + trash */}
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <CompactField label="Variable">
+                {agentVars && agentVars.length > 0 ? (
+                  <Combobox
+                    size="sm"
+                    value={row.agent_variable}
+                    onChange={(next) => updateRow(idx, { agent_variable: next })}
+                    options={agentVars.map((v) => ({ value: v, label: v }))}
+                    placeholder="Pick variable"
+                  />
                 ) : (
                   <Input
-                    value={row.static_value ?? ''}
+                    value={row.agent_variable}
                     onChange={(e) =>
-                      updateRow(idx, { static_value: e.target.value })
+                      updateRow(idx, { agent_variable: e.target.value })
                     }
-                    placeholder="literal value"
+                    placeholder="agent_variable"
                   />
                 )}
-              </InspectorField>
+              </CompactField>
             </div>
+            <button
+              type="button"
+              onClick={() => removeRow(idx)}
+              aria-label={`Remove mapping ${idx + 1}`}
+              className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
-        </InspectorCard>
+          <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
+            <CompactField label="Source">
+              <Combobox
+                size="sm"
+                value={row.source_kind}
+                onChange={(next) =>
+                  replaceRow(
+                    idx,
+                    normalizeSourceKindMappingRow(
+                      row,
+                      next === 'static' ? 'static' : 'payload',
+                    ),
+                  )
+                }
+                options={SOURCE_OPTIONS}
+                placeholder="Source"
+              />
+            </CompactField>
+            <CompactField label={row.source_kind === 'payload' ? 'Field' : 'Value'}>
+              {row.source_kind === 'payload' ? (
+                payloadFieldOptions && payloadFieldOptions.length > 0 ? (
+                  <Combobox
+                    size="sm"
+                    value={row.payload_field ?? ''}
+                    onChange={(next) => updateRow(idx, { payload_field: next })}
+                    options={payloadFieldSelectOptions(payloadFieldOptions, row.payload_field)}
+                    placeholder="Pick a recipient field"
+                  />
+                ) : (
+                  <Input
+                    value={row.payload_field ?? ''}
+                    onChange={(e) =>
+                      updateRow(idx, { payload_field: e.target.value })
+                    }
+                    placeholder="recipient.payload field"
+                  />
+                )
+              ) : (
+                <Input
+                  value={row.static_value ?? ''}
+                  onChange={(e) =>
+                    updateRow(idx, { static_value: e.target.value })
+                  }
+                  placeholder="literal value"
+                />
+              )}
+            </CompactField>
+          </div>
+        </div>
       ))}
       {agentVarsError ? (
-        <span className="rounded-[var(--radius-default)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-3 py-2 text-[11px] text-[var(--color-error)]">
+        <span className="rounded-[var(--radius-default)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-2 py-1.5 text-[11px] text-[var(--color-error)]">
           {agentVarsError}
         </span>
       ) : null}
