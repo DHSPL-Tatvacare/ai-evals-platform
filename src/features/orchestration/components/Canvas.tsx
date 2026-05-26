@@ -374,6 +374,13 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
         onReconnect={onReconnect}
         onMoveEnd={onMoveEnd}
         onPaneClick={onPaneClick}
+        // Default minZoom (0.5) clamps both zoom-out and fitView, so large
+        // sprawling workflows never frame fully; 0.1 lets fitView shrink
+        // enough to bound every node. fitViewOptions aligns the Controls fit
+        // button padding with the onInit auto-fit (0.2).
+        minZoom={0.1}
+        maxZoom={2}
+        fitViewOptions={{ padding: 0.2 }}
         // Phase 3 — Delete / Backspace removes the selected node(s) or
         // edge(s); the change flows through onNodesChange / onEdgesChange,
         // both of which already gate on edit mode. View mode short-circuits
