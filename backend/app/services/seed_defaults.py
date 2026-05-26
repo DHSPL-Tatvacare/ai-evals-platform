@@ -2461,7 +2461,7 @@ APP_SEEDS = [
                     "label": "Batch Evaluation",
                     "description": "Evaluate a selected set of calls",
                     "icon": "FileSpreadsheet",
-                    "config": {"modalId": "insideSalesEval"},
+                    "config": {"modalId": "callQualityEval"},
                 },
             ],
             "evaluatorDetail": {
