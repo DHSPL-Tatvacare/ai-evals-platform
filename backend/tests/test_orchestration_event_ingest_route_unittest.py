@@ -79,6 +79,48 @@ async def test_webhook_vendor_creates_run(db_session, seed_full_run):
 
 
 @pytest.mark.asyncio
+async def test_webhook_canonical_sample_without_event_name_fires(db_session, seed_full_run):
+    # Identity webhook: the inspector's canonical sample omits event_name; the
+    # route falls back to the trigger's own event_name so the sample fires.
+    trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="webhook")
+    _override_db_with_session(db_session)
+    try:
+        r = await _client_post(
+            f"{WEBHOOKS}/event/webhook/{token}",
+            {"recipient_id": "evt-1", "foo": "bar"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["runsCreated"] == 1
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    run = (await db_session.execute(
+        select(WorkflowRun).where(WorkflowRun.trigger_id == trig.id)
+    )).scalar_one()
+    assert run.params["event_payload"]["event_name"] == trig.event_name
+
+
+@pytest.mark.asyncio
+async def test_webhook_explicit_event_name_not_overwritten(db_session, seed_full_run):
+    # An explicit body event_name wins over the trigger fallback.
+    trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="webhook")
+    _override_db_with_session(db_session)
+    try:
+        r = await _client_post(
+            f"{WEBHOOKS}/event/webhook/{token}",
+            {"event_name": "crm.lead.created", "recipient_id": "evt-1"},
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    run = (await db_session.execute(
+        select(WorkflowRun).where(WorkflowRun.trigger_id == trig.id)
+    )).scalar_one()
+    assert run.params["event_payload"]["event_name"] == "crm.lead.created"
+
+
+@pytest.mark.asyncio
 async def test_vendor_mismatch_404(db_session, seed_full_run):
     # Trigger is bound to frappe; hitting the same token under /webhook 404s.
     trig, token, *_ = await _make_event_trigger(db_session, seed_full_run, vendor="frappe")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
@@ -138,6 +139,10 @@ async def event_ingest_webhook(
 
     headers = dict(request.headers)
     canonical_name = adapter.map_event_name(payload, headers=headers)
+    if vendor == "webhook" and not canonical_name:
+        # Identity passthrough carries no native fields — the trigger's own
+        # event_name (NOT-NULL for kind='event') makes its sample runnable.
+        canonical_name = trigger.event_name
     if not canonical_name:
         # Native event has no canonical mapping — acknowledge so the CRM stops
         # retrying, but create nothing.
@@ -147,6 +152,8 @@ async def event_ingest_webhook(
         return {"status": "ok", "runsCreated": 0, "deduped": False, "runIds": []}
 
     batch = adapter.normalize_event(payload, headers=headers)
+    if vendor == "webhook" and not batch.event_name:
+        batch = replace(batch, event_name=canonical_name)
     if len(batch.recipients) > _MAX_EVENT_RECIPIENTS:
         raise HTTPException(status_code=413, detail="too many recipients in one event")
 
