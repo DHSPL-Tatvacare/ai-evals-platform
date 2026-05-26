@@ -1,11 +1,11 @@
-/**
- * TranscriptionConfigStep — wizard step 3 for inside-sales eval wizard.
- * Configures language, script, model, and transcription toggles.
- */
-
-import { Info } from 'lucide-react';
-import { Select } from '@/components/ui';
+import { Select, Switch } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
+import {
+  WizardStepLayout,
+  WizardSection,
+  WizardFieldRow,
+  WizardMetric,
+} from '@/features/evalRuns/components/WizardStepLayout';
 
 const LANGUAGE_OPTIONS: SelectOption[] = [
   { value: 'hi', label: 'Hindi' },
@@ -20,17 +20,14 @@ const SCRIPT_OPTIONS: SelectOption[] = [
   { value: 'latin', label: 'Latin (Romanized)' },
 ];
 
-const MODEL_OPTIONS: SelectOption[] = [
-  { value: 'gemini', label: 'Gemini (default)' },
-];
-
 export interface TranscriptionConfig {
   language: string;
   script: string;
-  model: string;
   forceRetranscribe: boolean;
   preserveCodeSwitching: boolean;
   speakerDiarization: boolean;
+  transliterate: boolean;
+  targetScript: string;
 }
 
 interface TranscriptionConfigStepProps {
@@ -39,96 +36,47 @@ interface TranscriptionConfigStepProps {
   totalCalls: number;
 }
 
-export function TranscriptionConfigStep({
-  config,
-  onChange,
-  totalCalls,
-}: TranscriptionConfigStepProps) {
+export function TranscriptionConfigStep({ config, onChange, totalCalls }: TranscriptionConfigStepProps) {
   return (
-    <div className="space-y-5">
-      {/* Info callout */}
-      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5">
-        <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
-        <p className="text-xs text-[var(--text-secondary)]">
-          Calls without transcripts will be transcribed before evaluation. Configure transcription settings below.
-        </p>
-      </div>
-
-      {/* Stats */}
-      <div className="flex gap-4 text-xs">
-        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-          <div className="text-[10px] font-medium text-[var(--text-muted)] uppercase">Total Calls</div>
-          <div className="text-sm font-semibold text-[var(--text-primary)]">{totalCalls}</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-          <div className="text-[10px] font-medium text-[var(--text-muted)] uppercase">Need Transcription</div>
-          <div className="text-sm font-semibold text-[var(--text-primary)]">{totalCalls}</div>
-        </div>
-      </div>
-
-      {/* Language */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[var(--text-secondary)]">Language</label>
-        <Select
-          value={config.language}
-          onChange={(language) => onChange({ language })}
-          options={LANGUAGE_OPTIONS}
-          size="sm"
+    <WizardStepLayout
+      eyebrow="Transcription"
+      title="Configure transcription"
+      description="Calls without a transcript are transcribed before evaluation."
+    >
+      <WizardSection
+        aside={
+          <div className="flex gap-2">
+            <WizardMetric label="Total calls" value={totalCalls} />
+            <WizardMetric label="Need transcription" value={totalCalls} />
+          </div>
+        }
+      >
+        <WizardFieldRow
+          title="Language"
+          description="Spoken language of the calls. Auto-detect inspects each recording."
+          control={<Select value={config.language} onChange={(language) => onChange({ language })} options={LANGUAGE_OPTIONS} size="sm" />}
         />
-      </div>
-
-      {/* Source Script */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[var(--text-secondary)]">Source Script</label>
-        <Select
-          value={config.script}
-          onChange={(script) => onChange({ script })}
-          options={SCRIPT_OPTIONS}
-          size="sm"
+        <WizardFieldRow
+          title="Source script"
+          description="Script the call is spoken in. Used when transliterating."
+          control={<Select value={config.script} onChange={(script) => onChange({ script })} options={SCRIPT_OPTIONS} size="sm" />}
         />
-      </div>
-
-      {/* Transcription Model */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[var(--text-secondary)]">Transcription Model</label>
-        <Select
-          value={config.model}
-          onChange={(model) => onChange({ model })}
-          options={MODEL_OPTIONS}
-          size="sm"
+        <WizardFieldRow
+          title="Speaker diarization"
+          description="Label each turn as agent or lead."
+          control={<Switch checked={config.speakerDiarization} onCheckedChange={(v) => onChange({ speakerDiarization: v })} size="sm" />}
         />
-      </div>
-
-      {/* Toggles */}
-      <div className="space-y-2.5">
-        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <input
-            type="checkbox"
-            checked={config.forceRetranscribe}
-            onChange={(e) => onChange({ forceRetranscribe: e.target.checked })}
-            className="h-3.5 w-3.5 rounded accent-[var(--color-brand-accent)]"
-          />
-          Force re-transcription (even if transcript exists)
-        </label>
-        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <input
-            type="checkbox"
-            checked={config.preserveCodeSwitching}
-            onChange={(e) => onChange({ preserveCodeSwitching: e.target.checked })}
-            className="h-3.5 w-3.5 rounded accent-[var(--color-brand-accent)]"
-          />
-          Preserve code-switching (Hindi ↔ English)
-        </label>
-        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <input
-            type="checkbox"
-            checked={config.speakerDiarization}
-            onChange={(e) => onChange({ speakerDiarization: e.target.checked })}
-            className="h-3.5 w-3.5 rounded accent-[var(--color-brand-accent)]"
-          />
-          Speaker diarization (identify agent vs lead)
-        </label>
-      </div>
-    </div>
+        <WizardFieldRow
+          title="Preserve code-switching"
+          description="Keep Hindi ↔ English mixing exactly as spoken."
+          control={<Switch checked={config.preserveCodeSwitching} onCheckedChange={(v) => onChange({ preserveCodeSwitching: v })} size="sm" />}
+        />
+        <WizardFieldRow
+          title="Force re-transcription"
+          description="Re-transcribe even when a transcript already exists."
+          control={<Switch checked={config.forceRetranscribe} onCheckedChange={(v) => onChange({ forceRetranscribe: v })} size="sm" />}
+        />
+      </WizardSection>
+    </WizardStepLayout>
   );
 }

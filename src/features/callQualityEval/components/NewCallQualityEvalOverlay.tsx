@@ -1,17 +1,19 @@
 /**
- * NewCallQualityEvalOverlay — 6-step wizard for call-quality evaluation.
+ * NewCallQualityEvalOverlay — 7-step wizard for call-quality evaluation.
  * Follows the same pattern as NewBatchEvalOverlay.
  */
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { WizardOverlay, type WizardStep } from '@/features/evalRuns/components/WizardOverlay';
 import { RunInfoStep } from '@/features/evalRuns/components/RunInfoStep';
-import { LLMConfigStep, type LLMConfig } from '@/features/evalRuns/components/LLMConfigStep';
+import type { LLMConfig } from '@/features/evalRuns/components/LLMConfigStep';
 import { ParallelConfigSection } from '@/features/evalRuns/components/ParallelConfigSection';
 import { ReviewStep, type ReviewSummary, type ReviewSection } from '@/features/evalRuns/components/ReviewStep';
 import { SelectCallsStep, type CallSelectionConfig } from './SelectCallsStep';
 import { buildCallQualitySelection } from './buildCallQualitySelection';
 import { TranscriptionConfigStep, type TranscriptionConfig } from './TranscriptionConfigStep';
+import { TransliterationStep } from './TransliterationStep';
+import { ModelsStep } from './ModelsStep';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { routes } from '@/config/routes';
@@ -41,8 +43,9 @@ const STEPS: WizardStep[] = [
   { key: 'info', label: 'Run Info' },
   { key: 'calls', label: 'Select Calls' },
   { key: 'transcription', label: 'Transcription' },
+  { key: 'transliteration', label: 'Transliteration' },
   { key: 'evaluators', label: 'Evaluators' },
-  { key: 'llm', label: 'LLM Config' },
+  { key: 'models', label: 'Models' },
   { key: 'review', label: 'Review' },
 ];
 
@@ -103,17 +106,18 @@ export function NewCallQualityEvalOverlay({
   const [previewCalls, setPreviewCalls] = useState<CallRecord[]>([]);
   const [matchingCount, setMatchingCount] = useState(0);
 
-  // Step 3: Transcription
+  // Step 3: Transcription + Step 4: Transliteration (share the same config object)
   const [transcriptionConfig, setTranscriptionConfig] = useState<TranscriptionConfig>({
     language: 'auto',
     script: 'auto',
-    model: 'gemini',
     forceRetranscribe: false,
     preserveCodeSwitching: true,
     speakerDiarization: true,
+    transliterate: false,
+    targetScript: 'latin',
   });
 
-  // Step 4: Evaluators
+  // Step 5: Evaluators
   const [availableEvaluators, setAvailableEvaluators] = useState<EvaluatorDefinition[]>([]);
   const [selectedEvaluatorIds, setSelectedEvaluatorIds] = useState<string[]>([]);
 
@@ -127,8 +131,14 @@ export function NewCallQualityEvalOverlay({
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Step 5: LLM Config
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>({
+  // Step 6: Models — two separate LLM configs
+  const [transcriptionLlmConfig, setTranscriptionLlmConfig] = useState<LLMConfig>({
+    provider: '',
+    model: '',
+    temperature: 0.1,
+    thinking: 'off',
+  });
+  const [evaluationLlmConfig, setEvaluationLlmConfig] = useState<LLMConfig>({
     provider: '',
     model: '',
     temperature: 0.1,
@@ -159,18 +169,20 @@ export function NewCallQualityEvalOverlay({
       ? Math.min(callConfig.sampleSize, matchingCount)
       : matchingCount;
 
-  // Validation
+  // Validation — step indices: 0=info, 1=calls, 2=transcription, 3=transliteration, 4=evaluators, 5=models, 6=review
   const canGoNext = useMemo(() => {
     switch (currentStep) {
       case 0: return runName.trim().length > 0;
       case 1: return resolvedCallCount > 0;
       case 2: return true; // transcription config always valid
-      case 3: return selectedEvaluatorIds.length > 0;
-      case 4: return Boolean(llmConfig.provider) && Boolean(llmConfig.model);
-      case 5: return resolvedCallCount > 0; // final submit must still resolve to ≥1 call
+      case 3: return true; // transliteration config always valid
+      case 4: return selectedEvaluatorIds.length > 0;
+      case 5: return Boolean(transcriptionLlmConfig.provider) && Boolean(transcriptionLlmConfig.model)
+                  && Boolean(evaluationLlmConfig.provider) && Boolean(evaluationLlmConfig.model);
+      case 6: return resolvedCallCount > 0; // final submit must still resolve to ≥1 call
       default: return false;
     }
-  }, [currentStep, runName, resolvedCallCount, selectedEvaluatorIds, llmConfig.provider, llmConfig.model]);
+  }, [currentStep, runName, resolvedCallCount, selectedEvaluatorIds, transcriptionLlmConfig.provider, transcriptionLlmConfig.model, evaluationLlmConfig.provider, evaluationLlmConfig.model]);
 
   // Review data — alias for clarity in the existing review summary code below.
   const callCount = resolvedCallCount;
@@ -179,12 +191,12 @@ export function NewCallQualityEvalOverlay({
     name: runName,
     description: runDescription,
     badges: [
-      { label: 'Model', value: llmConfig.model || '—' },
+      { label: 'Model', value: evaluationLlmConfig.model || '—' },
       { label: 'Calls', value: String(callCount) },
       { label: 'Evaluators', value: String(selectedEvaluatorIds.length) },
       { label: 'Workers', value: parallelEnabled ? String(parallelWorkers) : '1' },
     ],
-  }), [runName, runDescription, llmConfig.model, callCount, selectedEvaluatorIds.length, parallelEnabled, parallelWorkers]);
+  }), [runName, runDescription, evaluationLlmConfig.model, callCount, selectedEvaluatorIds.length, parallelEnabled, parallelWorkers]);
 
   const reviewSections: ReviewSection[] = useMemo(() => [
     {
@@ -207,8 +219,8 @@ export function NewCallQualityEvalOverlay({
       items: [
         { key: 'Language', value: transcriptionConfig.language },
         { key: 'Script', value: transcriptionConfig.script },
-        { key: 'Model', value: transcriptionConfig.model },
         { key: 'Diarization', value: transcriptionConfig.speakerDiarization ? 'Yes' : 'No' },
+        { key: 'Transliterate', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
       ],
     },
     {
@@ -221,13 +233,13 @@ export function NewCallQualityEvalOverlay({
     {
       label: 'Execution',
       items: [
-        { key: 'Provider', value: llmConfig.provider || 'Default' },
-        { key: 'Model', value: llmConfig.model },
-        { key: 'Temperature', value: String(llmConfig.temperature) },
+        { key: 'Transcription model', value: transcriptionLlmConfig.model || '—' },
+        { key: 'Evaluation model', value: evaluationLlmConfig.model || '—' },
+        { key: 'Temperature', value: String(evaluationLlmConfig.temperature) },
         { key: 'Workers', value: parallelEnabled ? String(parallelWorkers) : '1 (sequential)' },
       ],
     },
-  ], [callConfig, callCount, transcriptionConfig, selectedEvaluatorIds, availableEvaluators, llmConfig, parallelEnabled, parallelWorkers]);
+  ], [callConfig, callCount, transcriptionConfig, selectedEvaluatorIds, availableEvaluators, transcriptionLlmConfig, evaluationLlmConfig, parallelEnabled, parallelWorkers]);
 
   const handleSubmit = useCallback(async () => {
     const selection = buildCallQualitySelection(callConfig);
@@ -239,26 +251,33 @@ export function NewCallQualityEvalOverlay({
       run_description: runDescription,
       selection,
       evaluator_ids: selectedEvaluatorIds,
-      llm_config: {
-        provider: llmConfig.provider,
-        model: llmConfig.model,
-        temperature: llmConfig.temperature,
-        thinking: llmConfig.thinking,
+      transcription_llm_config: {
+        provider: transcriptionLlmConfig.provider,
+        model: transcriptionLlmConfig.model,
+        temperature: transcriptionLlmConfig.temperature,
+        thinking: transcriptionLlmConfig.thinking,
+      },
+      evaluation_llm_config: {
+        provider: evaluationLlmConfig.provider,
+        model: evaluationLlmConfig.model,
+        temperature: evaluationLlmConfig.temperature,
+        thinking: evaluationLlmConfig.thinking,
       },
       transcription_config: {
         language: transcriptionConfig.language,
         script: transcriptionConfig.script,
-        model: transcriptionConfig.model,
         speaker_diarization: transcriptionConfig.speakerDiarization,
         preserve_code_switching: transcriptionConfig.preserveCodeSwitching,
         force_retranscribe: transcriptionConfig.forceRetranscribe,
+        transliterate: transcriptionConfig.transliterate,
+        target_script: transcriptionConfig.targetScript,
       },
       parallel_workers: parallelEnabled ? parallelWorkers : 1,
       preview_records: previewCalls,
     });
-  }, [runName, runDescription, callConfig, transcriptionConfig, selectedEvaluatorIds, llmConfig, parallelEnabled, parallelWorkers, previewCalls, submitJob]);
+  }, [runName, runDescription, callConfig, transcriptionConfig, selectedEvaluatorIds, transcriptionLlmConfig, evaluationLlmConfig, parallelEnabled, parallelWorkers, previewCalls, submitJob]);
 
-  // Step content
+  // Step content — indices: 0=info, 1=calls, 2=transcription, 3=transliteration, 4=evaluators, 5=models, 6=review
   const stepContent = (() => {
     switch (currentStep) {
       case 0:
@@ -292,18 +311,28 @@ export function NewCallQualityEvalOverlay({
         );
       case 3:
         return (
+          <TransliterationStep
+            config={transcriptionConfig}
+            onChange={(updates) => setTranscriptionConfig((prev) => ({ ...prev, ...updates }))}
+          />
+        );
+      case 4:
+        return (
           <EvaluatorPickerStep
             available={availableEvaluators}
             selectedIds={selectedEvaluatorIds}
             onSelectionChange={setSelectedEvaluatorIds}
           />
         );
-      case 4:
+      case 5:
         return (
           <div className="space-y-4">
-            <LLMConfigStep
-              config={llmConfig}
-              onChange={setLlmConfig}
+            <ModelsStep
+              transcription={transcriptionLlmConfig}
+              evaluation={evaluationLlmConfig}
+              transliterateEnabled={transcriptionConfig.transliterate}
+              onTranscriptionChange={setTranscriptionLlmConfig}
+              onEvaluationChange={setEvaluationLlmConfig}
             />
             <ParallelConfigSection
               parallel={parallelEnabled}
@@ -315,7 +344,7 @@ export function NewCallQualityEvalOverlay({
             />
           </div>
         );
-      case 5:
+      case 6:
         return <ReviewStep summary={reviewSummary} sections={reviewSections} />;
       default:
         return null;
