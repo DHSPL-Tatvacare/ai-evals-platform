@@ -165,6 +165,19 @@ async def _resolve_dataset(
         )
 
 
+def _sample_for_field(field_type: str, enum_values: list[Any]) -> Any:
+    """Representative preview value derived from the field's declared type — never an LLM call."""
+    if field_type == "enum":
+        return str(enum_values[0]) if enum_values else "value"
+    if field_type == "number":
+        return 42
+    if field_type == "boolean":
+        return True
+    if field_type == "array":
+        return ["value"]
+    return "text"
+
+
 def _resolve_llm_extract(
     node: WorkflowDefinitionNode,
     *,
@@ -177,14 +190,19 @@ def _resolve_llm_extract(
         key = field.get("key")
         if not key:
             continue
+        field_type = field.get("type") or "text"
+        raw_enum = field.get("enumValues")
+        enum_values = raw_enum if isinstance(raw_enum, list) else []
+        sample = _sample_for_field(field_type, enum_values)
         add(
             UpstreamField(
                 path=f"{namespace}.{key}",
-                type=field.get("type") or "text",
+                type=field_type,
                 source="step",
                 source_node_id=node.id,
+                sample_value=sample,
             ),
-            None,
+            sample,
         )
 
 

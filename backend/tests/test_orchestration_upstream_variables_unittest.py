@@ -114,6 +114,55 @@ async def _make_dataset_version(
     return version.id
 
 
+# ─── llm.extract sample values (pure — no DB) ─────────────────────────────────
+
+
+def test_llm_extract_fields_carry_typed_sample_values():
+    from app.services.orchestration.upstream_variables import _resolve_llm_extract
+
+    node = _node("analyze", "llm.extract", {
+        "output_namespace": "analysis",
+        "output_schema": [
+            {"key": "sentiment", "type": "enum", "enumValues": ["positive", "negative"]},
+            {"key": "score", "type": "number"},
+            {"key": "is_urgent", "type": "boolean"},
+            {"key": "summary", "type": "text"},
+            {"key": "tags", "type": "array"},
+        ],
+    })
+    captured: dict[str, tuple[UpstreamField, object]] = {}
+
+    def _add(field: UpstreamField, value: object) -> None:
+        captured[field.path] = (field, value)
+
+    _resolve_llm_extract(node, add=_add)
+
+    # Every field carries a non-null sample on both the field and the add() value.
+    for path, (field, value) in captured.items():
+        assert value is not None, path
+        assert field.sample_value is not None, path
+        assert field.sample_value == value, path
+
+    # enum → first allowed value; other types → a representative typed sample.
+    assert captured["analysis.sentiment"][1] == "positive"
+    assert captured["analysis.score"][1] == 42
+    assert captured["analysis.is_urgent"][1] is True
+    assert isinstance(captured["analysis.summary"][1], str)
+    assert isinstance(captured["analysis.tags"][1], list)
+
+
+def test_llm_extract_enum_without_values_still_samples():
+    from app.services.orchestration.upstream_variables import _resolve_llm_extract
+
+    node = _node("analyze", "llm.extract", {
+        "output_schema": [{"key": "stage", "type": "enum"}],
+    })
+    captured: dict[str, object] = {}
+    _resolve_llm_extract(node, add=lambda f, v: captured.__setitem__(f.path, v))
+
+    assert captured["analyze.stage"] is not None
+
+
 # ─── service: source-field resolution ────────────────────────────────────────
 
 
