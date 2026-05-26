@@ -8,7 +8,7 @@ interface InspectorInfoButtonProps {
   ariaLabel: string;
 }
 
-function InspectorInfoButton({ content, ariaLabel }: InspectorInfoButtonProps) {
+export function InspectorInfoButton({ content, ariaLabel }: InspectorInfoButtonProps) {
   return (
     <Tooltip content={content} position="top" maxWidth={280} closeDelay={120}>
       <button
@@ -28,7 +28,7 @@ function InspectorInfoButton({ content, ariaLabel }: InspectorInfoButtonProps) {
 interface InspectorFieldProps {
   label: string;
   children: React.ReactNode;
-  description?: string;
+  description?: React.ReactNode;
   required?: boolean;
   htmlFor?: string;
   className?: string;
@@ -71,7 +71,7 @@ export function InspectorField({
 interface InspectorSectionProps {
   title: string;
   children: React.ReactNode;
-  description?: string;
+  description?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
 }

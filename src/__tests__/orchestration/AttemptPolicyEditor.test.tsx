@@ -36,6 +36,17 @@ describe('AttemptPolicyEditor', () => {
     expect(screen.queryByPlaceholderText('exhausted')).not.toBeInTheDocument();
   });
 
+  it('moves the retry-on guidance into an info control, not inline text', () => {
+    const onChange = vi.fn();
+    render(<AttemptPolicyEditor value={undefined} onChange={onChange} />);
+    expect(
+      screen.queryByText(/any classifiable retryable failure/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /retry on/i }),
+    ).toBeInTheDocument();
+  });
+
   it('clamps max_attempts to a minimum of 1', () => {
     const onChange = vi.fn();
     render(<AttemptPolicyEditor value={undefined} onChange={onChange} />);

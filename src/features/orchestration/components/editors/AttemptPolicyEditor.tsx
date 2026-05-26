@@ -6,6 +6,8 @@ import type {
 } from '@/features/orchestration/types';
 import { DEFAULT_ATTEMPT_POLICY } from '@/features/orchestration/types';
 
+import { InspectorInfoButton } from '../inspector/InspectorPrimitives';
+
 interface Props {
   value: AttemptPolicy | undefined;
   onChange(next: AttemptPolicy): void;
@@ -17,14 +19,7 @@ const BACKOFF_OPTIONS: { value: AttemptBackoffKind; label: string; help: string 
   { value: 'exponential', label: 'Exponential backoff',        help: 'Doubles the delay per retry. Same suspend caveat as fixed_delay.' },
 ];
 
-/**
- * Phase 11 (Commit 2) — attempt-policy editor.
- *
- * Used as a sub-form inside dispatch-node editors (Phase 11 §3.5). Mirrors
- * the backend ``AttemptPolicy`` Pydantic model field-for-field. Per-attempt
- * retry happens inside the node — operators never wire retry loops via the
- * graph.
- */
+/** Per-node attempt-policy sub-form; mirrors the backend `AttemptPolicy` model field-for-field. */
 export function AttemptPolicyEditor({ value, onChange }: Props) {
   // Merge stored value with defaults so partial payloads (e.g. legacy node
   // configs missing `retry_on`) don't crash on `.join()` / `.map()`.
@@ -52,7 +47,10 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
             }
           />
         </Field>
-        <Field label="Backoff">
+        <Field
+          label="Backoff"
+          info={BACKOFF_OPTIONS.find((o) => o.value === v.backoff_kind)?.help}
+        >
           <Select
             value={v.backoff_kind}
             onChange={(next) =>
@@ -62,9 +60,6 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
           />
         </Field>
       </div>
-      <p className="text-[11px] text-[var(--text-secondary)]">
-        {BACKOFF_OPTIONS.find((o) => o.value === v.backoff_kind)?.help}
-      </p>
       {v.backoff_kind !== 'immediate' ? (
         <Field label="Delay (minutes)">
           <Input
@@ -75,7 +70,16 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
           />
         </Field>
       ) : null}
-      <Field label="Retry on (comma-separated tokens)">
+      <Field
+        label="Retry on (comma-separated tokens)"
+        info={
+          <>
+            Empty means {'"any classifiable retryable failure"'}. Tokens depend
+            on the dispatch node — for HTTP, common values are{' '}
+            <code>timeout</code>, <code>http_5xx</code>, <code>transport</code>.
+          </>
+        }
+      >
         <Input
           value={retryOn.join(', ')}
           onChange={(e) =>
@@ -88,22 +92,30 @@ export function AttemptPolicyEditor({ value, onChange }: Props) {
           }
           placeholder="timeout, http_5xx, transport"
         />
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Empty means "any classifiable retryable failure". Tokens depend on
-          the dispatch node — for HTTP, common values are{' '}
-          <code>timeout</code>, <code>http_5xx</code>, <code>transport</code>.
-        </p>
       </Field>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
-        {label}
-      </span>
+      <div className="flex items-center gap-1">
+        <span className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">
+          {label}
+        </span>
+        {info ? (
+          <InspectorInfoButton content={info} ariaLabel={`More info about ${label}`} />
+        ) : null}
+      </div>
       {children}
     </div>
   );

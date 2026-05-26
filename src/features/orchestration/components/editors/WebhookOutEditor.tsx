@@ -20,6 +20,14 @@ const METHOD_OPTIONS = [
   { value: 'PUT', label: 'PUT' },
 ];
 
+const BODY_HELP = (
+  <>
+    Structured request body. Leaves can be JSON literals or payload references
+    like <code>{'{ "$payload": "first_name" }'}</code>. Use{' '}
+    <code>recipient_id</code> to reference the recipient&apos;s id.
+  </>
+);
+
 interface WebhookConfig {
   connection_id?: string | null;
   url?: string;
@@ -103,30 +111,28 @@ export function WebhookOutEditor({ value, onChange, appId }: Props) {
           <InspectorEmptyState>No headers — click Add to insert one.</InspectorEmptyState>
         ) : null}
         {headerEntries.map(([key, val]) => (
-          <InspectorCard key={key}>
+          <InspectorCard key={key} className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <Input
                 value={key}
                 onChange={(e) => setHeader(key, e.target.value, val)}
-                placeholder="Header-Name"
-                className="flex-1"
-              />
-              <span className="shrink-0 text-[11px] text-[var(--text-muted)]">:</span>
-              <Input
-                value={val}
-                onChange={(e) => setHeader(key, key, e.target.value)}
-                placeholder="value"
+                placeholder="Header name"
                 className="flex-1"
               />
               <button
                 type="button"
                 onClick={() => removeHeader(key)}
-                className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-1.5 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
+                className="shrink-0 rounded-[var(--radius-default)] border border-[var(--border-default)] p-2 text-[var(--text-muted)] transition-colors hover:border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/5 hover:text-[var(--color-error)]"
                 aria-label={`Remove ${key} header`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
+            <Input
+              value={val}
+              onChange={(e) => setHeader(key, key, e.target.value)}
+              placeholder="Value"
+            />
           </InspectorCard>
         ))}
         <Button variant="secondary" size="sm" onClick={addHeader}>
@@ -136,7 +142,7 @@ export function WebhookOutEditor({ value, onChange, appId }: Props) {
       </InspectorSection>
 
       {/* Body */}
-      <InspectorSection title="Body">
+      <InspectorSection title="Body" description={BODY_HELP}>
         <StructuredRequestBodyEditor
           value={cfg.body as StructuredRequestBody | undefined}
           onChange={(next) => patch({ body: next })}

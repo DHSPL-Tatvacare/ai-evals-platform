@@ -8,32 +8,18 @@ interface Props {
   onChange(next: StructuredRequestBody): void;
 }
 
-/**
- * Phase 11 (Commit 2) — structured request body editor for `core.webhook_out`.
- *
- * The persisted shape is a JSON-shaped object whose leaves may be JSON
- * literals or ``{"$payload": "field"}`` references. Authoring this through
- * a tree UI is the right experience but a deeper change than this
- * checkpoint can absorb — the editor surfaces the structured contract
- * through a JSON textarea with payload-reference syntax help and live
- * validation.
- *
- * The textarea is parsed on change; invalid JSON keeps the raw text but
- * surfaces an inline error. ``onChange`` is only called when the parse
- * succeeds — preserves ``body`` from being silently corrupted.
- */
+/** JSON body editor for `core.webhook_out`; leaves may be literals or `{"$payload": "field"}` refs. */
 export function StructuredRequestBodyEditor({ value, onChange }: Props) {
   const initialText = useMemo(() => stringify(value), [value]);
   const [text, setText] = useState<string>(initialText);
   const [parseError, setParseError] = useState<string | null>(null);
 
-  // Sync from props when the value changes externally (e.g. a different
-  // node selected). Avoid clobbering the user's in-progress edit when the
-  // serialized form already matches what they typed.
+  // Re-seed only when the incoming value isn't already what the current text
+  // represents (external change / node switch). Re-seeding on our own onChange
+  // round-trip would pretty-reformat mid-keystroke and jump the caret.
   useEffect(() => {
-    const next = stringify(value);
-    if (next !== text) {
-      setText(next);
+    if (!textRepresents(text, value)) {
+      setText(stringify(value));
       setParseError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -55,19 +41,26 @@ export function StructuredRequestBodyEditor({ value, onChange }: Props) {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const { selectionStart: start, selectionEnd: end } = el;
+    handleChange(`${text.slice(0, start)}  ${text.slice(end)}`);
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = start + 2;
+    });
+  };
+
   return (
     <div className="flex flex-col gap-1">
-      <p className="text-xs text-[var(--text-secondary)]">
-        Structured request body. Leaves can be JSON literals or payload
-        references like <code>{'{ "$payload": "first_name" }'}</code>. Use{' '}
-        <code>recipient_id</code> to reference the recipient&apos;s id.
-      </p>
       <textarea
         value={text}
         onChange={(e) => handleChange(e.target.value)}
-        rows={10}
+        onKeyDown={handleKeyDown}
+        rows={12}
         spellCheck={false}
-        className="block w-full resize-y rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-base)] px-2 py-1.5 font-mono text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
+        className="block w-full resize-y rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-base)] px-2 py-1.5 font-mono text-xs leading-relaxed text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
       />
       {parseError ? (
         <p className="text-xs text-[var(--color-error)]">JSON parse error: {parseError}</p>
@@ -78,6 +71,19 @@ export function StructuredRequestBodyEditor({ value, onChange }: Props) {
       </details>
     </div>
   );
+}
+
+// True when `text` parses to a value canonically equal to `value` — so the
+// textarea already shows this value and re-seeding would only reformat it.
+function textRepresents(text: string, value: StructuredRequestBody | undefined): boolean {
+  if (text.trim() === '') {
+    return value == null || (typeof value === 'object' && Object.keys(value).length === 0);
+  }
+  try {
+    return JSON.stringify(JSON.parse(text)) === JSON.stringify(value ?? {});
+  } catch {
+    return false;
+  }
 }
 
 function stringify(v: StructuredRequestBody | undefined): string {

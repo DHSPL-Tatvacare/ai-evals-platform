@@ -58,4 +58,18 @@ describe('StructuredRequestBodyEditor', () => {
     expect(screen.getByText(/JSON parse error/)).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('does not pretty-reformat the text when the parsed value round-trips back', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <StructuredRequestBodyEditor value={{}} onChange={onChange} />,
+    );
+    const textarea = getTextarea();
+    // User types compact JSON; the editor must not normalize whitespace.
+    fireEvent.change(textarea, { target: { value: '{"x":1}' } });
+    expect(onChange).toHaveBeenLastCalledWith({ x: 1 });
+    // Parent persists the parsed value and feeds it straight back.
+    rerender(<StructuredRequestBodyEditor value={{ x: 1 }} onChange={onChange} />);
+    expect(getTextarea().value).toBe('{"x":1}');
+  });
 });
