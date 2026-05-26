@@ -1,5 +1,5 @@
 import { Info } from 'lucide-react';
-import { Combobox, Switch } from '@/components/ui';
+import { Combobox, Switch, Tooltip } from '@/components/ui';
 import type { ComboboxOption } from '@/components/ui';
 import { LANGUAGES, getLanguageLabel } from '@/constants/languages';
 import { SCRIPTS } from '@/constants/scripts';
@@ -37,6 +37,20 @@ interface TranscriptionConfigStepProps {
   totalCalls: number;
 }
 
+function LabelWithInfo({ label, info }: { label: string; info: string }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-1.5">
+      <span className="text-[13px] font-medium text-[var(--text-primary)]">{label}</span>
+      <Tooltip content={info} position="top" maxWidth={320}>
+        <Info
+          aria-label={`${label} info`}
+          className="h-3.5 w-3.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] cursor-help"
+        />
+      </Tooltip>
+    </div>
+  );
+}
+
 function ToggleRow({
   label,
   description,
@@ -72,7 +86,10 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
 
       {/* Language */}
       <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Language</label>
+        <LabelWithInfo
+          label="Language"
+          info="The language actually spoken on the calls — e.g. Hindi, Tamil, English. Pick a specific language for best accuracy, or Auto-detect to let the model identify it per call."
+        />
         <Combobox
           options={LANGUAGE_OPTIONS}
           value={config.language}
@@ -83,7 +100,10 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
 
       {/* Source script */}
       <div>
-        <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Source script</label>
+        <LabelWithInfo
+          label="Source script"
+          info="The writing system the transcript comes out in. The same language can be written in different scripts — e.g. Hindi in Devanagari (कैसे हो) or in Latin/Roman letters (kaise ho). Auto-detect lets the model choose based on the audio."
+        />
         <Combobox
           options={SCRIPT_OPTIONS}
           value={config.script}
