@@ -683,6 +683,8 @@ async def _upsert_dim_lead_rows(
             if value:
                 attrs_first_seen[key] = value
 
+        attrs_current = _build_dim_lead_attributes(rp)
+
         payload.append(
             {
                 "id": uuid.uuid4(),
@@ -706,6 +708,7 @@ async def _upsert_dim_lead_rows(
                 "email": row.get("email"),
                 "city": row.get("city"),
                 "attributes_at_first_seen": attrs_first_seen,
+                "attributes": attrs_current,
             }
         )
     if not payload:
@@ -725,6 +728,9 @@ async def _upsert_dim_lead_rows(
                 "phone": stmt.excluded.phone,
                 "email": stmt.excluded.email,
                 "city": stmt.excluded.city,
+                # Mutable current-state bag — refresh on every resync, same
+                # as latest_stage_observed / assigned_rep_label.
+                "attributes": stmt.excluded.attributes,
                 # attributes_at_first_seen is insert-only by design;
                 # don't overwrite the first-observation snapshot on resync.
                 "updated_at": func.now(),

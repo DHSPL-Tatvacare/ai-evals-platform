@@ -770,6 +770,46 @@ class HashGuardedUpsertTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ON CONFLICT ON CONSTRAINT", compiled)
         self.assertIn("source_record_hash IS DISTINCT FROM", compiled)
 
+    async def test_dim_lead_upsert_writes_and_refreshes_plan_name_attribute(self):
+        from sqlalchemy.dialects import postgresql as _pg
+
+        captured: list[Any] = []
+
+        class _Sess:
+            async def execute(self, stmt):
+                captured.append(stmt)
+                return None
+
+        row = {
+            "tenant_id": uuid.uuid4(),
+            "app_id": "inside-sales",
+            "source_system": "lsq",
+            "lead_id": "prospect-1",
+            "first_name": "Lead",
+            "last_name": "One",
+            "phone": "9999999999",
+            "email": None,
+            "city": None,
+            "created_on": datetime.now(timezone.utc),
+            "raw_payload": {
+                "prospect_stage": "Converted",
+                "plan_name": "Smart CGM Program",
+            },
+        }
+        await sync_service._upsert_dim_lead_rows(  # type: ignore[arg-type]
+            _Sess(), rows=[row], cycle_start=datetime.now(timezone.utc)
+        )
+        self.assertEqual(len(captured), 1)
+        # Don't literal_binds — JSONB values can't render as SQL literals;
+        # assert on the bound param + the conflict-set text instead.
+        compiled = captured[0].compile(dialect=_pg.dialect())
+        # INSERT carries the plan name into the attributes JSONB.
+        self.assertIn(
+            {"plan_name": "Smart CGM Program"}, compiled.params.values()
+        )
+        # Resync refreshes the mutable bag (current-state, like stage/rep).
+        self.assertIn("attributes = excluded.attributes", str(compiled))
+
 
 class InsideSalesSyncJobTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_inside_sales_source_sync_targeted_lead_creates_and_completes_sync_run(self):
