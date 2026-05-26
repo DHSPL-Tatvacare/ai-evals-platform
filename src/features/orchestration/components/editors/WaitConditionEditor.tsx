@@ -1,6 +1,7 @@
 import { cn } from '@/utils/cn';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 import type { PredicateAst, WaitMode } from '@/features/orchestration/types';
 
 import { PredicateBuilder } from './PredicateBuilder';
@@ -34,7 +35,7 @@ interface Props {
 const MODE_OPTIONS: { value: WaitMode; label: string; help: string }[] = [
   { value: 'duration',         label: 'Wait for duration',          help: 'Wake after N hours. Emits a `wakeup` edge.' },
   { value: 'until_datetime',   label: 'Wait until ISO datetime',    help: 'Wake at a specific UTC time. Emits a `wakeup` edge.' },
-  { value: 'event',            label: 'Wait for event',             help: 'Hold until a matching event arrives. Emits an `event` edge.' },
+  { value: 'event',            label: 'Wait for event',             help: 'Pause here until a matching event arrives, then continue down the Event path.' },
   { value: 'event_or_timeout', label: 'Wait for event OR timeout',  help: 'Whichever happens first. Emits `event` or `timeout`.' },
 ];
 
@@ -115,19 +116,18 @@ export function WaitConditionEditor({ value, onChange }: Props) {
 
       {mode === 'until_datetime' ? (
         <Field label="Wake at (UTC ISO datetime)">
-          <Input
-            type="text"
+          <DateTimeField
             value={value.until_datetime ?? ''}
-            onChange={(e) =>
-              onChange({ ...value, until_datetime: e.target.value })
-            }
-            placeholder="2026-05-01T00:00:00Z"
+            onChange={(next) => onChange({ ...value, until_datetime: next })}
           />
         </Field>
       ) : null}
 
       {mode === 'event' || mode === 'event_or_timeout' ? (
         <>
+          <p className="text-xs text-[var(--text-secondary)]">
+            Today this resumes on a WhatsApp reply; full event matching is coming soon.
+          </p>
           <Field label="Event name">
             <Input
               type="text"
@@ -135,10 +135,13 @@ export function WaitConditionEditor({ value, onChange }: Props) {
               onChange={(e) => onChange({ ...value, event_name: e.target.value })}
               placeholder="wati.message_replied"
             />
+            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+              The event that resumes this step — e.g. a WhatsApp reply or a CRM stage change.
+            </p>
           </Field>
           <Field label="Event match (optional predicate)">
             <p className="mb-1 text-xs text-[var(--text-secondary)]">
-              Only resume when the inbound event also matches this predicate.
+              Optional — only resume when the event&apos;s data matches these conditions. Leave empty to resume on any matching event.
             </p>
             <PredicateBuilder
               value={value.event_match}
