@@ -244,6 +244,33 @@ def _extract_template_parameters(candidate: dict[str, Any]) -> list[str]:
     return sorted(numbers, key=int)
 
 
+def _extract_template_body(candidate: dict[str, Any]) -> tuple[str, Optional[str]]:
+    """Return (body, bodyOriginal) text. body carries positional {{1}}, bodyOriginal named {{name}}.
+
+    Falls back to the BODY component's text; never fabricates a sentence."""
+    body = candidate.get("body")
+    if not isinstance(body, str) or not body:
+        body = ""
+        fallback = ""
+        components = candidate.get("components")
+        if isinstance(components, list):
+            for component in components:
+                if not isinstance(component, dict):
+                    continue
+                text = component.get("text") or component.get("body")
+                if not isinstance(text, str) or not text:
+                    continue
+                if str(component.get("type") or "").upper() == "BODY":
+                    body = text
+                    break
+                fallback = fallback or text
+        body = body or fallback
+    body_original = candidate.get("bodyOriginal")
+    if not isinstance(body_original, str) or not body_original:
+        body_original = None
+    return body, body_original
+
+
 def _normalize_template_candidate(candidate: dict[str, Any]) -> Optional[dict[str, Any]]:
     name = (
         candidate.get("template_name") or candidate.get("templateName")
@@ -256,11 +283,14 @@ def _normalize_template_candidate(candidate: dict[str, Any]) -> Optional[dict[st
         language = (
             language.get("value") or language.get("key") or language.get("text") or ""
         )
+    body, body_original = _extract_template_body(candidate)
     return {
         "name": str(name),
         "language": str(language or ""),
         "status": str(candidate.get("status") or candidate.get("templateStatus") or ""),
         "parameters": _extract_template_parameters(candidate),
+        "body": body,
+        "body_original": body_original,
     }
 
 

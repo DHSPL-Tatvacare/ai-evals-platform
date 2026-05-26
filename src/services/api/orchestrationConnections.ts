@@ -110,6 +110,10 @@ export interface ProviderTemplateSummary {
   status: string;
   /** Ordered placeholder names declared by the WATI template. */
   parameters: string[];
+  /** Rendered body with positional {{1}} placeholders; empty when unavailable. */
+  body: string;
+  /** Body with named {{name}} placeholders; null when unavailable. */
+  bodyOriginal: string | null;
 }
 
 export interface ProviderTemplatesListResponse {

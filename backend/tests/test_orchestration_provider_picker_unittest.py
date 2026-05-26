@@ -180,6 +180,77 @@ async def test_wati_list_message_templates_missing_credentials_raises():
         await adapter.list_message_templates(bad_conn)
 
 
+# ─── WATI template body surfacing ─────────────────────────────────────────────
+
+
+def test_template_body_surfaced_from_components():
+    from app.services.orchestration.adapters.wati import _normalize_template_candidate
+
+    candidate = {
+        "template_name": "followup_30d",
+        "language": "en",
+        "status": "APPROVED",
+        "components": [
+            {"text": "Hello {{1}}, your follow-up date is {{2}}.", "type": "BODY"},
+        ],
+    }
+    norm = _normalize_template_candidate(candidate)
+    assert norm["body"] == "Hello {{1}}, your follow-up date is {{2}}."
+    # Existing positional parameter extraction is unchanged.
+    assert norm["parameters"] == ["1", "2"]
+
+
+def test_template_body_and_body_original_surfaced_from_top_level():
+    from app.services.orchestration.adapters.wati import _normalize_template_candidate
+
+    candidate = {
+        "template_name": "welcome_v2",
+        "language": "en",
+        "status": "APPROVED",
+        "parameters": ["first_name", "programme_name"],
+        "body": "Hi {{1}}, welcome to {{2}}.",
+        "bodyOriginal": "Hi {{first_name}}, welcome to {{programme_name}}.",
+    }
+    norm = _normalize_template_candidate(candidate)
+    assert norm["body"] == "Hi {{1}}, welcome to {{2}}."
+    assert norm["body_original"] == "Hi {{first_name}}, welcome to {{programme_name}}."
+    assert norm["parameters"] == ["first_name", "programme_name"]
+
+
+def test_template_without_body_yields_empty_string_no_fabrication():
+    from app.services.orchestration.adapters.wati import _normalize_template_candidate
+
+    candidate = {
+        "template_name": "noparams",
+        "language": "en",
+        "status": "APPROVED",
+        "parameters": ["first_name"],
+    }
+    norm = _normalize_template_candidate(candidate)
+    assert norm["body"] == ""
+    assert norm["body_original"] is None
+
+
+def test_provider_template_summary_carries_body_fields():
+    from app.schemas.orchestration_connection import ProviderTemplateSummary
+
+    s = ProviderTemplateSummary(
+        name="t", language="en", status="APPROVED", parameters=["1"],
+        body="Hi {{1}}", body_original="Hi {{name}}",
+    )
+    dumped = s.model_dump(by_alias=True)
+    assert dumped["body"] == "Hi {{1}}"
+    assert dumped["bodyOriginal"] == "Hi {{name}}"
+
+
+def test_provider_template_summary_body_defaults_backward_compatible():
+    from app.schemas.orchestration_connection import ProviderTemplateSummary
+
+    s = ProviderTemplateSummary(name="t", language="en", status="APPROVED", parameters=[])
+    assert s.body == ""
+    assert s.body_original is None
+
+
 # ─── Bolna adapter list_agents ────────────────────────────────────────────────
 
 

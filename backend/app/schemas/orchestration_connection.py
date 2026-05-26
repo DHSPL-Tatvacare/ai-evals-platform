@@ -133,6 +133,9 @@ class ProviderTemplateSummary(CamelModel):
     language: str
     status: str
     parameters: list[str]
+    # Rendered template body for preview: body has positional {{1}}, bodyOriginal named {{name}}.
+    body: str = ""
+    body_original: Optional[str] = None
 
 
 class ProviderTemplatesListResponse(CamelModel):
