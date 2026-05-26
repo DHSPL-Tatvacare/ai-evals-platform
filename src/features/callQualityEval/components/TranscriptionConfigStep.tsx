@@ -1,24 +1,25 @@
 import { Info } from 'lucide-react';
-import { Select, Switch } from '@/components/ui';
-import type { SelectOption } from '@/components/ui';
+import { Combobox, Switch } from '@/components/ui';
+import type { ComboboxOption } from '@/components/ui';
+import { LANGUAGES, getLanguageLabel } from '@/constants/languages';
+import { SCRIPTS } from '@/constants/scripts';
 
-const LANGUAGE_OPTIONS: SelectOption[] = [
-  { value: 'hi', label: 'Hindi' },
-  { value: 'en', label: 'English' },
-  { value: 'hi-en', label: 'Hindi-English (Mixed)' },
-  { value: 'auto', label: 'Auto-detect' },
-];
+// Full curated registries (flags + native names), shared with the voice-rx flow.
+const LANGUAGE_OPTIONS: ComboboxOption[] = LANGUAGES.map((l) => ({
+  value: l.code,
+  label: getLanguageLabel(l),
+  searchText: `${l.name} ${l.nativeName} ${l.code}`,
+}));
 
-const SCRIPT_OPTIONS: SelectOption[] = [
-  { value: 'auto', label: 'Auto-detect' },
-  { value: 'devanagari', label: 'Devanagari' },
-  { value: 'latin', label: 'Latin (Romanized)' },
-];
+const SCRIPT_OPTIONS: ComboboxOption[] = SCRIPTS.map((s) => ({
+  value: s.id,
+  label: s.name,
+}));
 
-const TARGET_SCRIPT_OPTIONS: SelectOption[] = [
-  { value: 'latin', label: 'Latin (Romanized)' },
-  { value: 'devanagari', label: 'Devanagari' },
-];
+const TARGET_SCRIPT_OPTIONS: ComboboxOption[] = SCRIPTS.filter((s) => s.id !== 'auto').map((s) => ({
+  value: s.id,
+  label: s.name,
+}));
 
 export interface TranscriptionConfig {
   language: string;
@@ -72,13 +73,23 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
       {/* Language */}
       <div>
         <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Language</label>
-        <Select value={config.language} onChange={(language) => onChange({ language })} options={LANGUAGE_OPTIONS} />
+        <Combobox
+          options={LANGUAGE_OPTIONS}
+          value={config.language}
+          onChange={(language) => onChange({ language })}
+          placeholder="Select language..."
+        />
       </div>
 
       {/* Source script */}
       <div>
         <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Source script</label>
-        <Select value={config.script} onChange={(script) => onChange({ script })} options={SCRIPT_OPTIONS} />
+        <Combobox
+          options={SCRIPT_OPTIONS}
+          value={config.script}
+          onChange={(script) => onChange({ script })}
+          placeholder="Select source script..."
+        />
       </div>
 
       {/* Toggles */}
@@ -91,7 +102,7 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
         />
         <ToggleRow
           label="Preserve code-switching"
-          description="Keep Hindi ↔ English mixing exactly as spoken."
+          description="Keep mixed-language speech exactly as spoken."
           checked={config.preserveCodeSwitching}
           onChange={(v) => onChange({ preserveCodeSwitching: v })}
         />
@@ -103,7 +114,7 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
         />
         <ToggleRow
           label="Transliterate transcript"
-          description="Also produce the transcript in another script (same language) — handy for romanizing Devanagari. Runs on the evaluation model."
+          description="Also produce the transcript in another script (same language) — handy for romanizing non-Latin scripts. Runs on the evaluation model."
           checked={config.transliterate}
           onChange={(v) => onChange({ transliterate: v })}
         />
@@ -113,7 +124,12 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
       {config.transliterate && (
         <div>
           <label className="block text-[13px] font-medium text-[var(--text-primary)] mb-1.5">Target script</label>
-          <Select value={config.targetScript} onChange={(targetScript) => onChange({ targetScript })} options={TARGET_SCRIPT_OPTIONS} />
+          <Combobox
+            options={TARGET_SCRIPT_OPTIONS}
+            value={config.targetScript}
+            onChange={(targetScript) => onChange({ targetScript })}
+            placeholder="Select target script..."
+          />
           <p className="mt-1 text-[11px] text-[var(--text-muted)]">Text already in this script is returned unchanged.</p>
         </div>
       )}
