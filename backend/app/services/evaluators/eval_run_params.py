@@ -28,11 +28,12 @@ class TranscriptionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: str = "auto"
-    script: str = "auto"
-    model: str = "gemini"
+    script: str = "auto"            # source script (informs transliteration)
     speaker_diarization: bool = True
     preserve_code_switching: bool = True
     force_retranscribe: bool = False
+    transliterate: bool = False     # 3rd LLM pass: transliterate transcript into target_script
+    target_script: str = "latin"
 
 
 class EvalRunParams(BaseModel):
@@ -57,8 +58,9 @@ class EvalRunParams(BaseModel):
     selection: EvaluationSelectionSpec
     evaluator_ids: list[uuid.UUID] = Field(min_length=1)
 
-    # How to evaluate
-    llm_config: LLMConfig
+    # How to evaluate — two distinct models, one per stage. Transliteration reuses the evaluation model.
+    transcription_llm_config: LLMConfig
+    evaluation_llm_config: LLMConfig
     transcription_config: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     parallel_workers: int = 1
 

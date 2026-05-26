@@ -17,6 +17,12 @@ from typing import Any
 import httpx
 
 from app.services.analytics.signal_taxonomy import SIGNAL_TYPES
+from app.services.evaluators.evaluation_constants import (
+    NORMALIZATION_PROMPT_PLAIN,
+    NORMALIZATION_SYSTEM_PROMPT,
+    build_normalization_schema_plain,
+    resolve_script_name,
+)
 from app.services.evaluators.output_schema_utils import primary_score
 from app.services.evaluators.response_parser import _safe_parse_json
 from app.services.evaluators.runner_utils import set_usage_call_purpose
@@ -189,6 +195,55 @@ def _mime_for_url(url: str) -> str:
     return "audio/wav" if url.lower().endswith(".wav") else "audio/mpeg"
 
 
+# ── Optional transliteration stage ──────────────────────────────────
+
+
+async def _maybe_transliterate(
+    ctx: WorkerContext, transcript: str
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Optional stage: transliterate the transcript into the target script.
+
+    Same language, script conversion only (Devanagari → Roman). Reuses voice-rx's
+    plain-text normalization prompt/schema. Runs on the evaluation LLM (text->text).
+    Returns (transliterated_text, meta) or (None, None) when disabled/empty.
+    """
+    cfg = ctx.transcription_config
+    if not cfg.get("transliterate"):
+        return None, None
+
+    target_script = cfg.get("target_script", "latin")
+    target_display = resolve_script_name(target_script) or target_script
+    source_script = cfg.get("script", "auto")
+    source_display = resolve_script_name(source_script)
+    language = cfg.get("language", "auto")
+
+    if not source_display or source_script == "auto":
+        source_instruction = "The source script should be auto-detected from the input text."
+    else:
+        source_instruction = f"The source text is in {source_display} script."
+
+    set_usage_call_purpose(ctx.evaluation_llm, "transliteration", stage_index=2)
+    raw = await ctx.evaluation_llm.generate_json(
+        prompt=NORMALIZATION_PROMPT_PLAIN.format(
+            target_script=target_display,
+            source_instruction=source_instruction,
+            language=language,
+            transcript_text=transcript,
+        ),
+        system_prompt=NORMALIZATION_SYSTEM_PROMPT,
+        json_schema=build_normalization_schema_plain(target_display),
+    )
+    parsed = _safe_parse_json(raw)[0] if isinstance(raw, str) else raw
+    text = ((parsed or {}).get("normalized_text") or "").strip()
+    if not text:
+        return None, None
+    return text, {
+        "enabled": True,
+        "source_script": source_script,
+        "target_script": target_script,
+    }
+
+
 # ── Worker entry point ───────────────────────────────────────────────
 
 
@@ -210,8 +265,8 @@ async def audio_transcribe_evaluate(ctx: WorkerContext) -> WorkerOutput:
         audio_resp.raise_for_status()
         audio_bytes = audio_resp.content
 
-    set_usage_call_purpose(ctx.llm, "transcription", stage_index=0)
-    transcript = await ctx.llm.generate_with_audio(
+    set_usage_call_purpose(ctx.transcription_llm, "transcription", stage_index=0)
+    transcript = await ctx.transcription_llm.generate_with_audio(
         prompt=transcription_prompt,
         audio_bytes=audio_bytes,
         mime_type=_mime_for_url(record.recording_url),
@@ -220,6 +275,9 @@ async def audio_transcribe_evaluate(ctx: WorkerContext) -> WorkerOutput:
     if not transcript or not transcript.strip():
         transcript = "[Transcription returned empty result]"
 
+    # ── Step 1.5: Optional transliteration (additive; eval still uses original) ──
+    transcript_transliterated, transliteration_meta = await _maybe_transliterate(ctx, transcript)
+
     # ── Step 2: Evaluate against each rubric ─────────────────────
     eval_outputs: list[EvaluatorOutput] = []
     for evaluator in ctx.evaluators:
@@ -227,8 +285,8 @@ async def audio_transcribe_evaluate(ctx: WorkerContext) -> WorkerOutput:
         augmented = _augment_output_schema(evaluator.output_schema)
         json_schema = generate_json_schema(augmented)
 
-        set_usage_call_purpose(ctx.llm, "evaluation", stage_index=1)
-        raw_result = await ctx.llm.generate_json(
+        set_usage_call_purpose(ctx.evaluation_llm, "evaluation", stage_index=1)
+        raw_result = await ctx.evaluation_llm.generate_json(
             prompt=prompt,
             json_schema=json_schema,
         )
@@ -253,6 +311,8 @@ async def audio_transcribe_evaluate(ctx: WorkerContext) -> WorkerOutput:
         transcript=transcript,
         evaluator_outputs=eval_outputs,
         signals=merge_signals(eval_outputs),
+        transcript_transliterated=transcript_transliterated,
+        transliteration_meta=transliteration_meta,
     )
 
 

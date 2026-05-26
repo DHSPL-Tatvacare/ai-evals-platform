@@ -114,7 +114,8 @@ def _build_initial_snapshot(
         "dataset_id": params.dataset_id,
         "selection": params.selection.model_dump(mode="json"),
         "transcription_config": params.transcription_config.model_dump(mode="json"),
-        "llm_config": params.llm_config.model_dump(mode="json"),
+        "transcription_llm_config": params.transcription_llm_config.model_dump(mode="json"),
+        "evaluation_llm_config": params.evaluation_llm_config.model_dump(mode="json"),
         "requested_evaluator_ids": [str(eid) for eid in params.evaluator_ids],
         "parallel_workers": params.parallel_workers,
     }
@@ -194,6 +195,8 @@ async def _persist_thread(
                     ],
                     "signals": output.signals,
                     "transcript": output.transcript,
+                    "transcript_transliterated": output.transcript_transliterated,
+                    "transliteration_meta": output.transliteration_meta,
                     "call_metadata": _build_thread_metadata(record),
                     "extra_metadata": output.extra_metadata or {},
                 },
@@ -265,8 +268,8 @@ async def run_eval(
         app_id=params.app_id,
         eval_type=eval_type,
         job_id=job_id,
-        llm_provider=params.llm_config.provider,
-        llm_model=params.llm_config.model,
+        llm_provider=params.evaluation_llm_config.provider,
+        llm_model=params.evaluation_llm_config.model,
         config=initial_snapshot,
         batch_metadata={
             "run_name": params.run_name,
@@ -294,41 +297,55 @@ async def run_eval(
             error_message="No evaluators found",
         )
 
-    # ── LLM wrapper ─────────────────────────────────────────────
+    # ── LLM wrappers — two call-sites, one per stage ─────────────
     from app.services.llm_credentials import resolve_llm_call
 
+    def _build_llm(resolved, *, temperature: float, call_purpose: str) -> LoggingLLMWrapper:
+        provider_kwargs: dict[str, Any] = {}
+        if resolved.provider == "azure_openai":
+            provider_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
+            provider_kwargs["api_version"] = (
+                resolved.api_version
+                or resolved.credentials.extra_config.get("api_version")
+                or "2025-03-01-preview"
+            )
+        provider = create_llm_provider(
+            provider=resolved.provider,
+            api_key=resolved.credentials.secret.get("api_key", ""),
+            model_name=resolved.model,
+            temperature=temperature,
+            service_account_path=resolved.credentials.service_account_path or "",
+            **provider_kwargs,
+        )
+        usage_cb = make_usage_callback(
+            tenant_id=tenant_id, user_id=user_id, app_id=params.app_id,
+            owner_type="eval_run", owner_id=eval_run_id, default_call_purpose=call_purpose,
+        )
+        wrapper = LoggingLLMWrapper(provider, log_callback=save_api_log, usage_callback=usage_cb)
+        wrapper.set_context(str(eval_run_id))
+        return wrapper
+
     async with _async_session() as db:
-        resolved = await resolve_llm_call(
+        transcription_resolved = await resolve_llm_call(
+            db, tenant_id, "audio_transcription",
+            provider_override=params.transcription_llm_config.provider or None,
+            model_override=params.transcription_llm_config.model or None,
+        )
+        evaluation_resolved = await resolve_llm_call(
             db, tenant_id, "chat_text",
-            provider_override=params.llm_config.provider or None,
-            model_override=params.llm_config.model or None,
+            provider_override=params.evaluation_llm_config.provider or None,
+            model_override=params.evaluation_llm_config.model or None,
         )
-    provider_kwargs: dict[str, Any] = {}
-    if resolved.provider == "azure_openai":
-        provider_kwargs["azure_endpoint"] = resolved.credentials.extra_config.get("base_url") or ""
-        provider_kwargs["api_version"] = (
-            resolved.api_version
-            or resolved.credentials.extra_config.get("api_version")
-            or "2025-03-01-preview"
-        )
-    provider = create_llm_provider(
-        provider=resolved.provider,
-        api_key=resolved.credentials.secret.get("api_key", ""),
-        model_name=resolved.model,
-        temperature=params.llm_config.temperature,
-        service_account_path=resolved.credentials.service_account_path or "",
-        **provider_kwargs,
+    transcription_llm = _build_llm(
+        transcription_resolved,
+        temperature=params.transcription_llm_config.temperature,
+        call_purpose="transcription",
     )
-    usage_cb = make_usage_callback(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        app_id=params.app_id,
-        owner_type="eval_run",
-        owner_id=eval_run_id,
-        default_call_purpose=call_purpose,
+    evaluation_llm = _build_llm(
+        evaluation_resolved,
+        temperature=params.evaluation_llm_config.temperature,
+        call_purpose=call_purpose,
     )
-    llm = LoggingLLMWrapper(provider, log_callback=save_api_log, usage_callback=usage_cb)
-    llm.set_context(str(eval_run_id))
 
     # ── Resolve selection ───────────────────────────────────────
     await update_job_progress(
@@ -406,11 +423,11 @@ async def run_eval(
         index: int,  # noqa: ARG001 — required by run_parallel's worker signature
         record: EvaluableCall,
     ) -> dict[str, Any]:
-        worker_llm = llm.clone_for_thread(record.activity_id)
         ctx = WorkerContext(
             record=record,
             evaluators=evaluators,
-            llm=worker_llm,
+            transcription_llm=transcription_llm.clone_for_thread(record.activity_id),
+            evaluation_llm=evaluation_llm.clone_for_thread(record.activity_id),
             transcription_config=params.transcription_config.model_dump(mode="json"),
             tenant_id=tenant_id,
             user_id=user_id,

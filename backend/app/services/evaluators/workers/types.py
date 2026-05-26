@@ -22,15 +22,13 @@ class EvaluatorSpec:
 
 @dataclass(frozen=True)
 class WorkerContext:
-    """Per-record context the shell hands to the worker.
-
-    The worker reads from this; the shell builds it once per record. Keeps the
-    worker free of session/credential plumbing.
-    """
+    """Per-record context: transcription_llm (audio) + evaluation_llm (text judge,
+    also used for the optional transliteration pass), never interchanged."""
 
     record: EvaluableCall
     evaluators: list[EvaluatorSpec]
-    llm: LoggingLLMWrapper
+    transcription_llm: LoggingLLMWrapper
+    evaluation_llm: LoggingLLMWrapper
     transcription_config: dict[str, Any] = field(default_factory=dict)
     tenant_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
@@ -57,6 +55,8 @@ class WorkerOutput:
     transcript: str | None
     evaluator_outputs: list[EvaluatorOutput]
     signals: list[dict[str, Any]]
+    transcript_transliterated: str | None = None
+    transliteration_meta: dict[str, Any] | None = None
     extra_metadata: dict[str, Any] = field(default_factory=dict)
 
 
