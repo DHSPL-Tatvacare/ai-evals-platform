@@ -41,6 +41,7 @@ import type {
 } from "@/types";
 import { schemasRepository } from "@/services/api/schemasApi";
 import { notificationService } from "@/services/notifications";
+import { usePermission } from "@/utils/permissions";
 import type { EvaluationConfig } from "../hooks/useAIEvaluation";
 
 type TabType = "prerequisites" | "review";
@@ -185,17 +186,21 @@ export function EvaluationOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  const canRunEvaluation = usePermission('evaluation:run');
+
   // Can we run?
   const canRun = useMemo(() => {
+    if (!canRunEvaluation) return false;
     if (sourceType === 'api') {
       return isOnline && credentialsOk && hasAudioBlob && !!listing.apiResponse;
     }
     return isOnline && credentialsOk && hasAudioBlob && !!listing.transcript;
-  }, [isOnline, credentialsOk, hasAudioBlob, sourceType, listing.transcript, listing.apiResponse]);
+  }, [canRunEvaluation, isOnline, credentialsOk, hasAudioBlob, sourceType, listing.transcript, listing.apiResponse]);
 
   // Validation errors
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
+    if (!canRunEvaluation) errors.push("You don't have permission to run evaluations");
     if (!isOnline) errors.push("No network connection");
     if (!credentialsOk) errors.push("Credentials not configured — set an API key or service account in Settings");
     if (!hasAudioBlob) errors.push("Audio file not loaded");
@@ -205,7 +210,7 @@ export function EvaluationOverlay({
       if (!listing.transcript) errors.push("Original transcript required");
     }
     return errors;
-  }, [isOnline, credentialsOk, hasAudioBlob, sourceType, listing.transcript, listing.apiResponse]);
+  }, [canRunEvaluation, isOnline, credentialsOk, hasAudioBlob, sourceType, listing.transcript, listing.apiResponse]);
 
   const handleRun = useCallback(() => {
     // Build step_models only if any overrides are set
