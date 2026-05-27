@@ -1,8 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { PieChart } from 'lucide-react';
-import { Card, DataTable, type ColumnDef } from '@/components/ui';
+import { Card, DataTable, PageHeaderSearch, type ColumnDef } from '@/components/ui';
 import { cn } from '@/utils';
-import { CostSearchInput } from './CostSearchInput';
 import { formatInt, formatTokensCompact, formatUsd } from '../utils/format';
 import type { GroupedSpend } from '../types';
 
@@ -109,16 +108,18 @@ export function SpendBreakdownCard({
 
   return (
     <Card className={cn('flex h-full min-h-0 flex-col p-4')}>
-      <div className="mb-3 flex shrink-0 items-baseline justify-between gap-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
-        {subtitle && <span className="text-[11.5px] text-[var(--text-muted)]">{subtitle}</span>}
+        <div className="flex items-center gap-2">
+          {subtitle && <span className="text-[11.5px] text-[var(--text-muted)]">{subtitle}</span>}
+          <PageHeaderSearch
+            value={query}
+            onChange={setQuery}
+            placeholder={searchPlaceholder}
+            label={searchPlaceholder}
+          />
+        </div>
       </div>
-      <CostSearchInput
-        value={query}
-        onCommit={setQuery}
-        placeholder={searchPlaceholder}
-        className="mb-3 shrink-0"
-      />
       <div className="flex min-h-0 flex-1 flex-col">
         <DataTable
           columns={columns}
