@@ -1749,6 +1749,72 @@ async def handle_populate_cost_rollup(job_id, params: dict, *, tenant_id: uuid.U
 
 
 @register_job_handler(
+    "generate-cost-signals",
+    queue_class="bulk",
+    priority=510,
+    retry_safe=True,
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="LLM cost signals",
+    schedule_description="Generates per-tenant AI cost-signal snapshots (daily, after the rollup).",
+    schedule_default_params={},
+    schedule_platform_managed=True,
+    required_permissions=("cost:manage",),
+)
+async def handle_generate_cost_signals(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Generate per-tenant LLM cost-signal snapshots over a recent window.
+
+    Params:
+        days: int window length (defaults to 30)
+    Enumerates every tenant with usage in the window and generates one snapshot
+    each; one tenant failing never aborts the others.
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import distinct, select
+    from app.models.cost import FactLlmGeneration
+    from app.services.cost_tracking.signals_service import generate_signals_for_tenant
+
+    days = params.get("days") or 30
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 30
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    period = f"{days}d"
+
+    async with async_session() as db:
+        tenant_rows = (
+            await db.execute(
+                select(distinct(FactLlmGeneration.tenant_id)).where(
+                    FactLlmGeneration.created_at >= start,
+                    FactLlmGeneration.created_at < end,
+                )
+            )
+        ).all()
+    tenant_ids = [r[0] for r in tenant_rows]
+
+    generated = 0
+    skipped = 0
+    for t in tenant_ids:
+        try:
+            async with async_session() as db:
+                snapshot = await generate_signals_for_tenant(
+                    db, t, job_id, period=period, start=start, end=end
+                )
+                if snapshot is not None:
+                    await db.commit()
+                    generated += 1
+                else:
+                    skipped += 1
+        except Exception:
+            logger.warning("cost_signals.tenant_failed tenant_id=%s", t, exc_info=True)
+            skipped += 1
+
+    return {"generated": generated, "skipped": skipped, "tenants": len(tenant_ids)}
+
+
+@register_job_handler(
     "derive-signals",
     queue_class="bulk",
     priority=505,

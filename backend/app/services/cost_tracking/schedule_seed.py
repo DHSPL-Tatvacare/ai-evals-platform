@@ -38,6 +38,13 @@ COST_ROLLUP_SCHEDULE_KEY = "platform:cost:daily-rollup"
 # ``flush_llm_usage`` landed after the day rolled over.
 COST_ROLLUP_CRON = "5 1 * * *"
 
+COST_SIGNALS_APP_ID = ""
+COST_SIGNALS_JOB_TYPE = "generate-cost-signals"
+COST_SIGNALS_SCHEDULE_KEY = "platform:cost:daily-signals"
+
+# 01:20 UTC daily — fires after the 01:05 rollup so signals read a settled day.
+COST_SIGNALS_CRON = "20 1 * * *"
+
 
 async def seed_cost_rollup_schedule(
     session: AsyncSession,
@@ -112,5 +119,74 @@ async def seed_cost_rollup_schedule(
         "cost_rollup.schedule_seed.inserted schedule_id=%s cron=%r",
         schedule.id,
         COST_ROLLUP_CRON,
+    )
+    return True
+
+
+async def seed_cost_signals_schedule(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Insert the default daily cost-signals schedule if absent. No-op otherwise.
+
+    Mirrors ``seed_cost_rollup_schedule``: system-tenant owned, ``app_id=""``,
+    idempotent via the model's unique constraint. Fires at 01:20 UTC, after the
+    01:05 rollup.
+    """
+    current = now or datetime.now(timezone.utc)
+
+    existing = await session.scalar(
+        select(ScheduledJobDefinition).where(
+            ScheduledJobDefinition.tenant_id == SYSTEM_TENANT_ID,
+            ScheduledJobDefinition.app_id == COST_SIGNALS_APP_ID,
+            ScheduledJobDefinition.job_type == COST_SIGNALS_JOB_TYPE,
+            ScheduledJobDefinition.schedule_key == COST_SIGNALS_SCHEDULE_KEY,
+        )
+    )
+    if existing is not None:
+        return False
+
+    tenant = await session.get(Tenant, SYSTEM_TENANT_ID)
+    if tenant is None:
+        _log.warning(
+            "cost_signals.schedule_seed.missing_system_tenant "
+            "tenant_id=%s — skipping seed (seed_all_defaults order?)",
+            SYSTEM_TENANT_ID,
+        )
+        return False
+
+    system_user = await session.get(User, SYSTEM_USER_ID)
+    created_by = SYSTEM_USER_ID if system_user is not None else None
+
+    from app.services.scheduler.engine import next_cron_tick
+
+    schedule = ScheduledJobDefinition(
+        id=uuid.uuid4(),
+        tenant_id=SYSTEM_TENANT_ID,
+        app_id=COST_SIGNALS_APP_ID,
+        job_type=COST_SIGNALS_JOB_TYPE,
+        schedule_key=COST_SIGNALS_SCHEDULE_KEY,
+        name="LLM cost signals",
+        description=(
+            "Generates per-tenant AI cost-signal snapshots from a 30-day window. "
+            "Runs at 01:20 UTC, after the 01:05 rollup, so signals read a settled day."
+        ),
+        cron=COST_SIGNALS_CRON,
+        params={},
+        override={},
+        enabled=True,
+        next_check_at=next_cron_tick(COST_SIGNALS_CRON, current),
+        current_cycle_attempts=0,
+        created_by=created_by,
+        created_at=current,
+        updated_at=current,
+    )
+    session.add(schedule)
+    await session.flush()
+    _log.info(
+        "cost_signals.schedule_seed.inserted schedule_id=%s cron=%r",
+        schedule.id,
+        COST_SIGNALS_CRON,
     )
     return True

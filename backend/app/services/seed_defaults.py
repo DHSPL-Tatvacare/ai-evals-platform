@@ -3375,7 +3375,10 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
     from app.services.evaluator_seed_catalog import reconcile_evaluator_seed_catalog
     from app.services.cost_tracking.bootstrap_seed import seed_model_pricing
-    from app.services.cost_tracking.schedule_seed import seed_cost_rollup_schedule
+    from app.services.cost_tracking.schedule_seed import (
+        seed_cost_rollup_schedule,
+        seed_cost_signals_schedule,
+    )
     from app.services.sherlock_v3.verified_queries import seed_verified_queries
     from app.services.analytics.signal_derivation.definition_seed import (
         seed_default_signal_definitions,
@@ -3403,6 +3406,7 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await seed_orchestration_defaults(session)
     await seed_model_pricing(session)
     await seed_cost_rollup_schedule(session)
+    await seed_cost_signals_schedule(session)
     await seed_waiting_tail_sweep_schedule(session)
     await seed_reconcile_voice_schedule(session)
     inserted_sigdef = await seed_default_signal_definitions(session)
