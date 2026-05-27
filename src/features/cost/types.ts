@@ -313,3 +313,17 @@ export interface ModalityBreakdown {
   totalCostUsd: number;
   computedAt: string;
 }
+
+export interface CostSignal {
+  severity: string;
+  title: string;
+  detail: string;
+  metric?: { label: string; value: string } | null;
+}
+
+export interface CostSignalsSnapshot {
+  signals: CostSignal[];
+  generatedAt: string | null;
+  model: string | null;
+  period: string | null;
+}

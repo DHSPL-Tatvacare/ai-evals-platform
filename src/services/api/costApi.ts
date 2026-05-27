@@ -10,6 +10,7 @@ import type {
   ChipSummary,
   CostFilters,
   CostOverview,
+  CostSignalsSnapshot,
   EfficiencyBundle,
   EntityCostBreakdown,
   EntityListPage,
@@ -180,4 +181,7 @@ export const costApi = {
       `/api/cost/aliases/${encodeURIComponent(aliasId)}/reprice`,
       { method: 'POST' },
     ),
+
+  fetchSignals: (): Promise<CostSignalsSnapshot> =>
+    apiRequest<CostSignalsSnapshot>('/api/cost/signals'),
 };

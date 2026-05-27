@@ -12,6 +12,7 @@ import type {
   CallsPage,
   CostFilters,
   CostOverview,
+  CostSignalsSnapshot,
   EfficiencyBundle,
   EntityCostBreakdown,
   EntityListPage,
@@ -75,6 +76,7 @@ interface CostState {
   calls: Slice<CallsPage> & { page: number; searchQuery: string };
   efficiency: Slice<EfficiencyBundle>;
   pricing: Slice<PricingBundle>;
+  signals: Slice<CostSignalsSnapshot>;
 
   entityCache: Record<string, EntityCostBreakdown>;
   callDetailCache: Record<string, CallDetail>;
@@ -90,6 +92,7 @@ interface CostState {
   setEntitiesSearch: (query: string) => void;
   setCallsSearch: (query: string) => void;
   loadPricing: () => Promise<void>;
+  loadSignals: () => Promise<void>;
 
   refreshActive: (slice: SliceName) => Promise<void>;
 
@@ -115,6 +118,7 @@ export const useCostStore = create<CostState>((set, get) => ({
   calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
   efficiency: initialSlice<EfficiencyBundle>(),
   pricing: initialSlice<PricingBundle>(),
+  signals: initialSlice<CostSignalsSnapshot>(),
 
   entityCache: {},
   callDetailCache: {},
@@ -352,6 +356,21 @@ export const useCostStore = create<CostState>((set, get) => ({
     }
   },
 
+  loadSignals: async () => {
+    const { signals } = get();
+    if (signals.status === 'loading' || signals.status === 'ready') return;
+
+    set({ signals: { ...signals, status: 'loading', error: undefined } });
+    try {
+      const data = await costApi.fetchSignals();
+      set({ signals: { status: 'ready', data } });
+    } catch (e: unknown) {
+      const msg = errorMessage(e, 'Failed to load cost signals');
+      set({ signals: { status: 'error', error: msg } });
+      notificationService.error(msg);
+    }
+  },
+
   refreshActive: async (slice) => {
     const state = get();
     switch (slice) {
@@ -514,6 +533,7 @@ export const useCostStore = create<CostState>((set, get) => ({
       calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       efficiency: initialSlice(),
       pricing: initialSlice(),
+      signals: initialSlice(),
       entityCache: {},
       callDetailCache: {},
     });

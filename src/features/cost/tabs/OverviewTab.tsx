@@ -6,8 +6,8 @@ import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import { cn } from '@/utils/cn';
 import { CostKpiRow } from '../components/CostKpiRow';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
-import { formatInt, formatUsdCompact } from '../utils/format';
-import type { CostOverview, CostKpi, GroupedSpend } from '../types';
+import { formatInt, formatUsdCompact, formatDateTime } from '../utils/format';
+import type { CostOverview, CostKpi, CostSignalsSnapshot, GroupedSpend } from '../types';
 
 interface TabProps {
   active: boolean;
@@ -16,12 +16,17 @@ interface TabProps {
 export function OverviewTab({ active }: TabProps) {
   const slice = useCostStore((s) => s.overview);
   const loadOverview = useCostStore((s) => s.loadOverview);
+  const loadSignals = useCostStore((s) => s.loadSignals);
+  const signalsSlice = useCostStore((s) => s.signals);
   const refresh = useCostStore((s) => s.refreshActive);
   const filtersKey = useCostStore((s) => s.filtersKey);
 
   useEffect(() => {
-    if (active) void loadOverview();
-  }, [active, loadOverview, filtersKey]);
+    if (active) {
+      void loadOverview();
+      void loadSignals();
+    }
+  }, [active, loadOverview, loadSignals, filtersKey]);
 
   return (
     <div className="flex h-full min-h-0 flex-col space-y-4 pb-6">
@@ -33,16 +38,21 @@ export function OverviewTab({ active }: TabProps) {
         emptyDescription="No LLM requests were recorded for the selected range."
         isEmpty={(data) => data.kpis.totalCalls === 0}
       >
-        {(data) => <OverviewContent data={data} />}
+        {(data) => (
+          <OverviewContent
+            data={data}
+            snapshot={signalsSlice.status === 'ready' ? signalsSlice.data : undefined}
+          />
+        )}
       </SliceStateBoundary>
     </div>
   );
 }
 
-function OverviewContent({ data }: { data: CostOverview }) {
+function OverviewContent({ data, snapshot }: { data: CostOverview; snapshot?: CostSignalsSnapshot }) {
   return (
     <>
-      <AiSummaryBox kpis={data.kpis} byApp={data.spendByApp} />
+      <AiSummaryBox kpis={data.kpis} byApp={data.spendByApp} snapshot={snapshot} />
 
       <CostKpiRow kpis={data.kpis} />
 
@@ -81,12 +91,20 @@ interface Signal {
   body: React.ReactNode;
 }
 
-function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] }) {
+function AiSummaryBox({
+  kpis,
+  byApp,
+  snapshot,
+}: {
+  kpis: CostKpi;
+  byApp: GroupedSpend[];
+  snapshot?: CostSignalsSnapshot;
+}) {
   const topApp = byApp[0];
-  const signals: Signal[] = [];
+  const derivedSignals: Signal[] = [];
 
   if (kpis.pricingFallbackCalls > 0) {
-    signals.push({
+    derivedSignals.push({
       key: 'unpriced',
       tone: 'warning',
       body: (
@@ -99,7 +117,7 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
   }
   if (kpis.errorCalls > 0) {
     const errorPct = kpis.totalCalls ? kpis.errorCalls / kpis.totalCalls : 0;
-    signals.push({
+    derivedSignals.push({
       key: 'errors',
       tone: errorPct > 0.02 ? 'error' : 'info',
       body: (
@@ -114,7 +132,7 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
     const total = byApp.reduce((s, r) => s + r.costUsd, 0);
     const share = total ? topApp.costUsd / total : 0;
     if (share >= 0.5) {
-      signals.push({
+      derivedSignals.push({
         key: 'concentration',
         tone: 'info',
         body: (
@@ -126,6 +144,9 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
       });
     }
   }
+
+  const useSnapshot = snapshot !== undefined && snapshot.signals.length > 0;
+  const isEmpty = !useSnapshot && derivedSignals.length === 0;
 
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--chip-brand-border)] bg-[var(--surface-brand-subtle)] p-5 shadow-[var(--shadow-md)]">
@@ -140,13 +161,45 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
           <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">AI summary</span>
         </div>
       </div>
-      {signals.length === 0 ? (
+      {isEmpty ? (
         <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
           Nothing unusual &mdash; no unpriced rows, errors within norm, spend balanced across apps.
         </p>
+      ) : useSnapshot ? (
+        <>
+          <ul className="space-y-2">
+            {snapshot!.signals.map((sig, i) => (
+              <li
+                key={i}
+                className="flex items-start gap-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]"
+              >
+                <span
+                  className={cn(
+                    'mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full',
+                    sig.severity === 'warning' && 'bg-[var(--color-warning)]',
+                    (sig.severity === 'error' || sig.severity === 'critical') && 'bg-[var(--color-error)]',
+                    sig.severity !== 'warning' && sig.severity !== 'error' && sig.severity !== 'critical' && 'bg-[var(--color-info)]',
+                  )}
+                />
+                <span>
+                  <span className="font-medium text-[var(--text-primary)]">{sig.title}</span>
+                  {' — '}
+                  {sig.detail}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {(snapshot!.generatedAt || snapshot!.model) && (
+            <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+              {snapshot!.generatedAt && <>Generated {formatDateTime(snapshot!.generatedAt)}</>}
+              {snapshot!.generatedAt && snapshot!.model && ' · '}
+              {snapshot!.model}
+            </p>
+          )}
+        </>
       ) : (
         <ul className="space-y-2">
-          {signals.map((signal) => (
+          {derivedSignals.map((signal) => (
             <li key={signal.key} className="flex items-start gap-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
               <span
                 className={cn(
