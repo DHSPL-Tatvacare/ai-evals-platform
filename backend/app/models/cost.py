@@ -26,6 +26,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    desc,
     func,
     text,
 )
@@ -366,5 +367,34 @@ class SnapshotLlmModelsCatalog(Base):
     __table_args__ = (
         Index('idx_snapshot_llm_models_catalog_fetched_at', 'fetched_at'),
         Index('idx_snapshot_llm_models_catalog_payload_hash', 'payload_hash'),
+        {'schema': 'analytics'},
+    )
+
+
+class CostSignalSnapshot(Base):
+    """Latest LLM-generated cost-signal snapshot per tenant.
+
+    Produced by a scheduled job; the Cost Overview AI-summary card reads the
+    most recent row for the tenant. ``signals`` is a list of signal objects.
+    """
+
+    __tablename__ = 'cost_signal_snapshot'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signals: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            'ix_cost_signal_snapshot_tenant_recent',
+            'tenant_id',
+            desc('generated_at'),
+        ),
         {'schema': 'analytics'},
     )

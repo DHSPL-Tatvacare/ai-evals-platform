@@ -15,6 +15,7 @@ audit-logged; the rate limit on ``POST /api/cost/pricing/refresh`` remains
 Endpoint bundle shapes mirror §9.3 of the hardened spec:
 
     GET   /api/cost/overview                        — KPI row + spend-by-app
+    GET   /api/cost/signals                         — latest LLM cost-signal snapshot
     GET   /api/cost/spend                           — grouped spend bundle
     GET   /api/cost/entities                        — paginated expensive entities
     GET   /api/cost/entity/{owner_type}/{owner_id}  — single entity drill-down
@@ -52,6 +53,7 @@ from app.config import settings
 from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.cost import (
+    CostSignalSnapshot,
     FactLlmGeneration,
     AggLlmUsageDaily,
     RefLlmModelAlias,
@@ -217,6 +219,20 @@ class CostOverviewResponse(CamelModel):
     spend_by_purpose: list[GroupedSpend]
     signals: dict[str, Any]
     computed_at: datetime
+
+
+class CostSignal(CamelModel):
+    severity: str  # 'info' | 'warning' | 'critical'
+    title: str
+    detail: str
+    metric: dict[str, Any] | None = None
+
+
+class CostSignalsResponse(CamelModel):
+    signals: list[CostSignal]
+    generated_at: datetime | None = None
+    model: str | None = None
+    period: str | None = None
 
 
 class SpendBundleResponse(CamelModel):
@@ -741,6 +757,52 @@ async def cost_overview(
         spend_by_purpose=spend_by_purpose,
         signals=signals,
         computed_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get('/signals', response_model=CostSignalsResponse)
+async def cost_signals(
+    auth: AuthContext = require_permission('cost:view'),
+    db: AsyncSession = Depends(get_db),
+) -> CostSignalsResponse:
+    """Latest LLM-generated cost-signal snapshot for the caller's tenant.
+
+    Returns an empty list until the generator job writes the first snapshot.
+    """
+    stmt = (
+        select(CostSignalSnapshot)
+        .where(CostSignalSnapshot.tenant_id == auth.tenant_id)
+        .order_by(desc(CostSignalSnapshot.generated_at))
+        .limit(1)
+    )
+    snapshot = (await db.execute(stmt)).scalar_one_or_none()
+    if snapshot is None:
+        return CostSignalsResponse(signals=[])
+
+    signals: list[CostSignal] = []
+    for raw in snapshot.signals or []:
+        if not isinstance(raw, dict):
+            continue
+        severity = raw.get('severity')
+        title = raw.get('title')
+        detail = raw.get('detail')
+        if not (isinstance(severity, str) and isinstance(title, str) and isinstance(detail, str)):
+            continue
+        metric = raw.get('metric')
+        signals.append(
+            CostSignal(
+                severity=severity,
+                title=title,
+                detail=detail,
+                metric=metric if isinstance(metric, dict) else None,
+            )
+        )
+
+    return CostSignalsResponse(
+        signals=signals,
+        generated_at=snapshot.generated_at,
+        model=snapshot.model,
+        period=snapshot.period,
     )
 
 
