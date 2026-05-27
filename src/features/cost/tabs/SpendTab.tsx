@@ -80,7 +80,7 @@ function SpendContent({ data }: { data: SpendBundle }) {
         searchPlaceholder="Search purposes"
       />
       <SpendBreakdownCard
-        title="Top models"
+        title="By model"
         subtitle="by cost"
         rows={data.topModels}
         nameHeader="Model"
@@ -95,7 +95,7 @@ function SpendContent({ data }: { data: SpendBundle }) {
         searchPlaceholder="Search models"
       />
       <SpendBreakdownCard
-        title="Top users"
+        title="By user"
         subtitle="by cost"
         rows={data.topUsers}
         nameHeader="User"
