@@ -100,7 +100,7 @@ function ByPurposeCard({ rows }: { rows: GroupedSpend[] }) {
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">By call purpose</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">By purpose</h3>
         <span className="text-[11.5px] text-[var(--text-muted)]">top {Math.min(rows.length, 8)}</span>
       </div>
       <HBarList rows={hbarRows} />
@@ -127,7 +127,7 @@ function TopModelsCard({ rows }: { rows: GroupedSpend[] }) {
     },
     {
       key: 'calls',
-      header: 'Calls',
+      header: 'API Requests',
       width: 'w-20',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
@@ -178,7 +178,7 @@ function TopUsersCard({ rows }: { rows: GroupedSpend[] }) {
     },
     {
       key: 'calls',
-      header: 'Calls',
+      header: 'API Requests',
       width: 'w-24',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',

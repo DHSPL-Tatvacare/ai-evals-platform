@@ -216,7 +216,7 @@ export function UnmappedTab({ active }: TabProps) {
     },
     {
       key: 'callCount',
-      header: 'Calls',
+      header: 'API Requests',
       width: 'w-20',
       cellClassName: 'text-right tabular-nums',
       headerClassName: 'text-right',
@@ -347,7 +347,7 @@ export function UnmappedTab({ active }: TabProps) {
         ) : unmapped.length === 0 ? (
           <div className="flex items-center gap-2 rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-[12px] text-[var(--text-muted)]">
             <Layers className="h-4 w-4" />
-            <span>No unmapped models — every logged call resolves to a pricing row.</span>
+            <span>No unmapped models — every logged request resolves to a pricing row.</span>
           </div>
         ) : (
           <DataTable<UnmappedRowState>
@@ -447,7 +447,7 @@ export function UnmappedTab({ active }: TabProps) {
         description={
           pendingDelete
             ? `Remove mapping ${pendingDelete.observed} → ${pendingDelete.canonical}? ` +
-              `Future ${pendingDelete.provider} calls logged under "${pendingDelete.observed}" will fall back to unpriced ` +
+              `Future ${pendingDelete.provider} requests logged under "${pendingDelete.observed}" will fall back to unpriced ` +
               `until a new alias is added. Historical rows already repriced are unaffected.`
             : ''
         }

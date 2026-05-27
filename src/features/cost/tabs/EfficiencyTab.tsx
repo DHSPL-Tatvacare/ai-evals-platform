@@ -28,7 +28,7 @@ export function EfficiencyTab({ active }: TabProps) {
         onRetry={() => refresh('efficiency')}
         emptyIcon={Gauge}
         emptyTitle="No efficiency data"
-        emptyDescription="Cache, error, and unpriced metrics need at least one LLM call in range."
+        emptyDescription="Cache, error, and unpriced metrics need at least one LLM request in range."
         isEmpty={(data) =>
           data.cacheByPurpose.length === 0 &&
           data.errorByCode.length === 0 &&
@@ -148,7 +148,7 @@ function ErrorHealthCard({
           <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">
             {formatInt(errorCount)}
           </p>
-          <p className="text-[11.5px] text-[var(--text-muted)]">failed calls</p>
+          <p className="text-[11.5px] text-[var(--text-muted)]">failed requests</p>
         </div>
       </div>
       <div className="mt-4">
@@ -171,7 +171,7 @@ function UnpricedCallsCard({ rows }: { rows: GroupedSpend[] }) {
     },
     {
       key: 'calls',
-      header: 'Calls',
+      header: 'API Requests',
       width: 'w-24',
       cellClassName: 'text-right tabular-nums',
       headerClassName: 'text-right',
@@ -189,12 +189,12 @@ function UnpricedCallsCard({ rows }: { rows: GroupedSpend[] }) {
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Unpriced calls</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Unpriced requests</h3>
         <span className="text-[11.5px] text-[var(--text-muted)]">needs a pricing row</span>
       </div>
       {rows.length === 0 ? (
         <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-          Every call in this range has a pricing row. Nothing to backfill.
+          Every request in this range has a pricing row. Nothing to backfill.
         </p>
       ) : (
         <DataTable columns={columns} data={rows} keyExtractor={(row) => row.key} minWidth="0" />
@@ -227,7 +227,7 @@ function ReasoningTokensCard({ rows }: { rows: GroupedSpend[] }) {
       </div>
       {rows.length === 0 ? (
         <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-          No calls with reasoning tokens in range.
+          No requests with reasoning tokens in range.
         </p>
       ) : (
         <HBarList

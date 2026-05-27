@@ -13,7 +13,7 @@ export function CostKpiRow({ kpis }: CostKpiRowProps) {
     <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
       <KpiCard icon={Coins} label="Total spend" value={formatUsd(kpis.totalCostUsd)} />
       <KpiCard icon={Sigma} label="Total tokens" value={formatTokensCompact(kpis.totalTokens)} />
-      <KpiCard icon={Hash} label="Calls" value={formatInt(kpis.totalCalls)} />
+      <KpiCard icon={Hash} label="API Requests" value={formatInt(kpis.totalCalls)} />
       <KpiCard icon={CircleAlert} label="Errors" value={formatInt(kpis.errorCalls)} tone={kpis.errorCalls > 0 ? 'danger' : 'neutral'} />
       <KpiCard icon={AlertTriangle} label="Unpriced" value={formatInt(kpis.pricingFallbackCalls)} tone={kpis.pricingFallbackCalls > 0 ? 'warning' : 'neutral'} />
     </div>

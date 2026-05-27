@@ -30,7 +30,7 @@ export function OverviewTab({ active }: TabProps) {
         onRetry={() => refresh('overview')}
         emptyIcon={BarChart3}
         emptyTitle="No usage yet"
-        emptyDescription="No LLM calls were recorded for the selected range."
+        emptyDescription="No LLM requests were recorded for the selected range."
         isEmpty={(data) => data.kpis.totalCalls === 0}
       >
         {(data) => <OverviewContent data={data} />}
@@ -124,8 +124,8 @@ function SignalsCard({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] }) 
 
   if (kpis.pricingFallbackCalls > 0) {
     signals.push(
-      <Alert key="unpriced" variant="warning" title="Unpriced calls">
-        <span className="tabular-nums">{formatInt(kpis.pricingFallbackCalls)}</span> calls were priced with
+      <Alert key="unpriced" variant="warning" title="Unpriced requests">
+        <span className="tabular-nums">{formatInt(kpis.pricingFallbackCalls)}</span> requests were priced with
         a fallback rate. Add a pricing row to stop under-accounting for spend.
       </Alert>,
     );
@@ -133,8 +133,8 @@ function SignalsCard({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] }) 
   if (kpis.errorCalls > 0) {
     const errorPct = kpis.totalCalls ? kpis.errorCalls / kpis.totalCalls : 0;
     signals.push(
-      <Alert key="errors" variant={errorPct > 0.02 ? 'error' : 'info'} title="Call errors">
-        <span className="tabular-nums">{formatInt(kpis.errorCalls)}</span> failed calls
+      <Alert key="errors" variant={errorPct > 0.02 ? 'error' : 'info'} title="Request errors">
+        <span className="tabular-nums">{formatInt(kpis.errorCalls)}</span> failed requests
         {kpis.totalCalls > 0 && (
           <> &middot; {(errorPct * 100).toFixed(2)}% of traffic</>
         )}

@@ -142,7 +142,7 @@ function EntitiesTable({
     },
     {
       key: 'calls',
-      header: 'Calls',
+      header: 'API Requests',
       width: 'w-20',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
@@ -150,14 +150,14 @@ function EntitiesTable({
     },
     {
       key: 'first_at',
-      header: 'First call',
+      header: 'First request',
       width: 'w-40',
       cellClassName: 'whitespace-nowrap text-[var(--text-secondary)]',
       render: (row) => formatDateTime(row.firstAt),
     },
     {
       key: 'last_at',
-      header: 'Last call',
+      header: 'Last request',
       width: 'w-40',
       cellClassName: 'whitespace-nowrap text-[var(--text-secondary)]',
       render: (row) => formatDateTime(row.lastAt),
@@ -221,7 +221,7 @@ function DrillSummary({ detail }: { detail: EntityCostBreakdown }) {
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12.5px]">
         <SummaryItem label="Spend" value={formatUsd(detail.costUsd)} highlight />
         <SummaryItem label="Tokens" value={formatTokensCompact(detail.totalTokens)} />
-        <SummaryItem label="Calls" value={formatInt(detail.callCount)} />
+        <SummaryItem label="API Requests" value={formatInt(detail.callCount)} />
         <SummaryItem label="Purposes" value={String(detail.byPurpose.length)} />
         <SummaryItem label="Models" value={String(detail.byModel.length)} />
       </div>

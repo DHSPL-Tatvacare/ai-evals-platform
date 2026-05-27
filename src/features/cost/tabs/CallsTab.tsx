@@ -38,7 +38,7 @@ export function CallsTab({ active }: TabProps) {
     total !== undefined
       ? searchQuery
         ? `${total} match${total === 1 ? '' : 'es'}`
-        : `${total} call${total === 1 ? '' : 's'}`
+        : `${total} request${total === 1 ? '' : 's'}`
       : undefined;
 
   return (
@@ -53,11 +53,11 @@ export function CallsTab({ active }: TabProps) {
         slice={slice}
         onRetry={() => refresh('calls')}
         emptyIcon={Activity}
-        emptyTitle={searchQuery ? 'No matches' : 'No calls'}
+        emptyTitle={searchQuery ? 'No matches' : 'No requests'}
         emptyDescription={
           searchQuery
-            ? `No calls match "${searchQuery}". Clear the search to see all calls.`
-            : 'No LLM calls match the current filters.'
+            ? `No requests match "${searchQuery}". Clear the search to see all requests.`
+            : 'No LLM requests match the current filters.'
         }
         isEmpty={(data) => data.items.length === 0}
       >
@@ -135,7 +135,7 @@ function CallsTable({
     },
     {
       key: 'in',
-      header: 'In',
+      header: 'Tokens In',
       width: 'w-20',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
@@ -143,7 +143,7 @@ function CallsTable({
     },
     {
       key: 'out',
-      header: 'Out',
+      header: 'Tokens Out',
       width: 'w-20',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
@@ -169,8 +169,8 @@ function CallsTable({
     },
     {
       key: 'ms',
-      header: 'ms',
-      width: 'w-16',
+      header: 'Run time (ms)',
+      width: 'w-28',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
       render: (row) => (row.durationMs != null ? formatInt(row.durationMs) : '—'),
@@ -183,7 +183,7 @@ function CallsTable({
     },
     {
       key: 'cost',
-      header: 'Spend',
+      header: 'Cost',
       width: 'w-24',
       cellClassName: 'text-right tabular-nums font-semibold',
       headerClassName: 'text-right',
@@ -200,8 +200,8 @@ function CallsTable({
       keyExtractor={(row) => row.id}
       onRowClick={onRowClick}
       emptyIcon={Activity}
-      emptyTitle="No calls"
-      emptyDescription="No LLM calls match the current filters."
+      emptyTitle="No requests"
+      emptyDescription="No LLM requests match the current filters."
       pagination={{
         page,
         totalPages,
@@ -253,7 +253,7 @@ function CallDetailDrawer({ call, onClose }: { call: CallDetail; onClose: () => 
       <aside className="relative flex h-full w-full max-w-[560px] flex-col overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">Call detail</h2>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Request detail</h2>
             <p className="mt-1 font-mono text-[11px] text-[var(--text-muted)]">{call.id}</p>
           </div>
           <button

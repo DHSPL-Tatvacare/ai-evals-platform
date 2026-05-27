@@ -44,7 +44,7 @@ export function CostPage() {
       { id: 'overview', label: 'Overview', content: <OverviewTab active={activeTab === 'overview'} /> },
       { id: 'spend', label: 'Spend', content: <SpendTab active={activeTab === 'spend'} /> },
       { id: 'entities', label: 'Entities', content: <EntitiesTab active={activeTab === 'entities'} /> },
-      { id: 'calls', label: 'Calls', content: <CallsTab active={activeTab === 'calls'} /> },
+      { id: 'calls', label: 'API Requests', content: <CallsTab active={activeTab === 'calls'} /> },
       { id: 'efficiency', label: 'Efficiency', content: <EfficiencyTab active={activeTab === 'efficiency'} /> },
       { id: 'pricing', label: 'Pricing', content: <PricingTab active={activeTab === 'pricing'} /> },
       { id: 'unmapped', label: 'Unmapped', content: <UnmappedTab active={activeTab === 'unmapped'} /> },
@@ -58,7 +58,7 @@ export function CostPage() {
     <PageSurface
       icon={icon}
       title={title}
-      subtitle="LLM spend and token usage for this tenant, plus pricing history"
+      subtitle="Track LLM cost, token usage, and pricing across your apps."
       filters={<CostFiltersBar />}
       actions={
         <Button
