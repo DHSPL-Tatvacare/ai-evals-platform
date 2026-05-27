@@ -22,6 +22,7 @@ Endpoint bundle shapes mirror §9.3 of the hardened spec:
     GET   /api/cost/calls                           — paginated raw calls
     GET   /api/cost/calls/{id}                      — single call drawer
     GET   /api/cost/efficiency                      — cache / error / unpriced bundle
+    GET   /api/cost/modality                         — token usage by modality + est. cost
     GET   /api/cost/pricing/bundle                  — pricing rows + refresh history
     POST  /api/cost/pricing                         — new pricing row (cost:manage)
     PATCH /api/cost/pricing/{id}                    — close current + insert new (cost:manage)
@@ -41,7 +42,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 from slowapi import Limiter
-from sqlalchemy import Text, and_, case, desc, func, or_, select, update
+from sqlalchemy import Integer, Text, and_, case, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -327,6 +328,20 @@ class EfficiencyBundleResponse(CamelModel):
     error_by_code: list[GroupedSpend]
     unpriced_calls: list[GroupedSpend]
     reasoning_by_model: list[GroupedSpend]
+    computed_at: datetime
+
+
+class ModalitySlice(CamelModel):
+    modality: str
+    tokens: int
+    cost_usd: float
+    estimated: bool
+
+
+class ModalityBreakdownResponse(CamelModel):
+    modalities: list[ModalitySlice]
+    total_tokens: int
+    total_cost_usd: float
     computed_at: datetime
 
 
@@ -1206,6 +1221,82 @@ async def list_entities(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+def _build_modality_slices(
+    total_tokens: int, total_cost: float, audio_tokens: int, image_tokens: int
+) -> list[ModalitySlice]:
+    """Split aggregate tokens into text/audio/image slices with a proportional,
+    flagged cost estimate. Tokens are exact; cost is best-effort because the
+    fact row carries a single ``cost_usd`` with no per-modality rate."""
+    text_tokens = max(total_tokens - audio_tokens - image_tokens, 0)
+
+    def _cost_for(tokens: int) -> float:
+        if total_tokens <= 0:
+            return 0.0
+        return total_cost * tokens / total_tokens
+
+    candidates: list[tuple[str, int]] = [
+        ('text', text_tokens),
+        ('audio', audio_tokens),
+        ('image', image_tokens),
+    ]
+    slices = [
+        ModalitySlice(
+            modality=name,
+            tokens=tokens,
+            cost_usd=_cost_for(tokens),
+            estimated=True,
+        )
+        # Always keep text when there is any usage so the card is never empty.
+        for name, tokens in candidates
+        if tokens > 0 or (name == 'text' and total_tokens > 0)
+    ]
+    slices.sort(key=lambda s: s.tokens, reverse=True)
+    return slices
+
+
+@router.get('/modality', response_model=ModalityBreakdownResponse)
+async def cost_by_modality(
+    range: str | None = Query(None),
+    app_id: str | None = Query(None),
+    provider: str | None = Query(None),
+    model: str | None = Query(None),
+    auth: AuthContext = require_permission('cost:view'),
+    db: AsyncSession = Depends(get_db),
+) -> ModalityBreakdownResponse:
+    start, end = _parse_range(range)
+    window = and_(FactLlmGeneration.created_at >= start, FactLlmGeneration.created_at < end)
+    filters = _apply_optional_fact_filters([window], FactLlmGeneration, app_id=app_id, provider=provider, model=model)
+
+    audio_expr = func.coalesce(
+        func.sum(func.coalesce(func.cast(FactLlmGeneration.modality_details['audio_tokens'].astext, Integer), 0)),
+        0,
+    )
+    image_expr = func.coalesce(
+        func.sum(func.coalesce(func.cast(FactLlmGeneration.modality_details['image_tokens'].astext, Integer), 0)),
+        0,
+    )
+    stmt = select(
+        func.coalesce(func.sum(FactLlmGeneration.total_tokens), 0),
+        func.coalesce(func.sum(FactLlmGeneration.cost_usd), 0),
+        audio_expr,
+        image_expr,
+    ).where(and_(*filters))
+    stmt = _apply_tenant_scope(stmt, auth, FactLlmGeneration.tenant_id)
+
+    row = (await db.execute(stmt)).one()
+    total_tokens = int(row[0] or 0)
+    total_cost = _to_float(row[1])
+    audio_tokens = int(row[2] or 0)
+    image_tokens = int(row[3] or 0)
+
+    return ModalityBreakdownResponse(
+        modalities=_build_modality_slices(total_tokens, total_cost, audio_tokens, image_tokens),
+        total_tokens=total_tokens,
+        total_cost_usd=total_cost,
+        computed_at=datetime.now(timezone.utc),
     )
 
 
