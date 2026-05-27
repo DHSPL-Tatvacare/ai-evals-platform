@@ -52,16 +52,18 @@ export function SpendBreakdownCard({
     {
       key: 'share',
       header: 'Share',
-      width: 'w-32',
+      width: 'w-44',
       render: (row) => {
         const fillPct = maxCost ? (row.costUsd / maxCost) * 100 : 0;
         const sharePct = total ? (row.costUsd / total) * 100 : 0;
+        // Fixed-width track (not flex) so the bar is equally visible on every card,
+        // even when a wide name column squeezes the row; min nub keeps tiny shares legible.
         return (
           <span className="flex items-center gap-2">
-            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
+            <span className="h-2 w-24 shrink-0 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
               <span
                 className="block h-full rounded-full bg-[var(--interactive-primary)]"
-                style={{ width: `${fillPct}%` }}
+                style={{ width: `${fillPct > 0 ? Math.max(fillPct, 4) : 0}%` }}
               />
             </span>
             <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
