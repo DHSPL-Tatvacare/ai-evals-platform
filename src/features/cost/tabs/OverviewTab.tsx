@@ -128,14 +128,14 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
   }
 
   return (
-    <div className="rounded-[var(--radius-lg)] bg-[var(--gradient-node-ai)] p-px shadow-[var(--shadow-md)]">
-      <div className="rounded-[7px] bg-[var(--surface-node-ai)] p-5">
+    <div className="rounded-[var(--radius-lg)] [background-image:var(--gradient-node-ai)] p-px shadow-[var(--shadow-md)]">
+      <div className="rounded-[7px] [background-image:var(--surface-node-ai)] p-5">
         <div className="mb-3.5 flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--gradient-node-ai)] shadow-[var(--shadow-sm)]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-lg)] [background-image:var(--gradient-node-ai)] shadow-[var(--shadow-sm)]">
             <Sparkles className="h-[18px] w-[18px] text-white" />
           </span>
           <div className="flex flex-col">
-            <h3 className="bg-[var(--gradient-brand-text)] bg-clip-text text-[15px] font-semibold leading-tight text-transparent">
+            <h3 className="bg-[image:var(--gradient-brand-text)] bg-clip-text text-[15px] font-semibold leading-tight text-transparent">
               Signals to watch
             </h3>
             <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">AI summary</span>
