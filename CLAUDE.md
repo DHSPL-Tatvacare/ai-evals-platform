@@ -213,7 +213,7 @@ Silent shape-drift is the bug class this rule eliminates. The 2026-05-15 inside-
 
 - Postgres schemas: `platform`, `analytics`, `orchestration`. Cross-schema FKs go FROM `orchestration` TO `platform`.
 - Active app IDs: `voice-rx`, `kaira-bot`, `inside-sales`.
-- LLM providers: Gemini (AI Studio + Vertex), OpenAI, Azure OpenAI, Anthropic.
+- LLM providers: Gemini (AI Studio + Vertex), OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Sarvam (sarvamai SDK; not in models.dev — catalog/pricing hand-seeded via backend/runbooks/).
 - Route groups: auth, listings, files, evaluators, chat, chat_engine, history, settings, tags, jobs, evaluation_runs (+ threads), llm, llm_assist, adversarial_config, adversarial_test_cases, admin, admin_ai_settings, reports, report_builder (+ v2), inside_sales, apps, roles, rules, eval_templates, reviews, analytics_library, cost (+ cost admin), scheduled_jobs, orchestration_webhooks (public), orchestration, orchestration_connections, orchestration_datasets, orchestration_cohorts.
 - Job types: `evaluate-voice-rx`, `evaluate-batch`, `evaluate-adversarial`, `evaluate-custom`, `evaluate-custom-batch`, `evaluate-inside-sales`, `generate-report`, `generate-evaluator-draft`, `generate-cross-run-report`, `sync-external-source`, `populate-analytics`, `populate-cost-rollup`, `backfill-facts-from-mirror`, `backfill-lead-signals`, `backfill-stage-transitions`, `run-workflow`, `resume-waiting-cohorts`.
 - Zustand stores (under active migration to TanStack Query): authStore, appStore, appSettingsStore, llmSettingsStore, globalSettingsStore, listingsStore, evaluatorsStore, evalTemplatesStore, chatStore, uiStore, miniPlayerStore, taskQueueStore, jobTrackerStore, crossRunStore, insideSalesStore, reviewModeStore, costStore, workflowBuilderStore.

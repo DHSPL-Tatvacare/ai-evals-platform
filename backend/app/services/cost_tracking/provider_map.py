@@ -83,6 +83,10 @@ PROVIDER_CLASS_KEYS: dict[str, str] = {
     'AzureOpenAIProvider': 'azure_openai',
     'AnthropicProvider': 'anthropic',
     'BedrockProvider': 'bedrock',
+    # Sarvam is absent from PROVIDER_MAP on purpose: it is not in models.dev,
+    # so its catalog/pricing rows are hand-seeded and must never be deprecated
+    # by a refresh. It still needs a class key so usage is attributed correctly.
+    'SarvamProvider': 'sarvam',
 }
 
 
@@ -148,4 +152,6 @@ def model_family_for(provider: str, model: str) -> str | None:
         if 'haiku' in lowered:
             return 'claude-haiku'
         return 'claude'
+    if provider == 'sarvam':
+        return 'sarvam'
     return None

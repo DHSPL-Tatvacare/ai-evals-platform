@@ -84,6 +84,9 @@ async def list_models_for_credential(
     if provider == "azure_openai":
         return await _list_azure_deployments(db, credential)
 
+    if provider == "sarvam":
+        return await _list_sarvam(db, credential)
+
     creds = _resolved_from_row(credential)
     if provider == "openai":
         return await _list_openai(creds)
@@ -96,6 +99,23 @@ async def list_models_for_credential(
     if provider == "bedrock":
         return await _list_bedrock(creds)
     raise ValueError(f"Unsupported provider for model discovery: {provider}")
+
+
+async def _list_sarvam(
+    db: AsyncSession, credential: TenantLlmCredential
+) -> list[str]:
+    """Return Sarvam's curatable model ids from the seeded catalog.
+
+    Sarvam's SDK exposes no key-listable models endpoint, so discovery reads the
+    hand-seeded ``analytics.ref_llm_models_catalog`` rows instead. Validation
+    still requires a stored key so a blank credential surfaces as invalid.
+    """
+    creds = _resolved_from_row(credential)
+    if not creds.secret.get("api_key"):
+        raise ValueError("Sarvam API key not configured")
+    rows = await list_catalog_models(db, "sarvam")
+    names = sorted({r.model for r in rows if r.model})
+    return _dedupe_preserving_order(names)
 
 
 async def validate_credentials(

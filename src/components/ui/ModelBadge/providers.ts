@@ -12,6 +12,7 @@ export function detectProvider(modelName: string): LlmProvider | null {
   if (lower.includes('azure')) return 'azure_openai';
   if (lower.includes('gpt') || lower.includes('openai')) return 'openai';
   if (lower.includes('claude') || lower.includes('anthropic')) return 'anthropic';
+  if (lower.includes('sarvam')) return 'sarvam';
   return null;
 }
 

@@ -18,6 +18,7 @@ const PROVIDER_ORDER: LlmProvider[] = [
   'azure_openai',
   'bedrock',
   'vertex',
+  'sarvam',
 ];
 
 type RailDotStatus = 'success' | 'error' | 'warning' | 'neutral';

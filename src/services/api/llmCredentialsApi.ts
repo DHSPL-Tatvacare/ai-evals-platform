@@ -6,7 +6,8 @@ export type LlmProvider =
   | 'anthropic'
   | 'gemini'
   | 'vertex'
-  | 'bedrock';
+  | 'bedrock'
+  | 'sarvam';
 
 export type ValidationStatus = 'ok' | 'invalid' | 'untested';
 

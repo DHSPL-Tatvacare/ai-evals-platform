@@ -1,5 +1,10 @@
 import type { LlmProvider } from '@/services/api/llmCredentialsApi';
-import { LLM_PROVIDER_LABELS, LLM_PROVIDER_LOGOS } from '@/constants/llmProviders';
+import {
+  LLM_PROVIDER_LABELS,
+  LLM_PROVIDER_LOGOS,
+  LLM_PROVIDER_LOGOS_DARK,
+} from '@/constants/llmProviders';
+import { useResolvedTheme } from '@/hooks/useResolvedTheme';
 import { cn } from '@/utils';
 
 interface LLMProviderLogoProps {
@@ -13,9 +18,13 @@ export function LLMProviderLogo({
   size = 20,
   className,
 }: LLMProviderLogoProps) {
+  const theme = useResolvedTheme();
+  const src =
+    (theme === 'dark' && LLM_PROVIDER_LOGOS_DARK[provider]) ||
+    LLM_PROVIDER_LOGOS[provider];
   return (
     <img
-      src={LLM_PROVIDER_LOGOS[provider]}
+      src={src}
       alt={`${LLM_PROVIDER_LABELS[provider]} logo`}
       width={size}
       height={size}

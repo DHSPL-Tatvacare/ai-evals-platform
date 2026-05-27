@@ -119,7 +119,7 @@ async def _create_openai_credential(client: httpx.AsyncClient, *, api_key: str =
 
 
 @pytest.mark.asyncio
-async def test_list_returns_all_six_providers(admin_client):
+async def test_list_returns_all_providers(admin_client):
     resp = await admin_client.get("/api/admin/ai-settings/providers")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -130,6 +130,7 @@ async def test_list_returns_all_six_providers(admin_client):
         "gemini",
         "vertex",
         "bedrock",
+        "sarvam",
     }
     for p in body:
         assert p["isEnabled"] is False

@@ -21,6 +21,7 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = (
     "gemini",
     "vertex",
     "bedrock",
+    "sarvam",
 )
 
 # Default credential name when callers don't specify one. Matches the resolver

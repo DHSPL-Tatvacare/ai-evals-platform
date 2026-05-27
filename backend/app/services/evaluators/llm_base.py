@@ -942,6 +942,109 @@ class BedrockProvider(AnthropicProvider):
         )
 
 
+class SarvamProvider(BaseLLMProvider):
+    """Sarvam AI provider via the official ``sarvamai`` SDK.
+
+    Responses are OpenAI-shaped (``choices[].message.content`` + ``usage``), so
+    the existing ``normalize_openai_chat`` carries the cost envelope. Sarvam has
+    no ``response_format`` parameter — JSON is prompt-driven, and structured
+    output is gated off in the model catalog so structured call sites never pick it.
+    """
+
+    def __init__(self, api_key: str, model_name: str = "", temperature: float = 1.0):
+        super().__init__(api_key, model_name, temperature)
+        from sarvamai import SarvamAI
+        self.client = SarvamAI(api_subscription_key=api_key)
+
+        import httpx
+        from sarvamai import (
+            InternalServerError, ServiceUnavailableError, TooManyRequestsError,
+        )
+        self.RETRYABLE_EXCEPTIONS = (
+            ConnectionError, TimeoutError, httpx.TransportError,
+            TooManyRequestsError, InternalServerError, ServiceUnavailableError,
+        )
+
+    @staticmethod
+    def _extract_tokens(response):
+        """Extract token counts from a Sarvam chat response. Returns (in, out)."""
+        tokens_in = tokens_out = None
+        usage = getattr(response, "usage", None)
+        if usage:
+            tokens_in = getattr(usage, "prompt_tokens", None)
+            tokens_out = getattr(usage, "completion_tokens", None)
+        return tokens_in, tokens_out
+
+    def _extract_usage(self, response):
+        tokens_in, tokens_out = SarvamProvider._extract_tokens(response)
+        try:
+            from app.services.cost_tracking.normalizers import normalize_openai_chat
+            meta = normalize_openai_chat(response, provider='sarvam')
+        except Exception:
+            meta = None
+        return tokens_in, tokens_out, meta
+
+    def _sync_generate(self, prompt, system_prompt):
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        response = self.client.chat.completions(
+            model=self.model_name, messages=messages, temperature=self.temperature,
+        )
+        tokens_in, tokens_out, meta = self._extract_usage(response)
+        content = response.choices[0].message.content if response.choices else ""
+        return content, tokens_in, tokens_out, meta
+
+    def _sync_generate_json(self, prompt, system_prompt, json_schema):
+        json_instruction = "Respond with valid JSON only. No markdown fences, no extra text."
+        if json_schema:
+            json_instruction += f"\n\nJSON Schema:\n{json.dumps(json_schema, indent=2)}"
+        full_system = f"{system_prompt}\n\n{json_instruction}" if system_prompt else json_instruction
+        messages = [
+            {"role": "system", "content": full_system},
+            {"role": "user", "content": prompt},
+        ]
+        response = self.client.chat.completions(
+            model=self.model_name, messages=messages, temperature=self.temperature,
+        )
+        tokens_in, tokens_out, meta = self._extract_usage(response)
+        content = (response.choices[0].message.content if response.choices else "") or "{}"
+        try:
+            return json.loads(content), tokens_in, tokens_out, meta
+        except json.JSONDecodeError:
+            text = content.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip()), tokens_in, tokens_out, meta
+
+    async def generate(self, prompt, system_prompt=None, response_format=None, **kwargs):
+        timeout = self._get_timeout()
+        try:
+            text, self._last_tokens_in, self._last_tokens_out, self._last_metadata = await self._with_retry(
+                self._sync_generate, prompt, system_prompt,
+                per_attempt_timeout=timeout,
+            )
+            return text
+        except asyncio.TimeoutError:
+            raise LLMTimeoutError(f"LLM generate call timed out after {timeout}s")
+
+    async def generate_json(self, prompt, system_prompt=None, json_schema=None, **kwargs):
+        timeout = self._get_timeout(has_schema=bool(json_schema))
+        try:
+            data, self._last_tokens_in, self._last_tokens_out, self._last_metadata = await self._with_retry(
+                self._sync_generate_json, prompt, system_prompt, json_schema,
+                per_attempt_timeout=timeout,
+            )
+            return data
+        except asyncio.TimeoutError:
+            raise LLMTimeoutError(f"LLM generate_json call timed out after {timeout}s")
+
+    # generate_with_audio: inherits NotImplementedError — Sarvam chat is text-only.
+
+
 class LoggingLLMWrapper(BaseLLMProvider):
     """Wraps any async LLM provider to log API calls to the database."""
 
@@ -1186,6 +1289,10 @@ def create_llm_provider(
             region=kwargs.get("region") or "us-east-1",
             model_name=model_name,
             temperature=temperature,
+        )
+    elif provider == "sarvam":
+        return SarvamProvider(
+            api_key=api_key, model_name=model_name, temperature=temperature,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")

@@ -107,7 +107,12 @@ function buildBody(
   const secret: Record<string, string> = {};
   const extraConfig: Record<string, unknown> = {};
 
-  if (provider === 'openai' || provider === 'anthropic' || provider === 'gemini') {
+  if (
+    provider === 'openai' ||
+    provider === 'anthropic' ||
+    provider === 'gemini' ||
+    provider === 'sarvam'
+  ) {
     if (isCreate && !form.apiKey.trim()) {
       return { body: {}, error: 'API key is required' };
     }
@@ -371,17 +376,16 @@ function renderProviderFields(
       </>
     );
   }
-  if (provider === 'anthropic' || provider === 'gemini') {
+  if (provider === 'anthropic' || provider === 'gemini' || provider === 'sarvam') {
+    const keyHint =
+      provider === 'anthropic' ? 'sk-ant-…' : provider === 'gemini' ? 'AIza…' : 'sk_…';
     return (
       <FormRow label="API key">
         <Input
           type="password"
           value={form.apiKey}
           onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-          placeholder={
-            secretPlaceholder ||
-            (provider === 'anthropic' ? 'sk-ant-…' : 'AIza…')
-          }
+          placeholder={secretPlaceholder || keyHint}
         />
       </FormRow>
     );

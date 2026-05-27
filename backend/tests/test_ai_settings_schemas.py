@@ -49,7 +49,7 @@ def test_credential_update_treats_blank_secret_value_as_preserve():
     assert body.secret == {"api_key": ""}
 
 
-def test_supported_providers_constant_covers_all_six():
+def test_supported_providers_constant_covers_all_known():
     from app.schemas.ai_settings import SUPPORTED_PROVIDERS
 
     assert set(SUPPORTED_PROVIDERS) == {
@@ -59,6 +59,7 @@ def test_supported_providers_constant_covers_all_six():
         "gemini",
         "vertex",
         "bedrock",
+        "sarvam",
     }
 
 
