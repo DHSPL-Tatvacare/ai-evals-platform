@@ -375,8 +375,9 @@ export const useCostStore = create<CostState>((set, get) => ({
     const state = get();
     switch (slice) {
       case 'overview':
-        set({ overview: initialSlice<CostOverview>() });
-        await state.loadOverview();
+        // Overview owns both the KPI/spend data and the AI signals snapshot — refresh both.
+        set({ overview: initialSlice<CostOverview>(), signals: initialSlice<CostSignalsSnapshot>() });
+        await Promise.all([state.loadOverview(), state.loadSignals()]);
         return;
       case 'spend':
         set({ spend: initialSlice<SpendBundle>() });

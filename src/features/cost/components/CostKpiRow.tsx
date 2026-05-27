@@ -1,6 +1,7 @@
 import { AlertTriangle, CircleAlert, Coins, Hash, Sigma } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Card } from '@/components/ui';
+import { cn } from '@/utils/cn';
 import type { CostKpi } from '../types';
 import { formatInt, formatTokensCompact, formatUsd } from '../utils/format';
 
@@ -42,7 +43,7 @@ function KpiCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
-          <p className={`mt-1 text-xl font-semibold tabular-nums ${colorClass}`}>{value}</p>
+          <p className={cn('mt-1 text-xl font-semibold tabular-nums', colorClass)}>{value}</p>
         </div>
         <Icon className="h-4 w-4 text-[var(--text-muted)]" />
       </div>
