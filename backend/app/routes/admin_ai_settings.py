@@ -278,7 +278,7 @@ async def create_credential(
     if not body.secret:
         raise HTTPException(status_code=400, detail="secret payload is required on create")
     # Sanity-check shape per provider: blank/missing required key = 400.
-    if provider in {"openai", "anthropic", "azure_openai", "gemini"}:
+    if provider in {"openai", "anthropic", "azure_openai", "gemini", "sarvam"}:
         if not (body.secret.get("api_key") or "").strip():
             raise HTTPException(status_code=400, detail="secret.api_key is required")
     elif provider == "bedrock":

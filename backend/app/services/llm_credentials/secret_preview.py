@@ -29,7 +29,7 @@ def _decrypted_payload(row: TenantLlmCredential) -> dict[str, str]:
 def _pick_preview_candidate(payload: dict[str, str], provider: str) -> str:
     if not payload:
         return ""
-    if provider in {"openai", "anthropic", "azure_openai", "gemini"}:
+    if provider in {"openai", "anthropic", "azure_openai", "gemini", "sarvam"}:
         return payload.get("api_key", "") or ""
     if provider == "bedrock":
         return payload.get("access_key_id", "") or ""

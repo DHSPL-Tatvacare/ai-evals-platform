@@ -223,6 +223,40 @@ async def test_credential_create_rejects_missing_secret_keys(admin_client):
 
 
 @pytest.mark.asyncio
+async def test_sarvam_create_requires_api_key(admin_client):
+    # Non-empty secret with a blank api_key clears the generic "secret required"
+    # guard, so the sarvam-specific api_key check must reject it.
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/sarvam/credentials",
+        json={
+            "name": "default",
+            "isEnabled": True,
+            "secret": {"api_key": ""},
+            "extraConfig": {},
+        },
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sarvam_credential_exposes_masked_api_key_preview(admin_client):
+    resp = await admin_client.post(
+        "/api/admin/ai-settings/providers/sarvam/credentials",
+        json={
+            "name": "default",
+            "isEnabled": True,
+            "secret": {"api_key": "sk_test_abcd1234wxyz"},
+            "extraConfig": {},
+        },
+    )
+    assert resp.status_code in (200, 201), resp.text
+    body = resp.json()
+    # Sarvam uses an api_key like openai/anthropic — the masked preview must show.
+    assert body.get("secretPreview")
+    assert "sk_test_abcd1234wxyz" not in str(body)
+
+
+@pytest.mark.asyncio
 async def test_bedrock_create_requires_both_iam_fields(admin_client):
     resp = await admin_client.post(
         "/api/admin/ai-settings/providers/bedrock/credentials",

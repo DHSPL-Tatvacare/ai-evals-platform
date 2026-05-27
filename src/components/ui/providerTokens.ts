@@ -7,6 +7,7 @@ export const PROVIDER_TOKENS: Record<string, string> = {
   azure_openai: '--color-provider-azure',
   vertex: '--color-provider-gemini',
   bedrock: '--color-provider-bedrock',
+  sarvam: '--color-provider-sarvam',
 };
 
 export const APP_TOKENS: Record<string, string> = {

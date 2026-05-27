@@ -123,6 +123,8 @@
   --color-provider-anthropic: #cc785c;
   --color-provider-azure: #0078d4;
   --color-provider-bedrock: #ff9900;
+  /* Sarvam publishes no single brand hex; assigned a distinct rose tone. */
+  --color-provider-sarvam: #d6336c;
 
   /* App category colors (cost dashboard stacked charts, app tags) */
   --color-app-voicerx: #7f56d9;
