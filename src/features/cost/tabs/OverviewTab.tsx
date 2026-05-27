@@ -128,41 +128,39 @@ function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] })
   }
 
   return (
-    <div className="rounded-[var(--radius-lg)] [background-image:var(--gradient-node-ai)] p-px shadow-[var(--shadow-md)]">
-      <div className="rounded-[7px] [background-image:var(--surface-node-ai)] p-5">
-        <div className="mb-3.5 flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-lg)] [background-image:var(--gradient-node-ai)] shadow-[var(--shadow-sm)]">
-            <Sparkles className="h-[18px] w-[18px] text-white" />
-          </span>
-          <div className="flex flex-col">
-            <h3 className="bg-[image:var(--gradient-brand-text)] bg-clip-text text-[15px] font-semibold leading-tight text-transparent">
-              Signals to watch
-            </h3>
-            <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">AI summary</span>
-          </div>
+    <div className="rounded-[var(--radius-lg)] border border-[var(--chip-brand-border)] bg-[var(--surface-brand-subtle)] p-5 shadow-[var(--shadow-md)]">
+      <div className="mb-3.5 flex items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--interactive-primary)] shadow-[var(--shadow-sm)]">
+          <Sparkles className="h-[18px] w-[18px] text-white" />
+        </span>
+        <div className="flex flex-col">
+          <h3 className="text-[15px] font-semibold leading-tight text-[var(--text-primary)]">
+            Signals to watch
+          </h3>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">AI summary</span>
         </div>
-        {signals.length === 0 ? (
-          <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            Nothing unusual &mdash; no unpriced rows, errors within norm, spend balanced across apps.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {signals.map((signal) => (
-              <li key={signal.key} className="flex items-start gap-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-                <span
-                  className={cn(
-                    'mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full',
-                    signal.tone === 'warning' && 'bg-[var(--color-warning)]',
-                    signal.tone === 'error' && 'bg-[var(--color-error)]',
-                    signal.tone === 'info' && 'bg-[var(--color-info)]',
-                  )}
-                />
-                <span>{signal.body}</span>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
+      {signals.length === 0 ? (
+        <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
+          Nothing unusual &mdash; no unpriced rows, errors within norm, spend balanced across apps.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {signals.map((signal) => (
+            <li key={signal.key} className="flex items-start gap-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
+              <span
+                className={cn(
+                  'mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full',
+                  signal.tone === 'warning' && 'bg-[var(--color-warning)]',
+                  signal.tone === 'error' && 'bg-[var(--color-error)]',
+                  signal.tone === 'info' && 'bg-[var(--color-info)]',
+                )}
+              />
+              <span>{signal.body}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
