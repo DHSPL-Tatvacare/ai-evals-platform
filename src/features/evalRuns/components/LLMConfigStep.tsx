@@ -36,7 +36,7 @@ interface LLMConfigStepProps {
 export function LLMConfigStep({
   config,
   onChange,
-  modelSectionTitle = 'Model Selection',
+  modelSectionTitle = 'Evaluation Model (LLM as a Judge)',
   modelSectionDescription = 'Choose the provider, model, and Gemini thinking level for this run.',
   parallelCases = false,
   caseWorkers = 3,

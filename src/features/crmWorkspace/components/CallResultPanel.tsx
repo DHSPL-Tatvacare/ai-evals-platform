@@ -39,7 +39,6 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
     : [];
   const transcript = result?.transcript as string | undefined;
   const transcriptTransliterated = result?.transcript_transliterated as string | undefined;
-  const transliterationMeta = result?.transliteration_meta as { target_script?: string } | undefined;
   const hasTransliteration = Boolean(transcriptTransliterated && transcriptTransliterated !== transcript);
   const [showTransliterated, setShowTransliterated] = useState(false);
   const displayedTranscript = showTransliterated && transcriptTransliterated ? transcriptTransliterated : transcript;
@@ -123,9 +122,7 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
                 onClick={() => setShowTransliterated((v) => !v)}
                 className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
               >
-                {showTransliterated
-                  ? 'Show original'
-                  : `Show ${transliterationMeta?.target_script ?? 'transliterated'}`}
+                {showTransliterated ? 'Show original' : 'Show normalized'}
               </button>
             )}
           </div>
@@ -143,7 +140,7 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
                     onClick={() => setShowTransliterated((v) => !v)}
                     className="mb-2 block w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-left text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                   >
-                    This quote was found in the {showTransliterated ? 'original' : 'transliterated'} transcript — switch to view.
+                    This quote was found in the {showTransliterated ? 'original' : 'normalized'} transcript — switch to view.
                   </button>
                 )}
                 {transcriptContent}
@@ -219,9 +216,7 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
                   onClick={() => setShowTransliterated((v) => !v)}
                   className="text-[11px] font-medium text-[var(--text-brand)] hover:underline"
                 >
-                  {showTransliterated
-                    ? 'Show original'
-                    : `Show ${transliterationMeta?.target_script ?? 'transliterated'}`}
+                  {showTransliterated ? 'Show original' : 'Show normalized'}
                 </button>
               </div>
             )}

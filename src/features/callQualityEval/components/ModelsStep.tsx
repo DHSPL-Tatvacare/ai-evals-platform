@@ -36,7 +36,7 @@ export function ModelsStep({
         config={evaluation}
         onChange={onEvaluationChange}
         modelSectionTitle="Evaluation Model (LLM as a Judge)"
-        modelSectionDescription="The model that scores each call against your rubrics. It also produces the transliteration when that option is enabled in the Transcription step."
+        modelSectionDescription="The model that scores each call against your rubrics. It also runs the normalization (transliteration) pass when that option is enabled in the Transcription step."
       />
     </WizardStepLayout>
   );

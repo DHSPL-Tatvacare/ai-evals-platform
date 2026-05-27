@@ -133,8 +133,8 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
           onChange={(v) => onChange({ forceRetranscribe: v })}
         />
         <ToggleRow
-          label="Transliterate transcript"
-          description="Also produce the transcript in another script (same language) — handy for romanizing non-Latin scripts. Runs on the evaluation model."
+          label="Normalize transcript"
+          description="Transliterate the transcript into the target script — same language, different script (e.g. romanize Devanagari). Runs on the evaluation model."
           checked={config.transliterate}
           onChange={(v) => onChange({ transliterate: v })}
         />

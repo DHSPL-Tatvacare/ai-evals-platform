@@ -26,7 +26,7 @@ const STEPS: WizardStep[] = [
   { key: 'info', label: 'Run Info' },
   { key: 'api', label: 'Kaira API' },
   { key: 'test', label: 'Test Config' },
-  { key: 'llm', label: 'Execution Config' },
+  { key: 'llm', label: 'Models' },
   { key: 'review', label: 'Review' },
 ];
 

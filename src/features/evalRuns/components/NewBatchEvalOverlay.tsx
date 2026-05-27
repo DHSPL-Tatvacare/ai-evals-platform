@@ -19,7 +19,7 @@ const STEPS: WizardStep[] = [
   { key: 'data', label: 'Data Source' },
   { key: 'scope', label: 'Thread Scope' },
   { key: 'evaluators', label: 'Evaluators' },
-  { key: 'llm', label: 'LLM Config' },
+  { key: 'llm', label: 'Models' },
   { key: 'review', label: 'Review' },
 ];
 

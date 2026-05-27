@@ -218,7 +218,7 @@ export function NewCallQualityEvalOverlay({
         { key: 'Language', value: findLanguage(transcriptionConfig.language)?.name || transcriptionConfig.language },
         { key: 'Script', value: transcriptionConfig.script },
         { key: 'Diarization', value: transcriptionConfig.speakerDiarization ? 'Yes' : 'No' },
-        { key: 'Transliterate', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
+        { key: 'Normalize', value: transcriptionConfig.transliterate ? `Yes → ${transcriptionConfig.targetScript}` : 'No' },
       ],
     },
     {

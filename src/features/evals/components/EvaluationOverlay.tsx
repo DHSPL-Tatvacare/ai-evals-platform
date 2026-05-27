@@ -477,7 +477,10 @@ export function EvaluationOverlay({
                 </div>
               )}
 
-              {/* Provider + Model */}
+              {/* Evaluation model (LLM as a judge) */}
+              <label className="block text-[12px] font-medium text-[var(--text-primary)] mb-1.5">
+                Evaluation Model (LLM as a Judge)
+              </label>
               <LlmModelSelect
                 callSite="chat_text"
                 value={llmPick}
