@@ -230,6 +230,7 @@ class EntityRow(CamelModel):
     owner_type: str
     owner_id: uuid.UUID | None
     display_name: str | None = None
+    app_id: str | None = None
     cost_usd: float
     total_tokens: int
     call_count: int
@@ -1158,6 +1159,8 @@ async def list_entities(
             func.count(FactLlmGeneration.id).label('calls'),
             func.min(FactLlmGeneration.created_at).label('first_at'),
             func.max(FactLlmGeneration.created_at).label('last_at'),
+            func.min(FactLlmGeneration.app_id).label('app_id'),
+            func.count(func.distinct(FactLlmGeneration.app_id)).label('app_count'),
         )
         .where(and_(*base_filters))
         .group_by(FactLlmGeneration.owner_type, FactLlmGeneration.owner_id)
@@ -1191,6 +1194,7 @@ async def list_entities(
                 owner_type=row[0],
                 owner_id=row[1],
                 display_name=display_names.get((row[0], row[1])),
+                app_id=row[7] if (row[8] or 0) == 1 else None,
                 cost_usd=_to_float(row[2]),
                 total_tokens=int(row[3] or 0),
                 call_count=int(row[4] or 0),

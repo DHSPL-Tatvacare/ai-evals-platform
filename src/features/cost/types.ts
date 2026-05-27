@@ -83,6 +83,8 @@ export interface EntityRow {
    * truncated user_message for sherlock_turn, job_type for job, etc.
    * ``null`` when the owner source row has been deleted. */
   displayName: string | null;
+  /** Representative app for the workload; ``null`` when it spans multiple apps. */
+  appId: string | null;
   costUsd: number;
   totalTokens: number;
   callCount: number;

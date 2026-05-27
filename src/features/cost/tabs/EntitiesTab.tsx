@@ -1,12 +1,14 @@
 import { useCallback, useEffect } from 'react';
 import { Database } from 'lucide-react';
 import {
+  AppTag,
   Card,
   DataTable,
   HBarList,
   type ColumnDef,
   type HBarRowData,
 } from '@/components/ui';
+import { cn } from '@/utils/cn';
 import { useCostStore } from '@/stores/costStore';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
 import { CostSearchInput } from '../components/CostSearchInput';
@@ -21,11 +23,12 @@ interface TabProps {
 const PAGE_SIZE = 25;
 
 const OWNER_LABEL: Record<string, string> = {
-  sherlock_turn: 'sherlock turn',
-  eval_run: 'eval run',
-  report_run: 'report',
-  job: 'job',
-  standalone: 'standalone',
+  eval_run: 'Evaluation',
+  sherlock_turn: 'Sherlock chat',
+  report_run: 'Report',
+  job: 'Job',
+  llm_assist: 'Assist',
+  standalone: 'Ad-hoc',
 };
 
 export function EntitiesTab({ active }: TabProps) {
@@ -47,7 +50,7 @@ export function EntitiesTab({ active }: TabProps) {
     total !== undefined
       ? searchQuery
         ? `${total} match${total === 1 ? '' : 'es'}`
-        : `${total} owner${total === 1 ? '' : 's'}`
+        : `${total} workload${total === 1 ? '' : 's'}`
       : undefined;
 
   return (
@@ -55,17 +58,17 @@ export function EntitiesTab({ active }: TabProps) {
       <CostSearchInput
         value={searchQuery}
         onCommit={handleSearchCommit}
-        placeholder="Search by owner type, id, app, provider, model, or purpose (e.g. kaira, gpt-5.4, eval_run)"
+        placeholder="Search by type, app, workload, id, provider, or model (e.g. kaira, gpt-5.4, evaluation)"
         countLabel={countLabel}
       />
       <SliceStateBoundary
         slice={slice}
         onRetry={() => refresh('entities')}
         emptyIcon={Database}
-        emptyTitle={searchQuery ? 'No matches' : 'No entities'}
+        emptyTitle={searchQuery ? 'No matches' : 'No workloads'}
         emptyDescription={
           searchQuery
-            ? `No entities match "${searchQuery}". Clear the search to see all entities.`
+            ? `No workloads match "${searchQuery}". Clear the search to see all workloads.`
             : 'No LLM usage rows match the current filters.'
         }
         isEmpty={(data) => data.items.length === 0}
@@ -99,30 +102,34 @@ function EntitiesTable({
 }) {
   const columns: ColumnDef<EntityRow>[] = [
     {
-      key: 'owner',
-      header: 'Owner',
+      key: 'type',
+      header: 'Type',
+      width: 'w-32',
       render: (row) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex shrink-0 items-center rounded-[4px] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
-            {OWNER_LABEL[row.ownerType] ?? row.ownerType}
-          </span>
-          <div className="flex min-w-0 flex-col">
-            <span
-              className="truncate text-[12.5px] text-[var(--text-primary)]"
-              title={row.displayName ?? undefined}
-            >
-              {row.displayName ?? (
-                <span className="font-mono text-[var(--text-secondary)]">{truncateId(row.ownerId)}</span>
-              )}
-            </span>
-            {row.displayName && row.ownerId && (
-              <span className="truncate font-mono text-[10.5px] text-[var(--text-muted)]" title={row.ownerId}>
-                {truncateId(row.ownerId)}
-              </span>
-            )}
-          </div>
-        </div>
+        <span className="inline-flex shrink-0 items-center rounded-[4px] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+          {OWNER_LABEL[row.ownerType] ?? row.ownerType}
+        </span>
       ),
+    },
+    {
+      key: 'app',
+      header: 'App',
+      width: 'w-28',
+      render: (row) =>
+        row.appId ? <AppTag value={row.appId} /> : <span className="text-[var(--text-muted)]">—</span>,
+    },
+    {
+      key: 'name',
+      header: 'Workload',
+      textBehavior: 'truncate',
+      render: (row) =>
+        row.displayName ? (
+          <span className="text-[12.5px] text-[var(--text-primary)]" title={row.displayName}>
+            {row.displayName}
+          </span>
+        ) : (
+          <span className="font-mono text-[var(--text-secondary)]">{truncateId(row.ownerId)}</span>
+        ),
     },
     {
       key: 'cost',
@@ -133,20 +140,20 @@ function EntitiesTable({
       render: (row) => formatUsd(row.costUsd),
     },
     {
+      key: 'calls',
+      header: 'API Requests',
+      width: 'w-24',
+      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+      headerClassName: 'text-right',
+      render: (row) => formatInt(row.callCount),
+    },
+    {
       key: 'tokens',
       header: 'Tokens',
       width: 'w-24',
       cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
       headerClassName: 'text-right',
       render: (row) => formatTokensCompact(row.totalTokens),
-    },
-    {
-      key: 'calls',
-      header: 'API Requests',
-      width: 'w-20',
-      cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
-      headerClassName: 'text-right',
-      render: (row) => formatInt(row.callCount),
     },
     {
       key: 'first_at',
@@ -206,7 +213,7 @@ function EntityDrillDown({ ownerType, ownerId }: { ownerType: OwnerType; ownerId
   }
   return (
     <div className="space-y-4 py-2">
-      <DrillSummary detail={detail} />
+      <DrillSummary detail={detail} ownerId={ownerId} />
       <div className="grid gap-4 md:grid-cols-2">
         <DrillList title="By purpose" rows={detail.byPurpose} />
         <DrillList title="By model" rows={detail.byModel} />
@@ -215,10 +222,11 @@ function EntityDrillDown({ ownerType, ownerId }: { ownerType: OwnerType; ownerId
   );
 }
 
-function DrillSummary({ detail }: { detail: EntityCostBreakdown }) {
+function DrillSummary({ detail, ownerId }: { detail: EntityCostBreakdown; ownerId: string }) {
   return (
     <Card className="p-3">
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12.5px]">
+        <SummaryItem label="ID" value={truncateId(ownerId)} mono />
         <SummaryItem label="Spend" value={formatUsd(detail.costUsd)} highlight />
         <SummaryItem label="Tokens" value={formatTokensCompact(detail.totalTokens)} />
         <SummaryItem label="API Requests" value={formatInt(detail.callCount)} />
@@ -229,12 +237,25 @@ function DrillSummary({ detail }: { detail: EntityCostBreakdown }) {
   );
 }
 
-function SummaryItem({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function SummaryItem({
+  label,
+  value,
+  highlight,
+  mono,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  mono?: boolean;
+}) {
   return (
     <div className="flex items-baseline gap-2">
       <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
       <span
-        className={`tabular-nums ${highlight ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
+        className={cn(
+          mono ? 'font-mono' : 'tabular-nums',
+          highlight ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]',
+        )}
       >
         {value}
       </span>

@@ -43,7 +43,7 @@ export function CostPage() {
     () => [
       { id: 'overview', label: 'Overview', content: <OverviewTab active={activeTab === 'overview'} /> },
       { id: 'spend', label: 'Spend', content: <SpendTab active={activeTab === 'spend'} /> },
-      { id: 'entities', label: 'Entities', content: <EntitiesTab active={activeTab === 'entities'} /> },
+      { id: 'entities', label: 'Workloads', content: <EntitiesTab active={activeTab === 'entities'} /> },
       { id: 'calls', label: 'API Requests', content: <CallsTab active={activeTab === 'calls'} /> },
       { id: 'efficiency', label: 'Efficiency', content: <EfficiencyTab active={activeTab === 'efficiency'} /> },
       { id: 'pricing', label: 'Pricing', content: <PricingTab active={activeTab === 'pricing'} /> },
