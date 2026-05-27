@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
-import { BarChart3 } from 'lucide-react';
-import { Alert, Card, HBarList, type HBarRowData } from '@/components/ui';
+import { BarChart3, Sparkles } from 'lucide-react';
+import { Card } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
 import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
+import { cn } from '@/utils/cn';
 import { CostKpiRow } from '../components/CostKpiRow';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
-import { formatInt, formatUsd, formatUsdCompact } from '../utils/format';
-import { toneForApp, toneForPurpose } from '../utils/tones';
+import { formatInt, formatUsdCompact } from '../utils/format';
 import type { CostOverview, CostKpi, GroupedSpend } from '../types';
 
 interface TabProps {
@@ -42,6 +42,8 @@ export function OverviewTab({ active }: TabProps) {
 function OverviewContent({ data }: { data: CostOverview }) {
   return (
     <>
+      <AiSummaryBox kpis={data.kpis} byApp={data.spendByApp} />
+
       <CostKpiRow kpis={data.kpis} />
 
       <Card className="p-4">
@@ -60,113 +62,127 @@ function OverviewContent({ data }: { data: CostOverview }) {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <WhereTheMoneyGoes byApp={data.spendByApp} byPurpose={data.spendByPurpose} />
-        <SignalsCard kpis={data.kpis} byApp={data.spendByApp} />
+        <SpendDonutCard
+          title="By app"
+          rows={data.spendByApp}
+        />
+        <SpendDonutCard
+          title="By purpose"
+          rows={data.spendByPurpose}
+        />
       </div>
     </>
   );
 }
 
-function WhereTheMoneyGoes({ byApp, byPurpose }: { byApp: GroupedSpend[]; byPurpose: GroupedSpend[] }) {
-  const totalApp = byApp.reduce((s, r) => s + r.costUsd, 0);
-  const totalPurpose = byPurpose.reduce((s, r) => s + r.costUsd, 0);
-  const maxApp = byApp.reduce((m, r) => Math.max(m, r.costUsd), 0);
-  const maxPurpose = byPurpose.reduce((m, r) => Math.max(m, r.costUsd), 0);
-
-  const appRows: HBarRowData[] = byApp.slice(0, 5).map((row) => ({
-    key: `app:${row.key}`,
-    label: row.key,
-    pct: maxApp ? row.costUsd / maxApp : 0,
-    tone: toneForApp(row.key),
-    amount: formatUsd(row.costUsd),
-    meta: totalApp ? `${((row.costUsd / totalApp) * 100).toFixed(0)}%` : undefined,
-  }));
-  const purposeRows: HBarRowData[] = byPurpose.slice(0, 6).map((row, i) => ({
-    key: `purpose:${row.key}`,
-    label: row.key,
-    pct: maxPurpose ? row.costUsd / maxPurpose : 0,
-    tone: toneForPurpose(i),
-    amount: formatUsd(row.costUsd),
-    meta: totalPurpose ? `${((row.costUsd / totalPurpose) * 100).toFixed(0)}%` : undefined,
-  }));
-
-  return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Where the money goes</h3>
-        <span className="text-[11.5px] text-[var(--text-muted)]">top apps &amp; purposes</span>
-      </div>
-      {appRows.length === 0 && purposeRows.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No spend recorded</p>
-      ) : (
-        <div className="space-y-4">
-          {appRows.length > 0 && (
-            <div>
-              <p className="mb-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">By app</p>
-              <HBarList rows={appRows} />
-            </div>
-          )}
-          {purposeRows.length > 0 && (
-            <div>
-              <p className="mb-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">By purpose</p>
-              <HBarList rows={purposeRows} />
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  );
+interface Signal {
+  key: string;
+  tone: 'warning' | 'error' | 'info';
+  body: React.ReactNode;
 }
 
-function SignalsCard({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] }) {
+function AiSummaryBox({ kpis, byApp }: { kpis: CostKpi; byApp: GroupedSpend[] }) {
   const topApp = byApp[0];
-  const signals: React.ReactNode[] = [];
+  const signals: Signal[] = [];
 
   if (kpis.pricingFallbackCalls > 0) {
-    signals.push(
-      <Alert key="unpriced" variant="warning" title="Unpriced requests">
-        <span className="tabular-nums">{formatInt(kpis.pricingFallbackCalls)}</span> requests were priced with
-        a fallback rate. Add a pricing row to stop under-accounting for spend.
-      </Alert>,
-    );
+    signals.push({
+      key: 'unpriced',
+      tone: 'warning',
+      body: (
+        <>
+          <span className="tabular-nums">{formatInt(kpis.pricingFallbackCalls)}</span> requests priced with a
+          fallback rate &mdash; add a pricing row to stop under-accounting for spend.
+        </>
+      ),
+    });
   }
   if (kpis.errorCalls > 0) {
     const errorPct = kpis.totalCalls ? kpis.errorCalls / kpis.totalCalls : 0;
-    signals.push(
-      <Alert key="errors" variant={errorPct > 0.02 ? 'error' : 'info'} title="Request errors">
-        <span className="tabular-nums">{formatInt(kpis.errorCalls)}</span> failed requests
-        {kpis.totalCalls > 0 && (
-          <> &middot; {(errorPct * 100).toFixed(2)}% of traffic</>
-        )}
-        .
-      </Alert>,
-    );
+    signals.push({
+      key: 'errors',
+      tone: errorPct > 0.02 ? 'error' : 'info',
+      body: (
+        <>
+          <span className="tabular-nums">{formatInt(kpis.errorCalls)}</span> failed requests
+          {kpis.totalCalls > 0 && <> &middot; {(errorPct * 100).toFixed(2)}% of traffic</>}.
+        </>
+      ),
+    });
   }
   if (topApp && byApp.length > 1) {
     const total = byApp.reduce((s, r) => s + r.costUsd, 0);
     const share = total ? topApp.costUsd / total : 0;
     if (share >= 0.5) {
-      signals.push(
-        <Alert key="concentration" variant="info" title="Spend concentration">
-          <span className="font-medium">{topApp.key}</span> drives {(share * 100).toFixed(0)}% of all spend
-          ({formatUsdCompact(topApp.costUsd)}). Investigate its per-purpose breakdown in Spend.
-        </Alert>,
-      );
+      signals.push({
+        key: 'concentration',
+        tone: 'info',
+        body: (
+          <>
+            <span className="font-medium text-[var(--text-primary)]">{topApp.key}</span> drives{' '}
+            {(share * 100).toFixed(0)}% of all spend ({formatUsdCompact(topApp.costUsd)}).
+          </>
+        ),
+      });
     }
   }
 
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Signals to watch</h3>
-        <span className="text-[11.5px] text-[var(--text-muted)]">auto-curated</span>
+    <Card className="border-[var(--border-subtle)] bg-[var(--surface-node-ai)] p-4">
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--gradient-node-ai)]">
+          <Sparkles className="h-4 w-4 text-white" />
+        </span>
+        <div className="flex flex-col">
+          <h3 className="bg-[var(--gradient-brand-text)] bg-clip-text text-sm font-semibold leading-tight text-transparent">
+            Signals to watch
+          </h3>
+          <span className="text-[11px] text-[var(--text-muted)]">AI summary</span>
+        </div>
       </div>
       {signals.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-          Nothing unusual. No unpriced rows, errors within norm, spend balanced across apps.
+        <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+          Nothing unusual &mdash; no unpriced rows, errors within norm, spend balanced across apps.
         </p>
       ) : (
-        <div className="space-y-2.5">{signals}</div>
+        <ul className="space-y-1.5">
+          {signals.map((signal) => (
+            <li key={signal.key} className="flex items-start gap-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+              <span
+                className={cn(
+                  'mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full',
+                  signal.tone === 'warning' && 'bg-[var(--color-warning)]',
+                  signal.tone === 'error' && 'bg-[var(--color-error)]',
+                  signal.tone === 'info' && 'bg-[var(--color-info)]',
+                )}
+              />
+              <span>{signal.body}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function SpendDonutCard({ title, rows }: { title: string; rows: GroupedSpend[] }) {
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">share of spend</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No spend recorded</p>
+      ) : (
+        <ChartRenderer
+          type="donut"
+          data={rows.map((r) => ({ name: r.key, value: r.costUsd }))}
+          xKey="name"
+          yKey="value"
+          height={260}
+          legendPosition="right"
+        />
       )}
     </Card>
   );
