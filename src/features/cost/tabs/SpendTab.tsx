@@ -2,10 +2,11 @@ import { useEffect } from 'react';
 import { PieChart } from 'lucide-react';
 import { AppTag, ProviderTag } from '@/components/ui';
 import { useCostStore } from '@/stores/costStore';
+import { ModalityStrip } from '../components/ModalityStrip';
 import { SliceStateBoundary } from '../components/SliceStateBoundary';
 import { SpendBreakdownCard } from '../components/SpendBreakdownCard';
 import { truncateId } from '../utils/format';
-import type { SpendBundle } from '../types';
+import type { ModalityBreakdown, SpendBundle } from '../types';
 
 interface TabProps {
   active: boolean;
@@ -13,16 +14,31 @@ interface TabProps {
 
 export function SpendTab({ active }: TabProps) {
   const slice = useCostStore((s) => s.spend);
+  const modalitySlice = useCostStore((s) => s.modality);
   const loadSpend = useCostStore((s) => s.loadSpend);
+  const loadModality = useCostStore((s) => s.loadModality);
   const refresh = useCostStore((s) => s.refreshActive);
   const filtersKey = useCostStore((s) => s.filtersKey);
 
   useEffect(() => {
-    if (active) void loadSpend();
-  }, [active, loadSpend, filtersKey]);
+    if (active) {
+      void loadSpend();
+      void loadModality();
+    }
+  }, [active, loadSpend, loadModality, filtersKey]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col pb-6">
+    <div className="flex h-full min-h-0 flex-col gap-4 pb-6">
+      {/* Modality strip — compact, full-width, above the 2×2 grid */}
+      <SliceStateBoundary
+        slice={modalitySlice}
+        onRetry={() => refresh('modality')}
+        loadingLabel="Loading modality…"
+      >
+        {(data: ModalityBreakdown) => <ModalityStrip data={data} />}
+      </SliceStateBoundary>
+
+      {/* 2×2 spend breakdown grid */}
       <div className="flex min-h-0 flex-1 flex-col">
         <SliceStateBoundary
           slice={slice}

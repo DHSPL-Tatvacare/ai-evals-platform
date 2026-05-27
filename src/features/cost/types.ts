@@ -299,3 +299,17 @@ export interface AliasRepriceResponse {
   stillUnpriced: number;
   daysRolled: number;
 }
+
+export interface ModalitySlice {
+  modality: string;
+  tokens: number;
+  costUsd: number;
+  estimated: boolean;
+}
+
+export interface ModalityBreakdown {
+  modalities: ModalitySlice[];
+  totalTokens: number;
+  totalCostUsd: number;
+  computedAt: string;
+}

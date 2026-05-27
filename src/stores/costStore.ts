@@ -15,6 +15,7 @@ import type {
   EfficiencyBundle,
   EntityCostBreakdown,
   EntityListPage,
+  ModalityBreakdown,
   OwnerType,
   PricingBundle,
   PricingCreatePayload,
@@ -33,7 +34,7 @@ export interface Slice<T> {
   filtersKey?: string;
 }
 
-type SliceName = 'overview' | 'spend' | 'entities' | 'calls' | 'efficiency' | 'pricing';
+type SliceName = 'overview' | 'spend' | 'modality' | 'entities' | 'calls' | 'efficiency' | 'pricing';
 
 const DEFAULT_FILTERS: CostFilters = { range: '7d' };
 
@@ -69,6 +70,7 @@ interface CostState {
 
   overview: Slice<CostOverview>;
   spend: Slice<SpendBundle>;
+  modality: Slice<ModalityBreakdown>;
   entities: Slice<EntityListPage> & { page: number; searchQuery: string };
   calls: Slice<CallsPage> & { page: number; searchQuery: string };
   efficiency: Slice<EfficiencyBundle>;
@@ -81,6 +83,7 @@ interface CostState {
 
   loadOverview: () => Promise<void>;
   loadSpend: () => Promise<void>;
+  loadModality: () => Promise<void>;
   loadEfficiency: () => Promise<void>;
   loadEntities: (page?: number) => Promise<void>;
   loadCalls: (page?: number) => Promise<void>;
@@ -107,6 +110,7 @@ export const useCostStore = create<CostState>((set, get) => ({
 
   overview: initialSlice<CostOverview>(),
   spend: initialSlice<SpendBundle>(),
+  modality: initialSlice<ModalityBreakdown>(),
   entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
   calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
   efficiency: initialSlice<EfficiencyBundle>(),
@@ -124,6 +128,7 @@ export const useCostStore = create<CostState>((set, get) => ({
       filtersKey: nextKey,
       overview: initialSlice(),
       spend: initialSlice(),
+      modality: initialSlice(),
       entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
       calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       efficiency: initialSlice(),
@@ -160,6 +165,22 @@ export const useCostStore = create<CostState>((set, get) => ({
     } catch (e: unknown) {
       const msg = errorMessage(e, 'Failed to load spend');
       set({ spend: { status: 'error', error: msg, filtersKey } });
+      notificationService.error(msg);
+    }
+  },
+
+  loadModality: async () => {
+    const { modality, filters, filtersKey } = get();
+    if (modality.status === 'loading') return;
+    if (modality.status === 'ready' && modality.filtersKey === filtersKey) return;
+
+    set({ modality: { ...modality, status: 'loading', error: undefined } });
+    try {
+      const data = await costApi.fetchModality(filters);
+      set({ modality: { status: 'ready', data, filtersKey } });
+    } catch (e: unknown) {
+      const msg = errorMessage(e, 'Failed to load modality');
+      set({ modality: { status: 'error', error: msg, filtersKey } });
       notificationService.error(msg);
     }
   },
@@ -342,6 +363,10 @@ export const useCostStore = create<CostState>((set, get) => ({
         set({ spend: initialSlice<SpendBundle>() });
         await state.loadSpend();
         return;
+      case 'modality':
+        set({ modality: initialSlice<ModalityBreakdown>() });
+        await state.loadModality();
+        return;
       case 'efficiency':
         set({ efficiency: initialSlice<EfficiencyBundle>() });
         await state.loadEfficiency();
@@ -468,6 +493,7 @@ export const useCostStore = create<CostState>((set, get) => ({
     set({
       overview: initialSlice<CostOverview>(),
       spend: initialSlice<SpendBundle>(),
+      modality: initialSlice<ModalityBreakdown>(),
       efficiency: initialSlice<EfficiencyBundle>(),
       entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
       calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
@@ -483,6 +509,7 @@ export const useCostStore = create<CostState>((set, get) => ({
       filtersKey: hashFilters(DEFAULT_FILTERS),
       overview: initialSlice(),
       spend: initialSlice(),
+      modality: initialSlice(),
       entities: { ...initialSlice<EntityListPage>(), page: 1, searchQuery: '' },
       calls: { ...initialSlice<CallsPage>(), page: 1, searchQuery: '' },
       efficiency: initialSlice(),

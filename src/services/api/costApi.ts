@@ -13,6 +13,7 @@ import type {
   EfficiencyBundle,
   EntityCostBreakdown,
   EntityListPage,
+  ModalityBreakdown,
   OwnerType,
   PricingBundle,
   PricingCreatePayload,
@@ -53,6 +54,9 @@ export const costApi = {
 
   fetchSpend: (filters: CostFilters): Promise<SpendBundle> =>
     apiRequest<SpendBundle>(`/api/cost/spend${applyFiltersQuery(filters)}`),
+
+  fetchModality: (filters: CostFilters): Promise<ModalityBreakdown> =>
+    apiRequest<ModalityBreakdown>(`/api/cost/modality${applyFiltersQuery(filters)}`),
 
   fetchEfficiency: (filters: CostFilters): Promise<EfficiencyBundle> =>
     apiRequest<EfficiencyBundle>(`/api/cost/efficiency${applyFiltersQuery(filters)}`),
