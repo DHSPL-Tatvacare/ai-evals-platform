@@ -2458,7 +2458,7 @@ APP_SEEDS = [
                 {
                     "id": "inside-sales-batch-eval",
                     "kind": "openModal",
-                    "label": "Batch Evaluation",
+                    "label": "Call Quality Evaluation",
                     "description": "Evaluate a selected set of calls",
                     "icon": "FileSpreadsheet",
                     "config": {"modalId": "callQualityEval"},
