@@ -182,10 +182,10 @@ function SpendDonutCard({ title, rows }: { title: string; rows: GroupedSpend[] }
           data={rows.map((r) => ({ name: r.key, value: r.costUsd }))}
           xKey="name"
           yKey="value"
-          height={260}
+          height={300}
           legendPosition="right"
-          // compact suppresses overlapping slice labels — legend + hover tooltip carry the detail
-          compact
+          // hideSliceLabels keeps the ring big and clean; legend + hover tooltip carry the detail
+          hideSliceLabels
         />
       )}
     </Card>

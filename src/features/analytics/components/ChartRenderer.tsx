@@ -63,6 +63,8 @@ interface ChartRendererProps {
   legendPosition?: 'top' | 'bottom' | 'right' | 'none';
   height?: number;
   compact?: boolean;
+  // Suppress pie/donut inline slice labels; legend + tooltip carry detail.
+  hideSliceLabels?: boolean;
   /**
    * Phase 4.6B — optional layout overrides derived by ``chartLayout.ts``.
    * When provided, callers have already chosen surface-appropriate y-axis
@@ -172,7 +174,8 @@ function GradientDefs({ uid, colors }: { uid: string; colors: string[] }) {
 
 export function ChartRenderer({
   type, data, xKey, yKey, seriesKeys = [], series, xLabel, yLabel,
-  legendPosition, height = 300, compact = false, yAxisWidthOverride,
+  legendPosition, height = 300, compact = false, hideSliceLabels = false,
+  yAxisWidthOverride,
   marginOverride, tickFontSizeOverride, xTickCharCapOverride,
   xTickIntervalOverride,
 }: ChartRendererProps) {
@@ -249,7 +252,7 @@ export function ChartRenderer({
 
   // ── Pie / Donut ──────────────────────────────────────────────
   if (type === 'pie' || type === 'donut') {
-    const outerRadius = compact ? Math.min(height / 3, 80) : height / 3;
+    const outerRadius = compact ? Math.min(height / 3, 80) : hideSliceLabels ? height / 2.4 : height / 3;
     const innerRadius = mapping.innerRadius ? outerRadius * mapping.innerRadius : 0;
     return (
       <ResponsiveContainer width="100%" height={height}>
@@ -268,7 +271,7 @@ export function ChartRenderer({
             strokeWidth={2}
             animationEasing={ANIM_EASING}
             animationDuration={ANIM_DURATION}
-            label={compact ? undefined : ({ name, percent }: { name?: string; percent?: number }) =>
+            label={(compact || hideSliceLabels) ? undefined : ({ name, percent }: { name?: string; percent?: number }) =>
               `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`
             }
             labelLine={false}
