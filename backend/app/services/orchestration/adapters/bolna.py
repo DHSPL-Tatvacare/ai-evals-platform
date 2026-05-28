@@ -134,6 +134,14 @@ def voice_event_name(canonical_outcome: str) -> str:
     return _VOICE_EVENT_NAMES.get(canonical_outcome, "voice.failed")
 
 
+_VOICE_EVENT_COMPLETED = "voice.completed"
+
+
+def voice_resume_event_names(canonical_outcome: str) -> frozenset[str]:
+    # A terminal voice call satisfies the coarse 'call done' event plus its specific outcome name.
+    return frozenset({voice_event_name(canonical_outcome), _VOICE_EVENT_COMPLETED})
+
+
 def is_terminal(status: Optional[str]) -> bool:
     return bool(status) and status.lower() in _TERMINAL_STATUSES  # type: ignore[union-attr]
 
@@ -689,6 +697,7 @@ class BolnaAdapter:
             provider_status=str(status).lower(),
             child_action_type=action_type,
             child_idempotency_key=child_idem,
+            resume_event_names=voice_resume_event_names(canonical),
         )
 
     async def handle_webhook(
@@ -811,4 +820,4 @@ from app.services.orchestration.adapters import register_adapter  # noqa: E402
 register_adapter(capability="voice", vendor="bolna", adapter=BolnaAdapter())
 
 
-__all__ = ["BolnaAdapter", "BolnaServiceError", "classify_outcome", "is_terminal", "voice_event_name"]
+__all__ = ["BolnaAdapter", "BolnaServiceError", "classify_outcome", "is_terminal", "voice_event_name", "voice_resume_event_names"]

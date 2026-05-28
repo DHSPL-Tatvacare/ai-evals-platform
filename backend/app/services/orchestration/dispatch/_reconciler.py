@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Collection, Optional
 
 from sqlalchemy import func, or_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -31,6 +31,7 @@ async def apply_terminal_event(
     child_idempotency_key: Optional[str] = None,
     child_response: Optional[dict[str, Any]] = None,
     flip_waiting_to_ready: bool = True,
+    resume_event_names: Optional[Collection[str]] = None,
 ) -> bool:
     """Idempotent. ``True`` if newly applied, ``False`` if ``provider_terminal`` already set.
 
@@ -125,19 +126,6 @@ async def apply_terminal_event(
         WorkflowRunRecipientState.ignore_webhooks_after > func.now(),
     )
 
-    flipped_to_ready = False
-    if flip_waiting_to_ready:
-        flip_result = await db.execute(
-            update(WorkflowRunRecipientState)
-            .where(
-                WorkflowRunRecipientState.run_id == action.run_id,
-                WorkflowRunRecipientState.recipient_id == action.recipient_id,
-                WorkflowRunRecipientState.status == "waiting",
-                ttl_gate,
-            )
-            .values(status="ready", wakeup_at=None)
-        )
-        flipped_to_ready = bool(getattr(flip_result, "rowcount", 0))
     # Always stamp ``last_outcome`` + ``last_event_at`` so the run-detail UI
     # has provider-agnostic columns to render. ``last_outcome`` falls back
     # to ``provider_status`` when the caller did not declare a child
@@ -167,26 +155,25 @@ async def apply_terminal_event(
         )
     )
 
-    # When this reconciliation actually flipped a recipient from waiting
-    # → ready (e.g. Bolna poller reconciled a terminal call), drive the
-    # workflow forward immediately by enqueuing a delayed run-workflow
-    # resume job. Replaces the resume-waiting-cohorts cron's ~60s latency
-    # with ±~1s worker pickup. Lazy import keeps the shared funnel quiet
-    # in test fixtures that don't mount the full app.
-    if flipped_to_ready:
-        from app.services.orchestration.dispatch.resume_enqueue import (
-            enqueue_resume_for_recipient,
+    # Resume the recipient only when the terminal event it actually awaits
+    # arrives — the shared core gates on node==logic.wait + mode + event_name
+    # membership + event_match, replacing the old blunt waiting→ready flip.
+    # Lazy import keeps the shared funnel quiet in fixtures.
+    if flip_waiting_to_ready and resume_event_names:
+        from app.services.orchestration.dispatch.event_resume import (
+            resume_waiting_on_event,
         )
         # Idempotency key folds in child_idempotency_key when present so
         # a duplicate reconcile (webhook + poller) collapses into one job.
         reason_token = child_idempotency_key or (
             f"ready:reconcile:{action.id}"
         )
-        await enqueue_resume_for_recipient(
+        await resume_waiting_on_event(
             db,
             run_id=action.run_id,
             recipient_id=action.recipient_id,
-            available_at=None,
+            event_names=resume_event_names,
+            payload=(recipient_payload_patch or {}),
             reason=reason_token,
         )
 
