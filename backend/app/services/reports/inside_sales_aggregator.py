@@ -76,6 +76,13 @@ def _safe_parse_list(raw: str) -> list:
         return []
 
 
+def _resolve_dimension_max(field: dict, reasoning_max_by_key: dict[str, float]) -> float:
+    m = field.get("max")
+    if isinstance(m, (int, float)) and m > 0:
+        return float(m)
+    return reasoning_max_by_key.get(field["key"], 100.0)  # 100 only if reasoning has nothing
+
+
 class InsideSalesAggregator:
     def __init__(
         self,
@@ -114,13 +121,43 @@ class InsideSalesAggregator:
             if out:
                 outputs.append((t, out))
 
+        reasoning_max_by_key = self._build_reasoning_max_by_key(outputs)
+
         return {
             "runSummary": self._run_summary(outputs),
-            "dimensionBreakdown": self._dimension_breakdown(outputs),
+            "dimensionBreakdown": self._dimension_breakdown(outputs, reasoning_max_by_key),
             "complianceBreakdown": self._compliance_breakdown(outputs),
             "flagStats": self._flag_stats(outputs),
-            "agentSlices": self._agent_slices(outputs),
+            "agentSlices": self._agent_slices(outputs, reasoning_max_by_key),
         }
+
+    def _build_reasoning_max_by_key(self, outputs) -> dict[str, float]:
+        # Mirror frontend findReasoningMax: a reasoning entry matches a field key
+        # when its lowercased dimension contains EVERY underscore-split key token.
+        resolved: dict[str, float] = {}
+        for field in self.dimension_fields:
+            key = field["key"]
+            tokens = [t for t in key.lower().split("_") if t]
+            if not tokens:
+                continue
+            for _, out in outputs:
+                raw = out.get("reasoning")
+                items = raw if isinstance(raw, list) else []
+                match = None
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    m = item.get("max")
+                    if not (isinstance(m, (int, float)) and m > 0):
+                        continue
+                    dim = str(item.get("dimension", "")).lower()
+                    if all(tok in dim for tok in tokens):
+                        match = float(m)
+                        break
+                if match is not None:
+                    resolved[key] = match
+                    break
+        return resolved
 
     def _run_summary(self, outputs):
         scores = [s for s in (_safe_score(out.get(self.overall_score_key)) for _, out in outputs) if s is not None]
@@ -130,6 +167,7 @@ class InsideSalesAggregator:
         for s in scores:
             verdicts[_classify_verdict(s)] += 1
 
+        # compliancePassRate = % of evaluated calls passing EVERY gate; complianceViolationCount = calls with >=1 violation, not total failed checks.
         compliance_violations = 0
         for _, out in outputs:
             for cf in self.compliance_fields:
@@ -150,7 +188,7 @@ class InsideSalesAggregator:
             "complianceViolationCount": compliance_violations,
         }
 
-    def _dimension_breakdown(self, outputs):
+    def _dimension_breakdown(self, outputs, reasoning_max_by_key):
         breakdown = {}
         for field in self.dimension_fields:
             key = field["key"]
@@ -158,7 +196,7 @@ class InsideSalesAggregator:
             if not values:
                 continue
 
-            max_possible = field.get("max", 100)
+            max_possible = _resolve_dimension_max(field, reasoning_max_by_key)
             bucket_size = max_possible / 5
             distribution = [0, 0, 0, 0, 0]
             for v in values:
@@ -246,7 +284,7 @@ class InsideSalesAggregator:
             "crossSell": aggregate_outcome_flag(crosssell, attempted_key="attempted", accepted_key="accepted"),
         }
 
-    def _agent_slices(self, outputs):
+    def _agent_slices(self, outputs, reasoning_max_by_key):
         agent_groups: dict[str, list[tuple]] = {}
         for thread, out in outputs:
             meta = _get_call_metadata(thread)
@@ -263,7 +301,13 @@ class InsideSalesAggregator:
             for field in self.dimension_fields:
                 key = field["key"]
                 values = [v for v in (_safe_score(out.get(key)) for _, out in agent_outputs) if v is not None]
-                dims[key] = {"avg": round(mean(values), 1) if values else 0}
+                max_possible = _resolve_dimension_max(field, reasoning_max_by_key)
+                dims[key] = {
+                    "avg": round(mean(values), 1) if values else 0,
+                    "maxPossible": max_possible,
+                    "greenThreshold": field.get("green_threshold", max_possible * 0.8),
+                    "yellowThreshold": field.get("yellow_threshold", max_possible * 0.5),
+                }
 
             comp_passed = 0
             comp_failed = 0

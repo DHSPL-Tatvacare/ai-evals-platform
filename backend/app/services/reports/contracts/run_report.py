@@ -50,12 +50,21 @@ class PlatformReportPresentation(CamelModel):
     sections: list[PresentationSectionConfig] = Field(default_factory=list)
 
 
+class EvaluatorReportView(CamelModel):
+    evaluator_id: str
+    evaluator_name: str
+    sections: list[PlatformReportSection]
+
+
 class PlatformRunReportPayload(CamelModel):
     schema_version: Literal["v1"] = "v1"
     metadata: PlatformReportMetadata
     presentation: PlatformReportPresentation = Field(default_factory=PlatformReportPresentation)
     sections: list[PlatformReportSection]
     export_document: PlatformReportDocument
+    # Additive + optional: single-evaluator artifacts (no key) round-trip as None.
+    # Populated only on multi-evaluator runs, one view per evaluator.
+    evaluator_views: list[EvaluatorReportView] | None = None
     # Defaulted so cache_validation.py:16 round-trips existing cached artifacts
     # without 409ing on deploy. Services populate ``missing_inputs``; the
     # finalizer in data_quality_finalizer.py owns ``section_status`` + ``overall``.

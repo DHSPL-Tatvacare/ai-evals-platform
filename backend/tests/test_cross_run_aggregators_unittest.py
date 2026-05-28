@@ -15,10 +15,8 @@ def _load_module(name: str, relative_path: str):
 
 
 cross_run_mod = _load_module('cross_run_aggregator', 'cross_run_aggregator.py')
-inside_sales_mod = _load_module('inside_sales_cross_run', 'inside_sales_cross_run.py')
 
 CrossRunAggregator = cross_run_mod.CrossRunAggregator
-InsideSalesCrossRunAggregator = inside_sales_mod.InsideSalesCrossRunAggregator
 
 
 class KairaCrossRunAggregatorTests(unittest.TestCase):
@@ -99,107 +97,6 @@ class KairaCrossRunAggregatorTests(unittest.TestCase):
         self.assertEqual(analytics.rule_compliance_heatmap.rows[0].rule_id, 'rule-a')
         self.assertEqual(analytics.issues_and_recommendations.runs_with_narrative, 2)
         self.assertGreaterEqual(len(analytics.issues_and_recommendations.issues), 1)
-
-
-class InsideSalesCrossRunAggregatorTests(unittest.TestCase):
-    def test_aggregate_builds_dimension_compliance_and_flag_rollups(self):
-        runs_data = [
-            (
-                {
-                    'id': 'sales-1',
-                    'created_at': '2026-03-01T00:00:00+00:00',
-                    'batch_metadata': {'run_name': 'Sales Run 1'},
-                },
-                {
-                    'metadata': {'runName': 'Sales Run 1'},
-                    'runSummary': {
-                        'totalCalls': 12,
-                        'evaluatedCalls': 10,
-                        'avgQaScore': 81,
-                        'compliancePassRate': 90,
-                    },
-                    'dimensionBreakdown': {
-                        'discovery': {
-                            'label': 'Discovery',
-                            'avg': 78,
-                            'maxPossible': 100,
-                            'greenThreshold': 80,
-                            'yellowThreshold': 60,
-                        },
-                    },
-                    'complianceBreakdown': {
-                        'compliance_disclosure': {'label': 'Disclosure', 'passed': 9, 'failed': 1, 'total': 10},
-                    },
-                    'flagStats': {
-                        'escalation': {'relevant': 4, 'notRelevant': 6, 'present': 1},
-                        'disagreement': {'relevant': 5, 'notRelevant': 5, 'present': 2},
-                        'tension': {'relevant': 3, 'notRelevant': 7, 'bySeverity': {'high': 1}},
-                        'meetingSetup': {'relevant': 10, 'notRelevant': 0, 'attempted': 4, 'accepted': 0},
-                    },
-                    'narrative': {
-                        'dimensionInsights': [
-                            {'dimension': 'Discovery', 'insight': 'Discovery quality is inconsistent.', 'priority': 'P1'},
-                        ],
-                        'complianceAlerts': ['Disclosure missed in some calls'],
-                        'recommendations': [{'priority': 'P0', 'action': 'Coach disclosure opener'}],
-                        'flagPatterns': 'Escalations correlate with weak discovery.',
-                    },
-                },
-            ),
-            (
-                {
-                    'id': 'sales-2',
-                    'created_at': '2026-03-02T00:00:00+00:00',
-                    'batch_metadata': {'run_name': 'Sales Run 2'},
-                },
-                {
-                    'metadata': {'runName': 'Sales Run 2'},
-                    'runSummary': {
-                        'totalCalls': 8,
-                        'evaluatedCalls': 8,
-                        'avgQaScore': 73,
-                        'compliancePassRate': 75,
-                    },
-                    'dimensionBreakdown': {
-                        'discovery': {
-                            'label': 'Discovery',
-                            'avg': 72,
-                            'maxPossible': 100,
-                            'greenThreshold': 80,
-                            'yellowThreshold': 60,
-                        },
-                    },
-                    'complianceBreakdown': {
-                        'compliance_disclosure': {'label': 'Disclosure', 'passed': 6, 'failed': 2, 'total': 8},
-                    },
-                    'flagStats': {
-                        'escalation': {'relevant': 2, 'notRelevant': 6, 'present': 1},
-                        'disagreement': {'relevant': 2, 'notRelevant': 6, 'present': 1},
-                        'tension': {'relevant': 2, 'notRelevant': 6, 'bySeverity': {'medium': 2}},
-                        'meetingSetup': {'relevant': 8, 'notRelevant': 0, 'attempted': 2, 'accepted': 0},
-                    },
-                    'narrative': {
-                        'dimensionInsights': [
-                            {'dimension': 'Discovery', 'insight': 'Discovery remains shallow.', 'priority': 'P1'},
-                        ],
-                        'complianceAlerts': ['Disclosure still missed'],
-                        'recommendations': [{'priority': 'P1', 'action': 'Reinforce objection handling'}],
-                        'flagPatterns': 'Tension increases when next steps are unclear.',
-                    },
-                },
-            ),
-        ]
-
-        analytics = InsideSalesCrossRunAggregator(runs_data, 4).aggregate()
-
-        self.assertEqual(analytics.stats.total_runs, 2)
-        self.assertEqual(analytics.stats.all_runs, 4)
-        self.assertEqual(analytics.stats.total_calls, 20)
-        self.assertEqual(analytics.dimension_heatmap.rows[0].key, 'discovery')
-        self.assertEqual(analytics.compliance_heatmap.rows[0].key, 'compliance_disclosure')
-        self.assertEqual(analytics.flag_rollups.behavioral['escalation'].present, 2)
-        self.assertGreaterEqual(len(analytics.issues_and_recommendations.issues), 1)
-        self.assertGreaterEqual(len(analytics.issues_and_recommendations.recommendations), 1)
 
 
 class KairaCrossRunCanonicalAdapterTests(unittest.TestCase):
@@ -678,6 +575,55 @@ class InsideSalesCrossRunCanonicalAdapterTests(unittest.TestCase):
         trend = by_id['inside-sales-cross-trend']
         self.assertEqual(len(trend.data.points), 1)
         self.assertEqual(trend.data.points[0].breakdown, {})
+
+    def _run_payload_with_dimensions(self, run_name: str, qa_score: float, dims: dict[str, float]) -> dict:
+        # Same minimal payload but with a caller-supplied dimension set so runs
+        # can carry heterogeneous dimensions across the cross-run series.
+        payload = self._run_payload(run_name, qa_score)
+        for section in payload['sections']:
+            if section['id'] == 'inside-sales-dimensions':
+                section['data'] = [
+                    {'key': label.lower(), 'label': label, 'value': value, 'maxValue': 100}
+                    for label, value in dims.items()
+                ]
+        return payload
+
+    def test_heterogeneous_dimensions_map_to_correct_run_index(self):
+        """Trend breakdown values must land on the run that actually carries the dimension."""
+        from app.services.reports.canonical_adapters import (
+            adapt_inside_sales_cross_run_from_runs,
+        )
+
+        # run0 has {A,B}, run1 has {B,C}, run2 has {A,C}. With the dense-list bug,
+        # dimension A (present in run0 + run2) builds [a0, a2]; indexed by run it
+        # puts a2 on run1 and drops it from run2. Assert each value maps correctly.
+        runs = [
+            ({'id': 'run-0', 'created_at': '2026-04-01T00:00:00+00:00'},
+             self._run_payload_with_dimensions('Run 0', 80.0, {'A': 10.0, 'B': 11.0})),
+            ({'id': 'run-1', 'created_at': '2026-04-02T00:00:00+00:00'},
+             self._run_payload_with_dimensions('Run 1', 81.0, {'B': 21.0, 'C': 22.0})),
+            ({'id': 'run-2', 'created_at': '2026-04-03T00:00:00+00:00'},
+             self._run_payload_with_dimensions('Run 2', 82.0, {'A': 30.0, 'C': 32.0})),
+        ]
+        report = adapt_inside_sales_cross_run_from_runs(
+            runs, self._inside_sales_analytics_config(), app_id='inside-sales', total_runs_available=3
+        )
+        by_id = {section.id: section for section in report.sections}
+        points = by_id['inside-sales-cross-trend'].data.points
+        self.assertEqual(len(points), 3)
+
+        # run0: A=10, B=11, no C
+        self.assertEqual(points[0].breakdown.get('A'), 10.0)
+        self.assertEqual(points[0].breakdown.get('B'), 11.0)
+        self.assertNotIn('C', points[0].breakdown)
+        # run1: B=21, C=22, no A
+        self.assertNotIn('A', points[1].breakdown)
+        self.assertEqual(points[1].breakdown.get('B'), 21.0)
+        self.assertEqual(points[1].breakdown.get('C'), 22.0)
+        # run2: A=30, C=32, no B
+        self.assertEqual(points[2].breakdown.get('A'), 30.0)
+        self.assertNotIn('B', points[2].breakdown)
+        self.assertEqual(points[2].breakdown.get('C'), 32.0)
 
 
 class DistributionSeriesKeyFieldTests(unittest.TestCase):

@@ -14,13 +14,24 @@ from app.services.reports.contracts.run_narrative import (
     RunNarrativePromptGap,
     RunNarrativeRecommendation,
 )
-from app.services.reports.contracts.run_report import PlatformReportMetadata, PlatformRunReportPayload
+from app.services.reports.contracts.report_sections import PlatformReportSection
+from app.services.reports.contracts.run_report import (
+    EvaluatorReportView,
+    PlatformReportMetadata,
+    PlatformRunReportPayload,
+)
 from app.services.reports.document_composer import compose_document
-from app.services.reports.report_composer import compose_cross_run_report, compose_run_report
+from app.services.reports.report_composer import compose_cross_run_report, compose_run_report, compose_sections
 from app.services.reports.schemas import ReportPayload
 from app.services.reports.cross_run_aggregator import CrossRunAnalytics
-from app.services.reports.inside_sales_cross_run import InsideSalesCrossRunAnalytics
-from app.services.reports.inside_sales_schemas import DimensionStats, InsideSalesReportPayload
+from app.services.reports.inside_sales_schemas import (
+    AgentSlice,
+    ComplianceGateStats,
+    DimensionStats,
+    FlagStats,
+    InsideSalesReportPayload,
+    RunSummary,
+)
 
 
 def _now_iso() -> str:
@@ -744,94 +755,85 @@ def adapt_kaira_cross_run_from_runs(
     )
 
 
-def adapt_inside_sales_run_report(
-    payload: InsideSalesReportPayload,
-    analytics_config: AppAnalyticsConfig,
-) -> PlatformRunReportPayload:
-    metadata = PlatformReportMetadata(
-        app_id=payload.metadata.app_id,
-        run_id=payload.metadata.run_id,
-        run_name=payload.metadata.run_name,
-        eval_type=payload.metadata.eval_type,
-        created_at=payload.metadata.created_at,
-        computed_at=_now_iso(),
-        llm_provider=payload.metadata.llm_provider,
-        llm_model=payload.metadata.llm_model,
-        narrative_model=payload.metadata.narrative_model,
-        cache_key=f'{payload.metadata.app_id}:{payload.metadata.run_id}:single_run',
-    )
-
+def _build_evaluator_section_payloads(
+    run_summary: RunSummary,
+    dimension_breakdown: dict[str, DimensionStats],
+    compliance_breakdown: dict[str, ComplianceGateStats],
+    flag_stats: FlagStats,
+    agent_slices: dict[str, AgentSlice],
+) -> dict[str, Any]:
     flag_items = [
         {
             'key': 'escalation',
             'label': 'Escalations',
-            'relevant': payload.flag_stats.escalation.relevant,
-            'present': payload.flag_stats.escalation.present,
-            'notRelevant': payload.flag_stats.escalation.not_relevant,
+            'relevant': flag_stats.escalation.relevant,
+            'present': flag_stats.escalation.present,
+            'notRelevant': flag_stats.escalation.not_relevant,
         },
         {
             'key': 'disagreement',
             'label': 'Disagreements',
-            'relevant': payload.flag_stats.disagreement.relevant,
-            'present': payload.flag_stats.disagreement.present,
-            'notRelevant': payload.flag_stats.disagreement.not_relevant,
+            'relevant': flag_stats.disagreement.relevant,
+            'present': flag_stats.disagreement.present,
+            'notRelevant': flag_stats.disagreement.not_relevant,
         },
         {
             'key': 'meeting-setup',
             'label': 'Meeting Setup',
-            'relevant': payload.flag_stats.meeting_setup.relevant,
+            'relevant': flag_stats.meeting_setup.relevant,
             'present': 0,
-            'attempted': payload.flag_stats.meeting_setup.attempted,
-            'accepted': payload.flag_stats.meeting_setup.accepted,
-            'notRelevant': payload.flag_stats.meeting_setup.not_relevant,
+            'attempted': flag_stats.meeting_setup.attempted,
+            'accepted': flag_stats.meeting_setup.accepted,
+            'notRelevant': flag_stats.meeting_setup.not_relevant,
         },
         {
             'key': 'purchase-made',
             'label': 'Purchase Made',
-            'relevant': payload.flag_stats.purchase_made.relevant,
+            'relevant': flag_stats.purchase_made.relevant,
             'present': 0,
-            'attempted': payload.flag_stats.purchase_made.attempted,
-            'accepted': payload.flag_stats.purchase_made.accepted,
-            'notRelevant': payload.flag_stats.purchase_made.not_relevant,
+            'attempted': flag_stats.purchase_made.attempted,
+            'accepted': flag_stats.purchase_made.accepted,
+            'notRelevant': flag_stats.purchase_made.not_relevant,
         },
     ]
 
-    section_payloads: dict[str, Any] = {
+    return {
         'inside-sales-summary': [
             {
                 'key': 'avg-qa-score',
                 'label': 'Avg QA Score',
-                'value': f'{payload.run_summary.avg_qa_score:.1f}',
-                'tone': _rate_tone(payload.run_summary.avg_qa_score),
+                'value': f'{run_summary.avg_qa_score:.1f}',
+                'tone': _rate_tone(run_summary.avg_qa_score),
             },
             {
                 'key': 'evaluated-calls',
                 'label': 'Evaluated Calls',
-                'value': str(payload.run_summary.evaluated_calls),
+                'value': str(run_summary.evaluated_calls),
                 'tone': 'neutral',
             },
             {
                 'key': 'total-calls',
                 'label': 'Total Calls',
-                'value': str(payload.run_summary.total_calls),
+                'value': str(run_summary.total_calls),
                 'tone': 'neutral',
             },
             {
                 'key': 'compliance-pass-rate',
                 'label': 'Compliance Pass Rate',
-                'value': f'{payload.run_summary.compliance_pass_rate:.1f}%',
-                'tone': _rate_tone(payload.run_summary.compliance_pass_rate),
+                'value': f'{run_summary.compliance_pass_rate:.1f}%',
+                'tone': _rate_tone(run_summary.compliance_pass_rate),
             },
         ],
+        # Dimension sub-scores ride their own max/thresholds, not the /100 band.
         'inside-sales-dimensions': [
             {
                 'key': key,
                 'label': dim.label,
                 'value': dim.avg,
                 'maxValue': dim.max_possible,
-                'tone': _rate_tone(dim.avg),
+                'tone': _dimension_tone(dim.avg, dim),
             }
-            for key, dim in payload.dimension_breakdown.items()
+            for key, dim in dimension_breakdown.items()
         ],
         'inside-sales-compliance': [
             {
@@ -842,14 +844,14 @@ def adapt_inside_sales_run_report(
                 'rate': (gate.passed / gate.total * 100) if gate.total else 0,
                 'total': gate.total,
             }
-            for key, gate in payload.compliance_breakdown.items()
+            for key, gate in compliance_breakdown.items()
         ],
         'inside-sales-flags': flag_items,
         # Agents × skills heatmap: rows are agents, columns lead with Avg QA
         # then one per scored dimension. Dimension tone keys off that
         # dimension's green/yellow thresholds; Avg QA off the 0–100 band.
         'inside-sales-agents': {
-            'columns': ['Avg QA', *[dim.label for dim in payload.dimension_breakdown.values()]],
+            'columns': ['Avg QA', *[dim.label for dim in dimension_breakdown.values()]],
             'rows': [
                 {
                     'key': key,
@@ -868,16 +870,57 @@ def adapt_inside_sales_run_report(
                             {
                                 'label': dim.label,
                                 'value': round(agent.dimensions[dim_key].avg, 1) if dim_key in agent.dimensions else None,
+                                # Per-agent thresholds equal the top-level dim's (same field + reasoning-max), so DimensionStats is the type-correct source.
                                 'tone': _dimension_tone(agent.dimensions[dim_key].avg, dim) if dim_key in agent.dimensions else 'neutral',
                             }
-                            for dim_key, dim in payload.dimension_breakdown.items()
+                            for dim_key, dim in dimension_breakdown.items()
                         ],
                     ],
                 }
-                for key, agent in payload.agent_slices.items()
+                for key, agent in agent_slices.items()
             ],
         },
     }
+
+
+def _build_evaluator_sections(
+    run_summary: RunSummary,
+    dimension_breakdown: dict[str, DimensionStats],
+    compliance_breakdown: dict[str, ComplianceGateStats],
+    flag_stats: FlagStats,
+    agent_slices: dict[str, AgentSlice],
+    analytics_config: AppAnalyticsConfig,
+) -> list[PlatformReportSection]:
+    section_payloads = _build_evaluator_section_payloads(
+        run_summary, dimension_breakdown, compliance_breakdown, flag_stats, agent_slices,
+    )
+    return compose_sections(analytics_config.single_run.sections, section_payloads)
+
+
+def adapt_inside_sales_run_report(
+    payload: InsideSalesReportPayload,
+    analytics_config: AppAnalyticsConfig,
+) -> PlatformRunReportPayload:
+    metadata = PlatformReportMetadata(
+        app_id=payload.metadata.app_id,
+        run_id=payload.metadata.run_id,
+        run_name=payload.metadata.run_name,
+        eval_type=payload.metadata.eval_type,
+        created_at=payload.metadata.created_at,
+        computed_at=_now_iso(),
+        llm_provider=payload.metadata.llm_provider,
+        llm_model=payload.metadata.llm_model,
+        narrative_model=payload.metadata.narrative_model,
+        cache_key=f'{payload.metadata.app_id}:{payload.metadata.run_id}:single_run',
+    )
+
+    section_payloads: dict[str, Any] = _build_evaluator_section_payloads(
+        payload.run_summary,
+        payload.dimension_breakdown,
+        payload.compliance_breakdown,
+        payload.flag_stats,
+        payload.agent_slices,
+    )
     if payload.narrative:
         section_payloads['inside-sales-narrative'] = {
             'executiveSummary': payload.narrative.executive_summary,
@@ -950,143 +993,36 @@ def adapt_inside_sales_run_report(
         export_config=analytics_config.single_run.export,
         composition_theme=analytics_config.single_run.theme,
     )
-    return compose_run_report(
+    report = compose_run_report(
         metadata=metadata,
         section_configs=analytics_config.single_run.sections,
         section_payloads=section_payloads,
         export_document=export_document,
     )
 
-
-def adapt_inside_sales_cross_run(
-    analytics: InsideSalesCrossRunAnalytics,
-    analytics_config: AppAnalyticsConfig,
-    *,
-    app_id: str,
-    source_run_count: int,
-    total_runs_available: int,
-) -> PlatformCrossRunPayload:
-    flag_items = []
-    for key, item in analytics.flag_rollups.behavioral.items():
-        flag_items.append(
-            {
-                'key': key,
-                'label': item.label,
-                'relevant': item.relevant,
-                'present': item.present,
-                'notRelevant': item.not_relevant,
-            }
+    # One view per evaluator only when >1; flat top-level sections stay the primary for back-compat.
+    per_evaluator = payload.per_evaluator or {}
+    if len(per_evaluator) > 1:
+        report = report.model_copy(
+            update={
+                'evaluator_views': [
+                    EvaluatorReportView(
+                        evaluator_id=agg.id,
+                        evaluator_name=agg.name,
+                        sections=_build_evaluator_sections(
+                            agg.run_summary,
+                            agg.dimension_breakdown,
+                            agg.compliance_breakdown,
+                            agg.flag_stats,
+                            agg.agent_slices,
+                            analytics_config,
+                        ),
+                    )
+                    for agg in per_evaluator.values()
+                ],
+            },
         )
-    for key, item in analytics.flag_rollups.outcomes.items():
-        flag_items.append(
-            {
-                'key': key,
-                'label': item.label,
-                'relevant': item.relevant,
-                'present': 0,
-                'attempted': item.attempted,
-                'accepted': item.accepted,
-                'notRelevant': item.not_relevant,
-            }
-        )
-
-    section_payloads: dict[str, Any] = {
-        'inside-sales-cross-summary': [
-            {
-                'key': 'avg-qa-score',
-                'label': 'Average QA Score',
-                'value': f'{analytics.stats.avg_qa_score:.1f}',
-                'tone': _rate_tone(analytics.stats.avg_qa_score),
-            },
-            {
-                'key': 'avg-compliance-rate',
-                'label': 'Average Compliance Pass Rate',
-                'value': f'{analytics.stats.avg_compliance_pass_rate * 100:.1f}%',
-                'tone': _rate_tone(analytics.stats.avg_compliance_pass_rate * 100),
-            },
-            {
-                'key': 'runs',
-                'label': 'Runs Analyzed',
-                'value': str(analytics.stats.total_runs),
-                'tone': 'neutral',
-            },
-            {
-                'key': 'calls',
-                'label': 'Calls Evaluated',
-                'value': str(analytics.stats.evaluated_calls),
-                'tone': 'neutral',
-            },
-        ],
-        'inside-sales-cross-dimensions': {
-            'columns': [run.run_name or run.run_id[:8] for run in analytics.dimension_heatmap.runs],
-            'rows': [
-                {
-                    'key': row.label,
-                    'label': row.label,
-                    'cells': [
-                        {
-                            'label': row.label,
-                            'value': cell,
-                            'tone': _rate_tone(cell or 0),
-                        }
-                        for cell in row.cells
-                    ],
-                }
-                for row in analytics.dimension_heatmap.rows
-            ],
-        },
-        'inside-sales-cross-compliance': {
-            'columns': [run.run_name or run.run_id[:8] for run in analytics.compliance_heatmap.runs],
-            'rows': [
-                {
-                    'key': row.label,
-                    'label': row.label,
-                    'cells': [
-                        {
-                            'label': row.label,
-                            'value': None if cell is None else cell * 100,
-                            'tone': 'positive' if (cell or 0) >= 0.85 else 'warning' if (cell or 0) >= 0.6 else 'negative',
-                        }
-                        for cell in row.cells
-                    ],
-                }
-                for row in analytics.compliance_heatmap.rows
-            ],
-        },
-        'inside-sales-cross-flags': flag_items,
-        'inside-sales-cross-issues': {
-            'issues': [
-                {
-                    'title': item.area,
-                    'area': item.area,
-                    'priority': 'P0' if item.worst_rank <= 1 else 'P1' if item.worst_rank <= 2 else 'P2',
-                    'summary': item.descriptions[0] if item.descriptions else '',
-                }
-                for item in analytics.issues_and_recommendations.issues
-            ],
-            'recommendations': [
-                {
-                    'priority': item.highest_priority,
-                    'title': item.area,
-                    'action': item.actions[0] if item.actions else '',
-                }
-                for item in analytics.issues_and_recommendations.recommendations
-            ],
-        },
-    }
-    metadata = PlatformCrossRunMetadata(
-        app_id=app_id,
-        computed_at=_now_iso(),
-        source_run_count=source_run_count,
-        total_runs_available=total_runs_available,
-        cache_key=f'{app_id}:cross_run',
-    )
-    return compose_cross_run_report(
-        metadata=metadata,
-        section_configs=analytics_config.cross_run.sections,
-        section_payloads=section_payloads,
-        export_document=None,
-    )
+    return report
 
 
 def _build_inside_sales_cross_insights(
@@ -1138,6 +1074,7 @@ def adapt_inside_sales_cross_run_from_runs(
     avg_qa_scores: list[float] = []
     compliance_rates: list[float] = []
     dimension_values: dict[str, list[float]] = {}
+    dimension_value_by_run: list[dict[str, float]] = []
     dimension_rows_by_run: list[dict[str, Any]] = []
     compliance_rows_by_run: list[dict[str, Any]] = []
     flag_totals: dict[str, dict[str, float]] = {}
@@ -1159,11 +1096,14 @@ def adapt_inside_sales_cross_run_from_runs(
 
         dimensions = sections.get('inside-sales-dimensions')
         dimension_map: dict[str, Any] = {}
+        run_dimension_values: dict[str, float] = {}
         if dimensions:
             for item in dimensions.data:
                 dimension_values.setdefault(item.label, []).append(item.value)
                 dimension_map[item.label] = item
+                run_dimension_values[item.label] = item.value
         dimension_rows_by_run.append(dimension_map)
+        dimension_value_by_run.append(run_dimension_values)
 
         compliance = sections.get('inside-sales-compliance')
         compliance_map: dict[str, Any] = {}
@@ -1237,9 +1177,9 @@ def adapt_inside_sales_cross_run_from_runs(
                     'hoverLabel': run_labels[index],
                     'primary': avg_qa_scores[index] if index < len(avg_qa_scores) else 0.0,
                     'breakdown': {
-                        label: values[index]
-                        for label, values in dimension_values.items()
-                        if index < len(values) and values[index] is not None
+                        label: dimension_value_by_run[index][label]
+                        for label in dimension_value_by_run[index]
+                        if dimension_value_by_run[index][label] is not None
                     },
                 }
                 for index in range(len(run_labels))
