@@ -20,8 +20,15 @@ from app.services.orchestration.adapters.bolna import (
     BolnaAdapter,
     voice_resume_event_names,
 )
+from app.services.orchestration.adapters.canonical import (
+    CanonicalEventBatch,
+    CanonicalEventRecipient,
+)
 from app.services.orchestration.dispatch.bag import bag_read
-from app.services.orchestration.dispatch.event_resume import resume_waiting_on_event
+from app.services.orchestration.dispatch.event_resume import (
+    resume_waiting_on_event,
+    resume_waiting_on_inbound_event,
+)
 
 
 def _wait_definition(*, event_name: str, mode: str = "event_or_timeout",
@@ -363,3 +370,271 @@ async def test_reconcile_does_not_resume_wa_wait_but_records_outcome(db_session,
     assert state.status == "waiting"
     # ...but the voice_outcome is STILL recorded at the voice node namespace.
     assert bag_read(state.payload, node_id="wait1", key="voice_outcome") == "answered"
+
+
+# ── Path B: inbound-event resume (correlation-matched) ────────────
+
+
+def _correlated_wait_definition(*, event_name: str,
+                                recipient_id_field: str = "lead_id",
+                                event_match: dict | None = None) -> dict:
+    config: dict = {
+        "mode": "event_or_timeout",
+        "event_name": event_name,
+        "correlation": {"recipient_id_field": recipient_id_field},
+        "timeout_hours": 24,
+    }
+    if event_match is not None:
+        config["event_match"] = event_match
+    return {
+        "nodes": [{"id": "wait1", "type": "logic.wait", "config": config}],
+        "edges": [],
+    }
+
+
+def _inbound_batch(event_name: str, *recipients: tuple[str, dict]) -> CanonicalEventBatch:
+    return CanonicalEventBatch(
+        event_name=event_name,
+        recipients=[
+            CanonicalEventRecipient(recipient_id=rid, payload=payload)
+            for rid, payload in recipients
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_path_b_correlation_match_resumes(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("ignored", {"lead_id": "L-1", "score": 9})),
+        reason_prefix="event",
+    )
+    assert resumed == 1
+
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "ready"
+    assert state.wakeup_at is None
+    assert bag_read(state.payload, node_id="wait1", key="score") == 9
+    assert await _resume_job_count(db_session, run_id=run.id, recipient_id="L-1") == 1
+
+
+@pytest.mark.asyncio
+async def test_path_b_correlation_mismatch_no_resume(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-OTHER"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_event_name_mismatch_no_resume(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.created", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_only_matching_recipient_resumes(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-2",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 1
+    s1 = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    s2 = await _read_state(db_session, run_id=run.id, recipient_id="L-2")
+    assert s1.status == "ready"
+    assert s2.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_event_match_false_stays_parked(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id,
+        _correlated_wait_definition(
+            event_name="crm.lead.replied",
+            event_match={"field": "intent", "op": "eq", "value": "buy"},
+        ),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1", "intent": "browse"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_ttl_lapsed_ignored(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+        ttl=datetime.now(timezone.utc) - timedelta(seconds=60),
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_workflow_isolation(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    # Different workflow_id — must NOT resume this candidate.
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=uuid.uuid4(),
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_app_isolation(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id="some-other-app", workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_path_b_multiple_batch_recipients_each_resume(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-2",
+    )
+
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch(
+            "crm.lead.replied",
+            ("a", {"lead_id": "L-1"}),
+            ("b", {"lead_id": "L-2"}),
+        ),
+        reason_prefix="event",
+    )
+    assert resumed == 2
+    s1 = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    s2 = await _read_state(db_session, run_id=run.id, recipient_id="L-2")
+    assert s1.status == "ready"
+    assert s2.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_path_b_tenant_isolation(db_session, seed_full_run):
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id, _correlated_wait_definition(event_name="crm.lead.replied"),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-1",
+    )
+
+    # Scoped to a different tenant — must NOT resume tenant A's recipient.
+    tenant_b_id = uuid.uuid4()
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_b_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch("crm.lead.replied", ("x", {"lead_id": "L-1"})),
+        reason_prefix="event",
+    )
+    assert resumed == 0
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
+    assert state.status == "waiting"

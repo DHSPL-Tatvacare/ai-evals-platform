@@ -168,6 +168,17 @@ async def event_ingest_webhook(
         raise HTTPException(status_code=400, detail=str(exc))
     except EventTriggerConfigurationError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+    # Path B: also resume already-waiting recipients parked at a logic.wait
+    # awaiting this event. Internally fault-isolated — never alters the
+    # trigger path's response or this route's status.
+    from app.services.orchestration.dispatch.event_resume import (
+        resume_waiting_on_inbound_event,
+    )
+    await resume_waiting_on_inbound_event(
+        db, tenant_id=trigger.tenant_id, app_id=trigger.app_id,
+        workflow_id=trigger.workflow_id, batch=batch, reason_prefix="event",
+    )
     await db.commit()
     _log.info(
         "event_ingest.fired vendor=%s trigger_id=%s event=%s runs=%d deduped=%s",
