@@ -30,6 +30,7 @@ async def apply_terminal_event(
     child_action_type: Optional[str] = None,
     child_idempotency_key: Optional[str] = None,
     child_response: Optional[dict[str, Any]] = None,
+    child_outcome_bucket: Optional[str] = None,
     flip_waiting_to_ready: bool = True,
     resume_event_names: Optional[Collection[str]] = None,
 ) -> bool:
@@ -102,6 +103,7 @@ async def apply_terminal_event(
                 recipient_id=action.recipient_id,
                 channel=action.channel,
                 action_type=child_action_type,
+                outcome_bucket=child_outcome_bucket,
                 status="success",
                 idempotency_key=child_idempotency_key,
                 payload=inherited_payload,

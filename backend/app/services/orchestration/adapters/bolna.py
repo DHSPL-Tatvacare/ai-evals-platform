@@ -709,6 +709,7 @@ class BolnaAdapter:
             provider_status=str(status).lower(),
             child_action_type=action_type,
             child_idempotency_key=child_idem,
+            child_outcome_bucket=self.outcome_bucket(action_type).value,
             resume_event_names=voice_resume_event_names(canonical),
         )
 
