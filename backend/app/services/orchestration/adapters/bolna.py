@@ -5,6 +5,7 @@ import csv as _csv
 import io as _io
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, ClassVar, Mapping, Optional
 
@@ -339,6 +340,11 @@ class BolnaAdapter:
             raise BolnaServiceError(
                 "Bolna /batches response missing batch_id — cannot correlate inbound webhooks"
             )
+        when = datetime.now(timezone.utc) + timedelta(minutes=2)
+        await self._schedule_batch(
+            base_url=base_url, api_key=api_key, batch_id=batch_id,
+            when=when, bypass=first.bypass_call_guardrails,
+        )
         return [
             CanonicalVoiceResponse(
                 provider_correlation_id=batch_id,
@@ -348,6 +354,27 @@ class BolnaAdapter:
             )
             for req in requests
         ]
+
+    async def _schedule_batch(
+        self, *, base_url: str, api_key: str, batch_id: str,
+        when: datetime, bypass: bool,
+    ) -> None:
+        # Bolna requires +00:00 literal — Z suffix causes 400.
+        data: dict[str, Any] = {"scheduled_at": when.strftime("%Y-%m-%dT%H:%M:%S+00:00")}
+        if bypass:
+            data["bypass_call_guardrails"] = "true"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with _make_client(timeout=60.0) as client:
+            resp = await client.post(
+                f"{base_url}/batches/{batch_id}/schedule", data=data, headers=headers,
+            )
+        if 400 <= resp.status_code < 500:
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"text": resp.text[:200]}
+            raise BolnaServiceError(f"Bolna {resp.status_code}: {err}")
+        resp.raise_for_status()
 
     async def list_agents(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
         """Fetch all agents from GET /v2/agent/all, return normalised {id, name, status, type} list."""
@@ -606,9 +633,11 @@ class BolnaAdapter:
                 f"{base_url}/batches/{batch_id}/executions", params=params, headers=headers,
             )
         if resp.status_code == 200:
-            body = resp.json() if resp.content else {}
-            rows = body.get("data") or body.get("executions") or []
-            return {"data": rows, "has_more": bool(body.get("has_more", False))}
+            body = resp.json() if resp.content else []
+            # Live API returns a bare array; guard against a future dict envelope.
+            rows = body if isinstance(body, list) else (body.get("data") or body.get("executions") or [])
+            has_more = len(rows) == page_size
+            return {"data": rows, "has_more": has_more}
         if resp.status_code == 404:
             return {"data": [], "has_more": False}
         raise BolnaServiceError(f"Bolna {resp.status_code}: {_safe_message(resp)}")

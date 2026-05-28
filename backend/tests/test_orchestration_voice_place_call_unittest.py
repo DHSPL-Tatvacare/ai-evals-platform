@@ -584,19 +584,22 @@ def test_build_batch_csv_columns_stable():
 
 @pytest.mark.asyncio
 async def test_place_call_batch_happy_path(monkeypatch):
-    captured: dict = {}
+    # Keyed by request URL so the schedule POST doesn't overwrite the create capture.
+    captured: dict[str, dict] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        captured["method"] = request.method
-        captured["headers"] = dict(request.headers)
-        captured["content"] = request.content
+        url = str(request.url)
+        captured[url] = {
+            "method": request.method,
+            "headers": dict(request.headers),
+            "content": request.content,
+        }
         return httpx.Response(200, json={"batch_id": "batch_xyz", "message": "queued"})
 
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(
         "app.services.orchestration.adapters.bolna._make_client",
-        lambda timeout=30.0: _client_with_transport(transport),
+        lambda timeout=60.0: _client_with_transport(transport),
     )
 
     adapter = BolnaAdapter()
@@ -618,9 +621,10 @@ async def test_place_call_batch_happy_path(monkeypatch):
     assert len(responses) == 10
     assert all(r.provider_correlation_id == "batch_xyz" for r in responses)
     assert all(r.mode == "batch" for r in responses)
-    assert captured["url"] == "https://api.bolna.ai/batches"
+    create_url = "https://api.bolna.ai/batches"
+    assert create_url in captured, f"create URL not hit; saw: {list(captured)}"
     # Multipart upload — content includes both form fields and CSV
-    body = captured["content"].decode(errors="ignore")
+    body = captured[create_url]["content"].decode(errors="ignore")
     assert "agent_id" in body
     assert "agent_xyz" in body
     assert "+91999" in body  # from_phone passed through
@@ -922,3 +926,230 @@ def test_bolna_adapter_registered():
     assert adapter.capability == "voice"
     assert adapter.vendor == "bolna"
     assert adapter.batch_threshold == 10
+
+
+# ─── fetch_batch_executions — bare-array response (Change A) ────────────────
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_executions_bare_array_partial_page(monkeypatch):
+    """Live Bolna GET /batches/{id}/executions returns a bare JSON array, not a
+    dict with a 'data' key.  Two rows < page_size=50 → has_more False."""
+    fixture = [
+        {"id": "exec1", "status": "completed",
+         "context_details": {"recipient_data": {"recipient_id": "r1"}}},
+        {"id": "exec2", "status": "no-answer",
+         "context_details": {"recipient_data": {"recipient_id": "r2"}}},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=fixture)
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    result = await adapter.fetch_batch_executions(
+        connection={"api_key": "k"}, batch_id="batch_abc",
+    )
+    assert result["data"] == fixture
+    assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_executions_bare_array_full_page(monkeypatch):
+    """A full page (len == page_size) → has_more True (inferred, not from body)."""
+    fixture = [
+        {"id": f"exec{i}", "status": "completed",
+         "context_details": {"recipient_data": {"recipient_id": f"r{i}"}}}
+        for i in range(2)
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=fixture)
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    result = await adapter.fetch_batch_executions(
+        connection={"api_key": "k"}, batch_id="batch_abc",
+        page_number=1, page_size=2,
+    )
+    assert len(result["data"]) == 2
+    assert result["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_executions_404_returns_empty(monkeypatch):
+    """404 → empty result with has_more False."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "not found"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=30.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    result = await adapter.fetch_batch_executions(
+        connection={"api_key": "k"}, batch_id="batch_missing",
+    )
+    assert result == {"data": [], "has_more": False}
+
+
+# ─── place_call_batch schedule step (Change B) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_schedules_after_create(monkeypatch):
+    """After creating the batch, place_call_batch must POST to /batches/{id}/schedule."""
+    from datetime import datetime, timezone
+
+    urls_seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls_seen.append(str(request.url))
+        if "/schedule" in str(request.url):
+            return httpx.Response(200, json={"state": "scheduled at 2026-05-28T10:30:00+00:00"})
+        return httpx.Response(200, json={"batch_id": "batch_xyz"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    responses = await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(contact="+91", agent_id="a", variables={})],
+        recipient_ids=["r1"],
+    )
+
+    assert any("/schedule" in u for u in urls_seen), f"schedule URL not hit; saw: {urls_seen}"
+    assert all(r.provider_correlation_id == "batch_xyz" for r in responses)
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_schedule_at_format(monkeypatch):
+    """scheduled_at must end with +00:00, never Z, and be ≥ ~2 min in the future."""
+    import re as _re
+    import urllib.parse as _up
+    from datetime import datetime, timezone, timedelta
+
+    schedule_raw: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/schedule" in str(request.url):
+            schedule_raw["body"] = request.content.decode(errors="ignore")
+            return httpx.Response(200, json={"state": "scheduled"})
+        return httpx.Response(200, json={"batch_id": "batch_format_test"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    before = datetime.now(timezone.utc)
+    adapter = BolnaAdapter()
+    await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(contact="+91", agent_id="a", variables={})],
+        recipient_ids=["r1"],
+    )
+
+    raw_body = schedule_raw.get("body", "")
+    # URL-decode so %2B→+ and %3A→: are visible for assertion.
+    decoded = _up.unquote(raw_body)
+    assert "+00:00" in decoded, f"scheduled_at must end with +00:00; decoded={decoded!r}"
+    # No bare Z after the time portion.
+    assert not _re.search(r"\d{2}:\d{2}Z", decoded), \
+        f"scheduled_at must not use Z suffix; decoded={decoded!r}"
+    # Extract timestamp and verify it is ≥ 2 min in the future.
+    m = _re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00)", decoded)
+    assert m, f"Could not find ISO timestamp in schedule body: {decoded!r}"
+    scheduled_dt = datetime.fromisoformat(m.group(1))
+    assert scheduled_dt >= before + timedelta(minutes=2) - timedelta(seconds=1), \
+        f"scheduled_at {scheduled_dt} is not ≥ 2 min after {before}"
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_schedule_bypass_true(monkeypatch):
+    """bypass_call_guardrails=True → schedule multipart includes bypass_call_guardrails field."""
+    schedule_body: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/schedule" in str(request.url):
+            schedule_body["content"] = request.content.decode(errors="ignore")
+            return httpx.Response(200, json={"state": "scheduled"})
+        return httpx.Response(200, json={"batch_id": "batch_bypass"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=True,
+        )],
+        recipient_ids=["r1"],
+    )
+    assert "bypass_call_guardrails" in schedule_body.get("content", "")
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_schedule_bypass_false(monkeypatch):
+    """bypass_call_guardrails=False → schedule multipart does NOT include bypass field."""
+    schedule_body: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/schedule" in str(request.url):
+            schedule_body["content"] = request.content.decode(errors="ignore")
+            return httpx.Response(200, json={"state": "scheduled"})
+        return httpx.Response(200, json={"batch_id": "batch_no_bypass"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    await adapter.place_call_batch(
+        connection={"api_key": "k"},
+        requests=[CanonicalVoiceRequest(
+            contact="+91", agent_id="a", variables={},
+            bypass_call_guardrails=False,
+        )],
+        recipient_ids=["r1"],
+    )
+    assert "bypass_call_guardrails" not in schedule_body.get("content", "")
+
+
+@pytest.mark.asyncio
+async def test_place_call_batch_schedule_4xx_raises(monkeypatch):
+    """schedule returning 400 (e.g. Z-suffix reject) → BolnaServiceError raised."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/schedule" in str(request.url):
+            return httpx.Response(400, json={"detail": "invalid scheduled_at format"})
+        return httpx.Response(200, json={"batch_id": "batch_err"})
+
+    monkeypatch.setattr(
+        "app.services.orchestration.adapters.bolna._make_client",
+        lambda timeout=60.0: _client_with_transport(httpx.MockTransport(handler)),
+    )
+
+    adapter = BolnaAdapter()
+    with pytest.raises(BolnaServiceError, match="Bolna 400"):
+        await adapter.place_call_batch(
+            connection={"api_key": "k"},
+            requests=[CanonicalVoiceRequest(contact="+91", agent_id="a", variables={})],
+            recipient_ids=["r1"],
+        )
