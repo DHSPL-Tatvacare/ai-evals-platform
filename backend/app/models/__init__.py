@@ -67,6 +67,7 @@ from app.models.cost import (
     RefLlmModelsCatalog,
     SnapshotLlmModelsCatalog,
 )
+from app.models.orchestration_signal import OrchestrationSignalSnapshot
 from app.models.clinical_outbox import LogClinicalActionOutbox
 from app.models.orchestration import (
     Workflow,
@@ -115,6 +116,7 @@ __all__ = [
     "SherlockOntologyClass", "SherlockOntologyEntityType", "SherlockEntityResolver",
     "FactLlmGeneration", "RefLlmModelPricing", "RefLlmModelAlias", "AggLlmUsageDaily",
     "RefLlmModelsCatalog", "SnapshotLlmModelsCatalog",
+    "OrchestrationSignalSnapshot",
     "Workflow", "WorkflowVersion", "WorkflowTrigger", "WorkflowActionTemplate",
     "WorkflowConsentRecord", "WorkflowRun", "WorkflowRunCancelAudit", "WorkflowRunNodeStep",
     "WorkflowRunRecipientState", "WorkflowRunRecipientAction", "WorkflowRunRecipientOverride",
