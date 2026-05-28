@@ -1815,6 +1815,72 @@ async def handle_generate_cost_signals(job_id, params: dict, *, tenant_id: uuid.
 
 
 @register_job_handler(
+    "generate-orchestration-signals",
+    queue_class="bulk",
+    priority=510,
+    retry_safe=True,
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Orchestration signals",
+    schedule_description="Generates per-(tenant,app) orchestration analytics signal snapshots (daily, after the rollup).",
+    schedule_default_params={},
+    schedule_platform_managed=True,
+    required_permissions=("orchestration:manage",),
+)
+async def handle_generate_orchestration_signals(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Generate per-(tenant, app) orchestration-signal snapshots.
+
+    Iterates every tenant's orchestration-enabled apps and generates one
+    snapshot each; one app failing never aborts the others.
+    """
+    from sqlalchemy import select
+    from app.models.application import Application
+    from app.schemas.app_config import AppConfig
+    from app.models.tenant import Tenant
+    from app.services.orchestration.analytics.signals_service import (
+        generate_orchestration_signals,
+    )
+
+    async with async_session() as db:
+        tenant_rows = (await db.execute(select(Tenant.id))).all()
+        app_rows = (await db.execute(select(Application.slug, Application.config))).all()
+    tenant_ids = [r[0] for r in tenant_rows]
+    enabled_apps: list[str] = []
+    for slug, config in app_rows:
+        try:
+            if AppConfig.model_validate(config or {}).features.has_orchestration:
+                enabled_apps.append(slug)
+        except Exception:
+            continue
+
+    generated = 0
+    skipped = 0
+    for t in tenant_ids:
+        for app_id in enabled_apps:
+            try:
+                async with async_session() as db:
+                    snapshot = await generate_orchestration_signals(db, t, app_id, job_id=job_id)
+                    if snapshot is not None:
+                        await db.commit()
+                        generated += 1
+                    else:
+                        skipped += 1
+            except Exception:
+                logger.warning(
+                    "orchestration_signals.app_failed tenant_id=%s app_id=%s", t, app_id,
+                    exc_info=True,
+                )
+                skipped += 1
+
+    return {
+        "generated": generated,
+        "skipped": skipped,
+        "tenants": len(tenant_ids),
+        "apps": len(enabled_apps),
+    }
+
+
+@register_job_handler(
     "derive-signals",
     queue_class="bulk",
     priority=505,
