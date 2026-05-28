@@ -6,12 +6,19 @@ import { AudioPlayer } from '@/features/transcript/components/AudioPlayer';
 import { Badge, DataTable, EmptyState, Tooltip } from '@/components/ui';
 import type { ColumnDef } from '@/components/ui';
 import { findBestMatch } from '@/features/transcript/utils/transcriptHighlight';
+import { EvaluatorPills } from '@/features/evals/components/EvaluatorPills';
 import type { ThreadEvalRow, AppId } from '@/types';
 
 interface CallResultPanelProps {
   thread: ThreadEvalRow;
   recordingUrl?: string;
   appId?: AppId;
+}
+
+interface EvaluatorEntry {
+  id: string;
+  name: string;
+  output?: Record<string, unknown>;
 }
 
 export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanelProps) {
@@ -28,8 +35,27 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
   }
 
   const result = thread.result as unknown as Record<string, unknown> | undefined;
-  const evals = result?.evaluations as Array<Record<string, unknown>> | undefined;
-  const evalOutput = evals?.[0]?.output as Record<string, unknown> | undefined;
+  const evaluators = useMemo<EvaluatorEntry[]>(() => {
+    const raw = result?.evaluations;
+    if (!Array.isArray(raw)) return [];
+    return (raw as Array<Record<string, unknown>>).map((e, i) => ({
+      id: typeof e.evaluator_id === 'string' ? e.evaluator_id : `evaluator-${i}`,
+      name: typeof e.evaluator_name === 'string' ? e.evaluator_name : `Evaluator ${i + 1}`,
+      output: (e.output as Record<string, unknown> | undefined) ?? undefined,
+    }));
+  }, [result]);
+
+  const [activeEvaluatorId, setActiveEvaluatorId] = useState<string | null>(evaluators[0]?.id ?? null);
+  // Preserve the selected evaluator across calls when it still exists; else fall back to first.
+  const selectedEvaluatorId =
+    activeEvaluatorId && evaluators.some((e) => e.id === activeEvaluatorId)
+      ? activeEvaluatorId
+      : evaluators[0]?.id ?? null;
+  if (selectedEvaluatorId !== activeEvaluatorId) {
+    setActiveEvaluatorId(selectedEvaluatorId);
+  }
+
+  const evalOutput = evaluators.find((e) => e.id === selectedEvaluatorId)?.output;
   const signals = Array.isArray(result?.signals) ? (result.signals as SignalEntry[]) : [];
   const reasoningRaw = evalOutput?.reasoning;
   const reasoningItems: ReasoningItem[] = Array.isArray(reasoningRaw)
@@ -168,6 +194,16 @@ export function CallResultPanel({ thread, recordingUrl, appId }: CallResultPanel
               </button>
             ))}
           </div>
+
+          {evaluators.length > 1 && (activeTab === 'scorecard' || activeTab === 'compliance') && selectedEvaluatorId && (
+            <div className="px-4 py-2 border-b border-[var(--border-subtle)]">
+              <EvaluatorPills
+                items={evaluators.map((e) => ({ id: e.id, name: e.name }))}
+                activeId={selectedEvaluatorId}
+                onSelect={setActiveEvaluatorId}
+              />
+            </div>
+          )}
 
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
             {activeTab === 'scorecard' && (

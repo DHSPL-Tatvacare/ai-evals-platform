@@ -23,6 +23,7 @@ import type {
   CoverBlock,
 } from '@/types/platformReports';
 import { Tabs } from '@/components/ui';
+import { EvaluatorPills } from '@/features/evals/components/EvaluatorPills';
 import SectionHeader from '@/features/evalRuns/components/report/shared/SectionHeader';
 import CalloutBox from '@/features/evalRuns/components/report/shared/CalloutBox';
 import VerdictDistributions from '@/features/evalRuns/components/report/VerdictDistributions';
@@ -1038,8 +1039,22 @@ interface PlatformReportViewProps {
   printMode?: boolean;
 }
 
-export function PlatformReportView({ report, actions, printMode = false }: PlatformReportViewProps) {
+export function PlatformReportView({ report: rawReport, actions, printMode = false }: PlatformReportViewProps) {
   const [activeTab, setActiveTab] = useState('summary');
+  // Multi-evaluator single-run reports carry one section set per evaluator;
+  // single-evaluator and cross-run payloads leave `evaluatorViews` unset.
+  const evaluatorViews =
+    isSingleRunPayload(rawReport) && (rawReport.evaluatorViews?.length ?? 0) > 1
+      ? rawReport.evaluatorViews
+      : undefined;
+  const [selectedEvaluatorId, setSelectedEvaluatorId] = useState(
+    evaluatorViews?.[0]?.evaluatorId ?? '',
+  );
+  const selectedView = evaluatorViews?.find((v) => v.evaluatorId === selectedEvaluatorId);
+  // Swap only the section list for the picked evaluator; metadata is shared.
+  const report: AnyReportPayload = selectedView
+    ? { ...rawReport, sections: selectedView.sections }
+    : rawReport;
   // Narrow to single-run payload for metadata fields not present on cross-run.
   const singleRunMeta = isSingleRunPayload(report) ? report.metadata : null;
   const reportTitle = singleRunMeta
@@ -1147,6 +1162,14 @@ export function PlatformReportView({ report, actions, printMode = false }: Platf
     <div className="space-y-6" style={buildReportPresentationStyle(report)}>
       <DataQualityBanner report={report} printMode={false} />
       {headerCard}
+
+      {evaluatorViews ? (
+        <EvaluatorPills
+          items={evaluatorViews.map((v) => ({ id: v.evaluatorId, name: v.evaluatorName }))}
+          activeId={selectedEvaluatorId}
+          onSelect={setSelectedEvaluatorId}
+        />
+      ) : null}
 
       {hasRenderableSections ? (
         <Tabs

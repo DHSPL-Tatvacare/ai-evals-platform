@@ -494,6 +494,12 @@ export interface PlatformReportPresentation {
   themeTokens: Record<string, unknown>;
 }
 
+export interface EvaluatorReportView {
+  evaluatorId: string;
+  evaluatorName: string;
+  sections: PlatformReportSection[];
+}
+
 export interface PlatformRunReportPayload {
   schemaVersion: 'v1';
   metadata: PlatformReportMetadata;
@@ -501,6 +507,7 @@ export interface PlatformRunReportPayload {
   sections: PlatformReportSection[];
   exportDocument: PlatformReportDocument;
   dataQuality?: DataQualityReport;
+  evaluatorViews?: EvaluatorReportView[];
 }
 
 export interface PlatformCrossRunMetadata {

@@ -18,6 +18,5 @@ export * from './history.types';
 export * from './evalRuns';
 export * from './reports';
 export * from './reporting';
-export * from './insideSalesCrossRun';
 export * from './platformReports';
 export * from './reviews';

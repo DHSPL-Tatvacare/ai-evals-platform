@@ -14,9 +14,9 @@ import { buildCallQualitySelection } from './buildCallQualitySelection';
 import { TranscriptionConfigStep, type TranscriptionConfig } from './TranscriptionConfigStep';
 import { ModelsStep } from './ModelsStep';
 import { evaluatorsRepository } from '@/services/api/evaluatorsApi';
+import { EvaluatorPickerList } from '@/features/evals/components/EvaluatorPickerList';
 import { useSubmitAndRedirect } from '@/hooks/useSubmitAndRedirect';
 import { routes } from '@/config/routes';
-import { cn } from '@/utils';
 import type { CallFilters, CallRecord } from '@/services/api/insideSales';
 import { findLanguage } from '@/constants/languages';
 import type { EvaluatorDefinition } from '@/types';
@@ -309,14 +309,22 @@ export function NewCallQualityEvalOverlay({
             totalCalls={callCount}
           />
         );
-      case 3:
+      case 3: {
+        const selectedSet = new Set(selectedEvaluatorIds);
         return (
-          <EvaluatorPickerStep
-            available={availableEvaluators}
-            selectedIds={selectedEvaluatorIds}
-            onSelectionChange={setSelectedEvaluatorIds}
+          <EvaluatorPickerList
+            evaluators={availableEvaluators}
+            selectedIds={selectedSet}
+            onToggle={(id) =>
+              setSelectedEvaluatorIds((prev) =>
+                prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+              )
+            }
+            onSelectAll={() => setSelectedEvaluatorIds(availableEvaluators.map((e) => e.id))}
+            onSelectNone={() => setSelectedEvaluatorIds([])}
           />
         );
+      }
       case 4:
         return (
           <div className="space-y-4">
@@ -359,73 +367,5 @@ export function NewCallQualityEvalOverlay({
     >
       {stepContent}
     </WizardOverlay>
-  );
-}
-
-/* ── Simple Evaluator Picker ─────────────────────────────── */
-
-function EvaluatorPickerStep({
-  available,
-  selectedIds,
-  onSelectionChange,
-}: {
-  available: EvaluatorDefinition[];
-  selectedIds: string[];
-  onSelectionChange: (ids: string[]) => void;
-}) {
-  const toggleEvaluator = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onSelectionChange(selectedIds.filter((x) => x !== id));
-    } else {
-      onSelectionChange([...selectedIds, id]);
-    }
-  };
-
-  if (available.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-xs text-[var(--text-muted)]">No evaluators found for Inside Sales.</p>
-        <p className="text-xs text-[var(--text-muted)] mt-1">Go to Evaluators page to create or seed evaluators first.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-[var(--text-secondary)]">
-        Select which evaluators to run against the selected calls.
-      </p>
-      {available.map((ev) => {
-        const isSelected = selectedIds.includes(ev.id);
-        const dimCount = ev.outputSchema.filter((f) => f.type === 'number' && !f.isMainMetric).length;
-        return (
-          <button
-            key={ev.id}
-            onClick={() => toggleEvaluator(ev.id)}
-            className={cn(
-              'w-full text-left rounded-lg border p-3 transition-colors',
-              isSelected
-                ? 'border-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/5'
-                : 'border-[var(--border-default)] hover:border-[var(--border-brand)]'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-medium text-[var(--text-primary)]">{ev.name}</div>
-                <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                  {dimCount} dimensions · {ev.outputSchema.filter((f) => f.type === 'boolean').length} compliance gates
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={() => toggleEvaluator(ev.id)}
-                className="h-4 w-4 rounded accent-[var(--color-brand-accent)]"
-              />
-            </div>
-          </button>
-        );
-      })}
-    </div>
   );
 }
