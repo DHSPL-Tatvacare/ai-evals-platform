@@ -78,3 +78,8 @@ export { RecordNavigator } from './RecordNavigator';
 export { AuroraBackdrop } from './AuroraBackdrop';
 export { BrandMark } from './BrandMark';
 export { GradientText } from './GradientText';
+export { StatCard, type StatCardTone } from './StatCard';
+export { TrendCard } from './TrendCard';
+export { FunnelCard, type FunnelStageDatum } from './FunnelCard';
+export { MetricBreakdownCard, type MetricBreakdownColumn } from './MetricBreakdownCard';
+export { ScopeToggle, type AnalyticsScope } from './ScopeToggle';
