@@ -14,10 +14,10 @@ describe('WaitConditionEditor', () => {
     );
     expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
     expect(
-      screen.queryByPlaceholderText('hours before timeout fires'),
+      screen.queryByPlaceholderText('hours before giving up'),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByPlaceholderText('wati.message_replied'),
+      screen.queryByPlaceholderText('voice.completed'),
     ).not.toBeInTheDocument();
   });
 
@@ -42,67 +42,109 @@ describe('WaitConditionEditor', () => {
     expect(screen.queryByPlaceholderText('amount')).not.toBeInTheDocument();
   });
 
-  it('renders event + timeout inputs in event_or_timeout mode', () => {
+  it('renders three mode options — pure event is absent', () => {
+    const onChange = vi.fn();
+
+    // duration mode: trigger shows its label; help text confirms the option exists.
+    const { unmount: u1 } = render(
+      <WaitConditionEditor value={{ mode: 'duration' }} onChange={onChange} />,
+    );
+    expect(screen.getByText('Wait for a set time')).toBeInTheDocument();
+    expect(
+      screen.getByText('Pause here, then continue after the time you set.'),
+    ).toBeInTheDocument();
+    u1();
+
+    // until_datetime mode: trigger shows its label.
+    const { unmount: u2 } = render(
+      <WaitConditionEditor value={{ mode: 'until_datetime' }} onChange={onChange} />,
+    );
+    expect(screen.getByText('Wait until a specific date & time')).toBeInTheDocument();
+    u2();
+
+    // event_or_timeout mode: trigger shows its label — the new event option IS present.
+    render(
+      <WaitConditionEditor
+        value={{ mode: 'event_or_timeout', event_name: '', timeout_hours: 24 }}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByText('Wait for an event (with a time limit)')).toBeInTheDocument();
+    // The removed pure-event option label must not appear anywhere in the DOM.
+    // "Wait for event" (exact) was the old label; "Wait for an event …" does NOT contain it.
+    expect(screen.queryByText('Wait for event')).not.toBeInTheDocument();
+  });
+
+  it('does not render the "coming soon" caveat in any mode', () => {
+    const onChange = vi.fn();
+    render(
+      <WaitConditionEditor
+        value={{ mode: 'event_or_timeout', event_name: '', timeout_hours: 24 }}
+        onChange={onChange}
+      />,
+    );
+    expect(
+      screen.queryByText(/coming soon/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders event + correlation + timeout inputs in event_or_timeout mode', () => {
     const onChange = vi.fn();
     render(
       <WaitConditionEditor
         value={{
           mode: 'event_or_timeout',
-          event_name: 'wati.replied',
-          correlation: {},
+          event_name: 'voice.completed',
+          correlation: { recipient_id_field: 'recipient_id' },
           timeout_hours: 24,
         }}
         onChange={onChange}
       />,
     );
-    expect(
-      screen.getByPlaceholderText('wati.message_replied'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText('hours before timeout fires'),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('hours before giving up')).toBeInTheDocument();
     // No duration input.
     expect(screen.queryByPlaceholderText('amount')).not.toBeInTheDocument();
   });
 
-  it('shows event-mode note and event_name caption in event mode', () => {
+  it('steers legacy pure-event mode to event_or_timeout display — no blank Select', () => {
     const onChange = vi.fn();
     render(
       <WaitConditionEditor
-        value={{ mode: 'event', event_name: '' }}
+        value={{ mode: 'event', event_name: 'voice.completed' }}
         onChange={onChange}
       />,
     );
-    // Approved event-mode note.
-    expect(
-      screen.getByText(
-        "Today this resumes on a WhatsApp reply; full event matching is coming soon.",
-      ),
-    ).toBeInTheDocument();
-    // Approved event_name caption.
-    expect(
-      screen.getByText(
-        "The event that resumes this step — e.g. a WhatsApp reply or a CRM stage change.",
-      ),
-    ).toBeInTheDocument();
-    // event_name remains a free-text input (no picker).
-    expect(
-      screen.getByPlaceholderText('wati.message_replied'),
-    ).toBeInTheDocument();
+    // Event fields still render.
+    expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
+    // Timeout field renders (defaulted to 24).
+    expect(screen.getByPlaceholderText('hours before giving up')).toBeInTheDocument();
+    // The caveat line is gone.
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
+    // onChange has NOT been called (no silent mutation on open).
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('shows updated event_match help text in event mode', () => {
+  it('shows updated approved copy for event_or_timeout mode', () => {
     const onChange = vi.fn();
     render(
       <WaitConditionEditor
-        value={{ mode: 'event', event_name: '' }}
+        value={{ mode: 'event_or_timeout', event_name: '', timeout_hours: 12 }}
         onChange={onChange}
       />,
     );
     expect(
-      screen.getByText(
-        /Optional — only resume when the event's data matches these conditions\./,
-      ),
+      screen.getByText('The event that resumes this step — e.g. a call finishing or a CRM update.'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText('The event field that identifies the contact (defaults to the contact id).'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Optional — only resume when the event's data matches these conditions\./),
+    ).toBeInTheDocument();
+    // Updated section label.
+    expect(screen.getByText('Only resume if… (optional)')).toBeInTheDocument();
   });
 });

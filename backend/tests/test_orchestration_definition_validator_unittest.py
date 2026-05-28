@@ -13,6 +13,7 @@ from app.services.orchestration.definition_validator import (
     validate_definition,
     validate_dispatch_required_fields,
 )
+from app.services.orchestration.nodes.logic_wait import _Config as _WaitConfig
 
 
 def _wf(nodes, edges):
@@ -674,3 +675,82 @@ def test_voice_place_call_with_agent_id_and_phone_field_passes_dispatch_gate():
     }]
     errors = validate_dispatch_required_fields(_wf(nodes, []))
     assert not any(e["node_id"] == "vc1" for e in errors)
+
+
+# ─── Section: pure-event wait footgun enforcement ──────────────────────────
+
+
+def _pure_event_wait_definition(node_id: str = "wait1"):
+    """Minimal complete workflow with a pure-event wait node."""
+    wait_node = {
+        "id": node_id,
+        "type": "logic.wait",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {
+            "mode": "event",
+            "event_name": "contact_replied",
+            "correlation": {"recipient_id_field": "lead_id"},
+        },
+    }
+    sink = {**_VALID_SINK_NODE, "id": "done2"}
+    return _wf(
+        [_VALID_SOURCE_NODE, wait_node, sink],
+        [
+            {"id": "e_in",  "source": "src",    "target": node_id, "output_id": "default"},
+            {"id": "e_evt", "source": node_id,  "target": "done2", "output_id": "event"},
+        ],
+    )
+
+
+def test_publish_pure_event_wait_raises_footgun_error():
+    """Publish must reject mode='event' — a recipient would wait forever with no timeout."""
+    with pytest.raises(DefinitionValidationError) as exc_info:
+        validate_definition(_pure_event_wait_definition(), workflow_type="crm", mode="publish")
+    msgs = [it["message"] or "" for it in exc_info.value.errors]
+    assert any("wait1" in m for m in msgs), f"node id missing from errors: {msgs}"
+    assert any("event_or_timeout" in m for m in msgs), f"steering hint missing: {msgs}"
+
+
+def test_draft_pure_event_wait_does_not_raise_footgun_error():
+    """Draft must NOT raise the pure-event footgun rule — author may be mid-edit."""
+    # Should not raise DefinitionValidationError for the pure-event rule.
+    # (Other completeness checks are also deferred in draft, so the call returns.)
+    validate_definition(_pure_event_wait_definition(), workflow_type="crm", mode="draft")
+
+
+def test_publish_event_or_timeout_wait_passes():
+    """event_or_timeout with a timeout is the sanctioned shape — publish must accept it."""
+    wait_node = {
+        "id": "wait1",
+        "type": "logic.wait",
+        "position": {"x": 0, "y": 100},
+        "data": {},
+        "config": {
+            "mode": "event_or_timeout",
+            "event_name": "contact_replied",
+            "correlation": {"recipient_id_field": "lead_id"},
+            "timeout_hours": 48,
+        },
+    }
+    sink = {**_VALID_SINK_NODE, "id": "done2"}
+    sink3 = {**_VALID_SINK_NODE, "id": "done3"}
+    defn = _wf(
+        [_VALID_SOURCE_NODE, wait_node, sink, sink3],
+        [
+            {"id": "e_in",  "source": "src",   "target": "wait1", "output_id": "default"},
+            {"id": "e_evt", "source": "wait1", "target": "done2", "output_id": "event"},
+            {"id": "e_to",  "source": "wait1", "target": "done3", "output_id": "timeout"},
+        ],
+    )
+    validate_definition(defn, workflow_type="crm", mode="publish")
+
+
+def test_runtime_config_still_loads_pure_event_mode():
+    """_Config must still construct with mode='event' so existing parked recipients resume."""
+    cfg = _WaitConfig(
+        mode="event",
+        event_name="contact_replied",
+        correlation={"recipient_id_field": "lead_id"},
+    )
+    assert cfg.mode == "event"

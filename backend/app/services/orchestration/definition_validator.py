@@ -532,6 +532,17 @@ def validate_definition(
                         field=f"edges.{o}",
                     )
                 )
+            # Pure-event wait (no timeout) parks a recipient forever; steer to event_or_timeout at publish.
+            if not is_draft and (n.get("config") or {}).get("mode") == "event":
+                errors.append(
+                    _err(
+                        f"logic.wait {nid!r}: a 'Wait for event' step must also set a timeout "
+                        f"so a recipient can never wait forever — use mode 'event_or_timeout' "
+                        f"with a timeout.",
+                        node_id=nid,
+                        field="config.mode",
+                    )
+                )
             # If the descriptor's graph_rules.requires_outgoing_edges is true,
             # at least one of the expected outputs must be wired.
             # Deferred in draft — author may still be wiring outputs.

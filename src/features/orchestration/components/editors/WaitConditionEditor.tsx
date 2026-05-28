@@ -8,6 +8,9 @@ import { PredicateBuilder } from './PredicateBuilder';
 
 type DurationUnit = 'minutes' | 'hours' | 'days';
 
+// Modes offered in the dropdown — pure 'event' is no longer selectable.
+type SelectableMode = Exclude<WaitMode, 'event'>;
+
 interface WaitConfig {
   mode?: WaitMode;
   duration_value?: number;
@@ -32,55 +35,76 @@ interface Props {
   onChange(next: WaitConfig): void;
 }
 
-const MODE_OPTIONS: { value: WaitMode; label: string; help: string }[] = [
-  { value: 'duration',         label: 'Wait for duration',          help: 'Wake after N hours. Emits a `wakeup` edge.' },
-  { value: 'until_datetime',   label: 'Wait until ISO datetime',    help: 'Wake at a specific UTC time. Emits a `wakeup` edge.' },
-  { value: 'event',            label: 'Wait for event',             help: 'Pause here until a matching event arrives, then continue down the Event path.' },
-  { value: 'event_or_timeout', label: 'Wait for event OR timeout',  help: 'Whichever happens first. Emits `event` or `timeout`.' },
+const MODE_OPTIONS: { value: SelectableMode; label: string; help: string }[] = [
+  {
+    value: 'duration',
+    label: 'Wait for a set time',
+    help: 'Pause here, then continue after the time you set.',
+  },
+  {
+    value: 'until_datetime',
+    label: 'Wait until a specific date & time',
+    help: 'Pause here until the date and time you choose (UTC).',
+  },
+  {
+    value: 'event_or_timeout',
+    label: 'Wait for an event (with a time limit)',
+    help: 'Pause until the event arrives, or continue down the timeout path once the time limit passes.',
+  },
 ];
 
 /**
- * Phase 11 (Commit 2) — `logic.wait` editor.
+ * `logic.wait` editor.
  *
  * Discriminated-union editing: each mode shows only the fields that mode
- * needs. The active mode determines which output edges the validator
- * expects (Phase 11 §6.4).
+ * needs. Pure `event` mode is no longer offered (backend rejects publish);
+ * legacy definitions with `mode==='event'` are steered to `event_or_timeout`
+ * in the display layer without silently mutating stored config.
  */
 export function WaitConditionEditor({ value, onChange }: Props) {
-  const mode: WaitMode = value.mode ?? 'duration';
+  // Map legacy pure-event to event_or_timeout for the display layer only.
+  const displayMode: SelectableMode =
+    value.mode === 'event' || value.mode === 'event_or_timeout'
+      ? 'event_or_timeout'
+      : (value.mode ?? 'duration');
 
-  const setMode = (next: WaitMode) => {
+  const setMode = (next: SelectableMode) => {
     const base: WaitConfig = { mode: next };
     if (next === 'duration') {
       base.duration_value = value.duration_value ?? value.duration_hours ?? 1;
       base.duration_unit = value.duration_unit ?? 'hours';
     }
     if (next === 'until_datetime') base.until_datetime = value.until_datetime ?? '';
-    if (next === 'event' || next === 'event_or_timeout') {
-      base.event_name = value.event_name ?? '';
-      base.correlation = value.correlation ?? {};
-      base.event_match = value.event_match;
-    }
     if (next === 'event_or_timeout') {
+      base.event_name = value.event_name ?? '';
+      base.correlation = {
+        recipient_id_field: 'recipient_id',
+        ...value.correlation,
+      };
+      base.event_match = value.event_match;
       base.timeout_hours = value.timeout_hours ?? 24;
     }
     onChange(base);
   };
 
+  // For event modes, ensure a default timeout is visible even on legacy pure-event defs
+  // so the author can save without blanking out the field (no silent mutation on open).
+  const isEventMode = displayMode === 'event_or_timeout';
+
   return (
     <div className="flex flex-col gap-3">
       <Field label="Mode">
         <Select
-          value={mode}
-          onChange={(next) => setMode(next as WaitMode)}
+          value={displayMode}
+          onChange={(next) => setMode(next as SelectableMode)}
           options={MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
         />
         <p className="mt-1 text-xs text-[var(--text-secondary)]">
-          {MODE_OPTIONS.find((o) => o.value === mode)?.help}
+          {MODE_OPTIONS.find((o) => o.value === displayMode)?.help}
         </p>
       </Field>
 
-      {mode === 'duration' ? (
+      {displayMode === 'duration' ? (
         <Field label="Duration">
           <div className={cn('flex gap-2')}>
             <Input
@@ -114,7 +138,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
         </Field>
       ) : null}
 
-      {mode === 'until_datetime' ? (
+      {displayMode === 'until_datetime' ? (
         <Field label="Wake at (UTC ISO datetime)">
           <DateTimeField
             value={value.until_datetime ?? ''}
@@ -123,23 +147,43 @@ export function WaitConditionEditor({ value, onChange }: Props) {
         </Field>
       ) : null}
 
-      {mode === 'event' || mode === 'event_or_timeout' ? (
+      {isEventMode ? (
         <>
-          <p className="text-xs text-[var(--text-secondary)]">
-            Today this resumes on a WhatsApp reply; full event matching is coming soon.
-          </p>
-          <Field label="Event name">
+          <Field label="Event to wait for">
             <Input
               type="text"
               value={value.event_name ?? ''}
               onChange={(e) => onChange({ ...value, event_name: e.target.value })}
-              placeholder="wati.message_replied"
+              placeholder="voice.completed"
             />
             <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-              The event that resumes this step — e.g. a WhatsApp reply or a CRM stage change.
+              The event that resumes this step — e.g. a call finishing or a CRM update.
             </p>
           </Field>
-          <Field label="Event match (optional predicate)">
+          <Field label="Match the contact by">
+            <Input
+              type="text"
+              value={
+                typeof value.correlation?.recipient_id_field === 'string'
+                  ? value.correlation.recipient_id_field
+                  : ''
+              }
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  correlation: {
+                    ...value.correlation,
+                    recipient_id_field: e.target.value,
+                  },
+                })
+              }
+              placeholder="recipient_id"
+            />
+            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+              The event field that identifies the contact (defaults to the contact id).
+            </p>
+          </Field>
+          <Field label="Only resume if… (optional)">
             <p className="mb-1 text-xs text-[var(--text-secondary)]">
               Optional — only resume when the event&apos;s data matches these conditions. Leave empty to resume on any matching event.
             </p>
@@ -151,19 +195,21 @@ export function WaitConditionEditor({ value, onChange }: Props) {
         </>
       ) : null}
 
-      {mode === 'event_or_timeout' ? (
-        <Field label="Timeout (hours)">
+      {isEventMode ? (
+        <Field label="Time limit (hours)">
           <Input
             type="number"
             min={0}
-            value={value.timeout_hours ?? ''}
+            // For legacy pure-event defs opened without a timeout, default to 24 in the input
+            // so the field isn't blank — without writing back until the author changes it.
+            value={value.timeout_hours ?? 24}
             onChange={(e) =>
               onChange({
                 ...value,
                 timeout_hours: Number(e.target.value),
               })
             }
-            placeholder="hours before timeout fires"
+            placeholder="hours before giving up"
           />
         </Field>
       ) : null}
