@@ -138,6 +138,19 @@ def _canonical_outcome(action_type: str) -> str:
     return "failed"
 
 
+# Single source of truth: canonical voice outcome → the event name a logic.wait matches on.
+_VOICE_EVENT_NAMES: dict[str, str] = {
+    "answered":  "voice.answered",
+    "no_answer": "voice.no_answer",
+    "failed":    "voice.failed",
+}
+
+
+def voice_event_name(canonical_outcome: str) -> str:
+    # Unknown inputs default to voice.failed, mirroring _canonical_outcome's safe default.
+    return _VOICE_EVENT_NAMES.get(canonical_outcome, "voice.failed")
+
+
 def is_terminal(status: Optional[str]) -> bool:
     return bool(status) and status.lower() in _TERMINAL_STATUSES  # type: ignore[union-attr]
 
@@ -815,4 +828,4 @@ from app.services.orchestration.adapters import register_adapter  # noqa: E402
 register_adapter(capability="voice", vendor="bolna", adapter=BolnaAdapter())
 
 
-__all__ = ["BolnaAdapter", "BolnaServiceError", "classify_outcome", "is_terminal"]
+__all__ = ["BolnaAdapter", "BolnaServiceError", "classify_outcome", "is_terminal", "voice_event_name"]

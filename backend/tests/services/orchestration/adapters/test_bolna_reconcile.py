@@ -19,7 +19,9 @@ from app.services.orchestration.adapters.bolna import (
     _canonical_outcome,
     classify_outcome,
     is_terminal,
+    voice_event_name,
 )
+from app.services.orchestration.dispatch.bag import bag_read
 
 
 def test_call_disconnected_is_terminal():
@@ -193,3 +195,62 @@ async def test_handle_webhook_reads_id_key_and_reconciles(db_session, seed_full_
         )
     )).scalar_one()
     assert child.idempotency_key == "voice-outcome|99828536|bolna_answered"
+
+
+# ── Phase 1: canonical voice event name ───────────────────────────
+
+@pytest.mark.parametrize("canonical,expected", [
+    ("answered",  "voice.answered"),
+    ("no_answer", "voice.no_answer"),
+    ("failed",    "voice.failed"),
+    ("weird",     "voice.failed"),   # unknown input defaults to voice.failed
+])
+def test_voice_event_name_pure_mapping(canonical, expected):
+    assert voice_event_name(canonical) == expected
+
+
+def test_voice_event_name_composes_with_canonical_outcome():
+    # Composition test: outcome strings flow from classify_outcome through
+    # _canonical_outcome into voice_event_name without a seam.
+    assert voice_event_name(_canonical_outcome("bolna_answered")) == "voice.answered"
+    assert voice_event_name(_canonical_outcome("bolna_rnr"))      == "voice.no_answer"
+    assert voice_event_name(_canonical_outcome("bolna_failed"))   == "voice.failed"
+
+
+@pytest.mark.asyncio
+async def test_voice_outcome_namespace_and_event_name_round_trip(
+    db_session, seed_full_run,
+):
+    """Regression guard: voice_outcome lands in steps.<node>.voice_outcome AND
+    voice_event_name maps it to the correct event name — both ends of the
+    outcome→event-name contract in one round trip."""
+    run, version, workflow, node_step, tenant_id, app_id = seed_full_run
+    action = await _seed_voice_action(
+        db_session, run=run, version=version, workflow=workflow,
+        node_step=node_step, tenant_id=tenant_id, app_id=app_id,
+        correlation_id="ex-phase1",
+    )
+    run_id = run.id
+
+    applied = await BolnaAdapter().reconcile_execution(
+        db_session, action=action, node_id="n1",
+        execution={
+            "id": "ex-phase1", "status": "completed",
+            "transcript": "hello", "conversation_duration": 5,
+        },
+    )
+    assert applied is True
+    await db_session.commit()
+
+    db_session.expire_all()
+    state = (await db_session.execute(
+        select(WorkflowRunRecipientState).where(
+            WorkflowRunRecipientState.run_id == run_id,
+            WorkflowRunRecipientState.recipient_id == "P-recon",
+        )
+    )).scalar_one()
+
+    # bag_write namespaces fields as flat dot-string keys: "steps.<node>.<key>"
+    voice_outcome = bag_read(state.payload, node_id="n1", key="voice_outcome")
+    assert voice_outcome == "answered"
+    assert voice_event_name(voice_outcome) == "voice.answered"
