@@ -45,6 +45,10 @@ class PredicateError(ValueError):
     pass
 
 
+class MissingFieldError(PredicateError):
+    """A leaf referenced a payload field that is absent (and the op is not exists/missing)."""
+
+
 LeafOp = Literal[
     "eq", "neq", "gte", "gt", "lte", "lt", "in", "not_in", "contains", "exists", "missing",
 ]
@@ -170,7 +174,7 @@ def _evaluate_leaf(leaf: LeafPredicate, payload: dict[str, Any]) -> bool:
     if leaf.op == "missing":
         return actual is None
     if actual is None:
-        raise PredicateError(
+        raise MissingFieldError(
             f"payload field {leaf.field!r} is missing; use 'exists'/'missing' to branch on absence"
         )
 
@@ -258,6 +262,7 @@ def _collect_fields(node: Predicate, out: set[str]) -> None:
 
 __all__ = [
     "PredicateError",
+    "MissingFieldError",
     "LeafOp",
     "LeafPredicate",
     "AndPredicate",

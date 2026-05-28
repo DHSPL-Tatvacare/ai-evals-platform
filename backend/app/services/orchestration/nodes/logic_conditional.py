@@ -16,6 +16,7 @@ from app.services.orchestration._config_strictness import strict_node_config_dic
 from app.services.orchestration.node_protocol import NodeResult, RecipientOutcome
 from app.services.orchestration.node_registry import register_node
 from app.services.orchestration.predicate_contract import (
+    MissingFieldError,
     evaluate as evaluate_predicate,
     parse as parse_predicate,
 )
@@ -69,7 +70,11 @@ class _Handler:
         async for rid, payload in input_cohort:
             target = _DEFAULT_OUTPUT_ID
             for branch in config.branches:
-                if evaluate_predicate(branch.predicate, payload):
+                try:
+                    matched = evaluate_predicate(branch.predicate, payload)
+                except MissingFieldError:
+                    continue  # absent field is not a match; try next branch, fall to default
+                if matched:
                     target = branch.id
                     break
             buckets[target].append(RecipientOutcome(recipient_id=rid))

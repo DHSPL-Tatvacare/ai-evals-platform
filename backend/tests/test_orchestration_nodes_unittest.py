@@ -249,6 +249,108 @@ async def test_conditional_output_edges_mirror_branches_plus_default(db_session,
     assert output_edges_for_config(cfg) == ["a", "b", "default"]
 
 
+@pytest.mark.asyncio
+async def test_conditional_missing_field_falls_to_default(db_session, seed_full_run):
+    """A recipient whose payload is missing the branch field routes to default without raising."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="cond-mf", node_type="logic.conditional")
+    await db_session.flush()
+
+    cfg = _Config(
+        branches=[
+            {"id": "has_score", "label": "Has score", "predicate": {"field": "score", "op": "gte", "value": 50}},
+        ]
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="cond-mf", step_id=step_id)
+    # Payload has no 'score' field — must route to default, not crash.
+    cohort = CohortStream([("r-no-score", {"name": "test"})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    assert [o.recipient_id for o in result.by_output_id["default"]] == ["r-no-score"]
+    assert result.by_output_id["has_score"] == []
+
+
+@pytest.mark.asyncio
+async def test_conditional_missing_first_branch_falls_through_to_matching_second(db_session, seed_full_run):
+    """Branch[0] references absent field → no-match-continue; branch[1] references present matching field → routes there."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="cond-ft", node_type="logic.conditional")
+    await db_session.flush()
+
+    cfg = _Config(
+        branches=[
+            {"id": "tier_vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+            {"id": "high_score", "label": "High score", "predicate": {"field": "score", "op": "gte", "value": 80}},
+        ]
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="cond-ft", step_id=step_id)
+    # 'tier' is absent → branch[0] no-match; 'score' is present and >= 80 → branch[1] matches.
+    cohort = CohortStream([("r-fallthrough", {"score": 90})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    assert [o.recipient_id for o in result.by_output_id["high_score"]] == ["r-fallthrough"]
+    assert result.by_output_id["tier_vip"] == []
+    assert result.by_output_id["default"] == []
+
+
+@pytest.mark.asyncio
+async def test_conditional_present_matching_branch_not_affected(db_session, seed_full_run):
+    """Regression: present, matching first branch still routes to that branch."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="cond-reg", node_type="logic.conditional")
+    await db_session.flush()
+
+    cfg = _Config(
+        branches=[
+            {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+            {"id": "warm", "label": "Warm", "predicate": {"field": "score", "op": "gte", "value": 50}},
+        ]
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="cond-reg", step_id=step_id)
+    cohort = CohortStream([("r-vip", {"tier": "vip", "score": 90})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    assert [o.recipient_id for o in result.by_output_id["vip"]] == ["r-vip"]
+    assert result.by_output_id["warm"] == []
+    assert result.by_output_id["default"] == []
+
+
+@pytest.mark.asyncio
+async def test_conditional_all_branches_miss_falls_to_default(db_session, seed_full_run):
+    """Recipient matching no branch with present fields still falls to default."""
+    run, version, workflow, _, tenant_id, app_id = seed_full_run
+    from app.services.orchestration.nodes.logic_conditional import _Handler, _Config
+
+    step_id = _make_node_step(db_session, run=run, version=version, workflow=workflow,
+                              tenant_id=tenant_id, app_id=app_id,
+                              node_id="cond-all-miss", node_type="logic.conditional")
+    await db_session.flush()
+
+    cfg = _Config(
+        branches=[
+            {"id": "vip", "label": "VIP", "predicate": {"field": "tier", "op": "eq", "value": "vip"}},
+        ]
+    )
+    ctx = _make_ctx(db_session, run=run, version=version, workflow=workflow,
+                    tenant_id=tenant_id, app_id=app_id, node_id="cond-all-miss", step_id=step_id)
+    cohort = CohortStream([("r-std", {"tier": "standard"})])
+    result = await _Handler().execute(cohort, cfg, ctx)
+    assert [o.recipient_id for o in result.by_output_id["default"]] == ["r-std"]
+    assert result.by_output_id["vip"] == []
+
+
 # ─── logic.split ─────────────────────────────────────────────────────────────
 
 

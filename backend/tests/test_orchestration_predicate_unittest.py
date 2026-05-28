@@ -7,6 +7,7 @@ from app.services.orchestration.nodes._predicate import (
     PredicateError,
     evaluate_predicate,
 )
+from app.services.orchestration.predicate_contract import MissingFieldError
 
 
 def test_simple_eq():
@@ -92,3 +93,18 @@ def test_unknown_op_raises():
 def test_malformed_predicate_raises():
     with pytest.raises(PredicateError):
         evaluate_predicate({"foo": "bar"}, {})
+
+
+def test_missing_field_raises_missing_field_error():
+    # Absent field with a value op raises MissingFieldError specifically.
+    with pytest.raises(MissingFieldError):
+        evaluate_predicate({"field": "x", "op": "eq", "value": 1}, {})
+    # MissingFieldError IS-A PredicateError.
+    assert issubclass(MissingFieldError, PredicateError)
+
+
+def test_type_mismatch_raises_predicate_error_not_missing_field_error():
+    # Type mismatch raises PredicateError but NOT MissingFieldError.
+    with pytest.raises(PredicateError) as ei:
+        evaluate_predicate({"field": "score", "op": "gte", "value": 5}, {"score": "high"})
+    assert not isinstance(ei.value, MissingFieldError)
