@@ -18,9 +18,10 @@ from pydantic.warnings import UnsupportedFieldAttributeWarning
 
 warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from scalar_fastapi import get_scalar_api_reference
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -269,7 +270,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Evals Platform API",
+    title="TatvaCare AI Platform API",
     version="1.0.0",
     description="Backend API for AI evaluation pipelines.",
     lifespan=lifespan,
@@ -335,6 +336,19 @@ async def health_check():
             return {"status": "ok", "database": "connected", "version": API_VERSION}
     except Exception as e:
         return {"status": "error", "database": str(e), "version": API_VERSION}
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def scalar_reference():
+    """Interactive Scalar API reference — served in dev environments only."""
+    if not settings.is_dev:
+        raise HTTPException(status_code=404)
+    return get_scalar_api_reference(
+        openapi_url=app.openapi_url,
+        title="TatvaCare AI Platform API",
+        servers=[{"url": f"http://localhost:{settings.API_PORT}", "description": "Local"}],
+        telemetry=False,
+    )
 
 
 # Register routers
