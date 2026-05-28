@@ -17,6 +17,8 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalSendRequest,
     CanonicalSendResponse,
 )
+from app.services.orchestration.adapters.protocol import FunnelStage
+from app.services.orchestration.analytics.outcomes import EngagementBucket
 
 _log = logging.getLogger(__name__)
 
@@ -125,6 +127,17 @@ class AiSensyAdapter:
             await self.cancel_dispatch(connection=connection, action=a)
             for a in actions
         ]
+
+    def outcome_bucket(self, action_type: str) -> EngagementBucket:
+        return {
+            "wa_replied": EngagementBucket.positive,
+            "wa_read": EngagementBucket.reached,
+            "wa_delivered": EngagementBucket.reached,
+            "wa_failed": EngagementBucket.failed,
+        }.get(action_type, EngagementBucket.in_flight)
+
+    def funnel_stages(self) -> list[FunnelStage]:
+        return [FunnelStage("sent", "Sent"), FunnelStage("delivered", "Delivered"), FunnelStage("read", "Read"), FunnelStage("replied", "Replied")]
 
 
 from app.services.orchestration.adapters import register_adapter  # noqa: E402

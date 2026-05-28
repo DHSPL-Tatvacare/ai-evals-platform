@@ -27,6 +27,8 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalVoiceResponse,
     VariableSurface,
 )
+from app.services.orchestration.adapters.protocol import FunnelStage
+from app.services.orchestration.analytics.outcomes import EngagementBucket
 from app.services.orchestration.dispatch._reconciler import apply_terminal_event
 
 _log = logging.getLogger(__name__)
@@ -543,6 +545,16 @@ class BolnaAdapter:
                 continue
             results.append(await self.cancel_dispatch(connection=connection, action=action))
         return results
+
+    def outcome_bucket(self, action_type: str) -> EngagementBucket:
+        return {
+            "bolna_answered": EngagementBucket.positive,
+            "bolna_rnr": EngagementBucket.no_response,
+            "bolna_failed": EngagementBucket.failed,
+        }.get(action_type, EngagementBucket.failed)
+
+    def funnel_stages(self) -> list[FunnelStage]:
+        return [FunnelStage("dialed", "Dialed"), FunnelStage("connected", "Connected"), FunnelStage("answered", "Answered"), FunnelStage("positive", "Positive")]
 
     def normalize_webhook(self, raw: dict[str, Any]) -> CanonicalVoiceEvent:
         status = raw.get("status")

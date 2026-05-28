@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Optional
 
+from app.services.orchestration.analytics.outcomes import EngagementBucket  # noqa: F401  re-export: single import site
+
 
 @dataclass(frozen=True)
 class VariableSurface:

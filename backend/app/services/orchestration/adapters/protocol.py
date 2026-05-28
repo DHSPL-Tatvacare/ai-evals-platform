@@ -1,6 +1,7 @@
 """Capability adapter Protocols — messaging (WhatsApp et al.) and voice."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, ClassVar, Mapping, Optional, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,13 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalVoiceRequest,
     CanonicalVoiceResponse,
 )
+from app.services.orchestration.analytics.outcomes import EngagementBucket
+
+
+@dataclass(frozen=True)
+class FunnelStage:
+    key: str
+    label: str
 
 
 class MessagingAdapter(Protocol):
@@ -45,6 +53,14 @@ class MessagingAdapter(Protocol):
     async def cancel_run_actions(
         self, *, connection: Any, actions: list[Any],
     ) -> list[CancelDispatchResult]: ...
+
+    def outcome_bucket(self, action_type: str) -> EngagementBucket:
+        """Map a terminal child action_type to a channel-agnostic engagement bucket."""
+        ...
+
+    def funnel_stages(self) -> list["FunnelStage"]:
+        """Ordered engagement funnel stages for this capability."""
+        ...
 
 
 class EventSourceAdapter(Protocol):
@@ -128,3 +144,11 @@ class VoiceAdapter(Protocol):
     async def cancel_run_actions(
         self, *, connection: Any, actions: list[Any],
     ) -> list[CancelDispatchResult]: ...
+
+    def outcome_bucket(self, action_type: str) -> EngagementBucket:
+        """Map a terminal child action_type to a channel-agnostic engagement bucket."""
+        ...
+
+    def funnel_stages(self) -> list["FunnelStage"]:
+        """Ordered engagement funnel stages for this capability."""
+        ...
