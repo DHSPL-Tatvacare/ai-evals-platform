@@ -614,6 +614,7 @@ class WorkflowRunRecipientAction(Base):
     provider_correlation_id: Mapped[Optional[str]] = mapped_column(String(128))
     provider_reply_ref: Mapped[Optional[str]] = mapped_column(String(128))
     provider_status: Mapped[Optional[str]] = mapped_column(String(64))
+    outcome_bucket: Mapped[str | None] = mapped_column(String(16), nullable=True)
     provider_terminal: Mapped[bool] = mapped_column(default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
